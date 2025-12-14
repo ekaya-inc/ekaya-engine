@@ -2,11 +2,9 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/ilyakaznacheev/cleanenv"
-	"gopkg.in/yaml.v3"
 )
 
 // Config holds all configuration for ekaya-engine.
@@ -72,50 +70,18 @@ type RedisConfig struct {
 	KeyPrefix string `yaml:"key_prefix" env:"REDIS_KEY_PREFIX" env-default:"project:"`
 }
 
-// Load reads configuration from config.yaml (if exists) and environment variables.
+// Load reads configuration from config.yaml with environment variable overrides.
 // The version parameter is injected at build time and set on the returned Config.
-//
-// Loading strategy:
-//   - If config.yaml exists: Read YAML first, then override secrets from env vars
-//   - If config.yaml doesn't exist: Read everything from environment variables
-//
-// Secrets (PGPASSWORD, REDIS_PASSWORD, PROJECT_CREDENTIALS_KEY) always come from
-// environment variables, never from YAML files.
+// Environment variables override YAML values. Secrets (PGPASSWORD, REDIS_PASSWORD,
+// PROJECT_CREDENTIALS_KEY) must come from environment variables (yaml:"-" fields).
 func Load(version string) (*Config, error) {
 	cfg := &Config{
 		Version: version,
 	}
 
-	configPath := "config.yaml"
-	if _, err := os.Stat(configPath); err == nil {
-		// config.yaml exists - read YAML first to respect explicit values
-		yamlData, err := os.ReadFile(configPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read config file: %w", err)
-		}
-
-		if err := yaml.Unmarshal(yamlData, cfg); err != nil {
-			return nil, fmt.Errorf("failed to parse yaml: %w", err)
-		}
-
-		// Manually read environment-only secret fields (yaml:"-")
-		// These are not in config.yaml and must come from environment
-		if pgPassword := os.Getenv("PGPASSWORD"); pgPassword != "" {
-			cfg.Database.Password = pgPassword
-		}
-		if redisPassword := os.Getenv("REDIS_PASSWORD"); redisPassword != "" {
-			cfg.Redis.Password = redisPassword
-		}
-		if projectCredentialsKey := os.Getenv("PROJECT_CREDENTIALS_KEY"); projectCredentialsKey != "" {
-			cfg.ProjectCredentialsKey = projectCredentialsKey
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("failed to access config file: %w", err)
-	} else {
-		// config.yaml doesn't exist - read from environment only
-		if err := cleanenv.ReadEnv(cfg); err != nil {
-			return nil, fmt.Errorf("failed to read environment config: %w", err)
-		}
+	// Load config from YAML file with environment variable overrides
+	if err := cleanenv.ReadConfig("config.yaml", cfg); err != nil {
+		return nil, fmt.Errorf("failed to read config.yaml: %w", err)
 	}
 
 	// Parse complex fields
