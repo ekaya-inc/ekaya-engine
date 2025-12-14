@@ -1,13 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
-	"os"
-	"runtime"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/config"
+	"github.com/ekaya-inc/ekaya-engine/pkg/handlers"
 )
 
 // Version is set at build time via ldflags
@@ -30,26 +28,9 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// Health check endpoint for Cloud Run
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-
-	// Ping endpoint with version info
-	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
-		hostname, _ := os.Hostname()
-		response := map[string]interface{}{
-			"status":      "ok",
-			"version":     cfg.Version,
-			"service":     "ekaya-engine",
-			"go_version":  runtime.Version(),
-			"hostname":    hostname,
-			"environment": cfg.Env,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
-	})
+	// Register handlers
+	healthHandler := handlers.NewHealthHandler(cfg)
+	healthHandler.RegisterRoutes(mux)
 
 	// Serve static UI files from ui/dist
 	fs := http.FileServer(http.Dir("./ui/dist"))
