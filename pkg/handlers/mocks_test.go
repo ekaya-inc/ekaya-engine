@@ -15,21 +15,7 @@ import (
 type mockProjectService struct {
 	project         *models.Project
 	provisionResult *services.ProvisionResult
-	createResult    *services.CreateProjectResult
 	err             error
-}
-
-func (m *mockProjectService) Create(ctx context.Context, name string, adminUserID uuid.UUID, params map[string]interface{}) (*services.CreateProjectResult, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	if m.createResult != nil {
-		return m.createResult, nil
-	}
-	return &services.CreateProjectResult{
-		ProjectID:  uuid.New(),
-		ProjectURL: "http://localhost/projects/" + uuid.New().String(),
-	}, nil
 }
 
 func (m *mockProjectService) GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error) {

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -16,19 +15,6 @@ import (
 
 // TenantMiddleware is a function that wraps a handler with tenant context.
 type TenantMiddleware func(http.HandlerFunc) http.HandlerFunc
-
-// CreateProjectRequest is the request body for creating a project.
-type CreateProjectRequest struct {
-	Name       string                 `json:"name"`
-	Admin      string                 `json:"admin"`
-	Parameters map[string]interface{} `json:"parameters"`
-}
-
-// CreateProjectResponse is the response for creating a project.
-type CreateProjectResponse struct {
-	ProjectID  string `json:"projectId"`
-	ProjectURL string `json:"projectUrl"`
-}
 
 // ProjectResponse is the standard response for project endpoints.
 type ProjectResponse struct {
@@ -59,65 +45,10 @@ func (h *ProjectsHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *aut
 	mux.HandleFunc("POST /projects", authMiddleware.RequireAuth(h.Provision))
 
 	// API routes
-	mux.HandleFunc("POST /api/projects/new", authMiddleware.RequireCentralService(h.Create))
 	mux.HandleFunc("GET /api/projects/{pid}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Get)))
 	mux.HandleFunc("DELETE /api/projects/{pid}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Delete)))
-}
-
-// Create handles POST /api/projects/new
-// Creates a new project with an admin user. Called by central service.
-func (h *ProjectsHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var req CreateProjectRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	if req.Name == "" {
-		if err := ErrorResponse(w, http.StatusBadRequest, "missing_name", "Project name is required"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	if req.Admin == "" {
-		if err := ErrorResponse(w, http.StatusBadRequest, "missing_admin", "Admin user ID is required"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	adminID, err := uuid.Parse(req.Admin)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_admin", "Invalid admin user ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	result, err := h.projectService.Create(r.Context(), req.Name, adminID, req.Parameters)
-	if err != nil {
-		h.logger.Error("Failed to create project",
-			zap.String("name", req.Name),
-			zap.Error(err))
-		if err := ErrorResponse(w, http.StatusInternalServerError, "create_failed", "Failed to create project"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	response := CreateProjectResponse{
-		ProjectID:  result.ProjectID.String(),
-		ProjectURL: result.ProjectURL,
-	}
-
-	if err := WriteJSON(w, http.StatusCreated, response); err != nil {
-		h.logger.Error("Failed to write response", zap.Error(err))
-	}
 }
 
 // GetCurrent handles GET /projects

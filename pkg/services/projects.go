@@ -17,12 +17,6 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
 
-// CreateProjectResult contains the result of creating a project.
-type CreateProjectResult struct {
-	ProjectID  uuid.UUID
-	ProjectURL string
-}
-
 // ProvisionResult contains the result of provisioning a project.
 type ProvisionResult struct {
 	ProjectID uuid.UUID
@@ -33,7 +27,6 @@ type ProvisionResult struct {
 
 // ProjectService defines the interface for project operations.
 type ProjectService interface {
-	Create(ctx context.Context, name string, adminUserID uuid.UUID, params map[string]interface{}) (*CreateProjectResult, error)
 	Provision(ctx context.Context, projectID uuid.UUID, name string, params map[string]interface{}) (*ProvisionResult, error)
 	ProvisionFromClaims(ctx context.Context, claims *auth.Claims) (*ProvisionResult, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error)
@@ -68,69 +61,6 @@ func NewProjectService(
 		baseURL:     baseURL,
 		logger:      logger,
 	}
-}
-
-// Create creates a new project with an admin user.
-// This is called by central service (no tenant context) so we use WithoutTenant.
-func (s *projectService) Create(ctx context.Context, name string, adminUserID uuid.UUID, params map[string]interface{}) (*CreateProjectResult, error) {
-	// Acquire connection without tenant context (central service mode)
-	scope, err := s.db.WithoutTenant(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to acquire connection: %w", err)
-	}
-	defer scope.Close()
-
-	// Set tenant scope in context for repositories
-	ctx = database.SetTenantScope(ctx, scope)
-
-	// Start transaction
-	tx, err := scope.Conn.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback(ctx)
-		}
-	}()
-
-	// Create project
-	project := &models.Project{
-		ID:         uuid.New(),
-		Name:       name,
-		Parameters: params,
-		Status:     "active",
-	}
-
-	if err = s.projectRepo.Create(ctx, project); err != nil {
-		return nil, fmt.Errorf("failed to create project: %w", err)
-	}
-
-	// Add admin user
-	user := &models.User{
-		ProjectID: project.ID,
-		UserID:    adminUserID,
-		Role:      models.RoleAdmin,
-	}
-
-	if err = s.userRepo.Add(ctx, user); err != nil {
-		return nil, fmt.Errorf("failed to add admin user: %w", err)
-	}
-
-	// Commit transaction
-	if err = tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	// Cache project config in Redis
-	if s.redis != nil {
-		s.cacheProjectConfig(ctx, project)
-	}
-
-	return &CreateProjectResult{
-		ProjectID:  project.ID,
-		ProjectURL: fmt.Sprintf("%s/projects/%s", s.baseURL, project.ID),
-	}, nil
 }
 
 // Provision ensures a project exists with the given ID (idempotent).
