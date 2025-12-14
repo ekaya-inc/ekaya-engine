@@ -125,8 +125,7 @@ func main() {
 	wellKnownHandler := handlers.NewWellKnownHandler(cfg, logger)
 	wellKnownHandler.RegisterRoutes(mux)
 
-	// Register AI config stub handler (must be before projects handler)
-	// These stubs prevent /api/projects/ai-config from matching GET /api/projects/{pid}
+	// Register AI config stub handler
 	aiConfigStubHandler := handlers.NewAIConfigStubHandler(logger)
 	aiConfigStubHandler.RegisterRoutes(mux, authMiddleware)
 

@@ -20,14 +20,12 @@ func NewAIConfigStubHandler(logger *zap.Logger) *AIConfigStubHandler {
 }
 
 // RegisterRoutes registers the AI config stub routes.
-// These must be registered BEFORE the projects handler to prevent
-// /api/projects/ai-config from matching GET /api/projects/{pid}
 func (h *AIConfigStubHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.Middleware) {
 	// AI config endpoints - return "not configured" state
-	mux.HandleFunc("GET /api/projects/ai-config", authMiddleware.RequireAuth(h.GetConfig))
-	mux.HandleFunc("PUT /api/projects/ai-config", authMiddleware.RequireAuth(h.UpdateConfig))
-	mux.HandleFunc("DELETE /api/projects/ai-config", authMiddleware.RequireAuth(h.DeleteConfig))
-	mux.HandleFunc("POST /api/projects/ai-config/test", authMiddleware.RequireAuth(h.TestConnection))
+	mux.HandleFunc("GET /api/projects/{pid}/ai-config", authMiddleware.RequireAuthWithPathValidation("pid")(h.GetConfig))
+	mux.HandleFunc("PUT /api/projects/{pid}/ai-config", authMiddleware.RequireAuthWithPathValidation("pid")(h.UpdateConfig))
+	mux.HandleFunc("DELETE /api/projects/{pid}/ai-config", authMiddleware.RequireAuthWithPathValidation("pid")(h.DeleteConfig))
+	mux.HandleFunc("POST /api/projects/{pid}/ai-config/test", authMiddleware.RequireAuthWithPathValidation("pid")(h.TestConnection))
 
 	// AI options endpoint - return empty options
 	mux.HandleFunc("GET /api/ai-options", authMiddleware.RequireAuth(h.GetOptions))
