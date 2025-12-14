@@ -193,13 +193,15 @@ func TestProtectedEndpoint_WithCookieAuth(t *testing.T) {
 	authService := auth.NewAuthService(jwksClient, logger)
 	authMiddleware := auth.NewMiddleware(authService, logger)
 
-	// Create projects handler
-	projectService := services.NewProjectService()
+	// Create projects handler with mock service
+	projectService := &mockProjectService{}
 	projectsHandler := NewProjectsHandler(projectService, logger)
 
-	// Set up mux with protected route
+	// Set up mux with protected route - use a no-op tenant middleware for testing
 	mux := http.NewServeMux()
-	projectsHandler.RegisterRoutes(mux, authMiddleware)
+	noopTenantMiddleware := func(next http.HandlerFunc) http.HandlerFunc { return next }
+	mux.HandleFunc("GET /api/projects/{pid}",
+		authMiddleware.RequireAuthWithPathValidation("pid")(noopTenantMiddleware(projectsHandler.Get)))
 
 	// Create request with JWT cookie
 	projectID := "550e8400-e29b-41d4-a716-446655440000"
@@ -223,11 +225,8 @@ func TestProtectedEndpoint_WithCookieAuth(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if resp.UserID != "user-123" {
-		t.Errorf("expected user_id 'user-123', got %q", resp.UserID)
-	}
-	if resp.UserEmail != "user@example.com" {
-		t.Errorf("expected user_email 'user@example.com', got %q", resp.UserEmail)
+	if resp.PID != projectID {
+		t.Errorf("expected pid %q, got %q", projectID, resp.PID)
 	}
 }
 
@@ -239,11 +238,13 @@ func TestProtectedEndpoint_WithBearerAuth(t *testing.T) {
 	authService := auth.NewAuthService(jwksClient, logger)
 	authMiddleware := auth.NewMiddleware(authService, logger)
 
-	projectService := services.NewProjectService()
+	projectService := &mockProjectService{}
 	projectsHandler := NewProjectsHandler(projectService, logger)
 
 	mux := http.NewServeMux()
-	projectsHandler.RegisterRoutes(mux, authMiddleware)
+	noopTenantMiddleware := func(next http.HandlerFunc) http.HandlerFunc { return next }
+	mux.HandleFunc("GET /api/projects/{pid}",
+		authMiddleware.RequireAuthWithPathValidation("pid")(noopTenantMiddleware(projectsHandler.Get)))
 
 	projectID := "550e8400-e29b-41d4-a716-446655440000"
 	token := testhelpers.GenerateTestJWTWithBearer("user-456", projectID, "api@example.com")
@@ -261,8 +262,8 @@ func TestProtectedEndpoint_WithBearerAuth(t *testing.T) {
 	var resp ProjectResponse
 	_ = json.NewDecoder(w.Body).Decode(&resp)
 
-	if resp.UserID != "user-456" {
-		t.Errorf("expected user_id 'user-456', got %q", resp.UserID)
+	if resp.PID != projectID {
+		t.Errorf("expected pid %q, got %q", projectID, resp.PID)
 	}
 }
 
@@ -274,11 +275,13 @@ func TestProtectedEndpoint_CookiePreferredOverHeader(t *testing.T) {
 	authService := auth.NewAuthService(jwksClient, logger)
 	authMiddleware := auth.NewMiddleware(authService, logger)
 
-	projectService := services.NewProjectService()
+	projectService := &mockProjectService{}
 	projectsHandler := NewProjectsHandler(projectService, logger)
 
 	mux := http.NewServeMux()
-	projectsHandler.RegisterRoutes(mux, authMiddleware)
+	noopTenantMiddleware := func(next http.HandlerFunc) http.HandlerFunc { return next }
+	mux.HandleFunc("GET /api/projects/{pid}",
+		authMiddleware.RequireAuthWithPathValidation("pid")(noopTenantMiddleware(projectsHandler.Get)))
 
 	projectID := "550e8400-e29b-41d4-a716-446655440000"
 	cookieToken := testhelpers.GenerateTestJWT("cookie-user", projectID, "cookie@example.com")
@@ -295,12 +298,12 @@ func TestProtectedEndpoint_CookiePreferredOverHeader(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 
+	// Response doesn't contain user info anymore, just verify success
 	var resp ProjectResponse
 	_ = json.NewDecoder(w.Body).Decode(&resp)
 
-	// Should use cookie (preferred)
-	if resp.UserID != "cookie-user" {
-		t.Errorf("expected cookie user 'cookie-user', got %q (header was preferred)", resp.UserID)
+	if resp.Status != "success" {
+		t.Errorf("expected success status, got %q", resp.Status)
 	}
 }
 
@@ -312,11 +315,13 @@ func TestProtectedEndpoint_ProjectIDMismatch(t *testing.T) {
 	authService := auth.NewAuthService(jwksClient, logger)
 	authMiddleware := auth.NewMiddleware(authService, logger)
 
-	projectService := services.NewProjectService()
+	projectService := &mockProjectService{}
 	projectsHandler := NewProjectsHandler(projectService, logger)
 
 	mux := http.NewServeMux()
-	projectsHandler.RegisterRoutes(mux, authMiddleware)
+	noopTenantMiddleware := func(next http.HandlerFunc) http.HandlerFunc { return next }
+	mux.HandleFunc("GET /api/projects/{pid}",
+		authMiddleware.RequireAuthWithPathValidation("pid")(noopTenantMiddleware(projectsHandler.Get)))
 
 	// Token has project A, URL has project B
 	tokenProjectID := "550e8400-e29b-41d4-a716-446655440000"
@@ -342,11 +347,13 @@ func TestProtectedEndpoint_NoAuth(t *testing.T) {
 	authService := auth.NewAuthService(jwksClient, logger)
 	authMiddleware := auth.NewMiddleware(authService, logger)
 
-	projectService := services.NewProjectService()
+	projectService := &mockProjectService{}
 	projectsHandler := NewProjectsHandler(projectService, logger)
 
 	mux := http.NewServeMux()
-	projectsHandler.RegisterRoutes(mux, authMiddleware)
+	noopTenantMiddleware := func(next http.HandlerFunc) http.HandlerFunc { return next }
+	mux.HandleFunc("GET /api/projects/{pid}",
+		authMiddleware.RequireAuthWithPathValidation("pid")(noopTenantMiddleware(projectsHandler.Get)))
 
 	req := httptest.NewRequest("GET", "/api/projects/550e8400-e29b-41d4-a716-446655440000", nil)
 	w := httptest.NewRecorder()
@@ -366,11 +373,13 @@ func TestProtectedEndpoint_MissingProjectID(t *testing.T) {
 	authService := auth.NewAuthService(jwksClient, logger)
 	authMiddleware := auth.NewMiddleware(authService, logger)
 
-	projectService := services.NewProjectService()
+	projectService := &mockProjectService{}
 	projectsHandler := NewProjectsHandler(projectService, logger)
 
 	mux := http.NewServeMux()
-	projectsHandler.RegisterRoutes(mux, authMiddleware)
+	noopTenantMiddleware := func(next http.HandlerFunc) http.HandlerFunc { return next }
+	mux.HandleFunc("GET /api/projects/{pid}",
+		authMiddleware.RequireAuthWithPathValidation("pid")(noopTenantMiddleware(projectsHandler.Get)))
 
 	// Token without project ID
 	token := testhelpers.GenerateTestJWT("user-123", "", "user@example.com")
