@@ -1,11 +1,17 @@
 package main
 
 import (
+	"context"
+	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/config"
+	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/handlers"
+	"github.com/jackc/pgx/v5/stdlib"
 )
 
 // Version is set at build time via ldflags
@@ -26,6 +32,14 @@ func main() {
 	log.Printf("  Database: %s@%s:%d/%s", cfg.Database.User, cfg.Database.Host, cfg.Database.Port, cfg.Database.Database)
 	log.Printf("  Redis: %s:%d", cfg.Redis.Host, cfg.Redis.Port)
 
+	// Connect to database
+	ctx := context.Background()
+	db, err := setupDatabase(ctx, &cfg.Database)
+	if err != nil {
+		log.Fatalf("Failed to setup database: %v", err)
+	}
+	defer db.Close()
+
 	mux := http.NewServeMux()
 
 	// Register handlers
@@ -40,4 +54,37 @@ func main() {
 	if err := http.ListenAndServe(":"+cfg.Port, mux); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
+}
+
+func setupDatabase(ctx context.Context, cfg *config.DatabaseConfig) (*database.DB, error) {
+	log.Printf("Connecting to database %s@%s:%d/%s...", cfg.User, cfg.Host, cfg.Port, cfg.Database)
+
+	// Build database URL with URL-encoded password
+	databaseURL := fmt.Sprintf("postgresql://%s:%s@%s:%d/%s?sslmode=%s",
+		cfg.User, url.QueryEscape(cfg.Password), cfg.Host, cfg.Port, cfg.Database, cfg.SSLMode)
+
+	db, err := database.NewConnection(ctx, &database.Config{
+		URL:            databaseURL,
+		MaxConnections: cfg.MaxConnections,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	// Convert pgxpool to *sql.DB for migrations
+	stdDB := stdlib.OpenDBFromPool(db.Pool)
+
+	// Run database migrations automatically
+	log.Printf("Running database migrations...")
+	if err := runMigrations(stdDB); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to run migrations: %w", err)
+	}
+	log.Printf("Database migrations completed successfully")
+
+	return db, nil
+}
+
+func runMigrations(stdDB *sql.DB) error {
+	return database.RunMigrations(stdDB, "./migrations")
 }
