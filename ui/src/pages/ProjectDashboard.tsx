@@ -120,7 +120,7 @@ const ProjectDashboard = () => {
       // Load project-specific config and server AI options in parallel
       const [configResponse, optionsResponse] = await Promise.all([
         fetchWithAuth(`/api/projects/${pid}/ai-config`),
-        fetchWithAuth(`/api/ai-options`),
+        fetchWithAuth(`/api/config/project`),
       ]);
 
       if (configResponse.ok) {
@@ -140,8 +140,8 @@ const ProjectDashboard = () => {
       }
 
       if (optionsResponse.ok) {
-        const options = await optionsResponse.json();
-        setAiOptions(options);
+        const projectConfig = await optionsResponse.json();
+        setAiOptions(projectConfig.ai_options);
       }
     } catch (err) {
       console.error('Failed to load AI config:', err);

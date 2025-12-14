@@ -121,6 +121,10 @@ func main() {
 	configHandler := handlers.NewConfigHandler(cfg, logger)
 	configHandler.RegisterRoutes(mux)
 
+	// Register project config handler (authenticated - project-scoped config)
+	projectConfigHandler := handlers.NewProjectConfigHandler(logger)
+	projectConfigHandler.RegisterRoutes(mux, authMiddleware)
+
 	// Register well-known endpoints (public - no auth required)
 	wellKnownHandler := handlers.NewWellKnownHandler(cfg, logger)
 	wellKnownHandler.RegisterRoutes(mux)

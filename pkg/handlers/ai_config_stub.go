@@ -26,9 +26,6 @@ func (h *AIConfigStubHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware 
 	mux.HandleFunc("PUT /api/projects/{pid}/ai-config", authMiddleware.RequireAuthWithPathValidation("pid")(h.UpdateConfig))
 	mux.HandleFunc("DELETE /api/projects/{pid}/ai-config", authMiddleware.RequireAuthWithPathValidation("pid")(h.DeleteConfig))
 	mux.HandleFunc("POST /api/projects/{pid}/ai-config/test", authMiddleware.RequireAuthWithPathValidation("pid")(h.TestConnection))
-
-	// AI options endpoint - return empty options
-	mux.HandleFunc("GET /api/ai-options", authMiddleware.RequireAuth(h.GetOptions))
 }
 
 // GetConfig returns empty AI config (not configured state)
@@ -58,15 +55,5 @@ func (h *AIConfigStubHandler) TestConnection(w http.ResponseWriter, r *http.Requ
 	h.logger.Warn("AI connection test attempted but not implemented")
 	if err := ErrorResponse(w, http.StatusNotImplemented, "not_implemented", "AI configuration is not yet available in ekaya-engine"); err != nil {
 		h.logger.Error("Failed to write error response", zap.Error(err))
-	}
-}
-
-// GetOptions returns available AI options (empty for now)
-func (h *AIConfigStubHandler) GetOptions(w http.ResponseWriter, r *http.Request) {
-	if err := WriteJSON(w, http.StatusOK, map[string]interface{}{
-		"community": nil,
-		"embedded":  nil,
-	}); err != nil {
-		h.logger.Error("Failed to encode AI options response", zap.Error(err))
 	}
 }

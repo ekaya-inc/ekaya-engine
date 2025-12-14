@@ -50,16 +50,15 @@ export async function fetchConfig(): Promise<AppConfig> {
   // Build query string if auth_url is present
   const queryString = authUrl ? `?auth_url=${encodeURIComponent(authUrl)}` : '';
 
-  // Fetch both endpoints in parallel with auth_url if provided
+  // Fetch both endpoints in parallel
+  // Note: auth_url is only needed for well-known endpoint (determines which auth server metadata to return)
+  // /api/config/auth returns static client config (oauth_client_id, base_url)
   const [configResponse, discoveryResponse] = await Promise.all([
-    fetch(`/api/config${queryString}`),
+    fetch(`/api/config/auth`),
     fetch(`/.well-known/oauth-authorization-server${queryString}`),
   ]);
 
   if (!configResponse.ok) {
-    if (configResponse.status === 400) {
-      throw new Error('Invalid auth_url: not in allowed list');
-    }
     throw new Error(`Failed to fetch config: ${configResponse.statusText}`);
   }
 
