@@ -176,3 +176,4 @@ make test-short
 
 ### Important: Wait for CI/CD Checks
 When merging pull requests, **ALWAYS wait approximately 3-4 minutes** for GitHub Actions to complete before merging.
+- ekaya-engine is the clean and architecturally sound migration from ../ekaya-region/. You may look in that directory for reference but make sure to migrate any artifact over (code, documentation, configuration) in the context of an extermely well-written service.

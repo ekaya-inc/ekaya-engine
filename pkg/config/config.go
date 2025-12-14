@@ -22,6 +22,17 @@ type Config struct {
 	// Authentication configuration
 	Auth AuthConfig `yaml:"auth"`
 
+	// OAuth configuration
+	OAuth OAuthConfig `yaml:"oauth"`
+
+	// AuthServerURL is the OAuth authorization server base URL.
+	// Used for constructing OAuth redirect URLs.
+	AuthServerURL string `yaml:"auth_server_url" env:"AUTH_SERVER_URL" env-default:""`
+
+	// CookieDomain is the domain for auth cookies (optional).
+	// If empty, it will be auto-derived from BaseURL.
+	CookieDomain string `yaml:"cookie_domain" env:"COOKIE_DOMAIN" env-default:""`
+
 	// Database configuration (PostgreSQL)
 	Database DatabaseConfig `yaml:"database"`
 
@@ -32,6 +43,12 @@ type Config struct {
 	// Must be a 32-byte key, base64 encoded. Generate with: openssl rand -base64 32
 	// Server will fail to start if this is not set.
 	ProjectCredentialsKey string `yaml:"-" env:"PROJECT_CREDENTIALS_KEY"` // Secret - not in YAML
+}
+
+// OAuthConfig holds OAuth client configuration.
+type OAuthConfig struct {
+	// ClientID is the OAuth client ID registered with the auth server.
+	ClientID string `yaml:"client_id" env:"OAUTH_CLIENT_ID" env-default:"ekaya-engine-dev"`
 }
 
 // AuthConfig holds authentication-related configuration.
@@ -128,4 +145,23 @@ func (c *DatabaseConfig) ConnectionString() string {
 // RedisAddr returns the Redis address in host:port format.
 func (c *RedisConfig) RedisAddr() string {
 	return fmt.Sprintf("%s:%d", c.Host, c.Port)
+}
+
+// ValidateAuthURL validates an auth_url against the JWKS endpoints whitelist.
+// Returns the validated auth URL and an empty error string on success.
+// If authURL is empty, returns the default AuthServerURL.
+// If authURL is provided but not in the whitelist, returns empty string and error message.
+func (c *Config) ValidateAuthURL(authURL string) (string, string) {
+	// If no auth_url provided, use default
+	if authURL == "" {
+		return c.AuthServerURL, ""
+	}
+
+	// Check if auth_url is in the JWKS endpoints whitelist
+	if _, ok := c.Auth.JWKSEndpoints[authURL]; ok {
+		return authURL, ""
+	}
+
+	// auth_url provided but not in whitelist - reject
+	return "", "auth_url not in allowed list"
 }
