@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  devcontainer:
+    image: mcr.microsoft.com/devcontainers/go:1-1.24-bookworm
+    volumes:
+      - ..:/workspace:cached
+    environment:
+      DATABASE_URL: postgresql://ekaya:localdev@postgres:5432/ekaya_engine
+      REDIS_URL: redis://redis:6379
+      AUTH_ENABLE_VERIFICATION: "false"
+    command: sleep infinity
+    depends_on:
+      - postgres
+      - redis
+    network_mode: service:postgres

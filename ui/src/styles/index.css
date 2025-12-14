@@ -1,0 +1,94 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light theme colors */
+    --brand-purple: #ab68ff;
+    --text-primary: #2d2d2d;
+    --text-secondary: #6e6e80;
+    --text-tertiary: #8e8ea0;
+    --surface-primary: #ffffff;
+    --surface-secondary: #f7f7f8;
+    --surface-tertiary: #ececf1;
+    --surface-active: #e7f3ff;
+    --surface-hover: rgba(0, 0, 0, 0.05);
+    --border-light: #e5e5e5;
+    --border-medium: #d4d4d8;
+    --border-heavy: #a1a1aa;
+    --header-primary: #ffffff;
+    --header-hover: #f7f7f8;
+
+    /* Component specific */
+    --surface-submit: #10a37f;
+    --surface-submit-hover: #0d8f6f;
+    --surface-destructive: #ef4444;
+    --surface-destructive-hover: #dc2626;
+  }
+
+  .dark {
+    /* Dark theme colors */
+    --brand-purple: #ab68ff;
+    --text-primary: #ffffff;
+    --text-secondary: #a0a0ab;
+    --text-tertiary: #6e6e80;
+    --surface-primary: #171717;
+    --surface-secondary: #212121;
+    --surface-tertiary: #2f2f2f;
+    --surface-active: #2f2f2f;
+    --surface-hover: rgba(255, 255, 255, 0.1);
+    --border-light: #424242;
+    --border-medium: #595959;
+    --border-heavy: #6e6e80;
+    --header-primary: #212121;
+    --header-hover: #2f2f2f;
+
+    /* Component specific */
+    --surface-submit: #10a37f;
+    --surface-submit-hover: #0d8f6f;
+    --surface-destructive: #ef4444;
+    --surface-destructive-hover: #dc2626;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    font-family: 'Inter', sans-serif;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: var(--surface-primary);
+    color: var(--text-primary);
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: var(--border-medium);
+    border-radius: 3px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: var(--border-heavy);
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+}

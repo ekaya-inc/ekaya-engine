@@ -1,0 +1,36 @@
+#!/bin/sh
+# Pre-commit hook for ekaya-region
+# Runs comprehensive checks before allowing commit
+
+set -e
+
+echo "🔍 Running pre-commit checks..."
+
+# Check if we're in the right directory
+if [ ! -f "go.mod" ]; then
+    echo "❌ Error: Not in Go project root directory"
+    exit 1
+fi
+
+# Run comprehensive make check which includes:
+# - go.mod tidy check
+# - code formatting check
+# - linting (golangci-lint)
+# - backend tests with coverage
+# - frontend linting
+# - TypeScript typecheck
+# - frontend tests
+echo "📋 Running make check (comprehensive quality checks)..."
+echo "This includes: formatting, linting, backend tests, frontend tests, and typecheck"
+if make check; then
+    echo "✅ Make check passed - all quality checks successful!"
+else
+    echo ""
+    echo "❌ Make check failed. Please fix the issues above before committing."
+    echo ""
+    echo "Tip: Run 'make check' to see detailed error messages"
+    echo "     Run 'make test' for just the tests"
+    exit 1
+fi
+
+echo "✅ All pre-commit checks passed!"

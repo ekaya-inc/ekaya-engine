@@ -1,0 +1,56 @@
+# golangci-lint configuration
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  # Enable specific linters for consistent code quality
+  enable:
+    - govet
+    - ineffassign
+    # - staticcheck  # Disabled temporarily - working on cleanup
+    # - errcheck  # Disabled temporarily - defer patterns cleanup needed
+    # - misspell  # Disabled temporarily - false positives on variable names
+    - whitespace
+  disable:
+    - unused  # Disabled temporarily - many helper functions pending usage
+    - staticcheck  # Disabled temporarily - working on cleanup
+    - errcheck  # Disabled temporarily - defer patterns cleanup needed
+    - misspell  # Disabled temporarily - false positives on variable names
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: false
+    exclude-functions:
+      - (*database/sql.DB).Close
+      - (*database/sql.Rows).Close
+      - (*database/sql.Stmt).Close
+      - (*net/http.Response.Body).Close
+  misspell:
+    locale: US
+    ignore-words:
+      - ect
+      - EnhancedCloudTools
+
+issues:
+  exclude:
+    - "`ect` is a misspelling of `etc`"
+    - "Error return value of.*Close.*is not checked"
+    - "Error return value of.*Delete.*is not checked"
+    - "Error return value of.*Set.*is not checked"
+    - "Error return value of.*AddMessage.*is not checked"
+    - "Error return value of.*StoreKnowledge.*is not checked"
+    - "Error return value of.*UpdateState.*is not checked"
+    - "Error return value of.*ArchiveSession.*is not checked"
+    - "Error return value of.*saveToCache.*is not checked"
+    - "SA9003: empty branch"
+    - "S1009:.*should omit nil check"
+    - "SA1019:.*Record.*deprecated"
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+      text: "Error return value of `(os\\.Setenv|os\\.Unsetenv)` is not checked"

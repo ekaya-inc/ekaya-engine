@@ -1,0 +1,74 @@
+# Development configuration for ekaya-region
+# Scenario: Localhost ekaya-region + deployed dev auth server
+# Use this when: Developer downloads ekaya-region and authenticates with dev environment
+# Copy to config.yaml: cp config/config.dev.yaml config.yaml
+
+# Server configuration
+port: "3443"
+env: "dev"
+base_url: "http://localhost:3443"  # WHERE THIS INSTANCE RUNS - localhost self-hosted
+region_domain: "localhost"
+auth_server_url: "https://auth.dev.ekaya.ai"  # WHERE AUTH SERVER IS - deployed dev
+cookie_domain: ""  # Auto-derived: localhost → "" (no domain restrictions, works over HTTP)
+
+# Authentication configuration
+auth:
+  enable_verification: false  # TEMPORARILY DISABLED for testing MCP context propagation
+  jwks_endpoints: "https://auth.dev.ekaya.ai=https://auth.dev.ekaya.ai/.well-known/jwks.json"
+
+# OAuth configuration
+oauth:
+  client_id: "ekaya-region-localhost"  # Localhost server with deployed dev auth
+
+# Database configuration
+# Password should be provided via PGPASSWORD environment variable
+database:
+  host: "localhost"
+  port: 5432
+  user: "ekaya"
+  database: "ekaya_region"
+  max_connections: 25
+  max_idle_conns: 5
+  type: "postgres"
+  ssl_mode: "require"
+
+# Redis configuration
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+  key_prefix: "project:"
+
+# SDAP configuration
+sdap:
+  auth:
+    enabled: false  # Disabled for development
+    jwks_url: "https://auth.dev.ekaya.ai/.well-known/jwks.json"
+    issuer: "https://auth.dev.ekaya.ai"
+  connection_ttl_minutes: 5
+  max_connections_per_user: 1
+
+# Optional: Ontology extraction configuration
+# Ontology extraction iteration settings
+# These control the interactive Q&A loop for ontology extraction
+ontology_max_iterations: 3       # Maximum Q&A iterations for ontology extraction (1-20 recommended, default: 1)
+ontology_target_confidence: 0.8  # Target confidence threshold 0.0-1.0 (default: 0.8)
+
+# Optional: Tool filters (empty list = all tools enabled)
+enabled_tools: []
+
+# Community AI configuration (free models hosted on DGX Spark cluster)
+# These are OpenAI-compatible endpoints for the community to use
+community_ai:
+  llm_base_url: "http://sparkone:30000/v1"
+  llm_model: "Qwen3-30B-A3B-NVFP4-self"
+  embedding_url: "http://sparkone:30001/v1"
+  embedding_model: "Qwen/Qwen3-Embedding-0.6B"
+
+# Embedded AI configuration (licensed models for enterprise deployments)
+# Same as community for dev, but would be customer-hosted in production
+embedded_ai:
+  llm_base_url: "http://sparktwo:30000/v1"
+  llm_model: "Qwen3-30B-A3B-NVFP4"
+  embedding_url: "http://sparktwo:30001/v1"
+  embedding_model: "Qwen/Qwen3-Embedding-0.6B"

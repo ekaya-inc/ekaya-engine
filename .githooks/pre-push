@@ -1,0 +1,70 @@
+#!/bin/sh
+# Pre-push hook for ekaya-region
+# Runs comprehensive checks before pushing to remote
+
+set -e
+
+echo "🚀 Running pre-push checks for production service..."
+echo "This may take a minute due to comprehensive testing..."
+
+# Check if we're in the right directory
+if [ ! -f "go.mod" ]; then
+    echo "❌ Error: Not in Go project root directory"
+    exit 1
+fi
+
+# Get the remote branch being pushed to
+remote="$1"
+url="$2"
+
+# Check if pushing to main or prod branches
+protected_branch='(main|prod|master|production)'
+while read local_ref local_sha remote_ref remote_sha
+do
+    if echo "$remote_ref" | grep -qE "refs/heads/$protected_branch"; then
+        echo "⚠️  Pushing to protected branch: $remote_ref"
+        echo "Running comprehensive checks..."
+        
+        # Run full make check
+        echo "📋 Running make check..."
+        if make check; then
+            echo "✅ Make check passed"
+        else
+            echo "❌ Make check failed. Fix issues before pushing to $remote_ref"
+            exit 1
+        fi
+        
+        # Check if linter is installed and run it strictly
+        if command -v golangci-lint >/dev/null 2>&1; then
+            echo "🔍 Running strict linter checks..."
+            if golangci-lint run; then
+                echo "✅ Linter checks passed"
+            else
+                echo "❌ Linter found issues. Fix them before pushing to $remote_ref"
+                exit 1
+            fi
+        else
+            echo "⚠️  golangci-lint not found, skipping strict lint checks"
+        fi
+    else
+        # For feature branches, run lighter checks
+        echo "📝 Running basic checks for feature branch..."
+        
+        # Just run formatting and basic tests
+        if ! gofmt -l . | grep -q .; then
+            echo "✅ Code formatting OK"
+        else
+            echo "❌ Formatting issues found. Run 'go fmt ./...'"
+            exit 1
+        fi
+        
+        if go test -short -timeout 1m ./... >/dev/null 2>&1; then
+            echo "✅ Unit tests passed"
+        else
+            echo "❌ Unit tests failed"
+            exit 1
+        fi
+    fi
+done
+
+echo "✅ All pre-push checks passed! Safe to push."
