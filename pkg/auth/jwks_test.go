@@ -61,6 +61,7 @@ func TestJWKSClient_ValidateToken_DevMode(t *testing.T) {
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   "user-123",
 			Issuer:    "https://auth.example.com",
+			Audience:  jwt.ClaimStrings{"engine"},
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 		},
 		ProjectID: "550e8400-e29b-41d4-a716-446655440000",
@@ -173,6 +174,7 @@ func TestJWKSClient_ParsesAllClaimFields(t *testing.T) {
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   "user-456",
 			Issuer:    "https://auth.ekaya.ai",
+			Audience:  jwt.ClaimStrings{"engine", "other-service"},
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
@@ -204,6 +206,67 @@ func TestJWKSClient_ParsesAllClaimFields(t *testing.T) {
 	}
 	if len(claims.Roles) != 1 || claims.Roles[0] != "owner" {
 		t.Errorf("Roles mismatch: got %v", claims.Roles)
+	}
+}
+
+func TestJWKSClient_ValidateToken_InvalidAudience(t *testing.T) {
+	config := &JWKSConfig{
+		EnableVerification: false,
+	}
+
+	client, err := NewJWKSClient(config)
+	if err != nil {
+		t.Fatalf("NewJWKSClient failed: %v", err)
+	}
+	defer client.Close()
+
+	// Token with wrong audience (not "engine")
+	testClaims := &Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:  "user-123",
+			Issuer:   "https://auth.example.com",
+			Audience: jwt.ClaimStrings{"other-service"},
+		},
+		ProjectID: "project-123",
+	}
+
+	token := createTestToken(testClaims)
+	_, err = client.ValidateToken(token)
+	if err == nil {
+		t.Error("expected error for invalid audience")
+	}
+	if err != ErrInvalidAudience {
+		t.Errorf("expected ErrInvalidAudience, got: %v", err)
+	}
+}
+
+func TestJWKSClient_ValidateToken_MissingAudience(t *testing.T) {
+	config := &JWKSConfig{
+		EnableVerification: false,
+	}
+
+	client, err := NewJWKSClient(config)
+	if err != nil {
+		t.Fatalf("NewJWKSClient failed: %v", err)
+	}
+	defer client.Close()
+
+	// Token with no audience
+	testClaims := &Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject: "user-123",
+			Issuer:  "https://auth.example.com",
+		},
+		ProjectID: "project-123",
+	}
+
+	token := createTestToken(testClaims)
+	_, err = client.ValidateToken(token)
+	if err == nil {
+		t.Error("expected error for missing audience")
+	}
+	if err != ErrInvalidAudience {
+		t.Errorf("expected ErrInvalidAudience, got: %v", err)
 	}
 }
 

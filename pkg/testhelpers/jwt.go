@@ -9,10 +9,11 @@ import (
 // GenerateTestJWT creates a test JWT token for use when verification is disabled.
 // The token has a valid structure but no signature (alg: none).
 // This is useful for testing auth flows without needing real JWKS validation.
+// The token includes aud: "engine" which is required for validation.
 func GenerateTestJWT(sub, projectID, email string) string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
 
-	payload := fmt.Sprintf(`{"sub":"%s"`, sub)
+	payload := fmt.Sprintf(`{"sub":"%s","aud":"engine"`, sub)
 	if projectID != "" {
 		payload += fmt.Sprintf(`,"pid":"%s"`, projectID)
 	}

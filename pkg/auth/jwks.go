@@ -4,10 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// expectedAudience is the required audience claim for ekaya-engine tokens.
+const expectedAudience = "engine"
+
+// ErrInvalidAudience is returned when the token audience doesn't include "engine".
+var ErrInvalidAudience = errors.New("invalid audience: token must be issued for 'engine'")
 
 // JWKSClientInterface defines the interface for JWT token validation.
 // This abstraction enables testing with mock implementations.
@@ -100,11 +107,17 @@ func (c *JWKSClient) ValidateToken(tokenString string) (*Claims, error) {
 		return nil, errors.New("invalid claims type")
 	}
 
+	// Validate audience contains "engine"
+	if !slices.Contains(claims.Audience, expectedAudience) {
+		return nil, ErrInvalidAudience
+	}
+
 	return claims, nil
 }
 
 // parseUnverifiedToken parses a JWT without verifying the signature.
 // Used in development mode when EnableVerification is false.
+// Note: Audience validation is still enforced even in dev mode.
 func (c *JWKSClient) parseUnverifiedToken(tokenString string) (*Claims, error) {
 	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
 	token, _, err := parser.ParseUnverified(tokenString, &Claims{})
@@ -115,6 +128,11 @@ func (c *JWKSClient) parseUnverifiedToken(tokenString string) (*Claims, error) {
 	claims, ok := token.Claims.(*Claims)
 	if !ok {
 		return nil, errors.New("invalid claims type")
+	}
+
+	// Validate audience contains "engine" even in dev mode
+	if !slices.Contains(claims.Audience, expectedAudience) {
+		return nil, ErrInvalidAudience
 	}
 
 	return claims, nil
