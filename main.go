@@ -110,7 +110,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	// Register health handler
-	healthHandler := handlers.NewHealthHandler(cfg)
+	healthHandler := handlers.NewHealthHandler(cfg, logger)
 	healthHandler.RegisterRoutes(mux)
 
 	// Register auth handler (public - no auth required)

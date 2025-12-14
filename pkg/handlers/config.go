@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"go.uber.org/zap"
@@ -55,7 +54,9 @@ func (h *ConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 			zap.String("auth_url", authURL),
 			zap.String("remote_addr", r.RemoteAddr),
 			zap.String("error", errMsg))
-		h.errorResponse(w, http.StatusBadRequest, "invalid_auth_url", "Invalid auth_url: not in allowed list")
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_auth_url", "Invalid auth_url: not in allowed list"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
 		return
 	}
 
@@ -65,7 +66,6 @@ func (h *ConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 		BaseURL:       h.config.BaseURL,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	// Don't cache if auth_url was provided (dynamic response)
 	if authURL == "" {
 		w.Header().Set("Cache-Control", "public, max-age=300") // Cache for 5 minutes
@@ -73,7 +73,7 @@ func (h *ConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "private, no-cache")
 	}
 
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to encode config response", zap.Error(err))
 		return
 	}
@@ -82,14 +82,4 @@ func (h *ConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 		zap.String("remote_addr", r.RemoteAddr),
 		zap.String("auth_server_url", response.AuthServerURL),
 		zap.Bool("custom_auth_url", authURL != ""))
-}
-
-// errorResponse writes a JSON error response.
-func (h *ConfigHandler) errorResponse(w http.ResponseWriter, statusCode int, errorCode, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"error":   errorCode,
-		"message": message,
-	})
 }

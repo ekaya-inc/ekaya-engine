@@ -53,14 +53,18 @@ func (h *AuthHandler) CompleteOAuth(w http.ResponseWriter, r *http.Request) {
 	var req CompleteOAuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.logger.Warn("Invalid request body", zap.Error(err))
-		h.errorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
 		return
 	}
 
 	// Validate required fields
 	if req.Code == "" || req.State == "" || req.CodeVerifier == "" {
 		h.logger.Warn("Missing required parameters")
-		h.errorResponse(w, http.StatusBadRequest, "missing_parameters", "Missing code, state, or code_verifier")
+		if err := ErrorResponse(w, http.StatusBadRequest, "missing_parameters", "Missing code, state, or code_verifier"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
 		return
 	}
 
@@ -73,11 +77,15 @@ func (h *AuthHandler) CompleteOAuth(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if err == services.ErrInvalidAuthURL {
 			h.logger.Warn("Invalid auth_url", zap.String("auth_url", req.AuthURL))
-			h.errorResponse(w, http.StatusBadRequest, "invalid_auth_url", "Invalid auth_url: not in allowed list")
+			if err := ErrorResponse(w, http.StatusBadRequest, "invalid_auth_url", "Invalid auth_url: not in allowed list"); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
 			return
 		}
 		h.logger.Error("Token exchange failed", zap.Error(err))
-		h.errorResponse(w, http.StatusInternalServerError, "token_exchange_failed", "Authentication failed")
+		if err := ErrorResponse(w, http.StatusInternalServerError, "token_exchange_failed", "Authentication failed"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
 		return
 	}
 
@@ -112,21 +120,10 @@ func (h *AuthHandler) CompleteOAuth(w http.ResponseWriter, r *http.Request) {
 		zap.String("original_url", originalURL))
 
 	// Return success with redirect URL
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(CompleteOAuthResponse{
+	if err := WriteJSON(w, http.StatusOK, CompleteOAuthResponse{
 		Success:     true,
 		RedirectURL: originalURL,
 	}); err != nil {
 		h.logger.Error("Failed to encode response", zap.Error(err))
 	}
-}
-
-// errorResponse writes a JSON error response.
-func (h *AuthHandler) errorResponse(w http.ResponseWriter, statusCode int, errorCode, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"error":   errorCode,
-		"message": message,
-	})
 }

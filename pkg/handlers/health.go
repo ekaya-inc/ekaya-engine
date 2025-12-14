@@ -1,10 +1,11 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 	"os"
 	"runtime"
+
+	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/config"
 )
@@ -21,12 +22,13 @@ type PingResponse struct {
 
 // HealthHandler handles health check and ping endpoints.
 type HealthHandler struct {
-	cfg *config.Config
+	cfg    *config.Config
+	logger *zap.Logger
 }
 
 // NewHealthHandler creates a new HealthHandler with the given configuration.
-func NewHealthHandler(cfg *config.Config) *HealthHandler {
-	return &HealthHandler{cfg: cfg}
+func NewHealthHandler(cfg *config.Config, logger *zap.Logger) *HealthHandler {
+	return &HealthHandler{cfg: cfg, logger: logger}
 }
 
 // RegisterRoutes registers the health handler's routes on the given mux.
@@ -60,8 +62,7 @@ func (h *HealthHandler) Ping(w http.ResponseWriter, r *http.Request) {
 		Environment: h.cfg.Env,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		return
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to encode ping response", zap.Error(err))
 	}
 }

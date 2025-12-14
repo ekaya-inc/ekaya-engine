@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"go.uber.org/zap"
+
 	"github.com/ekaya-inc/ekaya-engine/pkg/config"
 )
 
@@ -14,7 +16,7 @@ func TestHealthHandler_Health(t *testing.T) {
 		Version: "test-version",
 		Env:     "test",
 	}
-	handler := NewHealthHandler(cfg)
+	handler := NewHealthHandler(cfg, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
@@ -34,7 +36,7 @@ func TestHealthHandler_Ping(t *testing.T) {
 		Version: "1.2.3",
 		Env:     "test",
 	}
-	handler := NewHealthHandler(cfg)
+	handler := NewHealthHandler(cfg, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	rec := httptest.NewRecorder()
@@ -72,7 +74,7 @@ func TestHealthHandler_Ping(t *testing.T) {
 
 func TestHealthHandler_RegisterRoutes(t *testing.T) {
 	cfg := &config.Config{}
-	handler := NewHealthHandler(cfg)
+	handler := NewHealthHandler(cfg, zap.NewNop())
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)

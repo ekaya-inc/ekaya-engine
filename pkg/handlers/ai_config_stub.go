@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"go.uber.org/zap"
@@ -36,21 +35,19 @@ func (h *AIConfigStubHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware 
 
 // GetConfig returns empty AI config (not configured state)
 func (h *AIConfigStubHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"config_type": "none",
-	})
+	}); err != nil {
+		h.logger.Error("Failed to encode AI config response", zap.Error(err))
+	}
 }
 
 // UpdateConfig is a stub that accepts but doesn't persist AI config
 func (h *AIConfigStubHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 	h.logger.Warn("AI config update attempted but not implemented")
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"error":   "not_implemented",
-		"message": "AI configuration is not yet available in ekaya-engine",
-	})
+	if err := ErrorResponse(w, http.StatusNotImplemented, "not_implemented", "AI configuration is not yet available in ekaya-engine"); err != nil {
+		h.logger.Error("Failed to write error response", zap.Error(err))
+	}
 }
 
 // DeleteConfig is a stub for deleting AI config
@@ -61,19 +58,17 @@ func (h *AIConfigStubHandler) DeleteConfig(w http.ResponseWriter, r *http.Reques
 // TestConnection is a stub for testing AI connection
 func (h *AIConfigStubHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
 	h.logger.Warn("AI connection test attempted but not implemented")
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"error":   "not_implemented",
-		"message": "AI configuration is not yet available in ekaya-engine",
-	})
+	if err := ErrorResponse(w, http.StatusNotImplemented, "not_implemented", "AI configuration is not yet available in ekaya-engine"); err != nil {
+		h.logger.Error("Failed to write error response", zap.Error(err))
+	}
 }
 
 // GetOptions returns available AI options (empty for now)
 func (h *AIConfigStubHandler) GetOptions(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"community": nil,
 		"embedded":  nil,
-	})
+	}); err != nil {
+		h.logger.Error("Failed to encode AI options response", zap.Error(err))
+	}
 }
