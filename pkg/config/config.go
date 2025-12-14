@@ -2,11 +2,9 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/ilyakaznacheev/cleanenv"
-	"gopkg.in/yaml.v3"
 )
 
 // Config holds all configuration for ekaya-engine.
@@ -24,6 +22,17 @@ type Config struct {
 	// Authentication configuration
 	Auth AuthConfig `yaml:"auth"`
 
+	// OAuth configuration
+	OAuth OAuthConfig `yaml:"oauth"`
+
+	// AuthServerURL is the OAuth authorization server base URL.
+	// Used for constructing OAuth redirect URLs.
+	AuthServerURL string `yaml:"auth_server_url" env:"AUTH_SERVER_URL" env-default:""`
+
+	// CookieDomain is the domain for auth cookies (optional).
+	// If empty, it will be auto-derived from BaseURL.
+	CookieDomain string `yaml:"cookie_domain" env:"COOKIE_DOMAIN" env-default:""`
+
 	// Database configuration (PostgreSQL)
 	Database DatabaseConfig `yaml:"database"`
 
@@ -34,6 +43,12 @@ type Config struct {
 	// Must be a 32-byte key, base64 encoded. Generate with: openssl rand -base64 32
 	// Server will fail to start if this is not set.
 	ProjectCredentialsKey string `yaml:"-" env:"PROJECT_CREDENTIALS_KEY"` // Secret - not in YAML
+}
+
+// OAuthConfig holds OAuth client configuration.
+type OAuthConfig struct {
+	// ClientID is the OAuth client ID registered with the auth server.
+	ClientID string `yaml:"client_id" env:"OAUTH_CLIENT_ID" env-default:"ekaya-engine-dev"`
 }
 
 // AuthConfig holds authentication-related configuration.
@@ -72,50 +87,18 @@ type RedisConfig struct {
 	KeyPrefix string `yaml:"key_prefix" env:"REDIS_KEY_PREFIX" env-default:"project:"`
 }
 
-// Load reads configuration from config.yaml (if exists) and environment variables.
+// Load reads configuration from config.yaml with environment variable overrides.
 // The version parameter is injected at build time and set on the returned Config.
-//
-// Loading strategy:
-//   - If config.yaml exists: Read YAML first, then override secrets from env vars
-//   - If config.yaml doesn't exist: Read everything from environment variables
-//
-// Secrets (PGPASSWORD, REDIS_PASSWORD, PROJECT_CREDENTIALS_KEY) always come from
-// environment variables, never from YAML files.
+// Environment variables override YAML values. Secrets (PGPASSWORD, REDIS_PASSWORD,
+// PROJECT_CREDENTIALS_KEY) must come from environment variables (yaml:"-" fields).
 func Load(version string) (*Config, error) {
 	cfg := &Config{
 		Version: version,
 	}
 
-	configPath := "config.yaml"
-	if _, err := os.Stat(configPath); err == nil {
-		// config.yaml exists - read YAML first to respect explicit values
-		yamlData, err := os.ReadFile(configPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read config file: %w", err)
-		}
-
-		if err := yaml.Unmarshal(yamlData, cfg); err != nil {
-			return nil, fmt.Errorf("failed to parse yaml: %w", err)
-		}
-
-		// Manually read environment-only secret fields (yaml:"-")
-		// These are not in config.yaml and must come from environment
-		if pgPassword := os.Getenv("PGPASSWORD"); pgPassword != "" {
-			cfg.Database.Password = pgPassword
-		}
-		if redisPassword := os.Getenv("REDIS_PASSWORD"); redisPassword != "" {
-			cfg.Redis.Password = redisPassword
-		}
-		if projectCredentialsKey := os.Getenv("PROJECT_CREDENTIALS_KEY"); projectCredentialsKey != "" {
-			cfg.ProjectCredentialsKey = projectCredentialsKey
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("failed to access config file: %w", err)
-	} else {
-		// config.yaml doesn't exist - read from environment only
-		if err := cleanenv.ReadEnv(cfg); err != nil {
-			return nil, fmt.Errorf("failed to read environment config: %w", err)
-		}
+	// Load config from YAML file with environment variable overrides
+	if err := cleanenv.ReadConfig("config.yaml", cfg); err != nil {
+		return nil, fmt.Errorf("failed to read config.yaml: %w", err)
 	}
 
 	// Parse complex fields
@@ -162,4 +145,23 @@ func (c *DatabaseConfig) ConnectionString() string {
 // RedisAddr returns the Redis address in host:port format.
 func (c *RedisConfig) RedisAddr() string {
 	return fmt.Sprintf("%s:%d", c.Host, c.Port)
+}
+
+// ValidateAuthURL validates an auth_url against the JWKS endpoints whitelist.
+// Returns the validated auth URL and an empty error string on success.
+// If authURL is empty, returns the default AuthServerURL.
+// If authURL is provided but not in the whitelist, returns empty string and error message.
+func (c *Config) ValidateAuthURL(authURL string) (string, string) {
+	// If no auth_url provided, use default
+	if authURL == "" {
+		return c.AuthServerURL, ""
+	}
+
+	// Check if auth_url is in the JWKS endpoints whitelist
+	if _, ok := c.Auth.JWKSEndpoints[authURL]; ok {
+		return authURL, ""
+	}
+
+	// auth_url provided but not in whitelist - reject
+	return "", "auth_url not in allowed list"
 }

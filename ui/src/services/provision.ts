@@ -35,20 +35,17 @@ export async function getProject(): Promise<ProjectInfoResponse> {
 }
 
 /**
- * Provisions a project in region_projects, region_users, and ekaya-forge
+ * Provisions a project and user from JWT claims.
  *
  * This endpoint is idempotent - safe to call multiple times for the same project.
  * It will:
- * 1. Create/update project in region_projects table
- * 2. Add user to region_users table with role from JWT
- * 3. Call ekaya-forge provision endpoint
- *
- * Rate limited: 10 requests per user per minute
+ * 1. Create project in projects table (if not exists)
+ * 2. Add user to project_users table with admin role
  *
  * @throws {Error} If provisioning fails
  */
 export async function provisionProject(): Promise<ProvisionResponse> {
-  const response = await fetchWithAuth('/cloud/project_provision', {
+  const response = await fetchWithAuth('/projects', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

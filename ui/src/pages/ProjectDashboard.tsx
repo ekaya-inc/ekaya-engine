@@ -119,8 +119,8 @@ const ProjectDashboard = () => {
     try {
       // Load project-specific config and server AI options in parallel
       const [configResponse, optionsResponse] = await Promise.all([
-        fetchWithAuth(`/api/projects/ai-config`),
-        fetchWithAuth(`/api/ai-options`),
+        fetchWithAuth(`/api/projects/${pid}/ai-config`),
+        fetchWithAuth(`/api/config/project`),
       ]);
 
       if (configResponse.ok) {
@@ -140,8 +140,8 @@ const ProjectDashboard = () => {
       }
 
       if (optionsResponse.ok) {
-        const options = await optionsResponse.json();
-        setAiOptions(options);
+        const projectConfig = await optionsResponse.json();
+        setAiOptions(projectConfig.ai_options);
       }
     } catch (err) {
       console.error('Failed to load AI config:', err);
@@ -197,7 +197,7 @@ const ProjectDashboard = () => {
         }
       }
 
-      const response = await fetchWithAuth(`/api/projects/ai-config/test`, {
+      const response = await fetchWithAuth(`/api/projects/${pid}/ai-config/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -265,7 +265,7 @@ const ProjectDashboard = () => {
         }
       }
 
-      const response = await fetchWithAuth(`/api/projects/ai-config`, {
+      const response = await fetchWithAuth(`/api/projects/${pid}/ai-config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -293,7 +293,7 @@ const ProjectDashboard = () => {
     setSaveError(null);
 
     try {
-      const response = await fetchWithAuth(`/api/projects/ai-config`, {
+      const response = await fetchWithAuth(`/api/projects/${pid}/ai-config`, {
         method: 'DELETE',
       });
 

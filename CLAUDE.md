@@ -159,6 +159,14 @@ Version is managed through git tags and injected at build time:
 
 Configuration files are in `config/` subdirectory. The `make setup-auth-*` commands copy the appropriate template to `config.yaml` (gitignored).
 
+## Database Access
+
+The local PostgreSQL database is accessible via `psql` without parameters (PG* environment variables are set):
+```bash
+psql -c "SELECT * FROM engine_projects;"
+psql -c "SELECT * FROM engine_users;"
+```
+
 ## Testing
 
 ```bash
@@ -176,3 +184,4 @@ make test-short
 
 ### Important: Wait for CI/CD Checks
 When merging pull requests, **ALWAYS wait approximately 3-4 minutes** for GitHub Actions to complete before merging.
+- ekaya-engine is the clean and architecturally sound migration from ../ekaya-region/. You may look in that directory for reference but make sure to migrate any artifact over (code, documentation, configuration) in the context of an extermely well-written service.
