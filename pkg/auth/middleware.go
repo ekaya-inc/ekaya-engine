@@ -97,6 +97,31 @@ func (m *Middleware) badRequest(w http.ResponseWriter, message string) {
 	})
 }
 
+// RequireCentralService validates JWT and requires sub: "central".
+// Use for internal endpoints called by ekaya-central (e.g., project provisioning).
+// Unlike RequireAuth, this does NOT require a project ID in the token.
+func (m *Middleware) RequireCentralService(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, token, err := m.authService.ValidateRequest(r)
+		if err != nil {
+			m.unauthorized(w, "Authentication required")
+			return
+		}
+
+		if claims.Subject != "central" {
+			m.logger.Warn("Non-central service attempted to access central-only endpoint",
+				zap.String("subject", claims.Subject),
+				zap.String("path", r.URL.Path))
+			m.forbidden(w, "Central service authorization required")
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), ClaimsKey, claims)
+		ctx = context.WithValue(ctx, TokenKey, token)
+		next(w, r.WithContext(ctx))
+	}
+}
+
 // forbidden returns a 403 response with JSON error body.
 func (m *Middleware) forbidden(w http.ResponseWriter, message string) {
 	w.Header().Set("Content-Type", "application/json")

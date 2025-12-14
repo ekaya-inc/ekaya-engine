@@ -251,3 +251,151 @@ func TestMiddleware_ContextValues_NotSet(t *testing.T) {
 		t.Error("expected GetToken to return false for empty context")
 	}
 }
+
+func TestMiddleware_RequireCentralService_Success(t *testing.T) {
+	claims := &Claims{}
+	claims.Subject = "central" // Central service token
+	authService := &mockAuthService{claims: claims, token: "central-token"}
+	middleware := NewMiddleware(authService, zap.NewNop())
+
+	var handlerCalled bool
+	var ctxClaims *Claims
+	var ctxToken string
+
+	handler := middleware.RequireCentralService(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		ctxClaims, _ = GetClaims(r.Context())
+		ctxToken, _ = GetToken(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/new", nil)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if !handlerCalled {
+		t.Error("expected handler to be called")
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+
+	if ctxClaims == nil || ctxClaims.Subject != "central" {
+		t.Error("expected claims with subject 'central' in context")
+	}
+
+	if ctxToken != "central-token" {
+		t.Errorf("expected token 'central-token' in context, got %q", ctxToken)
+	}
+}
+
+func TestMiddleware_RequireCentralService_WithProjectID(t *testing.T) {
+	// Central service can optionally include a project ID
+	claims := &Claims{ProjectID: "project-123"}
+	claims.Subject = "central"
+	authService := &mockAuthService{claims: claims, token: "central-token"}
+	middleware := NewMiddleware(authService, zap.NewNop())
+
+	var handlerCalled bool
+	handler := middleware.RequireCentralService(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/new", nil)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if !handlerCalled {
+		t.Error("expected handler to be called")
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+}
+
+func TestMiddleware_RequireCentralService_Unauthorized(t *testing.T) {
+	authService := &mockAuthService{validateErr: ErrMissingAuthorization}
+	middleware := NewMiddleware(authService, zap.NewNop())
+
+	handler := middleware.RequireCentralService(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/new", nil)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected status 401, got %d", rec.Code)
+	}
+
+	var response map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if response["error"] != "unauthorized" {
+		t.Errorf("expected error 'unauthorized', got %q", response["error"])
+	}
+}
+
+func TestMiddleware_RequireCentralService_UserTokenRejected(t *testing.T) {
+	// Regular user token should be rejected
+	claims := &Claims{ProjectID: "project-123"}
+	claims.Subject = "user-123" // Not "central"
+	authService := &mockAuthService{claims: claims, token: "user-token"}
+	middleware := NewMiddleware(authService, zap.NewNop())
+
+	handler := middleware.RequireCentralService(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called for user token")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/new", nil)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected status 403, got %d", rec.Code)
+	}
+
+	var response map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if response["error"] != "forbidden" {
+		t.Errorf("expected error 'forbidden', got %q", response["error"])
+	}
+
+	if response["message"] != "Central service authorization required" {
+		t.Errorf("expected message 'Central service authorization required', got %q", response["message"])
+	}
+}
+
+func TestMiddleware_RequireCentralService_EmptySubjectRejected(t *testing.T) {
+	// Token with empty subject should be rejected
+	claims := &Claims{}
+	claims.Subject = ""
+	authService := &mockAuthService{claims: claims, token: "bad-token"}
+	middleware := NewMiddleware(authService, zap.NewNop())
+
+	handler := middleware.RequireCentralService(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called for empty subject")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/new", nil)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected status 403, got %d", rec.Code)
+	}
+}
