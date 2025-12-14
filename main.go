@@ -121,8 +121,9 @@ func main() {
 	configHandler := handlers.NewConfigHandler(cfg, logger)
 	configHandler.RegisterRoutes(mux)
 
-	// Register OAuth discovery endpoint (public - no auth required)
-	mux.HandleFunc("GET /.well-known/oauth-authorization-server", auth.HandleOAuthDiscovery(cfg, logger))
+	// Register well-known endpoints (public - no auth required)
+	wellKnownHandler := handlers.NewWellKnownHandler(cfg, logger)
+	wellKnownHandler.RegisterRoutes(mux)
 
 	// Register AI config stub handler (must be before projects handler)
 	// These stubs prevent /api/projects/ai-config from matching GET /api/projects/{pid}
