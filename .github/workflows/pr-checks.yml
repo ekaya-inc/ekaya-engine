@@ -90,7 +90,7 @@ jobs:
           gofmt -l .
           golangci-lint run --timeout=5m
           # Run unit tests only (skip integration tests that need test image)
-          go test ./... -short -cover -timeout 2m
+          go test ./... -short -timeout 2m
           # Frontend checks
           cd ui && npm run lint && npm run typecheck && npm test -- --run
 
