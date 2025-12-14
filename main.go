@@ -15,6 +15,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/config"
+	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/handlers"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -53,6 +54,16 @@ func main() {
 		zap.String("database", fmt.Sprintf("%s@%s:%d/%s", cfg.Database.User, cfg.Database.Host, cfg.Database.Port, cfg.Database.Database)),
 		zap.String("redis", fmt.Sprintf("%s:%d", cfg.Redis.Host, cfg.Redis.Port)),
 	)
+
+	// Validate required credentials key (fail fast)
+	if cfg.ProjectCredentialsKey == "" {
+		logger.Fatal("PROJECT_CREDENTIALS_KEY environment variable is required. Generate with: openssl rand -base64 32")
+	}
+	credentialEncryptor, err := crypto.NewCredentialEncryptor(cfg.ProjectCredentialsKey)
+	if err != nil {
+		logger.Fatal("Failed to initialize credential encryptor", zap.Error(err))
+	}
+	_ = credentialEncryptor // Will be injected into datasource service
 
 	// Initialize OAuth session store
 	auth.InitSessionStore()
