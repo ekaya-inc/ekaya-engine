@@ -18,7 +18,7 @@ auth:
 
 # OAuth configuration
 oauth:
-  client_id: "ekaya-engine-localhost"
+  client_id: "ekaya-engine"
 
 # Database configuration
 # Password should be provided via PGPASSWORD environment variable

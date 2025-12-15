@@ -18,7 +18,7 @@ auth:
 
 # OAuth configuration
 oauth:
-  client_id: "ekaya-engine-localhost"  # Localhost server with deployed prod auth
+  client_id: "ekaya-engine"
 
 # Database configuration
 # All database connection details should be provided via environment variables
