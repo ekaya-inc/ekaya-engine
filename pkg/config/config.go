@@ -51,7 +51,7 @@ type Config struct {
 // OAuthConfig holds OAuth client configuration.
 type OAuthConfig struct {
 	// ClientID is the OAuth client ID registered with the auth server.
-	ClientID string `yaml:"client_id" env:"OAUTH_CLIENT_ID" env-default:"ekaya-engine-dev"`
+	ClientID string `yaml:"client_id" env:"OAUTH_CLIENT_ID" env-default:"ekaya-engine"`
 }
 
 // AuthConfig holds authentication-related configuration.

@@ -16,10 +16,6 @@ auth:
   enable_verification: false  # TEMPORARILY DISABLED for testing MCP context propagation
   jwks_endpoints: "https://auth.dev.ekaya.ai=https://auth.dev.ekaya.ai/.well-known/jwks.json"
 
-# OAuth configuration
-oauth:
-  client_id: "ekaya-engine"
-
 # Database configuration
 # Password should be provided via PGPASSWORD environment variable
 database:

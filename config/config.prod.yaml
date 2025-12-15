@@ -16,10 +16,6 @@ auth:
   enable_verification: true  # Always enabled in production
   jwks_endpoints: "https://auth.ekaya.ai=https://auth.ekaya.ai/.well-known/jwks.json"
 
-# OAuth configuration
-oauth:
-  client_id: "ekaya-engine"
-
 # Database configuration
 # All database connection details should be provided via environment variables
 # PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE, PGTYPE, PGSSLMODE

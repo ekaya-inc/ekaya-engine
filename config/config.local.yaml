@@ -16,10 +16,6 @@ auth:
   # Multiple issuers: local emulator + dev + prod (allows testing with projects from any environment)
   jwks_endpoints: "http://localhost:5002=http://localhost:5002/.well-known/jwks.json,https://auth.dev.ekaya.ai=https://auth.dev.ekaya.ai/.well-known/jwks.json,https://auth.ekaya.ai=https://auth.ekaya.ai/.well-known/jwks.json"
 
-# OAuth configuration
-oauth:
-  client_id: "ekaya-engine"
-
 # Database configuration
 # Password should be provided via PGPASSWORD environment variable
 database:
