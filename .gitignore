@@ -22,9 +22,6 @@ vendor/
 bin/
 dist/
 
-# Air live reload
-.air.toml
-
 # IDE specific files
 .vscode/
 .idea/
