@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -32,25 +33,31 @@ type DatasourceService interface {
 
 	// Delete removes a datasource.
 	Delete(ctx context.Context, id uuid.UUID) error
+
+	// TestConnection tests connectivity to a datasource without saving it.
+	TestConnection(ctx context.Context, dsType string, config map[string]any) error
 }
 
 // datasourceService implements DatasourceService.
 type datasourceService struct {
-	repo      repositories.DatasourceRepository
-	encryptor *crypto.CredentialEncryptor
-	logger    *zap.Logger
+	repo           repositories.DatasourceRepository
+	encryptor      *crypto.CredentialEncryptor
+	adapterFactory datasource.DatasourceAdapterFactory
+	logger         *zap.Logger
 }
 
 // NewDatasourceService creates a new datasource service with dependencies.
 func NewDatasourceService(
 	repo repositories.DatasourceRepository,
 	encryptor *crypto.CredentialEncryptor,
+	adapterFactory datasource.DatasourceAdapterFactory,
 	logger *zap.Logger,
 ) DatasourceService {
 	return &datasourceService{
-		repo:      repo,
-		encryptor: encryptor,
-		logger:    logger,
+		repo:           repo,
+		encryptor:      encryptor,
+		adapterFactory: adapterFactory,
+		logger:         logger,
 	}
 }
 
@@ -188,6 +195,22 @@ func (s *datasourceService) Delete(ctx context.Context, id uuid.UUID) error {
 		zap.String("id", id.String()),
 	)
 
+	return nil
+}
+
+// TestConnection tests connectivity to a datasource without saving it.
+func (s *datasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any) error {
+	adapter, err := s.adapterFactory.NewConnectionTester(ctx, dsType, config)
+	if err != nil {
+		return fmt.Errorf("failed to connect: %w", err)
+	}
+	defer adapter.Close()
+
+	if err := adapter.TestConnection(ctx); err != nil {
+		return fmt.Errorf("connection test failed: %w", err)
+	}
+
+	s.logger.Info("Connection test successful", zap.String("type", dsType))
 	return nil
 }
 

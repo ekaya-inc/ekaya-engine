@@ -37,11 +37,13 @@ COPY . .
 # Copy built UI from previous stage
 COPY --from=ui-builder /app/ui/dist ./ui/dist
 
-# Build argument for version injection
+# Build arguments for version and adapter selection
 ARG VERSION=dev
+ARG BUILD_TAGS=all_adapters
 
 # Build the binary with optimizations for Cloud Run
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -tags="${BUILD_TAGS}" \
     -ldflags="-w -s -X main.Version=${VERSION}" \
     -o ekaya-engine \
     main.go

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
@@ -78,9 +79,45 @@ func (m *mockDatasourceRepository) Delete(ctx context.Context, id uuid.UUID) err
 	return m.deleteErr
 }
 
+// mockConnectionTester is a mock implementation of datasource.ConnectionTester.
+type mockConnectionTester struct {
+	testErr error
+}
+
+func (m *mockConnectionTester) TestConnection(ctx context.Context) error {
+	return m.testErr
+}
+
+func (m *mockConnectionTester) Close() error {
+	return nil
+}
+
+// mockAdapterFactory is a mock implementation of datasource.DatasourceAdapterFactory.
+type mockAdapterFactory struct {
+	tester     *mockConnectionTester
+	factoryErr error
+}
+
+func (m *mockAdapterFactory) NewConnectionTester(ctx context.Context, dsType string, config map[string]any) (datasource.ConnectionTester, error) {
+	if m.factoryErr != nil {
+		return nil, m.factoryErr
+	}
+	if m.tester == nil {
+		return &mockConnectionTester{}, nil
+	}
+	return m.tester, nil
+}
+
+func (m *mockAdapterFactory) ListTypes() []datasource.DatasourceAdapterInfo {
+	return []datasource.DatasourceAdapterInfo{
+		{Type: "postgres", DisplayName: "PostgreSQL"},
+	}
+}
+
 func newTestService(repo *mockDatasourceRepository) (DatasourceService, *crypto.CredentialEncryptor) {
 	encryptor, _ := crypto.NewCredentialEncryptor(testEncryptionKey)
-	return NewDatasourceService(repo, encryptor, zap.NewNop()), encryptor
+	factory := &mockAdapterFactory{}
+	return NewDatasourceService(repo, encryptor, factory, zap.NewNop()), encryptor
 }
 
 func TestDatasourceService_Create_Success(t *testing.T) {
@@ -402,4 +439,60 @@ func containsHelper(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestDatasourceService_TestConnection_Success(t *testing.T) {
+	repo := &mockDatasourceRepository{}
+	encryptor, _ := crypto.NewCredentialEncryptor(testEncryptionKey)
+	factory := &mockAdapterFactory{
+		tester: &mockConnectionTester{},
+	}
+	service := NewDatasourceService(repo, encryptor, factory, zap.NewNop())
+
+	config := map[string]any{
+		"host":     "localhost",
+		"user":     "testuser",
+		"database": "testdb",
+	}
+
+	err := service.TestConnection(context.Background(), "postgres", config)
+	if err != nil {
+		t.Fatalf("TestConnection failed: %v", err)
+	}
+}
+
+func TestDatasourceService_TestConnection_FactoryError(t *testing.T) {
+	repo := &mockDatasourceRepository{}
+	encryptor, _ := crypto.NewCredentialEncryptor(testEncryptionKey)
+	factory := &mockAdapterFactory{
+		factoryErr: errors.New("unsupported datasource type"),
+	}
+	service := NewDatasourceService(repo, encryptor, factory, zap.NewNop())
+
+	err := service.TestConnection(context.Background(), "unknown", nil)
+	if err == nil {
+		t.Fatal("expected error from factory")
+	}
+}
+
+func TestDatasourceService_TestConnection_ConnectionError(t *testing.T) {
+	repo := &mockDatasourceRepository{}
+	encryptor, _ := crypto.NewCredentialEncryptor(testEncryptionKey)
+	factory := &mockAdapterFactory{
+		tester: &mockConnectionTester{
+			testErr: errors.New("connection refused"),
+		},
+	}
+	service := NewDatasourceService(repo, encryptor, factory, zap.NewNop())
+
+	config := map[string]any{
+		"host":     "localhost",
+		"user":     "testuser",
+		"database": "testdb",
+	}
+
+	err := service.TestConnection(context.Background(), "postgres", config)
+	if err == nil {
+		t.Fatal("expected connection error")
+	}
 }

@@ -13,6 +13,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	_ "github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource/postgres" // Register postgres adapter
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/config"
 	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
@@ -114,10 +116,13 @@ func main() {
 	userRepo := repositories.NewUserRepository()
 	datasourceRepo := repositories.NewDatasourceRepository()
 
+	// Create adapter factory for datasource connections
+	adapterFactory := datasource.NewDatasourceAdapterFactory()
+
 	// Create services
 	projectService := services.NewProjectService(db, projectRepo, userRepo, redisClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
-	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, logger)
+	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, logger)
 	_ = datasourceService // Available for handlers (Part 2)
 
 	mux := http.NewServeMux()
