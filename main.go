@@ -63,7 +63,6 @@ func main() {
 	if err != nil {
 		logger.Fatal("Failed to initialize credential encryptor", zap.Error(err))
 	}
-	_ = credentialEncryptor // Will be injected into datasource service
 
 	// Initialize OAuth session store
 	auth.InitSessionStore()
@@ -113,10 +112,13 @@ func main() {
 	// Create repositories
 	projectRepo := repositories.NewProjectRepository()
 	userRepo := repositories.NewUserRepository()
+	datasourceRepo := repositories.NewDatasourceRepository()
 
 	// Create services
 	projectService := services.NewProjectService(db, projectRepo, userRepo, redisClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
+	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, logger)
+	_ = datasourceService // Available for handlers (Part 2)
 
 	mux := http.NewServeMux()
 
