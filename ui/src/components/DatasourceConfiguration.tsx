@@ -1,5 +1,5 @@
-import { ArrowLeft, CheckCircle, XCircle, Loader2 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { ArrowLeft, CheckCircle, XCircle, Loader2, Pencil } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 
 import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext";
@@ -72,6 +72,7 @@ interface DatasourceFormConfig {
   password: string;
   name: string;
   useSSL: boolean;
+  displayName: string;
 }
 
 interface DatasourceConfigurationProps {
@@ -99,9 +100,15 @@ const DatasourceConfiguration = ({
     deleteDataSource,
   } = useDatasourceConnection();
 
+  const adapterInfo = getAdapterInfo(
+    selectedAdapter ?? connectionDetails?.type
+  );
+
   const [testingConnection, setTestingConnection] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isDisconnecting, setIsDisconnecting] = useState<boolean>(false);
+  const [isEditingName, setIsEditingName] = useState<boolean>(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const [config, setConfig] = useState<DatasourceFormConfig>({
     host: "",
     port: "5432",
@@ -109,15 +116,12 @@ const DatasourceConfiguration = ({
     password: "",
     name: "",
     useSSL: false,
+    displayName: "",
   });
-
-  const adapterInfo = getAdapterInfo(
-    selectedAdapter ?? connectionDetails?.type
-  );
 
   // Determine if this is editing an existing datasource or configuring a new one
   const isEditingExisting = Boolean(
-    selectedDatasource?.datasourceId || connectionDetails?.datasourceId
+    selectedDatasource?.datasourceId ?? connectionDetails?.datasourceId
   );
 
   const handleConfigChange = (
@@ -132,6 +136,7 @@ const DatasourceConfiguration = ({
 
   useEffect(() => {
     if (connectionDetails) {
+      // Editing existing datasource - load from connectionDetails
       const formData: DatasourceFormConfig = {
         host: connectionDetails.host || "",
         port: connectionDetails.port?.toString() || "5432",
@@ -141,11 +146,26 @@ const DatasourceConfiguration = ({
         useSSL:
           connectionDetails.ssl_mode === "require" ||
           connectionDetails.ssl_mode === "prefer",
+        displayName: connectionDetails.displayName ?? adapterInfo.name,
       };
 
       setConfig(formData);
+    } else {
+      // New datasource - set default displayName from adapter type
+      setConfig((prev) => ({
+        ...prev,
+        displayName: adapterInfo.name,
+      }));
     }
-  }, [connectionDetails]);
+  }, [connectionDetails, adapterInfo.name]);
+
+  // Focus name input when entering edit mode
+  useEffect(() => {
+    if (isEditingName && nameInputRef.current) {
+      nameInputRef.current.focus();
+      nameInputRef.current.select();
+    }
+  }, [isEditingName]);
 
   const handleTestConnection = async (): Promise<void> => {
     clearError();
@@ -162,7 +182,7 @@ const DatasourceConfiguration = ({
         password: config.password,
         ssl_mode: (config.useSSL ? "require" : "disable") as SSLMode,
       };
-      await testConnection(testDetails);
+      await testConnection(pid!, testDetails);
     } catch (error) {
       console.error("Connection test failed:", error);
     } finally {
@@ -239,8 +259,8 @@ const DatasourceConfiguration = ({
       const isEditing = datasourceId !== undefined && datasourceId !== null;
 
       const result = isEditing
-        ? await updateDataSource(pid, datasourceId, datasourceType, apiConfig)
-        : await saveDataSource(pid, datasourceType, apiConfig);
+        ? await updateDataSource(pid, datasourceId, config.displayName, datasourceType, apiConfig)
+        : await saveDataSource(pid, config.displayName, datasourceType, apiConfig);
 
       if (result.success) {
         const action = isEditing ? "updated" : "saved";
@@ -494,6 +514,38 @@ const DatasourceConfiguration = ({
 
       <Card>
         <CardContent className="p-6">
+          {/* Editable Datasource Name */}
+          <div className="mb-6 pb-6 border-b">
+            <Label htmlFor="displayName" className="text-sm text-text-secondary mb-2 block">
+              Datasource Name
+            </Label>
+            {isEditingName ? (
+              <Input
+                ref={nameInputRef}
+                id="displayName"
+                value={config.displayName}
+                onChange={(e) => handleConfigChange("displayName", e.target.value)}
+                onBlur={() => setIsEditingName(false)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === "Escape") {
+                    setIsEditingName(false);
+                  }
+                }}
+                className="text-xl font-semibold max-w-md"
+                placeholder="Enter datasource name"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsEditingName(true)}
+                className="flex items-center gap-2 text-xl font-semibold text-text-primary hover:text-blue-600 transition-colors group"
+              >
+                {config.displayName || adapterInfo.name}
+                <Pencil className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+            )}
+          </div>
+
           {error && (
             <div className="mb-4 p-4 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg">
               <div className="flex items-center gap-2 text-sm font-medium text-red-700 dark:text-red-400">

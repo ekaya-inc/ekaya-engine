@@ -1,6 +1,6 @@
-# Development configuration for ekaya-region
-# Scenario: Localhost ekaya-region + deployed dev auth server
-# Use this when: Developer downloads ekaya-region and authenticates with dev environment
+# Development configuration for ekaya-engine
+# Scenario: Localhost ekaya-engine + deployed dev auth server
+# Use this when: Developer downloads ekaya-engine and authenticates with dev environment
 # Copy to config.yaml: cp config/config.dev.yaml config.yaml
 
 # Server configuration
@@ -16,17 +16,13 @@ auth:
   enable_verification: false  # TEMPORARILY DISABLED for testing MCP context propagation
   jwks_endpoints: "https://auth.dev.ekaya.ai=https://auth.dev.ekaya.ai/.well-known/jwks.json"
 
-# OAuth configuration
-oauth:
-  client_id: "ekaya-region-localhost"  # Localhost server with deployed dev auth
-
 # Database configuration
 # Password should be provided via PGPASSWORD environment variable
 database:
   host: "localhost"
   port: 5432
   user: "ekaya"
-  database: "ekaya_region"
+  database: "ekaya_engine"
   max_connections: 25
   max_idle_conns: 5
   type: "postgres"
@@ -38,6 +34,11 @@ redis:
   port: 6379
   db: 0
   key_prefix: "project:"
+
+# Datasource configuration
+datasource:
+  connection_ttl_minutes: 5
+  max_connections_per_user: 1
 
 # SDAP configuration
 sdap:

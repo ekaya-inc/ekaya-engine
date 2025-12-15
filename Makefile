@@ -10,6 +10,9 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 VERSION_NO_V := $(shell echo $(VERSION) | sed 's/^v//')
 PORT ?= 3443
 
+# Build tags for datasource adapters (postgres, all_adapters)
+BUILD_TAGS ?= all_adapters
+
 # Git commit and date for dev tags
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "no-git")
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -61,13 +64,18 @@ clean: ## Clean build artifacts
 
 test: ## Run all tests
 	@echo "$(YELLOW)Running full test suite...$(NC)"
-	@go test ./... -v -cover -timeout 5m
+	@go test -tags="$(BUILD_TAGS)" ./... -v -cover -timeout 5m
 	@echo "$(GREEN)✓ All tests passed$(NC)"
 
 test-short: ## Run only unit tests (skip integration tests)
 	@echo "$(YELLOW)Running unit tests only...$(NC)"
-	@go test ./... -short -v -cover -timeout 2m
+	@go test -tags="$(BUILD_TAGS)" ./... -short -v -cover -timeout 2m
 	@echo "$(GREEN)✓ Unit tests passed$(NC)"
+
+test-integration: ## Run integration tests (requires Docker)
+	@echo "$(YELLOW)Running integration tests (requires Docker)...$(NC)"
+	@go test -tags="integration,$(BUILD_TAGS)" ./... -v -timeout 5m
+	@echo "$(GREEN)✓ Integration tests passed$(NC)"
 
 fmt: ## Format Go code
 	@echo "$(YELLOW)Formatting code...$(NC)"
@@ -127,7 +135,7 @@ check: ## Run strict quality checks (fails on any issue)
 	fi
 	@echo ""
 	@echo "$(YELLOW)Step 4: Running all backend tests...$(NC)"
-	@TEST_OUTPUT=$$(go test ./... -cover -timeout 5m 2>&1); \
+	@TEST_OUTPUT=$$(go test -tags="$(BUILD_TAGS)" ./... -cover -timeout 5m 2>&1); \
 	TEST_EXIT_CODE=$$?; \
 	if [ $$TEST_EXIT_CODE -ne 0 ]; then \
 		echo "$(RED)❌ Backend tests failed:$(NC)"; \
@@ -174,7 +182,7 @@ run: ## Build website and run the server (no watch)
 	@cd ui && npm run build
 	@echo "$(GREEN)✓ UI built$(NC)"
 	@echo "$(YELLOW)Starting ekaya-engine on port $(PORT)...$(NC)"
-	@PORT=$(PORT) go run main.go
+	@PORT=$(PORT) go run -tags="$(BUILD_TAGS)" main.go
 
 dev-ui: ## Watch UI files and rebuild to dist/ for Go server
 	@echo "$(YELLOW)Watching UI files and rebuilding to ui/dist/...$(NC)"
@@ -218,6 +226,7 @@ dev-build-docker: ## Build Docker image locally for testing (no push)
 	@echo "This will build using the same multi-stage process as CI/CD"
 	@docker build \
 		--build-arg VERSION=$(VERSION) \
+		--build-arg BUILD_TAGS=$(BUILD_TAGS) \
 		-t $(IMAGE_NAME):local \
 		.
 	@echo "$(GREEN)✓ Docker image built: $(IMAGE_NAME):local$(NC)"

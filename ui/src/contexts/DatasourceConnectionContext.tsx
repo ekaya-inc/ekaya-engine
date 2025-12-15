@@ -25,10 +25,12 @@ interface DatasourceConnectionContextValue {
   connect: (details: ConnectionDetails) => void;
   disconnect: (datasourceId: string) => void;
   testConnection: (
+    projectId: string,
     details: TestConnectionRequest
   ) => Promise<ApiResponse<TestConnectionResponse>>;
   saveDataSource: (
     projectId: string,
+    displayName: string,
     datasourceType: DatasourceType,
     config: DatasourceConfig
   ) => Promise<ApiResponse<CreateDatasourceResponse>>;
@@ -41,6 +43,7 @@ interface DatasourceConnectionContextValue {
   updateDataSource: (
     projectId: string,
     datasourceId: string,
+    displayName: string,
     datasourceType: DatasourceType,
     config: DatasourceConfig
   ) => Promise<ApiResponse<CreateDatasourceResponse>>;
@@ -109,6 +112,7 @@ export const DatasourceConnectionProvider = ({
               datasourceId: ds.datasource_id,
               projectId: ds.project_id,
               type: ds.type,
+              displayName: ds.name,
               ...ds.config,
             }));
           setDatasources(loadedDatasources);
@@ -206,6 +210,7 @@ export const DatasourceConnectionProvider = ({
   };
 
   const testConnection = async (
+    projectId: string,
     details: TestConnectionRequest
   ): Promise<ApiResponse<TestConnectionResponse>> => {
     setIsLoading(true);
@@ -213,7 +218,7 @@ export const DatasourceConnectionProvider = ({
 
     try {
       sdapApi.validateConnectionDetails(details);
-      const result = await sdapApi.testDatasourceConnection(details);
+      const result = await sdapApi.testDatasourceConnection(projectId, details);
 
       setConnectionStatus({
         success: result.success,
@@ -239,6 +244,7 @@ export const DatasourceConnectionProvider = ({
 
   const saveDataSource = async (
     projectId: string,
+    displayName: string,
     datasourceType: DatasourceType,
     config: DatasourceConfig
   ): Promise<ApiResponse<CreateDatasourceResponse>> => {
@@ -251,6 +257,7 @@ export const DatasourceConnectionProvider = ({
 
     try {
       const result = await sdapApi.createDataSource({
+        name: displayName,
         datasourceType,
         config,
         projectId,
@@ -261,6 +268,7 @@ export const DatasourceConnectionProvider = ({
           datasourceId: result.data.datasource_id,
           projectId: result.data.project_id,
           type: datasourceType,
+          displayName: result.data.name,
           ...config,
         };
         connect(connectionDetails);
@@ -287,11 +295,12 @@ export const DatasourceConnectionProvider = ({
       const result = await sdapApi.getDataSource(projectId, datasourceId);
 
       if (result.success && result.data) {
-        const { datasource_id, project_id, type, config } = result.data;
+        const { datasource_id, project_id, name, type, config } = result.data;
         const connectionDetails: ConnectionDetails = {
           datasourceId: datasource_id,
           projectId: project_id,
           type: type,
+          displayName: name,
           ...config,
         };
         connect(connectionDetails);
@@ -312,6 +321,7 @@ export const DatasourceConnectionProvider = ({
   const updateDataSource = async (
     projectId: string,
     datasourceId: string,
+    displayName: string,
     datasourceType: DatasourceType,
     config: DatasourceConfig
   ): Promise<ApiResponse<CreateDatasourceResponse>> => {
@@ -322,6 +332,7 @@ export const DatasourceConnectionProvider = ({
       const result = await sdapApi.updateDataSource(
         projectId,
         datasourceId,
+        displayName,
         datasourceType,
         config
       );
@@ -332,6 +343,7 @@ export const DatasourceConnectionProvider = ({
           datasourceId,
           projectId,
           type: datasourceType,
+          displayName,
           ...config,
         };
         connect(connectionDetails);

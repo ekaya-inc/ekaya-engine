@@ -1,6 +1,6 @@
-# Production configuration for ekaya-region
-# Scenario: Localhost ekaya-region + deployed production auth server
-# Use this when: Developer downloads ekaya-region and authenticates with production
+# Production configuration for ekaya-engine
+# Scenario: Localhost ekaya-engine + deployed production auth server
+# Use this when: Developer downloads ekaya-engine and authenticates with production
 # Copy to config.yaml: cp config/config.prod.yaml config.yaml
 
 # Server configuration
@@ -16,10 +16,6 @@ auth:
   enable_verification: true  # Always enabled in production
   jwks_endpoints: "https://auth.ekaya.ai=https://auth.ekaya.ai/.well-known/jwks.json"
 
-# OAuth configuration
-oauth:
-  client_id: "ekaya-region-localhost"  # Localhost server with deployed prod auth
-
 # Database configuration
 # All database connection details should be provided via environment variables
 # PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE, PGTYPE, PGSSLMODE
@@ -34,6 +30,11 @@ database:
 redis:
   db: 0
   key_prefix: "project:"
+
+# Datasource configuration
+datasource:
+  connection_ttl_minutes: 5
+  max_connections_per_user: 1
 
 # SDAP configuration
 # SDAP auth settings should be provided via environment variables

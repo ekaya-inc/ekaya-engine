@@ -1,24 +1,20 @@
-# Local development configuration for ekaya-region
+# Local development configuration for ekaya-engine
 # This file is for local development with minimal external dependencies
 # Secrets should be provided via environment variables
 
 # Server configuration
 port: "3443"
 env: "local"
-base_url: "http://localhost:3443"  # WHERE THIS INSTANCE RUNS - determines cookie Secure flag
+base_url: "http://localhost:3443" # WHERE THIS INSTANCE RUNS - determines cookie Secure flag
 region_domain: "localhost"
-auth_server_url: "http://localhost:5002"  # Firebase hosting emulator (not direct function URL)
-cookie_domain: ""  # Auto-derived from base_url if empty. Leave empty for localhost.
+auth_server_url: "http://localhost:5002" # Firebase hosting emulator (not direct function URL)
+cookie_domain: "" # Auto-derived from base_url if empty. Leave empty for localhost.
 
 # Authentication configuration
 auth:
-  enable_verification: false  # Disabled for local development
+  enable_verification: false # Disabled for local development
   # Multiple issuers: local emulator + dev + prod (allows testing with projects from any environment)
   jwks_endpoints: "http://localhost:5002=http://localhost:5002/.well-known/jwks.json,https://auth.dev.ekaya.ai=https://auth.dev.ekaya.ai/.well-known/jwks.json,https://auth.ekaya.ai=https://auth.ekaya.ai/.well-known/jwks.json"
-
-# OAuth configuration
-oauth:
-  client_id: "ekaya-region-localhost"
 
 # Database configuration
 # Password should be provided via PGPASSWORD environment variable
@@ -26,11 +22,11 @@ database:
   host: "localhost"
   port: 5432
   user: "ekaya"
-  database: "ekaya_region"
+  database: "ekaya_engine"
   max_connections: 10
   max_idle_conns: 5
   type: "postgres"
-  ssl_mode: "disable"  # Use disable for local development
+  ssl_mode: "disable" # Use disable for local development
 
 # Redis configuration
 redis:
@@ -39,10 +35,15 @@ redis:
   db: 0
   key_prefix: "project:"
 
+# Datasource configuration
+datasource:
+  connection_ttl_minutes: 5
+  max_connections_per_user: 1
+
 # SDAP configuration
 sdap:
   auth:
-    enabled: false  # Disabled for local development
+    enabled: false # Disabled for local development
     jwks_url: "http://localhost:5002/.well-known/jwks.json"
     issuer: "http://localhost:5002"
   connection_ttl_minutes: 5
@@ -51,8 +52,8 @@ sdap:
 # Optional: Ontology extraction configuration
 # Ontology extraction iteration settings
 # These control the interactive Q&A loop for ontology extraction
-ontology_max_iterations: 3       # Maximum Q&A iterations for ontology extraction (1-20 recommended, default: 1)
-ontology_target_confidence: 0.8  # Target confidence threshold 0.0-1.0 (default: 0.8)
+ontology_max_iterations: 3 # Maximum Q&A iterations for ontology extraction (1-20 recommended, default: 1)
+ontology_target_confidence: 0.8 # Target confidence threshold 0.0-1.0 (default: 0.8)
 
 # Optional: Tool filters (empty list = all tools enabled)
 enabled_tools: []

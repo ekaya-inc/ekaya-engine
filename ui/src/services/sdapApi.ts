@@ -27,7 +27,7 @@ import type {
   TestConnectionResponse,
 } from '../types';
 
-const SDAP_BASE_URL = '/sdap/v1';
+const SDAP_BASE_URL = '/api/projects';
 
 class SdapApiService {
   private baseURL: string;
@@ -79,9 +79,10 @@ class SdapApiService {
    * Test datasource connection
    */
   async testDatasourceConnection(
+    projectId: string,
     connectionDetails: TestConnectionRequest
   ): Promise<ApiResponse<TestConnectionResponse>> {
-    return this.makeRequest<TestConnectionResponse>('/test', {
+    return this.makeRequest<TestConnectionResponse>(`/${projectId}/datasources/test`, {
       method: 'POST',
       body: JSON.stringify(connectionDetails),
     });
@@ -92,10 +93,12 @@ class SdapApiService {
    */
   async createDataSource({
     projectId,
+    name,
     datasourceType,
     config,
   }: {
     projectId: string;
+    name: string;
     datasourceType: DatasourceType;
     config: DatasourceConfig;
   }): Promise<ApiResponse<CreateDatasourceResponse>> {
@@ -105,6 +108,7 @@ class SdapApiService {
         method: 'POST',
         body: JSON.stringify({
           project_id: projectId,
+          name: name,
           type: datasourceType,
           config: config,
         }),
@@ -126,25 +130,22 @@ class SdapApiService {
 
   /**
    * Update datasource for a project
-   * Note: Database name is omitted from updates - it cannot be changed after creation
    */
   async updateDataSource(
     projectId: string,
     datasourceId: string,
+    name: string,
     datasourceType: DatasourceType,
     config: DatasourceConfig
   ): Promise<ApiResponse<CreateDatasourceResponse>> {
-    // Database name cannot be changed after creation
-    const { name: _name, ...configEdit } = config;
-
     return this.makeRequest<CreateDatasourceResponse>(
       `/${projectId}/datasources/${datasourceId}`,
       {
         method: 'PUT',
         body: JSON.stringify({
-          project_id: projectId,
+          name: name,
           type: datasourceType,
-          config: configEdit,
+          config: config,
         }),
       }
     );

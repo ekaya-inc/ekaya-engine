@@ -13,8 +13,11 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	_ "github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource/postgres" // Register postgres adapter
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/config"
+	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/handlers"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -53,6 +56,15 @@ func main() {
 		zap.String("database", fmt.Sprintf("%s@%s:%d/%s", cfg.Database.User, cfg.Database.Host, cfg.Database.Port, cfg.Database.Database)),
 		zap.String("redis", fmt.Sprintf("%s:%d", cfg.Redis.Host, cfg.Redis.Port)),
 	)
+
+	// Validate required credentials key (fail fast)
+	if cfg.ProjectCredentialsKey == "" {
+		logger.Fatal("PROJECT_CREDENTIALS_KEY environment variable is required. Generate with: openssl rand -base64 32")
+	}
+	credentialEncryptor, err := crypto.NewCredentialEncryptor(cfg.ProjectCredentialsKey)
+	if err != nil {
+		logger.Fatal("Failed to initialize credential encryptor", zap.Error(err))
+	}
 
 	// Initialize OAuth session store
 	auth.InitSessionStore()
@@ -102,10 +114,15 @@ func main() {
 	// Create repositories
 	projectRepo := repositories.NewProjectRepository()
 	userRepo := repositories.NewUserRepository()
+	datasourceRepo := repositories.NewDatasourceRepository()
+
+	// Create adapter factory for datasource connections
+	adapterFactory := datasource.NewDatasourceAdapterFactory()
 
 	// Create services
 	projectService := services.NewProjectService(db, projectRepo, userRepo, redisClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
+	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, logger)
 
 	mux := http.NewServeMux()
 
@@ -118,7 +135,7 @@ func main() {
 	authHandler.RegisterRoutes(mux)
 
 	// Register config handler (public - no auth required)
-	configHandler := handlers.NewConfigHandler(cfg, logger)
+	configHandler := handlers.NewConfigHandler(cfg, adapterFactory, logger)
 	configHandler.RegisterRoutes(mux)
 
 	// Register project config handler (authenticated - project-scoped config)
@@ -143,6 +160,10 @@ func main() {
 	// Register users handler (protected)
 	usersHandler := handlers.NewUsersHandler(userService, logger)
 	usersHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register datasources handler (protected)
+	datasourcesHandler := handlers.NewDatasourcesHandler(datasourceService, logger)
+	datasourcesHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"

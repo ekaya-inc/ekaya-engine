@@ -39,6 +39,9 @@ type Config struct {
 	// Redis configuration
 	Redis RedisConfig `yaml:"redis"`
 
+	// Datasource connection management configuration
+	Datasource DatasourceConfig `yaml:"datasource"`
+
 	// Credential encryption key for project secrets (AI keys, database passwords, etc.)
 	// Must be a 32-byte key, base64 encoded. Generate with: openssl rand -base64 32
 	// Server will fail to start if this is not set.
@@ -48,7 +51,7 @@ type Config struct {
 // OAuthConfig holds OAuth client configuration.
 type OAuthConfig struct {
 	// ClientID is the OAuth client ID registered with the auth server.
-	ClientID string `yaml:"client_id" env:"OAUTH_CLIENT_ID" env-default:"ekaya-engine-dev"`
+	ClientID string `yaml:"client_id" env:"OAUTH_CLIENT_ID" env-default:"ekaya-engine"`
 }
 
 // AuthConfig holds authentication-related configuration.
@@ -85,6 +88,14 @@ type RedisConfig struct {
 	DB        int    `yaml:"db" env:"REDIS_DB" env-default:"0"`
 	Password  string `yaml:"-" env:"REDIS_PASSWORD" env-default:""` // Secret - not in YAML
 	KeyPrefix string `yaml:"key_prefix" env:"REDIS_KEY_PREFIX" env-default:"project:"`
+}
+
+// DatasourceConfig holds datasource connection management settings.
+type DatasourceConfig struct {
+	// ConnectionTTLMinutes is how long idle datasource connections are kept alive.
+	ConnectionTTLMinutes int `yaml:"connection_ttl_minutes" env:"DATASOURCE_CONNECTION_TTL_MINUTES" env-default:"5"`
+	// MaxConnectionsPerUser limits concurrent datasource connections per user.
+	MaxConnectionsPerUser int `yaml:"max_connections_per_user" env:"DATASOURCE_MAX_CONNECTIONS_PER_USER" env-default:"1"`
 }
 
 // Load reads configuration from config.yaml with environment variable overrides.

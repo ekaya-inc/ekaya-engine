@@ -1,0 +1,232 @@
+//go:build postgres || all_adapters
+
+package postgres
+
+import (
+	"context"
+	"os"
+	"testing"
+	"time"
+)
+
+func TestFromMap_ValidConfig(t *testing.T) {
+	config := map[string]any{
+		"host":     "localhost",
+		"port":     float64(5432), // JSON numbers are float64
+		"user":     "testuser",
+		"password": "testpass",
+		"database": "testdb",
+		"ssl_mode": "disable",
+	}
+
+	cfg, err := FromMap(config)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if cfg.Host != "localhost" {
+		t.Errorf("expected host 'localhost', got '%s'", cfg.Host)
+	}
+	if cfg.Port != 5432 {
+		t.Errorf("expected port 5432, got %d", cfg.Port)
+	}
+	if cfg.User != "testuser" {
+		t.Errorf("expected user 'testuser', got '%s'", cfg.User)
+	}
+	if cfg.Password != "testpass" {
+		t.Errorf("expected password 'testpass', got '%s'", cfg.Password)
+	}
+	if cfg.Database != "testdb" {
+		t.Errorf("expected database 'testdb', got '%s'", cfg.Database)
+	}
+	if cfg.SSLMode != "disable" {
+		t.Errorf("expected ssl_mode 'disable', got '%s'", cfg.SSLMode)
+	}
+}
+
+func TestFromMap_IntPort(t *testing.T) {
+	config := map[string]any{
+		"host":     "localhost",
+		"port":     5433, // int instead of float64
+		"user":     "testuser",
+		"database": "testdb",
+	}
+
+	cfg, err := FromMap(config)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if cfg.Port != 5433 {
+		t.Errorf("expected port 5433, got %d", cfg.Port)
+	}
+}
+
+func TestFromMap_Defaults(t *testing.T) {
+	config := map[string]any{
+		"host":     "localhost",
+		"user":     "testuser",
+		"database": "testdb",
+	}
+
+	cfg, err := FromMap(config)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if cfg.Port != DefaultPort() {
+		t.Errorf("expected default port %d, got %d", DefaultPort(), cfg.Port)
+	}
+	if cfg.SSLMode != DefaultSSLMode() {
+		t.Errorf("expected default ssl_mode '%s', got '%s'", DefaultSSLMode(), cfg.SSLMode)
+	}
+}
+
+func TestFromMap_LegacyNameField(t *testing.T) {
+	config := map[string]any{
+		"host": "localhost",
+		"user": "testuser",
+		"name": "legacydb", // legacy "name" field instead of "database"
+	}
+
+	cfg, err := FromMap(config)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if cfg.Database != "legacydb" {
+		t.Errorf("expected database 'legacydb', got '%s'", cfg.Database)
+	}
+}
+
+func TestFromMap_MissingHost(t *testing.T) {
+	config := map[string]any{
+		"user":     "testuser",
+		"database": "testdb",
+	}
+
+	_, err := FromMap(config)
+	if err == nil {
+		t.Fatal("expected error for missing host")
+	}
+}
+
+func TestFromMap_MissingUser(t *testing.T) {
+	config := map[string]any{
+		"host":     "localhost",
+		"database": "testdb",
+	}
+
+	_, err := FromMap(config)
+	if err == nil {
+		t.Fatal("expected error for missing user")
+	}
+}
+
+func TestFromMap_MissingDatabase(t *testing.T) {
+	config := map[string]any{
+		"host": "localhost",
+		"user": "testuser",
+	}
+
+	_, err := FromMap(config)
+	if err == nil {
+		t.Fatal("expected error for missing database")
+	}
+}
+
+func TestDefaultPort(t *testing.T) {
+	if DefaultPort() != 5432 {
+		t.Errorf("expected default port 5432, got %d", DefaultPort())
+	}
+}
+
+func TestDefaultSSLMode(t *testing.T) {
+	if DefaultSSLMode() != "require" {
+		t.Errorf("expected default ssl_mode 'require', got '%s'", DefaultSSLMode())
+	}
+}
+
+// Integration test - skipped if no database is available
+func TestAdapter_Integration(t *testing.T) {
+	// Skip if not running integration tests
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	// Check for required environment variables
+	host := os.Getenv("PGHOST")
+	user := os.Getenv("PGUSER")
+	database := os.Getenv("PGDATABASE")
+
+	if host == "" || user == "" || database == "" {
+		t.Skip("skipping integration test: PGHOST, PGUSER, or PGDATABASE not set")
+	}
+
+	config := map[string]any{
+		"host":     host,
+		"user":     user,
+		"password": os.Getenv("PGPASSWORD"),
+		"database": database,
+		"ssl_mode": "disable",
+	}
+
+	if port := os.Getenv("PGPORT"); port != "" {
+		// Parse port
+		var p int
+		if _, err := os.Stat(port); err == nil {
+			p = 5432
+		} else {
+			p = 5432 // default
+		}
+		config["port"] = float64(p)
+	}
+
+	cfg, err := FromMap(config)
+	if err != nil {
+		t.Fatalf("failed to parse config: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	adapter, err := NewAdapter(ctx, cfg)
+	if err != nil {
+		t.Fatalf("failed to create adapter: %v", err)
+	}
+	defer adapter.Close()
+
+	if err := adapter.TestConnection(ctx); err != nil {
+		t.Fatalf("connection test failed: %v", err)
+	}
+}
+
+func TestAdapter_ConnectionFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping connection failure test in short mode")
+	}
+
+	cfg := &Config{
+		Host:     "localhost",
+		Port:     59999, // unlikely to be listening
+		User:     "nonexistent",
+		Password: "wrong",
+		Database: "nodb",
+		SSLMode:  "disable",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	adapter, err := NewAdapter(ctx, cfg)
+	if err != nil {
+		// Connection failed at creation time - this is expected
+		return
+	}
+	defer adapter.Close()
+
+	// If adapter was created, ping should fail
+	if err := adapter.TestConnection(ctx); err == nil {
+		t.Error("expected connection test to fail with invalid credentials")
+	}
+}
