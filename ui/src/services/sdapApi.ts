@@ -27,7 +27,7 @@ import type {
   TestConnectionResponse,
 } from '../types';
 
-const SDAP_BASE_URL = '/sdap/v1';
+const SDAP_BASE_URL = '/api/projects';
 
 class SdapApiService {
   private baseURL: string;
@@ -79,9 +79,10 @@ class SdapApiService {
    * Test datasource connection
    */
   async testDatasourceConnection(
+    projectId: string,
     connectionDetails: TestConnectionRequest
   ): Promise<ApiResponse<TestConnectionResponse>> {
-    return this.makeRequest<TestConnectionResponse>('/test', {
+    return this.makeRequest<TestConnectionResponse>(`/${projectId}/datasources/test`, {
       method: 'POST',
       body: JSON.stringify(connectionDetails),
     });

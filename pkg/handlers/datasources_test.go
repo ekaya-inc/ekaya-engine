@@ -52,25 +52,40 @@ func TestDatasourcesHandler_List_Success(t *testing.T) {
 		t.Errorf("expected status 200, got %d", rec.Code)
 	}
 
-	var resp ListDatasourcesResponse
+	var resp ApiResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
 
-	if len(resp.Datasources) != 1 {
-		t.Fatalf("expected 1 datasource, got %d", len(resp.Datasources))
+	if !resp.Success {
+		t.Error("expected success to be true")
 	}
 
-	ds := resp.Datasources[0]
-	if ds.DatasourceID != dsID.String() {
-		t.Errorf("expected datasource_id %q, got %q", dsID.String(), ds.DatasourceID)
+	// Extract data from wrapped response
+	dataMap, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be a map, got %T", resp.Data)
 	}
-	if ds.Type != "postgres" {
-		t.Errorf("expected type 'postgres', got %q", ds.Type)
+	datasources, ok := dataMap["datasources"].([]any)
+	if !ok {
+		t.Fatalf("expected datasources to be an array")
+	}
+
+	if len(datasources) != 1 {
+		t.Fatalf("expected 1 datasource, got %d", len(datasources))
+	}
+
+	ds := datasources[0].(map[string]any)
+	if ds["datasource_id"] != dsID.String() {
+		t.Errorf("expected datasource_id %q, got %q", dsID.String(), ds["datasource_id"])
+	}
+	if ds["type"] != "postgres" {
+		t.Errorf("expected type 'postgres', got %q", ds["type"])
 	}
 
 	// Verify password is masked
-	if pw, ok := ds.Config["password"].(string); ok && pw != "********" {
+	config := ds["config"].(map[string]any)
+	if pw, ok := config["password"].(string); ok && pw != "********" {
 		t.Errorf("expected password masked as '********', got %q", pw)
 	}
 }
@@ -154,17 +169,31 @@ func TestDatasourcesHandler_Create_Success(t *testing.T) {
 		t.Errorf("expected status 201, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var resp DatasourceResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+	var apiResp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &apiResp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
 
-	if resp.DatasourceID != dsID.String() {
-		t.Errorf("expected datasource_id %q, got %q", dsID.String(), resp.DatasourceID)
+	if !apiResp.Success {
+		t.Error("expected success to be true")
+	}
+
+	// Extract data from wrapped response
+	dataMap, ok := apiResp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be a map, got %T", apiResp.Data)
+	}
+
+	if dataMap["datasource_id"] != dsID.String() {
+		t.Errorf("expected datasource_id %q, got %q", dsID.String(), dataMap["datasource_id"])
 	}
 
 	// Verify password is masked in response
-	if pw, ok := resp.Config["password"].(string); ok && pw != "********" {
+	config, ok := dataMap["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected config to be a map")
+	}
+	if pw, ok := config["password"].(string); ok && pw != "********" {
 		t.Errorf("expected password masked, got %q", pw)
 	}
 }
@@ -259,17 +288,31 @@ func TestDatasourcesHandler_Get_Success(t *testing.T) {
 		t.Errorf("expected status 200, got %d", rec.Code)
 	}
 
-	var resp DatasourceResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+	var apiResp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &apiResp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
 
-	if resp.DatasourceID != dsID.String() {
-		t.Errorf("expected datasource_id %q, got %q", dsID.String(), resp.DatasourceID)
+	if !apiResp.Success {
+		t.Error("expected success to be true")
+	}
+
+	// Extract data from wrapped response
+	dataMap, ok := apiResp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be a map, got %T", apiResp.Data)
+	}
+
+	if dataMap["datasource_id"] != dsID.String() {
+		t.Errorf("expected datasource_id %q, got %q", dsID.String(), dataMap["datasource_id"])
 	}
 
 	// Verify password is masked
-	if pw, ok := resp.Config["password"].(string); ok && pw != "********" {
+	config, ok := dataMap["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected config to be a map")
+	}
+	if pw, ok := config["password"].(string); ok && pw != "********" {
 		t.Errorf("expected password masked, got %q", pw)
 	}
 }
@@ -353,13 +396,23 @@ func TestDatasourcesHandler_Update_Success(t *testing.T) {
 		t.Errorf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+	var apiResp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &apiResp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
 
-	if resp["datasource_id"] != dsID.String() {
-		t.Errorf("expected datasource_id %q, got %v", dsID.String(), resp["datasource_id"])
+	if !apiResp.Success {
+		t.Error("expected success to be true")
+	}
+
+	// Extract data from wrapped response
+	dataMap, ok := apiResp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be a map, got %T", apiResp.Data)
+	}
+
+	if dataMap["datasource_id"] != dsID.String() {
+		t.Errorf("expected datasource_id %q, got %v", dsID.String(), dataMap["datasource_id"])
 	}
 }
 
@@ -407,13 +460,23 @@ func TestDatasourcesHandler_Delete_Success(t *testing.T) {
 		t.Errorf("expected status 200, got %d", rec.Code)
 	}
 
-	var resp DeleteDatasourceResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+	var apiResp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &apiResp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
 
-	if !resp.Success {
+	if !apiResp.Success {
 		t.Error("expected success to be true")
+	}
+
+	// Extract data from wrapped response
+	dataMap, ok := apiResp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be a map, got %T", apiResp.Data)
+	}
+
+	if dataMap["success"] != true {
+		t.Error("expected data.success to be true")
 	}
 }
 
@@ -442,8 +505,13 @@ func TestDatasourcesHandler_TestConnection_Success(t *testing.T) {
 
 	projectID := uuid.New()
 	body := TestConnectionRequest{
-		Type:   "postgres",
-		Config: map[string]any{"host": "localhost", "port": 5432, "user": "test", "password": "pass"},
+		Type:     "postgres",
+		Host:     "localhost",
+		Port:     5432,
+		User:     "test",
+		Password: "pass",
+		Name:     "testdb",
+		SSLMode:  "disable",
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -477,8 +545,12 @@ func TestDatasourcesHandler_TestConnection_Failure(t *testing.T) {
 
 	projectID := uuid.New()
 	body := TestConnectionRequest{
-		Type:   "postgres",
-		Config: map[string]any{"host": "badhost", "port": 5432},
+		Type:    "postgres",
+		Host:    "badhost",
+		Port:    5432,
+		User:    "test",
+		Name:    "testdb",
+		SSLMode: "disable",
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -512,7 +584,8 @@ func TestDatasourcesHandler_TestConnection_MissingType(t *testing.T) {
 
 	projectID := uuid.New()
 	body := TestConnectionRequest{
-		Config: map[string]any{"host": "localhost"},
+		Host: "localhost",
+		Port: 5432,
 	}
 	bodyBytes, _ := json.Marshal(body)
 

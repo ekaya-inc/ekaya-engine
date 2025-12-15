@@ -42,9 +42,27 @@ type UpdateDatasourceRequest struct {
 }
 
 // TestConnectionRequest for connection testing.
+// Matches frontend's flat structure (type + config fields at top level).
 type TestConnectionRequest struct {
-	Type   string         `json:"type"`
-	Config map[string]any `json:"config"`
+	Type     string `json:"type"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	User     string `json:"user"`
+	Password string `json:"password"`
+	Name     string `json:"name"`
+	SSLMode  string `json:"ssl_mode"`
+}
+
+// ToConfig converts the flat request to a config map for the service layer.
+func (r *TestConnectionRequest) ToConfig() map[string]any {
+	return map[string]any{
+		"host":     r.Host,
+		"port":     r.Port,
+		"user":     r.User,
+		"password": r.Password,
+		"name":     r.Name,
+		"ssl_mode": r.SSLMode,
+	}
 }
 
 // TestConnectionResponse for connection test result.
@@ -57,6 +75,14 @@ type TestConnectionResponse struct {
 type DeleteDatasourceResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
+}
+
+// ApiResponse wraps data in the format expected by the frontend.
+type ApiResponse struct {
+	Success bool   `json:"success"`
+	Data    any    `json:"data,omitempty"`
+	Error   string `json:"error,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // DatasourcesHandler handles datasource-related HTTP requests.
@@ -114,11 +140,11 @@ func (h *DatasourcesHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := ListDatasourcesResponse{
+	data := ListDatasourcesResponse{
 		Datasources: make([]DatasourceResponse, len(datasources)),
 	}
 	for i, ds := range datasources {
-		response.Datasources[i] = DatasourceResponse{
+		data.Datasources[i] = DatasourceResponse{
 			DatasourceID: ds.ID.String(),
 			ProjectID:    ds.ProjectID.String(),
 			Type:         ds.DatasourceType,
@@ -128,6 +154,7 @@ func (h *DatasourcesHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	response := ApiResponse{Success: true, Data: data}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
@@ -186,7 +213,7 @@ func (h *DatasourcesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := DatasourceResponse{
+	data := DatasourceResponse{
 		DatasourceID: ds.ID.String(),
 		ProjectID:    ds.ProjectID.String(),
 		Type:         ds.DatasourceType,
@@ -195,6 +222,7 @@ func (h *DatasourcesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:    ds.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 
+	response := ApiResponse{Success: true, Data: data}
 	if err := WriteJSON(w, http.StatusCreated, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
@@ -240,7 +268,7 @@ func (h *DatasourcesHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := DatasourceResponse{
+	data := DatasourceResponse{
 		DatasourceID: ds.ID.String(),
 		ProjectID:    ds.ProjectID.String(),
 		Type:         ds.DatasourceType,
@@ -249,6 +277,7 @@ func (h *DatasourcesHandler) Get(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:    ds.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 
+	response := ApiResponse{Success: true, Data: data}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
@@ -322,12 +351,13 @@ func (h *DatasourcesHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return success response (frontend expects UpdateDatasourceResponse without created_at)
-	response := map[string]any{
+	data := map[string]any{
 		"datasource_id": datasourceID.String(),
 		"type":          req.Type,
 		"config":        maskSensitiveConfig(req.Config),
 	}
 
+	response := ApiResponse{Success: true, Data: data}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
@@ -371,11 +401,12 @@ func (h *DatasourcesHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := DeleteDatasourceResponse{
+	data := DeleteDatasourceResponse{
 		Success: true,
 		Message: "Datasource deleted successfully",
 	}
 
+	response := ApiResponse{Success: true, Data: data}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
@@ -386,8 +417,12 @@ func (h *DatasourcesHandler) Delete(w http.ResponseWriter, r *http.Request) {
 func (h *DatasourcesHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
 	pidStr := r.PathValue("pid")
 
+	h.logger.Debug("TestConnection request received",
+		zap.String("project_id", pidStr))
+
 	_, err := uuid.Parse(pidStr)
 	if err != nil {
+		h.logger.Debug("Invalid project ID", zap.String("pid", pidStr), zap.Error(err))
 		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_project_id", "Invalid project ID format"); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))
 		}
@@ -396,20 +431,35 @@ func (h *DatasourcesHandler) TestConnection(w http.ResponseWriter, r *http.Reque
 
 	var req TestConnectionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.logger.Error("Failed to decode request body", zap.Error(err))
 		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))
 		}
 		return
 	}
 
+	h.logger.Debug("TestConnection parsed request",
+		zap.String("type", req.Type),
+		zap.String("host", req.Host),
+		zap.Int("port", req.Port),
+		zap.String("user", req.User),
+		zap.String("name", req.Name),
+		zap.String("ssl_mode", req.SSLMode))
+
 	if req.Type == "" {
+		h.logger.Debug("Missing datasource type in request")
 		if err := ErrorResponse(w, http.StatusBadRequest, "missing_type", "Datasource type is required"); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))
 		}
 		return
 	}
 
-	if err := h.datasourceService.TestConnection(r.Context(), req.Type, req.Config); err != nil {
+	config := req.ToConfig()
+	if err := h.datasourceService.TestConnection(r.Context(), req.Type, config); err != nil {
+		h.logger.Info("Connection test failed",
+			zap.String("type", req.Type),
+			zap.String("host", req.Host),
+			zap.Error(err))
 		response := TestConnectionResponse{
 			Success: false,
 			Message: err.Error(),
@@ -419,6 +469,10 @@ func (h *DatasourcesHandler) TestConnection(w http.ResponseWriter, r *http.Reque
 		}
 		return
 	}
+
+	h.logger.Debug("Connection test successful",
+		zap.String("type", req.Type),
+		zap.String("host", req.Host))
 
 	response := TestConnectionResponse{
 		Success: true,

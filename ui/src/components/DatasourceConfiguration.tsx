@@ -162,7 +162,7 @@ const DatasourceConfiguration = ({
         password: config.password,
         ssl_mode: (config.useSSL ? "require" : "disable") as SSLMode,
       };
-      await testConnection(testDetails);
+      await testConnection(pid!, testDetails);
     } catch (error) {
       console.error("Connection test failed:", error);
     } finally {

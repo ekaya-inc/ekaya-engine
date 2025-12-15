@@ -25,6 +25,7 @@ interface DatasourceConnectionContextValue {
   connect: (details: ConnectionDetails) => void;
   disconnect: (datasourceId: string) => void;
   testConnection: (
+    projectId: string,
     details: TestConnectionRequest
   ) => Promise<ApiResponse<TestConnectionResponse>>;
   saveDataSource: (
@@ -206,6 +207,7 @@ export const DatasourceConnectionProvider = ({
   };
 
   const testConnection = async (
+    projectId: string,
     details: TestConnectionRequest
   ): Promise<ApiResponse<TestConnectionResponse>> => {
     setIsLoading(true);
@@ -213,7 +215,7 @@ export const DatasourceConnectionProvider = ({
 
     try {
       sdapApi.validateConnectionDetails(details);
-      const result = await sdapApi.testDatasourceConnection(details);
+      const result = await sdapApi.testDatasourceConnection(projectId, details);
 
       setConnectionStatus({
         success: result.success,
