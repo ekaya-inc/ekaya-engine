@@ -2,6 +2,7 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
+import { ADAPTER_ICON_PATHS } from "../constants/adapters";
 import type { ConnectionDetails, DatasourceType } from "../types";
 
 import { Button } from "./ui/Button";
@@ -20,18 +21,6 @@ interface DatasourceTypeFromAPI {
   description: string;
   icon: string;
 }
-
-// Map icon identifier from API to actual image path
-const ICON_PATHS: Record<string, string> = {
-  postgres: "/icons/adapters/PostgreSQL.png",
-  mssql: "/icons/adapters/MSSQL.png",
-  clickhouse: "/icons/adapters/ClickHouse.png",
-  mysql: "/icons/adapters/MySQL.png",
-  snowflake: "/icons/adapters/Snowflake.png",
-  bigquery: "/icons/adapters/BigQuery.png",
-  databricks: "/icons/adapters/Databricks.png",
-  redshift: "/icons/adapters/AmazonRedshift.png",
-};
 
 interface DatasourceAdapterSelectionProps {
   selectedAdapter: string | null;
@@ -62,7 +51,7 @@ const DatasourceAdapterSelection = ({
           id: t.type as DatasourceType,
           name: t.display_name,
           description: t.description,
-          icon: ICON_PATHS[t.icon] ?? null,
+          icon: ADAPTER_ICON_PATHS[t.icon] ?? null,
         }));
         setAvailableAdapters(adapters);
       } catch (err) {
