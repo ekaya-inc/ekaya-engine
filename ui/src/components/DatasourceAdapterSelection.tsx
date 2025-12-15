@@ -1,4 +1,5 @@
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import type { ConnectionDetails, DatasourceType } from "../types";
@@ -7,78 +8,30 @@ import { Button } from "./ui/Button";
 import { Card, CardContent } from "./ui/Card";
 
 interface DatasourceAdapter {
-  id: DatasourceType | "other";
+  id: DatasourceType;
   name: string;
   description: string;
   icon: string | null;
-  supported: boolean;
 }
 
-const datasourceAdapters: DatasourceAdapter[] = [
-  {
-    id: "mssql",
-    name: "Microsoft SQL Server",
-    description: "Enterprise database platform",
-    icon: "/icons/adapters/MSSQL.png",
-    supported: true,
-  },
-  {
-    id: "postgres",
-    name: "PostgreSQL",
-    description: "Advanced relational database",
-    icon: "/icons/adapters/PostgreSQL.png",
-    supported: true,
-  },
-  {
-    id: "clickhouse",
-    name: "ClickHouse",
-    description: "High-performance analytics database",
-    icon: "/icons/adapters/ClickHouse.png",
-    supported: true,
-  },
-  {
-    id: "snowflake",
-    name: "Snowflake",
-    description: "Cloud data platform",
-    icon: "/icons/adapters/Snowflake.png",
-    supported: false,
-  },
-  {
-    id: "bigquery",
-    name: "Google BigQuery",
-    description: "Serverless data warehouse",
-    icon: "/icons/adapters/BigQuery.png",
-    supported: false,
-  },
-  {
-    id: "databricks",
-    name: "Databricks",
-    description: "Unified analytics platform",
-    icon: "/icons/adapters/Databricks.png",
-    supported: false,
-  },
-  {
-    id: "redshift",
-    name: "Amazon Redshift",
-    description: "Cloud data warehouse",
-    icon: "/icons/adapters/AmazonRedshift.png",
-    supported: false,
-  },
-  {
-    id: "mysql",
-    name: "MySQL",
-    description: "Popular open source database",
-    icon: "/icons/adapters/MySQL.png",
-    supported: false,
-  },
-  {
-    id: "other",
-    name: "ODBC/Other",
-    description: "Custom database adapter",
-    icon: null,
-    supported: false,
-  },
-];
+interface DatasourceTypeFromAPI {
+  type: string;
+  display_name: string;
+  description: string;
+  icon: string;
+}
+
+// Map icon identifier from API to actual image path
+const ICON_PATHS: Record<string, string> = {
+  postgres: "/icons/adapters/PostgreSQL.png",
+  mssql: "/icons/adapters/MSSQL.png",
+  clickhouse: "/icons/adapters/ClickHouse.png",
+  mysql: "/icons/adapters/MySQL.png",
+  snowflake: "/icons/adapters/Snowflake.png",
+  bigquery: "/icons/adapters/BigQuery.png",
+  databricks: "/icons/adapters/Databricks.png",
+  redshift: "/icons/adapters/AmazonRedshift.png",
+};
 
 interface DatasourceAdapterSelectionProps {
   selectedAdapter: string | null;
@@ -93,23 +46,75 @@ const DatasourceAdapterSelection = ({
 }: DatasourceAdapterSelectionProps) => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
+  const [availableAdapters, setAvailableAdapters] = useState<DatasourceAdapter[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadAdapters = async () => {
+      try {
+        const response = await fetch("/api/config/datasource-types");
+        if (!response.ok) {
+          throw new Error(`Failed to load adapters: ${response.statusText}`);
+        }
+        const types: DatasourceTypeFromAPI[] = await response.json();
+        const adapters = types.map((t) => ({
+          id: t.type as DatasourceType,
+          name: t.display_name,
+          description: t.description,
+          icon: ICON_PATHS[t.icon] ?? null,
+        }));
+        setAvailableAdapters(adapters);
+      } catch (err) {
+        console.error("Failed to load adapter types:", err);
+        setError(err instanceof Error ? err.message : "Failed to load adapters");
+      } finally {
+        setLoading(false);
+      }
+    };
+    void loadAdapters();
+  }, []);
+
   const getConnectedAdapterTypes = (): Set<string> => {
     return new Set(datasources.map((ds) => ds.type));
   };
 
   const getAdapterDisabledState = (adapter: DatasourceAdapter): boolean => {
-    // First check if adapter is supported
-    if (!adapter.supported) {
-      return true; // Always disable unsupported adapters
-    }
-
-    // For supported adapters, apply existing connection logic
+    // If there are existing connections, only allow the same adapter type
     const connectedTypes = getConnectedAdapterTypes();
     if (connectedTypes.size > 0) {
       return !connectedTypes.has(adapter.id);
     }
     return false;
   };
+
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-6xl">
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+          <span className="ml-3 text-text-secondary">Loading adapters...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="mx-auto max-w-6xl">
+        <div className="p-8 text-center">
+          <p className="text-red-600 dark:text-red-400">{error}</p>
+          <Button
+            variant="outline"
+            onClick={() => window.location.reload()}
+            className="mt-4"
+          >
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -132,10 +137,9 @@ const DatasourceAdapterSelection = ({
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
-        {datasourceAdapters.map((adapter) => {
+        {availableAdapters.map((adapter) => {
           const isDisabled = getAdapterDisabledState(adapter);
           const isSelected = selectedAdapter === adapter.id;
-          const isUnsupported = !adapter.supported;
 
           return (
             <Card
@@ -181,7 +185,7 @@ const DatasourceAdapterSelection = ({
                       </h3>
                       {isDisabled && (
                         <span className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 px-2 py-1 rounded">
-                          {isUnsupported ? "Coming Soon" : "No Connection"}
+                          No Connection
                         </span>
                       )}
                     </div>
@@ -196,9 +200,7 @@ const DatasourceAdapterSelection = ({
                     </p>
                     {isDisabled && (
                       <p className="text-xs text-text-tertiary mt-2">
-                        {isUnsupported
-                          ? "This adapter is not yet supported"
-                          : "No active connections for this adapter"}
+                        No active connections for this adapter
                       </p>
                     )}
                   </div>
