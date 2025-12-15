@@ -123,7 +123,6 @@ func main() {
 	projectService := services.NewProjectService(db, projectRepo, userRepo, redisClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, logger)
-	_ = datasourceService // Available for handlers (Part 2)
 
 	mux := http.NewServeMux()
 
@@ -136,7 +135,7 @@ func main() {
 	authHandler.RegisterRoutes(mux)
 
 	// Register config handler (public - no auth required)
-	configHandler := handlers.NewConfigHandler(cfg, logger)
+	configHandler := handlers.NewConfigHandler(cfg, adapterFactory, logger)
 	configHandler.RegisterRoutes(mux)
 
 	// Register project config handler (authenticated - project-scoped config)
@@ -161,6 +160,10 @@ func main() {
 	// Register users handler (protected)
 	usersHandler := handlers.NewUsersHandler(userService, logger)
 	usersHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register datasources handler (protected)
+	datasourcesHandler := handlers.NewDatasourcesHandler(datasourceService, logger)
+	datasourcesHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"
