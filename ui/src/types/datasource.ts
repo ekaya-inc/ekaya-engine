@@ -46,6 +46,7 @@ export interface ConnectionDetails extends DatasourceConfig {
   datasourceId?: string;
   projectId?: string;
   type: DatasourceType;
+  displayName?: string; // User-editable datasource name (separate from config.name which is database name)
 }
 
 export interface ConnectionStatus {

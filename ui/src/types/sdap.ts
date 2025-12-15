@@ -11,6 +11,7 @@ import type { DatasourceType, DatasourceConfig } from './datasource';
 export interface Datasource {
   datasource_id: string;
   project_id: string;
+  name: string;
   type: DatasourceType;
   config: DatasourceConfig;
   created_at: string;
@@ -22,6 +23,7 @@ export interface Datasource {
  */
 export interface DatasourceInput {
   project_id: string;
+  name: string;
   type: DatasourceType;
   config: DatasourceConfig;
 }

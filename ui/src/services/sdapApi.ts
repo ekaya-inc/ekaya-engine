@@ -93,10 +93,12 @@ class SdapApiService {
    */
   async createDataSource({
     projectId,
+    name,
     datasourceType,
     config,
   }: {
     projectId: string;
+    name: string;
     datasourceType: DatasourceType;
     config: DatasourceConfig;
   }): Promise<ApiResponse<CreateDatasourceResponse>> {
@@ -106,6 +108,7 @@ class SdapApiService {
         method: 'POST',
         body: JSON.stringify({
           project_id: projectId,
+          name: name,
           type: datasourceType,
           config: config,
         }),
@@ -127,25 +130,22 @@ class SdapApiService {
 
   /**
    * Update datasource for a project
-   * Note: Database name is omitted from updates - it cannot be changed after creation
    */
   async updateDataSource(
     projectId: string,
     datasourceId: string,
+    name: string,
     datasourceType: DatasourceType,
     config: DatasourceConfig
   ): Promise<ApiResponse<CreateDatasourceResponse>> {
-    // Database name cannot be changed after creation
-    const { name: _name, ...configEdit } = config;
-
     return this.makeRequest<CreateDatasourceResponse>(
       `/${projectId}/datasources/${datasourceId}`,
       {
         method: 'PUT',
         body: JSON.stringify({
-          project_id: projectId,
+          name: name,
           type: datasourceType,
-          config: configEdit,
+          config: config,
         }),
       }
     );
