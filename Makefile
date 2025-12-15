@@ -72,6 +72,11 @@ test-short: ## Run only unit tests (skip integration tests)
 	@go test -tags="$(BUILD_TAGS)" ./... -short -v -cover -timeout 2m
 	@echo "$(GREEN)✓ Unit tests passed$(NC)"
 
+test-integration: ## Run integration tests (requires Docker)
+	@echo "$(YELLOW)Running integration tests (requires Docker)...$(NC)"
+	@go test -tags="integration,$(BUILD_TAGS)" ./... -v -timeout 5m
+	@echo "$(GREEN)✓ Integration tests passed$(NC)"
+
 fmt: ## Format Go code
 	@echo "$(YELLOW)Formatting code...$(NC)"
 	@go fmt ./...
