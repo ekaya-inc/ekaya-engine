@@ -17,6 +17,7 @@ import (
 type DatasourceResponse struct {
 	DatasourceID string         `json:"datasource_id"`
 	ProjectID    string         `json:"project_id"`
+	Name         string         `json:"name"`
 	Type         string         `json:"type"`
 	Config       map[string]any `json:"config"`
 	CreatedAt    string         `json:"created_at"`
@@ -31,12 +32,14 @@ type ListDatasourcesResponse struct {
 // CreateDatasourceRequest for POST body.
 type CreateDatasourceRequest struct {
 	ProjectID string         `json:"project_id"`
+	Name      string         `json:"name"`
 	Type      string         `json:"type"`
 	Config    map[string]any `json:"config"`
 }
 
 // UpdateDatasourceRequest for PUT body.
 type UpdateDatasourceRequest struct {
+	Name   string         `json:"name"`
 	Type   string         `json:"type"`
 	Config map[string]any `json:"config"`
 }
@@ -147,8 +150,9 @@ func (h *DatasourcesHandler) List(w http.ResponseWriter, r *http.Request) {
 		data.Datasources[i] = DatasourceResponse{
 			DatasourceID: ds.ID.String(),
 			ProjectID:    ds.ProjectID.String(),
+			Name:         ds.Name,
 			Type:         ds.DatasourceType,
-			Config:       maskSensitiveConfig(ds.Config),
+			Config:       ds.Config,
 			CreatedAt:    ds.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 			UpdatedAt:    ds.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		}
@@ -181,6 +185,13 @@ func (h *DatasourcesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Name == "" {
+		if err := ErrorResponse(w, http.StatusBadRequest, "missing_name", "Datasource name is required"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
 	if req.Type == "" {
 		if err := ErrorResponse(w, http.StatusBadRequest, "missing_type", "Datasource type is required"); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))
@@ -188,22 +199,20 @@ func (h *DatasourcesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract name from config (frontend sends database name in config.name)
-	name := ""
-	if req.Config != nil {
-		if n, ok := req.Config["name"].(string); ok {
-			name = n
-		}
-	}
-	if name == "" {
-		if err := ErrorResponse(w, http.StatusBadRequest, "missing_name", "Datasource name is required in config"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	ds, err := h.datasourceService.Create(r.Context(), projectID, name, req.Type, req.Config)
+	ds, err := h.datasourceService.Create(r.Context(), projectID, req.Name, req.Type, req.Config)
 	if err != nil {
+		if errors.Is(err, apperrors.ErrDatasourceLimitReached) {
+			if err := ErrorResponse(w, http.StatusConflict, "datasource_limit_reached", "Only one datasource per project is currently supported"); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
+		if errors.Is(err, apperrors.ErrConflict) {
+			if err := ErrorResponse(w, http.StatusConflict, "duplicate_name", "A datasource with this name already exists"); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
 		h.logger.Error("Failed to create datasource",
 			zap.String("project_id", projectID.String()),
 			zap.Error(err))
@@ -216,8 +225,9 @@ func (h *DatasourcesHandler) Create(w http.ResponseWriter, r *http.Request) {
 	data := DatasourceResponse{
 		DatasourceID: ds.ID.String(),
 		ProjectID:    ds.ProjectID.String(),
+		Name:         ds.Name,
 		Type:         ds.DatasourceType,
-		Config:       maskSensitiveConfig(ds.Config),
+		Config:       ds.Config,
 		CreatedAt:    ds.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:    ds.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
@@ -271,8 +281,9 @@ func (h *DatasourcesHandler) Get(w http.ResponseWriter, r *http.Request) {
 	data := DatasourceResponse{
 		DatasourceID: ds.ID.String(),
 		ProjectID:    ds.ProjectID.String(),
+		Name:         ds.Name,
 		Type:         ds.DatasourceType,
-		Config:       maskSensitiveConfig(ds.Config),
+		Config:       ds.Config,
 		CreatedAt:    ds.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:    ds.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
@@ -313,6 +324,13 @@ func (h *DatasourcesHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Name == "" {
+		if err := ErrorResponse(w, http.StatusBadRequest, "missing_name", "Datasource name is required"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
 	if req.Type == "" {
 		if err := ErrorResponse(w, http.StatusBadRequest, "missing_type", "Datasource type is required"); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))
@@ -320,21 +338,7 @@ func (h *DatasourcesHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract name from config
-	name := ""
-	if req.Config != nil {
-		if n, ok := req.Config["name"].(string); ok {
-			name = n
-		}
-	}
-	if name == "" {
-		if err := ErrorResponse(w, http.StatusBadRequest, "missing_name", "Datasource name is required in config"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	if err := h.datasourceService.Update(r.Context(), datasourceID, name, req.Type, req.Config); err != nil {
+	if err := h.datasourceService.Update(r.Context(), datasourceID, req.Name, req.Type, req.Config); err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			if err := ErrorResponse(w, http.StatusNotFound, "not_found", "Datasource not found"); err != nil {
 				h.logger.Error("Failed to write error response", zap.Error(err))
@@ -350,11 +354,12 @@ func (h *DatasourcesHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return success response (frontend expects UpdateDatasourceResponse without created_at)
+	// Return success response
 	data := map[string]any{
 		"datasource_id": datasourceID.String(),
+		"name":          req.Name,
 		"type":          req.Type,
-		"config":        maskSensitiveConfig(req.Config),
+		"config":        req.Config,
 	}
 
 	response := ApiResponse{Success: true, Data: data}
@@ -482,20 +487,4 @@ func (h *DatasourcesHandler) TestConnection(w http.ResponseWriter, r *http.Reque
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
-}
-
-// maskSensitiveConfig removes sensitive fields from config before sending to client.
-func maskSensitiveConfig(config map[string]any) map[string]any {
-	if config == nil {
-		return nil
-	}
-	masked := make(map[string]any)
-	for k, v := range config {
-		if k == "password" {
-			masked[k] = "********"
-		} else {
-			masked[k] = v
-		}
-	}
-	return masked
 }

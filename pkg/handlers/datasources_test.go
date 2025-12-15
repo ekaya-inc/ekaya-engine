@@ -83,10 +83,15 @@ func TestDatasourcesHandler_List_Success(t *testing.T) {
 		t.Errorf("expected type 'postgres', got %q", ds["type"])
 	}
 
-	// Verify password is masked
+	// Verify name is returned as explicit field
+	if ds["name"] != "mydb" {
+		t.Errorf("expected name 'mydb', got %q", ds["name"])
+	}
+
+	// Verify password is NOT masked (UI handles display masking)
 	config := ds["config"].(map[string]any)
-	if pw, ok := config["password"].(string); ok && pw != "********" {
-		t.Errorf("expected password masked as '********', got %q", pw)
+	if pw, ok := config["password"].(string); ok && pw != "secret123" {
+		t.Errorf("expected password 'secret123', got %q", pw)
 	}
 }
 
@@ -138,9 +143,9 @@ func TestDatasourcesHandler_Create_Success(t *testing.T) {
 		datasource: &models.Datasource{
 			ID:             dsID,
 			ProjectID:      projectID,
-			Name:           "mydb",
+			Name:           "My Database",
 			DatasourceType: "postgres",
-			Config:         map[string]any{"host": "localhost", "name": "mydb", "password": "secret"},
+			Config:         map[string]any{"host": "localhost", "database": "mydb", "password": "secret"},
 			CreatedAt:      now,
 			UpdatedAt:      now,
 		},
@@ -149,8 +154,9 @@ func TestDatasourcesHandler_Create_Success(t *testing.T) {
 
 	body := CreateDatasourceRequest{
 		ProjectID: projectID.String(),
+		Name:      "My Database",
 		Type:      "postgres",
-		Config:    map[string]any{"host": "localhost", "name": "mydb", "password": "secret"},
+		Config:    map[string]any{"host": "localhost", "database": "mydb", "password": "secret"},
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -188,13 +194,18 @@ func TestDatasourcesHandler_Create_Success(t *testing.T) {
 		t.Errorf("expected datasource_id %q, got %q", dsID.String(), dataMap["datasource_id"])
 	}
 
-	// Verify password is masked in response
+	// Verify name is returned as explicit field
+	if dataMap["name"] != "My Database" {
+		t.Errorf("expected name 'My Database', got %q", dataMap["name"])
+	}
+
+	// Verify password is NOT masked (UI handles display masking)
 	config, ok := dataMap["config"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected config to be a map")
 	}
-	if pw, ok := config["password"].(string); ok && pw != "********" {
-		t.Errorf("expected password masked, got %q", pw)
+	if pw, ok := config["password"].(string); ok && pw != "secret" {
+		t.Errorf("expected password 'secret', got %q", pw)
 	}
 }
 
@@ -203,7 +214,8 @@ func TestDatasourcesHandler_Create_MissingType(t *testing.T) {
 
 	projectID := uuid.New()
 	body := CreateDatasourceRequest{
-		Config: map[string]any{"host": "localhost", "name": "mydb"},
+		Name:   "My Database",
+		Config: map[string]any{"host": "localhost", "database": "mydb"},
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -307,13 +319,18 @@ func TestDatasourcesHandler_Get_Success(t *testing.T) {
 		t.Errorf("expected datasource_id %q, got %q", dsID.String(), dataMap["datasource_id"])
 	}
 
-	// Verify password is masked
+	// Verify name is returned as explicit field
+	if dataMap["name"] != "mydb" {
+		t.Errorf("expected name 'mydb', got %q", dataMap["name"])
+	}
+
+	// Verify password is NOT masked (UI handles display masking)
 	config, ok := dataMap["config"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected config to be a map")
 	}
-	if pw, ok := config["password"].(string); ok && pw != "********" {
-		t.Errorf("expected password masked, got %q", pw)
+	if pw, ok := config["password"].(string); ok && pw != "secret" {
+		t.Errorf("expected password 'secret', got %q", pw)
 	}
 }
 
@@ -379,8 +396,9 @@ func TestDatasourcesHandler_Update_Success(t *testing.T) {
 	dsID := uuid.New()
 
 	body := UpdateDatasourceRequest{
+		Name:   "Updated Database",
 		Type:   "postgres",
-		Config: map[string]any{"host": "newhost", "name": "mydb", "password": "newpass"},
+		Config: map[string]any{"host": "newhost", "database": "mydb", "password": "newpass"},
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -414,6 +432,11 @@ func TestDatasourcesHandler_Update_Success(t *testing.T) {
 	if dataMap["datasource_id"] != dsID.String() {
 		t.Errorf("expected datasource_id %q, got %v", dsID.String(), dataMap["datasource_id"])
 	}
+
+	// Verify name is returned
+	if dataMap["name"] != "Updated Database" {
+		t.Errorf("expected name 'Updated Database', got %q", dataMap["name"])
+	}
 }
 
 func TestDatasourcesHandler_Update_NotFound(t *testing.T) {
@@ -424,8 +447,9 @@ func TestDatasourcesHandler_Update_NotFound(t *testing.T) {
 	dsID := uuid.New()
 
 	body := UpdateDatasourceRequest{
+		Name:   "Updated Database",
 		Type:   "postgres",
-		Config: map[string]any{"host": "newhost", "name": "mydb"},
+		Config: map[string]any{"host": "newhost", "database": "mydb"},
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -607,65 +631,5 @@ func TestDatasourcesHandler_TestConnection_MissingType(t *testing.T) {
 
 	if resp["error"] != "missing_type" {
 		t.Errorf("expected error 'missing_type', got %q", resp["error"])
-	}
-}
-
-func TestMaskSensitiveConfig(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    map[string]any
-		expected map[string]any
-	}{
-		{
-			name:     "nil config",
-			input:    nil,
-			expected: nil,
-		},
-		{
-			name:     "empty config",
-			input:    map[string]any{},
-			expected: map[string]any{},
-		},
-		{
-			name: "config with password",
-			input: map[string]any{
-				"host":     "localhost",
-				"password": "secret123",
-			},
-			expected: map[string]any{
-				"host":     "localhost",
-				"password": "********",
-			},
-		},
-		{
-			name: "config without password",
-			input: map[string]any{
-				"host": "localhost",
-				"port": 5432,
-			},
-			expected: map[string]any{
-				"host": "localhost",
-				"port": 5432,
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := maskSensitiveConfig(tt.input)
-
-			if tt.expected == nil {
-				if result != nil {
-					t.Errorf("expected nil, got %v", result)
-				}
-				return
-			}
-
-			for k, v := range tt.expected {
-				if result[k] != v {
-					t.Errorf("key %q: expected %v, got %v", k, v, result[k])
-				}
-			}
-		})
 	}
 }

@@ -2,12 +2,15 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
@@ -43,6 +46,7 @@ func NewDatasourceRepository() DatasourceRepository {
 }
 
 // Create inserts a new datasource.
+// Currently enforces a one-datasource-per-project limit within a transaction.
 func (r *datasourceRepository) Create(ctx context.Context, ds *models.Datasource, encryptedConfig string) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
@@ -53,12 +57,30 @@ func (r *datasourceRepository) Create(ctx context.Context, ds *models.Datasource
 	ds.CreatedAt = now
 	ds.UpdatedAt = now
 
+	// Use a transaction to check limit and insert atomically
+	tx, err := scope.Conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback on defer is best-effort
+
+	// Check if a datasource already exists for this project (one-datasource-per-project policy)
+	var count int
+	err = tx.QueryRow(ctx, "SELECT COUNT(*) FROM engine_datasources WHERE project_id = $1", ds.ProjectID).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("failed to check existing datasources: %w", err)
+	}
+	if count > 0 {
+		return apperrors.ErrDatasourceLimitReached
+	}
+
+	// Insert the new datasource
 	query := `
 		INSERT INTO engine_datasources (project_id, name, datasource_type, datasource_config, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id`
 
-	err := scope.Conn.QueryRow(ctx, query,
+	err = tx.QueryRow(ctx, query,
 		ds.ProjectID,
 		ds.Name,
 		ds.DatasourceType,
@@ -67,7 +89,16 @@ func (r *datasourceRepository) Create(ctx context.Context, ds *models.Datasource
 		ds.UpdatedAt,
 	).Scan(&ds.ID)
 	if err != nil {
+		// Check for unique constraint violation (PostgreSQL error code 23505)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return apperrors.ErrConflict
+		}
 		return fmt.Errorf("failed to create datasource: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return nil
