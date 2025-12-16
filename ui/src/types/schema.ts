@@ -7,14 +7,21 @@
  * Column information from database schema
  */
 export interface SchemaColumn {
+  id?: string;
   column_name: string;
   data_type: string;
   is_nullable?: string | boolean;
+  is_primary_key?: boolean;
+  is_selected?: boolean;
   column_default?: string | null;
   character_maximum_length?: number | null;
   numeric_precision?: number | null;
   numeric_scale?: number | null;
   ordinal_position?: number;
+  business_name?: string;
+  description?: string;
+  distinct_count?: number | null;
+  null_count?: number | null;
   [key: string]: unknown; // Allow additional database-specific fields
 }
 
@@ -22,9 +29,14 @@ export interface SchemaColumn {
  * Table schema information
  */
 export interface SchemaTable {
+  id?: string;
+  schema_name?: string;
   table_name: string;
   columns: SchemaColumn[];
   row_count?: number; // Optional, may not always be included
+  is_selected?: boolean;
+  business_name?: string;
+  description?: string;
 }
 
 /**

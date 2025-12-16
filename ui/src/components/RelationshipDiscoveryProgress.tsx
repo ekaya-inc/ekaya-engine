@@ -1,7 +1,7 @@
 import { X, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 
-import sdapApi from "../services/sdapApi";
+import engineApi from "../services/engineApi";
 import type { DiscoveryResults } from "../types";
 
 import { Button } from "./ui/Button";
@@ -15,6 +15,7 @@ import {
 
 interface RelationshipDiscoveryProgressProps {
   projectId: string;
+  datasourceId: string;
   isOpen: boolean;
   onClose: () => void;
   onComplete: () => void;
@@ -26,6 +27,7 @@ interface RelationshipDiscoveryProgressProps {
  */
 export const RelationshipDiscoveryProgress = ({
   projectId,
+  datasourceId,
   isOpen,
   onClose,
   onComplete,
@@ -41,7 +43,7 @@ export const RelationshipDiscoveryProgress = ({
       setError(null);
       setResults(null);
 
-      const response = await sdapApi.discoverRelationships(projectId);
+      const response = await engineApi.discoverRelationships(projectId, datasourceId);
 
       if (response.data) {
         setResults(response.data);
@@ -57,7 +59,7 @@ export const RelationshipDiscoveryProgress = ({
     } finally {
       setIsLoading(false);
     }
-  }, [projectId, onComplete]);
+  }, [projectId, datasourceId, onComplete]);
 
   // Start discovery when modal opens
   useEffect(() => {

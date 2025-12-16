@@ -1,7 +1,7 @@
 import { AlertTriangle, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 
-import sdapApi from '../services/sdapApi';
+import engineApi from '../services/engineApi';
 import type { RelationshipDetail } from '../types';
 
 import { Button } from './ui/Button';
@@ -18,6 +18,7 @@ interface RemoveRelationshipDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectId: string;
+  datasourceId: string;
   relationship: RelationshipDetail | null;
   onRelationshipRemoved: (relationshipId: string) => void;
 }
@@ -32,6 +33,7 @@ export const RemoveRelationshipDialog = ({
   open,
   onOpenChange,
   projectId,
+  datasourceId,
   relationship,
   onRelationshipRemoved,
 }: RemoveRelationshipDialogProps) => {
@@ -45,7 +47,7 @@ export const RemoveRelationshipDialog = ({
     setError(null);
 
     try {
-      const response = await sdapApi.removeRelationship(projectId, relationship.id);
+      const response = await engineApi.removeRelationship(projectId, datasourceId, relationship.id);
       if (response.success) {
         onRelationshipRemoved(relationship.id);
       } else {
