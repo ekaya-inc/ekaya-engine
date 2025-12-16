@@ -89,9 +89,9 @@ class OntologyApiService {
   async getBusinessRules(
     projectId: string,
     entityId?: string
-  ): Promise<any> {
+  ): Promise<unknown> {
     const params = entityId ? `?entity_id=${entityId}` : '';
-    return this.makeRequest<any>(
+    return this.makeRequest<unknown>(
       `/${projectId}/business-rules${params}`
     );
   }
@@ -150,7 +150,7 @@ class OntologyApiService {
       onStatusUpdate?: (status: WorkflowStatusResponse) => void;
     } = {}
   ): Promise<WorkflowStatusResponse> {
-    const intervalMs = options.intervalMs || 2000; // Default: 2 seconds
+    const intervalMs = options.intervalMs ?? 2000; // Default: 2 seconds
 
     return new Promise((resolve, reject) => {
       const poll = async () => {
@@ -363,7 +363,7 @@ class OntologyApiService {
 
           // Process complete SSE events (data: ...\n\n)
           const events = buffer.split('\n\n');
-          buffer = events.pop() || ''; // Keep incomplete event in buffer
+          buffer = events.pop() ?? ''; // Keep incomplete event in buffer
 
           for (const event of events) {
             if (event.startsWith('data: ')) {

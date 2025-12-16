@@ -252,7 +252,7 @@ const QuestionPanel = ({ projectId, onAllComplete, onQuestionAnswered }: Questio
             </div>
 
             {/* Affected tables/columns */}
-            {(currentQuestion.affected_tables?.length || currentQuestion.affected_columns?.length) && (
+            {((currentQuestion.affected_tables?.length ?? 0) > 0 || (currentQuestion.affected_columns?.length ?? 0) > 0) && (
               <div className="mb-4 p-3 bg-surface-secondary rounded-lg">
                 <p className="text-xs text-text-tertiary mb-2">Affects:</p>
                 <div className="flex flex-wrap gap-2">

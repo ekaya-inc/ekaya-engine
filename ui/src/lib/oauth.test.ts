@@ -40,7 +40,7 @@ describe('initiateOAuthFlow', () => {
       mockSessionStorage[key] = value;
     });
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation((key) => {
-      return mockSessionStorage[key] || null;
+      return mockSessionStorage[key] ?? null;
     });
 
     // Mock generatePKCE

@@ -62,8 +62,8 @@ class SdapApiService {
 
       if (!response.ok) {
         throw new Error(
-          data.error ||
-            data.message ||
+          data.error ??
+            data.message ??
             `HTTP ${response.status}: ${response.statusText}`
         );
       }
@@ -181,8 +181,8 @@ class SdapApiService {
    * List tables with row counts for a project
    * GET /sdap/v1/{project_id}/tables
    */
-  async listTables(projectId: string): Promise<ApiResponse<any>> {
-    return this.makeRequest<any>(`/${projectId}/tables`);
+  async listTables(projectId: string): Promise<ApiResponse<unknown>> {
+    return this.makeRequest<unknown>(`/${projectId}/tables`);
   }
 
   /**
@@ -368,7 +368,7 @@ class SdapApiService {
       redshift: 5439,
       sqlite: 0,
     };
-    return defaults[type] || 5432;
+    return defaults[type] ?? 5432;
   }
 
   /**

@@ -87,7 +87,9 @@ describe('api.js - fetchWithAuth', () => {
     // Verify sessionStorage keys are correct
     expect(sessionStorage.getItem('oauth_code_verifier')).toBe('test-verifier-123');
     expect(sessionStorage.getItem('oauth_state')).toBeTruthy();
-    expect(sessionStorage.getItem('oauth_state')!.length).toBeGreaterThanOrEqual(32); // Random state
+    const oauthState = sessionStorage.getItem('oauth_state');
+    expect(oauthState).not.toBeNull();
+    expect(oauthState?.length).toBeGreaterThanOrEqual(32); // Random state
     expect(sessionStorage.getItem('oauth_return_url')).toBe('/projects/test-123');
   });
 
@@ -115,7 +117,9 @@ describe('api.js - fetchWithAuth', () => {
 
     // Check that redirect URL includes project_id
     expect(hrefSpy).toHaveBeenCalled();
-    const redirectUrl = hrefSpy.mock.calls[0]![0];
+    const firstCall = hrefSpy.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const redirectUrl = firstCall?.[0];
     expect(redirectUrl).toContain('project_id=abc-def-123');
   });
 

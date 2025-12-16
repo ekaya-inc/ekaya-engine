@@ -206,7 +206,7 @@ export const DatasourceConnectionProvider = ({
     const datasource = datasources.find(
       (ds) => ds.datasourceId === datasourceId
     );
-    setSelectedDatasource(datasource || null);
+    setSelectedDatasource(datasource ?? null);
   };
 
   const testConnection = async (

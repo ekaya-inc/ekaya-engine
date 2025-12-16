@@ -96,7 +96,7 @@ export default function OAuthCallbackPage() {
         sessionStorage.removeItem('oauth_code_verifier');
         sessionStorage.removeItem('oauth_state');
         sessionStorage.removeItem('oauth_auth_server_url');
-        const originalUrl = sessionStorage.getItem('oauth_return_url') || data.redirect_url || '/';
+        const originalUrl = sessionStorage.getItem('oauth_return_url') ?? data.redirect_url ?? '/';
         sessionStorage.removeItem('oauth_return_url');
 
         setStatus('Authentication successful! Redirecting...');

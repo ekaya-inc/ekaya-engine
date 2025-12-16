@@ -58,7 +58,7 @@ const QuestionsView = ({
     } else {
       setExpandedQuestion(question.id);
       // Load existing answer if available
-      setResponseText(userAnswers[question.id] || '');
+      setResponseText(userAnswers[question.id] ?? '');
     }
   };
 
