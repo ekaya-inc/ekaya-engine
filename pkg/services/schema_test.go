@@ -50,6 +50,10 @@ type mockSchemaRepository struct {
 	getRelationshipByColsErr   error
 	updateApprovalErr          error
 	relationshipByColsResponse *models.SchemaRelationship
+	updateTableMetadataErr     error
+	updateColumnMetadataErr    error
+	updateTableSelectionErr    error
+	updateColumnSelectionErr   error
 
 	// Capture for verification
 	upsertedTables        []*models.SchemaTable
@@ -114,10 +118,16 @@ func (m *mockSchemaRepository) SoftDeleteRemovedTables(ctx context.Context, proj
 }
 
 func (m *mockSchemaRepository) UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error {
+	if m.updateTableSelectionErr != nil {
+		return m.updateTableSelectionErr
+	}
 	return nil
 }
 
 func (m *mockSchemaRepository) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
+	if m.updateTableMetadataErr != nil {
+		return m.updateTableMetadataErr
+	}
 	return nil
 }
 
@@ -191,10 +201,20 @@ func (m *mockSchemaRepository) SoftDeleteRemovedColumns(ctx context.Context, tab
 }
 
 func (m *mockSchemaRepository) UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error {
+	if m.updateColumnSelectionErr != nil {
+		return m.updateColumnSelectionErr
+	}
 	return nil
 }
 
 func (m *mockSchemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount *int64) error {
+	return nil
+}
+
+func (m *mockSchemaRepository) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
+	if m.updateColumnMetadataErr != nil {
+		return m.updateColumnMetadataErr
+	}
 	return nil
 }
 
@@ -1349,5 +1369,615 @@ func TestSchemaService_GetRelationshipsForDatasource_Error(t *testing.T) {
 	_, err := service.GetRelationshipsForDatasource(context.Background(), projectID, datasourceID)
 	if err == nil {
 		t.Fatal("expected error from repository")
+	}
+}
+
+// ============================================================================
+// Phase 8: Selection & Metadata Tests
+// ============================================================================
+
+func TestSchemaService_UpdateTableMetadata_Success(t *testing.T) {
+	projectID := uuid.New()
+	tableID := uuid.New()
+
+	repo := &mockSchemaRepository{}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	businessName := "Users Table"
+	description := "Contains user accounts"
+
+	err := service.UpdateTableMetadata(context.Background(), projectID, tableID, &businessName, &description)
+	if err != nil {
+		t.Fatalf("UpdateTableMetadata failed: %v", err)
+	}
+}
+
+func TestSchemaService_UpdateTableMetadata_PartialUpdate(t *testing.T) {
+	projectID := uuid.New()
+	tableID := uuid.New()
+
+	repo := &mockSchemaRepository{}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	// Update only business name
+	businessName := "Users"
+	err := service.UpdateTableMetadata(context.Background(), projectID, tableID, &businessName, nil)
+	if err != nil {
+		t.Fatalf("UpdateTableMetadata with partial update failed: %v", err)
+	}
+}
+
+func TestSchemaService_UpdateTableMetadata_NotFound(t *testing.T) {
+	projectID := uuid.New()
+	tableID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		updateTableMetadataErr: errors.New("table not found"),
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	businessName := "Users"
+	err := service.UpdateTableMetadata(context.Background(), projectID, tableID, &businessName, nil)
+	if err == nil {
+		t.Fatal("expected error for table not found")
+	}
+}
+
+func TestSchemaService_UpdateColumnMetadata_Success(t *testing.T) {
+	projectID := uuid.New()
+	columnID := uuid.New()
+
+	repo := &mockSchemaRepository{}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	businessName := "Email Address"
+	description := "User's email address"
+
+	err := service.UpdateColumnMetadata(context.Background(), projectID, columnID, &businessName, &description)
+	if err != nil {
+		t.Fatalf("UpdateColumnMetadata failed: %v", err)
+	}
+}
+
+func TestSchemaService_UpdateColumnMetadata_NotFound(t *testing.T) {
+	projectID := uuid.New()
+	columnID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		updateColumnMetadataErr: errors.New("column not found"),
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	businessName := "Email"
+	err := service.UpdateColumnMetadata(context.Background(), projectID, columnID, &businessName, nil)
+	if err == nil {
+		t.Fatal("expected error for column not found")
+	}
+}
+
+func TestSchemaService_SaveSelections_Success(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID := uuid.New()
+	columnID1 := uuid.New()
+	columnID2 := uuid.New()
+
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           tableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users",
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            columnID1,
+				ProjectID:     projectID,
+				SchemaTableID: tableID,
+				ColumnName:    "id",
+			},
+			{
+				ID:            columnID2,
+				ProjectID:     projectID,
+				SchemaTableID: tableID,
+				ColumnName:    "email",
+			},
+		},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	tableSelections := map[string]bool{
+		"public.users": true,
+	}
+	columnSelections := map[string][]string{
+		"public.users": {"id", "email"},
+	}
+
+	err := service.SaveSelections(context.Background(), projectID, datasourceID, tableSelections, columnSelections)
+	if err != nil {
+		t.Fatalf("SaveSelections failed: %v", err)
+	}
+}
+
+func TestSchemaService_SaveSelections_EmptyMaps(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	err := service.SaveSelections(context.Background(), projectID, datasourceID, nil, nil)
+	if err != nil {
+		t.Fatalf("SaveSelections with empty maps failed: %v", err)
+	}
+}
+
+func TestSchemaService_SaveSelections_UnknownTable(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{}, // No tables
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	tableSelections := map[string]bool{
+		"public.nonexistent": true,
+	}
+
+	// Should not error, just skip unknown tables
+	err := service.SaveSelections(context.Background(), projectID, datasourceID, tableSelections, nil)
+	if err != nil {
+		t.Fatalf("SaveSelections should not error for unknown tables: %v", err)
+	}
+}
+
+func TestSchemaService_GetSelectedDatasourceSchema_Success(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID1 := uuid.New()
+	tableID2 := uuid.New()
+	columnID1 := uuid.New()
+	columnID2 := uuid.New()
+	columnID3 := uuid.New()
+
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           tableID1,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users",
+				IsSelected:   true,
+			},
+			{
+				ID:           tableID2,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "orders",
+				IsSelected:   false, // Not selected
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            columnID1,
+				ProjectID:     projectID,
+				SchemaTableID: tableID1,
+				ColumnName:    "id",
+				IsSelected:    true,
+			},
+			{
+				ID:            columnID2,
+				ProjectID:     projectID,
+				SchemaTableID: tableID1,
+				ColumnName:    "email",
+				IsSelected:    false, // Not selected
+			},
+			{
+				ID:            columnID3,
+				ProjectID:     projectID,
+				SchemaTableID: tableID2,
+				ColumnName:    "id",
+				IsSelected:    true,
+			},
+		},
+		relationships: []*models.SchemaRelationship{},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	schema, err := service.GetSelectedDatasourceSchema(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("GetSelectedDatasourceSchema failed: %v", err)
+	}
+
+	// Should only have 1 table (users is selected, orders is not)
+	if len(schema.Tables) != 1 {
+		t.Errorf("expected 1 selected table, got %d", len(schema.Tables))
+	}
+
+	if schema.Tables[0].TableName != "users" {
+		t.Errorf("expected users table, got %s", schema.Tables[0].TableName)
+	}
+
+	// Should only have 1 column (id is selected, email is not)
+	if len(schema.Tables[0].Columns) != 1 {
+		t.Errorf("expected 1 selected column, got %d", len(schema.Tables[0].Columns))
+	}
+
+	if schema.Tables[0].Columns[0].ColumnName != "id" {
+		t.Errorf("expected id column, got %s", schema.Tables[0].Columns[0].ColumnName)
+	}
+}
+
+func TestSchemaService_GetSelectedDatasourceSchema_NothingSelected(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           tableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users",
+				IsSelected:   false, // Not selected
+			},
+		},
+		columns:       []*models.SchemaColumn{},
+		relationships: []*models.SchemaRelationship{},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	schema, err := service.GetSelectedDatasourceSchema(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("GetSelectedDatasourceSchema failed: %v", err)
+	}
+
+	if len(schema.Tables) != 0 {
+		t.Errorf("expected 0 selected tables, got %d", len(schema.Tables))
+	}
+}
+
+func TestSchemaService_GetSelectedDatasourceSchema_FiltersRelationships(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID1 := uuid.New()
+	tableID2 := uuid.New()
+	columnID1 := uuid.New()
+	columnID2 := uuid.New()
+	relID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           tableID1,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users",
+				IsSelected:   true,
+			},
+			{
+				ID:           tableID2,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "orders",
+				IsSelected:   false, // Not selected
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            columnID1,
+				ProjectID:     projectID,
+				SchemaTableID: tableID1,
+				ColumnName:    "id",
+				IsSelected:    true,
+			},
+			{
+				ID:            columnID2,
+				ProjectID:     projectID,
+				SchemaTableID: tableID2,
+				ColumnName:    "user_id",
+				IsSelected:    true,
+			},
+		},
+		relationships: []*models.SchemaRelationship{
+			{
+				ID:            relID,
+				ProjectID:     projectID,
+				SourceTableID: tableID2, // orders (not selected)
+				TargetTableID: tableID1, // users (selected)
+			},
+		},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	schema, err := service.GetSelectedDatasourceSchema(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("GetSelectedDatasourceSchema failed: %v", err)
+	}
+
+	// Relationship should be filtered out because orders table is not selected
+	if len(schema.Relationships) != 0 {
+		t.Errorf("expected 0 relationships (orders not selected), got %d", len(schema.Relationships))
+	}
+}
+
+func TestSchemaService_GetDatasourceSchemaForPrompt_Full(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID := uuid.New()
+	columnID := uuid.New()
+
+	rowCount := int64(100)
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           tableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users",
+				IsSelected:   true,
+				RowCount:     &rowCount,
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            columnID,
+				ProjectID:     projectID,
+				SchemaTableID: tableID,
+				ColumnName:    "id",
+				DataType:      "uuid",
+				IsPrimaryKey:  true,
+				IsNullable:    false,
+				IsSelected:    true,
+			},
+		},
+		relationships: []*models.SchemaRelationship{},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	prompt, err := service.GetDatasourceSchemaForPrompt(context.Background(), projectID, datasourceID, false)
+	if err != nil {
+		t.Fatalf("GetDatasourceSchemaForPrompt failed: %v", err)
+	}
+
+	// Check key elements are present
+	if !contains(prompt, "DATABASE SCHEMA:") {
+		t.Error("expected DATABASE SCHEMA header")
+	}
+	if !contains(prompt, "Table: public.users") {
+		t.Error("expected table name")
+	}
+	if !contains(prompt, "Row count: 100") {
+		t.Error("expected row count")
+	}
+	if !contains(prompt, "id: uuid") {
+		t.Error("expected column definition")
+	}
+	if !contains(prompt, "PRIMARY KEY") {
+		t.Error("expected PRIMARY KEY attribute")
+	}
+	if !contains(prompt, "NOT NULL") {
+		t.Error("expected NOT NULL attribute")
+	}
+}
+
+func TestSchemaService_GetDatasourceSchemaForPrompt_SelectedOnly(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID1 := uuid.New()
+	tableID2 := uuid.New()
+	columnID1 := uuid.New()
+	columnID2 := uuid.New()
+
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           tableID1,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users",
+				IsSelected:   true,
+			},
+			{
+				ID:           tableID2,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "orders",
+				IsSelected:   false, // Not selected
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            columnID1,
+				ProjectID:     projectID,
+				SchemaTableID: tableID1,
+				ColumnName:    "id",
+				DataType:      "uuid",
+				IsSelected:    true,
+			},
+			{
+				ID:            columnID2,
+				ProjectID:     projectID,
+				SchemaTableID: tableID2,
+				ColumnName:    "id",
+				DataType:      "uuid",
+				IsSelected:    true,
+			},
+		},
+		relationships: []*models.SchemaRelationship{},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	prompt, err := service.GetDatasourceSchemaForPrompt(context.Background(), projectID, datasourceID, true)
+	if err != nil {
+		t.Fatalf("GetDatasourceSchemaForPrompt failed: %v", err)
+	}
+
+	// Should only contain users table
+	if !contains(prompt, "public.users") {
+		t.Error("expected users table in prompt")
+	}
+	if contains(prompt, "public.orders") {
+		t.Error("orders table should not be in prompt (not selected)")
+	}
+}
+
+func TestSchemaService_GetDatasourceSchemaForPrompt_Empty(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		tables:        []*models.SchemaTable{},
+		columns:       []*models.SchemaColumn{},
+		relationships: []*models.SchemaRelationship{},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	prompt, err := service.GetDatasourceSchemaForPrompt(context.Background(), projectID, datasourceID, false)
+	if err != nil {
+		t.Fatalf("GetDatasourceSchemaForPrompt failed: %v", err)
+	}
+
+	// Should still have header
+	if !contains(prompt, "DATABASE SCHEMA:") {
+		t.Error("expected DATABASE SCHEMA header even for empty schema")
+	}
+}
+
+func TestSchemaService_GetDatasourceSchemaForPrompt_WithRelationships(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID1 := uuid.New()
+	tableID2 := uuid.New()
+	columnID1 := uuid.New()
+	columnID2 := uuid.New()
+	relID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           tableID1,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users",
+				IsSelected:   true,
+			},
+			{
+				ID:           tableID2,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "orders",
+				IsSelected:   true,
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            columnID1,
+				ProjectID:     projectID,
+				SchemaTableID: tableID1,
+				ColumnName:    "id",
+				DataType:      "uuid",
+				IsSelected:    true,
+			},
+			{
+				ID:            columnID2,
+				ProjectID:     projectID,
+				SchemaTableID: tableID2,
+				ColumnName:    "user_id",
+				DataType:      "uuid",
+				IsSelected:    true,
+			},
+		},
+		relationships: []*models.SchemaRelationship{
+			{
+				ID:               relID,
+				ProjectID:        projectID,
+				SourceTableID:    tableID2,
+				SourceColumnID:   columnID2,
+				TargetTableID:    tableID1,
+				TargetColumnID:   columnID1,
+				RelationshipType: "fk",
+				Cardinality:      "N:1",
+			},
+		},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	prompt, err := service.GetDatasourceSchemaForPrompt(context.Background(), projectID, datasourceID, false)
+	if err != nil {
+		t.Fatalf("GetDatasourceSchemaForPrompt failed: %v", err)
+	}
+
+	// Should have relationships section
+	if !contains(prompt, "RELATIONSHIPS:") {
+		t.Error("expected RELATIONSHIPS section")
+	}
+	if !contains(prompt, "->") {
+		t.Error("expected relationship arrow")
+	}
+	if !contains(prompt, "(N:1)") {
+		t.Error("expected cardinality")
 	}
 }

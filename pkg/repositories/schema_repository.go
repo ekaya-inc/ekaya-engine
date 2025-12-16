@@ -39,6 +39,7 @@ type SchemaRepository interface {
 	SoftDeleteRemovedColumns(ctx context.Context, tableID uuid.UUID, activeColumnNames []string) (int64, error)
 	UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error
 	UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount *int64) error
+	UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error
 
 	// Relationships
 	ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error)
@@ -313,9 +314,12 @@ func (r *schemaRepository) UpdateTableMetadata(ctx context.Context, projectID, t
 		return fmt.Errorf("no tenant scope in context")
 	}
 
+	// Use COALESCE to preserve existing values when nil is passed
 	query := `
 		UPDATE engine_schema_tables
-		SET business_name = $3, description = $4, updated_at = NOW()
+		SET business_name = COALESCE($3, business_name),
+		    description = COALESCE($4, description),
+		    updated_at = NOW()
 		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
 
 	result, err := scope.Conn.Exec(ctx, query, projectID, tableID, businessName, description)
@@ -630,6 +634,31 @@ func (r *schemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.
 	result, err := scope.Conn.Exec(ctx, query, columnID, distinctCount, nullCount)
 	if err != nil {
 		return fmt.Errorf("failed to update column stats: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("column not found")
+	}
+
+	return nil
+}
+
+func (r *schemaRepository) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		UPDATE engine_schema_columns
+		SET business_name = COALESCE($3, business_name),
+		    description = COALESCE($4, description),
+		    updated_at = NOW()
+		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
+
+	result, err := scope.Conn.Exec(ctx, query, projectID, columnID, businessName, description)
+	if err != nil {
+		return fmt.Errorf("failed to update column metadata: %w", err)
 	}
 
 	if result.RowsAffected() == 0 {

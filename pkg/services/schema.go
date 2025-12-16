@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -34,6 +35,23 @@ type SchemaService interface {
 
 	// GetRelationshipsForDatasource returns all relationships for a datasource.
 	GetRelationshipsForDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error)
+
+	// UpdateTableMetadata updates business_name and/or description for a table.
+	UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error
+
+	// UpdateColumnMetadata updates business_name and/or description for a column.
+	UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error
+
+	// SaveSelections updates is_selected flags for tables and columns.
+	// tableSelections maps "schema.table" names to selection status.
+	// columnSelections maps "schema.table" names to lists of selected column names.
+	SaveSelections(ctx context.Context, projectID, datasourceID uuid.UUID, tableSelections map[string]bool, columnSelections map[string][]string) error
+
+	// GetSelectedDatasourceSchema returns only selected tables and columns.
+	GetSelectedDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.DatasourceSchema, error)
+
+	// GetDatasourceSchemaForPrompt returns schema formatted for LLM context.
+	GetDatasourceSchemaForPrompt(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error)
 }
 
 type schemaService struct {
@@ -575,6 +593,234 @@ func (s *schemaService) GetRelationshipsForDatasource(ctx context.Context, proje
 		return nil, fmt.Errorf("failed to list relationships: %w", err)
 	}
 	return relationships, nil
+}
+
+// UpdateTableMetadata updates business_name and/or description for a table.
+func (s *schemaService) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
+	if err := s.schemaRepo.UpdateTableMetadata(ctx, projectID, tableID, businessName, description); err != nil {
+		return fmt.Errorf("failed to update table metadata: %w", err)
+	}
+
+	s.logger.Info("Updated table metadata",
+		zap.String("project_id", projectID.String()),
+		zap.String("table_id", tableID.String()),
+	)
+
+	return nil
+}
+
+// UpdateColumnMetadata updates business_name and/or description for a column.
+func (s *schemaService) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
+	if err := s.schemaRepo.UpdateColumnMetadata(ctx, projectID, columnID, businessName, description); err != nil {
+		return fmt.Errorf("failed to update column metadata: %w", err)
+	}
+
+	s.logger.Info("Updated column metadata",
+		zap.String("project_id", projectID.String()),
+		zap.String("column_id", columnID.String()),
+	)
+
+	return nil
+}
+
+// SaveSelections updates is_selected flags for tables and columns.
+func (s *schemaService) SaveSelections(ctx context.Context, projectID, datasourceID uuid.UUID, tableSelections map[string]bool, columnSelections map[string][]string) error {
+	// Get all tables to build name->ID map
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
+	if err != nil {
+		return fmt.Errorf("failed to list tables: %w", err)
+	}
+
+	// Build table name to ID map (key: "schema.table")
+	tableNameToID := make(map[string]uuid.UUID)
+	for _, t := range tables {
+		key := t.SchemaName + "." + t.TableName
+		tableNameToID[key] = t.ID
+	}
+
+	// Update table selections
+	for tableName, isSelected := range tableSelections {
+		tableID, ok := tableNameToID[tableName]
+		if !ok {
+			s.logger.Warn("Unknown table in selection, skipping",
+				zap.String("table", tableName),
+			)
+			continue
+		}
+
+		if err := s.schemaRepo.UpdateTableSelection(ctx, projectID, tableID, isSelected); err != nil {
+			return fmt.Errorf("failed to update table selection for %s: %w", tableName, err)
+		}
+	}
+
+	// Update column selections
+	for tableName, selectedColumns := range columnSelections {
+		tableID, ok := tableNameToID[tableName]
+		if !ok {
+			s.logger.Warn("Unknown table in column selection, skipping",
+				zap.String("table", tableName),
+			)
+			continue
+		}
+
+		// Get all columns for this table
+		columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, tableID)
+		if err != nil {
+			return fmt.Errorf("failed to list columns for %s: %w", tableName, err)
+		}
+
+		// Build set of selected column names
+		selectedSet := make(map[string]bool)
+		for _, colName := range selectedColumns {
+			selectedSet[colName] = true
+		}
+
+		// Update each column's selection status
+		for _, col := range columns {
+			isSelected := selectedSet[col.ColumnName]
+			if err := s.schemaRepo.UpdateColumnSelection(ctx, projectID, col.ID, isSelected); err != nil {
+				return fmt.Errorf("failed to update column selection for %s.%s: %w", tableName, col.ColumnName, err)
+			}
+		}
+	}
+
+	s.logger.Info("Saved selections",
+		zap.String("project_id", projectID.String()),
+		zap.String("datasource_id", datasourceID.String()),
+		zap.Int("tables", len(tableSelections)),
+		zap.Int("column_tables", len(columnSelections)),
+	)
+
+	return nil
+}
+
+// GetSelectedDatasourceSchema returns only selected tables and columns.
+func (s *schemaService) GetSelectedDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.DatasourceSchema, error) {
+	// Get full schema
+	fullSchema, err := s.GetDatasourceSchema(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build set of selected table IDs for relationship filtering
+	selectedTableIDs := make(map[uuid.UUID]bool)
+
+	// Filter tables
+	selectedTables := make([]*models.DatasourceTable, 0)
+	for _, table := range fullSchema.Tables {
+		if !table.IsSelected {
+			continue
+		}
+
+		selectedTableIDs[table.ID] = true
+
+		// Filter columns
+		selectedColumns := make([]*models.DatasourceColumn, 0)
+		for _, col := range table.Columns {
+			if col.IsSelected {
+				selectedColumns = append(selectedColumns, col)
+			}
+		}
+		table.Columns = selectedColumns
+
+		selectedTables = append(selectedTables, table)
+	}
+
+	// Filter relationships - only include if both source and target tables are selected
+	selectedRelationships := make([]*models.DatasourceRelationship, 0)
+	for _, rel := range fullSchema.Relationships {
+		if selectedTableIDs[rel.SourceTableID] && selectedTableIDs[rel.TargetTableID] {
+			selectedRelationships = append(selectedRelationships, rel)
+		}
+	}
+
+	return &models.DatasourceSchema{
+		ProjectID:     projectID,
+		DatasourceID:  datasourceID,
+		Tables:        selectedTables,
+		Relationships: selectedRelationships,
+	}, nil
+}
+
+// GetDatasourceSchemaForPrompt returns schema formatted for LLM context.
+func (s *schemaService) GetDatasourceSchemaForPrompt(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error) {
+	var schema *models.DatasourceSchema
+	var err error
+
+	if selectedOnly {
+		schema, err = s.GetSelectedDatasourceSchema(ctx, projectID, datasourceID)
+	} else {
+		schema, err = s.GetDatasourceSchema(ctx, projectID, datasourceID)
+	}
+	if err != nil {
+		return "", err
+	}
+
+	var sb strings.Builder
+	sb.WriteString("DATABASE SCHEMA:\n")
+
+	for _, table := range schema.Tables {
+		sb.WriteString("\nTable: ")
+		sb.WriteString(table.SchemaName)
+		sb.WriteString(".")
+		sb.WriteString(table.TableName)
+		sb.WriteString("\n")
+
+		if table.Description != "" {
+			sb.WriteString("Description: ")
+			sb.WriteString(table.Description)
+			sb.WriteString("\n")
+		}
+
+		if table.RowCount > 0 {
+			sb.WriteString(fmt.Sprintf("Row count: %d\n", table.RowCount))
+		}
+
+		sb.WriteString("Columns:\n")
+		for _, col := range table.Columns {
+			sb.WriteString("  - ")
+			sb.WriteString(col.ColumnName)
+			sb.WriteString(": ")
+			sb.WriteString(col.DataType)
+
+			// Add column attributes
+			attrs := make([]string, 0)
+			if col.IsPrimaryKey {
+				attrs = append(attrs, "PRIMARY KEY")
+			}
+			if !col.IsNullable {
+				attrs = append(attrs, "NOT NULL")
+			}
+			if len(attrs) > 0 {
+				sb.WriteString(" [")
+				sb.WriteString(strings.Join(attrs, ", "))
+				sb.WriteString("]")
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	if len(schema.Relationships) > 0 {
+		sb.WriteString("\nRELATIONSHIPS:\n")
+		for _, rel := range schema.Relationships {
+			sb.WriteString("  ")
+			sb.WriteString(rel.SourceTableName)
+			sb.WriteString(".")
+			sb.WriteString(rel.SourceColumnName)
+			sb.WriteString(" -> ")
+			sb.WriteString(rel.TargetTableName)
+			sb.WriteString(".")
+			sb.WriteString(rel.TargetColumnName)
+			if rel.Cardinality != "" && rel.Cardinality != "unknown" {
+				sb.WriteString(" (")
+				sb.WriteString(rel.Cardinality)
+				sb.WriteString(")")
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	return sb.String(), nil
 }
 
 // Ensure schemaService implements SchemaService at compile time.
