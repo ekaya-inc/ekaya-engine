@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
@@ -23,6 +24,16 @@ type SchemaService interface {
 
 	// GetDatasourceTable returns a single table with its columns.
 	GetDatasourceTable(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.DatasourceTable, error)
+
+	// AddManualRelationship creates a user-defined relationship between two columns.
+	AddManualRelationship(ctx context.Context, projectID, datasourceID uuid.UUID, req *models.AddRelationshipRequest) (*models.SchemaRelationship, error)
+
+	// RemoveRelationship marks a relationship as removed (is_approved=false).
+	// The relationship remains in the database to prevent re-inference.
+	RemoveRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error
+
+	// GetRelationshipsForDatasource returns all relationships for a datasource.
+	GetRelationshipsForDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error)
 }
 
 type schemaService struct {
@@ -439,6 +450,131 @@ func (s *schemaService) GetDatasourceTable(ctx context.Context, projectID, datas
 	}
 
 	return dt, nil
+}
+
+// parseTableName splits "schema.table" into schema and table name.
+// If no dot is present, defaults to "public" schema.
+func parseTableName(tableName string) (schemaName, tblName string) {
+	schemaName = "public"
+	tblName = tableName
+	for i := 0; i < len(tableName); i++ {
+		if tableName[i] == '.' {
+			schemaName = tableName[:i]
+			tblName = tableName[i+1:]
+			break
+		}
+	}
+	return
+}
+
+// AddManualRelationship creates a user-defined relationship between two columns.
+func (s *schemaService) AddManualRelationship(ctx context.Context, projectID, datasourceID uuid.UUID, req *models.AddRelationshipRequest) (*models.SchemaRelationship, error) {
+	// Validate request
+	if req.SourceTableName == "" || req.SourceColumnName == "" {
+		return nil, fmt.Errorf("source table and column are required")
+	}
+	if req.TargetTableName == "" || req.TargetColumnName == "" {
+		return nil, fmt.Errorf("target table and column are required")
+	}
+
+	// Parse and validate source table
+	sourceSchema, sourceTableName := parseTableName(req.SourceTableName)
+	sourceTable, err := s.schemaRepo.GetTableByName(ctx, projectID, datasourceID, sourceSchema, sourceTableName)
+	if err != nil {
+		return nil, fmt.Errorf("source table not found: %w", err)
+	}
+
+	// Validate source column
+	sourceColumn, err := s.schemaRepo.GetColumnByName(ctx, sourceTable.ID, req.SourceColumnName)
+	if err != nil {
+		return nil, fmt.Errorf("source column not found: %w", err)
+	}
+
+	// Parse and validate target table
+	targetSchema, targetTableName := parseTableName(req.TargetTableName)
+	targetTable, err := s.schemaRepo.GetTableByName(ctx, projectID, datasourceID, targetSchema, targetTableName)
+	if err != nil {
+		return nil, fmt.Errorf("target table not found: %w", err)
+	}
+
+	// Validate target column
+	targetColumn, err := s.schemaRepo.GetColumnByName(ctx, targetTable.ID, req.TargetColumnName)
+	if err != nil {
+		return nil, fmt.Errorf("target column not found: %w", err)
+	}
+
+	// Check if relationship already exists
+	existing, err := s.schemaRepo.GetRelationshipByColumns(ctx, sourceColumn.ID, targetColumn.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check existing relationship: %w", err)
+	}
+	if existing != nil {
+		return nil, apperrors.ErrConflict
+	}
+
+	// Create relationship
+	isApproved := true
+	manualType := models.RelationshipTypeManual
+	rel := &models.SchemaRelationship{
+		ProjectID:        projectID,
+		SourceTableID:    sourceTable.ID,
+		SourceColumnID:   sourceColumn.ID,
+		TargetTableID:    targetTable.ID,
+		TargetColumnID:   targetColumn.ID,
+		RelationshipType: manualType,
+		Cardinality:      models.CardinalityUnknown,
+		Confidence:       1.0,
+		InferenceMethod:  &manualType,
+		IsApproved:       &isApproved,
+	}
+
+	if err := s.schemaRepo.UpsertRelationship(ctx, rel); err != nil {
+		return nil, fmt.Errorf("failed to create relationship: %w", err)
+	}
+
+	s.logger.Info("Created manual relationship",
+		zap.String("project_id", projectID.String()),
+		zap.String("relationship_id", rel.ID.String()),
+		zap.String("source", req.SourceTableName+"."+req.SourceColumnName),
+		zap.String("target", req.TargetTableName+"."+req.TargetColumnName),
+	)
+
+	return rel, nil
+}
+
+// RemoveRelationship marks a relationship as removed (is_approved=false).
+func (s *schemaService) RemoveRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error {
+	// Verify relationship exists and belongs to project
+	rel, err := s.schemaRepo.GetRelationshipByID(ctx, projectID, relationshipID)
+	if err != nil {
+		return apperrors.ErrNotFound
+	}
+
+	// Double-check project ownership (security)
+	if rel.ProjectID != projectID {
+		return apperrors.ErrNotFound
+	}
+
+	// Set is_approved=false to mark as removed
+	if err := s.schemaRepo.UpdateRelationshipApproval(ctx, projectID, relationshipID, false); err != nil {
+		return fmt.Errorf("failed to update relationship: %w", err)
+	}
+
+	s.logger.Info("Removed relationship",
+		zap.String("project_id", projectID.String()),
+		zap.String("relationship_id", relationshipID.String()),
+	)
+
+	return nil
+}
+
+// GetRelationshipsForDatasource returns all relationships for a datasource.
+func (s *schemaService) GetRelationshipsForDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
+	relationships, err := s.schemaRepo.ListRelationshipsByDatasource(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list relationships: %w", err)
+	}
+	return relationships, nil
 }
 
 // Ensure schemaService implements SchemaService at compile time.

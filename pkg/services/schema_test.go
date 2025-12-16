@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
@@ -37,14 +38,18 @@ type mockSchemaRepository struct {
 	softDeletedRels       int64
 
 	// Error returns
-	listTablesErr         error
-	getTableByNameErr     error
-	listColumnsErr        error
-	getColumnByNameErr    error
-	listRelationshipsErr  error
-	softDeleteTablesErr   error
-	softDeleteColumnsErr  error
-	softDeleteOrphanedErr error
+	listTablesErr              error
+	getTableByNameErr          error
+	listColumnsErr             error
+	getColumnByNameErr         error
+	listRelationshipsErr       error
+	softDeleteTablesErr        error
+	softDeleteColumnsErr       error
+	softDeleteOrphanedErr      error
+	getRelationshipByIDErr     error
+	getRelationshipByColsErr   error
+	updateApprovalErr          error
+	relationshipByColsResponse *models.SchemaRelationship
 
 	// Capture for verification
 	upsertedTables        []*models.SchemaTable
@@ -201,6 +206,9 @@ func (m *mockSchemaRepository) ListRelationshipsByDatasource(ctx context.Context
 }
 
 func (m *mockSchemaRepository) GetRelationshipByID(ctx context.Context, projectID, relationshipID uuid.UUID) (*models.SchemaRelationship, error) {
+	if m.getRelationshipByIDErr != nil {
+		return nil, m.getRelationshipByIDErr
+	}
 	for _, r := range m.relationships {
 		if r.ID == relationshipID {
 			return r, nil
@@ -210,6 +218,12 @@ func (m *mockSchemaRepository) GetRelationshipByID(ctx context.Context, projectI
 }
 
 func (m *mockSchemaRepository) GetRelationshipByColumns(ctx context.Context, sourceColumnID, targetColumnID uuid.UUID) (*models.SchemaRelationship, error) {
+	if m.getRelationshipByColsErr != nil {
+		return nil, m.getRelationshipByColsErr
+	}
+	if m.relationshipByColsResponse != nil {
+		return m.relationshipByColsResponse, nil
+	}
 	for _, r := range m.relationships {
 		if r.SourceColumnID == sourceColumnID && r.TargetColumnID == targetColumnID {
 			return r, nil
@@ -226,6 +240,13 @@ func (m *mockSchemaRepository) UpsertRelationship(ctx context.Context, rel *mode
 		rel.ID = uuid.New()
 	}
 	m.upsertedRelationships = append(m.upsertedRelationships, rel)
+	return nil
+}
+
+func (m *mockSchemaRepository) UpdateRelationshipApproval(ctx context.Context, projectID, relationshipID uuid.UUID, isApproved bool) error {
+	if m.updateApprovalErr != nil {
+		return m.updateApprovalErr
+	}
 	return nil
 }
 
@@ -769,4 +790,564 @@ func TestSchemaService_Interface(t *testing.T) {
 	factory := &mockSchemaAdapterFactory{}
 	service := newTestSchemaService(repo, dsSvc, factory)
 	var _ SchemaService = service
+}
+
+// ============================================================================
+// Phase 7: Relationship Management Tests
+// ============================================================================
+
+func TestSchemaService_AddManualRelationship_Success(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	sourceTableID := uuid.New()
+	targetTableID := uuid.New()
+	sourceColumnID := uuid.New()
+	targetColumnID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           sourceTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "orders",
+			},
+			{
+				ID:           targetTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users",
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            sourceColumnID,
+				ProjectID:     projectID,
+				SchemaTableID: sourceTableID,
+				ColumnName:    "user_id",
+				DataType:      "uuid",
+			},
+			{
+				ID:            targetColumnID,
+				ProjectID:     projectID,
+				SchemaTableID: targetTableID,
+				ColumnName:    "id",
+				DataType:      "uuid",
+				IsPrimaryKey:  true,
+			},
+		},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	req := &models.AddRelationshipRequest{
+		SourceTableName:  "orders",
+		SourceColumnName: "user_id",
+		TargetTableName:  "users",
+		TargetColumnName: "id",
+	}
+
+	rel, err := service.AddManualRelationship(context.Background(), projectID, datasourceID, req)
+	if err != nil {
+		t.Fatalf("AddManualRelationship failed: %v", err)
+	}
+
+	if rel.RelationshipType != models.RelationshipTypeManual {
+		t.Errorf("expected relationship type %q, got %q", models.RelationshipTypeManual, rel.RelationshipType)
+	}
+	if rel.Confidence != 1.0 {
+		t.Errorf("expected confidence 1.0, got %f", rel.Confidence)
+	}
+	if rel.IsApproved == nil || !*rel.IsApproved {
+		t.Error("expected is_approved to be true")
+	}
+	if rel.Cardinality != models.CardinalityUnknown {
+		t.Errorf("expected cardinality %q, got %q", models.CardinalityUnknown, rel.Cardinality)
+	}
+
+	// Verify relationship was upserted
+	if len(repo.upsertedRelationships) != 1 {
+		t.Errorf("expected 1 relationship upserted, got %d", len(repo.upsertedRelationships))
+	}
+}
+
+func TestSchemaService_AddManualRelationship_WithSchemaPrefix(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	sourceTableID := uuid.New()
+	targetTableID := uuid.New()
+	sourceColumnID := uuid.New()
+	targetColumnID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           sourceTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "sales",
+				TableName:    "orders",
+			},
+			{
+				ID:           targetTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users",
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            sourceColumnID,
+				ProjectID:     projectID,
+				SchemaTableID: sourceTableID,
+				ColumnName:    "user_id",
+				DataType:      "uuid",
+			},
+			{
+				ID:            targetColumnID,
+				ProjectID:     projectID,
+				SchemaTableID: targetTableID,
+				ColumnName:    "id",
+				DataType:      "uuid",
+			},
+		},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	req := &models.AddRelationshipRequest{
+		SourceTableName:  "sales.orders",
+		SourceColumnName: "user_id",
+		TargetTableName:  "public.users",
+		TargetColumnName: "id",
+	}
+
+	rel, err := service.AddManualRelationship(context.Background(), projectID, datasourceID, req)
+	if err != nil {
+		t.Fatalf("AddManualRelationship failed: %v", err)
+	}
+
+	if rel.SourceTableID != sourceTableID {
+		t.Errorf("expected source table ID %s, got %s", sourceTableID, rel.SourceTableID)
+	}
+	if rel.TargetTableID != targetTableID {
+		t.Errorf("expected target table ID %s, got %s", targetTableID, rel.TargetTableID)
+	}
+}
+
+func TestSchemaService_AddManualRelationship_SourceTableNotFound(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		getTableByNameErr: errors.New("table not found"),
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	req := &models.AddRelationshipRequest{
+		SourceTableName:  "nonexistent",
+		SourceColumnName: "user_id",
+		TargetTableName:  "users",
+		TargetColumnName: "id",
+	}
+
+	_, err := service.AddManualRelationship(context.Background(), projectID, datasourceID, req)
+	if err == nil {
+		t.Fatal("expected error for source table not found")
+	}
+	if !contains(err.Error(), "source table not found") {
+		t.Errorf("expected error to contain 'source table not found', got: %v", err)
+	}
+}
+
+func TestSchemaService_AddManualRelationship_SourceColumnNotFound(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	sourceTableID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           sourceTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "orders",
+			},
+		},
+		getColumnByNameErr: errors.New("column not found"),
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	req := &models.AddRelationshipRequest{
+		SourceTableName:  "orders",
+		SourceColumnName: "nonexistent",
+		TargetTableName:  "users",
+		TargetColumnName: "id",
+	}
+
+	_, err := service.AddManualRelationship(context.Background(), projectID, datasourceID, req)
+	if err == nil {
+		t.Fatal("expected error for source column not found")
+	}
+	if !contains(err.Error(), "source column not found") {
+		t.Errorf("expected error to contain 'source column not found', got: %v", err)
+	}
+}
+
+func TestSchemaService_AddManualRelationship_TargetTableNotFound(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	sourceTableID := uuid.New()
+	sourceColumnID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           sourceTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "orders",
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            sourceColumnID,
+				ProjectID:     projectID,
+				SchemaTableID: sourceTableID,
+				ColumnName:    "user_id",
+				DataType:      "uuid",
+			},
+		},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	req := &models.AddRelationshipRequest{
+		SourceTableName:  "orders",
+		SourceColumnName: "user_id",
+		TargetTableName:  "nonexistent",
+		TargetColumnName: "id",
+	}
+
+	_, err := service.AddManualRelationship(context.Background(), projectID, datasourceID, req)
+	if err == nil {
+		t.Fatal("expected error for target table not found")
+	}
+	if !contains(err.Error(), "target table not found") {
+		t.Errorf("expected error to contain 'target table not found', got: %v", err)
+	}
+}
+
+func TestSchemaService_AddManualRelationship_TargetColumnNotFound(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	sourceTableID := uuid.New()
+	targetTableID := uuid.New()
+	sourceColumnID := uuid.New()
+
+	// Create a mock that returns success for source table/column but fails on target column
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           sourceTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "orders",
+			},
+			{
+				ID:           targetTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users",
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            sourceColumnID,
+				ProjectID:     projectID,
+				SchemaTableID: sourceTableID,
+				ColumnName:    "user_id",
+				DataType:      "uuid",
+			},
+			// No target column - will cause not found
+		},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	req := &models.AddRelationshipRequest{
+		SourceTableName:  "orders",
+		SourceColumnName: "user_id",
+		TargetTableName:  "users",
+		TargetColumnName: "id",
+	}
+
+	_, err := service.AddManualRelationship(context.Background(), projectID, datasourceID, req)
+	if err == nil {
+		t.Fatal("expected error for target column not found")
+	}
+	if !contains(err.Error(), "target column not found") {
+		t.Errorf("expected error to contain 'target column not found', got: %v", err)
+	}
+}
+
+func TestSchemaService_AddManualRelationship_AlreadyExists(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	sourceTableID := uuid.New()
+	targetTableID := uuid.New()
+	sourceColumnID := uuid.New()
+	targetColumnID := uuid.New()
+	existingRelID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           sourceTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "orders",
+			},
+			{
+				ID:           targetTableID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users",
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            sourceColumnID,
+				ProjectID:     projectID,
+				SchemaTableID: sourceTableID,
+				ColumnName:    "user_id",
+				DataType:      "uuid",
+			},
+			{
+				ID:            targetColumnID,
+				ProjectID:     projectID,
+				SchemaTableID: targetTableID,
+				ColumnName:    "id",
+				DataType:      "uuid",
+			},
+		},
+		// Return an existing relationship
+		relationshipByColsResponse: &models.SchemaRelationship{
+			ID:             existingRelID,
+			ProjectID:      projectID,
+			SourceColumnID: sourceColumnID,
+			TargetColumnID: targetColumnID,
+		},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	req := &models.AddRelationshipRequest{
+		SourceTableName:  "orders",
+		SourceColumnName: "user_id",
+		TargetTableName:  "users",
+		TargetColumnName: "id",
+	}
+
+	_, err := service.AddManualRelationship(context.Background(), projectID, datasourceID, req)
+	if err == nil {
+		t.Fatal("expected error for existing relationship")
+	}
+	if !errors.Is(err, apperrors.ErrConflict) {
+		t.Errorf("expected ErrConflict, got: %v", err)
+	}
+}
+
+func TestSchemaService_AddManualRelationship_EmptySourceTable(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	repo := &mockSchemaRepository{}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	req := &models.AddRelationshipRequest{
+		SourceTableName:  "",
+		SourceColumnName: "user_id",
+		TargetTableName:  "users",
+		TargetColumnName: "id",
+	}
+
+	_, err := service.AddManualRelationship(context.Background(), projectID, datasourceID, req)
+	if err == nil {
+		t.Fatal("expected error for empty source table")
+	}
+}
+
+func TestSchemaService_RemoveRelationship_Success(t *testing.T) {
+	projectID := uuid.New()
+	relationshipID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		relationships: []*models.SchemaRelationship{
+			{
+				ID:        relationshipID,
+				ProjectID: projectID,
+			},
+		},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	err := service.RemoveRelationship(context.Background(), projectID, relationshipID)
+	if err != nil {
+		t.Fatalf("RemoveRelationship failed: %v", err)
+	}
+}
+
+func TestSchemaService_RemoveRelationship_NotFound(t *testing.T) {
+	projectID := uuid.New()
+	relationshipID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		relationships: []*models.SchemaRelationship{}, // Empty - no relationships
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	err := service.RemoveRelationship(context.Background(), projectID, relationshipID)
+	if err == nil {
+		t.Fatal("expected error for relationship not found")
+	}
+	if !errors.Is(err, apperrors.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got: %v", err)
+	}
+}
+
+func TestSchemaService_RemoveRelationship_WrongProject(t *testing.T) {
+	projectID := uuid.New()
+	otherProjectID := uuid.New()
+	relationshipID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		relationships: []*models.SchemaRelationship{
+			{
+				ID:        relationshipID,
+				ProjectID: otherProjectID, // Different project
+			},
+		},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	err := service.RemoveRelationship(context.Background(), projectID, relationshipID)
+	if err == nil {
+		t.Fatal("expected error for wrong project")
+	}
+	if !errors.Is(err, apperrors.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got: %v", err)
+	}
+}
+
+func TestSchemaService_GetRelationshipsForDatasource_Success(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	rel1ID := uuid.New()
+	rel2ID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		relationships: []*models.SchemaRelationship{
+			{
+				ID:               rel1ID,
+				ProjectID:        projectID,
+				RelationshipType: models.RelationshipTypeFK,
+			},
+			{
+				ID:               rel2ID,
+				ProjectID:        projectID,
+				RelationshipType: models.RelationshipTypeManual,
+			},
+		},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	relationships, err := service.GetRelationshipsForDatasource(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("GetRelationshipsForDatasource failed: %v", err)
+	}
+
+	if len(relationships) != 2 {
+		t.Errorf("expected 2 relationships, got %d", len(relationships))
+	}
+}
+
+func TestSchemaService_GetRelationshipsForDatasource_Empty(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		relationships: []*models.SchemaRelationship{},
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	relationships, err := service.GetRelationshipsForDatasource(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("GetRelationshipsForDatasource failed: %v", err)
+	}
+
+	if len(relationships) != 0 {
+		t.Errorf("expected 0 relationships, got %d", len(relationships))
+	}
+}
+
+func TestSchemaService_GetRelationshipsForDatasource_Error(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	repo := &mockSchemaRepository{
+		listRelationshipsErr: errors.New("database error"),
+	}
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	_, err := service.GetRelationshipsForDatasource(context.Background(), projectID, datasourceID)
+	if err == nil {
+		t.Fatal("expected error from repository")
+	}
 }

@@ -214,3 +214,11 @@ type DatasourceRelationship struct {
 	Confidence       float64
 	IsApproved       *bool
 }
+
+// AddRelationshipRequest contains input for creating a manual relationship.
+type AddRelationshipRequest struct {
+	SourceTableName  string `json:"source_table"`
+	SourceColumnName string `json:"source_column"`
+	TargetTableName  string `json:"target_table"`
+	TargetColumnName string `json:"target_column"`
+}

@@ -45,6 +45,7 @@ type SchemaRepository interface {
 	GetRelationshipByID(ctx context.Context, projectID, relationshipID uuid.UUID) (*models.SchemaRelationship, error)
 	GetRelationshipByColumns(ctx context.Context, sourceColumnID, targetColumnID uuid.UUID) (*models.SchemaRelationship, error)
 	UpsertRelationship(ctx context.Context, rel *models.SchemaRelationship) error
+	UpdateRelationshipApproval(ctx context.Context, projectID, relationshipID uuid.UUID, isApproved bool) error
 	SoftDeleteRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error
 	SoftDeleteOrphanedRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (int64, error)
 }
@@ -822,6 +823,29 @@ func (r *schemaRepository) UpsertRelationship(ctx context.Context, rel *models.S
 
 	if err != nil {
 		return fmt.Errorf("failed to upsert relationship: %w", err)
+	}
+
+	return nil
+}
+
+func (r *schemaRepository) UpdateRelationshipApproval(ctx context.Context, projectID, relationshipID uuid.UUID, isApproved bool) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		UPDATE engine_schema_relationships
+		SET is_approved = $3, updated_at = NOW()
+		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
+
+	result, err := scope.Conn.Exec(ctx, query, projectID, relationshipID, isApproved)
+	if err != nil {
+		return fmt.Errorf("failed to update relationship approval: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("relationship not found")
 	}
 
 	return nil
