@@ -115,6 +115,7 @@ func main() {
 	projectRepo := repositories.NewProjectRepository()
 	userRepo := repositories.NewUserRepository()
 	datasourceRepo := repositories.NewDatasourceRepository()
+	schemaRepo := repositories.NewSchemaRepository()
 
 	// Create adapter factory for datasource connections
 	adapterFactory := datasource.NewDatasourceAdapterFactory()
@@ -123,6 +124,8 @@ func main() {
 	projectService := services.NewProjectService(db, projectRepo, userRepo, redisClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, logger)
+	schemaService := services.NewSchemaService(schemaRepo, datasourceService, adapterFactory, logger)
+	_ = schemaService // Will be used when schema handler is added in a future phase
 
 	mux := http.NewServeMux()
 

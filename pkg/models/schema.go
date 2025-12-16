@@ -148,3 +148,69 @@ const (
 	MatchQualityStrong   = "strong"
 	MatchQualityModerate = "moderate"
 )
+
+// ============================================================================
+// Service Layer Types
+// ============================================================================
+
+// RefreshResult contains statistics from a schema refresh operation.
+type RefreshResult struct {
+	TablesUpserted       int   `json:"tables_upserted"`
+	TablesDeleted        int64 `json:"tables_deleted"`
+	ColumnsUpserted      int   `json:"columns_upserted"`
+	ColumnsDeleted       int64 `json:"columns_deleted"`
+	RelationshipsCreated int   `json:"relationships_created"`
+	RelationshipsDeleted int64 `json:"relationships_deleted"`
+}
+
+// DatasourceSchema represents the complete schema for a customer's datasource.
+type DatasourceSchema struct {
+	ProjectID     uuid.UUID
+	DatasourceID  uuid.UUID
+	Tables        []*DatasourceTable
+	Relationships []*DatasourceRelationship
+}
+
+// DatasourceTable represents a table in the customer's datasource.
+type DatasourceTable struct {
+	ID           uuid.UUID
+	SchemaName   string
+	TableName    string
+	BusinessName string
+	Description  string
+	RowCount     int64
+	IsSelected   bool
+	Columns      []*DatasourceColumn
+}
+
+// DatasourceColumn represents a column in the customer's datasource.
+type DatasourceColumn struct {
+	ID              uuid.UUID
+	ColumnName      string
+	DataType        string
+	IsNullable      bool
+	IsPrimaryKey    bool
+	IsSelected      bool
+	OrdinalPosition int
+	BusinessName    string
+	Description     string
+	DistinctCount   *int64
+	NullCount       *int64
+}
+
+// DatasourceRelationship represents a relationship in the customer's datasource.
+type DatasourceRelationship struct {
+	ID               uuid.UUID
+	SourceTableID    uuid.UUID
+	SourceTableName  string
+	SourceColumnID   uuid.UUID
+	SourceColumnName string
+	TargetTableID    uuid.UUID
+	TargetTableName  string
+	TargetColumnID   uuid.UUID
+	TargetColumnName string
+	RelationshipType string
+	Cardinality      string
+	Confidence       float64
+	IsApproved       *bool
+}
