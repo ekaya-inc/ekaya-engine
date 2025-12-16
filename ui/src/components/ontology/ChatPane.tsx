@@ -131,7 +131,7 @@ const ChatPane = ({ projectId, onOntologyUpdate, onKnowledgeStored }: ChatPanePr
           const updated = [...prev];
           const lastMsg = updated[updated.length - 1];
           if (lastMsg?.role === 'assistant' && lastMsg.isStreaming) {
-            lastMsg.content += event.content || '';
+            lastMsg.content += event.content ?? '';
           }
           return updated;
         });
@@ -146,7 +146,7 @@ const ChatPane = ({ projectId, onOntologyUpdate, onKnowledgeStored }: ChatPanePr
             const lastMsg = updated[updated.length - 1];
             if (lastMsg?.role === 'assistant') {
               lastMsg.toolCalls = [
-                ...(lastMsg.toolCalls || []),
+                ...(lastMsg.toolCalls ?? []),
                 { id: toolData.id, name: toolData.name, status: 'pending' }
               ];
             }
@@ -194,7 +194,7 @@ const ChatPane = ({ projectId, onOntologyUpdate, onKnowledgeStored }: ChatPanePr
         break;
 
       case 'error':
-        setError(event.content || 'An error occurred');
+        setError(event.content ?? 'An error occurred');
         setIsStreaming(false);
         break;
 
@@ -451,7 +451,7 @@ const formatToolName = (name: string): string => {
     update_entity: 'Updating entity',
     update_domain: 'Updating domain',
   };
-  return nameMap[name] || name;
+  return nameMap[name] ?? name;
 };
 
 export default ChatPane;

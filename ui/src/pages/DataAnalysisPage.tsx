@@ -64,7 +64,7 @@ const DataAnalysisPage = () => {
 
   // Get selected tables from navigation state
   const locationState = location.state as LocationState | undefined;
-  const selectedTablesData = locationState?.selectedTables || [];
+  const selectedTablesData = locationState?.selectedTables ?? [];
   const selectedTables = selectedTablesData.map(t => t.name);
 
   // Build tableColumns from selected tables data
@@ -105,30 +105,38 @@ const DataAnalysisPage = () => {
 
   // Simulate running a single table analysis
   const runTableAnalysis = useCallback(async (taskId: string, tableName: string): Promise<void> => {
-    setTaskStates(prev => ({
-      ...prev,
-      [taskId]: {
-        ...prev[taskId]!,
-        tables: {
-          ...prev[taskId]!.tables,
-          [tableName]: 'running'
+    setTaskStates(prev => {
+      const task = prev[taskId];
+      if (!task) return prev;
+      return {
+        ...prev,
+        [taskId]: {
+          ...task,
+          tables: {
+            ...task.tables,
+            [tableName]: 'running'
+          }
         }
-      }
-    }));
+      };
+    });
 
     // Simulate API call delay
     await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
 
-    setTaskStates(prev => ({
-      ...prev,
-      [taskId]: {
-        ...prev[taskId]!,
-        tables: {
-          ...prev[taskId]!.tables,
-          [tableName]: 'completed'
+    setTaskStates(prev => {
+      const task = prev[taskId];
+      if (!task) return prev;
+      return {
+        ...prev,
+        [taskId]: {
+          ...task,
+          tables: {
+            ...task.tables,
+            [tableName]: 'completed'
+          }
         }
-      }
-    }));
+      };
+    });
   }, []);
 
   // Run analysis for a specific task
@@ -136,38 +144,50 @@ const DataAnalysisPage = () => {
     const task = taskStates[taskId];
     if (!task) return;
 
-    setTaskStates(prev => ({
-      ...prev,
-      [taskId]: {
-        ...prev[taskId]!,
-        status: 'running'
-      }
-    }));
+    setTaskStates(prev => {
+      const currentTask = prev[taskId];
+      if (!currentTask) return prev;
+      return {
+        ...prev,
+        [taskId]: {
+          ...currentTask,
+          status: 'running'
+        }
+      };
+    });
 
     if (taskId === 'understand_data_shape') {
-      const tables = Object.keys(task.tables || {});
+      const tables = Object.keys(task.tables ?? {});
       // Run all tables for this task in parallel
       await Promise.all(tables.map(table => runTableAnalysis(taskId, table)));
     } else if (taskId === 'understand_relationships') {
       // Simulate relationship discovery
       await new Promise(resolve => setTimeout(resolve, 2000));
 
-      setTaskStates(prev => ({
-        ...prev,
-        [taskId]: {
-          ...prev[taskId]!,
-          relationships: _discoveredRelationships
-        }
-      }));
+      setTaskStates(prev => {
+        const currentTask = prev[taskId];
+        if (!currentTask) return prev;
+        return {
+          ...prev,
+          [taskId]: {
+            ...currentTask,
+            relationships: _discoveredRelationships
+          }
+        };
+      });
     }
 
-    setTaskStates(prev => ({
-      ...prev,
-      [taskId]: {
-        ...prev[taskId]!,
-        status: 'completed'
-      }
-    }));
+    setTaskStates(prev => {
+      const currentTask = prev[taskId];
+      if (!currentTask) return prev;
+      return {
+        ...prev,
+        [taskId]: {
+          ...currentTask,
+          status: 'completed'
+        }
+      };
+    });
   }, [taskStates, runTableAnalysis, _discoveredRelationships]);
 
   // Run all tasks
@@ -214,8 +234,10 @@ const DataAnalysisPage = () => {
   };
 
   // Check if first task is completed (for dependency)
-  const isFirstTaskCompleted: boolean = taskStates['understand_data_shape']?.status === 'completed' ||
-    getTaskStatus(taskStates['understand_data_shape']!) === 'completed';
+  const firstTask = taskStates['understand_data_shape'];
+  const isFirstTaskCompleted: boolean = firstTask !== undefined && (
+    firstTask.status === 'completed' || getTaskStatus(firstTask) === 'completed'
+  );
 
   // Check if all tasks are completed
   const allTasksCompleted: boolean = Object.values(taskStates).every(task => {
@@ -238,13 +260,17 @@ const DataAnalysisPage = () => {
       description: description
     };
 
-    setTaskStates(prev => ({
-      ...prev,
-      'understand_relationships': {
-        ...prev['understand_relationships']!,
-        relationships: [...(prev['understand_relationships']!.relationships || []), relationship]
-      }
-    }));
+    setTaskStates(prev => {
+      const relTask = prev['understand_relationships'];
+      if (!relTask) return prev;
+      return {
+        ...prev,
+        'understand_relationships': {
+          ...relTask,
+          relationships: [...(relTask.relationships ?? []), relationship]
+        }
+      };
+    });
 
     // Reset form
     setNewRelationship({
@@ -410,13 +436,17 @@ const DataAnalysisPage = () => {
                                 <div className="ml-3">
                                   <button
                                     onClick={() => {
-                                      setTaskStates(prev => ({
-                                        ...prev,
-                                        'understand_relationships': {
-                                          ...prev['understand_relationships']!,
-                                          relationships: (prev['understand_relationships']!.relationships || []).filter((_, i) => i !== index)
-                                        }
-                                      }));
+                                      setTaskStates(prev => {
+                                        const relTask = prev['understand_relationships'];
+                                        if (!relTask) return prev;
+                                        return {
+                                          ...prev,
+                                          'understand_relationships': {
+                                            ...relTask,
+                                            relationships: (relTask.relationships ?? []).filter((_, i) => i !== index)
+                                          }
+                                        };
+                                      });
                                     }}
                                     className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-red-100 text-red-500 hover:text-red-700 transition-colors"
                                   >

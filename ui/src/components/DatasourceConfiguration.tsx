@@ -88,9 +88,9 @@ const DatasourceConfiguration = ({
       // Editing existing datasource - load from connectionDetails
       const formData: DatasourceFormConfig = {
         host: connectionDetails.host || "",
-        port: connectionDetails.port?.toString() || "5432",
-        user: connectionDetails.user || "",
-        password: connectionDetails.password || "",
+        port: connectionDetails.port?.toString() ?? "5432",
+        user: connectionDetails.user ?? "",
+        password: connectionDetails.password ?? "",
         name: connectionDetails.name || "",
         useSSL:
           connectionDetails.ssl_mode === "require" ||
@@ -130,7 +130,10 @@ const DatasourceConfiguration = ({
         password: config.password,
         ssl_mode: (config.useSSL ? "require" : "disable") as SSLMode,
       };
-      await testConnection(pid!, testDetails);
+      if (!pid) {
+        throw new Error("Project ID not available from route");
+      }
+      await testConnection(pid, testDetails);
     } catch (error) {
       console.error("Connection test failed:", error);
     } finally {

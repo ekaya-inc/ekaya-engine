@@ -76,10 +76,13 @@ const SchemaPage = () => {
         const response = await sdapApi.getSchema(pid as string);
 
         // Transform API response to match SchemaData interface
+        if (!response.data) {
+          throw new Error("No schema data returned from API");
+        }
         const transformedData: SchemaData = {
           catalog: "Datasource Schema", // API doesn't provide catalog name
           schema: "public", // API doesn't provide schema name
-          tables: response.data!.tables.map(table => ({
+          tables: response.data.tables.map(table => ({
             name: table.table_name,
             columns: table.columns.map(col => ({
               name: col.column_name,
@@ -124,7 +127,7 @@ const SchemaPage = () => {
         schemaData.tables.forEach((table) => {
           // If first time (no saved selections), default to all tables selected
           // Otherwise, only select tables that are in savedSelections.tables
-          const isTableSelected = isFirstTime || savedSelections.tables!.includes(table.name);
+          const isTableSelected = isFirstTime || (savedSelections.tables?.includes(table.name) ?? false);
 
           state[table.name] = {
             selected: isTableSelected,
@@ -133,14 +136,16 @@ const SchemaPage = () => {
 
           // Get saved column list for this table
           const savedColumns = savedSelections.columns?.[table.name];
+          const tableState = state[table.name];
+          if (!tableState) return;
 
           table.columns.forEach((column) => {
             if (!isFirstTime && savedColumns && savedColumns.length > 0) {
               // Use saved column selection if available (subsequent visit)
-              state[table.name]!.columns[column.name] = savedColumns.includes(column.name);
+              tableState.columns[column.name] = savedColumns.includes(column.name);
             } else {
               // First time or no saved columns: follow table selection state
-              state[table.name]!.columns[column.name] = isTableSelected;
+              tableState.columns[column.name] = isTableSelected;
             }
           });
         });
@@ -158,8 +163,10 @@ const SchemaPage = () => {
             selected: true,
             columns: {},
           };
+          const tableState = state[table.name];
+          if (!tableState) return;
           table.columns.forEach((column) => {
-            state[table.name]!.columns[column.name] = true;
+            tableState.columns[column.name] = true;
           });
         });
         setSelectionState(state);
@@ -204,8 +211,10 @@ const SchemaPage = () => {
         selected: checked,
         columns: {},
       };
+      const tableState = newState[table.name];
+      if (!tableState) return;
       table.columns.forEach((column) => {
-        newState[table.name]!.columns[column.name] = checked;
+        tableState.columns[column.name] = checked;
       });
     });
     setSelectionState(newState);
@@ -221,11 +230,13 @@ const SchemaPage = () => {
           selected: checked,
           columns: {},
         };
+        const tableState = newState[tableName];
+        if (!tableState) return newState;
         // When checking/unchecking a table, update all its columns
         const table = schemaData.tables.find((t) => t.name === tableName);
         if (table) {
           table.columns.forEach((column) => {
-            newState[tableName]!.columns[column.name] = checked;
+            tableState.columns[column.name] = checked;
           });
         }
         return newState;
@@ -239,19 +250,22 @@ const SchemaPage = () => {
     (tableName: string, columnName: string, checked: boolean): void => {
       setSelectionState((prev) => {
         const newState = { ...prev };
-        newState[tableName]!.columns[columnName] = checked;
+        const tableState = newState[tableName];
+        if (!tableState) return newState;
+
+        tableState.columns[columnName] = checked;
 
         // If checking a column and table is unchecked, check the table
-        if (checked && !newState[tableName]!.selected) {
-          newState[tableName]!.selected = true;
+        if (checked && !tableState.selected) {
+          tableState.selected = true;
         }
 
         // If unchecking a column and all columns are unchecked, uncheck the table
         const allColumnsUnchecked = Object.values(
-          newState[tableName]!.columns
+          tableState.columns
         ).every((col) => !col);
         if (!checked && allColumnsUnchecked) {
-          newState[tableName]!.selected = false;
+          tableState.selected = false;
         }
 
         return newState;
@@ -314,7 +328,7 @@ const SchemaPage = () => {
     } finally {
       setIsStartingExtraction(false);
     }
-  }, [schemaData, pid, selectionState, refreshSchemaSelections, toast]);
+  }, [schemaData, pid, selectionState, refreshSchemaSelections, toast, navigate]);
 
   // Handle refresh schema from datasource
   const handleRefreshSchema = useCallback(async (): Promise<void> => {
@@ -338,10 +352,13 @@ const SchemaPage = () => {
       const response = await sdapApi.getSchema(pid);
 
       // Transform API response to match SchemaData interface
+      if (!response.data) {
+        throw new Error("No schema data returned from API");
+      }
       const transformedData: SchemaData = {
         catalog: "Datasource Schema",
         schema: "public",
-        tables: response.data!.tables.map(table => ({
+        tables: response.data.tables.map(table => ({
           name: table.table_name,
           columns: table.columns.map(col => ({
             name: col.column_name,
@@ -434,7 +451,7 @@ const SchemaPage = () => {
             </div>
             <h2 className="text-lg font-semibold mb-2">Failed to Load Schema</h2>
             <p className="text-sm text-muted-foreground mb-4">
-              {error || "No schema data available"}
+              {error ?? "No schema data available"}
             </p>
             <button
               onClick={() => window.location.reload()}
@@ -649,7 +666,7 @@ const SchemaPage = () => {
                             type="checkbox"
                             id={`column-${table.name}-${column.name}`}
                             checked={
-                              selectionState[table.name]!.columns[
+                              selectionState[table.name]?.columns[
                                 column.name
                               ] ?? false
                             }

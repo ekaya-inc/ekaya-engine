@@ -129,12 +129,12 @@ const ProjectDashboard = () => {
           setActiveAIConfig(data.config_type as AIOption);
           // Don't auto-expand panel - let user click to expand
           setAiConfig({
-            llmBaseUrl: data.llm_base_url || '',
-            llmApiKey: data.llm_api_key || '', // Will be masked: "sk-a...xyz"
-            llmModel: data.llm_model || '',
-            embeddingBaseUrl: data.embedding_base_url || '',
-            embeddingApiKey: data.embedding_api_key || '',
-            embeddingModel: data.embedding_model || '',
+            llmBaseUrl: data.llm_base_url ?? '',
+            llmApiKey: data.llm_api_key ?? '', // Will be masked: "sk-a...xyz"
+            llmModel: data.llm_model ?? '',
+            embeddingBaseUrl: data.embedding_base_url ?? '',
+            embeddingApiKey: data.embedding_api_key ?? '',
+            embeddingModel: data.embedding_model ?? '',
           });
         }
       }
@@ -231,10 +231,10 @@ const ProjectDashboard = () => {
         const optionConfig = configType === 'community' ? aiOptions?.community : aiOptions?.embedded;
         body = {
           config_type: configType,
-          llm_base_url: optionConfig?.llm_base_url || '',
-          llm_model: optionConfig?.llm_model || '',
-          embedding_base_url: optionConfig?.embedding_url || '',
-          embedding_model: optionConfig?.embedding_model || '',
+          llm_base_url: optionConfig?.llm_base_url ?? '',
+          llm_model: optionConfig?.llm_model ?? '',
+          embedding_base_url: optionConfig?.embedding_url ?? '',
+          embedding_model: optionConfig?.embedding_model ?? '',
         };
       } else {
         // BYOK - check if API key looks like a masked value
@@ -273,7 +273,7 @@ const ProjectDashboard = () => {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to save configuration');
+        throw new Error(errorData.message ?? 'Failed to save configuration');
       }
 
       setActiveAIConfig(configType);
@@ -753,7 +753,7 @@ const ProjectDashboard = () => {
                     <h4 className="text-sm font-medium text-text-primary flex items-center gap-2 mb-2">
                       <Search className="h-4 w-4" /> Embedding Model
                     </h4>
-                    <p className="text-sm text-text-secondary font-mono">{aiOptions.community.embedding_model || 'Not configured'}</p>
+                    <p className="text-sm text-text-secondary font-mono">{aiOptions.community.embedding_model ?? 'Not configured'}</p>
                   </div>
                 </div>
               )}
@@ -842,7 +842,7 @@ const ProjectDashboard = () => {
                     <h4 className="text-sm font-medium text-text-primary flex items-center gap-2 mb-2">
                       <Search className="h-4 w-4" /> Embedding Model
                     </h4>
-                    <p className="text-sm text-text-secondary font-mono">{aiOptions.embedded.embedding_model || 'Not configured'}</p>
+                    <p className="text-sm text-text-secondary font-mono">{aiOptions.embedded.embedding_model ?? 'Not configured'}</p>
                   </div>
                 </div>
               )}

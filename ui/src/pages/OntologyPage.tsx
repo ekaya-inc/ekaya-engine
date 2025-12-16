@@ -221,7 +221,7 @@ const OntologyPage = () => {
             {/* Show QuestionPanel when there are pending questions */}
             {hasPendingQuestions && (
               <QuestionPanel
-                projectId={pid || ''}
+                projectId={pid ?? ''}
                 onAllComplete={handleAllQuestionsComplete}
                 onQuestionAnswered={handleQuestionAnswered}
               />
@@ -240,7 +240,7 @@ const OntologyPage = () => {
                   </div>
                 </div>
                 <ChatPane
-                  projectId={pid || ''}
+                  projectId={pid ?? ''}
                   onOntologyUpdate={handleOntologyUpdate}
                   onKnowledgeStored={handleKnowledgeStored}
                 />
@@ -250,7 +250,7 @@ const OntologyPage = () => {
             {/* Show Chat only when no questions exist at all (legacy behavior) */}
             {!hasPendingQuestions && !allQuestionsComplete && (
               <ChatPane
-                projectId={pid || ''}
+                projectId={pid ?? ''}
                 onOntologyUpdate={handleOntologyUpdate}
                 onKnowledgeStored={handleKnowledgeStored}
               />

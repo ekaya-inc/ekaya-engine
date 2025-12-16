@@ -159,9 +159,7 @@ const RelationshipsPage = () => {
   // Group by source table for display
   const groupedBySourceTable = filteredRelationships.reduce<Record<string, RelationshipDetail[]>>((acc, rel) => {
     const key = rel.source_table_name;
-    if (!acc[key]) {
-      acc[key] = [];
-    }
+    acc[key] ??= [];
     acc[key].push(rel);
     return acc;
   }, {});
@@ -182,7 +180,7 @@ const RelationshipsPage = () => {
   // Use API-provided counts if available, otherwise compute
   const emptyTableCount = emptyTables.length;
   const orphanTableCount = orphanTables.length;
-  const tablesWithoutRelationships = emptyTableCount + orphanTableCount || (totalTablesInSchema - tablesWithRelationships.size);
+  const tablesWithoutRelationships = (emptyTableCount + orphanTableCount) || (totalTablesInSchema - tablesWithRelationships.size);
 
   // Get type icon
   const getTypeIcon = (type: RelationshipType): React.ReactNode => {

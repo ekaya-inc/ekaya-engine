@@ -47,9 +47,9 @@ export async function fetchWithAuth(url: string, options: RequestInit = {}): Pro
     const projectsMatch = window.location.pathname.match(/\/projects\/([a-f0-9-]+)/);
     const sdapMatch = url.match(/\/sdap\/v1\/([a-f0-9-]+)\//);
 
-    const projectId = projectsMatch?.[1] || sdapMatch?.[1];
+    const projectId = projectsMatch?.[1] ?? sdapMatch?.[1];
 
-    console.log(`Clearing stale cookie and re-authenticating for project: ${projectId || 'none'}`);
+    console.log(`Clearing stale cookie and re-authenticating for project: ${projectId ?? 'none'}`);
 
     // Initiate OAuth flow with project_id if found
     await initiateOAuthFlow(config, projectId);

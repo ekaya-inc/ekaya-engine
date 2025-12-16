@@ -30,7 +30,7 @@ export const ThemeProvider = ({
   const [theme, setThemeState] = useState<Theme>(() => {
     // Check localStorage first
     const storedTheme = localStorage.getItem('theme') as Theme | null;
-    return storedTheme || initialTheme;
+    return storedTheme ?? initialTheme;
   });
 
   const applyTheme = (newTheme: Theme): void => {
