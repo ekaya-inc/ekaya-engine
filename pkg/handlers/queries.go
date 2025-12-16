@@ -12,6 +12,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
+	sqlvalidator "github.com/ekaya-inc/ekaya-engine/pkg/sql"
 )
 
 // QueryResponse matches frontend Query interface.
@@ -36,20 +37,20 @@ type ListQueriesResponse struct {
 }
 
 // CreateQueryRequest for POST body.
+// Note: Dialect is derived from datasource type in the service layer.
 type CreateQueryRequest struct {
 	NaturalLanguagePrompt string `json:"natural_language_prompt"`
 	AdditionalContext     string `json:"additional_context,omitempty"`
 	SQLQuery              string `json:"sql_query"`
-	Dialect               string `json:"dialect"`
 	IsEnabled             bool   `json:"is_enabled"`
 }
 
 // UpdateQueryRequest for PUT body (all fields optional).
+// Note: Dialect cannot be updated - it's derived from datasource type.
 type UpdateQueryRequest struct {
 	NaturalLanguagePrompt *string `json:"natural_language_prompt,omitempty"`
 	AdditionalContext     *string `json:"additional_context,omitempty"`
 	SQLQuery              *string `json:"sql_query,omitempty"`
-	Dialect               *string `json:"dialect,omitempty"`
 	IsEnabled             *bool   `json:"is_enabled,omitempty"`
 }
 
@@ -193,23 +194,22 @@ func (h *QueriesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Dialect == "" {
-		if err := ErrorResponse(w, http.StatusBadRequest, "missing_dialect", "Dialect is required"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
 	serviceReq := &services.CreateQueryRequest{
 		NaturalLanguagePrompt: req.NaturalLanguagePrompt,
 		AdditionalContext:     req.AdditionalContext,
 		SQLQuery:              req.SQLQuery,
-		Dialect:               req.Dialect,
 		IsEnabled:             req.IsEnabled,
 	}
 
 	query, err := h.queryService.Create(r.Context(), projectID, datasourceID, serviceReq)
 	if err != nil {
+		// Check for validation errors (bad request, not server error)
+		if errors.Is(err, sqlvalidator.ErrMultipleStatements) {
+			if err := ErrorResponse(w, http.StatusBadRequest, "invalid_sql", err.Error()); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
 		h.logger.Error("Failed to create query",
 			zap.String("project_id", projectID.String()),
 			zap.Error(err))
@@ -285,7 +285,6 @@ func (h *QueriesHandler) Update(w http.ResponseWriter, r *http.Request) {
 		NaturalLanguagePrompt: req.NaturalLanguagePrompt,
 		AdditionalContext:     req.AdditionalContext,
 		SQLQuery:              req.SQLQuery,
-		Dialect:               req.Dialect,
 		IsEnabled:             req.IsEnabled,
 	}
 
@@ -293,6 +292,13 @@ func (h *QueriesHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			if err := ErrorResponse(w, http.StatusNotFound, "not_found", "Query not found"); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
+		// Check for validation errors (bad request, not server error)
+		if errors.Is(err, sqlvalidator.ErrMultipleStatements) {
+			if err := ErrorResponse(w, http.StatusBadRequest, "invalid_sql", err.Error()); err != nil {
 				h.logger.Error("Failed to write error response", zap.Error(err))
 			}
 			return
@@ -429,7 +435,15 @@ func (h *QueriesHandler) Test(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.queryService.Test(r.Context(), projectID, datasourceID, serviceReq)
 	if err != nil {
-		// For test, return error as result (like TestConnection pattern)
+		// Check for validation errors (bad request, not execution failure)
+		if errors.Is(err, sqlvalidator.ErrMultipleStatements) {
+			if err := ErrorResponse(w, http.StatusBadRequest, "invalid_sql", err.Error()); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
+
+		// For execution failures, return error as result (like TestConnection pattern)
 		h.logger.Info("Query test failed",
 			zap.String("project_id", projectID.String()),
 			zap.Error(err))

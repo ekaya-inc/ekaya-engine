@@ -12,6 +12,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
+	sqlvalidator "github.com/ekaya-inc/ekaya-engine/pkg/sql"
 )
 
 // QueryService orchestrates query management and execution.
@@ -36,21 +37,21 @@ type QueryService interface {
 }
 
 // CreateQueryRequest contains fields for creating a new query.
+// Note: Dialect is derived from datasource type, not provided by caller.
 type CreateQueryRequest struct {
 	NaturalLanguagePrompt string `json:"natural_language_prompt"`
 	AdditionalContext     string `json:"additional_context,omitempty"`
 	SQLQuery              string `json:"sql_query"`
-	Dialect               string `json:"dialect"`
 	IsEnabled             bool   `json:"is_enabled"`
 }
 
 // UpdateQueryRequest contains fields for updating a query.
 // All fields are optional - only non-nil values are updated.
+// Note: Dialect cannot be updated - it's derived from datasource type.
 type UpdateQueryRequest struct {
 	NaturalLanguagePrompt *string `json:"natural_language_prompt,omitempty"`
 	AdditionalContext     *string `json:"additional_context,omitempty"`
 	SQLQuery              *string `json:"sql_query,omitempty"`
-	Dialect               *string `json:"dialect,omitempty"`
 	IsEnabled             *bool   `json:"is_enabled,omitempty"`
 }
 
@@ -96,17 +97,27 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 	if strings.TrimSpace(req.SQLQuery) == "" {
 		return nil, fmt.Errorf("SQL query is required")
 	}
-	if strings.TrimSpace(req.Dialect) == "" {
-		return nil, fmt.Errorf("dialect is required")
+
+	// Validate and normalize SQL query
+	validationResult := sqlvalidator.ValidateAndNormalize(req.SQLQuery)
+	if validationResult.Error != nil {
+		return nil, validationResult.Error
+	}
+	req.SQLQuery = validationResult.NormalizedSQL
+
+	// Fetch datasource to derive dialect from type
+	ds, err := s.datasourceSvc.Get(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get datasource: %w", err)
 	}
 
-	// Create query model
+	// Create query model with dialect derived from datasource type
 	query := &models.Query{
 		ProjectID:             projectID,
 		DatasourceID:          datasourceID,
 		NaturalLanguagePrompt: req.NaturalLanguagePrompt,
 		SQLQuery:              req.SQLQuery,
-		Dialect:               req.Dialect,
+		Dialect:               ds.DatasourceType, // Derived from datasource type
 		IsEnabled:             req.IsEnabled,
 		UsageCount:            0,
 	}
@@ -160,7 +171,17 @@ func (s *queryService) Update(ctx context.Context, projectID, queryID uuid.UUID,
 		return nil, fmt.Errorf("failed to get query: %w", err)
 	}
 
-	// Apply updates
+	// Validate and normalize SQL query if being updated
+	if req.SQLQuery != nil {
+		validationResult := sqlvalidator.ValidateAndNormalize(*req.SQLQuery)
+		if validationResult.Error != nil {
+			return nil, validationResult.Error
+		}
+		normalized := validationResult.NormalizedSQL
+		req.SQLQuery = &normalized
+	}
+
+	// Apply updates (dialect is not updatable - derived from datasource type)
 	if req.NaturalLanguagePrompt != nil {
 		query.NaturalLanguagePrompt = *req.NaturalLanguagePrompt
 	}
@@ -169,9 +190,6 @@ func (s *queryService) Update(ctx context.Context, projectID, queryID uuid.UUID,
 	}
 	if req.SQLQuery != nil {
 		query.SQLQuery = *req.SQLQuery
-	}
-	if req.Dialect != nil {
-		query.Dialect = *req.Dialect
 	}
 	if req.IsEnabled != nil {
 		query.IsEnabled = *req.IsEnabled
@@ -291,6 +309,13 @@ func (s *queryService) Test(ctx context.Context, projectID, datasourceID uuid.UU
 		return nil, fmt.Errorf("SQL query is required")
 	}
 
+	// Validate and normalize SQL query
+	validationResult := sqlvalidator.ValidateAndNormalize(req.SQLQuery)
+	if validationResult.Error != nil {
+		return nil, validationResult.Error
+	}
+	req.SQLQuery = validationResult.NormalizedSQL
+
 	// Get datasource config
 	ds, err := s.datasourceSvc.Get(ctx, projectID, datasourceID)
 	if err != nil {
@@ -319,6 +344,13 @@ func (s *queryService) Validate(ctx context.Context, projectID, datasourceID uui
 	if strings.TrimSpace(sqlQuery) == "" {
 		return fmt.Errorf("SQL query is required")
 	}
+
+	// Validate and normalize SQL query
+	validationResult := sqlvalidator.ValidateAndNormalize(sqlQuery)
+	if validationResult.Error != nil {
+		return validationResult.Error
+	}
+	sqlQuery = validationResult.NormalizedSQL
 
 	// Get datasource config
 	ds, err := s.datasourceSvc.Get(ctx, projectID, datasourceID)
