@@ -2,6 +2,7 @@ import { ArrowLeft, CheckCircle, XCircle, Loader2, Pencil } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 
+import { getAdapterInfo } from "../constants/adapters";
 import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext";
 import { useToast } from "../hooks/useToast";
 import sdapApi from "../services/sdapApi";
@@ -12,58 +13,6 @@ import { Card, CardContent } from "./ui/Card";
 import { Input } from "./ui/Input";
 import { Label } from "./ui/Label";
 import { Switch } from "./ui/Switch";
-
-const TYPE_MAPPING: Record<string, DatasourceType> = {
-  postgresql: "postgres",
-  mysql: "mysql",
-  clickhouse: "clickhouse",
-  mssql: "mssql",
-  snowflake: "snowflake",
-  bigquery: "bigquery",
-  databricks: "databricks",
-  redshift: "redshift",
-};
-
-interface AdapterInfo {
-  name: string;
-  icon: string | null;
-  description?: string;
-}
-
-const getAdapterInfo = (adapterId?: string): AdapterInfo => {
-  const postgresInfo: AdapterInfo = {
-    name: "PostgreSQL",
-    icon: "/icons/adapters/PostgreSQL.png",
-  };
-  const adapterMap: Record<string, AdapterInfo> = {
-    postgres: postgresInfo,
-    postgresql: postgresInfo,
-    mysql: { name: "MySQL", icon: "/icons/adapters/MySQL.png" },
-    mssql: {
-      name: "Microsoft SQL Server",
-      icon: "/icons/adapters/MSSQL.png",
-    },
-    clickhouse: {
-      name: "ClickHouse",
-      icon: "/icons/adapters/ClickHouse.png",
-    },
-    snowflake: { name: "Snowflake", icon: "/icons/adapters/Snowflake.png" },
-    bigquery: {
-      name: "Google BigQuery",
-      icon: "/icons/adapters/BigQuery.png",
-    },
-    databricks: {
-      name: "Databricks",
-      icon: "/icons/adapters/Databricks.png",
-    },
-    redshift: {
-      name: "Amazon Redshift",
-      icon: "/icons/adapters/AmazonRedshift.png",
-    },
-  };
-
-  return adapterMap[adapterId ?? ""] ?? { name: "Datasource", icon: null };
-};
 
 interface DatasourceFormConfig {
   host: string;
@@ -173,8 +122,7 @@ const DatasourceConfiguration = ({
 
     try {
       const testDetails = {
-        type: (TYPE_MAPPING[selectedAdapter ?? ""] ??
-          selectedAdapter) as DatasourceType,
+        type: selectedAdapter as DatasourceType,
         host: config.host,
         port: parseInt(config.port),
         name: config.name,
@@ -238,8 +186,7 @@ const DatasourceConfiguration = ({
     try {
       const datasourceId =
         connectionDetails?.datasourceId ?? selectedDatasource?.datasourceId;
-      const datasourceType = (TYPE_MAPPING[selectedAdapter ?? ""] ??
-        selectedAdapter) as DatasourceType;
+      const datasourceType = selectedAdapter as DatasourceType;
       const apiConfig = {
         type: datasourceType,
         host: config.host,
@@ -507,7 +454,6 @@ const DatasourceConfiguration = ({
             <h1 className="text-3xl font-bold text-text-primary">
               Configure {adapterInfo?.name}
             </h1>
-            <p className="text-text-secondary">{adapterInfo?.description}</p>
           </div>
         </div>
       </div>

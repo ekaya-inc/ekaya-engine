@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
+import ErrorBoundary from './components/ErrorBoundary';
 import Layout from './components/Layout';
 import ProjectDataLoader from './components/ProjectDataLoader';
 import { ThemeProvider } from './components/ThemeProvider';
@@ -26,6 +27,7 @@ const App = (): JSX.Element => {
         <DatasourceConnectionProvider>
           <ToastProviderComponent>
             <Router>
+              <ErrorBoundary>
               <Routes>
                 <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
                 <Route path="/" element={<HomePage />} />
@@ -41,6 +43,7 @@ const App = (): JSX.Element => {
                   <Route path="help" element={<HelpPage />} />
                 </Route>
               </Routes>
+              </ErrorBoundary>
             </Router>
           </ToastProviderComponent>
         </DatasourceConnectionProvider>
