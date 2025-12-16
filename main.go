@@ -125,7 +125,6 @@ func main() {
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, logger)
 	schemaService := services.NewSchemaService(schemaRepo, datasourceService, adapterFactory, logger)
-	_ = schemaService // Will be used when schema handler is added in a future phase
 
 	mux := http.NewServeMux()
 
@@ -167,6 +166,10 @@ func main() {
 	// Register datasources handler (protected)
 	datasourcesHandler := handlers.NewDatasourcesHandler(datasourceService, logger)
 	datasourcesHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register schema handler (protected)
+	schemaHandler := handlers.NewSchemaHandler(schemaService, logger)
+	schemaHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"
