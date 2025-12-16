@@ -445,6 +445,73 @@ func TestSchemaService_SaveSelections_Deselect_Integration(t *testing.T) {
 	}
 }
 
+func TestSchemaService_SaveSelections_RoundTrip_Integration(t *testing.T) {
+	// This test verifies the full round-trip: save selections, then retrieve
+	// schema via GetDatasourceSchema and verify is_selected flags are correct.
+	// This catches bugs where the frontend and backend have mismatched expectations
+	// (e.g., frontend sends "users" but backend expects "public.users").
+	tc := setupSchemaServiceTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create tables with columns (all unselected initially)
+	usersTable := tc.createTestTable(ctx, "public", "users", false)
+	tc.createTestColumn(ctx, usersTable.ID, "id", "uuid", 1, false)
+	tc.createTestColumn(ctx, usersTable.ID, "email", "text", 2, false)
+	tc.createTestColumn(ctx, usersTable.ID, "password_hash", "text", 3, false)
+
+	ordersTable := tc.createTestTable(ctx, "public", "orders", false)
+	tc.createTestColumn(ctx, ordersTable.ID, "id", "uuid", 1, false)
+	tc.createTestColumn(ctx, ordersTable.ID, "total", "numeric", 2, false)
+
+	// Save selections using schema-qualified names (as the frontend now does)
+	tableSelections := map[string]bool{
+		"public.users":  true,
+		"public.orders": true,
+	}
+	columnSelections := map[string][]string{
+		"public.users":  {"id", "email"}, // password_hash excluded
+		"public.orders": {"id", "total"},
+	}
+
+	err := tc.service.SaveSelections(ctx, tc.projectID, tc.dsID, tableSelections, columnSelections)
+	if err != nil {
+		t.Fatalf("SaveSelections failed: %v", err)
+	}
+
+	// Now retrieve the schema via GetDatasourceSchema (simulates frontend reload)
+	schema, err := tc.service.GetDatasourceSchema(ctx, tc.projectID, tc.dsID)
+	if err != nil {
+		t.Fatalf("GetDatasourceSchema failed: %v", err)
+	}
+
+	// Verify tables have is_selected=true
+	for _, tbl := range schema.Tables {
+		if !tbl.IsSelected {
+			t.Errorf("expected table %s.%s to have is_selected=true after save", tbl.SchemaName, tbl.TableName)
+		}
+	}
+
+	// Verify columns have correct is_selected state
+	for _, tbl := range schema.Tables {
+		for _, col := range tbl.Columns {
+			// password_hash should not be selected
+			if tbl.TableName == "users" && col.ColumnName == "password_hash" {
+				if col.IsSelected {
+					t.Errorf("expected users.password_hash to have is_selected=false")
+				}
+			} else {
+				// All other columns should be selected
+				if !col.IsSelected {
+					t.Errorf("expected %s.%s to have is_selected=true", tbl.TableName, col.ColumnName)
+				}
+			}
+		}
+	}
+}
+
 // ============================================================================
 // GetSelectedDatasourceSchema Integration Tests
 // ============================================================================

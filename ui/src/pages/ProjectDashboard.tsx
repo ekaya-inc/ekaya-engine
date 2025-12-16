@@ -3,7 +3,8 @@ import {
   Brain,
   Check,
   Database,
-  FileText,
+  Layers,
+  ListTree,
   Loader2,
   MessageCircleQuestion,
   Network,
@@ -385,7 +386,7 @@ const ProjectDashboard = () => {
     },
     {
       title: 'Schema',
-      icon: FileText,
+      icon: ListTree,
       path: `/projects/${pid}/schema`,
       disabled: !isConnected, // Disabled if no datasource configured
       color: 'green',
@@ -409,7 +410,7 @@ const ProjectDashboard = () => {
     },
     {
       title: 'Ontology',
-      icon: Brain,
+      icon: Layers,
       path: `/projects/${pid}/ontology`,
       disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
       color: 'purple',

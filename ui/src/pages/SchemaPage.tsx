@@ -2,7 +2,7 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
-  Database,
+  ListTree,
   RefreshCw,
   Table2,
   Columns,
@@ -22,6 +22,10 @@ import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext
 import { useToast } from "../hooks/useToast";
 import engineApi from "../services/engineApi";
 import type { SchemaTable as ApiSchemaTable } from "../types";
+import {
+  buildSelectionPayloads,
+  buildTableNameToQualified,
+} from "../utils/schemaUtils";
 
 interface Column {
   name: string;
@@ -266,24 +270,13 @@ const SchemaPage = () => {
     try {
       setIsStartingExtraction(true);
 
-      // Build table selections as Record<string, boolean>
-      const tableSelections: Record<string, boolean> = {};
-      schemaData.tables.forEach(table => {
-        tableSelections[table.name] = selectionState[table.name]?.selected ?? false;
-      });
-
-      // Collect selected columns per table
-      const columnSelections: Record<string, string[]> = {};
-      schemaData.tables.forEach(table => {
-        if (selectionState[table.name]?.selected) {
-          const tableColumns = table.columns
-            .filter(col => selectionState[table.name]?.columns[col.name])
-            .map(col => col.name);
-          if (tableColumns.length > 0) {
-            columnSelections[table.name] = tableColumns;
-          }
-        }
-      });
+      // Build schema-qualified table name lookup and selection payloads
+      const tableNameToQualified = buildTableNameToQualified(apiTables);
+      const { tableSelections, columnSelections } = buildSelectionPayloads(
+        schemaData.tables,
+        selectionState,
+        tableNameToQualified
+      );
 
       // Save schema selections to database
       await engineApi.saveSchemaSelections(pid, selectedDatasource.datasourceId, tableSelections, columnSelections);
@@ -314,7 +307,7 @@ const SchemaPage = () => {
     } finally {
       setIsStartingExtraction(false);
     }
-  }, [schemaData, pid, selectedDatasource?.datasourceId, selectionState, refreshSchemaSelections, toast, navigate]);
+  }, [schemaData, pid, selectedDatasource?.datasourceId, selectionState, apiTables, refreshSchemaSelections, toast, navigate]);
 
   // Handle refresh schema from datasource
   const handleRefreshSchema = useCallback(async (): Promise<void> => {
@@ -452,7 +445,7 @@ const SchemaPage = () => {
     );
   }
 
-  // Empty database state
+  // Empty schema state
   if (schemaData.tables.length === 0) {
     return (
       <div className="mx-auto max-w-6xl">
@@ -465,12 +458,15 @@ const SchemaPage = () => {
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center max-w-md p-6">
             <div className="mb-4">
-              <Database className="h-16 w-16 mx-auto text-muted-foreground" />
+              <ListTree className="h-16 w-16 mx-auto text-muted-foreground" />
             </div>
-            <h2 className="text-xl font-semibold mb-2">Datasource is empty</h2>
-            <p className="text-sm text-muted-foreground">
-              You can use Ekaya to set up and load your data
-            </p>
+            <h2 className="text-xl font-semibold mb-4">Schema is empty</h2>
+            <Button
+              onClick={handleRefreshSchema}
+              disabled={isRefreshingSchema || !selectedDatasource?.datasourceId}
+            >
+              {isRefreshingSchema ? 'Importing...' : 'Import'}
+            </Button>
           </div>
         </div>
       </div>
@@ -520,7 +516,7 @@ const SchemaPage = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/10">
-                <Database className="h-5 w-5 text-green-500" />
+                <ListTree className="h-5 w-5 text-green-500" />
               </div>
               <div>
                 <CardTitle>{schemaData.catalog}</CardTitle>

@@ -6,6 +6,7 @@ import {
   MessageCircle,
   FileText,
   ExternalLink,
+  ListTree,
   Zap,
   Shield,
   Database,
@@ -49,7 +50,7 @@ const HelpPage = () => {
       description: "Learn how to establish a connection to your datasource",
     },
     {
-      icon: FileText,
+      icon: ListTree,
       title: "Managing Schemas",
       description: "Understand how to view and modify database schemas",
     },
