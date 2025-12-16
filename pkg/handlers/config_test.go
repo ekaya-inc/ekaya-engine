@@ -22,6 +22,10 @@ func (m *mockAdapterFactory) NewConnectionTester(_ context.Context, _ string, _ 
 	return nil, nil
 }
 
+func (m *mockAdapterFactory) NewSchemaDiscoverer(_ context.Context, _ string, _ map[string]any) (datasource.SchemaDiscoverer, error) {
+	return nil, nil
+}
+
 func (m *mockAdapterFactory) ListTypes() []datasource.DatasourceAdapterInfo {
 	if m.types != nil {
 		return m.types

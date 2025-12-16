@@ -10,6 +10,9 @@ type DatasourceAdapterFactory interface {
 	// NewConnectionTester creates a connection tester for the given datasource type.
 	NewConnectionTester(ctx context.Context, dsType string, config map[string]any) (ConnectionTester, error)
 
+	// NewSchemaDiscoverer creates a schema discoverer for the given datasource type.
+	NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any) (SchemaDiscoverer, error)
+
 	// ListTypes returns info for all registered adapter types.
 	ListTypes() []DatasourceAdapterInfo
 }
@@ -25,6 +28,14 @@ func (f *registryFactory) NewConnectionTester(ctx context.Context, dsType string
 	factory := GetFactory(dsType)
 	if factory == nil {
 		return nil, fmt.Errorf("unsupported datasource type: %s (not compiled in)", dsType)
+	}
+	return factory(ctx, config)
+}
+
+func (f *registryFactory) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any) (SchemaDiscoverer, error) {
+	factory := GetSchemaDiscovererFactory(dsType)
+	if factory == nil {
+		return nil, fmt.Errorf("schema discovery not supported for type: %s", dsType)
 	}
 	return factory(ctx, config)
 }
