@@ -1,4 +1,4 @@
-import type { SchemaTable } from '../types';
+import type { DatasourceSchema, SchemaTable } from '../types';
 
 /**
  * Builds a lookup map from table_name to schema-qualified name (schema.table).
@@ -58,4 +58,36 @@ export function buildSelectionPayloads(
   }
 
   return { tableSelections, columnSelections };
+}
+
+/**
+ * Transform DatasourceSchema to CodeMirror SQLNamespace format for autocomplete.
+ * Includes both schema-qualified and unqualified table names for flexibility.
+ *
+ * @example
+ * // Input
+ * { tables: [{ table_name: "users", schema_name: "public", columns: [{ column_name: "id" }] }] }
+ * // Output
+ * { "public.users": ["id"], "users": ["id"] }
+ */
+export function toCodeMirrorSchema(
+  schema: DatasourceSchema | null | undefined
+): Record<string, readonly string[]> {
+  if (!schema?.tables) return {};
+
+  const result: Record<string, string[]> = {};
+
+  for (const table of schema.tables) {
+    const columns = table.columns.map((c) => c.column_name);
+
+    // Always add unqualified table name
+    result[table.table_name] = columns;
+
+    // Add schema-qualified name if schema_name exists
+    if (table.schema_name) {
+      result[`${table.schema_name}.${table.table_name}`] = columns;
+    }
+  }
+
+  return result;
 }

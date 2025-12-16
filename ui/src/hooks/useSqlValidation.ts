@@ -38,7 +38,6 @@ export function useSqlValidation({
 
   // Use refs to track the latest values and avoid stale closures
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
   const lastSqlRef = useRef<string>('');
 
   /**
@@ -49,12 +48,6 @@ export function useSqlValidation({
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
-    }
-
-    // Abort any in-flight request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
     }
 
     setStatus('idle');
@@ -73,12 +66,6 @@ export function useSqlValidation({
         timeoutRef.current = null;
       }
 
-      // Abort any in-flight request
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-      }
-
       // Don't validate empty queries
       const trimmedSql = sql.trim();
       if (!trimmedSql) {
@@ -95,6 +82,10 @@ export function useSqlValidation({
 
       lastSqlRef.current = trimmedSql;
 
+      // Clear stale validation state immediately when SQL changes
+      setStatus('idle');
+      setError(null);
+
       // Set debounced validation
       timeoutRef.current = setTimeout(async () => {
         setStatus('validating');
@@ -104,6 +95,11 @@ export function useSqlValidation({
           const response = await engineApi.validateQuery(projectId, datasourceId, {
             sql_query: trimmedSql,
           });
+
+          // Check if this response is still for the current SQL (race condition guard)
+          if (trimmedSql !== lastSqlRef.current) {
+            return; // Discard stale response
+          }
 
           if (response.success && response.data) {
             if (response.data.valid) {
@@ -118,9 +114,9 @@ export function useSqlValidation({
             setError(response.error ?? 'Validation failed');
           }
         } catch (err) {
-          // Ignore aborted requests
-          if (err instanceof Error && err.name === 'AbortError') {
-            return;
+          // Check if this response is still for the current SQL (race condition guard)
+          if (trimmedSql !== lastSqlRef.current) {
+            return; // Discard stale response
           }
 
           setStatus('invalid');
@@ -136,9 +132,6 @@ export function useSqlValidation({
     return () => {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
-      }
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
       }
     };
   }, []);

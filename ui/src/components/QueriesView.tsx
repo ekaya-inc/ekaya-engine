@@ -20,12 +20,13 @@ import {
   Loader2,
   RefreshCw,
 } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 
 import { useSqlValidation, type ValidationStatus } from '../hooks/useSqlValidation';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
-import type { Query, SqlDialect, CreateQueryRequest } from '../types';
+import type { DatasourceSchema, Query, SqlDialect, CreateQueryRequest } from '../types';
+import { toCodeMirrorSchema } from '../utils/schemaUtils';
 
 import { DeleteQueryDialog } from './DeleteQueryDialog';
 import { SqlEditor } from './SqlEditor';
@@ -59,6 +60,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
   const [queries, setQueries] = useState<Query[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [schema, setSchema] = useState<DatasourceSchema | null>(null);
 
   // UI state
   const [selectedQuery, setSelectedQuery] = useState<Query | null>(null);
@@ -81,6 +83,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testPassed, setTestPassed] = useState(false);
+  const [editTestPassed, setEditTestPassed] = useState(false);
 
   // Delete dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -126,6 +129,23 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
     loadQueries();
   }, [loadQueries]);
 
+  // Fetch schema for autocomplete (fire-and-forget, non-blocking)
+  useEffect(() => {
+    const fetchSchema = async () => {
+      const response = await engineApi.getSchema(projectId, datasourceId);
+      if (response.success && response.data) {
+        setSchema(response.data);
+      }
+    };
+    fetchSchema();
+  }, [projectId, datasourceId]);
+
+  // Transform schema to CodeMirror format for autocomplete
+  const codeMirrorSchema = useMemo(
+    () => toCodeMirrorSchema(schema),
+    [schema]
+  );
+
   // Filter queries based on search
   const filteredQueries = queries.filter(
     (query) =>
@@ -169,6 +189,8 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         });
         if (isCreateMode) {
           setTestPassed(true);
+        } else {
+          setEditTestPassed(true);
         }
         return true;
       } else {
@@ -264,6 +286,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
       is_enabled: query.is_enabled,
     });
     editValidation.reset();
+    setEditTestPassed(false);
   };
 
   /**
@@ -633,6 +656,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                         createValidation.validate(value);
                       }}
                       dialect={dialect}
+                      schema={codeMirrorSchema}
                       validationStatus={getValidationStatus(createValidation.status)}
                       validationError={createValidation.error ?? undefined}
                       placeholder="SELECT * FROM..."
@@ -770,9 +794,11 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                       value={editingState.sql_query}
                       onChange={(value) => {
                         setEditingState({ ...editingState, sql_query: value });
+                        setEditTestPassed(false);
                         editValidation.validate(value);
                       }}
                       dialect={dialect}
+                      schema={codeMirrorSchema}
                       validationStatus={getValidationStatus(editValidation.status)}
                       validationError={editValidation.error ?? undefined}
                       placeholder="SELECT * FROM..."
@@ -830,6 +856,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                         disabled={
                           !editingState.natural_language_prompt.trim() ||
                           !editingState.sql_query.trim() ||
+                          !editTestPassed ||
                           isSaving
                         }
                       >
@@ -842,6 +869,12 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                       </Button>
                     </div>
                   </div>
+
+                  {!editTestPassed && editingState.sql_query.trim() && (
+                    <p className="text-sm text-amber-600 dark:text-amber-400">
+                      Please test the query before saving
+                    </p>
+                  )}
                 </CardContent>
               </>
             ) : selectedQuery ? (
@@ -937,6 +970,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                       value={selectedQuery.sql_query}
                       onChange={() => {}}
                       dialect={dialect}
+                      schema={codeMirrorSchema}
                       readOnly
                       minHeight="150px"
                     />

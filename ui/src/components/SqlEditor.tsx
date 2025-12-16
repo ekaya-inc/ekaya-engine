@@ -6,7 +6,7 @@
 import { sql, PostgreSQL, MySQL, SQLite, MSSQL } from '@codemirror/lang-sql';
 import { oneDark } from '@codemirror/theme-one-dark';
 import CodeMirror from '@uiw/react-codemirror';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 
 import type { SqlDialect } from '../types';
@@ -19,6 +19,7 @@ interface SqlEditorProps {
   value: string;
   onChange: (value: string) => void;
   dialect: SqlDialect;
+  schema?: Record<string, readonly string[]>;
   readOnly?: boolean;
   validationStatus?: ValidationStatus;
   validationError?: string | undefined;
@@ -64,6 +65,7 @@ export function SqlEditor({
   value,
   onChange,
   dialect,
+  schema,
   readOnly = false,
   validationStatus = 'idle',
   validationError,
@@ -95,9 +97,18 @@ export function SqlEditor({
     return () => mediaQuery.removeEventListener('change', handler);
   }, [theme]);
 
-  const extensions = [
-    sql({ dialect: getCodeMirrorDialect(dialect) }),
-  ];
+  // Memoize extensions to avoid recreating on every render
+  // Recreate when dialect or schema changes
+  const extensions = useMemo(
+    () => [
+      sql({
+        dialect: getCodeMirrorDialect(dialect),
+        upperCaseKeywords: true,
+        ...(schema && { schema }),
+      }),
+    ],
+    [dialect, schema]
+  );
 
   const borderClass = getBorderClass(validationStatus);
 
