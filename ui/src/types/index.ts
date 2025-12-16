@@ -9,3 +9,4 @@ export * from './datasource';
 export * from './sdap';
 export * from './ontology';
 export * from './schema';
+export * from './query';

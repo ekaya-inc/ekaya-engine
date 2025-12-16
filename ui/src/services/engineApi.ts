@@ -8,14 +8,20 @@ import type {
   ApiResponse,
   ConnectionDetails,
   CreateDatasourceResponse,
+  CreateQueryRequest,
   CreateRelationshipRequest,
   DatasourceConfig,
   DatasourceSchema,
   DatasourceType,
   DeleteDatasourceResponse,
+  DeleteQueryResponse,
   DiscoveryResults,
+  ExecuteQueryRequest,
+  ExecuteQueryResponse,
   GetDatasourceResponse,
   ListDatasourcesResponse,
+  ListQueriesResponse,
+  Query,
   RelationshipCandidatesResponse,
   RelationshipDetail,
   RelationshipsResponse,
@@ -23,6 +29,10 @@ import type {
   SchemaRefreshResponse,
   TestConnectionRequest,
   TestConnectionResponse,
+  TestQueryRequest,
+  UpdateQueryRequest,
+  ValidateQueryRequest,
+  ValidateQueryResponse,
 } from '../types';
 
 const ENGINE_BASE_URL = '/api/projects';
@@ -308,6 +318,149 @@ class EngineApiService {
   ): Promise<ApiResponse<RelationshipCandidatesResponse>> {
     return this.makeRequest<RelationshipCandidatesResponse>(
       `/${projectId}/datasources/${datasourceId}/schema/relationships/candidates`
+    );
+  }
+
+  // --- Query Management Methods ---
+
+  /**
+   * List all queries for a datasource
+   * GET /api/projects/{projectId}/datasources/{datasourceId}/queries
+   */
+  async listQueries(
+    projectId: string,
+    datasourceId: string
+  ): Promise<ApiResponse<ListQueriesResponse>> {
+    return this.makeRequest<ListQueriesResponse>(
+      `/${projectId}/datasources/${datasourceId}/queries`
+    );
+  }
+
+  /**
+   * Get a single query by ID
+   * GET /api/projects/{projectId}/datasources/{datasourceId}/queries/{queryId}
+   */
+  async getQuery(
+    projectId: string,
+    datasourceId: string,
+    queryId: string
+  ): Promise<ApiResponse<Query>> {
+    return this.makeRequest<Query>(
+      `/${projectId}/datasources/${datasourceId}/queries/${queryId}`
+    );
+  }
+
+  /**
+   * Create a new query
+   * Note: Dialect is derived from datasource type by the backend
+   * POST /api/projects/{projectId}/datasources/{datasourceId}/queries
+   */
+  async createQuery(
+    projectId: string,
+    datasourceId: string,
+    request: CreateQueryRequest
+  ): Promise<ApiResponse<Query>> {
+    return this.makeRequest<Query>(
+      `/${projectId}/datasources/${datasourceId}/queries`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request),
+      }
+    );
+  }
+
+  /**
+   * Update an existing query
+   * Note: Dialect cannot be updated - it's derived from datasource type
+   * PUT /api/projects/{projectId}/datasources/{datasourceId}/queries/{queryId}
+   */
+  async updateQuery(
+    projectId: string,
+    datasourceId: string,
+    queryId: string,
+    request: UpdateQueryRequest
+  ): Promise<ApiResponse<Query>> {
+    return this.makeRequest<Query>(
+      `/${projectId}/datasources/${datasourceId}/queries/${queryId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(request),
+      }
+    );
+  }
+
+  /**
+   * Delete a query (soft delete)
+   * DELETE /api/projects/{projectId}/datasources/{datasourceId}/queries/{queryId}
+   */
+  async deleteQuery(
+    projectId: string,
+    datasourceId: string,
+    queryId: string
+  ): Promise<ApiResponse<DeleteQueryResponse>> {
+    return this.makeRequest<DeleteQueryResponse>(
+      `/${projectId}/datasources/${datasourceId}/queries/${queryId}`,
+      {
+        method: 'DELETE',
+      }
+    );
+  }
+
+  /**
+   * Execute a saved query
+   * POST /api/projects/{projectId}/datasources/{datasourceId}/queries/{queryId}/execute
+   */
+  async executeQuery(
+    projectId: string,
+    datasourceId: string,
+    queryId: string,
+    request?: ExecuteQueryRequest
+  ): Promise<ApiResponse<ExecuteQueryResponse>> {
+    const options: RequestInit = {
+      method: 'POST',
+    };
+    if (request) {
+      options.body = JSON.stringify(request);
+    }
+    return this.makeRequest<ExecuteQueryResponse>(
+      `/${projectId}/datasources/${datasourceId}/queries/${queryId}/execute`,
+      options
+    );
+  }
+
+  /**
+   * Test a SQL query without saving it
+   * POST /api/projects/{projectId}/datasources/{datasourceId}/queries/test
+   */
+  async testQuery(
+    projectId: string,
+    datasourceId: string,
+    request: TestQueryRequest
+  ): Promise<ApiResponse<ExecuteQueryResponse>> {
+    return this.makeRequest<ExecuteQueryResponse>(
+      `/${projectId}/datasources/${datasourceId}/queries/test`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request),
+      }
+    );
+  }
+
+  /**
+   * Validate SQL syntax without executing
+   * POST /api/projects/{projectId}/datasources/{datasourceId}/queries/validate
+   */
+  async validateQuery(
+    projectId: string,
+    datasourceId: string,
+    request: ValidateQueryRequest
+  ): Promise<ApiResponse<ValidateQueryResponse>> {
+    return this.makeRequest<ValidateQueryResponse>(
+      `/${projectId}/datasources/${datasourceId}/queries/validate`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request),
+      }
     );
   }
 
