@@ -180,6 +180,14 @@ make check
 make test-short
 ```
 
+### Integration Test Policy
+
+The idea for integration tests is that the test suite would create a single container, then use that container for all of the tests. If there are destructive tests, order them at the end so that they do not interfere.
+
+- Use `TestMain(m *testing.M)` to create shared Docker container once
+- Each test gets unique `project_id` for metadata isolation
+- Name destructive tests with `Test_Z_Destructive_*` prefix so Go runs them last alphabetically
+
 ## GitHub Actions & Pull Request Merging
 
 ### Important: Wait for CI/CD Checks

@@ -5,7 +5,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { getAdapterInfo } from "../constants/adapters";
 import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext";
 import { useToast } from "../hooks/useToast";
-import sdapApi from "../services/sdapApi";
+import engineApi from "../services/engineApi";
 import type { DatasourceType, SSLMode } from "../types";
 
 import { Button } from "./ui/Button";
@@ -200,7 +200,7 @@ const DatasourceConfiguration = ({
         ssl_mode: (config.useSSL ? "require" : "disable") as SSLMode,
       };
 
-      sdapApi.validateConnectionDetails(apiConfig);
+      engineApi.validateConnectionDetails(apiConfig);
 
       if (!pid) {
         throw new Error("Project ID not available from route");

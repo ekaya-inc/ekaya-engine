@@ -23,5 +23,12 @@ func init() {
 			}
 			return NewAdapter(ctx, cfg)
 		},
+		SchemaDiscovererFactory: func(ctx context.Context, config map[string]any) (datasource.SchemaDiscoverer, error) {
+			cfg, err := FromMap(config)
+			if err != nil {
+				return nil, err
+			}
+			return NewSchemaDiscoverer(ctx, cfg)
+		},
 	})
 }

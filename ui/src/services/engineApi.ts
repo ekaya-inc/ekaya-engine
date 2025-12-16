@@ -1,6 +1,6 @@
 /**
- * SDAP API Service
- * Handles communication with the Ekaya SDAP REST API
+ * Engine API Service
+ * Handles communication with the Ekaya Engine REST API
  */
 
 import { fetchWithAuth } from '../lib/api';
@@ -19,21 +19,19 @@ import type {
   RelationshipCandidatesResponse,
   RelationshipDetail,
   RelationshipsResponse,
-  SaveSelectionsRequest,
   SaveSelectionsResponse,
   SchemaRefreshResponse,
-  SelectedTablesResponse,
   TestConnectionRequest,
   TestConnectionResponse,
 } from '../types';
 
-const SDAP_BASE_URL = '/api/projects';
+const ENGINE_BASE_URL = '/api/projects';
 
-class SdapApiService {
+class EngineApiService {
   private baseURL: string;
 
   constructor() {
-    this.baseURL = SDAP_BASE_URL;
+    this.baseURL = ENGINE_BASE_URL;
   }
 
   /**
@@ -70,7 +68,7 @@ class SdapApiService {
 
       return data;
     } catch (error) {
-      console.error(`SDAP API Error (${endpoint}):`, error);
+      console.error(`Engine API Error (${endpoint}):`, error);
       throw error;
     }
   }
@@ -178,41 +176,45 @@ class SdapApiService {
   }
 
   /**
-   * List tables with row counts for a project
-   * GET /sdap/v1/{project_id}/tables
-   */
-  async listTables(projectId: string): Promise<ApiResponse<unknown>> {
-    return this.makeRequest<unknown>(`/${projectId}/tables`);
-  }
-
-  /**
-   * Get datasource schema for a project
+   * Get datasource schema
    * Returns comprehensive schema information including tables, columns, and relationships
+   * GET /api/projects/{projectId}/datasources/{datasourceId}/schema
    */
-  async getSchema(projectId: string): Promise<ApiResponse<DatasourceSchema>> {
-    return this.makeRequest<DatasourceSchema>(`/${projectId}/schema`);
+  async getSchema(
+    projectId: string,
+    datasourceId: string
+  ): Promise<ApiResponse<DatasourceSchema>> {
+    return this.makeRequest<DatasourceSchema>(
+      `/${projectId}/datasources/${datasourceId}/schema`
+    );
   }
 
   /**
-   * Get detailed relationships for a project
+   * Get detailed relationships for a datasource
    * Returns comprehensive relationship information including type, cardinality, and approval status
-   * GET /sdap/v1/{project_id}/schema/relationships
+   * GET /api/projects/{projectId}/datasources/{datasourceId}/schema/relationships
    */
-  async getRelationships(projectId: string): Promise<ApiResponse<RelationshipsResponse>> {
-    return this.makeRequest<RelationshipsResponse>(`/${projectId}/schema/relationships`);
+  async getRelationships(
+    projectId: string,
+    datasourceId: string
+  ): Promise<ApiResponse<RelationshipsResponse>> {
+    return this.makeRequest<RelationshipsResponse>(
+      `/${projectId}/datasources/${datasourceId}/schema/relationships`
+    );
   }
 
   /**
    * Create a manual relationship between two columns
    * The relationship will be analyzed to determine cardinality
-   * POST /sdap/v1/{project_id}/schema/relationships
+   * POST /api/projects/{projectId}/datasources/{datasourceId}/schema/relationships
    */
   async createRelationship(
     projectId: string,
+    datasourceId: string,
     request: CreateRelationshipRequest
   ): Promise<ApiResponse<RelationshipDetail>> {
     return this.makeRequest<RelationshipDetail>(
-      `/${projectId}/schema/relationships`,
+      `/${projectId}/datasources/${datasourceId}/schema/relationships`,
       {
         method: 'POST',
         body: JSON.stringify(request),
@@ -223,14 +225,15 @@ class SdapApiService {
   /**
    * Remove a relationship (sets is_approved = false)
    * The relationship remains in the database to prevent re-discovery
-   * DELETE /sdap/v1/{project_id}/schema/relationships/{relationship_id}
+   * DELETE /api/projects/{projectId}/datasources/{datasourceId}/schema/relationships/{relationshipId}
    */
   async removeRelationship(
     projectId: string,
+    datasourceId: string,
     relationshipId: string
   ): Promise<ApiResponse<{ message: string }>> {
     return this.makeRequest<{ message: string }>(
-      `/${projectId}/schema/relationships/${relationshipId}`,
+      `/${projectId}/datasources/${datasourceId}/schema/relationships/${relationshipId}`,
       {
         method: 'DELETE',
       }
@@ -238,57 +241,23 @@ class SdapApiService {
   }
 
   /**
-   * Get saved table selections for a project
-   * Returns null if no selections have been saved (default to all tables)
-   * @deprecated Use getSchemaSelections() to get both tables and columns
-   */
-  async getSelectedTables(projectId: string): Promise<string[] | null> {
-    const response = await this.makeRequest<SelectedTablesResponse>(
-      `/${projectId}/schema/selections`
-    );
-
-    // Extract selected_tables from the data object
-    return response.data?.selected_tables ?? null;
-  }
-
-  /**
-   * Get saved schema selections (both tables and columns) for a project
-   * Returns both selected tables and columns, or null for each if not saved
-   * GET /sdap/v1/{project_id}/schema/selections
-   */
-  async getSchemaSelections(projectId: string): Promise<{
-    tables: string[] | null;
-    columns: Record<string, string[]> | null;
-  }> {
-    const response = await this.makeRequest<SelectedTablesResponse>(
-      `/${projectId}/schema/selections`
-    );
-
-    return {
-      tables: response.data?.selected_tables ?? null,
-      columns: response.data?.selected_columns ?? null,
-    };
-  }
-
-  /**
-   * Save schema selections (tables and columns) for a project
-   * POST /sdap/v1/{project_id}/schema/selections
+   * Save schema selections (tables and columns) for a datasource
+   * POST /api/projects/{projectId}/datasources/{datasourceId}/schema/selections
    */
   async saveSchemaSelections(
     projectId: string,
-    selectedTables: string[],
-    selectedColumns: Record<string, string[]>
+    datasourceId: string,
+    tableSelections: Record<string, boolean>,
+    columnSelections: Record<string, string[]>
   ): Promise<ApiResponse<SaveSelectionsResponse>> {
-    const requestBody: SaveSelectionsRequest = {
-      selected_tables: selectedTables,
-      selected_columns: selectedColumns,
-    };
-
     return this.makeRequest<SaveSelectionsResponse>(
-      `/${projectId}/schema/selections`,
+      `/${projectId}/datasources/${datasourceId}/schema/selections`,
       {
         method: 'POST',
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify({
+          table_selections: tableSelections,
+          column_selections: columnSelections,
+        }),
       }
     );
   }
@@ -296,17 +265,16 @@ class SdapApiService {
   /**
    * Refresh schema from datasource
    * Re-discovers tables and columns from the datasource and updates the schema cache
-   * POST /sdap/v1/{project_id}/schema/refresh
+   * POST /api/projects/{projectId}/datasources/{datasourceId}/schema/refresh
    */
   async refreshSchema(
     projectId: string,
     datasourceId: string
   ): Promise<ApiResponse<SchemaRefreshResponse>> {
     return this.makeRequest<SchemaRefreshResponse>(
-      `/${projectId}/schema/refresh`,
+      `/${projectId}/datasources/${datasourceId}/schema/refresh`,
       {
         method: 'POST',
-        body: JSON.stringify({ datasource_id: datasourceId }),
       }
     );
   }
@@ -314,14 +282,15 @@ class SdapApiService {
   // --- Relationship Discovery Methods ---
 
   /**
-   * Discover relationships for a project (synchronous)
-   * POST /sdap/v1/{project_id}/schema/relationships/discover
+   * Discover relationships for a datasource (synchronous)
+   * POST /api/projects/{projectId}/datasources/{datasourceId}/schema/relationships/discover
    */
   async discoverRelationships(
-    projectId: string
+    projectId: string,
+    datasourceId: string
   ): Promise<ApiResponse<DiscoveryResults>> {
     return this.makeRequest<DiscoveryResults>(
-      `/${projectId}/schema/relationships/discover`,
+      `/${projectId}/datasources/${datasourceId}/schema/relationships/discover`,
       {
         method: 'POST',
       }
@@ -331,24 +300,25 @@ class SdapApiService {
   /**
    * Get relationship candidates (verified and rejected)
    * Useful for understanding what was discovered and why some candidates were rejected
-   * GET /sdap/v1/{project_id}/schema/relationships/candidates
+   * GET /api/projects/{projectId}/datasources/{datasourceId}/schema/relationships/candidates
    */
   async getRelationshipCandidates(
-    projectId: string
+    projectId: string,
+    datasourceId: string
   ): Promise<ApiResponse<RelationshipCandidatesResponse>> {
     return this.makeRequest<RelationshipCandidatesResponse>(
-      `/${projectId}/schema/relationships/candidates`
+      `/${projectId}/datasources/${datasourceId}/schema/relationships/candidates`
     );
   }
 
   /**
-   * Check SDAP API health
+   * Check Engine API health
    */
   async healthCheck(): Promise<ApiResponse<{ status: string }> | null> {
     try {
       return this.makeRequest<{ status: string }>('/health');
     } catch (error) {
-      console.error(`SDAP API Error (health check):`, error);
+      console.error(`Engine API Error (health check):`, error);
       return null;
     }
   }
@@ -398,5 +368,5 @@ class SdapApiService {
 }
 
 // Create and export singleton instance
-const sdapApi = new SdapApiService();
-export default sdapApi;
+const engineApi = new EngineApiService();
+export default engineApi;

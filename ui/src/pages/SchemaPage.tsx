@@ -2,7 +2,7 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
-  Database,
+  ListTree,
   RefreshCw,
   Table2,
   Columns,
@@ -20,7 +20,12 @@ import {
 } from "../components/ui/Card";
 import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext";
 import { useToast } from "../hooks/useToast";
-import sdapApi from "../services/sdapApi";
+import engineApi from "../services/engineApi";
+import type { SchemaTable as ApiSchemaTable } from "../types";
+import {
+  buildSelectionPayloads,
+  buildTableNameToQualified,
+} from "../utils/schemaUtils";
 
 interface Column {
   name: string;
@@ -60,6 +65,7 @@ const SchemaPage = () => {
 
   // State for schema data from API
   const [schemaData, setSchemaData] = useState<SchemaData | null>(null);
+  const [apiTables, setApiTables] = useState<ApiSchemaTable[]>([]); // Raw API response for is_selected
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isStartingExtraction, setIsStartingExtraction] = useState(false);
@@ -67,13 +73,13 @@ const SchemaPage = () => {
 
   // Fetch schema data from API
   useEffect(() => {
-    if (!pid) return;
+    if (!pid || !selectedDatasource?.datasourceId) return;
 
     async function fetchSchema() {
       try {
         setLoading(true);
         setError(null);
-        const response = await sdapApi.getSchema(pid as string);
+        const response = await engineApi.getSchema(pid as string, selectedDatasource?.datasourceId as string);
 
         // Transform API response to match SchemaData interface
         if (!response.data) {
@@ -93,6 +99,7 @@ const SchemaPage = () => {
         };
 
         setSchemaData(transformedData);
+        setApiTables(response.data.tables); // Store raw API tables for is_selected
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Failed to fetch schema";
         console.error("Failed to fetch schema:", errorMessage);
@@ -103,7 +110,7 @@ const SchemaPage = () => {
     }
 
     fetchSchema();
-  }, [pid]);
+  }, [pid, selectedDatasource?.datasourceId]);
 
   const [selectionState, setSelectionState] = useState<SelectionState>({});
   const [expandedTables, setExpandedTables] = useState<ExpandedTables>({});
@@ -111,71 +118,53 @@ const SchemaPage = () => {
   const [isFirstTimeSetup, setIsFirstTimeSetup] = useState(false);
 
   // Initialize selection state when schema data is loaded
+  // Selection state is now embedded in the schema response (is_selected fields)
   useEffect(() => {
-    if (!schemaData || !pid) return;
+    if (!schemaData || !pid || apiTables.length === 0) return;
 
-    const initializeSelections = async () => {
-      try {
-        // Fetch saved table and column selections
-        const savedSelections = await sdapApi.getSchemaSelections(pid);
+    // Check if any table has is_selected=true (indicates previous selections saved)
+    const hasAnySelection = apiTables.some((table) => table.is_selected === true);
 
-        // Check if this is first time setup (no saved selections)
-        const isFirstTime = savedSelections.tables === null;
-        setIsFirstTimeSetup(isFirstTime);
+    // First time setup: no tables have is_selected=true yet
+    const isFirstTime = !hasAnySelection;
+    setIsFirstTimeSetup(isFirstTime);
 
-        const state: SelectionState = {};
-        schemaData.tables.forEach((table) => {
-          // If first time (no saved selections), default to all tables selected
-          // Otherwise, only select tables that are in savedSelections.tables
-          const isTableSelected = isFirstTime || (savedSelections.tables?.includes(table.name) ?? false);
+    // Build selection state from API response
+    const state: SelectionState = {};
 
-          state[table.name] = {
-            selected: isTableSelected,
-            columns: {},
-          };
+    schemaData.tables.forEach((table) => {
+      // Find corresponding API table for is_selected state
+      const apiTable = apiTables.find((t) => t.table_name === table.name);
 
-          // Get saved column list for this table
-          const savedColumns = savedSelections.columns?.[table.name];
-          const tableState = state[table.name];
-          if (!tableState) return;
+      // If first time, default all tables to selected
+      // Otherwise, use the is_selected state from API
+      const isTableSelected = isFirstTime ? true : (apiTable?.is_selected ?? false);
 
-          table.columns.forEach((column) => {
-            if (!isFirstTime && savedColumns && savedColumns.length > 0) {
-              // Use saved column selection if available (subsequent visit)
-              tableState.columns[column.name] = savedColumns.includes(column.name);
-            } else {
-              // First time or no saved columns: follow table selection state
-              tableState.columns[column.name] = isTableSelected;
-            }
-          });
-        });
+      state[table.name] = {
+        selected: isTableSelected,
+        columns: {},
+      };
 
-        setSelectionState(state);
-        // Store initial state for dirty checking
-        setInitialSelectionState(JSON.parse(JSON.stringify(state)));
-      } catch (error) {
-        console.error('Failed to load saved selections:', error);
-        // Fallback: first time setup with all tables selected
-        setIsFirstTimeSetup(true);
-        const state: SelectionState = {};
-        schemaData.tables.forEach((table) => {
-          state[table.name] = {
-            selected: true,
-            columns: {},
-          };
-          const tableState = state[table.name];
-          if (!tableState) return;
-          table.columns.forEach((column) => {
-            tableState.columns[column.name] = true;
-          });
-        });
-        setSelectionState(state);
-        setInitialSelectionState(JSON.parse(JSON.stringify(state)));
-      }
-    };
+      const tableState = state[table.name];
+      if (!tableState) return;
 
-    initializeSelections();
-  }, [schemaData, pid]);
+      table.columns.forEach((column) => {
+        // Find corresponding API column for is_selected state
+        const apiColumn = apiTable?.columns.find((c) => c.column_name === column.name);
+
+        if (isFirstTime) {
+          // First time: all columns selected
+          tableState.columns[column.name] = true;
+        } else {
+          // Use saved selection state
+          tableState.columns[column.name] = apiColumn?.is_selected ?? false;
+        }
+      });
+    });
+
+    setSelectionState(state);
+    setInitialSelectionState(JSON.parse(JSON.stringify(state)));
+  }, [schemaData, pid, apiTables]);
 
   // Calculate if all items are selected
   const allSelected = useMemo(() => {
@@ -276,31 +265,21 @@ const SchemaPage = () => {
 
   // Handle save schema
   const handleSaveSchema = useCallback(async (): Promise<void> => {
-    if (!schemaData || !pid) return;
+    if (!schemaData || !pid || !selectedDatasource?.datasourceId) return;
 
     try {
       setIsStartingExtraction(true);
 
-      // Collect selected table names
-      const selectedTableNames = schemaData.tables
-        .filter(table => selectionState[table.name]?.selected)
-        .map(table => table.name);
-
-      // Collect selected columns per table
-      const selectedColumns: Record<string, string[]> = {};
-      schemaData.tables.forEach(table => {
-        if (selectionState[table.name]?.selected) {
-          const tableColumns = table.columns
-            .filter(col => selectionState[table.name]?.columns[col.name])
-            .map(col => col.name);
-          if (tableColumns.length > 0) {
-            selectedColumns[table.name] = tableColumns;
-          }
-        }
-      });
+      // Build schema-qualified table name lookup and selection payloads
+      const tableNameToQualified = buildTableNameToQualified(apiTables);
+      const { tableSelections, columnSelections } = buildSelectionPayloads(
+        schemaData.tables,
+        selectionState,
+        tableNameToQualified
+      );
 
       // Save schema selections to database
-      await sdapApi.saveSchemaSelections(pid, selectedTableNames, selectedColumns);
+      await engineApi.saveSchemaSelections(pid, selectedDatasource.datasourceId, tableSelections, columnSelections);
 
       // Refresh schema selections state to enable ontology tile
       await refreshSchemaSelections(pid);
@@ -328,7 +307,7 @@ const SchemaPage = () => {
     } finally {
       setIsStartingExtraction(false);
     }
-  }, [schemaData, pid, selectionState, refreshSchemaSelections, toast, navigate]);
+  }, [schemaData, pid, selectedDatasource?.datasourceId, selectionState, apiTables, refreshSchemaSelections, toast, navigate]);
 
   // Handle refresh schema from datasource
   const handleRefreshSchema = useCallback(async (): Promise<void> => {
@@ -346,10 +325,10 @@ const SchemaPage = () => {
       setLoading(true);
 
       // Call the refresh schema API
-      await sdapApi.refreshSchema(pid, selectedDatasource.datasourceId);
+      await engineApi.refreshSchema(pid, selectedDatasource.datasourceId);
 
       // Re-fetch the schema data to show updated tables/columns
-      const response = await sdapApi.getSchema(pid);
+      const response = await engineApi.getSchema(pid, selectedDatasource.datasourceId);
 
       // Transform API response to match SchemaData interface
       if (!response.data) {
@@ -369,6 +348,7 @@ const SchemaPage = () => {
       };
 
       setSchemaData(transformedData);
+      setApiTables(response.data.tables); // Update raw API tables
       setError(null);
 
       toast({
@@ -465,7 +445,7 @@ const SchemaPage = () => {
     );
   }
 
-  // Empty database state
+  // Empty schema state
   if (schemaData.tables.length === 0) {
     return (
       <div className="mx-auto max-w-6xl">
@@ -478,12 +458,15 @@ const SchemaPage = () => {
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center max-w-md p-6">
             <div className="mb-4">
-              <Database className="h-16 w-16 mx-auto text-muted-foreground" />
+              <ListTree className="h-16 w-16 mx-auto text-muted-foreground" />
             </div>
-            <h2 className="text-xl font-semibold mb-2">Datasource is empty</h2>
-            <p className="text-sm text-muted-foreground">
-              You can use Ekaya to set up and load your data
-            </p>
+            <h2 className="text-xl font-semibold mb-4">Schema is empty</h2>
+            <Button
+              onClick={handleRefreshSchema}
+              disabled={isRefreshingSchema || !selectedDatasource?.datasourceId}
+            >
+              {isRefreshingSchema ? 'Importing...' : 'Import'}
+            </Button>
           </div>
         </div>
       </div>
@@ -533,7 +516,7 @@ const SchemaPage = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/10">
-                <Database className="h-5 w-5 text-green-500" />
+                <ListTree className="h-5 w-5 text-green-500" />
               </div>
               <div>
                 <CardTitle>{schemaData.catalog}</CardTitle>

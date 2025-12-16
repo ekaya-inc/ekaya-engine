@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { createContext, useContext, useCallback, useState } from 'react';
 
-import sdapApi from '../services/sdapApi';
+import engineApi from '../services/engineApi';
 import type {
   ApiResponse,
   ConnectionDetails,
@@ -104,7 +104,7 @@ export const DatasourceConnectionProvider = ({
       }
 
       try {
-        const result = await sdapApi.listDataSources(projectId);
+        const result = await engineApi.listDataSources(projectId);
 
         if (result.success && result.data?.datasources) {
           const loadedDatasources: ConnectionDetails[] =
@@ -122,14 +122,21 @@ export const DatasourceConnectionProvider = ({
             setSelectedDatasource(loadedDatasources[0] ?? null);
           }
 
-          // Load schema selections to check if tables are selected
+          // Load schema to check if tables are selected (via is_selected field)
           try {
-            const schemaResult = await sdapApi.getSchemaSelections(projectId);
-            const { tables } = schemaResult;
-            setHasSelectedTables(tables !== null && tables.length > 0);
+            const firstDatasource = loadedDatasources[0];
+            if (firstDatasource?.datasourceId) {
+              const schemaResult = await engineApi.getSchema(projectId, firstDatasource.datasourceId);
+              if (schemaResult.data) {
+                const hasSelections = schemaResult.data.tables.some((t) => t.is_selected === true);
+                setHasSelectedTables(hasSelections);
+              } else {
+                setHasSelectedTables(false);
+              }
+            }
           } catch {
-            // No schema selections yet, this is normal
-            console.log('No schema selections found for project');
+            // No schema yet, this is normal
+            console.log('No schema found for project');
             setHasSelectedTables(false);
           }
         }
@@ -154,16 +161,28 @@ export const DatasourceConnectionProvider = ({
       }
 
       try {
-        const schemaResult = await sdapApi.getSchemaSelections(projectId);
-        const { tables } = schemaResult;
-        setHasSelectedTables(tables !== null && tables.length > 0);
+        // Use the currently selected datasource
+        const datasourceId = selectedDatasource?.datasourceId;
+        if (!datasourceId) {
+          console.log('No datasource selected, cannot refresh schema selections');
+          setHasSelectedTables(false);
+          return;
+        }
+
+        const schemaResult = await engineApi.getSchema(projectId, datasourceId);
+        if (schemaResult.data) {
+          const hasSelections = schemaResult.data.tables.some((t) => t.is_selected === true);
+          setHasSelectedTables(hasSelections);
+        } else {
+          setHasSelectedTables(false);
+        }
       } catch {
-        // No schema selections yet, this is normal
-        console.log('No schema selections found for project');
+        // No schema yet, this is normal
+        console.log('No schema found for project');
         setHasSelectedTables(false);
       }
     },
-    []
+    [selectedDatasource?.datasourceId]
   );
 
   const connect = (details: ConnectionDetails): void => {
@@ -217,8 +236,8 @@ export const DatasourceConnectionProvider = ({
     setError(null);
 
     try {
-      sdapApi.validateConnectionDetails(details);
-      const result = await sdapApi.testDatasourceConnection(projectId, details);
+      engineApi.validateConnectionDetails(details);
+      const result = await engineApi.testDatasourceConnection(projectId, details);
 
       setConnectionStatus({
         success: result.success,
@@ -256,7 +275,7 @@ export const DatasourceConnectionProvider = ({
     setError(null);
 
     try {
-      const result = await sdapApi.createDataSource({
+      const result = await engineApi.createDataSource({
         name: displayName,
         datasourceType,
         config,
@@ -292,7 +311,7 @@ export const DatasourceConnectionProvider = ({
     setError(null);
 
     try {
-      const result = await sdapApi.getDataSource(projectId, datasourceId);
+      const result = await engineApi.getDataSource(projectId, datasourceId);
 
       if (result.success && result.data) {
         const { datasource_id, project_id, name, type, config } = result.data;
@@ -329,7 +348,7 @@ export const DatasourceConnectionProvider = ({
     setError(null);
 
     try {
-      const result = await sdapApi.updateDataSource(
+      const result = await engineApi.updateDataSource(
         projectId,
         datasourceId,
         displayName,
@@ -368,7 +387,7 @@ export const DatasourceConnectionProvider = ({
     setError(null);
 
     try {
-      const result = await sdapApi.deleteDataSource(projectId, datasourceId);
+      const result = await engineApi.deleteDataSource(projectId, datasourceId);
       if (result.success) {
         disconnect(datasourceId);
       }

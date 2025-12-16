@@ -168,3 +168,128 @@ func (m *mockDatasourceService) Delete(ctx context.Context, id uuid.UUID) error 
 func (m *mockDatasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any) error {
 	return m.err
 }
+
+// mockSchemaService is a configurable mock for schema handler tests.
+type mockSchemaService struct {
+	schema        *models.DatasourceSchema
+	table         *models.DatasourceTable
+	relationships []*models.SchemaRelationship
+	relationship  *models.SchemaRelationship
+	refreshResult *models.RefreshResult
+	prompt        string
+	err           error
+}
+
+func (m *mockSchemaService) RefreshDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RefreshResult, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.refreshResult != nil {
+		return m.refreshResult, nil
+	}
+	return &models.RefreshResult{
+		TablesUpserted:       5,
+		ColumnsUpserted:      20,
+		RelationshipsCreated: 3,
+	}, nil
+}
+
+func (m *mockSchemaService) GetDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.DatasourceSchema, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.schema != nil {
+		return m.schema, nil
+	}
+	return &models.DatasourceSchema{
+		ProjectID:    projectID,
+		DatasourceID: datasourceID,
+		Tables:       []*models.DatasourceTable{},
+	}, nil
+}
+
+func (m *mockSchemaService) GetDatasourceTable(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.DatasourceTable, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.table != nil {
+		return m.table, nil
+	}
+	return &models.DatasourceTable{
+		ID:         uuid.New(),
+		SchemaName: "public",
+		TableName:  tableName,
+		IsSelected: true,
+		Columns:    []*models.DatasourceColumn{},
+	}, nil
+}
+
+func (m *mockSchemaService) AddManualRelationship(ctx context.Context, projectID, datasourceID uuid.UUID, req *models.AddRelationshipRequest) (*models.SchemaRelationship, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.relationship != nil {
+		return m.relationship, nil
+	}
+	return &models.SchemaRelationship{
+		ID:               uuid.New(),
+		ProjectID:        projectID,
+		SourceTableID:    uuid.New(),
+		SourceColumnID:   uuid.New(),
+		TargetTableID:    uuid.New(),
+		TargetColumnID:   uuid.New(),
+		RelationshipType: "manual",
+		Cardinality:      "N:1",
+		Confidence:       1.0,
+	}, nil
+}
+
+func (m *mockSchemaService) RemoveRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error {
+	return m.err
+}
+
+func (m *mockSchemaService) GetRelationshipsForDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.relationships != nil {
+		return m.relationships, nil
+	}
+	return []*models.SchemaRelationship{}, nil
+}
+
+func (m *mockSchemaService) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
+	return m.err
+}
+
+func (m *mockSchemaService) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
+	return m.err
+}
+
+func (m *mockSchemaService) SaveSelections(ctx context.Context, projectID, datasourceID uuid.UUID, tableSelections map[string]bool, columnSelections map[string][]string) error {
+	return m.err
+}
+
+func (m *mockSchemaService) GetSelectedDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.DatasourceSchema, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.schema != nil {
+		return m.schema, nil
+	}
+	return &models.DatasourceSchema{
+		ProjectID:    projectID,
+		DatasourceID: datasourceID,
+		Tables:       []*models.DatasourceTable{},
+	}, nil
+}
+
+func (m *mockSchemaService) GetDatasourceSchemaForPrompt(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error) {
+	if m.err != nil {
+		return "", m.err
+	}
+	if m.prompt != "" {
+		return m.prompt, nil
+	}
+	return "Schema prompt for datasource", nil
+}

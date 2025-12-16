@@ -60,3 +60,34 @@ type QueryResult struct {
 	Rows    []map[string]any `json:"rows"`
 	RowsAff int64            `json:"rows_affected"`
 }
+
+// SchemaDiscoverer discovers database schema for metadata tracking.
+// Each implementation owns its connection and must be closed when done.
+// This is separate from SchemaExtractor which is for text2sql workflows.
+type SchemaDiscoverer interface {
+	// DiscoverTables returns all user tables (excludes system schemas).
+	DiscoverTables(ctx context.Context) ([]TableMetadata, error)
+
+	// DiscoverColumns returns columns for a specific table.
+	DiscoverColumns(ctx context.Context, schemaName, tableName string) ([]ColumnMetadata, error)
+
+	// DiscoverForeignKeys returns all foreign key relationships.
+	DiscoverForeignKeys(ctx context.Context) ([]ForeignKeyMetadata, error)
+
+	// SupportsForeignKeys returns true if the database supports FK discovery.
+	SupportsForeignKeys() bool
+
+	// AnalyzeColumnStats gathers statistics for columns (for relationship inference).
+	AnalyzeColumnStats(ctx context.Context, schemaName, tableName string, columnNames []string) ([]ColumnStats, error)
+
+	// CheckValueOverlap checks value overlap between two columns (for relationship inference).
+	CheckValueOverlap(ctx context.Context, sourceSchema, sourceTable, sourceColumn,
+		targetSchema, targetTable, targetColumn string, sampleLimit int) (*ValueOverlapResult, error)
+
+	// AnalyzeJoin performs join analysis between two columns (for relationship inference).
+	AnalyzeJoin(ctx context.Context, sourceSchema, sourceTable, sourceColumn,
+		targetSchema, targetTable, targetColumn string) (*JoinAnalysis, error)
+
+	// Close releases the database connection.
+	Close() error
+}

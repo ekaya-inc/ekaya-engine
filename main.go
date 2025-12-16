@@ -115,6 +115,7 @@ func main() {
 	projectRepo := repositories.NewProjectRepository()
 	userRepo := repositories.NewUserRepository()
 	datasourceRepo := repositories.NewDatasourceRepository()
+	schemaRepo := repositories.NewSchemaRepository()
 
 	// Create adapter factory for datasource connections
 	adapterFactory := datasource.NewDatasourceAdapterFactory()
@@ -123,6 +124,7 @@ func main() {
 	projectService := services.NewProjectService(db, projectRepo, userRepo, redisClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, logger)
+	schemaService := services.NewSchemaService(schemaRepo, datasourceService, adapterFactory, logger)
 
 	mux := http.NewServeMux()
 
@@ -164,6 +166,10 @@ func main() {
 	// Register datasources handler (protected)
 	datasourcesHandler := handlers.NewDatasourcesHandler(datasourceService, logger)
 	datasourcesHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register schema handler (protected)
+	schemaHandler := handlers.NewSchemaHandler(schemaService, logger)
+	schemaHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"

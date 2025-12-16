@@ -25,7 +25,8 @@ import {
   CardHeader,
   CardTitle,
 } from "../components/ui/Card";
-import sdapApi from "../services/sdapApi";
+import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext";
+import engineApi from "../services/engineApi";
 import type { RelationshipDetail, RelationshipType, DatasourceSchema } from "../types";
 
 /**
@@ -35,6 +36,7 @@ import type { RelationshipDetail, RelationshipType, DatasourceSchema } from "../
 const RelationshipsPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
+  const { selectedDatasource } = useDatasourceConnection();
 
   // State for relationships data
   const [relationships, setRelationships] = useState<RelationshipDetail[]>([]);
@@ -63,9 +65,9 @@ const RelationshipsPage = () => {
 
   // Handler for when discovery completes - refresh relationships
   const handleDiscoveryComplete = async (): Promise<void> => {
-    if (!pid) return;
+    if (!pid || !selectedDatasource?.datasourceId) return;
     try {
-      const response = await sdapApi.getRelationships(pid);
+      const response = await engineApi.getRelationships(pid, selectedDatasource.datasourceId);
       if (response.data) {
         setRelationships(response.data.relationships);
         setEmptyTables(response.data.empty_tables ?? []);
@@ -96,17 +98,19 @@ const RelationshipsPage = () => {
 
   // Fetch relationships and schema data
   useEffect(() => {
-    if (!pid) return;
+    if (!pid || !selectedDatasource?.datasourceId) return;
 
     async function fetchData(): Promise<void> {
       try {
         setLoading(true);
         setError(null);
 
+        const datasourceId = selectedDatasource?.datasourceId as string;
+
         // Fetch both relationships and schema in parallel
         const [relationshipsResponse, schemaResponse] = await Promise.all([
-          sdapApi.getRelationships(pid as string),
-          sdapApi.getSchema(pid as string),
+          engineApi.getRelationships(pid as string, datasourceId),
+          engineApi.getSchema(pid as string, datasourceId),
         ]);
 
         if (relationshipsResponse.data) {
@@ -127,7 +131,7 @@ const RelationshipsPage = () => {
     }
 
     fetchData();
-  }, [pid]);
+  }, [pid, selectedDatasource?.datasourceId]);
 
   // Get unique table names for filter dropdown
   const tableNames = [...new Set([
@@ -309,6 +313,7 @@ const RelationshipsPage = () => {
           open={addDialogOpen}
           onOpenChange={setAddDialogOpen}
           projectId={pid ?? ''}
+          datasourceId={selectedDatasource?.datasourceId ?? ''}
           schema={schema}
           onRelationshipAdded={handleRelationshipAdded}
         />
@@ -316,6 +321,7 @@ const RelationshipsPage = () => {
         {/* Relationship Discovery Progress (for empty state) */}
         <RelationshipDiscoveryProgress
           projectId={pid ?? ''}
+          datasourceId={selectedDatasource?.datasourceId ?? ''}
           isOpen={discoveryOpen}
           onClose={() => setDiscoveryOpen(false)}
           onComplete={handleDiscoveryComplete}
@@ -655,6 +661,7 @@ const RelationshipsPage = () => {
         open={addDialogOpen}
         onOpenChange={setAddDialogOpen}
         projectId={pid ?? ''}
+        datasourceId={selectedDatasource?.datasourceId ?? ''}
         schema={schema}
         onRelationshipAdded={handleRelationshipAdded}
       />
@@ -662,6 +669,7 @@ const RelationshipsPage = () => {
       {/* Relationship Discovery Progress */}
       <RelationshipDiscoveryProgress
         projectId={pid ?? ''}
+        datasourceId={selectedDatasource?.datasourceId ?? ''}
         isOpen={discoveryOpen}
         onClose={() => setDiscoveryOpen(false)}
         onComplete={handleDiscoveryComplete}
@@ -672,6 +680,7 @@ const RelationshipsPage = () => {
         open={removeDialogOpen}
         onOpenChange={setRemoveDialogOpen}
         projectId={pid ?? ''}
+        datasourceId={selectedDatasource?.datasourceId ?? ''}
         relationship={relationshipToRemove}
         onRelationshipRemoved={handleRelationshipRemoved}
       />

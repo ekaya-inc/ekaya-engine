@@ -1,7 +1,7 @@
 import { AlertCircle, ArrowRight, Loader2 } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 
-import sdapApi from '../services/sdapApi';
+import engineApi from '../services/engineApi';
 import type { DatasourceSchema, SchemaTable, RelationshipDetail } from '../types';
 
 import { Button } from './ui/Button';
@@ -18,6 +18,7 @@ interface AddRelationshipDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectId: string;
+  datasourceId: string;
   schema: DatasourceSchema | null;
   onRelationshipAdded: (relationship: RelationshipDetail) => void;
 }
@@ -36,6 +37,7 @@ export const AddRelationshipDialog = ({
   open,
   onOpenChange,
   projectId,
+  datasourceId,
   schema,
   onRelationshipAdded,
 }: AddRelationshipDialogProps) => {
@@ -110,7 +112,7 @@ export const AddRelationshipDialog = ({
     setError(null);
 
     try {
-      const response = await sdapApi.createRelationship(projectId, {
+      const response = await engineApi.createRelationship(projectId, datasourceId, {
         source_table: sourceTable,
         source_column: sourceColumn,
         target_table: targetTable,

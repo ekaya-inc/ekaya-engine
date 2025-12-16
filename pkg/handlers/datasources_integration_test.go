@@ -33,6 +33,10 @@ func (f *integrationMockAdapterFactory) NewConnectionTester(ctx context.Context,
 	return &integrationMockConnectionTester{}, nil
 }
 
+func (f *integrationMockAdapterFactory) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any) (datasource.SchemaDiscoverer, error) {
+	return nil, nil
+}
+
 func (f *integrationMockAdapterFactory) ListTypes() []datasource.DatasourceAdapterInfo {
 	return []datasource.DatasourceAdapterInfo{
 		{Type: "postgres", DisplayName: "PostgreSQL", Description: "PostgreSQL database"},

@@ -13,10 +13,11 @@ type DatasourceAdapterInfo struct {
 	Icon        string `json:"icon"`         // Icon identifier for UI
 }
 
-// DatasourceAdapterRegistration contains info + factory for creating adapters.
+// DatasourceAdapterRegistration contains info + factories for creating adapters.
 type DatasourceAdapterRegistration struct {
-	Info    DatasourceAdapterInfo
-	Factory func(ctx context.Context, config map[string]any) (ConnectionTester, error)
+	Info                    DatasourceAdapterInfo
+	Factory                 func(ctx context.Context, config map[string]any) (ConnectionTester, error)
+	SchemaDiscovererFactory func(ctx context.Context, config map[string]any) (SchemaDiscoverer, error)
 }
 
 var (
@@ -53,6 +54,18 @@ func GetFactory(dsType string) func(ctx context.Context, config map[string]any) 
 
 	if reg, ok := registry[dsType]; ok {
 		return reg.Factory
+	}
+	return nil
+}
+
+// GetSchemaDiscovererFactory returns the schema discoverer factory for a datasource type.
+// Returns nil if type is not registered or doesn't support schema discovery.
+func GetSchemaDiscovererFactory(dsType string) func(ctx context.Context, config map[string]any) (SchemaDiscoverer, error) {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+
+	if reg, ok := registry[dsType]; ok {
+		return reg.SchemaDiscovererFactory
 	}
 	return nil
 }
