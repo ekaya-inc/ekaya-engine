@@ -790,6 +790,67 @@ func TestSchemaRepository_UpdateColumnStats(t *testing.T) {
 	}
 }
 
+func TestSchemaRepository_UpdateColumnSelection(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	table := tc.createTestTable(ctx, "public", "selectable_cols")
+	column := tc.createTestColumn(ctx, table.ID, "selectable_col", 1)
+
+	// Initially not selected
+	if column.IsSelected {
+		t.Error("expected IsSelected to be false initially")
+	}
+
+	// Update to selected
+	err := tc.repo.UpdateColumnSelection(ctx, tc.projectID, column.ID, true)
+	if err != nil {
+		t.Fatalf("UpdateColumnSelection failed: %v", err)
+	}
+
+	// Verify
+	retrieved, err := tc.repo.GetColumnByID(ctx, tc.projectID, column.ID)
+	if err != nil {
+		t.Fatalf("GetColumnByID failed: %v", err)
+	}
+
+	if !retrieved.IsSelected {
+		t.Error("expected IsSelected to be true after update")
+	}
+
+	// Update back to not selected
+	err = tc.repo.UpdateColumnSelection(ctx, tc.projectID, column.ID, false)
+	if err != nil {
+		t.Fatalf("UpdateColumnSelection (to false) failed: %v", err)
+	}
+
+	retrieved, err = tc.repo.GetColumnByID(ctx, tc.projectID, column.ID)
+	if err != nil {
+		t.Fatalf("GetColumnByID failed: %v", err)
+	}
+
+	if retrieved.IsSelected {
+		t.Error("expected IsSelected to be false after second update")
+	}
+}
+
+func TestSchemaRepository_UpdateColumnSelection_NotFound(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	nonExistentID := uuid.New()
+	err := tc.repo.UpdateColumnSelection(ctx, tc.projectID, nonExistentID, true)
+	if err == nil || err.Error() != "column not found" {
+		t.Errorf("expected 'column not found' error, got %v", err)
+	}
+}
+
 // ============================================================================
 // Relationship Operations Tests
 // ============================================================================
@@ -1064,6 +1125,76 @@ func TestSchemaRepository_SoftDeleteOrphanedRelationships(t *testing.T) {
 
 	if rels[0].ID != rel2.ID {
 		t.Errorf("expected rel2 to remain, got %s", rels[0].ID)
+	}
+}
+
+func TestSchemaRepository_GetRelationshipByColumns_Success(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create tables and columns
+	table1 := tc.createTestTable(ctx, "public", "lookup_source")
+	col1 := tc.createTestColumn(ctx, table1.ID, "fk_col", 1)
+
+	table2 := tc.createTestTable(ctx, "public", "lookup_target")
+	col2 := tc.createTestColumn(ctx, table2.ID, "pk_col", 1)
+
+	// Create relationship
+	rel := &models.SchemaRelationship{
+		ProjectID:        tc.projectID,
+		SourceTableID:    table1.ID,
+		SourceColumnID:   col1.ID,
+		TargetTableID:    table2.ID,
+		TargetColumnID:   col2.ID,
+		RelationshipType: models.RelationshipTypeFK,
+		Cardinality:      models.CardinalityNTo1,
+		Confidence:       1.0,
+	}
+	err := tc.repo.UpsertRelationship(ctx, rel)
+	if err != nil {
+		t.Fatalf("UpsertRelationship failed: %v", err)
+	}
+
+	// Lookup by column pair
+	retrieved, err := tc.repo.GetRelationshipByColumns(ctx, col1.ID, col2.ID)
+	if err != nil {
+		t.Fatalf("GetRelationshipByColumns failed: %v", err)
+	}
+
+	if retrieved == nil {
+		t.Fatal("expected relationship to be found")
+	}
+
+	if retrieved.ID != rel.ID {
+		t.Errorf("expected ID %s, got %s", rel.ID, retrieved.ID)
+	}
+
+	if retrieved.RelationshipType != models.RelationshipTypeFK {
+		t.Errorf("expected RelationshipType 'fk', got %q", retrieved.RelationshipType)
+	}
+}
+
+func TestSchemaRepository_GetRelationshipByColumns_NotFound(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	nonExistentID1 := uuid.New()
+	nonExistentID2 := uuid.New()
+
+	// GetRelationshipByColumns returns nil, nil when not found (not an error)
+	retrieved, err := tc.repo.GetRelationshipByColumns(ctx, nonExistentID1, nonExistentID2)
+	if err != nil {
+		t.Fatalf("GetRelationshipByColumns should not return error for not found, got: %v", err)
+	}
+
+	if retrieved != nil {
+		t.Error("expected nil result when relationship not found")
 	}
 }
 
