@@ -91,3 +91,26 @@ type SchemaDiscoverer interface {
 	// Close releases the database connection.
 	Close() error
 }
+
+// QueryExecutor executes SQL queries against a datasource.
+// Used for running saved queries from the Queries feature.
+// Each implementation owns its connection and must be closed when done.
+type QueryExecutor interface {
+	// ExecuteQuery runs a SQL query and returns the results.
+	// The limit parameter caps the number of rows returned (0 = no limit).
+	ExecuteQuery(ctx context.Context, sqlQuery string, limit int) (*QueryExecutionResult, error)
+
+	// ValidateQuery checks if a SQL query is syntactically valid without executing it.
+	// Returns nil if valid, error with details if invalid.
+	ValidateQuery(ctx context.Context, sqlQuery string) error
+
+	// Close releases any resources held by the executor.
+	Close() error
+}
+
+// QueryExecutionResult holds the results from executing a query.
+type QueryExecutionResult struct {
+	Columns  []string         `json:"columns"`
+	Rows     []map[string]any `json:"rows"`
+	RowCount int              `json:"row_count"`
+}

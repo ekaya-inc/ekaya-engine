@@ -18,6 +18,7 @@ type DatasourceAdapterRegistration struct {
 	Info                    DatasourceAdapterInfo
 	Factory                 func(ctx context.Context, config map[string]any) (ConnectionTester, error)
 	SchemaDiscovererFactory func(ctx context.Context, config map[string]any) (SchemaDiscoverer, error)
+	QueryExecutorFactory    func(ctx context.Context, config map[string]any) (QueryExecutor, error)
 }
 
 var (
@@ -66,6 +67,18 @@ func GetSchemaDiscovererFactory(dsType string) func(ctx context.Context, config 
 
 	if reg, ok := registry[dsType]; ok {
 		return reg.SchemaDiscovererFactory
+	}
+	return nil
+}
+
+// GetQueryExecutorFactory returns the query executor factory for a datasource type.
+// Returns nil if type is not registered or doesn't support query execution.
+func GetQueryExecutorFactory(dsType string) func(ctx context.Context, config map[string]any) (QueryExecutor, error) {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+
+	if reg, ok := registry[dsType]; ok {
+		return reg.QueryExecutorFactory
 	}
 	return nil
 }
