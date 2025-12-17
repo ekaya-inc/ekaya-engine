@@ -94,7 +94,7 @@ func main() {
 
 	// Connect to database
 	ctx := context.Background()
-	db, err := setupDatabase(ctx, &cfg.Database)
+	db, err := setupDatabase(ctx, &cfg.Database, logger)
 	if err != nil {
 		logger.Fatal("Failed to setup database", zap.Error(err))
 	}
@@ -218,8 +218,12 @@ func main() {
 	}
 }
 
-func setupDatabase(ctx context.Context, cfg *config.DatabaseConfig) (*database.DB, error) {
-	log.Printf("Connecting to database %s@%s:%d/%s...", cfg.User, cfg.Host, cfg.Port, cfg.Database)
+func setupDatabase(ctx context.Context, cfg *config.DatabaseConfig, logger *zap.Logger) (*database.DB, error) {
+	logger.Info("Connecting to database",
+		zap.String("user", cfg.User),
+		zap.String("host", cfg.Host),
+		zap.Int("port", cfg.Port),
+		zap.String("database", cfg.Database))
 
 	// Build database URL with URL-encoded password
 	databaseURL := fmt.Sprintf("postgresql://%s:%s@%s:%d/%s?sslmode=%s",
@@ -237,16 +241,16 @@ func setupDatabase(ctx context.Context, cfg *config.DatabaseConfig) (*database.D
 	stdDB := stdlib.OpenDBFromPool(db.Pool)
 
 	// Run database migrations automatically
-	log.Printf("Running database migrations...")
-	if err := runMigrations(stdDB); err != nil {
+	logger.Info("Running database migrations")
+	if err := runMigrations(stdDB, logger); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
-	log.Printf("Database migrations completed successfully")
+	logger.Info("Database migrations completed successfully")
 
 	return db, nil
 }
 
-func runMigrations(stdDB *sql.DB) error {
-	return database.RunMigrations(stdDB, "./migrations")
+func runMigrations(stdDB *sql.DB, logger *zap.Logger) error {
+	return database.RunMigrations(stdDB, "./migrations", logger)
 }

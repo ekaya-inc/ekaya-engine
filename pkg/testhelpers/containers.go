@@ -14,6 +14,7 @@ import (
 	_ "github.com/lib/pq" // PostgreSQL driver for database/sql (used by migrations)
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
+	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 )
@@ -185,7 +186,7 @@ func setupEngineDB(testDB *TestDB) (*EngineDB, error) {
 	_, currentFile, _, _ := runtime.Caller(0)
 	migrationsPath := filepath.Join(filepath.Dir(currentFile), "..", "..", "migrations")
 
-	if err := database.RunMigrations(sqlDB, migrationsPath); err != nil {
+	if err := database.RunMigrations(sqlDB, migrationsPath, zap.NewNop()); err != nil {
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
