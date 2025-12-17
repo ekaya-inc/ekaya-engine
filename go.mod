@@ -12,6 +12,7 @@ require (
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/lib/pq v1.10.9
 	github.com/redis/go-redis/v9 v9.17.2
+	github.com/sashabaranov/go-openai v1.41.2
 	github.com/testcontainers/testcontainers-go v0.38.0
 	go.uber.org/zap v1.27.1
 )

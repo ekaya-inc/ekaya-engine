@@ -15,6 +15,7 @@ vi.mock('../../services/engineApi', () => ({
     testQuery: vi.fn(),
     executeQuery: vi.fn(),
     validateQuery: vi.fn(),
+    getSchema: vi.fn(),
   },
 }));
 
@@ -99,6 +100,11 @@ const mockQueries: Query[] = [
 describe('QueriesView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default mock for getSchema to prevent unhandled rejections
+    vi.mocked(engineApi.getSchema).mockResolvedValue({
+      success: true,
+      data: { tables: [], total_tables: 0, relationships: [] },
+    });
   });
 
   it('renders loading state initially', () => {

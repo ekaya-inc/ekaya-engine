@@ -25,13 +25,13 @@ import (
 
 // queriesIntegrationTestContext holds all dependencies for query integration tests.
 type queriesIntegrationTestContext struct {
-	t                *testing.T
-	testDB           *testhelpers.TestDB
-	engineDB         *testhelpers.EngineDB
-	queriesHandler   *QueriesHandler
-	datasourcesSvc   services.DatasourceService
-	projectID        uuid.UUID
-	createdDsID      uuid.UUID
+	t              *testing.T
+	testDB         *testhelpers.TestDB
+	engineDB       *testhelpers.EngineDB
+	queriesHandler *QueriesHandler
+	datasourcesSvc services.DatasourceService
+	projectID      uuid.UUID
+	createdDsID    uuid.UUID
 }
 
 // setupQueriesIntegrationTest creates a test context with real database and services.
