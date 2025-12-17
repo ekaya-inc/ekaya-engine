@@ -21,21 +21,43 @@ const (
 	MaxColumnsPerStatsQuery    = 25   // Batch size for column stats
 )
 
-// Column data types excluded from join key consideration
+// Column data types excluded from join key consideration.
+// These types are unsuitable for relationship discovery via value overlap.
 var excludedJoinTypes = map[string]bool{
-	"text":        true,
-	"json":        true,
-	"jsonb":       true,
-	"bytea":       true,
-	"xml":         true,
-	"boolean":     true,
-	"bool":        true,
-	"timestamp":   true,
-	"timestamptz": true,
-	"date":        true,
-	"time":        true,
-	"timetz":      true,
-	"interval":    true,
+	// Temporal types - dates/times don't represent relationships
+	"timestamp": true, "timestamptz": true, "date": true,
+	"time": true, "timetz": true, "interval": true,
+	// Boolean - too few values, causes false positives
+	"boolean": true, "bool": true,
+	// Binary/LOB types - not comparable
+	"bytea": true, "blob": true, "binary": true,
+	// Structured data types - not comparable
+	"json": true, "jsonb": true, "xml": true,
+	// Geometry types - spatial data not suitable for FK inference
+	"point": true, "line": true, "polygon": true, "geometry": true,
+	// Variable-length strings - varying lengths cause false positives
+	"character varying": true, "varchar": true,
+}
+
+// isNumericType checks if a type is numeric (integers, decimals, floats).
+// Numeric types are excluded from value-overlap inference because:
+// 1. Auto-increment IDs naturally overlap across unrelated tables
+// 2. Counts/amounts falsely match other numeric columns
+// 3. Real numeric FK relationships are already captured via DB FK constraints
+func isNumericType(dataType string) bool {
+	t := normalizeType(dataType)
+	switch t {
+	// Integer types
+	case "integer", "int", "int4", "bigint", "int8", "smallint", "int2":
+		return true
+	// Serial types (auto-increment integers)
+	case "serial", "bigserial", "smallserial":
+		return true
+	// Decimal/float types
+	case "numeric", "decimal", "real", "double precision", "float", "float4", "float8":
+		return true
+	}
+	return false
 }
 
 // RelationshipDiscoveryService handles automated relationship discovery.
@@ -210,6 +232,14 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 				// Skip if relationship already exists
 				key := source.column.ID.String() + "->" + targetPK.ID.String()
 				if existingRelSet[key] {
+					continue
+				}
+
+				// Skip ALL numeric-to-numeric joins - these cause false positives.
+				// Auto-increment IDs, counts, and amounts naturally overlap across
+				// unrelated tables. Real numeric FK relationships are already
+				// captured via database FK constraints (imported as 'fk' type).
+				if isNumericType(source.column.DataType) && isNumericType(targetPK.DataType) {
 					continue
 				}
 
@@ -442,35 +472,10 @@ func (s *relationshipDiscoveryService) areTypesCompatible(sourceType, targetType
 	source := normalizeType(sourceType)
 	target := normalizeType(targetType)
 
-	// Same type family is compatible
-	if source == target {
-		return true
-	}
-
-	// Integer types are compatible with each other
-	intTypes := map[string]bool{
-		"integer": true, "int": true, "bigint": true, "smallint": true,
-		"int4": true, "int8": true, "int2": true, "serial": true,
-		"bigserial": true, "smallserial": true,
-	}
-	if intTypes[source] && intTypes[target] {
-		return true
-	}
-
-	// UUID types
-	if source == "uuid" && target == "uuid" {
-		return true
-	}
-
-	// String types (varchar, char, text - though text is excluded from joinability)
-	stringTypes := map[string]bool{
-		"varchar": true, "character varying": true, "char": true, "character": true,
-	}
-	if stringTypes[source] && stringTypes[target] {
-		return true
-	}
-
-	return false
+	// After numeric types are skipped (earlier in the pipeline), the remaining
+	// joinable types are uuid and text. These require exact type match.
+	// Same normalized type = compatible
+	return source == target
 }
 
 func normalizeType(t string) string {
