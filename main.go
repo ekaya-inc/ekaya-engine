@@ -128,6 +128,7 @@ func main() {
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, logger)
 	schemaService := services.NewSchemaService(schemaRepo, datasourceService, adapterFactory, logger)
+	discoveryService := services.NewRelationshipDiscoveryService(schemaRepo, datasourceService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
 
@@ -173,8 +174,8 @@ func main() {
 	datasourcesHandler := handlers.NewDatasourcesHandler(datasourceService, logger)
 	datasourcesHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
-	// Register schema handler (protected)
-	schemaHandler := handlers.NewSchemaHandler(schemaService, logger)
+	// Register schema handler (protected, includes discovery)
+	schemaHandler := handlers.NewSchemaHandlerWithDiscovery(schemaService, discoveryService, logger)
 	schemaHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register queries handler (protected)
