@@ -293,3 +293,23 @@ func (m *mockSchemaService) GetDatasourceSchemaForPrompt(ctx context.Context, pr
 	}
 	return "Schema prompt for datasource", nil
 }
+
+func (m *mockSchemaService) GetRelationshipsResponse(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RelationshipsResponse, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &models.RelationshipsResponse{
+		Relationships: []*models.RelationshipDetail{},
+		TotalCount:    0,
+	}, nil
+}
+
+func (m *mockSchemaService) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RelationshipCandidatesResponse, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &models.RelationshipCandidatesResponse{
+		Candidates: []models.RelationshipCandidate{},
+		Summary:    models.CandidatesSummary{},
+	}, nil
+}

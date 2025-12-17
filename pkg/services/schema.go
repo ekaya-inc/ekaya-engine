@@ -36,6 +36,12 @@ type SchemaService interface {
 	// GetRelationshipsForDatasource returns all relationships for a datasource.
 	GetRelationshipsForDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error)
 
+	// GetRelationshipsResponse returns enriched relationships with table/column details and empty/orphan tables.
+	GetRelationshipsResponse(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RelationshipsResponse, error)
+
+	// GetRelationshipCandidates returns all relationship candidates including rejected ones with summary stats.
+	GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RelationshipCandidatesResponse, error)
+
 	// UpdateTableMetadata updates business_name and/or description for a table.
 	UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error
 
@@ -593,6 +599,69 @@ func (s *schemaService) GetRelationshipsForDatasource(ctx context.Context, proje
 		return nil, fmt.Errorf("failed to list relationships: %w", err)
 	}
 	return relationships, nil
+}
+
+// GetRelationshipsResponse returns enriched relationships with table/column details and empty/orphan tables.
+func (s *schemaService) GetRelationshipsResponse(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RelationshipsResponse, error) {
+	// Get enriched relationship details (includes table/column names and types)
+	details, err := s.schemaRepo.GetRelationshipDetails(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get relationship details: %w", err)
+	}
+
+	// Get empty tables (row_count = 0)
+	emptyTables, err := s.schemaRepo.GetEmptyTables(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get empty tables: %w", err)
+	}
+
+	// Get orphan tables (has data but no relationships)
+	orphanTables, err := s.schemaRepo.GetOrphanTables(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get orphan tables: %w", err)
+	}
+
+	return &models.RelationshipsResponse{
+		Relationships: details,
+		TotalCount:    len(details),
+		EmptyTables:   emptyTables,
+		OrphanTables:  orphanTables,
+	}, nil
+}
+
+// GetRelationshipCandidates returns all relationship candidates including rejected ones with summary stats.
+func (s *schemaService) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RelationshipCandidatesResponse, error) {
+	// Get all candidates including rejected ones
+	candidates, err := s.schemaRepo.GetRelationshipCandidates(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get relationship candidates: %w", err)
+	}
+
+	// Compute summary statistics
+	summary := models.CandidatesSummary{
+		Total: len(candidates),
+	}
+	for _, c := range candidates {
+		switch c.Status {
+		case models.CandidateStatusVerified:
+			summary.Verified++
+		case models.CandidateStatusRejected:
+			summary.Rejected++
+		case models.CandidateStatusPending:
+			summary.Pending++
+		}
+	}
+
+	// Convert to response type (candidates is already the right type)
+	result := make([]models.RelationshipCandidate, len(candidates))
+	for i, c := range candidates {
+		result[i] = *c
+	}
+
+	return &models.RelationshipCandidatesResponse{
+		Candidates: result,
+		Summary:    summary,
+	}, nil
 }
 
 // UpdateTableMetadata updates business_name and/or description for a table.
