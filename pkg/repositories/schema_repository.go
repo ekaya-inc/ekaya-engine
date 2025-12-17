@@ -730,12 +730,13 @@ func (r *schemaRepository) GetRelationshipByID(ctx context.Context, projectID, r
 		SELECT id, project_id, source_table_id, source_column_id,
 		       target_table_id, target_column_id, relationship_type,
 		       cardinality, confidence, inference_method, is_validated,
-		       validation_results, is_approved, created_at, updated_at
+		       validation_results, is_approved, created_at, updated_at,
+		       match_rate, source_distinct, target_distinct, matched_count, rejection_reason
 		FROM engine_schema_relationships
 		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
 
 	row := scope.Conn.QueryRow(ctx, query, projectID, relationshipID)
-	rel, err := scanSchemaRelationshipRow(row)
+	rel, err := scanSchemaRelationshipRowWithDiscovery(row)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("relationship not found")
@@ -756,12 +757,13 @@ func (r *schemaRepository) GetRelationshipByColumns(ctx context.Context, sourceC
 		SELECT id, project_id, source_table_id, source_column_id,
 		       target_table_id, target_column_id, relationship_type,
 		       cardinality, confidence, inference_method, is_validated,
-		       validation_results, is_approved, created_at, updated_at
+		       validation_results, is_approved, created_at, updated_at,
+		       match_rate, source_distinct, target_distinct, matched_count, rejection_reason
 		FROM engine_schema_relationships
 		WHERE source_column_id = $1 AND target_column_id = $2 AND deleted_at IS NULL`
 
 	row := scope.Conn.QueryRow(ctx, query, sourceColumnID, targetColumnID)
-	rel, err := scanSchemaRelationshipRow(row)
+	rel, err := scanSchemaRelationshipRowWithDiscovery(row)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil // Not found is not an error for this lookup
@@ -805,7 +807,8 @@ func (r *schemaRepository) UpsertRelationship(ctx context.Context, rel *models.S
 		    is_validated = $7,
 		    validation_results = $8,
 		    is_approved = $9,
-		    updated_at = $10
+		    rejection_reason = $10,
+		    updated_at = $11
 		WHERE source_column_id = $1
 		  AND target_column_id = $2
 		  AND deleted_at IS NOT NULL
@@ -816,7 +819,7 @@ func (r *schemaRepository) UpsertRelationship(ctx context.Context, rel *models.S
 	err := scope.Conn.QueryRow(ctx, reactivateQuery,
 		rel.SourceColumnID, rel.TargetColumnID,
 		rel.RelationshipType, rel.Cardinality, rel.Confidence, rel.InferenceMethod,
-		rel.IsValidated, validationResultsJSON, rel.IsApproved, now,
+		rel.IsValidated, validationResultsJSON, rel.IsApproved, rel.RejectionReason, now,
 	).Scan(&existingID, &existingProjectID, &existingSourceTableID, &existingTargetTableID, &existingCreatedAt)
 
 	if err == nil {
@@ -838,8 +841,8 @@ func (r *schemaRepository) UpsertRelationship(ctx context.Context, rel *models.S
 			id, project_id, source_table_id, source_column_id,
 			target_table_id, target_column_id, relationship_type,
 			cardinality, confidence, inference_method, is_validated,
-			validation_results, is_approved, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			validation_results, is_approved, rejection_reason, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		ON CONFLICT (source_column_id, target_column_id)
 			WHERE deleted_at IS NULL
 		DO UPDATE SET
@@ -850,6 +853,7 @@ func (r *schemaRepository) UpsertRelationship(ctx context.Context, rel *models.S
 			is_validated = EXCLUDED.is_validated,
 			validation_results = EXCLUDED.validation_results,
 			is_approved = EXCLUDED.is_approved,
+			rejection_reason = EXCLUDED.rejection_reason,
 			updated_at = EXCLUDED.updated_at
 		RETURNING id, created_at`
 
@@ -857,7 +861,7 @@ func (r *schemaRepository) UpsertRelationship(ctx context.Context, rel *models.S
 		rel.ID, rel.ProjectID, rel.SourceTableID, rel.SourceColumnID,
 		rel.TargetTableID, rel.TargetColumnID, rel.RelationshipType,
 		rel.Cardinality, rel.Confidence, rel.InferenceMethod, rel.IsValidated,
-		validationResultsJSON, rel.IsApproved, rel.CreatedAt, rel.UpdatedAt,
+		validationResultsJSON, rel.IsApproved, rel.RejectionReason, rel.CreatedAt, rel.UpdatedAt,
 	).Scan(&rel.ID, &rel.CreatedAt)
 
 	if err != nil {
@@ -1488,6 +1492,29 @@ func scanSchemaRelationshipRow(row pgx.Row) (*models.SchemaRelationship, error) 
 		&rel.TargetTableID, &rel.TargetColumnID, &rel.RelationshipType,
 		&rel.Cardinality, &rel.Confidence, &rel.InferenceMethod, &rel.IsValidated,
 		&validationResultsJSON, &rel.IsApproved, &rel.CreatedAt, &rel.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if len(validationResultsJSON) > 0 {
+		rel.ValidationResults = &models.ValidationResults{}
+		if err := json.Unmarshal(validationResultsJSON, rel.ValidationResults); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal validation_results: %w", err)
+		}
+	}
+	return &rel, nil
+}
+
+// scanSchemaRelationshipRowWithDiscovery scans a relationship row including discovery fields.
+func scanSchemaRelationshipRowWithDiscovery(row pgx.Row) (*models.SchemaRelationship, error) {
+	var rel models.SchemaRelationship
+	var validationResultsJSON []byte
+	err := row.Scan(
+		&rel.ID, &rel.ProjectID, &rel.SourceTableID, &rel.SourceColumnID,
+		&rel.TargetTableID, &rel.TargetColumnID, &rel.RelationshipType,
+		&rel.Cardinality, &rel.Confidence, &rel.InferenceMethod, &rel.IsValidated,
+		&validationResultsJSON, &rel.IsApproved, &rel.CreatedAt, &rel.UpdatedAt,
+		&rel.MatchRate, &rel.SourceDistinct, &rel.TargetDistinct, &rel.MatchedCount, &rel.RejectionReason,
 	)
 	if err != nil {
 		return nil, err
