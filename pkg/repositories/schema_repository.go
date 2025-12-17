@@ -49,6 +49,16 @@ type SchemaRepository interface {
 	UpdateRelationshipApproval(ctx context.Context, projectID, relationshipID uuid.UUID, isApproved bool) error
 	SoftDeleteRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error
 	SoftDeleteOrphanedRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (int64, error)
+
+	// Relationship Discovery
+	GetRelationshipDetails(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.RelationshipDetail, error)
+	GetEmptyTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error)
+	GetOrphanTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error)
+	UpsertRelationshipWithMetrics(ctx context.Context, rel *models.SchemaRelationship, metrics *models.DiscoveryMetrics) error
+	GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error)
+	UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount *int64, isJoinable *bool, joinabilityReason *string) error
+	GetPrimaryKeyColumns(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error)
+	GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.RelationshipCandidate, error)
 }
 
 type schemaRepository struct{}
@@ -935,6 +945,447 @@ func (r *schemaRepository) SoftDeleteOrphanedRelationships(ctx context.Context, 
 }
 
 // ============================================================================
+// Relationship Discovery Methods
+// ============================================================================
+
+func (r *schemaRepository) GetRelationshipDetails(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.RelationshipDetail, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT
+			r.id,
+			st.schema_name || '.' || st.table_name as source_table_name,
+			sc.column_name as source_column_name,
+			sc.data_type as source_column_type,
+			tt.schema_name || '.' || tt.table_name as target_table_name,
+			tc.column_name as target_column_name,
+			tc.data_type as target_column_type,
+			r.relationship_type,
+			r.cardinality,
+			r.confidence,
+			r.inference_method,
+			r.is_validated,
+			r.is_approved,
+			r.created_at,
+			r.updated_at
+		FROM engine_schema_relationships r
+		JOIN engine_schema_columns sc ON r.source_column_id = sc.id
+		JOIN engine_schema_tables st ON r.source_table_id = st.id
+		JOIN engine_schema_columns tc ON r.target_column_id = tc.id
+		JOIN engine_schema_tables tt ON r.target_table_id = tt.id
+		WHERE r.project_id = $1
+		  AND st.datasource_id = $2
+		  AND r.deleted_at IS NULL
+		  AND sc.deleted_at IS NULL
+		  AND st.deleted_at IS NULL
+		  AND tc.deleted_at IS NULL
+		  AND tt.deleted_at IS NULL
+		  AND r.rejection_reason IS NULL
+		ORDER BY st.schema_name, st.table_name, sc.column_name`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get relationship details: %w", err)
+	}
+	defer rows.Close()
+
+	details := make([]*models.RelationshipDetail, 0)
+	for rows.Next() {
+		var d models.RelationshipDetail
+		err := rows.Scan(
+			&d.ID,
+			&d.SourceTableName, &d.SourceColumnName, &d.SourceColumnType,
+			&d.TargetTableName, &d.TargetColumnName, &d.TargetColumnType,
+			&d.RelationshipType, &d.Cardinality, &d.Confidence,
+			&d.InferenceMethod, &d.IsValidated, &d.IsApproved,
+			&d.CreatedAt, &d.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan relationship detail: %w", err)
+		}
+		details = append(details, &d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating relationship details: %w", err)
+	}
+
+	return details, nil
+}
+
+func (r *schemaRepository) GetEmptyTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT schema_name || '.' || table_name
+		FROM engine_schema_tables
+		WHERE project_id = $1
+		  AND datasource_id = $2
+		  AND deleted_at IS NULL
+		  AND (row_count IS NULL OR row_count = 0)
+		ORDER BY schema_name, table_name`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get empty tables: %w", err)
+	}
+	defer rows.Close()
+
+	tables := make([]string, 0)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("failed to scan empty table: %w", err)
+		}
+		tables = append(tables, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating empty tables: %w", err)
+	}
+
+	return tables, nil
+}
+
+func (r *schemaRepository) GetOrphanTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	// Tables with data (row_count > 0) but no active relationships
+	query := `
+		SELECT t.schema_name || '.' || t.table_name
+		FROM engine_schema_tables t
+		WHERE t.project_id = $1
+		  AND t.datasource_id = $2
+		  AND t.deleted_at IS NULL
+		  AND t.row_count IS NOT NULL
+		  AND t.row_count > 0
+		  AND NOT EXISTS (
+			  SELECT 1 FROM engine_schema_relationships r
+			  WHERE r.deleted_at IS NULL
+			    AND r.rejection_reason IS NULL
+			    AND (r.source_table_id = t.id OR r.target_table_id = t.id)
+		  )
+		ORDER BY t.schema_name, t.table_name`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get orphan tables: %w", err)
+	}
+	defer rows.Close()
+
+	tables := make([]string, 0)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("failed to scan orphan table: %w", err)
+		}
+		tables = append(tables, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating orphan tables: %w", err)
+	}
+
+	return tables, nil
+}
+
+func (r *schemaRepository) UpsertRelationshipWithMetrics(ctx context.Context, rel *models.SchemaRelationship, metrics *models.DiscoveryMetrics) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	now := time.Now()
+	rel.UpdatedAt = now
+	if rel.ID == uuid.Nil {
+		rel.ID = uuid.New()
+		rel.CreatedAt = now
+	}
+
+	var validationResultsJSON []byte
+	if rel.ValidationResults != nil {
+		var err error
+		validationResultsJSON, err = json.Marshal(rel.ValidationResults)
+		if err != nil {
+			return fmt.Errorf("failed to marshal validation_results: %w", err)
+		}
+	}
+
+	// Set discovery metrics on the relationship
+	if metrics != nil {
+		rel.MatchRate = &metrics.MatchRate
+		rel.SourceDistinct = &metrics.SourceDistinct
+		rel.TargetDistinct = &metrics.TargetDistinct
+		rel.MatchedCount = &metrics.MatchedCount
+	}
+
+	// First, try to reactivate a soft-deleted record
+	reactivateQuery := `
+		UPDATE engine_schema_relationships
+		SET deleted_at = NULL,
+		    relationship_type = $3,
+		    cardinality = $4,
+		    confidence = $5,
+		    inference_method = $6,
+		    is_validated = $7,
+		    validation_results = $8,
+		    is_approved = $9,
+		    match_rate = $10,
+		    source_distinct = $11,
+		    target_distinct = $12,
+		    matched_count = $13,
+		    rejection_reason = $14,
+		    updated_at = $15
+		WHERE source_column_id = $1
+		  AND target_column_id = $2
+		  AND deleted_at IS NOT NULL
+		RETURNING id, project_id, source_table_id, target_table_id, created_at`
+
+	var existingID, existingProjectID, existingSourceTableID, existingTargetTableID uuid.UUID
+	var existingCreatedAt time.Time
+	err := scope.Conn.QueryRow(ctx, reactivateQuery,
+		rel.SourceColumnID, rel.TargetColumnID,
+		rel.RelationshipType, rel.Cardinality, rel.Confidence, rel.InferenceMethod,
+		rel.IsValidated, validationResultsJSON, rel.IsApproved,
+		rel.MatchRate, rel.SourceDistinct, rel.TargetDistinct, rel.MatchedCount,
+		rel.RejectionReason, now,
+	).Scan(&existingID, &existingProjectID, &existingSourceTableID, &existingTargetTableID, &existingCreatedAt)
+
+	if err == nil {
+		rel.ID = existingID
+		rel.ProjectID = existingProjectID
+		rel.SourceTableID = existingSourceTableID
+		rel.TargetTableID = existingTargetTableID
+		rel.CreatedAt = existingCreatedAt
+		return nil
+	}
+	if err != pgx.ErrNoRows {
+		return fmt.Errorf("failed to reactivate relationship: %w", err)
+	}
+
+	// No soft-deleted record, do standard upsert on active records
+	upsertQuery := `
+		INSERT INTO engine_schema_relationships (
+			id, project_id, source_table_id, source_column_id,
+			target_table_id, target_column_id, relationship_type,
+			cardinality, confidence, inference_method, is_validated,
+			validation_results, is_approved, match_rate, source_distinct,
+			target_distinct, matched_count, rejection_reason,
+			created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+		ON CONFLICT (source_column_id, target_column_id)
+			WHERE deleted_at IS NULL
+		DO UPDATE SET
+			relationship_type = EXCLUDED.relationship_type,
+			cardinality = EXCLUDED.cardinality,
+			confidence = EXCLUDED.confidence,
+			inference_method = EXCLUDED.inference_method,
+			is_validated = EXCLUDED.is_validated,
+			validation_results = EXCLUDED.validation_results,
+			is_approved = EXCLUDED.is_approved,
+			match_rate = EXCLUDED.match_rate,
+			source_distinct = EXCLUDED.source_distinct,
+			target_distinct = EXCLUDED.target_distinct,
+			matched_count = EXCLUDED.matched_count,
+			rejection_reason = EXCLUDED.rejection_reason,
+			updated_at = EXCLUDED.updated_at
+		RETURNING id, created_at`
+
+	err = scope.Conn.QueryRow(ctx, upsertQuery,
+		rel.ID, rel.ProjectID, rel.SourceTableID, rel.SourceColumnID,
+		rel.TargetTableID, rel.TargetColumnID, rel.RelationshipType,
+		rel.Cardinality, rel.Confidence, rel.InferenceMethod, rel.IsValidated,
+		validationResultsJSON, rel.IsApproved, rel.MatchRate, rel.SourceDistinct,
+		rel.TargetDistinct, rel.MatchedCount, rel.RejectionReason,
+		rel.CreatedAt, rel.UpdatedAt,
+	).Scan(&rel.ID, &rel.CreatedAt)
+
+	if err != nil {
+		return fmt.Errorf("failed to upsert relationship with metrics: %w", err)
+	}
+
+	return nil
+}
+
+func (r *schemaRepository) GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT id, project_id, schema_table_id, column_name, data_type,
+		       is_nullable, is_primary_key, is_selected, ordinal_position,
+		       distinct_count, null_count, business_name, description, metadata,
+		       created_at, updated_at,
+		       row_count, non_null_count, is_joinable, joinability_reason, stats_updated_at
+		FROM engine_schema_columns
+		WHERE project_id = $1
+		  AND schema_table_id = $2
+		  AND deleted_at IS NULL
+		  AND is_joinable = true
+		ORDER BY ordinal_position`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID, tableID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get joinable columns: %w", err)
+	}
+	defer rows.Close()
+
+	columns := make([]*models.SchemaColumn, 0)
+	for rows.Next() {
+		c, err := scanSchemaColumnWithDiscovery(rows)
+		if err != nil {
+			return nil, err
+		}
+		columns = append(columns, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating joinable columns: %w", err)
+	}
+
+	return columns, nil
+}
+
+func (r *schemaRepository) UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount *int64, isJoinable *bool, joinabilityReason *string) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		UPDATE engine_schema_columns
+		SET row_count = $2,
+		    non_null_count = $3,
+		    is_joinable = $4,
+		    joinability_reason = $5,
+		    stats_updated_at = NOW(),
+		    updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL`
+
+	result, err := scope.Conn.Exec(ctx, query, columnID, rowCount, nonNullCount, isJoinable, joinabilityReason)
+	if err != nil {
+		return fmt.Errorf("failed to update column joinability: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("column not found")
+	}
+
+	return nil
+}
+
+func (r *schemaRepository) GetPrimaryKeyColumns(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
+		       c.is_nullable, c.is_primary_key, c.is_selected, c.ordinal_position,
+		       c.distinct_count, c.null_count, c.business_name, c.description, c.metadata,
+		       c.created_at, c.updated_at,
+		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at
+		FROM engine_schema_columns c
+		JOIN engine_schema_tables t ON c.schema_table_id = t.id
+		WHERE c.project_id = $1
+		  AND t.datasource_id = $2
+		  AND c.deleted_at IS NULL
+		  AND t.deleted_at IS NULL
+		  AND c.is_primary_key = true
+		ORDER BY t.schema_name, t.table_name, c.ordinal_position`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get primary key columns: %w", err)
+	}
+	defer rows.Close()
+
+	columns := make([]*models.SchemaColumn, 0)
+	for rows.Next() {
+		c, err := scanSchemaColumnWithDiscovery(rows)
+		if err != nil {
+			return nil, err
+		}
+		columns = append(columns, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating primary key columns: %w", err)
+	}
+
+	return columns, nil
+}
+
+func (r *schemaRepository) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.RelationshipCandidate, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	// Get all relationships including rejected ones (those with rejection_reason set)
+	query := `
+		SELECT
+			r.id,
+			st.schema_name || '.' || st.table_name as source_table,
+			sc.column_name as source_column,
+			tt.schema_name || '.' || tt.table_name as target_table,
+			tc.column_name as target_column,
+			COALESCE(r.match_rate, 0) as match_rate,
+			CASE
+				WHEN r.rejection_reason IS NOT NULL THEN 'rejected'
+				WHEN r.is_approved = true THEN 'verified'
+				ELSE 'pending'
+			END as status,
+			r.rejection_reason
+		FROM engine_schema_relationships r
+		JOIN engine_schema_columns sc ON r.source_column_id = sc.id
+		JOIN engine_schema_tables st ON r.source_table_id = st.id
+		JOIN engine_schema_columns tc ON r.target_column_id = tc.id
+		JOIN engine_schema_tables tt ON r.target_table_id = tt.id
+		WHERE r.project_id = $1
+		  AND st.datasource_id = $2
+		  AND r.deleted_at IS NULL
+		  AND sc.deleted_at IS NULL
+		  AND st.deleted_at IS NULL
+		  AND tc.deleted_at IS NULL
+		  AND tt.deleted_at IS NULL
+		ORDER BY st.schema_name, st.table_name, sc.column_name`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get relationship candidates: %w", err)
+	}
+	defer rows.Close()
+
+	candidates := make([]*models.RelationshipCandidate, 0)
+	for rows.Next() {
+		var c models.RelationshipCandidate
+		err := rows.Scan(
+			&c.ID,
+			&c.SourceTable, &c.SourceColumn,
+			&c.TargetTable, &c.TargetColumn,
+			&c.MatchRate, &c.Status, &c.RejectionReason,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan relationship candidate: %w", err)
+		}
+		candidates = append(candidates, &c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating relationship candidates: %w", err)
+	}
+
+	return candidates, nil
+}
+
+// ============================================================================
 // Helper Functions - Scan
 // ============================================================================
 
@@ -1048,4 +1499,24 @@ func scanSchemaRelationshipRow(row pgx.Row) (*models.SchemaRelationship, error) 
 		}
 	}
 	return &rel, nil
+}
+
+// scanSchemaColumnWithDiscovery scans a column row including discovery fields.
+func scanSchemaColumnWithDiscovery(rows pgx.Rows) (*models.SchemaColumn, error) {
+	var c models.SchemaColumn
+	var metadata []byte
+	err := rows.Scan(
+		&c.ID, &c.ProjectID, &c.SchemaTableID, &c.ColumnName, &c.DataType,
+		&c.IsNullable, &c.IsPrimaryKey, &c.IsSelected, &c.OrdinalPosition,
+		&c.DistinctCount, &c.NullCount, &c.BusinessName, &c.Description, &metadata,
+		&c.CreatedAt, &c.UpdatedAt,
+		&c.RowCount, &c.NonNullCount, &c.IsJoinable, &c.JoinabilityReason, &c.StatsUpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan column with discovery: %w", err)
+	}
+	if err := json.Unmarshal(metadata, &c.Metadata); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+	}
+	return &c, nil
 }
