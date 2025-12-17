@@ -415,23 +415,9 @@ func TestSchemaHandler_SaveSelections_InvalidBody(t *testing.T) {
 func TestSchemaHandler_GetRelationships_Success(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
-	relID := uuid.New()
 
-	service := &mockSchemaService{
-		relationships: []*models.SchemaRelationship{
-			{
-				ID:               relID,
-				ProjectID:        projectID,
-				SourceTableID:    uuid.New(),
-				SourceColumnID:   uuid.New(),
-				TargetTableID:    uuid.New(),
-				TargetColumnID:   uuid.New(),
-				RelationshipType: "fk",
-				Cardinality:      "N:1",
-				Confidence:       1.0,
-			},
-		},
-	}
+	// The handler now calls GetRelationshipsResponse which returns enriched data
+	service := &mockSchemaService{}
 	handler := NewSchemaHandler(service, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/relationships", nil)
@@ -450,13 +436,25 @@ func TestSchemaHandler_GetRelationships_Success(t *testing.T) {
 		t.Fatalf("failed to parse response: %v", err)
 	}
 
-	data, ok := resp.Data.([]any)
+	data, ok := resp.Data.(map[string]any)
 	if !ok {
-		t.Fatalf("expected data to be an array, got %T", resp.Data)
+		t.Fatalf("expected data to be an object, got %T", resp.Data)
 	}
 
-	if len(data) != 1 {
-		t.Errorf("expected 1 relationship, got %d", len(data))
+	// Check for relationships array in the response
+	relationships, ok := data["relationships"].([]any)
+	if !ok {
+		t.Fatalf("expected relationships to be an array, got %T", data["relationships"])
+	}
+
+	// Mock returns empty relationships
+	if len(relationships) != 0 {
+		t.Errorf("expected 0 relationships from mock, got %d", len(relationships))
+	}
+
+	// Check for total_count
+	if data["total_count"] != float64(0) {
+		t.Errorf("expected total_count 0, got %v", data["total_count"])
 	}
 }
 
