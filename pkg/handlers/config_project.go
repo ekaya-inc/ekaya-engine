@@ -6,10 +6,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/config"
 )
 
 // AIOptionConfig contains configuration for a single AI option (community or embedded).
 type AIOptionConfig struct {
+	Available      bool   `json:"available"`
 	LLMBaseURL     string `json:"llm_base_url"`
 	LLMModel       string `json:"llm_model"`
 	EmbeddingURL   string `json:"embedding_url"`
@@ -29,12 +31,14 @@ type ProjectConfigResponse struct {
 
 // ProjectConfigHandler handles project-scoped configuration requests.
 type ProjectConfigHandler struct {
+	cfg    *config.Config
 	logger *zap.Logger
 }
 
 // NewProjectConfigHandler creates a new project config handler.
-func NewProjectConfigHandler(logger *zap.Logger) *ProjectConfigHandler {
+func NewProjectConfigHandler(cfg *config.Config, logger *zap.Logger) *ProjectConfigHandler {
 	return &ProjectConfigHandler{
+		cfg:    cfg,
 		logger: logger,
 	}
 }
@@ -51,8 +55,8 @@ func (h *ProjectConfigHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware
 func (h *ProjectConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 	response := ProjectConfigResponse{
 		AIOptions: AIOptionsResponse{
-			Community: nil, // Not configured in ekaya-engine yet
-			Embedded:  nil, // Not configured in ekaya-engine yet
+			Community: h.buildAIOption(&h.cfg.CommunityAI),
+			Embedded:  h.buildAIOption(&h.cfg.EmbeddedAI),
 		},
 	}
 
@@ -62,4 +66,28 @@ func (h *ProjectConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.logger.Debug("Project config request served", zap.String("remote_addr", r.RemoteAddr))
+}
+
+// buildAIOption converts server config to API response format.
+// Returns an AIOptionConfig with Available=false if not configured.
+func (h *ProjectConfigHandler) buildAIOption(communityOrEmbedded interface{}) *AIOptionConfig {
+	switch c := communityOrEmbedded.(type) {
+	case *config.CommunityAIConfig:
+		return &AIOptionConfig{
+			Available:      c.IsAvailable(),
+			LLMBaseURL:     c.LLMBaseURL,
+			LLMModel:       c.LLMModel,
+			EmbeddingURL:   c.EmbeddingURL,
+			EmbeddingModel: c.EmbeddingModel,
+		}
+	case *config.EmbeddedAIConfig:
+		return &AIOptionConfig{
+			Available:      c.IsAvailable(),
+			LLMBaseURL:     c.LLMBaseURL,
+			LLMModel:       c.LLMModel,
+			EmbeddingURL:   c.EmbeddingURL,
+			EmbeddingModel: c.EmbeddingModel,
+		}
+	}
+	return &AIOptionConfig{Available: false}
 }

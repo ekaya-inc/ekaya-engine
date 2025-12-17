@@ -20,6 +20,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/handlers"
+	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -117,6 +118,7 @@ func main() {
 	datasourceRepo := repositories.NewDatasourceRepository()
 	schemaRepo := repositories.NewSchemaRepository()
 	queryRepo := repositories.NewQueryRepository()
+	aiConfigRepo := repositories.NewAIConfigRepository(credentialEncryptor)
 
 	// Create adapter factory for datasource connections
 	adapterFactory := datasource.NewDatasourceAdapterFactory()
@@ -127,6 +129,7 @@ func main() {
 	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, logger)
 	schemaService := services.NewSchemaService(schemaRepo, datasourceService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, logger)
+	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
 
 	mux := http.NewServeMux()
 
@@ -143,19 +146,20 @@ func main() {
 	configHandler.RegisterRoutes(mux)
 
 	// Register project config handler (authenticated - project-scoped config)
-	projectConfigHandler := handlers.NewProjectConfigHandler(logger)
+	projectConfigHandler := handlers.NewProjectConfigHandler(cfg, logger)
 	projectConfigHandler.RegisterRoutes(mux, authMiddleware)
 
 	// Register well-known endpoints (public - no auth required)
 	wellKnownHandler := handlers.NewWellKnownHandler(cfg, logger)
 	wellKnownHandler.RegisterRoutes(mux)
 
-	// Register AI config stub handler
-	aiConfigStubHandler := handlers.NewAIConfigStubHandler(logger)
-	aiConfigStubHandler.RegisterRoutes(mux, authMiddleware)
-
 	// Create tenant middleware once for all handlers that need it
 	tenantMiddleware := database.WithTenantContext(db, logger)
+
+	// Register AI config handler (protected)
+	connectionTester := llm.NewConnectionTester()
+	aiConfigHandler := handlers.NewAIConfigHandler(aiConfigService, connectionTester, cfg, logger)
+	aiConfigHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register projects handler (includes provisioning via POST /projects)
 	projectsHandler := handlers.NewProjectsHandler(projectService, logger)

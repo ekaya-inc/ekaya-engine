@@ -42,6 +42,10 @@ type Config struct {
 	// Datasource connection management configuration
 	Datasource DatasourceConfig `yaml:"datasource"`
 
+	// Pre-configured AI model endpoints (server-level)
+	CommunityAI CommunityAIConfig `yaml:"community_ai"`
+	EmbeddedAI  EmbeddedAIConfig  `yaml:"embedded_ai"`
+
 	// Credential encryption key for project secrets (AI keys, database passwords, etc.)
 	// Must be a 32-byte key, base64 encoded. Generate with: openssl rand -base64 32
 	// Server will fail to start if this is not set.
@@ -96,6 +100,34 @@ type DatasourceConfig struct {
 	ConnectionTTLMinutes int `yaml:"connection_ttl_minutes" env:"DATASOURCE_CONNECTION_TTL_MINUTES" env-default:"5"`
 	// MaxConnectionsPerUser limits concurrent datasource connections per user.
 	MaxConnectionsPerUser int `yaml:"max_connections_per_user" env:"DATASOURCE_MAX_CONNECTIONS_PER_USER" env-default:"1"`
+}
+
+// CommunityAIConfig holds endpoints for free community AI models.
+// These are server-level settings that projects can opt into.
+type CommunityAIConfig struct {
+	LLMBaseURL     string `yaml:"llm_base_url" env:"COMMUNITY_AI_LLM_BASE_URL" env-default:""`
+	LLMModel       string `yaml:"llm_model" env:"COMMUNITY_AI_LLM_MODEL" env-default:""`
+	EmbeddingURL   string `yaml:"embedding_url" env:"COMMUNITY_AI_EMBEDDING_URL" env-default:""`
+	EmbeddingModel string `yaml:"embedding_model" env:"COMMUNITY_AI_EMBEDDING_MODEL" env-default:""`
+}
+
+// IsAvailable returns true if community AI is configured.
+func (c *CommunityAIConfig) IsAvailable() bool {
+	return c.LLMBaseURL != "" && c.LLMModel != ""
+}
+
+// EmbeddedAIConfig holds endpoints for licensed embedded AI models.
+// These are server-level settings that projects can opt into.
+type EmbeddedAIConfig struct {
+	LLMBaseURL     string `yaml:"llm_base_url" env:"EMBEDDED_AI_LLM_BASE_URL" env-default:""`
+	LLMModel       string `yaml:"llm_model" env:"EMBEDDED_AI_LLM_MODEL" env-default:""`
+	EmbeddingURL   string `yaml:"embedding_url" env:"EMBEDDED_AI_EMBEDDING_URL" env-default:""`
+	EmbeddingModel string `yaml:"embedding_model" env:"EMBEDDED_AI_EMBEDDING_MODEL" env-default:""`
+}
+
+// IsAvailable returns true if embedded AI is configured.
+func (c *EmbeddedAIConfig) IsAvailable() bool {
+	return c.LLMBaseURL != "" && c.LLMModel != ""
 }
 
 // Load reads configuration from config.yaml with environment variable overrides.
