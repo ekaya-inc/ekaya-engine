@@ -41,6 +41,12 @@ type SchemaColumn struct {
 	Metadata        map[string]any `json:"metadata,omitempty"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
+	// Discovery-related fields (populated by discovery process)
+	RowCount          *int64     `json:"row_count,omitempty"`          // Denormalized table row count
+	NonNullCount      *int64     `json:"non_null_count,omitempty"`     // Non-null values in column
+	IsJoinable        *bool      `json:"is_joinable,omitempty"`        // Can be used as join key
+	JoinabilityReason *string    `json:"joinability_reason,omitempty"` // Why column is/isn't joinable
+	StatsUpdatedAt    *time.Time `json:"stats_updated_at,omitempty"`   // When stats were computed
 }
 
 // SchemaRelationship represents a relationship between two columns.
@@ -60,6 +66,12 @@ type SchemaRelationship struct {
 	IsApproved        *bool              `json:"is_approved,omitempty"`
 	CreatedAt         time.Time          `json:"created_at"`
 	UpdatedAt         time.Time          `json:"updated_at"`
+	// Discovery metrics (populated during relationship discovery)
+	MatchRate       *float64 `json:"match_rate,omitempty"`       // Value overlap 0.0-1.0
+	SourceDistinct  *int64   `json:"source_distinct,omitempty"`  // Distinct values in source
+	TargetDistinct  *int64   `json:"target_distinct,omitempty"`  // Distinct values in target
+	MatchedCount    *int64   `json:"matched_count,omitempty"`    // Count of matched values
+	RejectionReason *string  `json:"rejection_reason,omitempty"` // Why candidate was rejected
 }
 
 // ValidationResults stores metrics from relationship validation analysis.
@@ -149,6 +161,39 @@ const (
 	MatchQualityModerate = "moderate"
 )
 
+// Inference methods for discovered relationships
+const (
+	InferenceMethodNamingPattern = "naming_pattern"
+	InferenceMethodValueOverlap  = "value_overlap"
+	InferenceMethodTypeMatch     = "type_match"
+	InferenceMethodForeignKey    = "foreign_key"
+)
+
+// Rejection reasons for relationship candidates
+const (
+	RejectionLowMatchRate   = "low_match_rate"
+	RejectionHighOrphanRate = "high_orphan_rate"
+	RejectionJoinFailed     = "join_failed"
+	RejectionTypeMismatch   = "type_mismatch"
+	RejectionAlreadyExists  = "already_exists"
+)
+
+// Joinability classification reasons
+const (
+	JoinabilityPK             = "pk"
+	JoinabilityFKTarget       = "fk_target"
+	JoinabilityUniqueValues   = "unique_values"
+	JoinabilityTypeExcluded   = "type_excluded"
+	JoinabilityLowCardinality = "low_cardinality"
+)
+
+// Candidate statuses for relationship discovery
+const (
+	CandidateStatusPending  = "pending"
+	CandidateStatusVerified = "verified"
+	CandidateStatusRejected = "rejected"
+)
+
 // ============================================================================
 // Service Layer Types
 // ============================================================================
@@ -221,4 +266,80 @@ type AddRelationshipRequest struct {
 	SourceColumnName string `json:"source_column"`
 	TargetTableName  string `json:"target_table"`
 	TargetColumnName string `json:"target_column"`
+}
+
+// ============================================================================
+// Relationship Discovery Types
+// ============================================================================
+
+// RelationshipDetail provides enriched relationship data with resolved names and types.
+type RelationshipDetail struct {
+	ID               uuid.UUID `json:"id"`
+	SourceTableName  string    `json:"source_table_name"`
+	SourceColumnName string    `json:"source_column_name"`
+	SourceColumnType string    `json:"source_column_type"`
+	TargetTableName  string    `json:"target_table_name"`
+	TargetColumnName string    `json:"target_column_name"`
+	TargetColumnType string    `json:"target_column_type"`
+	RelationshipType string    `json:"relationship_type"`
+	Cardinality      string    `json:"cardinality"`
+	Confidence       float64   `json:"confidence"`
+	InferenceMethod  *string   `json:"inference_method,omitempty"`
+	IsValidated      bool      `json:"is_validated"`
+	IsApproved       *bool     `json:"is_approved,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// RelationshipsResponse contains the full response for GET /relationships endpoint.
+type RelationshipsResponse struct {
+	Relationships []*RelationshipDetail `json:"relationships"`
+	TotalCount    int                   `json:"total_count"`
+	EmptyTables   []string              `json:"empty_tables,omitempty"`  // Tables with 0 rows
+	OrphanTables  []string              `json:"orphan_tables,omitempty"` // Tables with data but no relationships
+}
+
+// DiscoveryResults contains statistics from a relationship discovery operation.
+type DiscoveryResults struct {
+	RelationshipsCreated       int      `json:"relationships_created"`
+	TablesAnalyzed             int      `json:"tables_analyzed"`
+	ColumnsAnalyzed            int      `json:"columns_analyzed"`
+	TablesWithoutRelationships int      `json:"tables_without_relationships"`
+	EmptyTables                int      `json:"empty_tables"`
+	EmptyTableNames            []string `json:"empty_table_names,omitempty"`
+	OrphanTableNames           []string `json:"orphan_table_names,omitempty"`
+}
+
+// RelationshipCandidate represents a potential relationship found during discovery.
+type RelationshipCandidate struct {
+	ID              uuid.UUID `json:"id"`
+	SourceTable     string    `json:"source_table"`
+	SourceColumn    string    `json:"source_column"`
+	TargetTable     string    `json:"target_table"`
+	TargetColumn    string    `json:"target_column"`
+	MatchRate       float64   `json:"match_rate"`
+	Status          string    `json:"status"` // "pending", "verified", "rejected"
+	RejectionReason *string   `json:"rejection_reason,omitempty"`
+}
+
+// RelationshipCandidatesResponse contains candidates with summary statistics.
+type RelationshipCandidatesResponse struct {
+	Candidates []RelationshipCandidate `json:"candidates"`
+	Summary    CandidatesSummary       `json:"summary"`
+}
+
+// CandidatesSummary provides aggregate stats for relationship candidates.
+type CandidatesSummary struct {
+	Total    int `json:"total"`
+	Verified int `json:"verified"`
+	Rejected int `json:"rejected"`
+	Pending  int `json:"pending"`
+}
+
+// DiscoveryMetrics captures metrics during relationship discovery for storage.
+type DiscoveryMetrics struct {
+	MatchRate      float64
+	SourceDistinct int64
+	TargetDistinct int64
+	MatchedCount   int64
 }

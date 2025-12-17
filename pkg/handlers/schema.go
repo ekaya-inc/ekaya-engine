@@ -97,12 +97,77 @@ type SchemaPromptResponse struct {
 	Prompt string `json:"prompt"`
 }
 
+// GetRelationshipsResponse contains relationships with enriched data and table analysis.
+type GetRelationshipsResponse struct {
+	Relationships []RelationshipDetailResponse `json:"relationships"`
+	TotalCount    int                          `json:"total_count"`
+	EmptyTables   []string                     `json:"empty_tables,omitempty"`
+	OrphanTables  []string                     `json:"orphan_tables,omitempty"`
+}
+
+// RelationshipDetailResponse provides enriched relationship data with column types.
+type RelationshipDetailResponse struct {
+	ID               string  `json:"id"`
+	SourceTableName  string  `json:"source_table_name"`
+	SourceColumnName string  `json:"source_column_name"`
+	SourceColumnType string  `json:"source_column_type"`
+	TargetTableName  string  `json:"target_table_name"`
+	TargetColumnName string  `json:"target_column_name"`
+	TargetColumnType string  `json:"target_column_type"`
+	RelationshipType string  `json:"relationship_type"`
+	Cardinality      *string `json:"cardinality"`
+	Confidence       float64 `json:"confidence"`
+	InferenceMethod  *string `json:"inference_method,omitempty"`
+	IsValidated      bool    `json:"is_validated"`
+	IsApproved       *bool   `json:"is_approved"`
+	CreatedAt        string  `json:"created_at"`
+	UpdatedAt        string  `json:"updated_at"`
+}
+
+// DiscoverRelationshipsResponse contains results from relationship discovery.
+type DiscoverRelationshipsResponse struct {
+	RelationshipsCreated       int      `json:"relationships_created"`
+	TablesAnalyzed             int      `json:"tables_analyzed"`
+	ColumnsAnalyzed            int      `json:"columns_analyzed"`
+	TablesWithoutRelationships int      `json:"tables_without_relationships"`
+	EmptyTables                int      `json:"empty_tables"`
+	EmptyTableNames            []string `json:"empty_table_names,omitempty"`
+	OrphanTableNames           []string `json:"orphan_table_names,omitempty"`
+}
+
+// RelationshipCandidatesResponse contains candidates with summary statistics.
+type RelationshipCandidatesResponse struct {
+	Candidates []RelationshipCandidateResponse `json:"candidates"`
+	Summary    CandidatesSummaryResponse       `json:"summary"`
+}
+
+// RelationshipCandidateResponse represents a potential or rejected relationship.
+type RelationshipCandidateResponse struct {
+	ID              string  `json:"id"`
+	SourceTable     string  `json:"source_table"`
+	SourceColumn    string  `json:"source_column"`
+	TargetTable     string  `json:"target_table"`
+	TargetColumn    string  `json:"target_column"`
+	MatchRate       float64 `json:"match_rate"`
+	Status          string  `json:"status"`
+	RejectionReason *string `json:"rejection_reason,omitempty"`
+}
+
+// CandidatesSummaryResponse provides aggregate stats for relationship candidates.
+type CandidatesSummaryResponse struct {
+	Total    int `json:"total"`
+	Verified int `json:"verified"`
+	Rejected int `json:"rejected"`
+	Pending  int `json:"pending"`
+}
+
 // --- Handler ---
 
 // SchemaHandler handles schema-related HTTP requests.
 type SchemaHandler struct {
-	schemaService services.SchemaService
-	logger        *zap.Logger
+	schemaService    services.SchemaService
+	discoveryService services.RelationshipDiscoveryService
+	logger           *zap.Logger
 }
 
 // NewSchemaHandler creates a new schema handler.
@@ -110,6 +175,15 @@ func NewSchemaHandler(schemaService services.SchemaService, logger *zap.Logger) 
 	return &SchemaHandler{
 		schemaService: schemaService,
 		logger:        logger,
+	}
+}
+
+// NewSchemaHandlerWithDiscovery creates a schema handler with discovery support.
+func NewSchemaHandlerWithDiscovery(schemaService services.SchemaService, discoveryService services.RelationshipDiscoveryService, logger *zap.Logger) *SchemaHandler {
+	return &SchemaHandler{
+		schemaService:    schemaService,
+		discoveryService: discoveryService,
+		logger:           logger,
 	}
 }
 
@@ -146,6 +220,12 @@ func (h *SchemaHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.AddRelationship)))
 	mux.HandleFunc("DELETE /api/projects/{pid}/datasources/{dsId}/schema/relationships/{relId}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.RemoveRelationship)))
+
+	// Relationship discovery operations
+	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsId}/schema/relationships/discover",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.DiscoverRelationships)))
+	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsId}/schema/relationships/candidates",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetRelationshipCandidates)))
 }
 
 // GetSchema handles GET /api/projects/{pid}/datasources/{dsId}/schema
@@ -440,14 +520,14 @@ func (h *SchemaHandler) SaveSelections(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetRelationships handles GET /api/projects/{pid}/datasources/{dsId}/schema/relationships
-// Returns all relationships for a datasource.
+// Returns all relationships for a datasource with enriched data and table analysis.
 func (h *SchemaHandler) GetRelationships(w http.ResponseWriter, r *http.Request) {
 	projectID, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
 	if !ok {
 		return
 	}
 
-	relationships, err := h.schemaService.GetRelationshipsForDatasource(r.Context(), projectID, datasourceID)
+	relResponse, err := h.schemaService.GetRelationshipsResponse(r.Context(), projectID, datasourceID)
 	if err != nil {
 		h.logger.Error("Failed to get relationships",
 			zap.String("project_id", projectID.String()),
@@ -459,9 +539,16 @@ func (h *SchemaHandler) GetRelationships(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	data := make([]RelationshipResponse, len(relationships))
-	for i, rel := range relationships {
-		data[i] = h.toSchemaRelationshipResponse(rel)
+	// Convert model response to handler response
+	data := GetRelationshipsResponse{
+		TotalCount:   relResponse.TotalCount,
+		EmptyTables:  relResponse.EmptyTables,
+		OrphanTables: relResponse.OrphanTables,
+	}
+
+	data.Relationships = make([]RelationshipDetailResponse, len(relResponse.Relationships))
+	for i, rel := range relResponse.Relationships {
+		data.Relationships[i] = h.toRelationshipDetailResponse(rel)
 	}
 
 	response := ApiResponse{Success: true, Data: data}
@@ -559,6 +646,101 @@ func (h *SchemaHandler) RemoveRelationship(w http.ResponseWriter, r *http.Reques
 	}
 
 	response := ApiResponse{Success: true}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// DiscoverRelationships handles POST /api/projects/{pid}/datasources/{dsId}/schema/relationships/discover
+// Runs automated relationship discovery to infer relationships from data.
+func (h *SchemaHandler) DiscoverRelationships(w http.ResponseWriter, r *http.Request) {
+	projectID, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	if !ok {
+		return
+	}
+
+	// Check if discovery service is available
+	if h.discoveryService == nil {
+		if err := ErrorResponse(w, http.StatusServiceUnavailable, "discovery_not_available", "Relationship discovery service is not configured"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	results, err := h.discoveryService.DiscoverRelationships(r.Context(), projectID, datasourceID)
+	if err != nil {
+		h.logger.Error("Failed to discover relationships",
+			zap.String("project_id", projectID.String()),
+			zap.String("datasource_id", datasourceID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "discover_relationships_failed", "Failed to discover relationships"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	data := DiscoverRelationshipsResponse{
+		RelationshipsCreated:       results.RelationshipsCreated,
+		TablesAnalyzed:             results.TablesAnalyzed,
+		ColumnsAnalyzed:            results.ColumnsAnalyzed,
+		TablesWithoutRelationships: results.TablesWithoutRelationships,
+		EmptyTables:                results.EmptyTables,
+		EmptyTableNames:            results.EmptyTableNames,
+		OrphanTableNames:           results.OrphanTableNames,
+	}
+
+	response := ApiResponse{Success: true, Data: data}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// GetRelationshipCandidates handles GET /api/projects/{pid}/datasources/{dsId}/schema/relationships/candidates
+// Returns all relationship candidates including rejected ones with summary statistics.
+func (h *SchemaHandler) GetRelationshipCandidates(w http.ResponseWriter, r *http.Request) {
+	projectID, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	if !ok {
+		return
+	}
+
+	candidatesResponse, err := h.schemaService.GetRelationshipCandidates(r.Context(), projectID, datasourceID)
+	if err != nil {
+		h.logger.Error("Failed to get relationship candidates",
+			zap.String("project_id", projectID.String()),
+			zap.String("datasource_id", datasourceID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "get_candidates_failed", "Failed to get relationship candidates"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Convert to handler response
+	candidates := make([]RelationshipCandidateResponse, len(candidatesResponse.Candidates))
+	for i, c := range candidatesResponse.Candidates {
+		candidates[i] = RelationshipCandidateResponse{
+			ID:              c.ID.String(),
+			SourceTable:     c.SourceTable,
+			SourceColumn:    c.SourceColumn,
+			TargetTable:     c.TargetTable,
+			TargetColumn:    c.TargetColumn,
+			MatchRate:       c.MatchRate,
+			Status:          c.Status,
+			RejectionReason: c.RejectionReason,
+		}
+	}
+
+	data := RelationshipCandidatesResponse{
+		Candidates: candidates,
+		Summary: CandidatesSummaryResponse{
+			Total:    candidatesResponse.Summary.Total,
+			Verified: candidatesResponse.Summary.Verified,
+			Rejected: candidatesResponse.Summary.Rejected,
+			Pending:  candidatesResponse.Summary.Pending,
+		},
+	}
+
+	response := ApiResponse{Success: true, Data: data}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
@@ -685,5 +867,31 @@ func (h *SchemaHandler) toSchemaRelationshipResponse(rel *models.SchemaRelations
 		Cardinality:      rel.Cardinality,
 		Confidence:       rel.Confidence,
 		IsApproved:       rel.IsApproved,
+	}
+}
+
+// toRelationshipDetailResponse converts a RelationshipDetail model to a RelationshipDetailResponse.
+func (h *SchemaHandler) toRelationshipDetailResponse(rel *models.RelationshipDetail) RelationshipDetailResponse {
+	var cardinality *string
+	if rel.Cardinality != "" {
+		cardinality = &rel.Cardinality
+	}
+
+	return RelationshipDetailResponse{
+		ID:               rel.ID.String(),
+		SourceTableName:  rel.SourceTableName,
+		SourceColumnName: rel.SourceColumnName,
+		SourceColumnType: rel.SourceColumnType,
+		TargetTableName:  rel.TargetTableName,
+		TargetColumnName: rel.TargetColumnName,
+		TargetColumnType: rel.TargetColumnType,
+		RelationshipType: rel.RelationshipType,
+		Cardinality:      cardinality,
+		Confidence:       rel.Confidence,
+		InferenceMethod:  rel.InferenceMethod,
+		IsValidated:      rel.IsValidated,
+		IsApproved:       rel.IsApproved,
+		CreatedAt:        rel.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		UpdatedAt:        rel.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 }
