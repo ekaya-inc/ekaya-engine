@@ -116,6 +116,7 @@ func main() {
 	userRepo := repositories.NewUserRepository()
 	datasourceRepo := repositories.NewDatasourceRepository()
 	schemaRepo := repositories.NewSchemaRepository()
+	queryRepo := repositories.NewQueryRepository()
 
 	// Create adapter factory for datasource connections
 	adapterFactory := datasource.NewDatasourceAdapterFactory()
@@ -125,6 +126,7 @@ func main() {
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, logger)
 	schemaService := services.NewSchemaService(schemaRepo, datasourceService, adapterFactory, logger)
+	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, logger)
 
 	mux := http.NewServeMux()
 
@@ -170,6 +172,10 @@ func main() {
 	// Register schema handler (protected)
 	schemaHandler := handlers.NewSchemaHandler(schemaService, logger)
 	schemaHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register queries handler (protected)
+	queriesHandler := handlers.NewQueriesHandler(queryService, logger)
+	queriesHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"

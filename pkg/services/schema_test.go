@@ -400,6 +400,10 @@ func (m *mockSchemaAdapterFactory) ListTypes() []datasource.DatasourceAdapterInf
 	return nil
 }
 
+func (m *mockSchemaAdapterFactory) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any) (datasource.QueryExecutor, error) {
+	return nil, errors.New("not implemented in mock")
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================

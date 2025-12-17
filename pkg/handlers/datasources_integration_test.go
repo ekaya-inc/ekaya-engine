@@ -43,6 +43,10 @@ func (f *integrationMockAdapterFactory) ListTypes() []datasource.DatasourceAdapt
 	}
 }
 
+func (f *integrationMockAdapterFactory) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any) (datasource.QueryExecutor, error) {
+	return nil, nil
+}
+
 type integrationMockConnectionTester struct{}
 
 func (t *integrationMockConnectionTester) TestConnection(ctx context.Context) error {

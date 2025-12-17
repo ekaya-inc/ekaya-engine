@@ -112,6 +112,10 @@ func (m *mockAdapterFactory) NewSchemaDiscoverer(ctx context.Context, dsType str
 	return nil, errors.New("not implemented in mock")
 }
 
+func (m *mockAdapterFactory) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any) (datasource.QueryExecutor, error) {
+	return nil, errors.New("not implemented in mock")
+}
+
 func (m *mockAdapterFactory) ListTypes() []datasource.DatasourceAdapterInfo {
 	return []datasource.DatasourceAdapterInfo{
 		{Type: "postgres", DisplayName: "PostgreSQL"},

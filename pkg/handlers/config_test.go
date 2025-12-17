@@ -33,6 +33,10 @@ func (m *mockAdapterFactory) ListTypes() []datasource.DatasourceAdapterInfo {
 	return []datasource.DatasourceAdapterInfo{}
 }
 
+func (m *mockAdapterFactory) NewQueryExecutor(_ context.Context, _ string, _ map[string]any) (datasource.QueryExecutor, error) {
+	return nil, nil
+}
+
 func TestConfigHandler_Get_Success(t *testing.T) {
 	cfg := &config.Config{
 		BaseURL: "http://localhost:3443",

@@ -30,5 +30,12 @@ func init() {
 			}
 			return NewSchemaDiscoverer(ctx, cfg)
 		},
+		QueryExecutorFactory: func(ctx context.Context, config map[string]any) (datasource.QueryExecutor, error) {
+			cfg, err := FromMap(config)
+			if err != nil {
+				return nil, err
+			}
+			return NewQueryExecutor(ctx, cfg)
+		},
 	})
 }
