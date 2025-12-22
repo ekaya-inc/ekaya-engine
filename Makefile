@@ -1,5 +1,5 @@
 # ekaya-engine Makefile
-.PHONY: help install install-hooks install-air clean test fmt lint check run dev-ui dev-server dev-build-docker ping dev-up dev-down dev-build-container connect-postgres build-test-image push-test-image pull-test-image
+.PHONY: help install install-hooks install-air clean test fmt lint check run dev-ui dev-server dev-build-docker ping dev-up dev-down dev-build-container connect-postgres DANGER-recreate-database build-test-image push-test-image pull-test-image
 
 # Variables
 # Note: These are the registries for dev and prod environments
@@ -271,6 +271,23 @@ connect-postgres: ## Connect to PostgreSQL via psql (uses .env variables)
 		-U $${PGUSER:-ekaya} \
 		-d $${PGDATABASE:-ekaya_engine}
 
+# DANGEROUS: Drop and recreate the engine database
+DANGER-recreate-database: ## Drop and recreate $${PGDATABASE:-ekaya_engine} (requires CONFIRM=YES)
+	@echo "$(RED)⚠️  This will DROP and RECREATE the database '$${PGDATABASE:-ekaya_engine}' on $${PGHOST:-localhost}:$${PGPORT:-5432} as user $${PGUSER:-ekaya}$(NC)"
+	@[ "$${CONFIRM}" = "YES" ] || (echo "$(RED)Aborting. Re-run with CONFIRM=YES$(NC)"; exit 1)
+	@echo "$(YELLOW)Terminating active sessions...$(NC)"
+	@PGPASSWORD=$${PGPASSWORD} psql -v ON_ERROR_STOP=1 \
+		-h $${PGHOST:-localhost} -p $${PGPORT:-5432} -U $${PGUSER:-ekaya} -d postgres \
+		-c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$${PGDATABASE:-ekaya_engine}' AND pid <> pg_backend_pid();"
+	@echo "$(YELLOW)Dropping database if it exists...$(NC)"
+	@PGPASSWORD=$${PGPASSWORD} psql -v ON_ERROR_STOP=1 \
+		-h $${PGHOST:-localhost} -p $${PGPORT:-5432} -U $${PGUSER:-ekaya} -d postgres \
+		-c "DROP DATABASE IF EXISTS \"$${PGDATABASE:-ekaya_engine}\";"
+	@echo "$(YELLOW)Creating database...$(NC)"
+	@PGPASSWORD=$${PGPASSWORD} psql -v ON_ERROR_STOP=1 \
+		-h $${PGHOST:-localhost} -p $${PGPORT:-5432} -U $${PGUSER:-ekaya} -d postgres \
+		-c "CREATE DATABASE \"$${PGDATABASE:-ekaya_engine}\";"
+	@echo "$(GREEN)✓ Recreated database: $${PGDATABASE:-ekaya_engine}$(NC)"
 
 dev-build-container: ## Build devcontainer environment
 	@echo "$(YELLOW)Building devcontainer environment...$(NC)"

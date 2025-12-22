@@ -253,6 +253,8 @@ class EngineApiService {
   /**
    * Save schema selections (tables and columns) for a datasource
    * POST /api/projects/{projectId}/datasources/{datasourceId}/schema/selections
+   * @param tableSelections - Map of table ID (UUID) to selection status
+   * @param columnSelections - Map of table ID (UUID) to array of selected column IDs (UUIDs)
    */
   async saveSchemaSelections(
     projectId: string,

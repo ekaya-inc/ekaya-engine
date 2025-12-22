@@ -22,10 +22,7 @@ import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext
 import { useToast } from "../hooks/useToast";
 import engineApi from "../services/engineApi";
 import type { SchemaTable as ApiSchemaTable } from "../types";
-import {
-  buildSelectionPayloads,
-  buildTableNameToQualified,
-} from "../utils/schemaUtils";
+import { buildSelectionPayloads } from "../utils/schemaUtils";
 
 interface Column {
   name: string;
@@ -270,12 +267,10 @@ const SchemaPage = () => {
     try {
       setIsStartingExtraction(true);
 
-      // Build schema-qualified table name lookup and selection payloads
-      const tableNameToQualified = buildTableNameToQualified(apiTables);
+      // Build selection payloads using table and column IDs
       const { tableSelections, columnSelections } = buildSelectionPayloads(
-        schemaData.tables,
-        selectionState,
-        tableNameToQualified
+        apiTables,
+        selectionState
       );
 
       // Save schema selections to database

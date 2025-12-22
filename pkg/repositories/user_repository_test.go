@@ -4,10 +4,12 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
@@ -454,5 +456,279 @@ func TestUserRepository_NoTenantScope(t *testing.T) {
 	_, err = tc.repo.CountAdmins(ctx, tc.projectID)
 	if err == nil {
 		t.Error("expected error for CountAdmins without tenant scope")
+	}
+}
+
+// TestUserRepository_RemoveWithOwnerCheck_Success tests removing a non-admin user.
+func TestUserRepository_RemoveWithOwnerCheck_Success(t *testing.T) {
+	tc := setupUserTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create admin and user
+	adminID := uuid.MustParse("00000000-0000-0000-0000-000000000040")
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000041")
+	tc.createTestUser(ctx, adminID, models.RoleAdmin)
+	tc.createTestUser(ctx, userID, models.RoleUser)
+
+	// Remove regular user should succeed
+	err := tc.repo.RemoveWithOwnerCheck(ctx, tc.projectID, userID)
+	if err != nil {
+		t.Fatalf("RemoveWithOwnerCheck failed: %v", err)
+	}
+
+	// Verify user is gone
+	_, err = tc.repo.GetByID(ctx, tc.projectID, userID)
+	if err == nil {
+		t.Error("expected error for removed user")
+	}
+}
+
+// TestUserRepository_RemoveWithOwnerCheck_LastAdmin tests removing last admin fails.
+func TestUserRepository_RemoveWithOwnerCheck_LastAdmin(t *testing.T) {
+	tc := setupUserTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create single admin
+	adminID := uuid.MustParse("00000000-0000-0000-0000-000000000042")
+	tc.createTestUser(ctx, adminID, models.RoleAdmin)
+
+	// Remove last admin should fail
+	err := tc.repo.RemoveWithOwnerCheck(ctx, tc.projectID, adminID)
+	if err == nil {
+		t.Fatal("expected error when removing last admin")
+	}
+	if !errors.Is(err, apperrors.ErrLastAdmin) {
+		t.Errorf("expected ErrLastAdmin, got: %v", err)
+	}
+
+	// Verify admin still exists
+	admin, err := tc.repo.GetByID(ctx, tc.projectID, adminID)
+	if err != nil {
+		t.Fatalf("admin should still exist: %v", err)
+	}
+	if admin.Role != models.RoleAdmin {
+		t.Errorf("expected role admin, got %q", admin.Role)
+	}
+}
+
+// TestUserRepository_RemoveWithOwnerCheck_NonLastAdmin tests removing admin when others exist.
+func TestUserRepository_RemoveWithOwnerCheck_NonLastAdmin(t *testing.T) {
+	tc := setupUserTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create two admins
+	admin1ID := uuid.MustParse("00000000-0000-0000-0000-000000000043")
+	admin2ID := uuid.MustParse("00000000-0000-0000-0000-000000000044")
+	tc.createTestUser(ctx, admin1ID, models.RoleAdmin)
+	tc.createTestUser(ctx, admin2ID, models.RoleAdmin)
+
+	// Remove one admin should succeed
+	err := tc.repo.RemoveWithOwnerCheck(ctx, tc.projectID, admin1ID)
+	if err != nil {
+		t.Fatalf("RemoveWithOwnerCheck failed: %v", err)
+	}
+
+	// Verify admin1 is gone
+	_, err = tc.repo.GetByID(ctx, tc.projectID, admin1ID)
+	if err == nil {
+		t.Error("expected error for removed admin")
+	}
+
+	// Verify admin2 still exists
+	_, err = tc.repo.GetByID(ctx, tc.projectID, admin2ID)
+	if err != nil {
+		t.Errorf("admin2 should still exist: %v", err)
+	}
+}
+
+// TestUserRepository_RemoveWithOwnerCheck_NotFound tests removing non-existent user.
+func TestUserRepository_RemoveWithOwnerCheck_NotFound(t *testing.T) {
+	tc := setupUserTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	nonExistentID := uuid.MustParse("00000000-0000-0000-0000-999999999994")
+	err := tc.repo.RemoveWithOwnerCheck(ctx, tc.projectID, nonExistentID)
+	if err == nil {
+		t.Error("expected error for non-existent user")
+	}
+}
+
+// TestUserRepository_UpdateRoleWithOwnerCheck_Success tests updating a user's role.
+func TestUserRepository_UpdateRoleWithOwnerCheck_Success(t *testing.T) {
+	tc := setupUserTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000045")
+	tc.createTestUser(ctx, userID, models.RoleUser)
+
+	// Promote to admin
+	err := tc.repo.UpdateRoleWithOwnerCheck(ctx, tc.projectID, userID, models.RoleAdmin)
+	if err != nil {
+		t.Fatalf("UpdateRoleWithOwnerCheck failed: %v", err)
+	}
+
+	// Verify role changed
+	user, err := tc.repo.GetByID(ctx, tc.projectID, userID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if user.Role != models.RoleAdmin {
+		t.Errorf("expected role admin, got %q", user.Role)
+	}
+}
+
+// TestUserRepository_UpdateRoleWithOwnerCheck_LastAdminDemotion tests demoting last admin fails.
+func TestUserRepository_UpdateRoleWithOwnerCheck_LastAdminDemotion(t *testing.T) {
+	tc := setupUserTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create single admin
+	adminID := uuid.MustParse("00000000-0000-0000-0000-000000000046")
+	tc.createTestUser(ctx, adminID, models.RoleAdmin)
+
+	// Demote last admin should fail
+	err := tc.repo.UpdateRoleWithOwnerCheck(ctx, tc.projectID, adminID, models.RoleUser)
+	if err == nil {
+		t.Fatal("expected error when demoting last admin")
+	}
+	if !errors.Is(err, apperrors.ErrLastAdmin) {
+		t.Errorf("expected ErrLastAdmin, got: %v", err)
+	}
+
+	// Verify admin still has admin role
+	admin, err := tc.repo.GetByID(ctx, tc.projectID, adminID)
+	if err != nil {
+		t.Fatalf("admin should still exist: %v", err)
+	}
+	if admin.Role != models.RoleAdmin {
+		t.Errorf("expected role admin, got %q", admin.Role)
+	}
+}
+
+// TestUserRepository_UpdateRoleWithOwnerCheck_NonLastAdminDemotion tests demoting admin when others exist.
+func TestUserRepository_UpdateRoleWithOwnerCheck_NonLastAdminDemotion(t *testing.T) {
+	tc := setupUserTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create two admins
+	admin1ID := uuid.MustParse("00000000-0000-0000-0000-000000000047")
+	admin2ID := uuid.MustParse("00000000-0000-0000-0000-000000000048")
+	tc.createTestUser(ctx, admin1ID, models.RoleAdmin)
+	tc.createTestUser(ctx, admin2ID, models.RoleAdmin)
+
+	// Demote one admin should succeed
+	err := tc.repo.UpdateRoleWithOwnerCheck(ctx, tc.projectID, admin1ID, models.RoleUser)
+	if err != nil {
+		t.Fatalf("UpdateRoleWithOwnerCheck failed: %v", err)
+	}
+
+	// Verify admin1 is now user
+	user, err := tc.repo.GetByID(ctx, tc.projectID, admin1ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if user.Role != models.RoleUser {
+		t.Errorf("expected role user, got %q", user.Role)
+	}
+
+	// Verify admin2 is still admin
+	admin2, err := tc.repo.GetByID(ctx, tc.projectID, admin2ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if admin2.Role != models.RoleAdmin {
+		t.Errorf("expected role admin, got %q", admin2.Role)
+	}
+}
+
+// TestUserRepository_UpdateRoleWithOwnerCheck_AdminToAdmin tests updating admin to admin (no-op).
+func TestUserRepository_UpdateRoleWithOwnerCheck_AdminToAdmin(t *testing.T) {
+	tc := setupUserTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create single admin
+	adminID := uuid.MustParse("00000000-0000-0000-0000-000000000049")
+	tc.createTestUser(ctx, adminID, models.RoleAdmin)
+
+	// Update admin to admin should succeed (not a demotion)
+	err := tc.repo.UpdateRoleWithOwnerCheck(ctx, tc.projectID, adminID, models.RoleAdmin)
+	if err != nil {
+		t.Fatalf("UpdateRoleWithOwnerCheck failed: %v", err)
+	}
+
+	// Verify still admin
+	admin, err := tc.repo.GetByID(ctx, tc.projectID, adminID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if admin.Role != models.RoleAdmin {
+		t.Errorf("expected role admin, got %q", admin.Role)
+	}
+}
+
+// TestUserRepository_UpdateRoleWithOwnerCheck_NotFound tests updating non-existent user.
+func TestUserRepository_UpdateRoleWithOwnerCheck_NotFound(t *testing.T) {
+	tc := setupUserTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	nonExistentID := uuid.MustParse("00000000-0000-0000-0000-999999999995")
+	err := tc.repo.UpdateRoleWithOwnerCheck(ctx, tc.projectID, nonExistentID, models.RoleAdmin)
+	if err == nil {
+		t.Error("expected error for non-existent user")
+	}
+}
+
+// TestUserRepository_RemoveWithOwnerCheck_NoTenantScope tests operation fails without tenant scope.
+func TestUserRepository_RemoveWithOwnerCheck_NoTenantScope(t *testing.T) {
+	tc := setupUserTest(t)
+	tc.cleanup()
+
+	ctx := context.Background()
+	userID := uuid.MustParse("00000000-0000-0000-0000-00000000004a")
+
+	err := tc.repo.RemoveWithOwnerCheck(ctx, tc.projectID, userID)
+	if err == nil {
+		t.Error("expected error for RemoveWithOwnerCheck without tenant scope")
+	}
+}
+
+// TestUserRepository_UpdateRoleWithOwnerCheck_NoTenantScope tests operation fails without tenant scope.
+func TestUserRepository_UpdateRoleWithOwnerCheck_NoTenantScope(t *testing.T) {
+	tc := setupUserTest(t)
+	tc.cleanup()
+
+	ctx := context.Background()
+	userID := uuid.MustParse("00000000-0000-0000-0000-00000000004b")
+
+	err := tc.repo.UpdateRoleWithOwnerCheck(ctx, tc.projectID, userID, models.RoleAdmin)
+	if err == nil {
+		t.Error("expected error for UpdateRoleWithOwnerCheck without tenant scope")
 	}
 }

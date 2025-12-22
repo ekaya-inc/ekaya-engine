@@ -13,6 +13,7 @@ import (
 // Secrets (passwords, keys) must only come from environment variables.
 type Config struct {
 	// Server configuration
+	BindAddr     string `yaml:"bind_addr" env:"BIND_ADDR" env-default:"127.0.0.1"`
 	Port         string `yaml:"port" env:"PORT" env-default:"3443"`
 	Env          string `yaml:"env" env:"ENVIRONMENT" env-default:"local"`
 	BaseURL      string `yaml:"base_url" env:"BASE_URL" env-default:"http://localhost:3443"`

@@ -53,10 +53,7 @@ func (h *ConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to encode config response", zap.Error(err))
-		return
 	}
-
-	h.logger.Debug("Config request served", zap.String("remote_addr", r.RemoteAddr))
 }
 
 // GetDatasourceTypes returns available datasource adapter types.
@@ -70,10 +67,5 @@ func (h *ConfigHandler) GetDatasourceTypes(w http.ResponseWriter, r *http.Reques
 
 	if err := WriteJSON(w, http.StatusOK, types); err != nil {
 		h.logger.Error("Failed to encode datasource types response", zap.Error(err))
-		return
 	}
-
-	h.logger.Debug("Datasource types request served",
-		zap.String("remote_addr", r.RemoteAddr),
-		zap.Int("types_count", len(types)))
 }

@@ -85,6 +85,7 @@ func setupIntegrationTest(t *testing.T) *integrationTestContext {
 		repo,
 		encryptor,
 		&integrationMockAdapterFactory{},
+		nil, // No project service for tests
 		zap.NewNop(),
 	)
 

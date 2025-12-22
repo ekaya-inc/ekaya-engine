@@ -7,10 +7,10 @@ import {
   CheckCircle,
   Circle,
   Clock,
+  HelpCircle,
   Loader2,
-  Pause,
-  Play,
-  RefreshCw,
+  Trash2,
+  X,
   Zap,
 } from 'lucide-react';
 
@@ -19,9 +19,10 @@ import { Button } from '../ui/Button';
 
 interface OntologyStatusProps {
   progress: WorkflowProgress;
-  onPause: () => void;
-  onResume: () => void;
-  onRestart: () => void;
+  pendingQuestionCount?: number;
+  onCancel: () => void;
+  onRefresh?: () => void; // Optional - refresh button currently hidden
+  onDelete: () => void;
 }
 
 const formatTimeRemaining = (ms: number | undefined): string => {
@@ -40,9 +41,9 @@ const formatTimeRemaining = (ms: number | undefined): string => {
 
 const OntologyStatus = ({
   progress,
-  onPause,
-  onResume,
-  onRestart,
+  pendingQuestionCount = 0,
+  onCancel,
+  onDelete,
 }: OntologyStatusProps) => {
   const { state, current, total, tokensPerSecond, timeRemainingMs } = progress;
   const progressPercent = total > 0 ? Math.round((current / total) * 100) : 0;
@@ -53,8 +54,8 @@ const OntologyStatus = ({
         return <CheckCircle className="h-5 w-5 text-green-500" />;
       case 'building':
         return <Loader2 className="h-5 w-5 text-blue-500 animate-spin" />;
-      case 'paused':
-        return <Pause className="h-5 w-5 text-amber-500" />;
+      case 'awaiting_input':
+        return <HelpCircle className="h-5 w-5 text-purple-500 animate-pulse" />;
       case 'initializing':
         return <Circle className="h-5 w-5 text-blue-400 animate-pulse" />;
       default:
@@ -68,8 +69,8 @@ const OntologyStatus = ({
         return 'Complete';
       case 'building':
         return 'Building';
-      case 'paused':
-        return 'Paused';
+      case 'awaiting_input':
+        return 'Questions Ready';
       case 'initializing':
         return 'Initializing';
       default:
@@ -83,8 +84,8 @@ const OntologyStatus = ({
         return 'text-green-600';
       case 'building':
         return 'text-blue-600';
-      case 'paused':
-        return 'text-amber-600';
+      case 'awaiting_input':
+        return 'text-purple-600';
       case 'initializing':
         return 'text-blue-400';
       default:
@@ -101,10 +102,15 @@ const OntologyStatus = ({
           <div>
             <div className={`font-semibold ${getStatusColor()}`}>
               {getStatusText()}
+              {state === 'awaiting_input' && pendingQuestionCount > 0 && (
+                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                  {pendingQuestionCount} {pendingQuestionCount === 1 ? 'question' : 'questions'}
+                </span>
+              )}
             </div>
             {state !== 'idle' && (
               <div className="text-sm text-text-secondary">
-                {current}/{total} entities
+                {current}/{total} entities analyzed
               </div>
             )}
           </div>
@@ -118,8 +124,8 @@ const OntologyStatus = ({
                 className={`h-full rounded-full transition-all duration-300 ${
                   state === 'complete'
                     ? 'bg-green-500'
-                    : state === 'paused'
-                    ? 'bg-amber-500'
+                    : state === 'awaiting_input'
+                    ? 'bg-purple-500'
                     : 'bg-blue-500'
                 }`}
                 style={{ width: `${progressPercent}%` }}
@@ -132,7 +138,7 @@ const OntologyStatus = ({
         )}
 
         {/* Performance stats */}
-        {(state === 'building' || state === 'paused') && (
+        {state === 'building' && (
           <div className="flex items-center gap-4 text-sm text-text-secondary">
             {tokensPerSecond !== undefined && tokensPerSecond > 0 && (
               <div className="flex items-center gap-1">
@@ -140,7 +146,7 @@ const OntologyStatus = ({
                 <span>{tokensPerSecond} tok/s</span>
               </div>
             )}
-            {timeRemainingMs !== undefined && state === 'building' && (
+            {timeRemainingMs !== undefined && (
               <div className="flex items-center gap-1">
                 <Clock className="h-4 w-4 text-blue-500" />
                 <span>{formatTimeRemaining(timeRemainingMs)} left</span>
@@ -151,35 +157,32 @@ const OntologyStatus = ({
 
         {/* Controls */}
         <div className="flex items-center gap-2">
-          {state === 'building' && (
+          {(state === 'building' || state === 'initializing') && (
             <Button
               variant="outline"
               size="sm"
-              onClick={onPause}
+              onClick={onCancel}
+              className="text-red-600 hover:text-red-700 hover:bg-red-50"
             >
-              <Pause className="h-4 w-4 mr-1" />
-              Pause
+              <X className="h-4 w-4 mr-1" />
+              Cancel
             </Button>
           )}
-          {state === 'paused' && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onResume}
-            >
-              <Play className="h-4 w-4 mr-1" />
-              Resume
-            </Button>
-          )}
-          {(state === 'complete' || state === 'paused') && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onRestart}
-            >
-              <RefreshCw className="h-4 w-4 mr-1" />
-              Restart
-            </Button>
+          {(state === 'complete' || state === 'awaiting_input') && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onDelete}
+                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                Delete
+              </Button>
+              {/* TODO: Refresh button hidden until we implement incremental refresh
+                  that can diff existing ontology vs schema and only process changes.
+                  Workaround: Delete and rebuild from scratch. */}
+            </>
           )}
         </div>
       </div>

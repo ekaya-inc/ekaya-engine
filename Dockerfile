@@ -76,6 +76,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 
 # Cloud Run optimizations via environment variables
 ENV PORT=3443 \
+    BIND_ADDR=0.0.0.0 \
     GOMAXPROCS=2
 
 # Run the binary

@@ -125,7 +125,8 @@ func (m *mockAdapterFactory) ListTypes() []datasource.DatasourceAdapterInfo {
 func newTestService(repo *mockDatasourceRepository) (DatasourceService, *crypto.CredentialEncryptor) {
 	encryptor, _ := crypto.NewCredentialEncryptor(testEncryptionKey)
 	factory := &mockAdapterFactory{}
-	return NewDatasourceService(repo, encryptor, factory, zap.NewNop()), encryptor
+	// Pass nil for projectService in tests - auto-set default datasource is tested separately
+	return NewDatasourceService(repo, encryptor, factory, nil, zap.NewNop()), encryptor
 }
 
 func TestDatasourceService_Create_Success(t *testing.T) {
@@ -455,7 +456,7 @@ func TestDatasourceService_TestConnection_Success(t *testing.T) {
 	factory := &mockAdapterFactory{
 		tester: &mockConnectionTester{},
 	}
-	service := NewDatasourceService(repo, encryptor, factory, zap.NewNop())
+	service := NewDatasourceService(repo, encryptor, factory, nil, zap.NewNop())
 
 	config := map[string]any{
 		"host":     "localhost",
@@ -475,7 +476,7 @@ func TestDatasourceService_TestConnection_FactoryError(t *testing.T) {
 	factory := &mockAdapterFactory{
 		factoryErr: errors.New("unsupported datasource type"),
 	}
-	service := NewDatasourceService(repo, encryptor, factory, zap.NewNop())
+	service := NewDatasourceService(repo, encryptor, factory, nil, zap.NewNop())
 
 	err := service.TestConnection(context.Background(), "unknown", nil)
 	if err == nil {
@@ -491,7 +492,7 @@ func TestDatasourceService_TestConnection_ConnectionError(t *testing.T) {
 			testErr: errors.New("connection refused"),
 		},
 	}
-	service := NewDatasourceService(repo, encryptor, factory, zap.NewNop())
+	service := NewDatasourceService(repo, encryptor, factory, nil, zap.NewNop())
 
 	config := map[string]any{
 		"host":     "localhost",

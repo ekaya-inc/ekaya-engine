@@ -82,7 +82,7 @@ export interface EntityProgressResponse {
 export interface TaskProgressResponse {
   id: string;
   name: string;
-  status: 'queued' | 'processing' | 'complete' | 'failed';
+  status: 'queued' | 'processing' | 'complete' | 'failed' | 'paused';
   requires_llm: boolean;
   started_at?: string;
   completed_at?: string;
@@ -115,7 +115,6 @@ export interface WorkflowStatusResponse {
   has_result: boolean;    // Whether there's a successful result to display
   // Entity queue for work queue UI (LEGACY)
   entity_queue?: EntityProgressResponse[];
-  total_entities?: number;
   completed_entities?: number;
   // Task queue for work queue UI (NEW)
   task_queue?: TaskProgressResponse[];
@@ -123,6 +122,11 @@ export interface WorkflowStatusResponse {
   completed_tasks?: number;
   answered_questions?: number;
   pending_questions_count?: number;  // Questions awaiting user answers
+  // UX improvement fields (NEW)
+  ontology_ready?: boolean;     // True once Tier 0/1 building is complete
+  total_entities?: number;      // Total entities (tables) to process
+  current_entity?: number;      // Current entity progress count
+  progress_message?: string;    // Human-readable progress message
 }
 
 /**
@@ -327,7 +331,7 @@ export interface WorkItem {
 /**
  * Task status in the work queue (NEW - task-based)
  */
-export type TaskStatus = 'queued' | 'processing' | 'complete' | 'failed';
+export type TaskStatus = 'queued' | 'processing' | 'complete' | 'failed' | 'paused';
 
 /**
  * Task item in the work queue (NEW)
@@ -358,19 +362,20 @@ export interface ExtractionQuestion {
  * Overall workflow state
  */
 export type WorkflowState =
-  | 'idle'          // No extraction running
-  | 'initializing'  // Starting up
-  | 'building'      // Actively processing entities
-  | 'paused'        // User paused extraction
-  | 'complete';     // All entities processed
+  | 'idle'            // No extraction running
+  | 'initializing'    // Starting up
+  | 'building'        // Actively processing entities
+  | 'awaiting_input'  // Questions need user answers
+  | 'complete'        // All entities processed
+  | 'error';          // Connection or fetch error
 
 /**
  * Workflow progress and performance stats
  */
 export interface WorkflowProgress {
   state: WorkflowState;
-  current: number;           // Entities completed
-  total: number;             // Total entities to process
+  current: number;           // Entities completed (global + tables + columns)
+  total: number;             // Total entities to process (global + tables + columns)
   tokensPerSecond?: number;  // Processing rate
   timeRemainingMs?: number;  // Estimated time to completion
   startedAt?: string;        // ISO timestamp
@@ -388,11 +393,22 @@ export interface OntologyWorkflowStatus {
   pendingQuestionCount: number;
   errors?: WorkflowError[];
   lastError?: string;
+  // UX improvement fields (NEW)
+  ontologyReady?: boolean;                  // True once Tier 0/1 building is complete
+  progressMessage?: string;                 // Human-readable progress message
 }
 
 // ===================================================================
 // Question-by-Question Flow Types (Application-Controlled State Machine)
 // ===================================================================
+
+/**
+ * Counts of pending questions by type
+ */
+export interface QuestionCounts {
+  required: number;
+  optional: number;
+}
 
 /**
  * Single question DTO from the backend
@@ -401,6 +417,7 @@ export interface QuestionDTO {
   id: string;
   text: string;
   priority: number;
+  is_required: boolean;
   category: string;
   reasoning?: string;
   affected_tables?: string[];
@@ -424,6 +441,7 @@ export interface AnswerQuestionResponse {
   all_complete: boolean;        // True if no more questions
   actions_summary?: string;     // Human-readable summary of actions taken
   thinking?: string;            // LLM's thinking process (for debugging)
+  counts?: QuestionCounts;      // Updated question counts
 }
 
 /**
@@ -442,14 +460,16 @@ export interface SkipDeleteResponse {
 export interface GetNextQuestionResponse {
   question?: QuestionDTO;
   all_complete: boolean;
+  counts?: QuestionCounts;
 }
 
 /**
  * State of the QuestionPanel component
  */
 export type QuestionPanelState =
-  | 'loading'           // Initial load
-  | 'showing_question'  // Displaying a question
-  | 'waiting_for_llm'   // Processing answer with LLM
-  | 'showing_follow_up' // LLM asked for clarification
-  | 'all_complete';     // No more questions
+  | 'loading'              // Initial load
+  | 'waiting_for_questions' // No questions available yet (extraction in progress)
+  | 'showing_question'     // Displaying a question
+  | 'waiting_for_llm'      // Processing answer with LLM
+  | 'showing_follow_up'    // LLM asked for clarification
+  | 'all_complete';        // No more questions

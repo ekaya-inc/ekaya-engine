@@ -88,6 +88,11 @@ type SchemaDiscoverer interface {
 	AnalyzeJoin(ctx context.Context, sourceSchema, sourceTable, sourceColumn,
 		targetSchema, targetTable, targetColumn string) (*JoinAnalysis, error)
 
+	// GetDistinctValues returns up to limit distinct non-null values from a column.
+	// Values are returned as strings, sorted alphabetically.
+	// Used during the scanning phase to collect sample values for enum detection.
+	GetDistinctValues(ctx context.Context, schemaName, tableName, columnName string, limit int) ([]string, error)
+
 	// Close releases the database connection.
 	Close() error
 }

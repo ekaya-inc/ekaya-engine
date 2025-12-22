@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
@@ -20,6 +21,12 @@ type UserRepository interface {
 	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.User, error)
 	GetByID(ctx context.Context, projectID, userID uuid.UUID) (*models.User, error)
 	CountAdmins(ctx context.Context, projectID uuid.UUID) (int, error)
+	// RemoveWithOwnerCheck atomically removes a user, returning ErrLastAdmin if
+	// attempting to remove the last admin from a project.
+	RemoveWithOwnerCheck(ctx context.Context, projectID, userID uuid.UUID) error
+	// UpdateRoleWithOwnerCheck atomically updates a user's role, returning ErrLastAdmin
+	// if attempting to demote the last admin from a project.
+	UpdateRoleWithOwnerCheck(ctx context.Context, projectID, userID uuid.UUID, newRole string) error
 }
 
 // userRepository implements UserRepository using PostgreSQL.
@@ -195,6 +202,130 @@ func (r *userRepository) CountAdmins(ctx context.Context, projectID uuid.UUID) (
 	}
 
 	return count, nil
+}
+
+// RemoveWithOwnerCheck atomically removes a user, returning ErrLastAdmin if
+// attempting to remove the last admin from a project.
+func (r *userRepository) RemoveWithOwnerCheck(ctx context.Context, projectID, userID uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	tx, err := scope.Conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	// Check if user exists and get their role
+	var role string
+	getUserQuery := `SELECT role FROM engine_users WHERE project_id = $1 AND user_id = $2`
+	err = tx.QueryRow(ctx, getUserQuery, projectID, userID).Scan(&role)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return fmt.Errorf("user not found")
+		}
+		return fmt.Errorf("failed to get user: %w", err)
+	}
+
+	// If user is admin, check if they're the last one
+	if role == models.RoleAdmin {
+		var adminCount int
+		countQuery := `SELECT COUNT(*) FROM engine_users WHERE project_id = $1 AND role = 'admin'`
+		err = tx.QueryRow(ctx, countQuery, projectID).Scan(&adminCount)
+		if err != nil {
+			return fmt.Errorf("failed to count admins: %w", err)
+		}
+
+		if adminCount <= 1 {
+			return apperrors.ErrLastAdmin
+		}
+	}
+
+	// Remove the user
+	deleteQuery := `DELETE FROM engine_users WHERE project_id = $1 AND user_id = $2`
+	result, err := tx.Exec(ctx, deleteQuery, projectID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to remove user: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("user not found")
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateRoleWithOwnerCheck atomically updates a user's role, returning ErrLastAdmin
+// if attempting to demote the last admin from a project.
+func (r *userRepository) UpdateRoleWithOwnerCheck(ctx context.Context, projectID, userID uuid.UUID, newRole string) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	tx, err := scope.Conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	// Get current role
+	var currentRole string
+	getUserQuery := `SELECT role FROM engine_users WHERE project_id = $1 AND user_id = $2`
+	err = tx.QueryRow(ctx, getUserQuery, projectID, userID).Scan(&currentRole)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return fmt.Errorf("user not found")
+		}
+		return fmt.Errorf("failed to get user: %w", err)
+	}
+
+	// If demoting from admin, check if they're the last one
+	if currentRole == models.RoleAdmin && newRole != models.RoleAdmin {
+		var adminCount int
+		countQuery := `SELECT COUNT(*) FROM engine_users WHERE project_id = $1 AND role = 'admin'`
+		err = tx.QueryRow(ctx, countQuery, projectID).Scan(&adminCount)
+		if err != nil {
+			return fmt.Errorf("failed to count admins: %w", err)
+		}
+
+		if adminCount <= 1 {
+			return apperrors.ErrLastAdmin
+		}
+	}
+
+	// Update the user's role
+	updateQuery := `UPDATE engine_users SET role = $1, updated_at = $2 WHERE project_id = $3 AND user_id = $4`
+	result, err := tx.Exec(ctx, updateQuery, newRole, time.Now(), projectID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update user: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("user not found")
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
 }
 
 // Ensure userRepository implements UserRepository at compile time.

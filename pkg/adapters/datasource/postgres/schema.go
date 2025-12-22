@@ -296,5 +296,42 @@ func (d *SchemaDiscoverer) AnalyzeJoin(ctx context.Context,
 	return &result, nil
 }
 
+// GetDistinctValues returns up to limit distinct non-null values from a column.
+func (d *SchemaDiscoverer) GetDistinctValues(ctx context.Context, schemaName, tableName, columnName string, limit int) ([]string, error) {
+	// Quote identifiers to prevent SQL injection
+	quotedSchema := pgx.Identifier{schemaName}.Sanitize()
+	quotedTable := pgx.Identifier{tableName}.Sanitize()
+	quotedCol := pgx.Identifier{columnName}.Sanitize()
+
+	query := fmt.Sprintf(`
+		SELECT DISTINCT %s::text
+		FROM %s.%s
+		WHERE %s IS NOT NULL
+		ORDER BY 1
+		LIMIT $1
+	`, quotedCol, quotedSchema, quotedTable, quotedCol)
+
+	rows, err := d.pool.Query(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get distinct values for %s.%s.%s: %w", schemaName, tableName, columnName, err)
+	}
+	defer rows.Close()
+
+	var values []string
+	for rows.Next() {
+		var val string
+		if err := rows.Scan(&val); err != nil {
+			return nil, fmt.Errorf("scan distinct value: %w", err)
+		}
+		values = append(values, val)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate distinct values: %w", err)
+	}
+
+	return values, nil
+}
+
 // Ensure SchemaDiscoverer implements datasource.SchemaDiscoverer at compile time.
 var _ datasource.SchemaDiscoverer = (*SchemaDiscoverer)(nil)

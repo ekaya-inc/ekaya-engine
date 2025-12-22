@@ -16,7 +16,7 @@ import type {
   WorkflowStatusResponse,
 } from '../types';
 
-const ONTOLOGY_BASE_URL = '/ontology/v1';
+const ONTOLOGY_BASE_URL = '/api/projects';
 
 class OntologyApiService {
   private async makeRequest<T>(
@@ -34,17 +34,25 @@ class OntologyApiService {
 
     try {
       const response = await fetchWithAuth(url, config);
-      const data = (await response.json()) as T;
+      const json = (await response.json()) as { data?: T } | T;
 
       if (!response.ok) {
         const error = new Error(
           `HTTP ${response.status}: ${response.statusText}`
-        ) as Error & { status?: number; data?: T };
+        ) as Error & { status?: number; data?: unknown };
         error.status = response.status;
-        error.data = data;
+        error.data = json;
         throw error;
       }
 
+      // Unwrap ApiResponse if present (backend wraps in {success, data}), otherwise return as-is
+      const data =
+        json !== null &&
+        typeof json === 'object' &&
+        'data' in json &&
+        json.data !== undefined
+          ? json.data
+          : (json as T);
       return data;
     } catch (error) {
       console.error(`Ontology API Error (${endpoint}):`, error);
@@ -54,37 +62,46 @@ class OntologyApiService {
 
   /**
    * Start ontology extraction workflow
-   * POST /ontology/v1/{project_id}/extract
+   * POST /api/projects/{project_id}/ontology/extract
+   * Note: datasource_id is fetched from project configuration on backend
    */
   async extractOntology(
     projectId: string,
-    selectedTables?: string[]
+    options?: {
+      selectedTables?: string[];
+      projectDescription?: string;
+    }
   ): Promise<ExtractOntologyResponse> {
-    const options: RequestInit = {
-      method: 'POST',
-    };
+    const body: Record<string, unknown> = {};
 
-    if (selectedTables && selectedTables.length > 0) {
-      options.body = JSON.stringify({ selected_tables: selectedTables });
+    if (options?.selectedTables && options.selectedTables.length > 0) {
+      body.selected_tables = options.selectedTables;
+    }
+
+    if (options?.projectDescription) {
+      body.project_description = options.projectDescription;
     }
 
     return this.makeRequest<ExtractOntologyResponse>(
-      `/${projectId}/extract`,
-      options
+      `/${projectId}/ontology/extract`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
     );
   }
 
   /**
    * Get workflow result (tiered ontology) for the latest workflow
-   * GET /ontology/v1/{project_id}/result
+   * GET /api/projects/{project_id}/ontology/result
    */
   async getWorkflowResult(projectId: string): Promise<WorkflowResultResponse> {
-    return this.makeRequest<WorkflowResultResponse>(`/${projectId}/result`);
+    return this.makeRequest<WorkflowResultResponse>(`/${projectId}/ontology/result`);
   }
 
   /**
    * Get business rules for a project
-   * GET /ontology/v1/{project_id}/business-rules
+   * GET /api/projects/{project_id}/ontology/business-rules
    */
   async getBusinessRules(
     projectId: string,
@@ -92,35 +109,43 @@ class OntologyApiService {
   ): Promise<unknown> {
     const params = entityId ? `?entity_id=${entityId}` : '';
     return this.makeRequest<unknown>(
-      `/${projectId}/business-rules${params}`
+      `/${projectId}/ontology/business-rules${params}`
     );
   }
 
   /**
    * Get status of active workflow for project
-   * GET /ontology/v1/{project_id}/status
+   * GET /api/projects/{project_id}/ontology/workflow
    */
   async getStatus(projectId: string): Promise<WorkflowStatusResponse> {
-    return this.makeRequest<WorkflowStatusResponse>(`/${projectId}/status`);
+    return this.makeRequest<WorkflowStatusResponse>(`/${projectId}/ontology/workflow`);
+  }
+
+  /**
+   * Get specific workflow by ID
+   * GET /api/projects/{project_id}/ontology/workflow/{workflow_id}
+   */
+  async getWorkflowById(projectId: string, workflowId: string): Promise<WorkflowStatusResponse> {
+    return this.makeRequest<WorkflowStatusResponse>(`/${projectId}/ontology/workflow/${workflowId}`);
   }
 
   /**
    * Get questions for active workflow
-   * GET /ontology/v1/{project_id}/questions
+   * GET /api/projects/{project_id}/ontology/questions
    */
   async getQuestions(projectId: string): Promise<WorkflowQuestionsResponse> {
-    return this.makeRequest<WorkflowQuestionsResponse>(`/${projectId}/questions`);
+    return this.makeRequest<WorkflowQuestionsResponse>(`/${projectId}/ontology/questions`);
   }
 
   /**
    * Submit answers to active workflow
-   * POST /ontology/v1/{project_id}/answers
+   * POST /api/projects/{project_id}/ontology/answers
    */
   async submitProjectAnswers(
     projectId: string,
     request: SubmitAnswersRequest
   ): Promise<SubmitAnswersResponse> {
-    return this.makeRequest<SubmitAnswersResponse>(`/${projectId}/answers`, {
+    return this.makeRequest<SubmitAnswersResponse>(`/${projectId}/ontology/answers`, {
       method: 'POST',
       body: JSON.stringify(request),
     });
@@ -128,14 +153,27 @@ class OntologyApiService {
 
   /**
    * Cancel active workflow
-   * POST /ontology/v1/{project_id}/cancel
+   * POST /api/projects/{project_id}/ontology/cancel
    */
   async cancelWorkflow(
     projectId: string
   ): Promise<{ workflow_id: string; status: string; message: string; error?: string }> {
     return this.makeRequest<{ workflow_id: string; status: string; message: string; error?: string }>(
-      `/${projectId}/cancel`,
+      `/${projectId}/ontology/cancel`,
       { method: 'POST' }
+    );
+  }
+
+  /**
+   * Delete all ontology data for project
+   * DELETE /api/projects/{project_id}/ontology
+   */
+  async deleteOntology(
+    projectId: string
+  ): Promise<{ message: string }> {
+    return this.makeRequest<{ message: string }>(
+      `/${projectId}/ontology`,
+      { method: 'DELETE' }
     );
   }
 
@@ -194,7 +232,7 @@ class OntologyApiService {
 
   /**
    * Get the next pending question for a project
-   * GET /ontology/v1/{project_id}/questions/next
+   * GET /api/projects/{project_id}/ontology/questions/next
    */
   async getNextQuestion(
     projectId: string,
@@ -202,13 +240,13 @@ class OntologyApiService {
   ): Promise<GetNextQuestionResponse> {
     const params = includeSkipped ? '?include_skipped=true' : '';
     return this.makeRequest<GetNextQuestionResponse>(
-      `/${projectId}/questions/next${params}`
+      `/${projectId}/ontology/questions/next${params}`
     );
   }
 
   /**
    * Submit an answer to a specific question
-   * POST /ontology/v1/{project_id}/questions/{question_id}/answer
+   * POST /api/projects/{project_id}/ontology/questions/{question_id}/answer
    */
   async answerQuestion(
     projectId: string,
@@ -216,7 +254,7 @@ class OntologyApiService {
     answer: string
   ): Promise<AnswerQuestionResponse> {
     return this.makeRequest<AnswerQuestionResponse>(
-      `/${projectId}/questions/${questionId}/answer`,
+      `/${projectId}/ontology/questions/${questionId}/answer`,
       {
         method: 'POST',
         body: JSON.stringify({ answer }),
@@ -226,28 +264,28 @@ class OntologyApiService {
 
   /**
    * Skip a question (may resurface later)
-   * POST /ontology/v1/{project_id}/questions/{question_id}/skip
+   * POST /api/projects/{project_id}/ontology/questions/{question_id}/skip
    */
   async skipQuestion(
     projectId: string,
     questionId: string
   ): Promise<SkipDeleteResponse> {
     return this.makeRequest<SkipDeleteResponse>(
-      `/${projectId}/questions/${questionId}/skip`,
+      `/${projectId}/ontology/questions/${questionId}/skip`,
       { method: 'POST' }
     );
   }
 
   /**
    * Delete a question (soft delete - won't be asked again)
-   * DELETE /ontology/v1/{project_id}/questions/{question_id}
+   * DELETE /api/projects/{project_id}/ontology/questions/{question_id}
    */
   async deleteQuestion(
     projectId: string,
     questionId: string
   ): Promise<SkipDeleteResponse> {
     return this.makeRequest<SkipDeleteResponse>(
-      `/${projectId}/questions/${questionId}`,
+      `/${projectId}/ontology/questions/${questionId}`,
       { method: 'DELETE' }
     );
   }
@@ -258,7 +296,7 @@ class OntologyApiService {
 
   /**
    * Initialize chat session
-   * POST /ontology/v1/{project_id}/chat/initialize
+   * POST /api/projects/{project_id}/ontology/chat/initialize
    */
   async initializeChat(
     projectId: string
@@ -269,14 +307,14 @@ class OntologyApiService {
     opening_message?: string;
     has_messages?: boolean;
   }> {
-    return this.makeRequest(`/${projectId}/chat/initialize`, {
+    return this.makeRequest(`/${projectId}/ontology/chat/initialize`, {
       method: 'POST',
     });
   }
 
   /**
    * Get chat history
-   * GET /ontology/v1/{project_id}/chat/history
+   * GET /api/projects/{project_id}/ontology/chat/history
    */
   async getChatHistory(
     projectId: string,
@@ -286,22 +324,22 @@ class OntologyApiService {
     total: number;
   }> {
     const params = limit ? `?limit=${limit}` : '';
-    return this.makeRequest(`/${projectId}/chat/history${params}`);
+    return this.makeRequest(`/${projectId}/ontology/chat/history${params}`);
   }
 
   /**
    * Clear chat history
-   * DELETE /ontology/v1/{project_id}/chat/history
+   * DELETE /api/projects/{project_id}/ontology/chat/history
    */
   async clearChatHistory(projectId: string): Promise<{ success: boolean; message: string }> {
-    return this.makeRequest(`/${projectId}/chat/history`, {
+    return this.makeRequest(`/${projectId}/ontology/chat/history`, {
       method: 'DELETE',
     });
   }
 
   /**
    * Get project knowledge
-   * GET /ontology/v1/{project_id}/knowledge
+   * GET /api/projects/{project_id}/ontology/knowledge
    */
   async getProjectKnowledge(
     projectId: string,
@@ -311,12 +349,12 @@ class OntologyApiService {
     total: number;
   }> {
     const params = factType ? `?fact_type=${factType}` : '';
-    return this.makeRequest(`/${projectId}/knowledge${params}`);
+    return this.makeRequest(`/${projectId}/ontology/knowledge${params}`);
   }
 
   /**
    * Send chat message with SSE streaming response
-   * POST /ontology/v1/{project_id}/chat/message
+   * POST /api/projects/{project_id}/ontology/chat/message
    * Returns an EventSource for SSE events
    */
   sendChatMessage(
@@ -327,7 +365,7 @@ class OntologyApiService {
     onComplete: () => void
   ): AbortController {
     const controller = new AbortController();
-    const url = `${ONTOLOGY_BASE_URL}/${projectId}/chat/message`;
+    const url = `${ONTOLOGY_BASE_URL}/${projectId}/ontology/chat/message`;
 
     // Send via fetch with SSE handling
     fetch(url, {

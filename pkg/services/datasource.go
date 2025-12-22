@@ -43,6 +43,7 @@ type datasourceService struct {
 	repo           repositories.DatasourceRepository
 	encryptor      *crypto.CredentialEncryptor
 	adapterFactory datasource.DatasourceAdapterFactory
+	projectService ProjectService
 	logger         *zap.Logger
 }
 
@@ -51,12 +52,14 @@ func NewDatasourceService(
 	repo repositories.DatasourceRepository,
 	encryptor *crypto.CredentialEncryptor,
 	adapterFactory datasource.DatasourceAdapterFactory,
+	projectService ProjectService,
 	logger *zap.Logger,
 ) DatasourceService {
 	return &datasourceService{
 		repo:           repo,
 		encryptor:      encryptor,
 		adapterFactory: adapterFactory,
+		projectService: projectService,
 		logger:         logger,
 	}
 }
@@ -98,6 +101,28 @@ func (s *datasourceService) Create(ctx context.Context, projectID uuid.UUID, nam
 		zap.String("name", name),
 		zap.String("type", dsType),
 	)
+
+	// Auto-set as default datasource for project if none configured
+	if s.projectService != nil {
+		currentDefault, err := s.projectService.GetDefaultDatasourceID(ctx, projectID)
+		if err != nil {
+			s.logger.Warn("Failed to check default datasource",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		} else if currentDefault == uuid.Nil {
+			// No default set yet, set this datasource as default
+			if err := s.projectService.SetDefaultDatasourceID(ctx, projectID, ds.ID); err != nil {
+				s.logger.Warn("Failed to auto-set default datasource",
+					zap.String("project_id", projectID.String()),
+					zap.String("datasource_id", ds.ID.String()),
+					zap.Error(err))
+			} else {
+				s.logger.Info("Auto-set default datasource for project",
+					zap.String("project_id", projectID.String()),
+					zap.String("datasource_id", ds.ID.String()))
+			}
+		}
+	}
 
 	return ds, nil
 }

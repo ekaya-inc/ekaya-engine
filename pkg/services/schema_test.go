@@ -99,6 +99,25 @@ func (m *mockSchemaRepository) GetTableByName(ctx context.Context, projectID, da
 	return nil, errors.New("table not found")
 }
 
+func (m *mockSchemaRepository) FindTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+	if m.getTableByNameErr != nil {
+		return nil, m.getTableByNameErr
+	}
+	// Search in tables list by table name only (schema-agnostic)
+	for _, t := range m.tables {
+		if t.TableName == tableName {
+			return t, nil
+		}
+	}
+	// Also check upserted tables
+	for _, t := range m.upsertedTables {
+		if t.TableName == tableName {
+			return t, nil
+		}
+	}
+	return nil, errors.New("table not found")
+}
+
 func (m *mockSchemaRepository) UpsertTable(ctx context.Context, table *models.SchemaTable) error {
 	if m.upsertTableErr != nil {
 		return m.upsertTableErr
@@ -406,6 +425,10 @@ func (m *mockSchemaDiscoverer) CheckValueOverlap(ctx context.Context, sourceSche
 }
 
 func (m *mockSchemaDiscoverer) AnalyzeJoin(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+	return nil, nil
+}
+
+func (m *mockSchemaDiscoverer) GetDistinctValues(ctx context.Context, schemaName, tableName, columnName string, limit int) ([]string, error) {
 	return nil, nil
 }
 
@@ -1545,11 +1568,12 @@ func TestSchemaService_SaveSelections_Success(t *testing.T) {
 
 	service := newTestSchemaService(repo, dsSvc, factory)
 
-	tableSelections := map[string]bool{
-		"public.users": true,
+	// Use table and column IDs instead of names
+	tableSelections := map[uuid.UUID]bool{
+		tableID: true,
 	}
-	columnSelections := map[string][]string{
-		"public.users": {"id", "email"},
+	columnSelections := map[uuid.UUID][]uuid.UUID{
+		tableID: {columnID1, columnID2},
 	}
 
 	err := service.SaveSelections(context.Background(), projectID, datasourceID, tableSelections, columnSelections)
@@ -1579,6 +1603,7 @@ func TestSchemaService_SaveSelections_EmptyMaps(t *testing.T) {
 func TestSchemaService_SaveSelections_UnknownTable(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
+	unknownTableID := uuid.New() // This ID doesn't exist in the repo
 
 	repo := &mockSchemaRepository{
 		tables: []*models.SchemaTable{}, // No tables
@@ -1588,14 +1613,15 @@ func TestSchemaService_SaveSelections_UnknownTable(t *testing.T) {
 
 	service := newTestSchemaService(repo, dsSvc, factory)
 
-	tableSelections := map[string]bool{
-		"public.nonexistent": true,
+	// Use an unknown table ID
+	tableSelections := map[uuid.UUID]bool{
+		unknownTableID: true,
 	}
 
-	// Should not error, just skip unknown tables
+	// Should not error, just skip unknown table IDs
 	err := service.SaveSelections(context.Background(), projectID, datasourceID, tableSelections, nil)
 	if err != nil {
-		t.Fatalf("SaveSelections should not error for unknown tables: %v", err)
+		t.Fatalf("SaveSelections should not error for unknown table IDs: %v", err)
 	}
 }
 
@@ -1831,7 +1857,7 @@ func TestSchemaService_GetDatasourceSchemaForPrompt_Full(t *testing.T) {
 	if !contains(prompt, "DATABASE SCHEMA:") {
 		t.Error("expected DATABASE SCHEMA header")
 	}
-	if !contains(prompt, "Table: public.users") {
+	if !contains(prompt, "Table: users") {
 		t.Error("expected table name")
 	}
 	if !contains(prompt, "Row count: 100") {
@@ -1905,11 +1931,11 @@ func TestSchemaService_GetDatasourceSchemaForPrompt_SelectedOnly(t *testing.T) {
 		t.Fatalf("GetDatasourceSchemaForPrompt failed: %v", err)
 	}
 
-	// Should only contain users table
-	if !contains(prompt, "public.users") {
+	// Should only contain users table (without schema prefix)
+	if !contains(prompt, "Table: users") {
 		t.Error("expected users table in prompt")
 	}
-	if contains(prompt, "public.orders") {
+	if contains(prompt, "Table: orders") {
 		t.Error("orders table should not be in prompt (not selected)")
 	}
 }

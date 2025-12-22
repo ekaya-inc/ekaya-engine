@@ -49,9 +49,9 @@ type SchemaService interface {
 	UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error
 
 	// SaveSelections updates is_selected flags for tables and columns.
-	// tableSelections maps "schema.table" names to selection status.
-	// columnSelections maps "schema.table" names to lists of selected column names.
-	SaveSelections(ctx context.Context, projectID, datasourceID uuid.UUID, tableSelections map[string]bool, columnSelections map[string][]string) error
+	// tableSelections maps table UUIDs to selection status.
+	// columnSelections maps table UUIDs to lists of selected column UUIDs.
+	SaveSelections(ctx context.Context, projectID, datasourceID uuid.UUID, tableSelections map[uuid.UUID]bool, columnSelections map[uuid.UUID][]uuid.UUID) error
 
 	// GetSelectedDatasourceSchema returns only selected tables and columns.
 	GetSelectedDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.DatasourceSchema, error)
@@ -692,63 +692,38 @@ func (s *schemaService) UpdateColumnMetadata(ctx context.Context, projectID, col
 	return nil
 }
 
-// SaveSelections updates is_selected flags for tables and columns.
-func (s *schemaService) SaveSelections(ctx context.Context, projectID, datasourceID uuid.UUID, tableSelections map[string]bool, columnSelections map[string][]string) error {
-	// Get all tables to build name->ID map
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
-	if err != nil {
-		return fmt.Errorf("failed to list tables: %w", err)
-	}
-
-	// Build table name to ID map (key: "schema.table")
-	tableNameToID := make(map[string]uuid.UUID)
-	for _, t := range tables {
-		key := t.SchemaName + "." + t.TableName
-		tableNameToID[key] = t.ID
-	}
-
-	// Update table selections
-	for tableName, isSelected := range tableSelections {
-		tableID, ok := tableNameToID[tableName]
-		if !ok {
-			s.logger.Warn("Unknown table in selection, skipping",
-				zap.String("table", tableName),
+// SaveSelections updates is_selected flags for tables and columns using their UUIDs.
+func (s *schemaService) SaveSelections(ctx context.Context, projectID, datasourceID uuid.UUID, tableSelections map[uuid.UUID]bool, columnSelections map[uuid.UUID][]uuid.UUID) error {
+	// Update table selections directly using table IDs
+	for tableID, isSelected := range tableSelections {
+		if err := s.schemaRepo.UpdateTableSelection(ctx, projectID, tableID, isSelected); err != nil {
+			s.logger.Warn("Failed to update table selection, skipping",
+				zap.String("table_id", tableID.String()),
+				zap.Error(err),
 			)
 			continue
-		}
-
-		if err := s.schemaRepo.UpdateTableSelection(ctx, projectID, tableID, isSelected); err != nil {
-			return fmt.Errorf("failed to update table selection for %s: %w", tableName, err)
 		}
 	}
 
 	// Update column selections
-	for tableName, selectedColumns := range columnSelections {
-		tableID, ok := tableNameToID[tableName]
-		if !ok {
-			s.logger.Warn("Unknown table in column selection, skipping",
-				zap.String("table", tableName),
-			)
-			continue
-		}
-
-		// Get all columns for this table
+	for tableID, selectedColumnIDs := range columnSelections {
+		// Get all columns for this table to determine which should be deselected
 		columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, tableID)
 		if err != nil {
-			return fmt.Errorf("failed to list columns for %s: %w", tableName, err)
+			return fmt.Errorf("failed to list columns for table %s: %w", tableID.String(), err)
 		}
 
-		// Build set of selected column names
-		selectedSet := make(map[string]bool)
-		for _, colName := range selectedColumns {
-			selectedSet[colName] = true
+		// Build set of selected column IDs
+		selectedSet := make(map[uuid.UUID]bool)
+		for _, colID := range selectedColumnIDs {
+			selectedSet[colID] = true
 		}
 
 		// Update each column's selection status
 		for _, col := range columns {
-			isSelected := selectedSet[col.ColumnName]
+			isSelected := selectedSet[col.ID]
 			if err := s.schemaRepo.UpdateColumnSelection(ctx, projectID, col.ID, isSelected); err != nil {
-				return fmt.Errorf("failed to update column selection for %s.%s: %w", tableName, col.ColumnName, err)
+				return fmt.Errorf("failed to update column selection for %s: %w", col.ID.String(), err)
 			}
 		}
 	}
@@ -830,8 +805,6 @@ func (s *schemaService) GetDatasourceSchemaForPrompt(ctx context.Context, projec
 
 	for _, table := range schema.Tables {
 		sb.WriteString("\nTable: ")
-		sb.WriteString(table.SchemaName)
-		sb.WriteString(".")
 		sb.WriteString(table.TableName)
 		sb.WriteString("\n")
 

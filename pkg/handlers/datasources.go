@@ -422,9 +422,6 @@ func (h *DatasourcesHandler) Delete(w http.ResponseWriter, r *http.Request) {
 func (h *DatasourcesHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
 	pidStr := r.PathValue("pid")
 
-	h.logger.Debug("TestConnection request received",
-		zap.String("project_id", pidStr))
-
 	_, err := uuid.Parse(pidStr)
 	if err != nil {
 		h.logger.Debug("Invalid project ID", zap.String("pid", pidStr), zap.Error(err))
@@ -442,14 +439,6 @@ func (h *DatasourcesHandler) TestConnection(w http.ResponseWriter, r *http.Reque
 		}
 		return
 	}
-
-	h.logger.Debug("TestConnection parsed request",
-		zap.String("type", req.Type),
-		zap.String("host", req.Host),
-		zap.Int("port", req.Port),
-		zap.String("user", req.User),
-		zap.String("name", req.Name),
-		zap.String("ssl_mode", req.SSLMode))
 
 	if req.Type == "" {
 		h.logger.Debug("Missing datasource type in request")
@@ -474,10 +463,6 @@ func (h *DatasourcesHandler) TestConnection(w http.ResponseWriter, r *http.Reque
 		}
 		return
 	}
-
-	h.logger.Debug("Connection test successful",
-		zap.String("type", req.Type),
-		zap.String("host", req.Host))
 
 	response := TestConnectionResponse{
 		Success: true,

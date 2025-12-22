@@ -13,9 +13,10 @@ import (
 
 // mockProjectService is a configurable mock for all handler tests.
 type mockProjectService struct {
-	project         *models.Project
-	provisionResult *services.ProvisionResult
-	err             error
+	project             *models.Project
+	provisionResult     *services.ProvisionResult
+	defaultDatasourceID uuid.UUID
+	err                 error
 }
 
 func (m *mockProjectService) GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error) {
@@ -66,6 +67,21 @@ func (m *mockProjectService) ProvisionFromClaims(ctx context.Context, claims *au
 		Name:      claims.Email,
 		Created:   false,
 	}, nil
+}
+
+func (m *mockProjectService) GetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error) {
+	if m.err != nil {
+		return uuid.Nil, m.err
+	}
+	return m.defaultDatasourceID, nil
+}
+
+func (m *mockProjectService) SetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID, datasourceID uuid.UUID) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.defaultDatasourceID = datasourceID
+	return nil
 }
 
 // mockAuthService is a mock AuthService for integration testing.
@@ -266,7 +282,7 @@ func (m *mockSchemaService) UpdateColumnMetadata(ctx context.Context, projectID,
 	return m.err
 }
 
-func (m *mockSchemaService) SaveSelections(ctx context.Context, projectID, datasourceID uuid.UUID, tableSelections map[string]bool, columnSelections map[string][]string) error {
+func (m *mockSchemaService) SaveSelections(ctx context.Context, projectID, datasourceID uuid.UUID, tableSelections map[uuid.UUID]bool, columnSelections map[uuid.UUID][]uuid.UUID) error {
 	return m.err
 }
 

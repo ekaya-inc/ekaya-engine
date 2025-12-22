@@ -53,7 +53,7 @@ func setupQueriesIntegrationTest(t *testing.T) *queriesIntegrationTestContext {
 
 	// Create datasource repository and service
 	dsRepo := repositories.NewDatasourceRepository()
-	dsSvc := services.NewDatasourceService(dsRepo, encryptor, adapterFactory, zap.NewNop())
+	dsSvc := services.NewDatasourceService(dsRepo, encryptor, adapterFactory, nil, zap.NewNop())
 
 	// Create query repository and service
 	queryRepo := repositories.NewQueryRepository()

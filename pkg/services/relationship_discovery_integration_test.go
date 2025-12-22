@@ -241,19 +241,19 @@ func TestSchemaService_GetRelationshipsResponse_Integration(t *testing.T) {
 	if relDetail.TargetColumnType != "uuid" {
 		t.Errorf("expected target column type 'uuid', got %q", relDetail.TargetColumnType)
 	}
-	if relDetail.SourceTableName != "public.orders" {
-		t.Errorf("expected source table 'public.orders', got %q", relDetail.SourceTableName)
+	if relDetail.SourceTableName != "orders" {
+		t.Errorf("expected source table 'orders', got %q", relDetail.SourceTableName)
 	}
-	if relDetail.TargetTableName != "public.users" {
-		t.Errorf("expected target table 'public.users', got %q", relDetail.TargetTableName)
+	if relDetail.TargetTableName != "users" {
+		t.Errorf("expected target table 'users', got %q", relDetail.TargetTableName)
 	}
 
 	// Verify empty tables list
 	if len(response.EmptyTables) != 1 {
 		t.Errorf("expected 1 empty table, got %d", len(response.EmptyTables))
 	}
-	if len(response.EmptyTables) > 0 && response.EmptyTables[0] != "public.audit_logs" {
-		t.Errorf("expected empty table 'public.audit_logs', got %q", response.EmptyTables[0])
+	if len(response.EmptyTables) > 0 && response.EmptyTables[0] != "audit_logs" {
+		t.Errorf("expected empty table 'audit_logs', got %q", response.EmptyTables[0])
 	}
 }
 
@@ -301,8 +301,8 @@ func TestSchemaService_GetRelationshipsResponse_OrphanTables_Integration(t *test
 	if len(response.OrphanTables) != 1 {
 		t.Errorf("expected 1 orphan table, got %d", len(response.OrphanTables))
 	}
-	if len(response.OrphanTables) > 0 && response.OrphanTables[0] != "public.settings" {
-		t.Errorf("expected orphan table 'public.settings', got %q", response.OrphanTables[0])
+	if len(response.OrphanTables) > 0 && response.OrphanTables[0] != "settings" {
+		t.Errorf("expected orphan table 'settings', got %q", response.OrphanTables[0])
 	}
 }
 
@@ -540,11 +540,11 @@ func TestSchemaService_ManualRelationship_CRUD_Integration(t *testing.T) {
 	tc.createTestColumn(ctx, ordersTable.ID, "id", "uuid", 1, true)
 	tc.createTestColumn(ctx, ordersTable.ID, "user_id", "uuid", 2, false)
 
-	// Create manual relationship
+	// Create manual relationship (API accepts just table names now)
 	req := &models.AddRelationshipRequest{
-		SourceTableName:  "public.orders",
+		SourceTableName:  "orders",
 		SourceColumnName: "user_id",
-		TargetTableName:  "public.users",
+		TargetTableName:  "users",
 		TargetColumnName: "id",
 	}
 

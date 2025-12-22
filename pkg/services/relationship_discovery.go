@@ -131,13 +131,13 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 		// Skip empty tables
 		if table.RowCount == nil || *table.RowCount == 0 {
 			results.EmptyTables++
-			results.EmptyTableNames = append(results.EmptyTableNames, table.SchemaName+"."+table.TableName)
+			results.EmptyTableNames = append(results.EmptyTableNames, table.TableName)
 			continue
 		}
 
 		columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to list columns for %s.%s: %w", table.SchemaName, table.TableName, err)
+			return nil, fmt.Errorf("failed to list columns for %s: %w", table.TableName, err)
 		}
 
 		// Batch analyze column stats
@@ -149,7 +149,7 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 		stats, err := s.analyzeColumnStats(ctx, discoverer, table, columnNames)
 		if err != nil {
 			s.logger.Warn("Failed to analyze column stats, skipping table",
-				zap.String("table", table.SchemaName+"."+table.TableName),
+				zap.String("table", table.TableName),
 				zap.Error(err))
 			continue
 		}
@@ -368,7 +368,7 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 		if table.RowCount != nil && *table.RowCount > 0 {
 			if !tablesWithOutbound[table.ID] && !tablesWithInbound[table.ID] {
 				results.TablesWithoutRelationships++
-				results.OrphanTableNames = append(results.OrphanTableNames, table.SchemaName+"."+table.TableName)
+				results.OrphanTableNames = append(results.OrphanTableNames, table.TableName)
 			}
 		}
 	}

@@ -10,9 +10,7 @@ This is **ekaya-engine** - a clean architecture rebuild of the Ekaya regional co
 - Clean architecture with separation of concerns
 - Dependency injection for testability
 - Controllers (thin HTTP handlers) → Services (business logic) → Repositories (data access)
-- Fail-fast error handling (same as ekaya-region)
-
-**Reference:** For existing implementation patterns (auth, SDAP, MCP), see `../ekaya-region/`
+- Fail-fast error handling
 
 ## Current State
 
@@ -132,7 +130,7 @@ func (s *userService) GetByID(ctx context.Context, id string) (*models.User, err
 
 ## UI/Frontend Development
 
-The UI is a React SPA built with TypeScript, Vite, and TailwindCSS (same as ekaya-region).
+The UI is a React SPA built with TypeScript, Vite, and TailwindCSS.
 
 ### Technology Stack
 - **React 18** with TypeScript (strict mode enabled)
@@ -182,14 +180,98 @@ make test-short
 
 ### Integration Test Policy
 
-The idea for integration tests is that the test suite would create a single container, then use that container for all of the tests. If there are destructive tests, order them at the end so that they do not interfere.
+Integration tests share a single Docker container via `sync.Once` in `pkg/testhelpers/containers.go`:
 
-- Use `TestMain(m *testing.M)` to create shared Docker container once
-- Each test gets unique `project_id` for metadata isolation
-- Name destructive tests with `Test_Z_Destructive_*` prefix so Go runs them last alphabetically
+- `testhelpers.GetTestDB(t)` → Connection to `test_data` database (pre-loaded test data)
+- `testhelpers.GetEngineDB(t)` → Connection to `ekaya_engine_test` database (migrations applied)
+
+The container is created lazily on first use and reused across all test packages. Tests are isolated via unique `project_id` values and cleanup functions. Name destructive tests with `Test_Z_Destructive_*` prefix so Go runs them last alphabetically.
+
+## Manual Testing: Ontology Extraction Workflow
+
+When manually testing the ontology extraction workflow, use Chrome browser integration to watch the UI while simultaneously querying backend state.
+
+### Ontology Tables
+
+| Table | Purpose |
+|-------|---------|
+| `engine_ontology_workflows` | Workflow state, progress, task queue |
+| `engine_ontologies` | Ontology data (entity_summaries, column_details) |
+| `engine_ontology_questions` | Questions generated during analysis (decoupled from workflow) |
+| `engine_ontology_chat_messages` | LLM conversation history |
+| `engine_workflow_state` | Per-entity state (table/column/global) |
+| `engine_project_knowledge` | Project-level knowledge and context |
+
+### Clear Tables Before Testing
+
+```sql
+TRUNCATE engine_ontology_workflows, engine_ontologies, engine_ontology_questions, engine_ontology_chat_messages, engine_workflow_state, engine_project_knowledge CASCADE;
+```
+
+### Monitor Workflow Progress
+
+```sql
+-- Overall workflow state and timing
+SELECT state, progress->>'message' as msg,
+       EXTRACT(EPOCH FROM (COALESCE(completed_at, now()) - started_at))::int as elapsed_seconds
+FROM engine_ontology_workflows ORDER BY created_at DESC LIMIT 1;
+
+-- Task queue size
+SELECT jsonb_array_length(task_queue) as queue_size
+FROM engine_ontology_workflows ORDER BY created_at DESC LIMIT 1;
+```
+
+### Monitor Entity States
+
+```sql
+-- Entity state summary by type and status
+SELECT entity_type, status, COUNT(*)
+FROM engine_workflow_state
+GROUP BY entity_type, status
+ORDER BY entity_type, status;
+
+-- Find entities blocking workflow (not complete/failed)
+SELECT entity_key, status, state_data
+FROM engine_workflow_state
+WHERE status NOT IN ('complete', 'failed');
+```
+
+### Check Questions Queue
+
+Questions are stored in `state_data` JSONB for entities with `status = 'needs_input'`:
+
+```sql
+-- Find entities needing user input
+SELECT entity_key, state_data->'questions' as questions
+FROM engine_workflow_state
+WHERE status = 'needs_input';
+
+-- Count required vs optional questions (parse from state_data)
+SELECT entity_key,
+       jsonb_array_length(state_data->'questions') as total_questions,
+       state_data->'llm_analysis'->>'has_required_questions' as has_required
+FROM engine_workflow_state
+WHERE status = 'needs_input';
+```
+
+### Check Entity Summaries Written
+
+```sql
+-- Count entity summaries
+SELECT jsonb_object_keys(entity_summaries) as entity
+FROM engine_ontologies WHERE is_active = true;
+```
+
+### What to Watch For
+
+1. **Progress updates** - Should increment after each batch completes
+2. **Parallel execution** - Work Queue should show multiple "Processing" tasks
+3. **Stuck workflows** - Check for `needs_input` status blocking completion
+4. **Task failures** - Check `last_error` in `engine_workflow_state`
+5. **Token limit errors** - Large tables may exceed LLM context limits
 
 ## GitHub Actions & Pull Request Merging
 
 ### Important: Wait for CI/CD Checks
 When merging pull requests, **ALWAYS wait approximately 3-4 minutes** for GitHub Actions to complete before merging.
-- ekaya-engine is the clean and architecturally sound migration from ../ekaya-region/. You may look in that directory for reference but make sure to migrate any artifact over (code, documentation, configuration) in the context of an extermely well-written service.
+
