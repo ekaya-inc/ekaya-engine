@@ -62,10 +62,7 @@ func (h *ProjectConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to encode project config response", zap.Error(err))
-		return
 	}
-
-	h.logger.Debug("Project config request served", zap.String("remote_addr", r.RemoteAddr))
 }
 
 // buildAIOption converts server config to API response format.

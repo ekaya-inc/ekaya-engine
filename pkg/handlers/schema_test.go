@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -379,8 +380,13 @@ func TestSchemaHandler_SaveSelections_Success(t *testing.T) {
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
+	tableID := uuid.New()
+	columnID1 := uuid.New()
+	columnID2 := uuid.New()
 
-	body := `{"table_selections": {"public.users": true}, "column_selections": {"public.users": ["id", "email"]}}`
+	// Use table and column UUIDs instead of names
+	body := fmt.Sprintf(`{"table_selections": {"%s": true}, "column_selections": {"%s": ["%s", "%s"]}}`,
+		tableID.String(), tableID.String(), columnID1.String(), columnID2.String())
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/selections", bytes.NewBufferString(body))
 	req.SetPathValue("pid", projectID.String())
 	req.SetPathValue("dsId", datasourceID.String())

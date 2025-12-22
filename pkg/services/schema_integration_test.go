@@ -339,22 +339,22 @@ func TestSchemaService_SaveSelections_Integration(t *testing.T) {
 
 	// Create two tables with columns
 	usersTable := tc.createTestTable(ctx, "public", "users", false)
-	tc.createTestColumn(ctx, usersTable.ID, "id", "uuid", 1, false)
-	tc.createTestColumn(ctx, usersTable.ID, "email", "text", 2, false)
+	usersIDCol := tc.createTestColumn(ctx, usersTable.ID, "id", "uuid", 1, false)
+	usersEmailCol := tc.createTestColumn(ctx, usersTable.ID, "email", "text", 2, false)
 	tc.createTestColumn(ctx, usersTable.ID, "password_hash", "text", 3, false) // Should not be selected
 
 	ordersTable := tc.createTestTable(ctx, "public", "orders", false)
-	tc.createTestColumn(ctx, ordersTable.ID, "id", "uuid", 1, false)
-	tc.createTestColumn(ctx, ordersTable.ID, "user_id", "uuid", 2, false)
+	ordersIDCol := tc.createTestColumn(ctx, ordersTable.ID, "id", "uuid", 1, false)
+	ordersUserIDCol := tc.createTestColumn(ctx, ordersTable.ID, "user_id", "uuid", 2, false)
 
-	// Save selections
-	tableSelections := map[string]bool{
-		"public.users":  true,
-		"public.orders": true,
+	// Save selections using table and column IDs
+	tableSelections := map[uuid.UUID]bool{
+		usersTable.ID:  true,
+		ordersTable.ID: true,
 	}
-	columnSelections := map[string][]string{
-		"public.users":  {"id", "email"}, // password_hash excluded
-		"public.orders": {"id", "user_id"},
+	columnSelections := map[uuid.UUID][]uuid.UUID{
+		usersTable.ID:  {usersIDCol.ID, usersEmailCol.ID}, // password_hash excluded
+		ordersTable.ID: {ordersIDCol.ID, ordersUserIDCol.ID},
 	}
 
 	err := tc.service.SaveSelections(ctx, tc.projectID, tc.dsID, tableSelections, columnSelections)
@@ -409,12 +409,12 @@ func TestSchemaService_SaveSelections_Deselect_Integration(t *testing.T) {
 	table := tc.createTestTable(ctx, "public", "metrics", true)
 	tc.createTestColumn(ctx, table.ID, "value", "numeric", 1, true)
 
-	// Deselect via SaveSelections
-	tableSelections := map[string]bool{
-		"public.metrics": false,
+	// Deselect via SaveSelections using table ID
+	tableSelections := map[uuid.UUID]bool{
+		table.ID: false,
 	}
-	columnSelections := map[string][]string{
-		"public.metrics": {}, // Empty means deselect all
+	columnSelections := map[uuid.UUID][]uuid.UUID{
+		table.ID: {}, // Empty means deselect all
 	}
 
 	err := tc.service.SaveSelections(ctx, tc.projectID, tc.dsID, tableSelections, columnSelections)
@@ -448,8 +448,6 @@ func TestSchemaService_SaveSelections_Deselect_Integration(t *testing.T) {
 func TestSchemaService_SaveSelections_RoundTrip_Integration(t *testing.T) {
 	// This test verifies the full round-trip: save selections, then retrieve
 	// schema via GetDatasourceSchema and verify is_selected flags are correct.
-	// This catches bugs where the frontend and backend have mismatched expectations
-	// (e.g., frontend sends "users" but backend expects "public.users").
 	tc := setupSchemaServiceTest(t)
 	tc.cleanup()
 
@@ -458,22 +456,22 @@ func TestSchemaService_SaveSelections_RoundTrip_Integration(t *testing.T) {
 
 	// Create tables with columns (all unselected initially)
 	usersTable := tc.createTestTable(ctx, "public", "users", false)
-	tc.createTestColumn(ctx, usersTable.ID, "id", "uuid", 1, false)
-	tc.createTestColumn(ctx, usersTable.ID, "email", "text", 2, false)
+	usersIDCol := tc.createTestColumn(ctx, usersTable.ID, "id", "uuid", 1, false)
+	usersEmailCol := tc.createTestColumn(ctx, usersTable.ID, "email", "text", 2, false)
 	tc.createTestColumn(ctx, usersTable.ID, "password_hash", "text", 3, false)
 
 	ordersTable := tc.createTestTable(ctx, "public", "orders", false)
-	tc.createTestColumn(ctx, ordersTable.ID, "id", "uuid", 1, false)
-	tc.createTestColumn(ctx, ordersTable.ID, "total", "numeric", 2, false)
+	ordersIDCol := tc.createTestColumn(ctx, ordersTable.ID, "id", "uuid", 1, false)
+	ordersTotalCol := tc.createTestColumn(ctx, ordersTable.ID, "total", "numeric", 2, false)
 
-	// Save selections using schema-qualified names (as the frontend now does)
-	tableSelections := map[string]bool{
-		"public.users":  true,
-		"public.orders": true,
+	// Save selections using table and column IDs
+	tableSelections := map[uuid.UUID]bool{
+		usersTable.ID:  true,
+		ordersTable.ID: true,
 	}
-	columnSelections := map[string][]string{
-		"public.users":  {"id", "email"}, // password_hash excluded
-		"public.orders": {"id", "total"},
+	columnSelections := map[uuid.UUID][]uuid.UUID{
+		usersTable.ID:  {usersIDCol.ID, usersEmailCol.ID}, // password_hash excluded
+		ordersTable.ID: {ordersIDCol.ID, ordersTotalCol.ID},
 	}
 
 	err := tc.service.SaveSelections(ctx, tc.projectID, tc.dsID, tableSelections, columnSelections)
@@ -655,8 +653,8 @@ func TestSchemaService_GetDatasourceSchemaForPrompt_Integration(t *testing.T) {
 		t.Error("expected prompt to contain 'DATABASE SCHEMA:'")
 	}
 
-	if !strings.Contains(prompt, "public.users") {
-		t.Error("expected prompt to contain 'public.users'")
+	if !strings.Contains(prompt, "Table: users") {
+		t.Error("expected prompt to contain 'Table: users'")
 	}
 
 	// Verify description is included (not business_name - prompt uses Description field)
@@ -668,7 +666,7 @@ func TestSchemaService_GetDatasourceSchemaForPrompt_Integration(t *testing.T) {
 		t.Error("expected prompt to contain 'RELATIONSHIPS:'")
 	}
 
-	// Relationship format uses schema.table for table names: "public.orders.user_id -> public.users.id"
+	// Relationship format uses schema.table.column: "public.orders.user_id -> public.users.id"
 	if !strings.Contains(prompt, "public.orders.user_id -> public.users.id") {
 		t.Errorf("expected prompt to contain relationship 'public.orders.user_id -> public.users.id', got:\n%s", prompt)
 	}

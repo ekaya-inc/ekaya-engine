@@ -32,6 +32,8 @@ type ProjectService interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error)
 	GetByIDWithoutTenant(ctx context.Context, id uuid.UUID) (*models.Project, error)
 	Delete(ctx context.Context, id uuid.UUID) error
+	GetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error)
+	SetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID, datasourceID uuid.UUID) error
 }
 
 // projectService implements ProjectService.
@@ -167,6 +169,59 @@ func (s *projectService) Delete(ctx context.Context, id uuid.UUID) error {
 	if s.redis != nil {
 		s.clearProjectCache(ctx, id)
 	}
+
+	return nil
+}
+
+// GetDefaultDatasourceID retrieves the default datasource ID from project parameters.
+// Returns uuid.Nil if no datasource is configured.
+func (s *projectService) GetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error) {
+	project, err := s.projectRepo.Get(ctx, projectID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to get project: %w", err)
+	}
+
+	if project.Parameters == nil {
+		return uuid.Nil, nil
+	}
+
+	dsIDStr, ok := project.Parameters["default_datasource_id"].(string)
+	if !ok || dsIDStr == "" {
+		return uuid.Nil, nil
+	}
+
+	dsID, err := uuid.Parse(dsIDStr)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("invalid datasource ID format: %w", err)
+	}
+
+	return dsID, nil
+}
+
+// SetDefaultDatasourceID updates the default datasource ID in project parameters.
+func (s *projectService) SetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID, datasourceID uuid.UUID) error {
+	project, err := s.projectRepo.Get(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("failed to get project: %w", err)
+	}
+
+	if project.Parameters == nil {
+		project.Parameters = make(map[string]interface{})
+	}
+	project.Parameters["default_datasource_id"] = datasourceID.String()
+
+	if err := s.projectRepo.Update(ctx, project); err != nil {
+		return fmt.Errorf("failed to update project: %w", err)
+	}
+
+	// Update Redis cache
+	if s.redis != nil {
+		s.cacheProjectConfig(ctx, project)
+	}
+
+	s.logger.Info("Set default datasource for project",
+		zap.String("project_id", projectID.String()),
+		zap.String("datasource_id", datasourceID.String()))
 
 	return nil
 }

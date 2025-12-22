@@ -25,6 +25,9 @@ type SchemaRepository interface {
 	ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error)
 	GetTableByID(ctx context.Context, projectID, tableID uuid.UUID) (*models.SchemaTable, error)
 	GetTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, schemaName, tableName string) (*models.SchemaTable, error)
+	// FindTableByName finds a table by name within a datasource (schema-agnostic).
+	// Use this when the schema prefix is not known or relevant (e.g., ontology layer).
+	FindTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error)
 	UpsertTable(ctx context.Context, table *models.SchemaTable) error
 	SoftDeleteRemovedTables(ctx context.Context, projectID, datasourceID uuid.UUID, activeTableKeys []TableKey) (int64, error)
 	UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error
@@ -155,6 +158,32 @@ func (r *schemaRepository) GetTableByName(ctx context.Context, projectID, dataso
 			return nil, fmt.Errorf("table not found")
 		}
 		return nil, fmt.Errorf("failed to get table: %w", err)
+	}
+
+	return t, nil
+}
+
+func (r *schemaRepository) FindTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT id, project_id, datasource_id, schema_name, table_name,
+		       is_selected, row_count, business_name, description, metadata,
+		       created_at, updated_at
+		FROM engine_schema_tables
+		WHERE project_id = $1 AND datasource_id = $2
+		  AND table_name = $3 AND deleted_at IS NULL`
+
+	row := scope.Conn.QueryRow(ctx, query, projectID, datasourceID, tableName)
+	t, err := scanSchemaTableRow(row)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("table not found: %s", tableName)
+		}
+		return nil, fmt.Errorf("failed to find table: %w", err)
 	}
 
 	return t, nil
@@ -961,10 +990,10 @@ func (r *schemaRepository) GetRelationshipDetails(ctx context.Context, projectID
 	query := `
 		SELECT
 			r.id,
-			st.schema_name || '.' || st.table_name as source_table_name,
+			st.table_name as source_table_name,
 			sc.column_name as source_column_name,
 			sc.data_type as source_column_type,
-			tt.schema_name || '.' || tt.table_name as target_table_name,
+			tt.table_name as target_table_name,
 			tc.column_name as target_column_name,
 			tc.data_type as target_column_type,
 			r.relationship_type,
@@ -1026,13 +1055,13 @@ func (r *schemaRepository) GetEmptyTables(ctx context.Context, projectID, dataso
 	}
 
 	query := `
-		SELECT schema_name || '.' || table_name
+		SELECT table_name
 		FROM engine_schema_tables
 		WHERE project_id = $1
 		  AND datasource_id = $2
 		  AND deleted_at IS NULL
 		  AND (row_count IS NULL OR row_count = 0)
-		ORDER BY schema_name, table_name`
+		ORDER BY table_name`
 
 	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID)
 	if err != nil {
@@ -1063,7 +1092,7 @@ func (r *schemaRepository) GetOrphanTables(ctx context.Context, projectID, datas
 
 	// Tables with data (row_count > 0) but no active relationships
 	query := `
-		SELECT t.schema_name || '.' || t.table_name
+		SELECT t.table_name
 		FROM engine_schema_tables t
 		WHERE t.project_id = $1
 		  AND t.datasource_id = $2
@@ -1076,7 +1105,7 @@ func (r *schemaRepository) GetOrphanTables(ctx context.Context, projectID, datas
 			    AND r.rejection_reason IS NULL
 			    AND (r.source_table_id = t.id OR r.target_table_id = t.id)
 		  )
-		ORDER BY t.schema_name, t.table_name`
+		ORDER BY t.table_name`
 
 	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID)
 	if err != nil {

@@ -10,6 +10,7 @@ import {
   Check,
   Circle,
   Loader2,
+  Pause,
   RefreshCw,
   Star,
   XCircle,
@@ -114,6 +115,8 @@ const getTaskStatusIcon = (status: TaskStatus, requiresLlm: boolean) => {
       );
     case 'queued':
       return <Circle className="h-4 w-4 text-text-tertiary" />;
+    case 'paused':
+      return <Pause className="h-4 w-4 text-amber-500" />;
     case 'failed':
       return <XCircle className="h-4 w-4 text-red-500" />;
     default:
@@ -129,6 +132,8 @@ const getTaskStatusLabel = (status: TaskStatus): string => {
       return 'Processing';
     case 'queued':
       return 'Queued';
+    case 'paused':
+      return 'Paused';
     case 'failed':
       return 'Failed';
     default:
@@ -140,6 +145,8 @@ const getTaskRowBackground = (status: TaskStatus): string => {
   switch (status) {
     case 'processing':
       return 'bg-blue-500/5 border-l-2 border-l-blue-500';
+    case 'paused':
+      return 'bg-amber-500/5 border-l-2 border-l-amber-500';
     case 'failed':
       return 'bg-red-500/5 border-l-2 border-l-red-500';
     default:
@@ -147,12 +154,13 @@ const getTaskRowBackground = (status: TaskStatus): string => {
   }
 };
 
-// Sort priority: processing > queued > complete > failed
+// Sort priority: processing > paused > queued > complete > failed
 const taskStatusPriority: Record<TaskStatus, number> = {
   processing: 0,
-  queued: 1,
-  complete: 2,
-  failed: 3,
+  paused: 1,
+  queued: 2,
+  complete: 3,
+  failed: 4,
 };
 
 // ============================================================================
@@ -288,9 +296,11 @@ const WorkQueue = ({ items, taskItems, maxHeight = '400px' }: WorkQueueProps) =>
                         ? 'bg-green-100 text-green-700'
                         : task.status === 'processing'
                           ? 'bg-blue-100 text-blue-700'
-                          : task.status === 'failed'
-                            ? 'bg-red-100 text-red-700'
-                            : 'bg-surface-tertiary text-text-secondary'
+                          : task.status === 'paused'
+                            ? 'bg-amber-100 text-amber-700'
+                            : task.status === 'failed'
+                              ? 'bg-red-100 text-red-700'
+                              : 'bg-surface-tertiary text-text-secondary'
                     }`}
                   >
                     {getTaskStatusLabel(task.status)}
@@ -400,7 +410,7 @@ const WorkQueue = ({ items, taskItems, maxHeight = '400px' }: WorkQueueProps) =>
   );
 
   return (
-    <div className="rounded-lg border border-border-light bg-surface-primary shadow-sm">
+    <div className="rounded-lg border border-border-light bg-surface-primary shadow-sm flex flex-col" style={{ minHeight: maxHeight }}>
       {useTaskQueue ? renderTaskQueue() : renderEntityQueue()}
     </div>
   );

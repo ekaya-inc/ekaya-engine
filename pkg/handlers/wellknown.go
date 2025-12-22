@@ -94,10 +94,4 @@ func (h *WellKnownHandler) OAuthDiscovery(w http.ResponseWriter, r *http.Request
 	if err := WriteJSON(w, http.StatusOK, metadata); err != nil {
 		h.logger.Error("Failed to encode OAuth metadata", zap.Error(err))
 	}
-
-	h.logger.Debug("Served OAuth discovery metadata",
-		zap.String("remote_addr", r.RemoteAddr),
-		zap.String("user_agent", r.UserAgent()),
-		zap.String("auth_server_url", validatedAuthURL),
-		zap.Bool("custom_auth_url", authURL != ""))
 }

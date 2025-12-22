@@ -1,0 +1,610 @@
+package llm
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"go.uber.org/zap"
+
+	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
+)
+
+// OntologyToolExecutor implements ToolExecutor for ontology chat and question answering.
+// It provides access to schema metadata, data sampling, and ontology updates.
+type OntologyToolExecutor struct {
+	projectID     uuid.UUID
+	datasourceID  uuid.UUID
+	ontologyRepo  repositories.OntologyRepository
+	workflowRepo  repositories.OntologyWorkflowRepository
+	stateRepo     repositories.WorkflowStateRepository
+	knowledgeRepo repositories.KnowledgeRepository
+	schemaRepo    repositories.SchemaRepository
+	queryExecutor datasource.QueryExecutor
+	logger        *zap.Logger
+}
+
+// OntologyToolExecutorConfig holds dependencies for creating an OntologyToolExecutor.
+type OntologyToolExecutorConfig struct {
+	ProjectID     uuid.UUID
+	DatasourceID  uuid.UUID
+	OntologyRepo  repositories.OntologyRepository
+	WorkflowRepo  repositories.OntologyWorkflowRepository
+	StateRepo     repositories.WorkflowStateRepository
+	KnowledgeRepo repositories.KnowledgeRepository
+	SchemaRepo    repositories.SchemaRepository
+	QueryExecutor datasource.QueryExecutor
+	Logger        *zap.Logger
+}
+
+// NewOntologyToolExecutor creates a new tool executor for ontology operations.
+func NewOntologyToolExecutor(cfg *OntologyToolExecutorConfig) *OntologyToolExecutor {
+	return &OntologyToolExecutor{
+		projectID:     cfg.ProjectID,
+		datasourceID:  cfg.DatasourceID,
+		ontologyRepo:  cfg.OntologyRepo,
+		workflowRepo:  cfg.WorkflowRepo,
+		stateRepo:     cfg.StateRepo,
+		knowledgeRepo: cfg.KnowledgeRepo,
+		schemaRepo:    cfg.SchemaRepo,
+		queryExecutor: cfg.QueryExecutor,
+		logger:        cfg.Logger.Named("tool-executor"),
+	}
+}
+
+// Ensure OntologyToolExecutor implements ToolExecutor.
+var _ ToolExecutor = (*OntologyToolExecutor)(nil)
+
+// ExecuteTool dispatches to the appropriate tool handler based on name.
+func (e *OntologyToolExecutor) ExecuteTool(ctx context.Context, name string, arguments string) (string, error) {
+	e.logger.Debug("Executing tool",
+		zap.String("tool", name),
+		zap.String("arguments", arguments))
+
+	switch name {
+	case "query_column_values":
+		return e.queryColumnValues(ctx, arguments)
+	case "query_schema_metadata":
+		return e.querySchemaMetadata(ctx, arguments)
+	case "store_knowledge":
+		return e.storeKnowledge(ctx, arguments)
+	case "update_entity":
+		return e.updateEntity(ctx, arguments)
+	case "update_column":
+		return e.updateColumn(ctx, arguments)
+	case "answer_question":
+		return e.answerQuestion(ctx, arguments)
+	case "get_pending_questions":
+		return e.getPendingQuestions(ctx, arguments)
+	default:
+		return "", fmt.Errorf("unknown tool: %s", name)
+	}
+}
+
+// ============================================================================
+// Tool: query_column_values
+// ============================================================================
+
+type queryColumnValuesArgs struct {
+	TableName  string `json:"table_name"`
+	ColumnName string `json:"column_name"`
+	Limit      int    `json:"limit"`
+}
+
+func (e *OntologyToolExecutor) queryColumnValues(ctx context.Context, arguments string) (string, error) {
+	var args queryColumnValuesArgs
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+
+	if args.TableName == "" || args.ColumnName == "" {
+		return "", fmt.Errorf("table_name and column_name are required")
+	}
+
+	limit := args.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	if e.queryExecutor == nil {
+		return `{"error": "No query executor available - datasource may not be configured"}`, nil
+	}
+
+	// Build and execute the query
+	// Use pgx.Identifier to safely quote identifiers and prevent SQL injection
+	quotedTable := pgx.Identifier{args.TableName}.Sanitize()
+	quotedCol := pgx.Identifier{args.ColumnName}.Sanitize()
+	query := fmt.Sprintf(
+		`SELECT DISTINCT %s FROM %s WHERE %s IS NOT NULL LIMIT %d`,
+		quotedCol, quotedTable, quotedCol, limit,
+	)
+
+	result, err := e.queryExecutor.ExecuteQuery(ctx, query, limit)
+	if err != nil {
+		e.logger.Error("Failed to query column values",
+			zap.String("table", args.TableName),
+			zap.String("column", args.ColumnName),
+			zap.Error(err))
+		return fmt.Sprintf(`{"error": "Query failed: %s"}`, err.Error()), nil
+	}
+
+	// Extract just the values
+	values := make([]any, 0, len(result.Rows))
+	for _, row := range result.Rows {
+		if v, ok := row[args.ColumnName]; ok {
+			values = append(values, v)
+		}
+	}
+
+	response := map[string]any{
+		"table":   args.TableName,
+		"column":  args.ColumnName,
+		"values":  values,
+		"count":   len(values),
+		"limited": len(values) == limit,
+	}
+
+	responseJSON, err := json.Marshal(response)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal response: %w", err)
+	}
+
+	return string(responseJSON), nil
+}
+
+// ============================================================================
+// Tool: query_schema_metadata
+// ============================================================================
+
+type querySchemaMetadataArgs struct {
+	TableName string `json:"table_name"`
+}
+
+func (e *OntologyToolExecutor) querySchemaMetadata(ctx context.Context, arguments string) (string, error) {
+	var args querySchemaMetadataArgs
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+
+	// Get all tables for the datasource
+	tables, err := e.schemaRepo.ListTablesByDatasource(ctx, e.projectID, e.datasourceID)
+	if err != nil {
+		return "", fmt.Errorf("failed to list tables: %w", err)
+	}
+
+	// If specific table requested, filter by table name
+	if args.TableName != "" {
+		filtered := make([]*models.SchemaTable, 0)
+		for _, t := range tables {
+			if t.TableName == args.TableName {
+				filtered = append(filtered, t)
+			}
+		}
+		tables = filtered
+	}
+
+	// Build response with table and column info
+	type columnInfo struct {
+		Name         string  `json:"name"`
+		DataType     string  `json:"data_type"`
+		IsPrimaryKey bool    `json:"is_primary_key"`
+		IsNullable   bool    `json:"is_nullable"`
+		BusinessName *string `json:"business_name,omitempty"`
+		Description  *string `json:"description,omitempty"`
+	}
+
+	type tableInfo struct {
+		Name         string       `json:"name"`
+		RowCount     *int64       `json:"row_count,omitempty"`
+		BusinessName *string      `json:"business_name,omitempty"`
+		Description  *string      `json:"description,omitempty"`
+		Columns      []columnInfo `json:"columns"`
+	}
+
+	result := make([]tableInfo, 0, len(tables))
+	for _, t := range tables {
+		info := tableInfo{
+			Name:         t.TableName,
+			RowCount:     t.RowCount,
+			BusinessName: t.BusinessName,
+			Description:  t.Description,
+			Columns:      []columnInfo{},
+		}
+
+		// Get columns for this table
+		columns, err := e.schemaRepo.ListColumnsByTable(ctx, e.projectID, t.ID)
+		if err != nil {
+			e.logger.Error("Failed to get columns for table",
+				zap.String("table", t.TableName),
+				zap.Error(err))
+			continue
+		}
+
+		for _, c := range columns {
+			info.Columns = append(info.Columns, columnInfo{
+				Name:         c.ColumnName,
+				DataType:     c.DataType,
+				IsPrimaryKey: c.IsPrimaryKey,
+				IsNullable:   c.IsNullable,
+				BusinessName: c.BusinessName,
+				Description:  c.Description,
+			})
+		}
+
+		result = append(result, info)
+	}
+
+	responseJSON, err := json.Marshal(map[string]any{
+		"tables":      result,
+		"table_count": len(result),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal response: %w", err)
+	}
+
+	return string(responseJSON), nil
+}
+
+// ============================================================================
+// Tool: store_knowledge
+// ============================================================================
+
+type storeKnowledgeArgs struct {
+	FactType string `json:"fact_type"`
+	Key      string `json:"key"`
+	Value    string `json:"value"`
+	Context  string `json:"context"`
+}
+
+func (e *OntologyToolExecutor) storeKnowledge(ctx context.Context, arguments string) (string, error) {
+	var args storeKnowledgeArgs
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+
+	if args.FactType == "" || args.Key == "" || args.Value == "" {
+		return "", fmt.Errorf("fact_type, key, and value are required")
+	}
+
+	// Validate fact type
+	validTypes := map[string]bool{
+		"terminology":       true,
+		"business_rule":     true,
+		"data_relationship": true,
+		"constraint":        true,
+		"context":           true,
+	}
+	if !validTypes[args.FactType] {
+		return "", fmt.Errorf("invalid fact_type: %s", args.FactType)
+	}
+
+	fact := &models.KnowledgeFact{
+		ProjectID: e.projectID,
+		FactType:  args.FactType,
+		Key:       args.Key,
+		Value:     args.Value,
+		Context:   args.Context,
+	}
+
+	if err := e.knowledgeRepo.Upsert(ctx, fact); err != nil {
+		return "", fmt.Errorf("failed to store knowledge: %w", err)
+	}
+
+	e.logger.Info("Stored knowledge fact",
+		zap.String("fact_type", args.FactType),
+		zap.String("key", args.Key))
+
+	response := map[string]any{
+		"success":   true,
+		"fact_id":   fact.ID.String(),
+		"fact_type": args.FactType,
+		"key":       args.Key,
+	}
+
+	responseJSON, err := json.Marshal(response)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal response: %w", err)
+	}
+
+	return string(responseJSON), nil
+}
+
+// ============================================================================
+// Tool: update_entity
+// ============================================================================
+
+type updateEntityArgs struct {
+	TableName    string   `json:"table_name"`
+	BusinessName string   `json:"business_name"`
+	Description  string   `json:"description"`
+	Domain       string   `json:"domain"`
+	Synonyms     []string `json:"synonyms"`
+}
+
+func (e *OntologyToolExecutor) updateEntity(ctx context.Context, arguments string) (string, error) {
+	var args updateEntityArgs
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+
+	if args.TableName == "" {
+		return "", fmt.Errorf("table_name is required")
+	}
+
+	// Get the active ontology
+	ontology, err := e.ontologyRepo.GetActive(ctx, e.projectID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get ontology: %w", err)
+	}
+	if ontology == nil {
+		return `{"error": "No active ontology found"}`, nil
+	}
+
+	// Get or create entity summary
+	summary := ontology.EntitySummaries[args.TableName]
+	if summary == nil {
+		summary = &models.EntitySummary{
+			TableName: args.TableName,
+		}
+	}
+
+	// Apply updates
+	if args.BusinessName != "" {
+		summary.BusinessName = args.BusinessName
+	}
+	if args.Description != "" {
+		summary.Description = args.Description
+	}
+	if args.Domain != "" {
+		summary.Domain = args.Domain
+	}
+	if len(args.Synonyms) > 0 {
+		summary.Synonyms = args.Synonyms
+	}
+
+	// Save the update
+	if err := e.ontologyRepo.UpdateEntitySummary(ctx, e.projectID, args.TableName, summary); err != nil {
+		return "", fmt.Errorf("failed to update entity: %w", err)
+	}
+
+	e.logger.Info("Updated entity",
+		zap.String("table", args.TableName),
+		zap.String("business_name", summary.BusinessName))
+
+	response := map[string]any{
+		"success":       true,
+		"table_name":    args.TableName,
+		"business_name": summary.BusinessName,
+		"description":   summary.Description,
+	}
+
+	responseJSON, err := json.Marshal(response)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal response: %w", err)
+	}
+
+	return string(responseJSON), nil
+}
+
+// ============================================================================
+// Tool: update_column
+// ============================================================================
+
+type updateColumnArgs struct {
+	TableName    string `json:"table_name"`
+	ColumnName   string `json:"column_name"`
+	BusinessName string `json:"business_name"`
+	Description  string `json:"description"`
+	SemanticType string `json:"semantic_type"`
+}
+
+func (e *OntologyToolExecutor) updateColumn(ctx context.Context, arguments string) (string, error) {
+	var args updateColumnArgs
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+
+	if args.TableName == "" || args.ColumnName == "" {
+		return "", fmt.Errorf("table_name and column_name are required")
+	}
+
+	// Validate semantic type if provided
+	if args.SemanticType != "" {
+		validTypes := map[string]bool{
+			"identifier": true, "name": true, "description": true,
+			"amount": true, "quantity": true, "date": true,
+			"timestamp": true, "status": true, "flag": true,
+			"code": true, "reference": true, "other": true,
+		}
+		if !validTypes[args.SemanticType] {
+			return "", fmt.Errorf("invalid semantic_type: %s", args.SemanticType)
+		}
+	}
+
+	// Get the active ontology
+	ontology, err := e.ontologyRepo.GetActive(ctx, e.projectID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get ontology: %w", err)
+	}
+	if ontology == nil {
+		return `{"error": "No active ontology found"}`, nil
+	}
+
+	// Get or create column details for the table
+	columns := ontology.ColumnDetails[args.TableName]
+	if columns == nil {
+		columns = []models.ColumnDetail{}
+	}
+
+	// Find or create the column detail
+	found := false
+	for i := range columns {
+		if columns[i].Name == args.ColumnName {
+			if args.Description != "" {
+				columns[i].Description = args.Description
+			}
+			if args.SemanticType != "" {
+				columns[i].SemanticType = args.SemanticType
+			}
+			// BusinessName maps to synonyms in this model
+			if args.BusinessName != "" {
+				columns[i].Synonyms = append(columns[i].Synonyms, args.BusinessName)
+			}
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		synonyms := []string{}
+		if args.BusinessName != "" {
+			synonyms = append(synonyms, args.BusinessName)
+		}
+		columns = append(columns, models.ColumnDetail{
+			Name:         args.ColumnName,
+			Description:  args.Description,
+			SemanticType: args.SemanticType,
+			Synonyms:     synonyms,
+		})
+	}
+
+	// Save the update
+	if err := e.ontologyRepo.UpdateColumnDetails(ctx, e.projectID, args.TableName, columns); err != nil {
+		return "", fmt.Errorf("failed to update column: %w", err)
+	}
+
+	e.logger.Info("Updated column",
+		zap.String("table", args.TableName),
+		zap.String("column", args.ColumnName))
+
+	response := map[string]any{
+		"success":     true,
+		"table_name":  args.TableName,
+		"column_name": args.ColumnName,
+	}
+
+	responseJSON, err := json.Marshal(response)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal response: %w", err)
+	}
+
+	return string(responseJSON), nil
+}
+
+// ============================================================================
+// Tool: answer_question
+// ============================================================================
+
+type answerQuestionArgs struct {
+	QuestionID string `json:"question_id"`
+	Answer     string `json:"answer"`
+}
+
+func (e *OntologyToolExecutor) answerQuestion(ctx context.Context, arguments string) (string, error) {
+	var args answerQuestionArgs
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+
+	if args.QuestionID == "" || args.Answer == "" {
+		return "", fmt.Errorf("question_id and answer are required")
+	}
+
+	// Find the question in workflow state
+	_, entityState, _, err := e.stateRepo.FindQuestionByID(ctx, args.QuestionID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return `{"error": "Question not found"}`, nil
+		}
+		return "", fmt.Errorf("failed to find question: %w", err)
+	}
+
+	// Update the question with the answer using the entity state ID
+	if err := e.stateRepo.UpdateQuestionInEntity(ctx, entityState.ID, args.QuestionID, string(models.QuestionStatusAnswered), args.Answer); err != nil {
+		return "", fmt.Errorf("failed to update question: %w", err)
+	}
+
+	e.logger.Info("Answered question via tool",
+		zap.String("question_id", args.QuestionID))
+
+	response := map[string]any{
+		"success":     true,
+		"question_id": args.QuestionID,
+		"message":     "Question marked as answered",
+	}
+
+	responseJSON, err := json.Marshal(response)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal response: %w", err)
+	}
+
+	return string(responseJSON), nil
+}
+
+// ============================================================================
+// Tool: get_pending_questions
+// ============================================================================
+
+type getPendingQuestionsArgs struct {
+	Limit int `json:"limit"`
+}
+
+func (e *OntologyToolExecutor) getPendingQuestions(ctx context.Context, arguments string) (string, error) {
+	var args getPendingQuestionsArgs
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+
+	limit := args.Limit
+	if limit <= 0 {
+		limit = 5
+	}
+	if limit > 20 {
+		limit = 20
+	}
+
+	// Get pending questions from workflow state
+	pendingQuestions, err := e.stateRepo.GetPendingQuestions(ctx, e.projectID, limit)
+	if err != nil {
+		return "", fmt.Errorf("failed to get pending questions: %w", err)
+	}
+
+	// Build response
+	type questionInfo struct {
+		ID       string `json:"id"`
+		Text     string `json:"text"`
+		Category string `json:"category"`
+		Priority int    `json:"priority"`
+	}
+
+	result := make([]questionInfo, 0, len(pendingQuestions))
+	for _, q := range pendingQuestions {
+		result = append(result, questionInfo{
+			ID:       q.ID,
+			Text:     q.Text,
+			Category: q.Category,
+			Priority: q.Priority,
+		})
+	}
+
+	response := map[string]any{
+		"questions":     result,
+		"count":         len(result),
+		"total_pending": len(pendingQuestions),
+	}
+
+	responseJSON, err := json.Marshal(response)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal response: %w", err)
+	}
+
+	return string(responseJSON), nil
+}

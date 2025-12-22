@@ -49,16 +49,25 @@ func NewClient(cfg *Config, logger *zap.Logger) (*Client, error) {
 	}, nil
 }
 
-// GenerateResponse generates a chat completion response.
+// GenerateResponse generates a chat completion response with usage stats.
+// Set thinking=true to enable chain-of-thought reasoning, false to disable it.
 func (c *Client) GenerateResponse(
 	ctx context.Context,
 	prompt string,
 	systemMessage string,
 	temperature float64,
-) (string, error) {
+	thinking bool,
+) (*GenerateResponseResult, error) {
+	// Prepend thinking control directive to the user prompt
+	thinkingDirective := "/no_think\n"
+	if thinking {
+		thinkingDirective = "/think\n"
+	}
+	promptWithDirective := thinkingDirective + prompt
+
 	messages := []openai.ChatCompletionMessage{
 		{Role: openai.ChatMessageRoleSystem, Content: systemMessage},
-		{Role: openai.ChatMessageRoleUser, Content: prompt},
+		{Role: openai.ChatMessageRoleUser, Content: promptWithDirective},
 	}
 
 	c.logger.Debug("LLM request",
@@ -77,11 +86,11 @@ func (c *Client) GenerateResponse(
 		c.logger.Error("LLM request failed",
 			zap.Duration("elapsed", time.Since(start)),
 			zap.Error(err))
-		return "", c.parseError(err)
+		return nil, c.parseError(err)
 	}
 
 	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("no choices in response")
+		return nil, fmt.Errorf("no choices in response")
 	}
 
 	content := resp.Choices[0].Message.Content
@@ -92,7 +101,12 @@ func (c *Client) GenerateResponse(
 		zap.Int("completion_tokens", resp.Usage.CompletionTokens),
 		zap.Duration("elapsed", elapsed))
 
-	return content, nil
+	return &GenerateResponseResult{
+		Content:          content,
+		PromptTokens:     resp.Usage.PromptTokens,
+		CompletionTokens: resp.Usage.CompletionTokens,
+		TotalTokens:      resp.Usage.TotalTokens,
+	}, nil
 }
 
 // CreateEmbedding generates an embedding vector for the input text.

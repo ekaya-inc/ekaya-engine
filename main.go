@@ -8,8 +8,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -21,6 +24,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/handlers"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
+	"github.com/ekaya-inc/ekaya-engine/pkg/middleware"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -120,17 +124,50 @@ func main() {
 	queryRepo := repositories.NewQueryRepository()
 	aiConfigRepo := repositories.NewAIConfigRepository(credentialEncryptor)
 
+	// Ontology repositories
+	ontologyRepo := repositories.NewOntologyRepository()
+	ontologyWorkflowRepo := repositories.NewOntologyWorkflowRepository()
+	ontologyChatRepo := repositories.NewOntologyChatRepository()
+	knowledgeRepo := repositories.NewKnowledgeRepository()
+	workflowStateRepo := repositories.NewWorkflowStateRepository()
+	ontologyQuestionRepo := repositories.NewOntologyQuestionRepository()
+
 	// Create adapter factory for datasource connections
 	adapterFactory := datasource.NewDatasourceAdapterFactory()
 
 	// Create services
 	projectService := services.NewProjectService(db, projectRepo, userRepo, redisClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
-	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, logger)
+	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, projectService, logger)
 	schemaService := services.NewSchemaService(schemaRepo, datasourceService, adapterFactory, logger)
 	discoveryService := services.NewRelationshipDiscoveryService(schemaRepo, datasourceService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
+
+	// LLM factory for creating clients per project configuration
+	llmFactory := llm.NewClientFactory(aiConfigService, logger)
+
+	// Ontology services
+	knowledgeService := services.NewKnowledgeService(knowledgeRepo, logger)
+	ontologyBuilderService := services.NewOntologyBuilderService(
+		ontologyRepo, schemaRepo, ontologyWorkflowRepo,
+		knowledgeRepo, workflowStateRepo, llmFactory, logger)
+	ontologyQuestionService := services.NewOntologyQuestionService(
+		ontologyQuestionRepo, ontologyRepo, knowledgeRepo,
+		ontologyBuilderService, logger)
+	getTenantCtx := services.NewTenantContextFunc(db)
+
+	// Set up LLM conversation recording for debugging
+	convRepo := repositories.NewConversationRepository()
+	convRecorder := llm.NewAsyncConversationRecorder(convRepo, llm.TenantContextFunc(getTenantCtx), logger, 100)
+	llmFactory.SetRecorder(convRecorder)
+
+	ontologyWorkflowService := services.NewOntologyWorkflowService(
+		ontologyWorkflowRepo, ontologyRepo, schemaRepo, workflowStateRepo, ontologyQuestionRepo,
+		datasourceService, adapterFactory, ontologyBuilderService, getTenantCtx, logger)
+	ontologyChatService := services.NewOntologyChatService(
+		ontologyChatRepo, ontologyRepo, knowledgeRepo,
+		schemaRepo, ontologyWorkflowRepo, workflowStateRepo, llmFactory, datasourceService, adapterFactory, logger)
 
 	mux := http.NewServeMux()
 
@@ -182,6 +219,16 @@ func main() {
 	queriesHandler := handlers.NewQueriesHandler(queryService, logger)
 	queriesHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
+	// Register ontology handlers (protected)
+	ontologyHandler := handlers.NewOntologyHandler(ontologyWorkflowService, projectService, logger)
+	ontologyHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	ontologyQuestionsHandler := handlers.NewOntologyQuestionsHandler(ontologyQuestionService, logger)
+	ontologyQuestionsHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	ontologyChatHandler := handlers.NewOntologyChatHandler(ontologyChatService, knowledgeService, logger)
+	ontologyChatHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"
 	fileServer := http.FileServer(http.Dir(uiDir))
@@ -211,12 +258,57 @@ func main() {
 		}
 	})
 
+	// Wrap mux with request logging middleware
+	handler := middleware.RequestLogger(logger)(mux)
+
+	// Create HTTP server
+	server := &http.Server{
+		Addr:    cfg.BindAddr + ":" + cfg.Port,
+		Handler: handler,
+	}
+
+	// Channel to signal shutdown complete
+	shutdownComplete := make(chan struct{})
+
+	// Handle shutdown signals
+	go func() {
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+		sig := <-sigChan
+
+		logger.Info("Received shutdown signal", zap.String("signal", sig.String()))
+
+		// Create shutdown context with 30 second timeout
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		// 1. Stop accepting new HTTP requests
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			logger.Error("HTTP server shutdown error", zap.Error(err))
+		}
+
+		// 2. Shutdown workflow service (cancels tasks, releases ownership)
+		if err := ontologyWorkflowService.Shutdown(shutdownCtx); err != nil {
+			logger.Error("Workflow service shutdown error", zap.Error(err))
+		}
+
+		// 3. Close conversation recorder (drain pending writes)
+		convRecorder.Close()
+
+		close(shutdownComplete)
+	}()
+
+	// Start server
 	logger.Info("Starting ekaya-engine",
-		zap.String("port", cfg.Port),
+		zap.String("addr", cfg.BindAddr+":"+cfg.Port),
 		zap.String("version", cfg.Version))
-	if err := http.ListenAndServe(":"+cfg.Port, mux); err != nil {
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Fatal("Server failed", zap.Error(err))
 	}
+
+	// Wait for shutdown to complete
+	<-shutdownComplete
+	logger.Info("Server shutdown complete")
 }
 
 func setupDatabase(ctx context.Context, cfg *config.DatabaseConfig, logger *zap.Logger) (*database.DB, error) {

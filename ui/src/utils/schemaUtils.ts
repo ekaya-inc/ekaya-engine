@@ -1,38 +1,21 @@
 import type { DatasourceSchema, SchemaTable } from '../types';
 
-/**
- * Builds a lookup map from table_name to schema-qualified name (schema.table).
- * This is required because the backend expects schema-qualified table names
- * (e.g., "public.users") when saving selections.
- */
-export function buildTableNameToQualified(
-  apiTables: SchemaTable[]
-): Record<string, string> {
-  const lookup: Record<string, string> = {};
-  for (const table of apiTables) {
-    lookup[table.table_name] = `${table.schema_name}.${table.table_name}`;
-  }
-  return lookup;
-}
-
 interface SelectionState {
   selected: boolean;
   columns: Record<string, boolean>;
 }
 
-interface TableWithColumns {
-  name: string;
-  columns: { name: string }[];
-}
-
 /**
- * Builds table and column selection payloads for the save API.
- * Returns schema-qualified table names as required by the backend.
+ * Builds table and column selection payloads for the save API using IDs.
+ * Maps from table/column names (used in UI state) to their UUIDs (required by API).
+ *
+ * @param apiTables - Tables from the API response (contains IDs)
+ * @param selectionState - UI selection state keyed by table name
+ * @returns Payloads with table IDs and column IDs
  */
 export function buildSelectionPayloads(
-  tables: TableWithColumns[],
-  selectionState: Record<string, SelectionState>,
-  tableNameToQualified: Record<string, string>
+  apiTables: SchemaTable[],
+  selectionState: Record<string, SelectionState>
 ): {
   tableSelections: Record<string, boolean>;
   columnSelections: Record<string, string[]>;
@@ -40,19 +23,35 @@ export function buildSelectionPayloads(
   const tableSelections: Record<string, boolean> = {};
   const columnSelections: Record<string, string[]> = {};
 
-  for (const table of tables) {
-    const qualifiedName = tableNameToQualified[table.name] ?? table.name;
-    const tableState = selectionState[table.name];
+  for (const apiTable of apiTables) {
+    const tableId = apiTable.id;
+    if (!tableId) {
+      console.warn(`Table ${apiTable.table_name} has no ID, skipping`);
+      continue;
+    }
 
-    tableSelections[qualifiedName] = tableState?.selected ?? false;
+    const tableState = selectionState[apiTable.table_name];
+    const isTableSelected = tableState?.selected ?? false;
 
-    if (tableState?.selected) {
-      const selectedColumns = table.columns
-        .filter((col) => tableState.columns[col.name])
-        .map((col) => col.name);
+    tableSelections[tableId] = isTableSelected;
 
-      if (selectedColumns.length > 0) {
-        columnSelections[qualifiedName] = selectedColumns;
+    if (isTableSelected && tableState) {
+      const selectedColumnIds: string[] = [];
+
+      for (const apiColumn of apiTable.columns) {
+        const columnId = apiColumn.id;
+        if (!columnId) {
+          console.warn(`Column ${apiColumn.column_name} in table ${apiTable.table_name} has no ID, skipping`);
+          continue;
+        }
+
+        if (tableState.columns[apiColumn.column_name]) {
+          selectedColumnIds.push(columnId);
+        }
+      }
+
+      if (selectedColumnIds.length > 0) {
+        columnSelections[tableId] = selectedColumnIds;
       }
     }
   }

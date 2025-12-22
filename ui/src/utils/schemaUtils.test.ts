@@ -2,58 +2,34 @@ import { describe, expect, it } from 'vitest';
 
 import type { SchemaTable } from '../types';
 
-import { buildSelectionPayloads, buildTableNameToQualified } from './schemaUtils';
+import { buildSelectionPayloads } from './schemaUtils';
 
 describe('schemaUtils', () => {
-  describe('buildTableNameToQualified', () => {
-    it('builds lookup from table_name to schema-qualified name', () => {
+  describe('buildSelectionPayloads', () => {
+    it('builds selection payloads using table and column IDs', () => {
       const apiTables: SchemaTable[] = [
         {
-          id: '1',
+          id: 'table-uuid-1',
           table_name: 'users',
           schema_name: 'public',
           is_selected: false,
           row_count: 100,
-          columns: [],
+          columns: [
+            { id: 'col-uuid-1', column_name: 'id', data_type: 'uuid' },
+            { id: 'col-uuid-2', column_name: 'email', data_type: 'text' },
+          ],
         },
         {
-          id: '2',
+          id: 'table-uuid-2',
           table_name: 'orders',
           schema_name: 'public',
           is_selected: false,
           row_count: 50,
-          columns: [],
+          columns: [
+            { id: 'col-uuid-3', column_name: 'id', data_type: 'uuid' },
+            { id: 'col-uuid-4', column_name: 'total', data_type: 'numeric' },
+          ],
         },
-        {
-          id: '3',
-          table_name: 'products',
-          schema_name: 'inventory',
-          is_selected: false,
-          row_count: 25,
-          columns: [],
-        },
-      ];
-
-      const result = buildTableNameToQualified(apiTables);
-
-      expect(result).toEqual({
-        users: 'public.users',
-        orders: 'public.orders',
-        products: 'inventory.products',
-      });
-    });
-
-    it('handles empty array', () => {
-      const result = buildTableNameToQualified([]);
-      expect(result).toEqual({});
-    });
-  });
-
-  describe('buildSelectionPayloads', () => {
-    it('builds schema-qualified table selections', () => {
-      const tables = [
-        { name: 'users', columns: [{ name: 'id' }, { name: 'email' }] },
-        { name: 'orders', columns: [{ name: 'id' }, { name: 'total' }] },
       ];
 
       const selectionState = {
@@ -61,37 +37,35 @@ describe('schemaUtils', () => {
         orders: { selected: false, columns: { id: false, total: false } },
       };
 
-      const tableNameToQualified = {
-        users: 'public.users',
-        orders: 'public.orders',
-      };
-
       const { tableSelections, columnSelections } = buildSelectionPayloads(
-        tables,
-        selectionState,
-        tableNameToQualified
+        apiTables,
+        selectionState
       );
 
-      // Table keys should be schema-qualified
+      // Table keys should be UUIDs
       expect(tableSelections).toEqual({
-        'public.users': true,
-        'public.orders': false,
+        'table-uuid-1': true,
+        'table-uuid-2': false,
       });
 
-      // Column selections should only include selected tables
+      // Column selections should use column UUIDs for selected tables only
       expect(columnSelections).toEqual({
-        'public.users': ['id', 'email'],
+        'table-uuid-1': ['col-uuid-1', 'col-uuid-2'],
       });
     });
 
     it('excludes unselected columns from columnSelections', () => {
-      const tables = [
+      const apiTables: SchemaTable[] = [
         {
-          name: 'users',
+          id: 'table-uuid-1',
+          table_name: 'users',
+          schema_name: 'public',
+          is_selected: false,
+          row_count: 100,
           columns: [
-            { name: 'id' },
-            { name: 'email' },
-            { name: 'password_hash' },
+            { id: 'col-uuid-1', column_name: 'id', data_type: 'uuid' },
+            { id: 'col-uuid-2', column_name: 'email', data_type: 'text' },
+            { id: 'col-uuid-3', column_name: 'password_hash', data_type: 'text' },
           ],
         },
       ];
@@ -103,52 +77,105 @@ describe('schemaUtils', () => {
         },
       };
 
-      const tableNameToQualified = { users: 'public.users' };
-
       const { columnSelections } = buildSelectionPayloads(
-        tables,
-        selectionState,
-        tableNameToQualified
+        apiTables,
+        selectionState
       );
 
-      // password_hash should not be included
-      expect(columnSelections['public.users']).toEqual(['id', 'email']);
-      expect(columnSelections['public.users']).not.toContain('password_hash');
-    });
-
-    it('falls back to unqualified name if not in lookup', () => {
-      const tables = [{ name: 'unknown_table', columns: [{ name: 'id' }] }];
-
-      const selectionState = {
-        unknown_table: { selected: true, columns: { id: true } },
-      };
-
-      const tableNameToQualified = {}; // Empty lookup
-
-      const { tableSelections, columnSelections } = buildSelectionPayloads(
-        tables,
-        selectionState,
-        tableNameToQualified
-      );
-
-      // Should fall back to unqualified name
-      expect(tableSelections).toEqual({ unknown_table: true });
-      expect(columnSelections).toEqual({ unknown_table: ['id'] });
+      // password_hash should not be included (only selected columns)
+      expect(columnSelections['table-uuid-1']).toEqual(['col-uuid-1', 'col-uuid-2']);
+      expect(columnSelections['table-uuid-1']).not.toContain('col-uuid-3');
     });
 
     it('handles missing selection state for table', () => {
-      const tables = [{ name: 'users', columns: [{ name: 'id' }] }];
+      const apiTables: SchemaTable[] = [
+        {
+          id: 'table-uuid-1',
+          table_name: 'users',
+          schema_name: 'public',
+          is_selected: false,
+          row_count: 100,
+          columns: [
+            { id: 'col-uuid-1', column_name: 'id', data_type: 'uuid' },
+          ],
+        },
+      ];
+
       const selectionState = {}; // No selection state
-      const tableNameToQualified = { users: 'public.users' };
 
       const { tableSelections, columnSelections } = buildSelectionPayloads(
-        tables,
-        selectionState,
-        tableNameToQualified
+        apiTables,
+        selectionState
       );
 
-      expect(tableSelections).toEqual({ 'public.users': false });
-      expect(columnSelections).toEqual({}); // No columns for unselected table
+      // Table should be marked as not selected
+      expect(tableSelections).toEqual({ 'table-uuid-1': false });
+      // No columns for unselected table
+      expect(columnSelections).toEqual({});
+    });
+
+    it('skips tables without IDs', () => {
+      const apiTables: SchemaTable[] = [
+        {
+          // No id field
+          table_name: 'users',
+          schema_name: 'public',
+          is_selected: false,
+          row_count: 100,
+          columns: [],
+        },
+      ];
+
+      const selectionState = {
+        users: { selected: true, columns: {} },
+      };
+
+      const { tableSelections, columnSelections } = buildSelectionPayloads(
+        apiTables,
+        selectionState
+      );
+
+      // Table without ID should be skipped
+      expect(tableSelections).toEqual({});
+      expect(columnSelections).toEqual({});
+    });
+
+    it('skips columns without IDs', () => {
+      const apiTables: SchemaTable[] = [
+        {
+          id: 'table-uuid-1',
+          table_name: 'users',
+          schema_name: 'public',
+          is_selected: false,
+          row_count: 100,
+          columns: [
+            { id: 'col-uuid-1', column_name: 'id', data_type: 'uuid' },
+            { column_name: 'email', data_type: 'text' }, // No id
+          ],
+        },
+      ];
+
+      const selectionState = {
+        users: { selected: true, columns: { id: true, email: true } },
+      };
+
+      const { columnSelections } = buildSelectionPayloads(
+        apiTables,
+        selectionState
+      );
+
+      // Only column with ID should be included
+      expect(columnSelections['table-uuid-1']).toEqual(['col-uuid-1']);
+    });
+
+    it('handles empty apiTables', () => {
+      const { tableSelections, columnSelections } = buildSelectionPayloads(
+        [],
+        {}
+      );
+
+      expect(tableSelections).toEqual({});
+      expect(columnSelections).toEqual({});
     });
   });
 });

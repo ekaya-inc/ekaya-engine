@@ -25,7 +25,7 @@ import {
 } from '../components/ui/Dialog';
 import { useDatasourceConnection } from '../contexts/DatasourceConnectionContext';
 import { fetchWithAuth } from '../lib/api';
-import { realOntologyService } from '../services/realOntologyService';
+import { ontologyService } from '../services/ontologyService';
 import type { OntologyWorkflowStatus } from '../types';
 
 type TileColor = 'blue' | 'green' | 'purple' | 'orange' | 'gray' | 'indigo';
@@ -157,7 +157,7 @@ const ProjectDashboard = () => {
 
   // Subscribe to ontology status for badge display
   useEffect(() => {
-    const unsubscribe = realOntologyService.subscribe((status) => {
+    const unsubscribe = ontologyService.subscribe((status) => {
       setOntologyStatus(status);
     });
     return () => {

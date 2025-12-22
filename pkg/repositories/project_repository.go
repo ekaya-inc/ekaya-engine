@@ -18,6 +18,7 @@ import (
 type ProjectRepository interface {
 	Create(ctx context.Context, project *models.Project) error
 	Get(ctx context.Context, id uuid.UUID) (*models.Project, error)
+	Update(ctx context.Context, project *models.Project) error
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
@@ -113,6 +114,37 @@ func (r *projectRepository) Get(ctx context.Context, id uuid.UUID) (*models.Proj
 	}
 
 	return &project, nil
+}
+
+// Update updates an existing project's parameters.
+func (r *projectRepository) Update(ctx context.Context, project *models.Project) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	project.UpdatedAt = time.Now()
+
+	params, err := json.Marshal(project.Parameters)
+	if err != nil {
+		return fmt.Errorf("failed to marshal parameters: %w", err)
+	}
+
+	query := `
+		UPDATE engine_projects
+		SET parameters = $2, updated_at = $3
+		WHERE id = $1`
+
+	result, err := scope.Conn.Exec(ctx, query, project.ID, params, project.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("failed to update project: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return apperrors.ErrNotFound
+	}
+
+	return nil
 }
 
 // Delete removes a project by ID.

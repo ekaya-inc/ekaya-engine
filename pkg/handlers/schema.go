@@ -25,8 +25,8 @@ type UpdateMetadataRequest struct {
 
 // SaveSelectionsRequest for bulk updating selection state.
 type SaveSelectionsRequest struct {
-	TableSelections  map[string]bool     `json:"table_selections"`  // "schema.table" -> selected
-	ColumnSelections map[string][]string `json:"column_selections"` // "schema.table" -> ["col1", "col2"]
+	TableSelections  map[uuid.UUID]bool        `json:"table_selections"`  // table_id -> selected
+	ColumnSelections map[uuid.UUID][]uuid.UUID `json:"column_selections"` // table_id -> [column_id, ...]
 }
 
 // --- Response Types ---

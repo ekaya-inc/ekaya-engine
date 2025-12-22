@@ -4,28 +4,34 @@
  * Shows one question at a time with Answer/Skip/Delete buttons.
  */
 
-import { HelpCircle, Loader2, CheckCircle, SkipForward, Trash2, Send, AlertCircle, MessageCircle, ChevronDown, ChevronUp, Brain } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { HelpCircle, Loader2, CheckCircle, SkipForward, Trash2, Send, AlertCircle, MessageCircle, ChevronDown, ChevronUp, Brain, Clock } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 import { useToast } from '../../hooks/useToast';
 import ontologyApi from '../../services/ontologyApi';
-import type { QuestionDTO, QuestionPanelState } from '../../types';
+import type { QuestionCounts, QuestionDTO, QuestionPanelState } from '../../types';
 
 interface QuestionPanelProps {
   projectId: string;
   onAllComplete?: () => void;
   onQuestionAnswered?: (questionId: string, actionsSummary: string) => void;
+  /** When true, poll for questions if none available */
+  pollForQuestions?: boolean;
+  /** When true, workflow is complete - show "All Questions Answered" instead of "Waiting" */
+  workflowComplete?: boolean;
 }
 
-const QuestionPanel = ({ projectId, onAllComplete, onQuestionAnswered }: QuestionPanelProps) => {
+const QuestionPanel = ({ projectId, onAllComplete, onQuestionAnswered, pollForQuestions = false, workflowComplete = false }: QuestionPanelProps) => {
   const { toast } = useToast();
   const [state, setState] = useState<QuestionPanelState>('loading');
   const [currentQuestion, setCurrentQuestion] = useState<QuestionDTO | null>(null);
+  const [counts, setCounts] = useState<QuestionCounts | null>(null);
   const [answer, setAnswer] = useState('');
   const [followUp, setFollowUp] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [thinking, setThinking] = useState<string | null>(null);
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadNextQuestion = useCallback(async () => {
     setState('loading');
@@ -38,24 +44,57 @@ const QuestionPanel = ({ projectId, onAllComplete, onQuestionAnswered }: Questio
     try {
       const response = await ontologyApi.getNextQuestion(projectId);
 
+      // Update counts if provided
+      if (response.counts) {
+        setCounts(response.counts);
+      }
+
       if (response.all_complete) {
-        setState('all_complete');
-        setCurrentQuestion(null);
-        onAllComplete?.();
+        // Only show "All Complete" if workflow is actually done
+        // Otherwise, we're still building and waiting for questions to be generated
+        if (workflowComplete) {
+          setState('all_complete');
+          setCurrentQuestion(null);
+          setCounts(null);
+          onAllComplete?.();
+        } else {
+          setState('waiting_for_questions');
+          setCurrentQuestion(null);
+        }
       } else if (response.question) {
         setCurrentQuestion(response.question);
         setState('showing_question');
+      } else {
+        // No question available yet, but not all complete - waiting for questions
+        setState('waiting_for_questions');
+        setCurrentQuestion(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load question');
-      setState('showing_question');
+      setState('waiting_for_questions');
     }
-  }, [projectId, onAllComplete]);
+  }, [projectId, onAllComplete, workflowComplete]);
 
   // Load the first question on mount
   useEffect(() => {
     loadNextQuestion();
   }, [loadNextQuestion]);
+
+  // Poll for questions when in waiting state and polling is enabled
+  useEffect(() => {
+    if (state === 'waiting_for_questions' && pollForQuestions) {
+      pollIntervalRef.current = setInterval(() => {
+        loadNextQuestion();
+      }, 3000); // Poll every 3 seconds
+    }
+
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+  }, [state, pollForQuestions, loadNextQuestion]);
 
   const handleSubmitAnswer = async () => {
     if (!currentQuestion || !answer.trim()) return;
@@ -73,6 +112,11 @@ const QuestionPanel = ({ projectId, onAllComplete, onQuestionAnswered }: Questio
       // Store thinking if available
       if (response.thinking) {
         setThinking(response.thinking);
+      }
+
+      // Update counts from response
+      if (response.counts) {
+        setCounts(response.counts);
       }
 
       if (response.follow_up) {
@@ -95,6 +139,7 @@ const QuestionPanel = ({ projectId, onAllComplete, onQuestionAnswered }: Questio
         if (response.all_complete) {
           setState('all_complete');
           setCurrentQuestion(null);
+          setCounts(null);
           onAllComplete?.();
         } else if (response.next_question) {
           setCurrentQuestion(response.next_question);
@@ -187,6 +232,68 @@ const QuestionPanel = ({ projectId, onAllComplete, onQuestionAnswered }: Questio
     );
   }
 
+  // Waiting for questions state (no questions available yet)
+  if (state === 'waiting_for_questions') {
+    return (
+      <div className="rounded-lg border border-border-light bg-surface-primary shadow-sm">
+        {/* Header */}
+        <div className="p-4 border-b border-border-light">
+          <h3 className="font-semibold text-text-primary flex items-center gap-2">
+            <HelpCircle className="h-5 w-5 text-gray-400" />
+            Ontology Questions
+          </h3>
+        </div>
+
+        {/* Waiting content */}
+        <div className="p-8">
+          <div className="flex flex-col items-center justify-center text-center">
+            <Clock className="h-12 w-12 text-gray-300 mb-4" />
+            <h4 className="text-lg font-medium text-text-secondary mb-2">Waiting for Questions</h4>
+            <p className="text-text-tertiary text-sm max-w-md">
+              Questions will appear here as the ontology extraction analyzes your schema.
+              This may take a moment.
+            </p>
+            {pollForQuestions && (
+              <div className="mt-4 flex items-center gap-2 text-text-tertiary text-xs">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <span>Checking for new questions...</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Disabled action area */}
+        <div className="p-4 border-t border-border-light bg-surface-secondary">
+          <div className="flex justify-between items-center opacity-50">
+            <div className="flex gap-2">
+              <button
+                disabled
+                className="px-4 py-2 text-sm font-medium text-text-secondary bg-surface-secondary rounded-lg cursor-not-allowed flex items-center gap-2"
+              >
+                <SkipForward className="h-4 w-4" />
+                Skip
+              </button>
+              <button
+                disabled
+                className="px-4 py-2 text-sm font-medium text-red-600 bg-red-50 rounded-lg cursor-not-allowed flex items-center gap-2"
+              >
+                <Trash2 className="h-4 w-4" />
+                Don&apos;t Ask Again
+              </button>
+            </div>
+            <button
+              disabled
+              className="px-6 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg cursor-not-allowed flex items-center gap-2"
+            >
+              <Send className="h-4 w-4" />
+              Submit Answer
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // All complete state
   if (state === 'all_complete') {
     return (
@@ -207,15 +314,36 @@ const QuestionPanel = ({ projectId, onAllComplete, onQuestionAnswered }: Questio
     <div className="rounded-lg border border-border-light bg-surface-primary shadow-sm">
       {/* Header */}
       <div className="p-4 border-b border-border-light flex items-center justify-between">
-        <h3 className="font-semibold text-text-primary flex items-center gap-2">
-          <HelpCircle className="h-5 w-5 text-purple-500" />
-          Ontology Question
-        </h3>
+        <div className="flex items-center gap-4">
+          <h3 className="font-semibold text-text-primary flex items-center gap-2">
+            <HelpCircle className="h-5 w-5 text-purple-500" />
+            Ontology Question
+          </h3>
+          {counts && (counts.required > 0 || counts.optional > 0) && (
+            <div className="flex items-center gap-2 text-sm">
+              {counts.required > 0 && (
+                <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">
+                  {counts.required} required
+                </span>
+              )}
+              {counts.optional > 0 && (
+                <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                  {counts.optional} optional
+                </span>
+              )}
+            </div>
+          )}
+        </div>
         {currentQuestion && (
           <div className="flex items-center gap-2">
+            {currentQuestion.is_required && (
+              <span className="px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-700">
+                Required
+              </span>
+            )}
             <span className={`px-2 py-1 text-xs font-medium rounded-full ${
               currentQuestion.priority <= 2
-                ? 'bg-red-100 text-red-700'
+                ? 'bg-orange-100 text-orange-700'
                 : currentQuestion.priority <= 3
                 ? 'bg-yellow-100 text-yellow-700'
                 : 'bg-gray-100 text-gray-700'
