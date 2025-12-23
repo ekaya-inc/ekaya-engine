@@ -21,6 +21,7 @@ import type {
   GetDatasourceResponse,
   ListDatasourcesResponse,
   ListQueriesResponse,
+  MCPConfigResponse,
   Query,
   RelationshipCandidatesResponse,
   RelationshipDetail,
@@ -30,6 +31,7 @@ import type {
   TestConnectionRequest,
   TestConnectionResponse,
   TestQueryRequest,
+  UpdateMCPConfigRequest,
   UpdateQueryRequest,
   ValidateQueryRequest,
   ValidateQueryResponse,
@@ -476,6 +478,30 @@ class EngineApiService {
       console.error(`Engine API Error (health check):`, error);
       return null;
     }
+  }
+
+  // --- MCP Configuration Methods ---
+
+  /**
+   * Get MCP configuration for a project
+   * GET /api/projects/{projectId}/mcp/config
+   */
+  async getMCPConfig(projectId: string): Promise<ApiResponse<MCPConfigResponse>> {
+    return this.makeRequest<MCPConfigResponse>(`/${projectId}/mcp/config`);
+  }
+
+  /**
+   * Update MCP configuration for a project
+   * PATCH /api/projects/{projectId}/mcp/config
+   */
+  async updateMCPConfig(
+    projectId: string,
+    request: UpdateMCPConfigRequest
+  ): Promise<ApiResponse<MCPConfigResponse>> {
+    return this.makeRequest<MCPConfigResponse>(`/${projectId}/mcp/config`, {
+      method: 'PATCH',
+      body: JSON.stringify(request),
+    });
   }
 
   /**

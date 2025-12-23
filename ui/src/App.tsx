@@ -11,6 +11,7 @@ import { ToastProviderComponent } from './hooks/useToast';
 import DatasourcePage from './pages/DatasourcePage';
 import HelpPage from './pages/HelpPage';
 import HomePage from './pages/HomePage';
+import MCPServerPage from './pages/MCPServerPage';
 import OAuthCallbackPage from './pages/OAuthCallbackPage';
 import OntologyPage from './pages/OntologyPage';
 import ProjectDashboard from './pages/ProjectDashboard';
@@ -39,6 +40,7 @@ const App = (): JSX.Element => {
                   <Route path="ontology" element={<OntologyPage />} />
                   <Route path="security" element={<SecurityPage />} />
                   <Route path="queries" element={<QueriesPage />} />
+                  <Route path="mcp-server" element={<MCPServerPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                   <Route path="help" element={<HelpPage />} />
                 </Route>

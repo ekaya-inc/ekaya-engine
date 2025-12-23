@@ -127,6 +127,9 @@ func main() {
 	queryRepo := repositories.NewQueryRepository()
 	aiConfigRepo := repositories.NewAIConfigRepository(credentialEncryptor)
 
+	// MCP config repository
+	mcpConfigRepo := repositories.NewMCPConfigRepository()
+
 	// Ontology repositories
 	ontologyRepo := repositories.NewOntologyRepository()
 	ontologyWorkflowRepo := repositories.NewOntologyWorkflowRepository()
@@ -146,6 +149,7 @@ func main() {
 	discoveryService := services.NewRelationshipDiscoveryService(schemaRepo, datasourceService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
+	mcpConfigService := services.NewMCPConfigService(mcpConfigRepo, cfg.BaseURL, logger)
 
 	// LLM factory for creating clients per project configuration
 	llmFactory := llm.NewClientFactory(aiConfigService, logger)
@@ -197,6 +201,11 @@ func main() {
 	// Register MCP server (authenticated - project-scoped)
 	mcpServer := mcp.NewServer("ekaya-engine", cfg.Version, logger)
 	mcptools.RegisterHealthTool(mcpServer.MCP(), cfg.Version)
+	mcptools.RegisterDeveloperTools(mcpServer.MCP(), &mcptools.DeveloperToolDeps{
+		DB:               db,
+		MCPConfigService: mcpConfigService,
+		Logger:           logger,
+	})
 	mcpHandler := handlers.NewMCPHandler(mcpServer, logger)
 	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, logger)
 	mcpHandler.RegisterRoutes(mux, mcpAuthMiddleware)
@@ -232,6 +241,10 @@ func main() {
 	// Register queries handler (protected)
 	queriesHandler := handlers.NewQueriesHandler(queryService, logger)
 	queriesHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register MCP config handler (protected)
+	mcpConfigHandler := handlers.NewMCPConfigHandler(mcpConfigService, logger)
+	mcpConfigHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register ontology handlers (protected)
 	ontologyHandler := handlers.NewOntologyHandler(ontologyWorkflowService, projectService, logger)

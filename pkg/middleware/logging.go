@@ -37,10 +37,25 @@ func RequestLogger(logger *zap.Logger) func(http.Handler) http.Handler {
 
 type responseWriter struct {
 	http.ResponseWriter
-	statusCode int
+	statusCode    int
+	headerWritten bool
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
+	// Prevent duplicate WriteHeader calls to avoid "superfluous response.WriteHeader" warnings
+	if rw.headerWritten {
+		return
+	}
+	rw.headerWritten = true
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// Write implements http.ResponseWriter. It ensures WriteHeader is called with 200
+// if no explicit status code was set, matching the standard library behavior.
+func (rw *responseWriter) Write(b []byte) (int, error) {
+	if !rw.headerWritten {
+		rw.WriteHeader(http.StatusOK)
+	}
+	return rw.ResponseWriter.Write(b)
 }

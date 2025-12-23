@@ -147,3 +147,52 @@ func TestMCPHandler_ToolsCall(t *testing.T) {
 		t.Errorf("expected version 'test-version', got '%s'", healthResult.Version)
 	}
 }
+
+func TestMCPHandler_GETReturnsMethodNotAllowed(t *testing.T) {
+	logger := zap.NewNop()
+	mcpServer := mcp.NewServer("test", "1.0.0", logger)
+	tools.RegisterHealthTool(mcpServer.MCP(), "1.0.0")
+	handler := NewMCPHandler(mcpServer, logger)
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux, newTestMCPAuthMiddleware())
+
+	// GET requests should return 405 Method Not Allowed
+	req := httptest.NewRequest(http.MethodGet, "/mcp/test-project", nil)
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("GET /mcp/{pid}: expected status %d, got %d", http.StatusMethodNotAllowed, rec.Code)
+	}
+
+	// Should have Allow header indicating POST is allowed
+	if allow := rec.Header().Get("Allow"); allow != "POST" {
+		t.Errorf("expected Allow header 'POST', got '%s'", allow)
+	}
+}
+
+func TestMCPHandler_UnsupportedMethodsReturnMethodNotAllowed(t *testing.T) {
+	logger := zap.NewNop()
+	mcpServer := mcp.NewServer("test", "1.0.0", logger)
+	handler := NewMCPHandler(mcpServer, logger)
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux, newTestMCPAuthMiddleware())
+
+	unsupportedMethods := []string{http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodPatch}
+
+	for _, method := range unsupportedMethods {
+		t.Run(method, func(t *testing.T) {
+			req := httptest.NewRequest(method, "/mcp/test-project", nil)
+			rec := httptest.NewRecorder()
+
+			mux.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusMethodNotAllowed {
+				t.Errorf("%s /mcp/{pid}: expected status %d, got %d", method, http.StatusMethodNotAllowed, rec.Code)
+			}
+		})
+	}
+}
