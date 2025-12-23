@@ -8,7 +8,8 @@ import (
 
 // ToolGroupConfig represents the configuration for a single tool group.
 type ToolGroupConfig struct {
-	Enabled bool `json:"enabled"`
+	Enabled       bool `json:"enabled"`
+	EnableExecute bool `json:"enableExecute"`
 }
 
 // MCPConfig represents the MCP server configuration for a project.

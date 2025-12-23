@@ -1,5 +1,6 @@
 import { AlertTriangle } from 'lucide-react';
 
+import type { SubOptionInfo } from '../../types';
 import { Card, CardContent } from '../ui/Card';
 import { Switch } from '../ui/Switch';
 
@@ -10,6 +11,8 @@ interface MCPToolGroupProps {
   enabled: boolean;
   onToggle: (enabled: boolean) => void;
   disabled?: boolean;
+  subOptions?: Record<string, SubOptionInfo>;
+  onSubOptionToggle?: (subOptionName: string, enabled: boolean) => void;
 }
 
 export default function MCPToolGroup({
@@ -19,6 +22,8 @@ export default function MCPToolGroup({
   enabled,
   onToggle,
   disabled = false,
+  subOptions,
+  onSubOptionToggle,
 }: MCPToolGroupProps) {
   return (
     <Card>
@@ -40,6 +45,27 @@ export default function MCPToolGroup({
                 <span>{warning}</span>
               </div>
             )}
+            {enabled && subOptions && Object.entries(subOptions).map(([subName, subOption]) => (
+              <div key={subName} className="mt-4 border-t border-border-light pt-4">
+                <div className="flex items-center gap-3">
+                  <Switch
+                    checked={subOption.enabled}
+                    onCheckedChange={(checked) => onSubOptionToggle?.(subName, checked)}
+                    disabled={disabled}
+                  />
+                  <span className="text-sm font-medium text-text-primary">{subOption.name}</span>
+                </div>
+                {subOption.description && (
+                  <p className="mt-1 text-sm text-text-secondary">{subOption.description}</p>
+                )}
+                {subOption.warning && (
+                  <div className="mt-2 flex items-start gap-2 rounded-md bg-red-50 p-3 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{subOption.warning}</span>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       </CardContent>

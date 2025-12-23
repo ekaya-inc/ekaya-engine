@@ -48,11 +48,15 @@ const MCPServerPage = () => {
   const handleToggleToolGroup = async (groupName: string, enabled: boolean) => {
     if (!pid || !config) return;
 
+    const groupInfo = config.toolGroups[groupName];
+    // Preserve existing sub-option values when toggling the main switch
+    const enableExecute = groupInfo?.subOptions?.['enableExecute']?.enabled ?? false;
+
     try {
       setUpdating(true);
       const response = await engineApi.updateMCPConfig(pid, {
         toolGroups: {
-          [groupName]: { enabled },
+          [groupName]: { enabled, enableExecute },
         },
       });
 
@@ -60,7 +64,45 @@ const MCPServerPage = () => {
         setConfig(response.data);
         toast({
           title: 'Success',
-          description: `${config.toolGroups[groupName]?.name ?? groupName} ${enabled ? 'enabled' : 'disabled'}`,
+          description: `${groupInfo?.name ?? groupName} ${enabled ? 'enabled' : 'disabled'}`,
+        });
+      } else {
+        throw new Error(response.error ?? 'Failed to update configuration');
+      }
+    } catch (error) {
+      console.error('Failed to update MCP config:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to update configuration',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleToggleSubOption = async (groupName: string, subOptionName: string, enabled: boolean) => {
+    if (!pid || !config) return;
+
+    const groupInfo = config.toolGroups[groupName];
+    const subOptionInfo = groupInfo?.subOptions?.[subOptionName];
+
+    try {
+      setUpdating(true);
+      const response = await engineApi.updateMCPConfig(pid, {
+        toolGroups: {
+          [groupName]: {
+            enabled: groupInfo?.enabled ?? false,
+            ...(subOptionName === 'enableExecute' ? { enableExecute: enabled } : {}),
+          },
+        },
+      });
+
+      if (response.success && response.data) {
+        setConfig(response.data);
+        toast({
+          title: 'Success',
+          description: `${subOptionInfo?.name ?? subOptionName} ${enabled ? 'enabled' : 'disabled'}`,
         });
       } else {
         throw new Error(response.error ?? 'Failed to update configuration');
@@ -125,6 +167,9 @@ const MCPServerPage = () => {
                     onToggle: (enabled: boolean) => handleToggleToolGroup(groupName, enabled),
                     disabled: updating,
                     ...(groupInfo.warning != null ? { warning: groupInfo.warning } : {}),
+                    ...(groupInfo.subOptions != null ? { subOptions: groupInfo.subOptions } : {}),
+                    onSubOptionToggle: (subOptionName: string, enabled: boolean) =>
+                      handleToggleSubOption(groupName, subOptionName, enabled),
                   };
                   return <MCPToolGroup key={groupName} {...props} />;
                 })}

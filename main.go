@@ -199,14 +199,7 @@ func main() {
 	wellKnownHandler.RegisterRoutes(mux)
 
 	// Register MCP server (authenticated - project-scoped)
-	mcpServer := mcp.NewServer("ekaya-engine", cfg.Version, logger)
-	mcptools.RegisterHealthTool(mcpServer.MCP(), cfg.Version, &mcptools.HealthToolDeps{
-		DB:                db,
-		ProjectService:    projectService,
-		DatasourceService: datasourceService,
-		Logger:            logger,
-	})
-	mcptools.RegisterDeveloperTools(mcpServer.MCP(), &mcptools.DeveloperToolDeps{
+	developerToolDeps := &mcptools.DeveloperToolDeps{
 		DB:                db,
 		MCPConfigService:  mcpConfigService,
 		DatasourceService: datasourceService,
@@ -214,7 +207,17 @@ func main() {
 		ProjectService:    projectService,
 		AdapterFactory:    adapterFactory,
 		Logger:            logger,
+	}
+	mcpServer := mcp.NewServer("ekaya-engine", cfg.Version, logger,
+		mcp.WithToolFilter(mcptools.NewToolFilter(developerToolDeps)),
+	)
+	mcptools.RegisterHealthTool(mcpServer.MCP(), cfg.Version, &mcptools.HealthToolDeps{
+		DB:                db,
+		ProjectService:    projectService,
+		DatasourceService: datasourceService,
+		Logger:            logger,
 	})
+	mcptools.RegisterDeveloperTools(mcpServer.MCP(), developerToolDeps)
 	mcpHandler := handlers.NewMCPHandler(mcpServer, logger)
 	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, logger)
 	mcpHandler.RegisterRoutes(mux, mcpAuthMiddleware)

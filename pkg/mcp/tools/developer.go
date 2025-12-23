@@ -65,6 +65,16 @@ func truncateSQL(sql string, maxLen int) string {
 	return sql[:maxLen] + "..."
 }
 
+// developerToolNames lists all tools in the developer group.
+var developerToolNames = map[string]bool{
+	"echo":     true,
+	"schema":   true,
+	"query":    true,
+	"sample":   true,
+	"execute":  true,
+	"validate": true,
+}
+
 // RegisterDeveloperTools registers the developer tool group tools.
 // These tools are only accessible when the developer tool group is enabled.
 func RegisterDeveloperTools(s *server.MCPServer, deps *DeveloperToolDeps) {
@@ -74,6 +84,72 @@ func RegisterDeveloperTools(s *server.MCPServer, deps *DeveloperToolDeps) {
 	registerSampleTool(s, deps)
 	registerExecuteTool(s, deps)
 	registerValidateTool(s, deps)
+}
+
+// NewToolFilter creates a ToolFilterFunc that filters tools based on MCP configuration.
+// It filters out developer tools when the developer group is disabled, and filters out
+// the execute tool when EnableExecute is false.
+func NewToolFilter(deps *DeveloperToolDeps) func(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
+	return func(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
+		// Get claims from context
+		claims, ok := auth.GetClaims(ctx)
+		if !ok {
+			// No auth context - filter out all developer tools
+			return filterOutDeveloperTools(tools, true)
+		}
+
+		projectID, err := uuid.Parse(claims.ProjectID)
+		if err != nil {
+			deps.Logger.Error("Invalid project ID in claims",
+				zap.String("project_id", claims.ProjectID),
+				zap.Error(err))
+			return filterOutDeveloperTools(tools, true)
+		}
+
+		// Get tool group config
+		config, err := deps.MCPConfigService.GetToolGroupConfig(ctx, projectID, developerToolGroup)
+		if err != nil {
+			deps.Logger.Error("Failed to get tool group config",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			return filterOutDeveloperTools(tools, true)
+		}
+
+		// If no config or disabled, filter out all developer tools
+		if config == nil || !config.Enabled {
+			return filterOutDeveloperTools(tools, true)
+		}
+
+		// Developer tools enabled - check if execute should be filtered
+		if !config.EnableExecute {
+			return filterOutExecuteTool(tools)
+		}
+
+		// All tools enabled
+		return tools
+	}
+}
+
+// filterOutDeveloperTools removes all developer tools from the list.
+func filterOutDeveloperTools(tools []mcp.Tool, _ bool) []mcp.Tool {
+	filtered := make([]mcp.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if !developerToolNames[tool.Name] {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
+}
+
+// filterOutExecuteTool removes only the execute tool from the list.
+func filterOutExecuteTool(tools []mcp.Tool) []mcp.Tool {
+	filtered := make([]mcp.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Name != "execute" {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
 }
 
 // checkDeveloperEnabled verifies the developer tool group is enabled for the project.
@@ -115,6 +191,33 @@ func checkDeveloperEnabled(ctx context.Context, deps *DeveloperToolDeps) (uuid.U
 	}
 
 	return projectID, tenantCtx, func() { scope.Close() }, nil
+}
+
+// checkExecuteEnabled verifies the execute tool is enabled for the project.
+// This checks both the developer tool group and the EnableExecute sub-option.
+func checkExecuteEnabled(ctx context.Context, deps *DeveloperToolDeps) (uuid.UUID, context.Context, func(), error) {
+	// First check if developer tools are enabled
+	projectID, tenantCtx, cleanup, err := checkDeveloperEnabled(ctx, deps)
+	if err != nil {
+		return uuid.Nil, nil, nil, err
+	}
+
+	// Check if EnableExecute is set
+	config, err := deps.MCPConfigService.GetToolGroupConfig(tenantCtx, projectID, developerToolGroup)
+	if err != nil {
+		cleanup()
+		deps.Logger.Error("Failed to get developer tool config",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool configuration: %w", err)
+	}
+
+	if config == nil || !config.EnableExecute {
+		cleanup()
+		return uuid.Nil, nil, nil, fmt.Errorf("execute tool is not enabled for this project")
+	}
+
+	return projectID, tenantCtx, cleanup, nil
 }
 
 // registerEchoTool adds a simple echo tool for testing the developer tool group.
@@ -538,7 +641,8 @@ func registerExecuteTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkDeveloperEnabled(ctx, deps)
+		// Check if execute tool is specifically enabled (not just developer tools)
+		projectID, tenantCtx, cleanup, err := checkExecuteEnabled(ctx, deps)
 		if err != nil {
 			return nil, err
 		}

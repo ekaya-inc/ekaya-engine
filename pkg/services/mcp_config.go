@@ -11,12 +11,21 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
 
-// ToolGroupInfo contains static metadata about a tool group for API responses.
-type ToolGroupInfo struct {
+// SubOptionInfo contains metadata about a sub-option within a tool group.
+type SubOptionInfo struct {
 	Enabled     bool   `json:"enabled"`
 	Name        string `json:"name"`
-	Description string `json:"description"`
+	Description string `json:"description,omitempty"`
 	Warning     string `json:"warning,omitempty"`
+}
+
+// ToolGroupInfo contains static metadata about a tool group for API responses.
+type ToolGroupInfo struct {
+	Enabled     bool                      `json:"enabled"`
+	Name        string                    `json:"name"`
+	Description string                    `json:"description"`
+	Warning     string                    `json:"warning,omitempty"`
+	SubOptions  map[string]*SubOptionInfo `json:"subOptions,omitempty"`
 }
 
 // MCPConfigResponse is the API response format for MCP configuration.
@@ -40,18 +49,39 @@ type MCPConfigService interface {
 
 	// IsToolGroupEnabled checks if a specific tool group is enabled for a project.
 	IsToolGroupEnabled(ctx context.Context, projectID uuid.UUID, toolGroup string) (bool, error)
+
+	// GetToolGroupConfig returns the full configuration for a tool group.
+	// Returns nil if the tool group doesn't exist or has no configuration.
+	GetToolGroupConfig(ctx context.Context, projectID uuid.UUID, toolGroup string) (*models.ToolGroupConfig, error)
 }
 
-// Tool group metadata - static information about each tool group.
-var toolGroupMetadata = map[string]struct {
+// subOptionMetadata contains static information about sub-options within tool groups.
+type subOptionMetadata struct {
 	Name        string
 	Description string
 	Warning     string
-}{
+}
+
+// toolGroupDef contains static metadata about a tool group.
+type toolGroupDef struct {
+	Name        string
+	Description string
+	Warning     string
+	SubOptions  map[string]subOptionMetadata
+}
+
+// Tool group metadata - static information about each tool group.
+var toolGroupMetadata = map[string]toolGroupDef{
 	"developer": {
 		Name:        "Developer Tools",
-		Description: "Enable raw access to the Datasource and Schema. This is intended for developers building applications or data engineers building ETL pipelines.  The MCP Client will have access with the credentials used to set up the Datasource -- this includes potentially destructive operations.",
+		Description: "Enable raw access to the Datasource and Schema. This is intended for developers building applications or data engineers building ETL pipelines.",
 		Warning:     "This setting is NOT recommended for business end users doing analytics.",
+		SubOptions: map[string]subOptionMetadata{
+			"enableExecute": {
+				Name:    "Enable Execute",
+				Warning: "The MCP Client will have access with the credentials used to set up the Datasource -- this includes potentially destructive operations.",
+			},
+		},
 	},
 }
 
@@ -141,22 +171,62 @@ func (s *mcpConfigService) IsToolGroupEnabled(ctx context.Context, projectID uui
 	return false, nil
 }
 
+// GetToolGroupConfig returns the full configuration for a tool group.
+func (s *mcpConfigService) GetToolGroupConfig(ctx context.Context, projectID uuid.UUID, toolGroup string) (*models.ToolGroupConfig, error) {
+	config, err := s.configRepo.Get(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get MCP config: %w", err)
+	}
+
+	// If no config exists, return nil (use defaults)
+	if config == nil {
+		return nil, nil
+	}
+
+	if groupConfig, ok := config.ToolGroups[toolGroup]; ok {
+		return groupConfig, nil
+	}
+
+	return nil, nil
+}
+
 // buildResponse creates the API response format from the model.
 func (s *mcpConfigService) buildResponse(projectID uuid.UUID, config *models.MCPConfig) *MCPConfigResponse {
 	toolGroups := make(map[string]*ToolGroupInfo)
 
 	for groupName, metadata := range toolGroupMetadata {
 		enabled := false
+		enableExecute := false
 		if groupConfig, ok := config.ToolGroups[groupName]; ok {
 			enabled = groupConfig.Enabled
+			enableExecute = groupConfig.EnableExecute
 		}
 
-		toolGroups[groupName] = &ToolGroupInfo{
+		info := &ToolGroupInfo{
 			Enabled:     enabled,
 			Name:        metadata.Name,
 			Description: metadata.Description,
 			Warning:     metadata.Warning,
 		}
+
+		// Build sub-options if any exist
+		if len(metadata.SubOptions) > 0 {
+			info.SubOptions = make(map[string]*SubOptionInfo)
+			for subName, subMeta := range metadata.SubOptions {
+				subEnabled := false
+				if subName == "enableExecute" {
+					subEnabled = enableExecute
+				}
+				info.SubOptions[subName] = &SubOptionInfo{
+					Enabled:     subEnabled,
+					Name:        subMeta.Name,
+					Description: subMeta.Description,
+					Warning:     subMeta.Warning,
+				}
+			}
+		}
+
+		toolGroups[groupName] = info
 	}
 
 	return &MCPConfigResponse{

@@ -12,12 +12,43 @@ type Server struct {
 	logger *zap.Logger
 }
 
+// ToolFilterFunc is a function that filters tools based on context.
+type ToolFilterFunc = server.ToolFilterFunc
+
+// ServerOption is a functional option for configuring the MCP server.
+type ServerOption func(*serverOptions)
+
+type serverOptions struct {
+	toolFilter ToolFilterFunc
+}
+
+// WithToolFilter sets a function to filter tools based on context.
+func WithToolFilter(filter ToolFilterFunc) ServerOption {
+	return func(opts *serverOptions) {
+		opts.toolFilter = filter
+	}
+}
+
 // NewServer creates a new MCP server instance.
-func NewServer(name, version string, logger *zap.Logger) *Server {
+func NewServer(name, version string, logger *zap.Logger, opts ...ServerOption) *Server {
+	// Process options
+	options := &serverOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	// Build server options
+	serverOpts := []server.ServerOption{
+		server.WithToolCapabilities(true),
+	}
+	if options.toolFilter != nil {
+		serverOpts = append(serverOpts, server.WithToolFilter(options.toolFilter))
+	}
+
 	mcpServer := server.NewMCPServer(
 		name,
 		version,
-		server.WithToolCapabilities(true),
+		serverOpts...,
 	)
 
 	return &Server{
