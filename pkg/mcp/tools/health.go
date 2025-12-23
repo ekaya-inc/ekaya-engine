@@ -11,11 +11,13 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // HealthToolDeps contains dependencies for the health tool.
 type HealthToolDeps struct {
+	DB                *database.DB
 	ProjectService    services.ProjectService
 	DatasourceService services.DatasourceService
 	Logger            *zap.Logger
@@ -85,6 +87,23 @@ func checkDatasourceHealth(ctx context.Context, deps *HealthToolDeps) *datasourc
 			Status: "error",
 			Error:  fmt.Sprintf("invalid project ID: %v", err),
 		}
+	}
+
+	// Acquire tenant-scoped database connection
+	// The DB field is optional for backward compatibility with tests using mocks
+	if deps.DB != nil {
+		scope, err := deps.DB.WithTenant(ctx, projectID)
+		if err != nil {
+			deps.Logger.Error("Failed to acquire tenant connection",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			return &datasourceHealth{
+				Status: "error",
+				Error:  fmt.Sprintf("failed to acquire database connection: %v", err),
+			}
+		}
+		defer scope.Close()
+		ctx = database.SetTenantScope(ctx, scope)
 	}
 
 	// Get default datasource ID for project
