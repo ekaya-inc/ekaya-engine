@@ -207,9 +207,13 @@ func main() {
 		Logger:            logger,
 	})
 	mcptools.RegisterDeveloperTools(mcpServer.MCP(), &mcptools.DeveloperToolDeps{
-		DB:               db,
-		MCPConfigService: mcpConfigService,
-		Logger:           logger,
+		DB:                db,
+		MCPConfigService:  mcpConfigService,
+		DatasourceService: datasourceService,
+		SchemaService:     schemaService,
+		ProjectService:    projectService,
+		AdapterFactory:    adapterFactory,
+		Logger:            logger,
 	})
 	mcpHandler := handlers.NewMCPHandler(mcpServer, logger)
 	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, logger)

@@ -395,6 +395,10 @@ func (m *mockQueryExecutor) ValidateQuery(ctx context.Context, sqlQuery string) 
 	return m.err
 }
 
+func (m *mockQueryExecutor) Execute(ctx context.Context, sqlStatement string) (*datasource.ExecuteResult, error) {
+	return nil, m.err
+}
+
 func (m *mockQueryExecutor) Close() error {
 	return nil
 }
