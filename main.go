@@ -24,6 +24,8 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/handlers"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
+	"github.com/ekaya-inc/ekaya-engine/pkg/mcp"
+	mcptools "github.com/ekaya-inc/ekaya-engine/pkg/mcp/tools"
 	"github.com/ekaya-inc/ekaya-engine/pkg/middleware"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
@@ -190,6 +192,12 @@ func main() {
 	// Register well-known endpoints (public - no auth required)
 	wellKnownHandler := handlers.NewWellKnownHandler(cfg, logger)
 	wellKnownHandler.RegisterRoutes(mux)
+
+	// Register MCP server (public - no auth for Phase 1)
+	mcpServer := mcp.NewServer("ekaya-engine", cfg.Version, logger)
+	mcptools.RegisterHealthTool(mcpServer.MCP(), cfg.Version)
+	mcpHandler := handlers.NewMCPHandler(mcpServer, logger)
+	mcpHandler.RegisterRoutes(mux)
 
 	// Create tenant middleware once for all handlers that need it
 	tenantMiddleware := database.WithTenantContext(db, logger)
