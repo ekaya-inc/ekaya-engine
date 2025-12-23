@@ -14,6 +14,7 @@ import {
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
+import ManagedAIOptionPanel from '../components/ManagedAIOptionPanel';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import {
   Dialog,
@@ -26,7 +27,13 @@ import {
 import { useDatasourceConnection } from '../contexts/DatasourceConnectionContext';
 import { fetchWithAuth } from '../lib/api';
 import { ontologyService } from '../services/ontologyService';
-import type { OntologyWorkflowStatus } from '../types';
+import type {
+  AIConfigForm,
+  AIOption,
+  AIOptionsResponse,
+  AITestResult,
+  OntologyWorkflowStatus,
+} from '../types';
 
 type TileColor = 'blue' | 'green' | 'purple' | 'orange' | 'gray' | 'indigo';
 
@@ -47,44 +54,6 @@ interface Tile {
  * Ontology tile is disabled when no datasource is configured OR no tables are selected.
  * Users must first configure a datasource via the Datasource tile and select tables in the Schema page.
  */
-type AIOption = 'byok' | 'community' | 'embedded' | null;
-
-interface AIConfigForm {
-  llmBaseUrl: string;
-  llmApiKey: string;
-  llmModel: string;
-  embeddingBaseUrl: string;
-  embeddingApiKey: string;
-  embeddingModel: string;
-}
-
-type AIErrorType = 'endpoint' | 'auth' | 'model' | 'unknown' | '';
-
-interface AITestResult {
-  success: boolean;
-  message: string;
-  llm_success?: boolean;
-  llm_message?: string;
-  llm_error_type?: AIErrorType;
-  llm_response_time_ms?: number;
-  embedding_success?: boolean;
-  embedding_message?: string;
-  embedding_error_type?: AIErrorType;
-}
-
-interface AIOptionConfig {
-  llm_base_url: string;
-  llm_model: string;
-  embedding_url: string;
-  embedding_model: string;
-  available: boolean;
-}
-
-interface AIOptionsResponse {
-  community: AIOptionConfig;
-  embedded: AIOptionConfig;
-}
-
 const ProjectDashboard = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
@@ -737,176 +706,46 @@ const ProjectDashboard = () => {
           
           {selectedAIOption === 'community' && (
             <div className="rounded-b-lg bg-surface-secondary p-6 border border-t-0 border-border-light">
-              <p className="text-text-secondary mb-4">
-                The Ekaya Community Models are free to use. We fine-tune the Community Models using anonymized schema, natural language and SQL queries from participants. The end result is a more robust and accurate model than the frontier models in this domain.
-              </p>
-
-              {/* Show configured model details */}
-              {aiOptions?.community.available && (
-                <div className="grid md:grid-cols-2 gap-4 mb-4 p-4 bg-surface-primary rounded-lg border border-border-light">
-                  <div>
-                    <h4 className="text-sm font-medium text-text-primary flex items-center gap-2 mb-2">
-                      <Brain className="h-4 w-4" /> Chat Model
-                    </h4>
-                    <p className="text-sm text-text-secondary font-mono">{aiOptions.community.llm_model}</p>
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-medium text-text-primary flex items-center gap-2 mb-2">
-                      <Search className="h-4 w-4" /> Embedding Model
-                    </h4>
-                    <p className="text-sm text-text-secondary font-mono">{aiOptions.community.embedding_model ?? 'Not configured'}</p>
-                  </div>
-                </div>
-              )}
-
-              {!aiOptions?.community.available && (
-                <div className="mb-4 p-3 rounded-lg text-sm bg-amber-500/10 border border-amber-500/20 text-amber-600">
-                  Community models are not configured on this server.
-                </div>
-              )}
-
-              {/* Test Result Display */}
-              {testResult && selectedAIOption === 'community' && (
-                <div className={`mb-4 p-3 rounded-lg text-sm ${
-                  testResult.success
-                    ? 'bg-green-500/10 border border-green-500/20 text-green-600'
-                    : 'bg-red-500/10 border border-red-500/20 text-red-600'
-                }`}>
-                  <p className="font-medium">{testResult.message}</p>
-                  {testResult.llm_message && (
-                    <p className="mt-1 text-xs opacity-80">LLM: {testResult.llm_message}</p>
-                  )}
-                  {testResult.embedding_message && (
-                    <p className="mt-1 text-xs opacity-80">Embedding: {testResult.embedding_message}</p>
-                  )}
-                </div>
-              )}
-
-              {/* Save Error Display */}
-              {saveError && selectedAIOption === 'community' && (
-                <div className="mb-4 p-3 rounded-lg text-sm bg-red-500/10 border border-red-500/20 text-red-600">
-                  {saveError}
-                </div>
-              )}
-
-              <div className="pt-2 border-t border-border-light flex items-center justify-between">
-                <p className="text-xs text-text-tertiary">
-                  {activeAIConfig && activeAIConfig !== 'community'
-                    ? 'Remove current configuration before saving a different one.'
-                    : 'No API key required - uses Ekaya-hosted models.'}
-                </p>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => handleTestConnection('community')}
-                    disabled={isTesting || !aiOptions?.community.available}
-                    className="rounded-lg px-4 py-2 text-sm font-medium border border-border-medium bg-surface-primary text-text-primary hover:bg-surface-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                  >
-                    {isTesting && <Loader2 className="h-4 w-4 animate-spin" />}
-                    Test Connection
-                  </button>
-                  <button
-                    onClick={activeAIConfig === 'community' ? () => setShowRemoveConfirmation(true) : () => handleSaveConfig('community')}
-                    disabled={isSaving || !canSaveConfig('community') || !aiOptions?.community.available}
-                    className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ${
-                      activeAIConfig === 'community'
-                        ? 'bg-red-600 text-white hover:bg-red-700'
-                        : 'bg-surface-submit text-white hover:bg-surface-submit-hover'
-                    }`}
-                  >
-                    {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-                    {activeAIConfig === 'community' ? 'Remove Configuration' : 'Save Configuration'}
-                  </button>
-                </div>
-              </div>
+              <ManagedAIOptionPanel
+                optionId="community"
+                description="The Ekaya Community Models are free to use. We fine-tune the Community Models using anonymized schema, natural language and SQL queries from participants. The end result is a more robust and accurate model than the frontier models in this domain."
+                unavailableMessage="Community models are not configured on this server."
+                helpText="No API key required - uses Ekaya-hosted models."
+                aiOptions={aiOptions}
+                isTesting={isTesting}
+                isSaving={isSaving}
+                testResult={testResult}
+                saveError={saveError}
+                activeAIConfig={activeAIConfig}
+                canSave={canSaveConfig('community')}
+                onTest={() => handleTestConnection('community')}
+                onSave={() => handleSaveConfig('community')}
+                onRemove={() => setShowRemoveConfirmation(true)}
+              />
             </div>
           )}
           
           {selectedAIOption === 'embedded' && (
             <div className="rounded-b-lg bg-surface-secondary p-6 border border-t-0 border-border-light">
-              <p className="text-text-secondary mb-4">
-                Ekaya offers custom models that you can host on your own infrastructure or as part of your hybrid cloud so that data never leaves your security boundary. Your data is not used for training these models although Ekaya can build models customized for your internal needs.
-              </p>
-              <p className="text-text-secondary mb-4">
-                These models have been fine-tuned for this domain and include prevention of SQL and LLM prompt injection attacks as well as detecting data leakage. These models are required for some features.
-              </p>
-
-              {/* Show configured model details */}
-              {aiOptions?.embedded.available && (
-                <div className="grid md:grid-cols-2 gap-4 mb-4 p-4 bg-surface-primary rounded-lg border border-border-light">
-                  <div>
-                    <h4 className="text-sm font-medium text-text-primary flex items-center gap-2 mb-2">
-                      <Brain className="h-4 w-4" /> Chat Model
-                    </h4>
-                    <p className="text-sm text-text-secondary font-mono">{aiOptions.embedded.llm_model}</p>
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-medium text-text-primary flex items-center gap-2 mb-2">
-                      <Search className="h-4 w-4" /> Embedding Model
-                    </h4>
-                    <p className="text-sm text-text-secondary font-mono">{aiOptions.embedded.embedding_model ?? 'Not configured'}</p>
-                  </div>
-                </div>
-              )}
-
-              {!aiOptions?.embedded.available && (
-                <div className="mb-4 p-3 rounded-lg text-sm bg-amber-500/10 border border-amber-500/20 text-amber-600">
-                  Embedded models are not configured on this server.
-                </div>
-              )}
-
-              {/* Test Result Display */}
-              {testResult && selectedAIOption === 'embedded' && (
-                <div className={`mb-4 p-3 rounded-lg text-sm ${
-                  testResult.success
-                    ? 'bg-green-500/10 border border-green-500/20 text-green-600'
-                    : 'bg-red-500/10 border border-red-500/20 text-red-600'
-                }`}>
-                  <p className="font-medium">{testResult.message}</p>
-                  {testResult.llm_message && (
-                    <p className="mt-1 text-xs opacity-80">LLM: {testResult.llm_message}</p>
-                  )}
-                  {testResult.embedding_message && (
-                    <p className="mt-1 text-xs opacity-80">Embedding: {testResult.embedding_message}</p>
-                  )}
-                </div>
-              )}
-
-              {/* Save Error Display */}
-              {saveError && selectedAIOption === 'embedded' && (
-                <div className="mb-4 p-3 rounded-lg text-sm bg-red-500/10 border border-red-500/20 text-red-600">
-                  {saveError}
-                </div>
-              )}
-
-              <div className="pt-2 border-t border-border-light flex items-center justify-between">
-                <p className="text-xs text-text-tertiary">
-                  {activeAIConfig && activeAIConfig !== 'embedded'
-                    ? 'Remove current configuration before saving a different one.'
-                    : 'No API key required - uses customer-hosted models.'}
-                </p>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => handleTestConnection('embedded')}
-                    disabled={isTesting || !aiOptions?.embedded.available}
-                    className="rounded-lg px-4 py-2 text-sm font-medium border border-border-medium bg-surface-primary text-text-primary hover:bg-surface-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                  >
-                    {isTesting && <Loader2 className="h-4 w-4 animate-spin" />}
-                    Test Connection
-                  </button>
-                  <button
-                    onClick={activeAIConfig === 'embedded' ? () => setShowRemoveConfirmation(true) : () => handleSaveConfig('embedded')}
-                    disabled={isSaving || !canSaveConfig('embedded') || !aiOptions?.embedded.available}
-                    className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ${
-                      activeAIConfig === 'embedded'
-                        ? 'bg-red-600 text-white hover:bg-red-700'
-                        : 'bg-surface-submit text-white hover:bg-surface-submit-hover'
-                    }`}
-                  >
-                    {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-                    {activeAIConfig === 'embedded' ? 'Remove Configuration' : 'Save Configuration'}
-                  </button>
-                </div>
-              </div>
+              <ManagedAIOptionPanel
+                optionId="embedded"
+                description={[
+                  "Ekaya offers custom models that you can host on your own infrastructure or as part of your hybrid cloud so that data never leaves your security boundary. Your data is not used for training these models although Ekaya can build models customized for your internal needs.",
+                  "These models have been fine-tuned for this domain and include prevention of SQL and LLM prompt injection attacks as well as detecting data leakage. These models are required for some features."
+                ]}
+                unavailableMessage="Embedded models are not configured on this server."
+                helpText="No API key required - uses customer-hosted models."
+                aiOptions={aiOptions}
+                isTesting={isTesting}
+                isSaving={isSaving}
+                testResult={testResult}
+                saveError={saveError}
+                activeAIConfig={activeAIConfig}
+                canSave={canSaveConfig('embedded')}
+                onTest={() => handleTestConnection('embedded')}
+                onSave={() => handleSaveConfig('embedded')}
+                onRemove={() => setShowRemoveConfirmation(true)}
+              />
             </div>
           )}
         </div>
