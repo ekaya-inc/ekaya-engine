@@ -9,6 +9,7 @@ import {
   MessageCircleQuestion,
   Network,
   Search,
+  Server,
   Shield,
 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
@@ -35,7 +36,7 @@ import type {
   OntologyWorkflowStatus,
 } from '../types';
 
-type TileColor = 'blue' | 'green' | 'purple' | 'orange' | 'gray' | 'indigo';
+type TileColor = 'blue' | 'green' | 'purple' | 'orange' | 'gray' | 'indigo' | 'cyan';
 
 interface Tile {
   title: string;
@@ -393,6 +394,16 @@ const ProjectDashboard = () => {
     },
   ];
 
+  const applicationTiles: Tile[] = [
+    {
+      title: 'MCP Server',
+      icon: Server,
+      path: `/projects/${pid}/mcp-server`,
+      disabled: !isConnected || !hasSelectedTables, // Requires datasource and schema
+      color: 'cyan',
+    },
+  ];
+
     const handleTileClick = (tile: Tile): void => {
       if (!tile.disabled) {
       navigate(tile.path);
@@ -407,6 +418,7 @@ const ProjectDashboard = () => {
       orange: 'bg-orange-500/10 text-orange-500 hover:bg-orange-500/20',
       gray: 'bg-gray-500/10 text-gray-500 hover:bg-gray-500/20',
       indigo: 'bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500/20',
+      cyan: 'bg-cyan-500/10 text-cyan-500 hover:bg-cyan-500/20',
     };
 
     return colorMap[color];
@@ -471,8 +483,50 @@ const ProjectDashboard = () => {
     );
   };
 
+  const renderApplicationTile = (tile: Tile) => {
+    const Icon = tile.icon;
+    const colorClasses = getColorClasses(tile.color);
+
+    return (
+      <Card
+        key={tile.title}
+        className={`transition-all ${
+          tile.disabled
+            ? 'opacity-50 cursor-not-allowed'
+            : 'cursor-pointer hover:shadow-lg'
+        }`}
+        onClick={() => handleTileClick(tile)}
+      >
+        <CardHeader className="pb-6">
+          <div
+            className={`mb-6 flex h-24 w-24 items-center justify-center rounded-xl ${colorClasses}`}
+          >
+            <Icon className="h-12 w-12" />
+          </div>
+          <CardTitle className="text-2xl">{tile.title}</CardTitle>
+          {tile.disabled && (
+            <p className="text-sm text-text-tertiary mt-2">
+              Requires a datasource and schema to be configured.
+            </p>
+          )}
+        </CardHeader>
+      </Card>
+    );
+  };
+
   return (
     <div className="mx-auto max-w-6xl space-y-8">
+      {/* Applications Section */}
+      <section>
+        <h1 className="text-2xl font-semibold mb-2">Applications</h1>
+        <p className="text-text-secondary mb-4">
+          Deploy applications that connect to your data through secure, governed interfaces.
+        </p>
+        <div className="grid gap-6 md:grid-cols-2">
+          {applicationTiles.map(renderApplicationTile)}
+        </div>
+      </section>
+
       {/* Data Section */}
       <section>
         <h1 className="text-2xl font-semibold mb-2">Data</h1>
