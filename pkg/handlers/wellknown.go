@@ -21,6 +21,18 @@ type OAuthServerMetadata struct {
 	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported,omitempty"`
 }
 
+// ProtectedResourceMetadata represents OAuth 2.0 Protected Resource Metadata (RFC 9728).
+// This tells MCP clients which authorization server(s) protect this resource.
+type ProtectedResourceMetadata struct {
+	Resource               string   `json:"resource"`
+	AuthorizationServers   []string `json:"authorization_servers"`
+	BearerMethodsSupported []string `json:"bearer_methods_supported,omitempty"`
+	ScopesSupported        []string `json:"scopes_supported,omitempty"`
+}
+
+// supportedScopes defines the OAuth scopes supported by this server.
+var supportedScopes = []string{"project:access"}
+
 // WellKnownHandler handles /.well-known/* endpoints.
 type WellKnownHandler struct {
 	cfg    *config.Config
@@ -38,6 +50,7 @@ func NewWellKnownHandler(cfg *config.Config, logger *zap.Logger) *WellKnownHandl
 // RegisterRoutes registers well-known endpoints.
 func (h *WellKnownHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", h.OAuthDiscovery)
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource", h.ProtectedResource)
 }
 
 // OAuthDiscovery serves the OAuth 2.0 Authorization Server Metadata (RFC 8414).
@@ -76,9 +89,7 @@ func (h *WellKnownHandler) OAuthDiscovery(w http.ResponseWriter, r *http.Request
 		CodeChallengeMethodsSupported: []string{
 			"S256",
 		},
-		ScopesSupported: []string{
-			"project:access",
-		},
+		ScopesSupported: supportedScopes,
 		TokenEndpointAuthMethodsSupported: []string{
 			"none",
 		},
@@ -93,5 +104,32 @@ func (h *WellKnownHandler) OAuthDiscovery(w http.ResponseWriter, r *http.Request
 
 	if err := WriteJSON(w, http.StatusOK, metadata); err != nil {
 		h.logger.Error("Failed to encode OAuth metadata", zap.Error(err))
+	}
+}
+
+// ProtectedResource serves the OAuth 2.0 Protected Resource Metadata (RFC 9728).
+// This tells MCP clients which authorization server(s) protect this resource.
+func (h *WellKnownHandler) ProtectedResource(w http.ResponseWriter, r *http.Request) {
+	if h.cfg.AuthServerURL == "" {
+		h.logger.Error("AuthServerURL not configured")
+		if err := ErrorResponse(w, http.StatusInternalServerError, "server_error", "Authorization server not configured"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	metadata := ProtectedResourceMetadata{
+		Resource:             h.cfg.BaseURL,
+		AuthorizationServers: []string{h.cfg.AuthServerURL},
+		BearerMethodsSupported: []string{
+			"header",
+		},
+		ScopesSupported: supportedScopes,
+	}
+
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+
+	if err := WriteJSON(w, http.StatusOK, metadata); err != nil {
+		h.logger.Error("Failed to encode protected resource metadata", zap.Error(err))
 	}
 }
