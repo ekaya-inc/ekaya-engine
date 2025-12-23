@@ -83,6 +83,10 @@ func registerEchoTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 			mcp.Required(),
 			mcp.Description("The message to echo back"),
 		),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

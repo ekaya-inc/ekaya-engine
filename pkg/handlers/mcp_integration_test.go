@@ -22,7 +22,7 @@ func TestMCPIntegration_FullFlow(t *testing.T) {
 
 	// Set up MCP server with health tool
 	mcpServer := mcp.NewServer("ekaya-engine", "1.0.0-test", logger)
-	tools.RegisterHealthTool(mcpServer.MCP(), "1.0.0-test")
+	tools.RegisterHealthTool(mcpServer.MCP(), "1.0.0-test", nil)
 	mcpHandler := NewMCPHandler(mcpServer, logger)
 
 	mux := http.NewServeMux()
@@ -122,15 +122,15 @@ func TestMCPIntegration_FullFlow(t *testing.T) {
 		}
 
 		var healthResult struct {
-			Status  string `json:"status"`
+			Engine  string `json:"engine"`
 			Version string `json:"version"`
 		}
 		if err := json.Unmarshal([]byte(response.Result.Content[0].Text), &healthResult); err != nil {
 			t.Fatalf("failed to parse health result: %v", err)
 		}
 
-		if healthResult.Status != "ok" {
-			t.Errorf("expected status 'ok', got '%s'", healthResult.Status)
+		if healthResult.Engine != "healthy" {
+			t.Errorf("expected engine 'healthy', got '%s'", healthResult.Engine)
 		}
 		if healthResult.Version != "1.0.0-test" {
 			t.Errorf("expected version '1.0.0-test', got '%s'", healthResult.Version)
@@ -170,7 +170,7 @@ func TestMCPIntegration_AuthFailures(t *testing.T) {
 	logger := zap.NewNop()
 
 	mcpServer := mcp.NewServer("ekaya-engine", "1.0.0-test", logger)
-	tools.RegisterHealthTool(mcpServer.MCP(), "1.0.0-test")
+	tools.RegisterHealthTool(mcpServer.MCP(), "1.0.0-test", nil)
 	mcpHandler := NewMCPHandler(mcpServer, logger)
 
 	t.Run("missing token returns 401 with WWW-Authenticate", func(t *testing.T) {

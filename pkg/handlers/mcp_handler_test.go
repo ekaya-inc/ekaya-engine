@@ -61,7 +61,7 @@ func TestNewMCPHandler(t *testing.T) {
 func TestMCPHandler_RegisterRoutes(t *testing.T) {
 	logger := zap.NewNop()
 	mcpServer := mcp.NewServer("test", "1.0.0", logger)
-	tools.RegisterHealthTool(mcpServer.MCP(), "1.0.0")
+	tools.RegisterHealthTool(mcpServer.MCP(), "1.0.0", nil)
 	handler := NewMCPHandler(mcpServer, logger)
 
 	mux := http.NewServeMux()
@@ -96,7 +96,7 @@ func TestMCPHandler_RegisterRoutes(t *testing.T) {
 func TestMCPHandler_ToolsCall(t *testing.T) {
 	logger := zap.NewNop()
 	mcpServer := mcp.NewServer("test", "test-version", logger)
-	tools.RegisterHealthTool(mcpServer.MCP(), "test-version")
+	tools.RegisterHealthTool(mcpServer.MCP(), "test-version", nil)
 	handler := NewMCPHandler(mcpServer, logger)
 
 	mux := http.NewServeMux()
@@ -133,15 +133,15 @@ func TestMCPHandler_ToolsCall(t *testing.T) {
 
 	// Parse the health result
 	var healthResult struct {
-		Status  string `json:"status"`
+		Engine  string `json:"engine"`
 		Version string `json:"version"`
 	}
 	if err := json.Unmarshal([]byte(response.Result.Content[0].Text), &healthResult); err != nil {
 		t.Fatalf("failed to unmarshal health result: %v", err)
 	}
 
-	if healthResult.Status != "ok" {
-		t.Errorf("expected status 'ok', got '%s'", healthResult.Status)
+	if healthResult.Engine != "healthy" {
+		t.Errorf("expected engine 'healthy', got '%s'", healthResult.Engine)
 	}
 	if healthResult.Version != "test-version" {
 		t.Errorf("expected version 'test-version', got '%s'", healthResult.Version)
@@ -151,7 +151,7 @@ func TestMCPHandler_ToolsCall(t *testing.T) {
 func TestMCPHandler_GETReturnsMethodNotAllowed(t *testing.T) {
 	logger := zap.NewNop()
 	mcpServer := mcp.NewServer("test", "1.0.0", logger)
-	tools.RegisterHealthTool(mcpServer.MCP(), "1.0.0")
+	tools.RegisterHealthTool(mcpServer.MCP(), "1.0.0", nil)
 	handler := NewMCPHandler(mcpServer, logger)
 
 	mux := http.NewServeMux()

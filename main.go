@@ -200,7 +200,11 @@ func main() {
 
 	// Register MCP server (authenticated - project-scoped)
 	mcpServer := mcp.NewServer("ekaya-engine", cfg.Version, logger)
-	mcptools.RegisterHealthTool(mcpServer.MCP(), cfg.Version)
+	mcptools.RegisterHealthTool(mcpServer.MCP(), cfg.Version, &mcptools.HealthToolDeps{
+		ProjectService:    projectService,
+		DatasourceService: datasourceService,
+		Logger:            logger,
+	})
 	mcptools.RegisterDeveloperTools(mcpServer.MCP(), &mcptools.DeveloperToolDeps{
 		DB:               db,
 		MCPConfigService: mcpConfigService,
