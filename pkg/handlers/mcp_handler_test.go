@@ -9,9 +9,37 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/mcp"
+	mcpauth "github.com/ekaya-inc/ekaya-engine/pkg/mcp/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/mcp/tools"
 )
+
+// mcpPassingAuthService is a mock that always allows requests through.
+type mcpPassingAuthService struct {
+	claims *auth.Claims
+	token  string
+}
+
+func (m *mcpPassingAuthService) ValidateRequest(r *http.Request) (*auth.Claims, string, error) {
+	return m.claims, m.token, nil
+}
+
+func (m *mcpPassingAuthService) RequireProjectID(claims *auth.Claims) error {
+	return nil
+}
+
+func (m *mcpPassingAuthService) ValidateProjectIDMatch(claims *auth.Claims, urlProjectID string) error {
+	return nil
+}
+
+func newTestMCPAuthMiddleware() *mcpauth.Middleware {
+	authService := &mcpPassingAuthService{
+		claims: &auth.Claims{ProjectID: "test-project"},
+		token:  "test-token",
+	}
+	return mcpauth.NewMiddleware(authService, zap.NewNop())
+}
 
 func TestNewMCPHandler(t *testing.T) {
 	logger := zap.NewNop()
@@ -37,18 +65,18 @@ func TestMCPHandler_RegisterRoutes(t *testing.T) {
 	handler := NewMCPHandler(mcpServer, logger)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux)
+	handler.RegisterRoutes(mux, newTestMCPAuthMiddleware())
 
-	// Test POST /mcp is registered and responds
+	// Test POST /mcp/{pid} is registered and responds
 	body := `{"jsonrpc":"2.0","method":"tools/list","id":1}`
-	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/mcp/test-project", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	mux.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Errorf("/mcp: expected status %d, got %d", http.StatusOK, rec.Code)
+		t.Errorf("/mcp/{pid}: expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 
 	// Verify it's a valid JSON-RPC response
@@ -72,10 +100,10 @@ func TestMCPHandler_ToolsCall(t *testing.T) {
 	handler := NewMCPHandler(mcpServer, logger)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux)
+	handler.RegisterRoutes(mux, newTestMCPAuthMiddleware())
 
 	body := `{"jsonrpc":"2.0","method":"tools/call","params":{"name":"health"},"id":1}`
-	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/mcp/test-project", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 

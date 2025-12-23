@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/mcp"
+	mcpauth "github.com/ekaya-inc/ekaya-engine/pkg/mcp/auth"
 )
 
 // MCPHandler handles MCP protocol requests over HTTP.
@@ -23,7 +24,10 @@ func NewMCPHandler(mcpServer *mcp.Server, logger *zap.Logger) *MCPHandler {
 	}
 }
 
-// RegisterRoutes registers the MCP endpoint.
-func (h *MCPHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.Handle("/mcp", h.httpServer)
+// RegisterRoutes registers the MCP endpoint with project-scoped authentication.
+// Route: /mcp/{pid} where {pid} must match the project ID in the JWT token.
+func (h *MCPHandler) RegisterRoutes(mux *http.ServeMux, mcpAuthMiddleware *mcpauth.Middleware) {
+	// Wrap the MCP HTTP server with authentication middleware
+	authenticatedHandler := mcpAuthMiddleware.RequireAuth("pid")(h.httpServer)
+	mux.Handle("/mcp/{pid}", authenticatedHandler)
 }

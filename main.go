@@ -25,6 +25,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/handlers"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/mcp"
+	mcpauth "github.com/ekaya-inc/ekaya-engine/pkg/mcp/auth"
 	mcptools "github.com/ekaya-inc/ekaya-engine/pkg/mcp/tools"
 	"github.com/ekaya-inc/ekaya-engine/pkg/middleware"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -193,11 +194,12 @@ func main() {
 	wellKnownHandler := handlers.NewWellKnownHandler(cfg, logger)
 	wellKnownHandler.RegisterRoutes(mux)
 
-	// Register MCP server (public - no auth for Phase 1)
+	// Register MCP server (authenticated - project-scoped)
 	mcpServer := mcp.NewServer("ekaya-engine", cfg.Version, logger)
 	mcptools.RegisterHealthTool(mcpServer.MCP(), cfg.Version)
 	mcpHandler := handlers.NewMCPHandler(mcpServer, logger)
-	mcpHandler.RegisterRoutes(mux)
+	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, logger)
+	mcpHandler.RegisterRoutes(mux, mcpAuthMiddleware)
 
 	// Register MCP OAuth token endpoint (public - for MCP clients)
 	mcpOAuthHandler := handlers.NewMCPOAuthHandler(oauthService, logger)
