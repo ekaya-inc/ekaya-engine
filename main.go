@@ -199,6 +199,10 @@ func main() {
 	mcpHandler := handlers.NewMCPHandler(mcpServer, logger)
 	mcpHandler.RegisterRoutes(mux)
 
+	// Register MCP OAuth token endpoint (public - for MCP clients)
+	mcpOAuthHandler := handlers.NewMCPOAuthHandler(oauthService, logger)
+	mcpOAuthHandler.RegisterRoutes(mux)
+
 	// Create tenant middleware once for all handlers that need it
 	tenantMiddleware := database.WithTenantContext(db, logger)
 
