@@ -13,7 +13,9 @@ type ColumnMetadata struct {
 	DataType        string
 	IsNullable      bool
 	IsPrimaryKey    bool
+	IsUnique        bool
 	OrdinalPosition int
+	DefaultValue    *string
 }
 
 // ForeignKeyMetadata represents a discovered foreign key constraint.

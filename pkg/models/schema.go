@@ -32,8 +32,10 @@ type SchemaColumn struct {
 	DataType        string         `json:"data_type"`
 	IsNullable      bool           `json:"is_nullable"`
 	IsPrimaryKey    bool           `json:"is_primary_key"`
+	IsUnique        bool           `json:"is_unique"`
 	IsSelected      bool           `json:"is_selected"`
 	OrdinalPosition int            `json:"ordinal_position"`
+	DefaultValue    *string        `json:"default_value,omitempty"`
 	DistinctCount   *int64         `json:"distinct_count,omitempty"`
 	NullCount       *int64         `json:"null_count,omitempty"`
 	BusinessName    *string        `json:"business_name,omitempty"`
@@ -235,8 +237,10 @@ type DatasourceColumn struct {
 	DataType        string
 	IsNullable      bool
 	IsPrimaryKey    bool
+	IsUnique        bool
 	IsSelected      bool
 	OrdinalPosition int
+	DefaultValue    *string
 	BusinessName    string
 	Description     string
 	DistinctCount   *int64

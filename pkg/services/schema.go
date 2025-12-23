@@ -199,7 +199,9 @@ func (s *schemaService) syncColumnsForTable(
 			DataType:        dc.DataType,
 			IsNullable:      dc.IsNullable,
 			IsPrimaryKey:    dc.IsPrimaryKey,
+			IsUnique:        dc.IsUnique,
 			OrdinalPosition: dc.OrdinalPosition,
+			DefaultValue:    dc.DefaultValue,
 		}
 
 		if err := s.schemaRepo.UpsertColumn(ctx, column); err != nil {
@@ -368,8 +370,10 @@ func (s *schemaService) GetDatasourceSchema(ctx context.Context, projectID, data
 				DataType:        c.DataType,
 				IsNullable:      c.IsNullable,
 				IsPrimaryKey:    c.IsPrimaryKey,
+				IsUnique:        c.IsUnique,
 				IsSelected:      c.IsSelected,
 				OrdinalPosition: c.OrdinalPosition,
+				DefaultValue:    c.DefaultValue,
 				DistinctCount:   c.DistinctCount,
 				NullCount:       c.NullCount,
 			}
@@ -459,8 +463,10 @@ func (s *schemaService) GetDatasourceTable(ctx context.Context, projectID, datas
 			DataType:        c.DataType,
 			IsNullable:      c.IsNullable,
 			IsPrimaryKey:    c.IsPrimaryKey,
+			IsUnique:        c.IsUnique,
 			IsSelected:      c.IsSelected,
 			OrdinalPosition: c.OrdinalPosition,
+			DefaultValue:    c.DefaultValue,
 			DistinctCount:   c.DistinctCount,
 			NullCount:       c.NullCount,
 		}
