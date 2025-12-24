@@ -66,9 +66,15 @@ func NewAdapter(ctx context.Context, cfg *Config, connMgr *datasource.Connection
 	}
 
 	// Use connection manager for reusable pool
-	pool, err := connMgr.GetOrCreatePool(ctx, projectID, userID, datasourceID, connStr)
+	connector, err := connMgr.GetOrCreateConnection(ctx, "postgres", projectID, userID, datasourceID, connStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pooled connection: %w", err)
+	}
+
+	// Extract underlying PostgreSQL pool from connector
+	pool, err := datasource.GetPostgresPool(connector)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract postgres pool: %w", err)
 	}
 
 	return &Adapter{

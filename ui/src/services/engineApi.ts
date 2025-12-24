@@ -624,21 +624,53 @@ class EngineApiService {
 
   /**
    * Validate connection details
+   * Validates based on datasource type and auth method
    */
   validateConnectionDetails(
-    connectionDetails: Partial<ConnectionDetails>
+    connectionDetails: Partial<ConnectionDetails> & { 
+      auth_method?: string;
+      tenant_id?: string;
+      client_id?: string;
+      client_secret?: string;
+    }
   ): boolean {
-    const { type, host, user, name, port, ssl_mode, password } =
+    const { type, host, user, name, port, ssl_mode, password, auth_method, tenant_id, client_id, client_secret } =
       connectionDetails;
     const errors: string[] = [];
 
+    // Common required fields for all datasources
     if (!type) errors.push('Datasource type is required');
     if (!host) errors.push('Host is required');
-    if (!user) errors.push('Username is required');
-    if (!name) errors.push('Datasource name is required');
+    if (!name) errors.push('Database name is required');
     if (!port) errors.push('Port is required');
     if (!ssl_mode) errors.push('SSL mode is required');
-    if (!password) errors.push('Password is required');
+
+    // MSSQL-specific validation based on auth method
+    if (type === 'mssql') {
+      if (auth_method === 'sql') {
+        // SQL Authentication: requires username and password
+        if (!user) errors.push('Username is required for SQL authentication');
+        if (!password) errors.push('Password is required for SQL authentication');
+      } else if (auth_method === 'service_principal') {
+        // Service Principal: requires tenant_id, client_id, client_secret
+        // NO username/password needed
+        if (!tenant_id) errors.push('Azure Tenant ID is required for Service Principal authentication');
+        if (!client_id) errors.push('Azure Client ID is required for Service Principal authentication');
+        if (!client_secret) errors.push('Azure Client Secret is required for Service Principal authentication');
+      } else if (auth_method === 'user_delegation') {
+        // User Delegation: no credentials needed (token from JWT)
+        // NO username/password/client credentials needed
+        // Validation will happen server-side when checking for Azure token in context
+      } else {
+        errors.push('Authentication method is required for MSSQL (sql, service_principal, or user_delegation)');
+      }
+    } else {
+      // PostgreSQL and other datasources: require username
+      // Password is typically required but may be optional for some auth methods
+      if (!user) errors.push('Username is required');
+      // Note: Password validation is lenient here - some databases allow empty passwords
+      // Backend will handle actual authentication validation
+    }
 
     if (errors.length > 0) {
       throw new Error(`Validation errors: ${errors.join(', ')}`);

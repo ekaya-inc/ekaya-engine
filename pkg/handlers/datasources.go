@@ -57,18 +57,61 @@ type TestConnectionRequest struct {
 	Password string `json:"password"`
 	Name     string `json:"name"`
 	SSLMode  string `json:"ssl_mode"`
+
+	// MSSQL-specific fields
+	AuthMethod             string `json:"auth_method"`
+	TenantID               string `json:"tenant_id"`
+	ClientID               string `json:"client_id"`
+	ClientSecret           string `json:"client_secret"`
+	Encrypt                *bool  `json:"encrypt"`
+	TrustServerCertificate *bool  `json:"trust_server_certificate"`
+	ConnectionTimeout      *int   `json:"connection_timeout"`
 }
 
 // ToConfig converts the flat request to a config map for the service layer.
 func (r *TestConnectionRequest) ToConfig() map[string]any {
-	return map[string]any{
+	config := map[string]any{
 		"host":     r.Host,
 		"port":     r.Port,
 		"user":     r.User,
 		"password": r.Password,
 		"database": r.Name,
+		"name":     r.Name,
 		"ssl_mode": r.SSLMode,
 	}
+
+	// Add user/password if provided (for SQL auth or PostgreSQL)
+	if r.User != "" {
+		config["user"] = r.User
+	}
+	if r.Password != "" {
+		config["password"] = r.Password
+	}
+
+	// Add MSSQL-specific fields if provided
+	if r.AuthMethod != "" {
+		config["auth_method"] = r.AuthMethod
+	}
+	if r.TenantID != "" {
+		config["tenant_id"] = r.TenantID
+	}
+	if r.ClientID != "" {
+		config["client_id"] = r.ClientID
+	}
+	if r.ClientSecret != "" {
+		config["client_secret"] = r.ClientSecret
+	}
+	if r.Encrypt != nil {
+		config["encrypt"] = *r.Encrypt
+	}
+	if r.TrustServerCertificate != nil {
+		config["trust_server_certificate"] = *r.TrustServerCertificate
+	}
+	if r.ConnectionTimeout != nil {
+		config["connection_timeout"] = *r.ConnectionTimeout
+	}
+
+	return config
 }
 
 // TestConnectionResponse for connection test result.
@@ -456,6 +499,7 @@ func (h *DatasourcesHandler) TestConnection(w http.ResponseWriter, r *http.Reque
 	}
 
 	config := req.ToConfig()
+
 	if err := h.datasourceService.TestConnection(r.Context(), req.Type, config); err != nil {
 		h.logger.Info("Connection test failed",
 			zap.String("type", req.Type),

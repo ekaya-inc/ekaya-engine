@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	_ "github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource/mssql"    // Register mssql adapter
 	_ "github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource/postgres" // Register postgres adapter
 	"github.com/ekaya-inc/ekaya-engine/pkg/audit"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
@@ -251,6 +252,7 @@ func main() {
 	// Register auth handler (public - no auth required)
 	authHandler := handlers.NewAuthHandler(oauthService, projectService, cfg, logger)
 	authHandler.RegisterRoutes(mux)
+	mux.HandleFunc("GET /api/auth/me", authMiddleware.RequireAuth(authHandler.GetMe))
 
 	// Register config handler (public - no auth required)
 	configHandler := handlers.NewConfigHandler(cfg, adapterFactory, logger)
