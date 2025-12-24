@@ -16,20 +16,18 @@ export type DatasourceType =
 
 export type SSLMode = 'disable' | 'allow' | 'prefer' | 'require' | 'verify-ca' | 'verify-full';
 
-export type MSSQLAuthMethod = 'sql' | 'windows' | 'azuread' | 'azuread_password';
+export type MSSQLAuthMethod = 'sql' | 'service_principal' | 'user_delegation';
 
 export interface MSSQLConfig {
   auth_method: MSSQLAuthMethod;
-  instance?: string;
-  domain?: string;
-  azure_tenant_id?: string;
-  azure_client_id?: string;
-  azure_client_secret?: string;
-  application_client_id?: string;
+  // Service Principal fields
+  tenant_id?: string;
+  client_id?: string;
+  client_secret?: string;
+  // Connection options
   trust_server_certificate?: boolean;
-  encrypt?: string;
+  encrypt?: boolean;
   connection_timeout?: number;
-  application_name?: string;
 }
 
 export interface DatasourceConfig {

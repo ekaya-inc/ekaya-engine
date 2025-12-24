@@ -3,7 +3,9 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 
 	"go.uber.org/zap"
 )
@@ -41,6 +43,13 @@ func (m *Middleware) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 		ctx := context.WithValue(r.Context(), ClaimsKey, claims)
 		ctx = context.WithValue(ctx, TokenKey, token)
+
+		// If Azure access token is present in JWT, inject it into context
+		// This allows datasource adapters to use user delegation authentication for SQL Server
+		if claims.AzureAccessToken != "" {
+			ctx = context.WithValue(ctx, AzureAccessTokenKey, claims.AzureAccessToken)
+		}
+
 		next(w, r.WithContext(ctx))
 	}
 }
@@ -72,6 +81,32 @@ func (m *Middleware) RequireAuthWithPathValidation(pathParamName string) func(ht
 
 			ctx := context.WithValue(r.Context(), ClaimsKey, claims)
 			ctx = context.WithValue(ctx, TokenKey, token)
+
+			// If Azure access token is present in JWT, inject it into context
+			// This allows datasource adapters to use user delegation authentication for SQL Server
+			if claims.AzureAccessToken != "" {
+				// #region agent log
+				if logFile, err := os.OpenFile("/Users/kofimupati/Dev/Tikr/ekaya/ekaya-engine/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+					tokenPreview := ""
+					if len(claims.AzureAccessToken) > 50 {
+						tokenPreview = claims.AzureAccessToken[:50] + "..."
+					} else {
+						tokenPreview = claims.AzureAccessToken
+					}
+					logFile.WriteString(fmt.Sprintf(`{"location":"auth/middleware.go:86","message":"Injecting Azure token into context","data":{"tokenLength":%d,"tokenPreview":"%s","tokenExpiry":%d},"timestamp":%d,"sessionId":"debug-session","runId":"middleware-debug","hypothesisId":"C"}`+"\n", len(claims.AzureAccessToken), tokenPreview, claims.AzureTokenExpiry, 0))
+					logFile.Close()
+				}
+				// #endregion
+				ctx = context.WithValue(ctx, AzureAccessTokenKey, claims.AzureAccessToken)
+			} else {
+				// #region agent log
+				if logFile, err := os.OpenFile("/Users/kofimupati/Dev/Tikr/ekaya/ekaya-engine/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+					logFile.WriteString(fmt.Sprintf(`{"location":"auth/middleware.go:95","message":"No Azure token in JWT claims","data":{"hasClaims":true},"timestamp":%d,"sessionId":"debug-session","runId":"middleware-debug","hypothesisId":"C"}`+"\n", 0))
+					logFile.Close()
+				}
+				// #endregion
+			}
+
 			next(w, r.WithContext(ctx))
 		}
 	}

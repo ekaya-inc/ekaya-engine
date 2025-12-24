@@ -195,3 +195,41 @@ func (h *AuthHandler) getProjectPageURL(ctx context.Context, pid string) string 
 
 	return "/"
 }
+
+// GetMeResponse represents the response for the /api/auth/me endpoint.
+type GetMeResponse struct {
+	Email         string   `json:"email"`
+	ProjectID     string   `json:"projectId"`
+	Roles         []string `json:"roles"`
+	HasAzureToken bool     `json:"hasAzureToken"`
+	AzureTokenExp *int64   `json:"azureTokenExp,omitempty"`
+}
+
+// GetMe handles GET /api/auth/me
+// Returns information about the currently authenticated user, including Azure token status.
+func (h *AuthHandler) GetMe(w http.ResponseWriter, r *http.Request) {
+	// Get claims from context (set by auth middleware)
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok || claims == nil {
+		if err := ErrorResponse(w, http.StatusUnauthorized, "unauthorized", "Not authenticated"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	response := GetMeResponse{
+		Email:         claims.Email,
+		ProjectID:     claims.ProjectID,
+		Roles:         claims.Roles,
+		HasAzureToken: claims.AzureAccessToken != "",
+	}
+
+	// Only include expiry if token is present
+	if claims.AzureAccessToken != "" && claims.AzureTokenExpiry > 0 {
+		response.AzureTokenExp = &claims.AzureTokenExpiry
+	}
+
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to encode response", zap.Error(err))
+	}
+}

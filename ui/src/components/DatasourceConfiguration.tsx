@@ -1,12 +1,25 @@
-import { ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, ExternalLink, AlertTriangle } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle,
+  XCircle,
+  Loader2,
+  Pencil,
+  ExternalLink,
+  AlertTriangle,
+} from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 
-import { getAdapterInfo, getProviderById, type ProviderInfo } from "../constants/adapters";
+import {
+  getAdapterInfo,
+  getProviderById,
+  type ProviderInfo,
+} from "../constants/adapters";
 import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext";
 import { useToast } from "../hooks/useToast";
 import engineApi from "../services/engineApi";
 import type { DatasourceType, SSLMode } from "../types";
+import type { ConnectionDetails } from "../types/datasource";
 import { parsePostgresUrl } from "../utils/connectionString";
 
 import { Button } from "./ui/Button";
@@ -31,6 +44,15 @@ interface DatasourceFormConfig {
   name: string;
   useSSL: boolean;
   displayName: string;
+
+  // MSSQL-specific fields
+  authMethod?: "sql" | "service_principal" | "user_delegation";
+  tenantId?: string;
+  clientId?: string;
+  clientSecret?: string;
+  encrypt?: boolean;
+  trustServerCertificate?: boolean;
+  connectionTimeout?: string;
 }
 
 interface DatasourceConfigurationProps {
@@ -67,27 +89,44 @@ const DatasourceConfiguration = ({
   const [testingConnection, setTestingConnection] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isDisconnecting, setIsDisconnecting] = useState<boolean>(false);
-  const [showDisconnectDialog, setShowDisconnectDialog] = useState<boolean>(false);
-  const [disconnectConfirmation, setDisconnectConfirmation] = useState<string>("");
+  const [showDisconnectDialog, setShowDisconnectDialog] =
+    useState<boolean>(false);
+  const [disconnectConfirmation, setDisconnectConfirmation] =
+    useState<string>("");
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
   const [connectionString, setConnectionString] = useState<string>("");
-  const [connectionStringError, setConnectionStringError] = useState<string>("");
+  const [connectionStringError, setConnectionStringError] =
+    useState<string>("");
   // Track provider (from selection or parsed from connection string)
-  const [activeProvider, setActiveProvider] = useState<ProviderInfo | undefined>(selectedProvider);
+  const [activeProvider, setActiveProvider] = useState<
+    ProviderInfo | undefined
+  >(selectedProvider);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   // Use provider info for display if available, otherwise fall back to adapter info
   // activeProvider takes precedence (can be updated from connection string parsing)
   const displayInfo = activeProvider ?? selectedProvider ?? adapterInfo;
-  const [config, setConfig] = useState<DatasourceFormConfig>(() => ({
+  // MSSQL-specific state
+  const [hasAzureToken, setHasAzureToken] = useState<boolean>(false);
+  const [userEmail, setUserEmail] = useState<string>("");
+
+  const [config, setConfig] = useState<DatasourceFormConfig>({
     host: "",
-    port: selectedProvider?.defaultPort?.toString() ?? "5432",
+    port: selectedAdapter === "mssql" ? "1433" : "5432",
     user: "",
     password: "",
     name: "",
-    useSSL: selectedProvider?.defaultSSL === "require" || selectedProvider?.defaultSSL === "verify-full",
+    useSSL:
+      selectedProvider?.defaultSSL === "require" ||
+      selectedProvider?.defaultSSL === "verify-full",
     displayName: "",
-  }));
+
+    // MSSQL defaults
+    authMethod: "sql",
+    encrypt: true,
+    trustServerCertificate: false,
+    connectionTimeout: "30",
+  });
 
   // Determine if this is editing an existing datasource or configuring a new one
   const isEditingExisting = Boolean(
@@ -115,7 +154,9 @@ const DatasourceConfiguration = ({
     const parsed = parsePostgresUrl(connectionString.trim());
 
     if (!parsed) {
-      setConnectionStringError("Invalid connection string format. Expected: postgresql://user:password@host:port/database");
+      setConnectionStringError(
+        "Invalid connection string format. Expected: postgresql://user:password@host:port/database"
+      );
       return;
     }
 
@@ -127,7 +168,10 @@ const DatasourceConfiguration = ({
       user: parsed.user || prev.user,
       password: parsed.password || prev.password,
       name: parsed.database || prev.name,
-      useSSL: parsed.sslMode === "require" || parsed.sslMode === "verify-full" || parsed.sslMode === "prefer",
+      useSSL:
+        parsed.sslMode === "require" ||
+        parsed.sslMode === "verify-full" ||
+        parsed.sslMode === "prefer",
     }));
 
     // Update provider if detected from URL
@@ -137,7 +181,8 @@ const DatasourceConfiguration = ({
         setActiveProvider(provider);
         // Update displayName if it's still the default
         setConfig((prev) => {
-          const currentDefault = activeProvider?.name ?? selectedProvider?.name ?? adapterInfo.name;
+          const currentDefault =
+            activeProvider?.name ?? selectedProvider?.name ?? adapterInfo.name;
           if (prev.displayName === currentDefault || !prev.displayName) {
             return { ...prev, displayName: provider.name };
           }
@@ -200,20 +245,103 @@ const DatasourceConfiguration = ({
     }
   }, [isEditingName]);
 
+  // Check if user has Azure token for MSSQL user delegation
+  useEffect(() => {
+    if (selectedAdapter === "mssql") {
+      fetch("/api/auth/me")
+        .then((res) => res.json())
+        .then((data) => {
+          setHasAzureToken(data.hasAzureToken || false);
+          setUserEmail(data.email || "");
+
+          // Auto-select user delegation if token available
+          if (data.hasAzureToken && !isEditingExisting) {
+            setConfig((prev) => ({ ...prev, authMethod: "user_delegation" }));
+          }
+        })
+        .catch((error) => {
+          console.error("Failed to check Azure token:", error);
+          // Continue without token check
+        });
+    }
+  }, [selectedAdapter, isEditingExisting]);
+
+  const isConnectionReadyToTest = (): boolean => {
+    // Basic fields required for all adapters
+    if (!config.host || !config.name) {
+      return false;
+    }
+
+    // MSSQL-specific validation based on auth method
+    if (selectedAdapter === "mssql") {
+      if (config.authMethod === "sql") {
+        // SQL Authentication: requires username AND password
+        return !!(config.user && config.password);
+      } else if (config.authMethod === "service_principal") {
+        // Service Principal: requires tenant ID, client ID, and client secret
+        // NO username/password needed
+        return !!(config.tenantId && config.clientId && config.clientSecret);
+      } else if (config.authMethod === "user_delegation") {
+        // User Delegation: only requires Azure token from SSO
+        // NO username/password/client credentials needed
+        return hasAzureToken;
+      }
+      // Unknown auth method
+      return false;
+    } else {
+      // PostgreSQL and other adapters: require username
+      // Password is typically required but may be empty for some auth methods
+      // For now, we require username (password can be empty for trust auth, etc.)
+      return !!config.user;
+    }
+  };
+
   const handleTestConnection = async (): Promise<void> => {
     clearError();
     setTestingConnection(true);
 
     try {
-      const testDetails = {
+      const testDetails: any = {
         type: selectedAdapter as DatasourceType,
         host: config.host,
         port: parseInt(config.port),
         name: config.name,
-        user: config.user,
-        password: config.password,
-        ssl_mode: (config.useSSL ? "require" : "disable") as SSLMode,
       };
+
+      // MSSQL-specific configuration
+      if (selectedAdapter === "mssql") {
+        testDetails.auth_method = config.authMethod || "sql";
+
+        if (config.authMethod === "sql") {
+          testDetails.user = config.user;
+          testDetails.password = config.password;
+        } else if (config.authMethod === "service_principal") {
+          testDetails.tenant_id = config.tenantId;
+          testDetails.client_id = config.clientId;
+          testDetails.client_secret = config.clientSecret;
+        }
+        // user_delegation: no credentials needed (token from JWT)
+        // Explicitly do NOT send user/password fields to avoid auto-detection issues
+
+        // MSSQL connection options
+        testDetails.encrypt = config.encrypt ?? true;
+        testDetails.trust_server_certificate =
+          config.trustServerCertificate ?? false;
+        testDetails.connection_timeout = parseInt(
+          config.connectionTimeout || "30"
+        );
+        testDetails.ssl_mode = (
+          config.useSSL ? "require" : "disable"
+        ) as SSLMode;
+      } else {
+        // PostgreSQL and other adapters
+        testDetails.user = config.user;
+        testDetails.password = config.password;
+        testDetails.ssl_mode = (
+          config.useSSL ? "require" : "disable"
+        ) as SSLMode;
+      }
+
       if (!pid) {
         throw new Error("Project ID not available from route");
       }
@@ -278,16 +406,43 @@ const DatasourceConfiguration = ({
       const datasourceType = selectedAdapter as DatasourceType;
       // Include provider for PostgreSQL-compatible variants (e.g., supabase, neon)
       const currentProvider = activeProvider ?? selectedProvider;
-      const apiConfig = {
+
+      const apiConfig: any = {
         type: datasourceType,
         ...(currentProvider && { provider: currentProvider.id }),
         host: config.host,
         port: parseInt(config.port),
         name: config.name,
-        user: config.user,
-        password: config.password,
-        ssl_mode: (config.useSSL ? "require" : "disable") as SSLMode,
       };
+
+      // MSSQL-specific configuration
+      if (selectedAdapter === "mssql") {
+        apiConfig.auth_method = config.authMethod || "sql";
+
+        if (config.authMethod === "sql") {
+          apiConfig.user = config.user;
+          apiConfig.password = config.password;
+        } else if (config.authMethod === "service_principal") {
+          apiConfig.tenant_id = config.tenantId;
+          apiConfig.client_id = config.clientId;
+          apiConfig.client_secret = config.clientSecret;
+        }
+        // user_delegation: no credentials needed (token from JWT)
+
+        // MSSQL connection options
+        apiConfig.encrypt = config.encrypt ?? true;
+        apiConfig.trust_server_certificate =
+          config.trustServerCertificate ?? false;
+        apiConfig.connection_timeout = parseInt(
+          config.connectionTimeout || "30"
+        );
+        apiConfig.ssl_mode = (config.useSSL ? "require" : "disable") as SSLMode;
+      } else {
+        // PostgreSQL and other adapters
+        apiConfig.user = config.user;
+        apiConfig.password = config.password;
+        apiConfig.ssl_mode = (config.useSSL ? "require" : "disable") as SSLMode;
+      }
 
       engineApi.validateConnectionDetails(apiConfig);
 
@@ -298,8 +453,19 @@ const DatasourceConfiguration = ({
       const isEditing = datasourceId !== undefined && datasourceId !== null;
 
       const result = isEditing
-        ? await updateDataSource(pid, datasourceId, config.displayName, datasourceType, apiConfig)
-        : await saveDataSource(pid, config.displayName, datasourceType, apiConfig);
+        ? await updateDataSource(
+            pid,
+            datasourceId,
+            config.displayName,
+            datasourceType,
+            apiConfig
+          )
+        : await saveDataSource(
+            pid,
+            config.displayName,
+            datasourceType,
+            apiConfig
+          );
 
       if (result.success) {
         const action = isEditing ? "updated" : "saved";
@@ -339,9 +505,7 @@ const DatasourceConfiguration = ({
       <div className="mb-6">
         <Button
           onClick={handleTestConnection}
-          disabled={
-            testingConnection || !config.host || !config.user || !config.name
-          }
+          disabled={testingConnection || !isConnectionReadyToTest()}
           className="min-w-[160px] bg-blue-600 hover:bg-blue-700 text-white font-semibold"
           size="default"
         >
@@ -354,14 +518,11 @@ const DatasourceConfiguration = ({
             "Test Connection"
           )}
         </Button>
-        {(testingConnection ||
-          !config.host ||
-          !config.user ||
-          !config.name) && (
+        {(testingConnection || !isConnectionReadyToTest()) && (
           <p className="text-sm text-text-secondary mt-2">
             {testingConnection
               ? "Please wait while we test your database connection..."
-              : "Please fill in Host, Username, and Database Name to test connection"}
+              : "Please fill in all required fields to test connection"}
           </p>
         )}
       </div>
@@ -466,7 +627,8 @@ const DatasourceConfiguration = ({
             {connectionStringError}
           </p>
         )}
-        {(hasConnectionStringHelp !== undefined || hasHelpUrl !== undefined) && (
+        {(hasConnectionStringHelp !== undefined ||
+          hasHelpUrl !== undefined) && (
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-text-secondary">
             {hasConnectionStringHelp && (
               <span>{currentProviderInfo.connectionStringHelp}</span>
@@ -491,9 +653,12 @@ const DatasourceConfiguration = ({
   const renderDatasourceSetup = () => (
     <div className="space-y-6">
       {renderConnectionStringSection()}
+      {/* Common Fields: Host, Port, Database Name */}
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label htmlFor="host">Host</Label>
+          <Label htmlFor="host">
+            Host <span className="text-red-500">*</span>
+          </Label>
           <Input
             id="host"
             placeholder="localhost or IP address"
@@ -509,7 +674,7 @@ const DatasourceConfiguration = ({
           <Input
             id="port"
             type="number"
-            placeholder="5432"
+            placeholder={selectedAdapter === "mssql" ? "1433" : "5432"}
             value={config.port}
             onChange={(e) => handleConfigChange("port", e.target.value)}
           />
@@ -519,37 +684,10 @@ const DatasourceConfiguration = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="user">Username</Label>
-          <Input
-            id="user"
-            placeholder="Database user"
-            value={config.user}
-            onChange={(e) => handleConfigChange("user", e.target.value)}
-          />
-          <p className="text-sm text-text-secondary">
-            The database user for the account that you want to use to connect to
-            your database.
-          </p>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="password">Password</Label>
-          <Input
-            id="password"
-            type="password"
-            placeholder="Database password"
-            value={config.password}
-            onChange={(e) => handleConfigChange("password", e.target.value)}
-          />
-          <p className="text-sm text-text-secondary">
-            The password for the user that you use to connect to the database.
-          </p>
-        </div>
-      </div>
-
       <div className="space-y-2">
-        <Label htmlFor="name">Database Name</Label>
+        <Label htmlFor="name">
+          Database Name <span className="text-red-500">*</span>
+        </Label>
         <Input
           id="name"
           placeholder="Database name"
@@ -564,14 +702,243 @@ const DatasourceConfiguration = ({
         </p>
       </div>
 
-      <div className="flex items-center space-x-2">
-        <Switch
-          id="useSSL"
-          checked={config.useSSL}
-          onCheckedChange={(checked) => handleConfigChange("useSSL", checked)}
-        />
-        <Label htmlFor="useSSL">Use SSL</Label>
-      </div>
+      {/* MSSQL Auth Method Selector */}
+      {selectedAdapter === "mssql" && (
+        <div className="space-y-2">
+          <Label htmlFor="auth-method">Authentication Method</Label>
+          <select
+            id="auth-method"
+            value={config.authMethod}
+            onChange={(e) => handleConfigChange("authMethod", e.target.value)}
+            className="w-full rounded-md border border-border-medium bg-surface-secondary text-text-primary px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-purple focus:border-transparent"
+            disabled={isEditingExisting}
+          >
+            {hasAzureToken && (
+              <option value="user_delegation">
+                Use My Microsoft Login ({userEmail})
+              </option>
+            )}
+            <option value="service_principal">
+              Azure AD Service Principal
+            </option>
+            <option value="sql">SQL Server Authentication</option>
+          </select>
+          <p className="text-sm text-text-secondary">
+            Choose how to authenticate with SQL Server.
+          </p>
+        </div>
+      )}
+
+      {/* Conditional Auth Fields based on adapter and auth method */}
+      {selectedAdapter !== "mssql" ? (
+        // PostgreSQL, MySQL, etc. - always show username/password
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="user">
+              Username <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="user"
+              placeholder="Database user"
+              value={config.user}
+              onChange={(e) => handleConfigChange("user", e.target.value)}
+            />
+            <p className="text-sm text-text-secondary">
+              The database user for the account that you want to use to connect
+              to your database.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              placeholder="Database password"
+              value={config.password}
+              onChange={(e) => handleConfigChange("password", e.target.value)}
+            />
+            <p className="text-sm text-text-secondary">
+              The password for the user that you use to connect to the database.
+            </p>
+          </div>
+        </div>
+      ) : config.authMethod === "sql" ? (
+        // MSSQL SQL Authentication
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="user">
+              Username <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="user"
+              placeholder="SQL Server user"
+              value={config.user}
+              onChange={(e) => handleConfigChange("user", e.target.value)}
+            />
+            <p className="text-sm text-text-secondary">
+              SQL Server authentication username.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="password">
+              Password <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="password"
+              type="password"
+              placeholder="SQL Server password"
+              value={config.password}
+              onChange={(e) => handleConfigChange("password", e.target.value)}
+            />
+            <p className="text-sm text-text-secondary">
+              SQL Server authentication password.
+            </p>
+          </div>
+        </div>
+      ) : config.authMethod === "service_principal" ? (
+        // MSSQL Service Principal
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="tenantId">
+              Azure Tenant ID <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="tenantId"
+              placeholder="00000000-0000-0000-0000-000000000000"
+              value={config.tenantId || ""}
+              onChange={(e) => handleConfigChange("tenantId", e.target.value)}
+            />
+            <p className="text-sm text-text-secondary">
+              Your Azure AD tenant ID (directory ID).
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="clientId">
+                Azure Client ID <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="clientId"
+                placeholder="00000000-0000-0000-0000-000000000000"
+                value={config.clientId || ""}
+                onChange={(e) => handleConfigChange("clientId", e.target.value)}
+              />
+              <p className="text-sm text-text-secondary">
+                Application (client) ID from Azure AD.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="clientSecret">
+                Azure Client Secret <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="clientSecret"
+                type="password"
+                placeholder="Client secret value"
+                value={config.clientSecret || ""}
+                onChange={(e) =>
+                  handleConfigChange("clientSecret", e.target.value)
+                }
+              />
+              <p className="text-sm text-text-secondary">
+                Client secret value from Azure AD.
+              </p>
+            </div>
+          </div>
+          <div className="p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-md">
+            <p className="text-sm text-blue-700 dark:text-blue-400">
+              Need help setting up Service Principal?{" "}
+              <a
+                href="https://docs.ekaya.ai/mssql-service-principal"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-blue-800 dark:hover:text-blue-300"
+              >
+                View setup guide →
+              </a>
+            </p>
+          </div>
+        </div>
+      ) : config.authMethod === "user_delegation" ? (
+        // MSSQL User Delegation
+        <div className="p-4 bg-surface-tertiary border border-border-medium rounded-md">
+          <p className="text-sm text-text-primary mb-2">
+            You&apos;ll connect to SQL Server as <strong>{userEmail}</strong>
+          </p>
+          <p className="text-sm text-text-secondary mb-3">
+            Make sure your Microsoft account has been granted access in Azure
+            SQL Database.
+          </p>
+          <a
+            href="https://learn.microsoft.com/en-us/entra/identity/hybrid/connect/how-to-connect-install-sql-delegation"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-brand-purple hover:underline"
+          >
+            Setup guide →
+          </a>
+        </div>
+      ) : null}
+
+      {/* MSSQL Connection Options */}
+      {selectedAdapter === "mssql" && (
+        <details className="border border-border-medium rounded-md">
+          <summary className="cursor-pointer p-3 text-sm font-medium text-text-primary hover:bg-surface-secondary">
+            Advanced Options
+          </summary>
+          <div className="p-4 pt-2 space-y-4">
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="encrypt"
+                checked={config.encrypt ?? true}
+                onCheckedChange={(checked) =>
+                  handleConfigChange("encrypt", checked)
+                }
+              />
+              <Label htmlFor="encrypt">Encrypt Connection</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="trustServerCertificate"
+                checked={config.trustServerCertificate ?? false}
+                onCheckedChange={(checked) =>
+                  handleConfigChange("trustServerCertificate", checked)
+                }
+              />
+              <Label htmlFor="trustServerCertificate">
+                Trust Server Certificate
+              </Label>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="connectionTimeout">
+                Connection Timeout (seconds)
+              </Label>
+              <Input
+                id="connectionTimeout"
+                type="number"
+                placeholder="30"
+                value={config.connectionTimeout || "30"}
+                onChange={(e) =>
+                  handleConfigChange("connectionTimeout", e.target.value)
+                }
+                className="max-w-xs"
+              />
+            </div>
+          </div>
+        </details>
+      )}
+
+      {/* Non-MSSQL SSL Toggle */}
+      {selectedAdapter !== "mssql" && (
+        <div className="flex items-center space-x-2">
+          <Switch
+            id="useSSL"
+            checked={config.useSSL}
+            onCheckedChange={(checked) => handleConfigChange("useSSL", checked)}
+          />
+          <Label htmlFor="useSSL">Use SSL</Label>
+        </div>
+      )}
 
       {renderTestConnection()}
     </div>
@@ -618,7 +985,10 @@ const DatasourceConfiguration = ({
         <CardContent className="p-6">
           {/* Editable Datasource Name */}
           <div className="mb-6 pb-6 border-b">
-            <Label htmlFor="displayName" className="text-sm text-text-secondary mb-2 block">
+            <Label
+              htmlFor="displayName"
+              className="text-sm text-text-secondary mb-2 block"
+            >
               Datasource Name
             </Label>
             {isEditingName ? (
@@ -626,7 +996,9 @@ const DatasourceConfiguration = ({
                 ref={nameInputRef}
                 id="displayName"
                 value={config.displayName}
-                onChange={(e) => handleConfigChange("displayName", e.target.value)}
+                onChange={(e) =>
+                  handleConfigChange("displayName", e.target.value)
+                }
                 onBlur={() => setIsEditingName(false)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === "Escape") {
@@ -717,13 +1089,18 @@ const DatasourceConfiguration = ({
               Disconnect Datasource?
             </DialogTitle>
             <DialogDescription>
-              This will disconnect from the datasource and clear all schema, approved queries,
-              and associated ontology extractions that were attached to this datasource.
+              This will disconnect from the datasource and clear all schema,
+              approved queries, and associated ontology extractions that were
+              attached to this datasource.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <label className="text-sm font-medium text-text-primary">
-              Type <span className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">disconnect</span> to confirm
+              Type{" "}
+              <span className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">
+                disconnect
+              </span>{" "}
+              to confirm
             </label>
             <Input
               value={disconnectConfirmation}
@@ -744,7 +1121,9 @@ const DatasourceConfiguration = ({
             <Button
               variant="destructive"
               onClick={handleDisconnect}
-              disabled={disconnectConfirmation !== "disconnect" || isDisconnecting}
+              disabled={
+                disconnectConfirmation !== "disconnect" || isDisconnecting
+              }
             >
               {isDisconnecting ? (
                 <>

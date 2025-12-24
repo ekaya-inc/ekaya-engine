@@ -114,11 +114,12 @@ describe("DatasourceConfiguration", () => {
       fireEvent.click(screen.getByRole("button", { name: "Parse" }));
 
       // Check that form fields were populated
-      expect(screen.getByLabelText("Host")).toHaveValue("localhost");
+      // Use regex for fields with asterisks (required fields)
+      expect(screen.getByLabelText(/^Host/)).toHaveValue("localhost");
       expect(screen.getByLabelText("Port")).toHaveValue(5432);
-      expect(screen.getByLabelText("Username")).toHaveValue("myuser");
+      expect(screen.getByLabelText(/^Username/)).toHaveValue("myuser");
       expect(screen.getByLabelText("Password")).toHaveValue("mypass");
-      expect(screen.getByLabelText("Database Name")).toHaveValue("mydb");
+      expect(screen.getByLabelText(/^Database Name/)).toHaveValue("mydb");
     });
 
     it("shows error for invalid connection string", () => {
@@ -313,16 +314,17 @@ describe("DatasourceConfiguration", () => {
       });
 
       // Fill in required fields
-      fireEvent.change(screen.getByLabelText("Host"), {
+      // Use regex for fields with asterisks (required fields)
+      fireEvent.change(screen.getByLabelText(/^Host/), {
         target: { value: "test.supabase.com" },
       });
-      fireEvent.change(screen.getByLabelText("Username"), {
+      fireEvent.change(screen.getByLabelText(/^Username/), {
         target: { value: "postgres" },
       });
       fireEvent.change(screen.getByLabelText("Password"), {
         target: { value: "password" },
       });
-      fireEvent.change(screen.getByLabelText("Database Name"), {
+      fireEvent.change(screen.getByLabelText(/^Database Name/), {
         target: { value: "postgres" },
       });
 
