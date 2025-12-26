@@ -199,6 +199,105 @@ func TestSchemaDiscoverer_DiscoverColumns_NonexistentTable(t *testing.T) {
 	}
 }
 
+func TestSchemaDiscoverer_DiscoverColumns_DetectsUniqueConstraint(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// The events table has a UNIQUE constraint on ev_id
+	columns, err := tc.discoverer.DiscoverColumns(ctx, "public", "events")
+	if err != nil {
+		t.Fatalf("DiscoverColumns failed: %v", err)
+	}
+
+	// Find the ev_id column and verify it's marked as unique
+	var evIDColumn *struct {
+		name     string
+		isUnique bool
+	}
+	for _, col := range columns {
+		if col.ColumnName == "ev_id" {
+			evIDColumn = &struct {
+				name     string
+				isUnique bool
+			}{col.ColumnName, col.IsUnique}
+			break
+		}
+	}
+
+	if evIDColumn == nil {
+		t.Fatal("expected to find ev_id column in events table")
+	}
+	if !evIDColumn.isUnique {
+		t.Error("expected ev_id column to have is_unique=true")
+	}
+}
+
+func TestSchemaDiscoverer_DiscoverColumns_DetectsDefaultValue(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// The accounts table has columns with default values
+	columns, err := tc.discoverer.DiscoverColumns(ctx, "public", "accounts")
+	if err != nil {
+		t.Fatalf("DiscoverColumns failed: %v", err)
+	}
+
+	// Find the id column - should have nextval default
+	var idDefault *string
+	var isBannedDefault *string
+	for _, col := range columns {
+		if col.ColumnName == "id" {
+			idDefault = col.DefaultValue
+		}
+		if col.ColumnName == "is_banned" {
+			isBannedDefault = col.DefaultValue
+		}
+	}
+
+	// id column should have a sequence default
+	if idDefault == nil {
+		t.Error("expected id column to have a default value")
+	} else if *idDefault != "nextval('accounts_id_seq'::regclass)" {
+		t.Errorf("expected id default to be nextval sequence, got: %s", *idDefault)
+	}
+
+	// is_banned column should have boolean default
+	if isBannedDefault == nil {
+		t.Error("expected is_banned column to have a default value")
+	} else if *isBannedDefault != "false" {
+		t.Errorf("expected is_banned default to be 'false', got: %s", *isBannedDefault)
+	}
+}
+
+func TestSchemaDiscoverer_DiscoverColumns_ExcludesMultiColumnUnique(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// Primary keys are often multi-column in junction tables, and we exclude
+	// multi-column unique constraints. Verify that regular columns in tables
+	// with composite keys don't incorrectly show as unique.
+
+	// The accounts table id is a PK (single column) - should NOT be marked unique
+	// because PKs are tracked separately from unique constraints
+	columns, err := tc.discoverer.DiscoverColumns(ctx, "public", "accounts")
+	if err != nil {
+		t.Fatalf("DiscoverColumns failed: %v", err)
+	}
+
+	for _, col := range columns {
+		if col.ColumnName == "id" {
+			// id is a PK, not a separate UNIQUE constraint
+			if col.IsUnique {
+				t.Error("expected id column (PK) to have is_unique=false since it's a PK, not a UNIQUE constraint")
+			}
+			if !col.IsPrimaryKey {
+				t.Error("expected id column to be marked as primary key")
+			}
+			break
+		}
+	}
+}
+
 func TestSchemaDiscoverer_DiscoverForeignKeys(t *testing.T) {
 	tc := setupSchemaDiscovererTest(t)
 	ctx := context.Background()

@@ -105,12 +105,25 @@ type QueryExecutor interface {
 	// The limit parameter caps the number of rows returned (0 = no limit).
 	ExecuteQuery(ctx context.Context, sqlQuery string, limit int) (*QueryExecutionResult, error)
 
+	// Execute runs any SQL statement (DDL/DML) and returns results.
+	// For statements with RETURNING clauses, returns rows in the result.
+	// For INSERT/UPDATE/DELETE without RETURNING, returns RowsAffected.
+	Execute(ctx context.Context, sqlStatement string) (*ExecuteResult, error)
+
 	// ValidateQuery checks if a SQL query is syntactically valid without executing it.
 	// Returns nil if valid, error with details if invalid.
 	ValidateQuery(ctx context.Context, sqlQuery string) error
 
 	// Close releases any resources held by the executor.
 	Close() error
+}
+
+// ExecuteResult holds the results from executing a DDL/DML statement.
+type ExecuteResult struct {
+	Columns      []string         `json:"columns,omitempty"`
+	Rows         []map[string]any `json:"rows,omitempty"`
+	RowCount     int              `json:"row_count"`
+	RowsAffected int64            `json:"rows_affected"`
 }
 
 // QueryExecutionResult holds the results from executing a query.

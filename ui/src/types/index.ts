@@ -10,3 +10,5 @@ export * from './sdap';
 export * from './ontology';
 export * from './schema';
 export * from './query';
+export * from './ai';
+export * from './mcp';

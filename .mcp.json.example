@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ekaya-engine": {
+      "type": "http",
+      "url": "http://localhost:3443/mcp/<your-project-id>"
+    }
+  }
+}

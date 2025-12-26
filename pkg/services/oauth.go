@@ -40,6 +40,12 @@ type TokenExchangeRequest struct {
 	CodeVerifier string
 	// AuthURL is the auth server URL to exchange with (must be in whitelist).
 	AuthURL string
+	// RedirectURI is the callback URI. Required for MCP, optional for browser flow
+	// (falls back to config.BaseURL/oauth/callback if empty).
+	RedirectURI string
+	// ClientID is the OAuth client ID. Required for MCP, optional for browser flow
+	// (falls back to config.ClientID if empty).
+	ClientID string
 }
 
 // TokenResponse contains the response from a token exchange.
@@ -115,22 +121,32 @@ func (s *oauthService) ExchangeCodeForToken(ctx context.Context, req *TokenExcha
 		return "", err
 	}
 
-	// Build redirect URI
-	baseURL, err := url.Parse(s.config.BaseURL)
-	if err != nil {
-		return "", fmt.Errorf("invalid base URL: %w", err)
+	// Determine redirect_uri: use request value if provided, else construct from config
+	redirectURI := req.RedirectURI
+	if redirectURI == "" {
+		baseURL, err := url.Parse(s.config.BaseURL)
+		if err != nil {
+			return "", fmt.Errorf("invalid base URL: %w", err)
+		}
+		parsedURI, err := baseURL.Parse("/oauth/callback")
+		if err != nil {
+			return "", fmt.Errorf("failed to construct redirect URI: %w", err)
+		}
+		redirectURI = parsedURI.String()
 	}
-	redirectURI, err := baseURL.Parse("/oauth/callback")
-	if err != nil {
-		return "", fmt.Errorf("failed to construct redirect URI: %w", err)
+
+	// Determine client_id: use request value if provided, else use config
+	clientID := req.ClientID
+	if clientID == "" {
+		clientID = s.config.ClientID
 	}
 
 	// Build request body
 	reqBody := map[string]string{
 		"grant_type":   "authorization_code",
 		"code":         req.Code,
-		"redirect_uri": redirectURI.String(),
-		"client_id":    s.config.ClientID,
+		"redirect_uri": redirectURI,
+		"client_id":    clientID,
 	}
 
 	// Include code_verifier if provided (PKCE)

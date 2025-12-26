@@ -24,6 +24,9 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/handlers"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
+	"github.com/ekaya-inc/ekaya-engine/pkg/mcp"
+	mcpauth "github.com/ekaya-inc/ekaya-engine/pkg/mcp/auth"
+	mcptools "github.com/ekaya-inc/ekaya-engine/pkg/mcp/tools"
 	"github.com/ekaya-inc/ekaya-engine/pkg/middleware"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
@@ -124,6 +127,9 @@ func main() {
 	queryRepo := repositories.NewQueryRepository()
 	aiConfigRepo := repositories.NewAIConfigRepository(credentialEncryptor)
 
+	// MCP config repository
+	mcpConfigRepo := repositories.NewMCPConfigRepository()
+
 	// Ontology repositories
 	ontologyRepo := repositories.NewOntologyRepository()
 	ontologyWorkflowRepo := repositories.NewOntologyWorkflowRepository()
@@ -143,6 +149,7 @@ func main() {
 	discoveryService := services.NewRelationshipDiscoveryService(schemaRepo, datasourceService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
+	mcpConfigService := services.NewMCPConfigService(mcpConfigRepo, cfg.BaseURL, logger)
 
 	// LLM factory for creating clients per project configuration
 	llmFactory := llm.NewClientFactory(aiConfigService, logger)
@@ -191,6 +198,34 @@ func main() {
 	wellKnownHandler := handlers.NewWellKnownHandler(cfg, logger)
 	wellKnownHandler.RegisterRoutes(mux)
 
+	// Register MCP server (authenticated - project-scoped)
+	developerToolDeps := &mcptools.DeveloperToolDeps{
+		DB:                db,
+		MCPConfigService:  mcpConfigService,
+		DatasourceService: datasourceService,
+		SchemaService:     schemaService,
+		ProjectService:    projectService,
+		AdapterFactory:    adapterFactory,
+		Logger:            logger,
+	}
+	mcpServer := mcp.NewServer("ekaya-engine", cfg.Version, logger,
+		mcp.WithToolFilter(mcptools.NewToolFilter(developerToolDeps)),
+	)
+	mcptools.RegisterHealthTool(mcpServer.MCP(), cfg.Version, &mcptools.HealthToolDeps{
+		DB:                db,
+		ProjectService:    projectService,
+		DatasourceService: datasourceService,
+		Logger:            logger,
+	})
+	mcptools.RegisterDeveloperTools(mcpServer.MCP(), developerToolDeps)
+	mcpHandler := handlers.NewMCPHandler(mcpServer, logger)
+	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, logger)
+	mcpHandler.RegisterRoutes(mux, mcpAuthMiddleware)
+
+	// Register MCP OAuth token endpoint (public - for MCP clients)
+	mcpOAuthHandler := handlers.NewMCPOAuthHandler(oauthService, logger)
+	mcpOAuthHandler.RegisterRoutes(mux)
+
 	// Create tenant middleware once for all handlers that need it
 	tenantMiddleware := database.WithTenantContext(db, logger)
 
@@ -218,6 +253,10 @@ func main() {
 	// Register queries handler (protected)
 	queriesHandler := handlers.NewQueriesHandler(queryService, logger)
 	queriesHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register MCP config handler (protected)
+	mcpConfigHandler := handlers.NewMCPConfigHandler(mcpConfigService, logger)
+	mcpConfigHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register ontology handlers (protected)
 	ontologyHandler := handlers.NewOntologyHandler(ontologyWorkflowService, projectService, logger)

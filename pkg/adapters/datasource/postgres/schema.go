@@ -88,7 +88,9 @@ func (d *SchemaDiscoverer) DiscoverColumns(ctx context.Context, schemaName, tabl
 			c.data_type,
 			c.is_nullable = 'YES' as is_nullable,
 			COALESCE(pk.is_pk, false) as is_primary_key,
-			c.ordinal_position
+			COALESCE(uq.is_unique, false) as is_unique,
+			c.ordinal_position,
+			c.column_default
 		FROM information_schema.columns c
 		LEFT JOIN (
 			SELECT kcu.column_name, true as is_pk
@@ -100,6 +102,20 @@ func (d *SchemaDiscoverer) DiscoverColumns(ctx context.Context, schemaName, tabl
 			  AND tc.table_schema = $1
 			  AND tc.table_name = $2
 		) pk ON c.column_name = pk.column_name
+		LEFT JOIN (
+			SELECT kcu.column_name, true as is_unique
+			FROM information_schema.table_constraints tc
+			JOIN information_schema.key_column_usage kcu
+				ON tc.constraint_name = kcu.constraint_name
+				AND tc.table_schema = kcu.table_schema
+			WHERE tc.constraint_type = 'UNIQUE'
+			  AND tc.table_schema = $1
+			  AND tc.table_name = $2
+			  -- Only single-column unique constraints
+			  AND (SELECT COUNT(*) FROM information_schema.key_column_usage k2
+			       WHERE k2.constraint_name = tc.constraint_name
+			         AND k2.table_schema = tc.table_schema) = 1
+		) uq ON c.column_name = uq.column_name
 		WHERE c.table_schema = $1 AND c.table_name = $2
 		ORDER BY c.ordinal_position
 	`
@@ -113,7 +129,7 @@ func (d *SchemaDiscoverer) DiscoverColumns(ctx context.Context, schemaName, tabl
 	var columns []datasource.ColumnMetadata
 	for rows.Next() {
 		var c datasource.ColumnMetadata
-		if err := rows.Scan(&c.ColumnName, &c.DataType, &c.IsNullable, &c.IsPrimaryKey, &c.OrdinalPosition); err != nil {
+		if err := rows.Scan(&c.ColumnName, &c.DataType, &c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.OrdinalPosition, &c.DefaultValue); err != nil {
 			return nil, fmt.Errorf("scan column: %w", err)
 		}
 		columns = append(columns, c)

@@ -385,8 +385,8 @@ func (r *schemaRepository) ListColumnsByTable(ctx context.Context, projectID, ta
 
 	query := `
 		SELECT id, project_id, schema_table_id, column_name, data_type,
-		       is_nullable, is_primary_key, is_selected, ordinal_position,
-		       distinct_count, null_count, business_name, description, metadata,
+		       is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
+		       default_value, distinct_count, null_count, business_name, description, metadata,
 		       created_at, updated_at
 		FROM engine_schema_columns
 		WHERE project_id = $1 AND schema_table_id = $2 AND deleted_at IS NULL
@@ -421,8 +421,8 @@ func (r *schemaRepository) ListColumnsByDatasource(ctx context.Context, projectI
 
 	query := `
 		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
-		       c.is_nullable, c.is_primary_key, c.is_selected, c.ordinal_position,
-		       c.distinct_count, c.null_count, c.business_name, c.description, c.metadata,
+		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
+		       c.default_value, c.distinct_count, c.null_count, c.business_name, c.description, c.metadata,
 		       c.created_at, c.updated_at
 		FROM engine_schema_columns c
 		JOIN engine_schema_tables t ON c.schema_table_id = t.id
@@ -459,8 +459,8 @@ func (r *schemaRepository) GetColumnByID(ctx context.Context, projectID, columnI
 
 	query := `
 		SELECT id, project_id, schema_table_id, column_name, data_type,
-		       is_nullable, is_primary_key, is_selected, ordinal_position,
-		       distinct_count, null_count, business_name, description, metadata,
+		       is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
+		       default_value, distinct_count, null_count, business_name, description, metadata,
 		       created_at, updated_at
 		FROM engine_schema_columns
 		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
@@ -485,8 +485,8 @@ func (r *schemaRepository) GetColumnByName(ctx context.Context, tableID uuid.UUI
 
 	query := `
 		SELECT id, project_id, schema_table_id, column_name, data_type,
-		       is_nullable, is_primary_key, is_selected, ordinal_position,
-		       distinct_count, null_count, business_name, description, metadata,
+		       is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
+		       default_value, distinct_count, null_count, business_name, description, metadata,
 		       created_at, updated_at
 		FROM engine_schema_columns
 		WHERE schema_table_id = $1 AND column_name = $2 AND deleted_at IS NULL`
@@ -531,9 +531,11 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 		    data_type = $4,
 		    is_nullable = $5,
 		    is_primary_key = $6,
-		    ordinal_position = $7,
-		    metadata = $8,
-		    updated_at = $9
+		    is_unique = $7,
+		    ordinal_position = $8,
+		    default_value = $9,
+		    metadata = $10,
+		    updated_at = $11
 		WHERE schema_table_id = $1
 		  AND column_name = $2
 		  AND project_id = $3
@@ -547,8 +549,8 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 	var existingBusinessName, existingDescription *string
 	err = scope.Conn.QueryRow(ctx, reactivateQuery,
 		column.SchemaTableID, column.ColumnName, column.ProjectID,
-		column.DataType, column.IsNullable, column.IsPrimaryKey, column.OrdinalPosition,
-		metadata, now,
+		column.DataType, column.IsNullable, column.IsPrimaryKey, column.IsUnique, column.OrdinalPosition,
+		column.DefaultValue, metadata, now,
 	).Scan(&existingID, &existingCreatedAt, &existingIsSelected,
 		&existingDistinctCount, &existingNullCount, &existingBusinessName, &existingDescription)
 
@@ -571,25 +573,27 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 	upsertQuery := `
 		INSERT INTO engine_schema_columns (
 			id, project_id, schema_table_id, column_name, data_type,
-			is_nullable, is_primary_key, is_selected, ordinal_position,
-			distinct_count, null_count, business_name, description, metadata,
+			is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
+			default_value, distinct_count, null_count, business_name, description, metadata,
 			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 		ON CONFLICT (schema_table_id, column_name)
 			WHERE deleted_at IS NULL
 		DO UPDATE SET
 			data_type = EXCLUDED.data_type,
 			is_nullable = EXCLUDED.is_nullable,
 			is_primary_key = EXCLUDED.is_primary_key,
+			is_unique = EXCLUDED.is_unique,
 			ordinal_position = EXCLUDED.ordinal_position,
+			default_value = EXCLUDED.default_value,
 			metadata = EXCLUDED.metadata,
 			updated_at = EXCLUDED.updated_at
 		RETURNING id, created_at, is_selected, distinct_count, null_count, business_name, description`
 
 	err = scope.Conn.QueryRow(ctx, upsertQuery,
 		column.ID, column.ProjectID, column.SchemaTableID, column.ColumnName, column.DataType,
-		column.IsNullable, column.IsPrimaryKey, column.IsSelected, column.OrdinalPosition,
-		column.DistinctCount, column.NullCount, column.BusinessName, column.Description, metadata,
+		column.IsNullable, column.IsPrimaryKey, column.IsUnique, column.IsSelected, column.OrdinalPosition,
+		column.DefaultValue, column.DistinctCount, column.NullCount, column.BusinessName, column.Description, metadata,
 		column.CreatedAt, column.UpdatedAt,
 	).Scan(&column.ID, &column.CreatedAt, &column.IsSelected,
 		&column.DistinctCount, &column.NullCount, &column.BusinessName, &column.Description)
@@ -1461,8 +1465,8 @@ func scanSchemaColumn(rows pgx.Rows) (*models.SchemaColumn, error) {
 	var metadata []byte
 	err := rows.Scan(
 		&c.ID, &c.ProjectID, &c.SchemaTableID, &c.ColumnName, &c.DataType,
-		&c.IsNullable, &c.IsPrimaryKey, &c.IsSelected, &c.OrdinalPosition,
-		&c.DistinctCount, &c.NullCount, &c.BusinessName, &c.Description, &metadata,
+		&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
+		&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.BusinessName, &c.Description, &metadata,
 		&c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
@@ -1479,8 +1483,8 @@ func scanSchemaColumnRow(row pgx.Row) (*models.SchemaColumn, error) {
 	var metadata []byte
 	err := row.Scan(
 		&c.ID, &c.ProjectID, &c.SchemaTableID, &c.ColumnName, &c.DataType,
-		&c.IsNullable, &c.IsPrimaryKey, &c.IsSelected, &c.OrdinalPosition,
-		&c.DistinctCount, &c.NullCount, &c.BusinessName, &c.Description, &metadata,
+		&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
+		&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.BusinessName, &c.Description, &metadata,
 		&c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {

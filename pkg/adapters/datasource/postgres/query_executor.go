@@ -78,6 +78,59 @@ func (e *QueryExecutor) ExecuteQuery(ctx context.Context, sqlQuery string, limit
 	}, nil
 }
 
+// Execute runs any SQL statement (DDL/DML) and returns results.
+func (e *QueryExecutor) Execute(ctx context.Context, sqlStatement string) (*datasource.ExecuteResult, error) {
+	rows, err := e.pool.Query(ctx, sqlStatement)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute statement: %w", err)
+	}
+	defer rows.Close()
+
+	result := &datasource.ExecuteResult{}
+
+	// Check if the statement returns rows (SELECT, INSERT/UPDATE/DELETE with RETURNING)
+	fieldDescs := rows.FieldDescriptions()
+	if len(fieldDescs) > 0 {
+		// Statement returns rows - collect them
+		result.Columns = make([]string, len(fieldDescs))
+		for i, fd := range fieldDescs {
+			result.Columns[i] = string(fd.Name)
+		}
+
+		result.Rows = make([]map[string]any, 0)
+		for rows.Next() {
+			values, err := rows.Values()
+			if err != nil {
+				return nil, fmt.Errorf("failed to read row values: %w", err)
+			}
+
+			rowMap := make(map[string]any)
+			for i, col := range result.Columns {
+				rowMap[col] = values[i]
+			}
+			result.Rows = append(result.Rows, rowMap)
+		}
+		result.RowCount = len(result.Rows)
+	} else {
+		// For DDL/DML without RETURNING, we must still consume the result
+		// to trigger execution and populate errors/CommandTag.
+		// pgx defers execution until rows are consumed.
+		for rows.Next() {
+			// No rows expected, but iteration triggers execution
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error during execution: %w", err)
+	}
+
+	// Get rows affected from command tag
+	cmdTag := rows.CommandTag()
+	result.RowsAffected = cmdTag.RowsAffected()
+
+	return result, nil
+}
+
 // ValidateQuery checks if a SQL query is syntactically valid without executing it.
 func (e *QueryExecutor) ValidateQuery(ctx context.Context, sqlQuery string) error {
 	// Use EXPLAIN to validate without executing
