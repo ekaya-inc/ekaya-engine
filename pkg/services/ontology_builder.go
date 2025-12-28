@@ -1883,7 +1883,7 @@ func (s *ontologyBuilderService) buildSchemaSummaryForDescription(tables []*mode
 
 	for _, table := range tables {
 		sb.WriteString(fmt.Sprintf("### %s\n", table.TableName))
-		if table.RowCount != nil {
+		if table.RowCount != nil && *table.RowCount >= 0 {
 			sb.WriteString(fmt.Sprintf("Rows: %d\n", *table.RowCount))
 		}
 		sb.WriteString("Columns: ")
