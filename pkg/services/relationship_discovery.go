@@ -19,6 +19,10 @@ const (
 	DefaultOrphanRateThreshold = 0.50 // 50% max orphan rate
 	DefaultSampleLimit         = 1000 // Max values to sample for overlap check
 	MaxColumnsPerStatsQuery    = 25   // Batch size for column stats
+
+	// CardinalityUniqueThreshold allows 10% tolerance for uniqueness detection
+	// to account for minor data inconsistencies or sampling variance.
+	CardinalityUniqueThreshold = 1.1
 )
 
 // Column data types excluded from join key consideration.
@@ -72,6 +76,9 @@ type relationshipDiscoveryService struct {
 	adapterFactory datasource.DatasourceAdapterFactory
 	logger         *zap.Logger
 }
+
+// Compile-time check that relationshipDiscoveryService implements RelationshipDiscoveryService.
+var _ RelationshipDiscoveryService = (*relationshipDiscoveryService)(nil)
 
 // NewRelationshipDiscoveryService creates a new relationship discovery service.
 func NewRelationshipDiscoveryService(
@@ -135,6 +142,9 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 			continue
 		}
 
+		// Extract row count for use in inner loop (defensive - nil already checked above)
+		tableRowCount := *table.RowCount
+
 		columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list columns for %s: %w", table.TableName, err)
@@ -148,7 +158,7 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 
 		stats, err := s.analyzeColumnStats(ctx, discoverer, table, columnNames)
 		if err != nil {
-			s.logger.Warn("Failed to analyze column stats, skipping table",
+			s.logger.Error("Failed to analyze column stats, skipping table",
 				zap.String("table", table.TableName),
 				zap.Error(err))
 			continue
@@ -165,7 +175,7 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 			columnsAnalyzed++
 			st := statsMap[col.ColumnName]
 
-			isJoinable, reason := s.classifyJoinability(col, st, *table.RowCount)
+			isJoinable, reason := s.classifyJoinability(col, st, tableRowCount)
 
 			// Update column joinability in database
 			var rowCount, nonNullCount *int64
@@ -175,7 +185,7 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 			}
 
 			if err := s.schemaRepo.UpdateColumnJoinability(ctx, col.ID, rowCount, nonNullCount, &isJoinable, &reason); err != nil {
-				s.logger.Warn("Failed to update column joinability",
+				s.logger.Error("Failed to update column joinability",
 					zap.String("column", col.ColumnName),
 					zap.Error(err))
 			}
@@ -235,10 +245,13 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 					continue
 				}
 
-				// Skip ALL numeric-to-numeric joins - these cause false positives.
-				// Auto-increment IDs, counts, and amounts naturally overlap across
-				// unrelated tables. Real numeric FK relationships are already
-				// captured via database FK constraints (imported as 'fk' type).
+				// Skip ALL numeric-to-numeric joins to prevent false positives from:
+				// 1. Auto-increment IDs naturally overlapping across unrelated tables
+				// 2. Count/amount columns falsely matching other numeric columns
+				// 3. Statistical coincidence in numeric data (e.g., order_total matching user_id)
+				//
+				// Real numeric FK relationships are captured via database FK constraints
+				// (imported as 'fk' type), so we lose no valid relationships here.
 				if isNumericType(source.column.DataType) && isNumericType(targetPK.DataType) {
 					continue
 				}
@@ -264,7 +277,16 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 	// Phase 4: Verify candidates via value overlap and join analysis
 	relationshipsCreated := 0
 
-	for _, candidate := range candidates {
+	for i, candidate := range candidates {
+		// Check for context cancellation periodically (every 100 candidates)
+		if i%100 == 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+			}
+		}
+
 		// Skip if target table doesn't exist (shouldn't happen but safety check)
 		if candidate.targetTable == nil {
 			continue
@@ -309,8 +331,9 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 
 		// Check orphan rate
 		var orphanRate float64
-		if joinAnalysis.SourceMatched > 0 {
-			orphanRate = float64(joinAnalysis.OrphanCount) / float64(joinAnalysis.SourceMatched+joinAnalysis.OrphanCount)
+		total := joinAnalysis.SourceMatched + joinAnalysis.OrphanCount
+		if total > 0 {
+			orphanRate = float64(joinAnalysis.OrphanCount) / float64(total)
 		}
 
 		if orphanRate > DefaultOrphanRateThreshold {
@@ -343,7 +366,7 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 		}
 
 		if err := s.schemaRepo.UpsertRelationshipWithMetrics(ctx, rel, metrics); err != nil {
-			s.logger.Warn("Failed to create relationship",
+			s.logger.Error("Failed to create relationship",
 				zap.String("source", candidate.sourceTable.TableName+"."+candidate.sourceColumn.ColumnName),
 				zap.String("target", candidate.targetTable.TableName+"."+candidate.targetColumn.ColumnName),
 				zap.Error(err))
@@ -434,14 +457,8 @@ func (s *relationshipDiscoveryService) classifyJoinability(col *models.SchemaCol
 		return true, models.JoinabilityPK
 	}
 
-	// Exclude certain data types
-	baseType := strings.ToLower(col.DataType)
-	// Strip any length/precision info like "varchar(255)"
-	if idx := strings.Index(baseType, "("); idx > 0 {
-		baseType = baseType[:idx]
-	}
-	// Handle array types like "integer[]"
-	baseType = strings.TrimSuffix(baseType, "[]")
+	// Exclude certain data types (use shared normalizeType function)
+	baseType := normalizeType(col.DataType)
 
 	if excludedJoinTypes[baseType] {
 		return false, models.JoinabilityTypeExcluded
@@ -449,7 +466,7 @@ func (s *relationshipDiscoveryService) classifyJoinability(col *models.SchemaCol
 
 	// Need stats for further classification
 	if stats == nil || tableRowCount == 0 {
-		return false, "no_stats"
+		return false, models.JoinabilityNoStats
 	}
 
 	// Check for unique values (potential FK target)
@@ -464,7 +481,7 @@ func (s *relationshipDiscoveryService) classifyJoinability(col *models.SchemaCol
 	}
 
 	// Default: joinable if it has reasonable cardinality
-	return true, "cardinality_ok"
+	return true, models.JoinabilityCardinalityOK
 }
 
 func (s *relationshipDiscoveryService) areTypesCompatible(sourceType, targetType string) bool {
@@ -499,17 +516,17 @@ func (s *relationshipDiscoveryService) inferCardinality(join *datasource.JoinAna
 	targetRatio := float64(join.JoinCount) / float64(join.TargetMatched)
 
 	// 1:1 - both sides have unique matches
-	if sourceRatio <= 1.1 && targetRatio <= 1.1 {
+	if sourceRatio <= CardinalityUniqueThreshold && targetRatio <= CardinalityUniqueThreshold {
 		return models.Cardinality1To1
 	}
 
 	// N:1 - multiple source rows match one target (typical FK)
-	if sourceRatio <= 1.1 && targetRatio > 1.1 {
+	if sourceRatio <= CardinalityUniqueThreshold && targetRatio > CardinalityUniqueThreshold {
 		return models.CardinalityNTo1
 	}
 
 	// 1:N - one source matches multiple targets (reverse FK)
-	if sourceRatio > 1.1 && targetRatio <= 1.1 {
+	if sourceRatio > CardinalityUniqueThreshold && targetRatio <= CardinalityUniqueThreshold {
 		return models.Cardinality1ToN
 	}
 
@@ -546,12 +563,9 @@ func (s *relationshipDiscoveryService) recordRejectedCandidate(
 	}
 
 	if err := s.schemaRepo.UpsertRelationshipWithMetrics(ctx, rel, metrics); err != nil {
-		s.logger.Warn("Failed to record rejected candidate",
+		s.logger.Error("Failed to record rejected candidate",
 			zap.String("source", candidate.sourceTable.TableName+"."+candidate.sourceColumn.ColumnName),
 			zap.String("target", candidate.targetTable.TableName+"."+candidate.targetColumn.ColumnName),
 			zap.Error(err))
 	}
 }
-
-// Ensure relationshipDiscoveryService implements RelationshipDiscoveryService at compile time.
-var _ RelationshipDiscoveryService = (*relationshipDiscoveryService)(nil)

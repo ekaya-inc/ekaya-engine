@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
@@ -469,7 +470,7 @@ func (r *schemaRepository) GetColumnByID(ctx context.Context, projectID, columnI
 	c, err := scanSchemaColumnRow(row)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("column not found")
+			return nil, apperrors.ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to get column: %w", err)
 	}
@@ -495,7 +496,7 @@ func (r *schemaRepository) GetColumnByName(ctx context.Context, tableID uuid.UUI
 	c, err := scanSchemaColumnRow(row)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("column not found")
+			return nil, apperrors.ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to get column: %w", err)
 	}
@@ -657,7 +658,7 @@ func (r *schemaRepository) UpdateColumnSelection(ctx context.Context, projectID,
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("column not found")
+		return apperrors.ErrNotFound
 	}
 
 	return nil
@@ -680,7 +681,7 @@ func (r *schemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("column not found")
+		return apperrors.ErrNotFound
 	}
 
 	return nil
@@ -705,7 +706,7 @@ func (r *schemaRepository) UpdateColumnMetadata(ctx context.Context, projectID, 
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("column not found")
+		return apperrors.ErrNotFound
 	}
 
 	return nil
@@ -1312,7 +1313,7 @@ func (r *schemaRepository) UpdateColumnJoinability(ctx context.Context, columnID
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("column not found")
+		return apperrors.ErrNotFound
 	}
 
 	return nil

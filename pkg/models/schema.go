@@ -163,12 +163,13 @@ const (
 	MatchQualityModerate = "moderate"
 )
 
-// Inference methods for discovered relationships
+// Inference methods for discovered relationships.
+// Some methods are reserved for future inference algorithms.
 const (
-	InferenceMethodNamingPattern = "naming_pattern"
-	InferenceMethodValueOverlap  = "value_overlap"
-	InferenceMethodTypeMatch     = "type_match"
-	InferenceMethodForeignKey    = "foreign_key"
+	InferenceMethodNamingPattern = "naming_pattern" // Reserved: column name pattern matching (e.g., user_id -> users.id)
+	InferenceMethodValueOverlap  = "value_overlap"  // Active: statistical value overlap analysis
+	InferenceMethodTypeMatch     = "type_match"     // Reserved: type-compatible column matching
+	InferenceMethodForeignKey    = "foreign_key"    // Active: imported from database FK constraints
 )
 
 // Rejection reasons for relationship candidates
@@ -187,6 +188,8 @@ const (
 	JoinabilityUniqueValues   = "unique_values"
 	JoinabilityTypeExcluded   = "type_excluded"
 	JoinabilityLowCardinality = "low_cardinality"
+	JoinabilityNoStats        = "no_stats"
+	JoinabilityCardinalityOK  = "cardinality_ok"
 )
 
 // Candidate statuses for relationship discovery
