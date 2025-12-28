@@ -334,6 +334,10 @@ func (m *mockSchemaRepository) GetRelationshipCandidates(ctx context.Context, pr
 	return nil, nil
 }
 
+func (m *mockSchemaRepository) GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+
 // mockDatasourceService is a mock for DatasourceService.
 type mockDatasourceService struct {
 	datasource *models.Datasource

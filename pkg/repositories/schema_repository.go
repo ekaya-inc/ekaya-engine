@@ -63,6 +63,8 @@ type SchemaRepository interface {
 	UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount *int64, isJoinable *bool, joinabilityReason *string) error
 	GetPrimaryKeyColumns(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error)
 	GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.RelationshipCandidate, error)
+	// GetNonPKColumnsByExactType returns non-primary-key columns with exact data type match for review candidate discovery.
+	GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error)
 }
 
 type schemaRepository struct{}
@@ -1421,6 +1423,51 @@ func (r *schemaRepository) GetRelationshipCandidates(ctx context.Context, projec
 	}
 
 	return candidates, nil
+}
+
+func (r *schemaRepository) GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	// Returns non-primary-key columns with exact data type match for review candidate discovery.
+	// Includes column stats and table info for cardinality filtering.
+	query := `
+		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
+		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
+		       c.default_value, c.distinct_count, c.null_count, c.business_name, c.description, c.metadata,
+		       c.created_at, c.updated_at,
+		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at
+		FROM engine_schema_columns c
+		JOIN engine_schema_tables t ON c.schema_table_id = t.id
+		WHERE c.project_id = $1
+		  AND t.datasource_id = $2
+		  AND c.deleted_at IS NULL
+		  AND t.deleted_at IS NULL
+		  AND c.is_primary_key = false
+		  AND LOWER(c.data_type) = LOWER($3)
+		ORDER BY t.schema_name, t.table_name, c.ordinal_position`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID, dataType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get non-PK columns by type: %w", err)
+	}
+	defer rows.Close()
+
+	columns := make([]*models.SchemaColumn, 0)
+	for rows.Next() {
+		c, err := scanSchemaColumnWithDiscovery(rows)
+		if err != nil {
+			return nil, err
+		}
+		columns = append(columns, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating non-PK columns: %w", err)
+	}
+
+	return columns, nil
 }
 
 // ============================================================================

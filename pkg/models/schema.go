@@ -109,6 +109,7 @@ const (
 	RelationshipTypeFK       = "fk"
 	RelationshipTypeInferred = "inferred"
 	RelationshipTypeManual   = "manual"
+	RelationshipTypeReview   = "review" // Pending LLM review for orphan tables
 )
 
 // ValidRelationshipTypes contains all valid relationship type values.
@@ -116,6 +117,7 @@ var ValidRelationshipTypes = []string{
 	RelationshipTypeFK,
 	RelationshipTypeInferred,
 	RelationshipTypeManual,
+	RelationshipTypeReview,
 }
 
 // IsValidRelationshipType checks if the given type is valid.
@@ -309,6 +311,7 @@ type RelationshipsResponse struct {
 // DiscoveryResults contains statistics from a relationship discovery operation.
 type DiscoveryResults struct {
 	RelationshipsCreated       int      `json:"relationships_created"`
+	ReviewCandidatesCreated    int      `json:"review_candidates_created"` // Review candidates for orphan tables
 	TablesAnalyzed             int      `json:"tables_analyzed"`
 	ColumnsAnalyzed            int      `json:"columns_analyzed"`
 	TablesWithoutRelationships int      `json:"tables_without_relationships"`

@@ -382,6 +382,10 @@ func (m *mockSchemaRepo) GetRelationshipCandidates(ctx context.Context, projectI
 	return nil, m.err
 }
 
+func (m *mockSchemaRepo) GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error) {
+	return nil, m.err
+}
+
 type mockQueryExecutor struct {
 	result *datasource.QueryExecutionResult
 	err    error

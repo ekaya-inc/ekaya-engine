@@ -23,6 +23,19 @@ const (
 	// CardinalityUniqueThreshold allows 10% tolerance for uniqueness detection
 	// to account for minor data inconsistencies or sampling variance.
 	CardinalityUniqueThreshold = 1.1
+
+	// Review candidate configuration - more aggressive discovery for orphan tables
+	// ReviewMinCardinalityRatio is the minimum distinct/total ratio for review candidates.
+	// Columns with lower ratios look like counts or status codes, not join keys.
+	ReviewMinCardinalityRatio = 0.10 // 10%
+
+	// ReviewMinDistinctCount is the minimum distinct values for review candidates.
+	// Small counts (1-100) are likely enums or status codes.
+	ReviewMinDistinctCount = 100
+
+	// ReviewMaxOrphanRate for review candidates (must be 0 for strict matching).
+	// All source values must exist in target column.
+	ReviewMaxOrphanRate = 0.0 // 0% - all values must exist in target
 )
 
 // Column data types excluded from join key consideration.
@@ -387,12 +400,26 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 	results.RelationshipsCreated = relationshipsCreated
 
 	// Find orphan tables (non-empty tables with no relationships)
+	orphanTables := make([]*models.SchemaTable, 0)
 	for _, table := range tables {
 		if table.RowCount != nil && *table.RowCount > 0 {
 			if !tablesWithOutbound[table.ID] && !tablesWithInbound[table.ID] {
 				results.TablesWithoutRelationships++
 				results.OrphanTableNames = append(results.OrphanTableNames, table.TableName)
+				orphanTables = append(orphanTables, table)
 			}
+		}
+	}
+
+	// Phase 6: Find review candidates for orphan tables
+	// These are numeric-to-numeric relationships that we skipped earlier but may be valid FKs
+	if len(orphanTables) > 0 {
+		reviewCreated, err := s.findReviewCandidates(ctx, discoverer, projectID, datasourceID, orphanTables, tableByID, pkColumnsByTable, existingRelSet)
+		if err != nil {
+			s.logger.Error("Failed to find review candidates", zap.Error(err))
+			// Continue - this is not fatal
+		} else {
+			results.ReviewCandidatesCreated = reviewCreated
 		}
 	}
 
@@ -401,6 +428,7 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 		zap.Int("tables_analyzed", results.TablesAnalyzed),
 		zap.Int("columns_analyzed", results.ColumnsAnalyzed),
 		zap.Int("relationships_created", results.RelationshipsCreated),
+		zap.Int("review_candidates_created", results.ReviewCandidatesCreated),
 		zap.Int("empty_tables", results.EmptyTables),
 		zap.Int("orphan_tables", results.TablesWithoutRelationships))
 
@@ -568,4 +596,204 @@ func (s *relationshipDiscoveryService) recordRejectedCandidate(
 			zap.String("target", candidate.targetTable.TableName+"."+candidate.targetColumn.ColumnName),
 			zap.Error(err))
 	}
+}
+
+// findReviewCandidates discovers potential numeric FK relationships for orphan tables.
+// It finds tables that may reference the orphan table's PK via an FK column.
+// These are stored as type='review' for LLM-assisted verification since numeric
+// relationships were skipped by the deterministic algorithm to avoid false positives.
+//
+// Algorithm: For each orphan table, find non-PK columns in other tables that:
+// 1. Have exact type match with the orphan's PK
+// 2. Have high cardinality (not counts/status codes)
+// 3. Have 100% of their values present in the orphan's PK (FK integrity)
+//
+// Relationships follow FK convention: source=FK holder, target=PK holder
+// e.g., other_table.orphan_id -> orphan_table.id
+func (s *relationshipDiscoveryService) findReviewCandidates(
+	ctx context.Context,
+	discoverer datasource.SchemaDiscoverer,
+	projectID, datasourceID uuid.UUID,
+	orphanTables []*models.SchemaTable,
+	tableByID map[uuid.UUID]*models.SchemaTable,
+	pkColumnsByTable map[uuid.UUID][]*models.SchemaColumn,
+	existingRelSet map[string]bool,
+) (int, error) {
+	reviewCreated := 0
+
+	for _, orphanTable := range orphanTables {
+		// Get PK columns from orphan table (these are potential FK targets)
+		pkColumns, err := s.getSourceColumnsForReview(ctx, projectID, orphanTable)
+		if err != nil {
+			s.logger.Error("Failed to get PK columns for review",
+				zap.String("table", orphanTable.TableName),
+				zap.Error(err))
+			continue
+		}
+
+		for _, pkCol := range pkColumns {
+			// Only consider numeric types for review candidates
+			if !isNumericType(pkCol.DataType) {
+				continue
+			}
+
+			// Find FK candidate columns (non-PK columns with exact type match)
+			fkCandidates, err := s.schemaRepo.GetNonPKColumnsByExactType(ctx, projectID, datasourceID, pkCol.DataType)
+			if err != nil {
+				s.logger.Error("Failed to get FK candidate columns by type",
+					zap.String("type", pkCol.DataType),
+					zap.Error(err))
+				continue
+			}
+
+			for _, fkCol := range fkCandidates {
+				// Skip self-references
+				if pkCol.SchemaTableID == fkCol.SchemaTableID {
+					continue
+				}
+
+				// Skip if relationship already exists (FK -> PK direction)
+				key := fkCol.ID.String() + "->" + pkCol.ID.String()
+				if existingRelSet[key] {
+					continue
+				}
+
+				// Get FK table
+				fkTable := tableByID[fkCol.SchemaTableID]
+				if fkTable == nil {
+					continue
+				}
+
+				// Check FK column has high cardinality (looks like a join key, not a count)
+				if !s.isHighCardinality(fkCol, fkTable) {
+					continue
+				}
+
+				// Check FK integrity: all FK values must exist in PK
+				// Source = FK column, Target = PK column
+				overlap, err := discoverer.CheckValueOverlap(
+					ctx,
+					fkTable.SchemaName, fkTable.TableName, fkCol.ColumnName,
+					orphanTable.SchemaName, orphanTable.TableName, pkCol.ColumnName,
+					DefaultSampleLimit,
+				)
+				if err != nil {
+					s.logger.Debug("Value overlap check failed for review candidate",
+						zap.String("fk", fkTable.TableName+"."+fkCol.ColumnName),
+						zap.String("pk", orphanTable.TableName+"."+pkCol.ColumnName),
+						zap.Error(err))
+					continue
+				}
+
+				// Require 100% match (no orphan FK values) for review candidates
+				// This is strict by design - review candidates should have high confidence
+				if overlap.MatchRate < 1.0-ReviewMaxOrphanRate {
+					continue
+				}
+
+				// Create review relationship following FK convention: source=FK, target=PK
+				inferenceMethod := models.InferenceMethodValueOverlap
+				rel := &models.SchemaRelationship{
+					ProjectID:        projectID,
+					SourceTableID:    fkTable.ID,      // FK holder
+					SourceColumnID:   fkCol.ID,        // FK column
+					TargetTableID:    orphanTable.ID,  // PK holder
+					TargetColumnID:   pkCol.ID,        // PK column
+					RelationshipType: models.RelationshipTypeReview,
+					Cardinality:      models.CardinalityUnknown, // Will be determined on approval
+					Confidence:       overlap.MatchRate,
+					InferenceMethod:  &inferenceMethod,
+					IsValidated:      false,
+					IsApproved:       nil, // Pending review
+				}
+
+				metrics := &models.DiscoveryMetrics{
+					MatchRate:      overlap.MatchRate,
+					SourceDistinct: overlap.SourceDistinct,
+					TargetDistinct: overlap.TargetDistinct,
+					MatchedCount:   overlap.MatchedCount,
+				}
+
+				if err := s.schemaRepo.UpsertRelationshipWithMetrics(ctx, rel, metrics); err != nil {
+					s.logger.Error("Failed to create review relationship",
+						zap.String("fk", fkTable.TableName+"."+fkCol.ColumnName),
+						zap.String("pk", orphanTable.TableName+"."+pkCol.ColumnName),
+						zap.Error(err))
+					continue
+				}
+
+				reviewCreated++
+				existingRelSet[key] = true // Prevent duplicates
+
+				s.logger.Info("Created review candidate",
+					zap.String("fk", fkTable.TableName+"."+fkCol.ColumnName),
+					zap.String("pk", orphanTable.TableName+"."+pkCol.ColumnName),
+					zap.Float64("match_rate", overlap.MatchRate))
+			}
+		}
+	}
+
+	return reviewCreated, nil
+}
+
+// getSourceColumnsForReview returns the columns to use as source for review candidate discovery.
+// If the table has a primary key, only PK columns are returned (more restrictive).
+// If the table has no primary key, all numeric columns are returned.
+func (s *relationshipDiscoveryService) getSourceColumnsForReview(ctx context.Context, projectID uuid.UUID, table *models.SchemaTable) ([]*models.SchemaColumn, error) {
+	columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if table has a primary key
+	hasPK := false
+	for _, col := range columns {
+		if col.IsPrimaryKey {
+			hasPK = true
+			break
+		}
+	}
+
+	result := make([]*models.SchemaColumn, 0)
+	for _, col := range columns {
+		if hasPK {
+			// If table has PK, only use PK columns
+			if col.IsPrimaryKey {
+				result = append(result, col)
+			}
+		} else {
+			// If no PK, use all numeric columns
+			if isNumericType(col.DataType) {
+				result = append(result, col)
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// isHighCardinality checks if a column has high enough cardinality to be a join key.
+// Low cardinality columns (counts, status codes) are excluded.
+func (s *relationshipDiscoveryService) isHighCardinality(col *models.SchemaColumn, table *models.SchemaTable) bool {
+	// Need distinct count stats
+	if col.DistinctCount == nil {
+		return false
+	}
+
+	distinctCount := *col.DistinctCount
+
+	// Must have at least ReviewMinDistinctCount distinct values
+	if distinctCount < ReviewMinDistinctCount {
+		return false
+	}
+
+	// Check cardinality ratio if we have row count
+	if table.RowCount != nil && *table.RowCount > 0 {
+		ratio := float64(distinctCount) / float64(*table.RowCount)
+		if ratio < ReviewMinCardinalityRatio {
+			return false
+		}
+	}
+
+	return true
 }
