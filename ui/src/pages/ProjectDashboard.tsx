@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Brain,
   Check,
+  ChevronDown,
   Database,
   Layers,
   ListTree,
@@ -15,7 +16,8 @@ import {
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
-import ManagedAIOptionPanel from '../components/ManagedAIOptionPanel';
+// TEMPORARY: Import commented out for MVP launch - Coming Soon UI replaces full panels
+// import ManagedAIOptionPanel from '../components/ManagedAIOptionPanel';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import {
   Dialog,
@@ -82,6 +84,16 @@ const ProjectDashboard = () => {
   const [showRemoveConfirmation, setShowRemoveConfirmation] = useState(false);
   const [aiOptions, setAiOptions] = useState<AIOptionsResponse | null>(null);
 
+  // Preset LLM provider URLs for combo box
+  const llmProviderPresets = [
+    { label: 'OpenAI', url: 'https://api.openai.com/v1' },
+    { label: 'Anthropic', url: 'https://api.anthropic.com/v1' },
+    { label: 'Azure OpenAI', url: '' }, // User needs to fill in their resource name
+    { label: 'Custom', url: '' },
+  ];
+  const [selectedProvider, setSelectedProvider] = useState<string>('OpenAI');
+  const [isProviderDropdownOpen, setIsProviderDropdownOpen] = useState(false);
+
   // Load AI config and options on mount
   const loadAIConfig = useCallback(async () => {
     if (!pid) return;
@@ -107,6 +119,17 @@ const ProjectDashboard = () => {
             embeddingApiKey: data.embedding_api_key ?? '',
             embeddingModel: data.embedding_model ?? '',
           });
+          // Set provider dropdown based on loaded URL
+          const loadedUrl = data.llm_base_url ?? '';
+          if (loadedUrl.includes('api.openai.com')) {
+            setSelectedProvider('OpenAI');
+          } else if (loadedUrl.includes('api.anthropic.com')) {
+            setSelectedProvider('Anthropic');
+          } else if (loadedUrl.includes('openai.azure.com')) {
+            setSelectedProvider('Azure OpenAI');
+          } else if (loadedUrl) {
+            setSelectedProvider('Custom');
+          }
         }
       }
 
@@ -319,17 +342,18 @@ const ProjectDashboard = () => {
     return '';
   };
 
+  // Full list of AI options - preserved for when Community/Embedded models are ready
   const aiOptionsList = [
     {
       id: 'byok' as const,
       title: 'Bring Your Own AI Keys',
-      badge: 'Flexible',
+      badge: 'Free',
       badgeColor: 'bg-gray-500 text-white',
     },
     {
       id: 'community' as const,
       title: 'Community Model',
-      badge: 'FREE',
+      badge: 'Easy',
       badgeColor: 'bg-gray-500 text-white',
     },
     {
@@ -339,6 +363,9 @@ const ProjectDashboard = () => {
       badgeColor: 'bg-gray-500 text-white',
     },
   ];
+
+  // TEMPORARY: For launch, Community/Embedded show "Coming Soon" instead of full config
+  // TODO: Remove this comment and enable full functionality when models are ready
 
   // Check if save is allowed (disabled if another config is already active)
   const canSaveConfig = (optionId: AIOption): boolean => {
@@ -546,8 +573,11 @@ const ProjectDashboard = () => {
           </p>
         )}
         <h1 className="text-2xl font-semibold mb-2">Intelligence</h1>
+        {/* TEMPORARY: Simplified description for BYOK-only launch
+            Original text: Add intelligence to the data by connecting a Large Language Model. You can bring your own AI keys or use Ekaya's models that are customized for data querying and analytics. Ekaya offers a free community model as well as licensed embeddable models that you can host so that no data leaves your data boundary.
+            TODO: Restore original text when Community/Embedded models are ready */}
         <p className={`mb-4 ${!hasSelectedTables || !activeAIConfig ? 'text-text-secondary/50' : 'text-text-secondary'}`}>
-          Add intelligence to the data by connecting a Large Language Model. You can bring your own AI keys or use Ekaya&apos;s models that are customized for data querying and analytics. Ekaya offers a free community model as well as licensed embeddable models that you can host so that no data leaves your data boundary.
+          Add intelligence to the data by connecting a Large Language Model. Configure your own OpenAI-compatible API keys to enable AI-powered features like ontology extraction, semantic search, and natural language querying.
         </p>
         
         {/* AI Selection Bar */}
@@ -588,13 +618,16 @@ const ProjectDashboard = () => {
                 </div>
               ) : (
                 <>
+              {/* TEMPORARY: Simplified description for LLM-only MVP
+                  Original: Configure OpenAI-compatible endpoints for chat completions and embeddings. Most providers (OpenAI, Anthropic, Azure, Ollama, vLLM, Together AI) support this interface. */}
               <p className="text-text-secondary text-sm mb-6">
-                Configure OpenAI-compatible endpoints for chat completions and embeddings. Most providers (OpenAI, Anthropic, Azure, Ollama, vLLM, Together AI) support this interface.
+                Configure an OpenAI-compatible endpoint for chat completions. Most providers (OpenAI, Anthropic, Azure, Ollama, vLLM, Together AI) support this interface.
               </p>
 
-              <div className="grid md:grid-cols-2 gap-6">
+              {/* TEMPORARY: Single column layout for LLM-only MVP. Original was grid md:grid-cols-2 */}
+              <div>
                 {/* LLM Configuration */}
-                <div className="space-y-4">
+                <div className="space-y-4 max-w-md">
                   <h3 className="text-base font-semibold text-text-primary flex items-center gap-2">
                     <Brain className="h-4 w-4" />
                     Chat Model (LLM)
@@ -602,18 +635,55 @@ const ProjectDashboard = () => {
 
                   <div>
                     <label className="block text-sm font-medium text-text-primary mb-1">
-                      Base URL
+                      Provider
                     </label>
-                    <input
-                      type="text"
-                      placeholder="https://api.openai.com/v1"
-                      value={aiConfig.llmBaseUrl}
-                      onChange={(e) => updateAiConfig('llmBaseUrl', e.target.value)}
-                      className={`w-full rounded-lg border bg-surface-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/50 focus:ring-1 focus:outline-none ${getInputErrorClass('llm', 'endpoint') || 'border-border-light focus:border-brand-purple focus:ring-brand-purple'}`}
-                    />
-                    <p className="mt-1 text-xs text-text-tertiary">
-                      Anthropic: api.anthropic.com/v1 • Azure: your-resource.openai.azure.com
-                    </p>
+                    {/* Custom dropdown - replaces native select for consistent styling */}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setIsProviderDropdownOpen(!isProviderDropdownOpen)}
+                        className={`w-full rounded-lg border bg-surface-primary px-3 py-2 text-sm text-text-primary text-left flex items-center justify-between focus:ring-1 focus:outline-none ${getInputErrorClass('llm', 'endpoint') || 'border-border-light focus:border-brand-purple focus:ring-brand-purple'}`}
+                      >
+                        <span>{selectedProvider}</span>
+                        <ChevronDown className={`h-4 w-4 text-text-tertiary transition-transform ${isProviderDropdownOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                      {isProviderDropdownOpen && (
+                        <div className="absolute z-10 w-full mt-1 rounded-lg border border-border-light bg-surface-primary shadow-lg overflow-hidden">
+                          {llmProviderPresets.map((preset) => (
+                            <button
+                              key={preset.label}
+                              type="button"
+                              onClick={() => {
+                                setSelectedProvider(preset.label);
+                                setIsProviderDropdownOpen(false);
+                                // Set URL for presets with URLs, clear for Custom/Azure
+                                updateAiConfig('llmBaseUrl', preset.url);
+                              }}
+                              className={`w-full px-3 py-2 text-sm text-left hover:bg-surface-hover flex items-center justify-between ${
+                                selectedProvider === preset.label ? 'bg-surface-secondary text-text-primary' : 'text-text-primary'
+                              }`}
+                            >
+                              <span>{preset.label}</span>
+                              {selectedProvider === preset.label && <Check className="h-4 w-4 text-brand-purple" />}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {(selectedProvider === 'Custom' || selectedProvider === 'Azure OpenAI') && (
+                      <input
+                        type="text"
+                        placeholder={selectedProvider === 'Azure OpenAI' ? 'https://your-resource.openai.azure.com' : 'https://your-endpoint.com/v1'}
+                        value={aiConfig.llmBaseUrl}
+                        onChange={(e) => updateAiConfig('llmBaseUrl', e.target.value)}
+                        className={`w-full mt-2 rounded-lg border bg-surface-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/50 focus:ring-1 focus:outline-none ${getInputErrorClass('llm', 'endpoint') || 'border-border-light focus:border-brand-purple focus:ring-brand-purple'}`}
+                      />
+                    )}
+                    {selectedProvider === 'Azure OpenAI' && (
+                      <p className="mt-1 text-xs text-text-tertiary">
+                        Enter your Azure OpenAI resource endpoint
+                      </p>
+                    )}
                   </div>
 
                   <div>
@@ -646,7 +716,7 @@ const ProjectDashboard = () => {
                   </div>
                 </div>
 
-                {/* Embedding Configuration */}
+                {/* TEMPORARY: Embedding Configuration hidden for MVP launch
                 <div className="space-y-4">
                   <h3 className="text-base font-semibold text-text-primary flex items-center gap-2">
                     <Search className="h-4 w-4" />
@@ -698,6 +768,7 @@ const ProjectDashboard = () => {
                     />
                   </div>
                 </div>
+                END TEMPORARY: Embedding Configuration */}
               </div>
 
               {/* Test Result Display */}
@@ -758,6 +829,18 @@ const ProjectDashboard = () => {
             </div>
           )}
           
+          {/* TEMPORARY: Community - Coming Soon for MVP launch */}
+          {selectedAIOption === 'community' && (
+            <div className="rounded-b-lg bg-surface-secondary p-6 border border-t-0 border-border-light">
+              <p className="text-text-secondary mb-4">
+                The Ekaya Community Models are free to use. We fine-tune the Community Models using anonymized schema, natural language and SQL queries from participants. The end result is a more robust and accurate model than the frontier models in this domain.
+              </p>
+              <div className="flex items-center justify-center py-8 text-text-tertiary">
+                <span className="text-lg font-medium">Coming Soon</span>
+              </div>
+            </div>
+          )}
+          {/* END TEMPORARY: Original ManagedAIOptionPanel code preserved below
           {selectedAIOption === 'community' && (
             <div className="rounded-b-lg bg-surface-secondary p-6 border border-t-0 border-border-light">
               <ManagedAIOptionPanel
@@ -778,7 +861,23 @@ const ProjectDashboard = () => {
               />
             </div>
           )}
-          
+          */}
+
+          {/* TEMPORARY: Embedded - Coming Soon for MVP launch */}
+          {selectedAIOption === 'embedded' && (
+            <div className="rounded-b-lg bg-surface-secondary p-6 border border-t-0 border-border-light">
+              <p className="text-text-secondary mb-4">
+                Ekaya offers custom models that you can host on your own infrastructure or as part of your hybrid cloud so that data never leaves your security boundary. Your data is not used for training these models although Ekaya can build models customized for your internal needs.
+              </p>
+              <p className="text-text-secondary mb-4">
+                These models have been fine-tuned for this domain and include prevention of SQL and LLM prompt injection attacks as well as detecting data leakage. These models are required for some features.
+              </p>
+              <div className="flex items-center justify-center py-8 text-text-tertiary">
+                <span className="text-lg font-medium">Coming Soon</span>
+              </div>
+            </div>
+          )}
+          {/* END TEMPORARY: Original ManagedAIOptionPanel code preserved below
           {selectedAIOption === 'embedded' && (
             <div className="rounded-b-lg bg-surface-secondary p-6 border border-t-0 border-border-light">
               <ManagedAIOptionPanel
@@ -802,6 +901,7 @@ const ProjectDashboard = () => {
               />
             </div>
           )}
+          */}
         </div>
 
         {/* Status message when AI not configured (shown after AI selector, before tiles) */}
