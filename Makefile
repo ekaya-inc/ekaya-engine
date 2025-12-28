@@ -56,9 +56,10 @@ install-air:
 		echo ".air.toml already exists."; \
 	fi
 
-clean: ## Clean build artifacts
+clean: ## Clean build artifacts and Go cache
 	@echo "$(YELLOW)Cleaning build artifacts...$(NC)"
 	@rm -rf bin/
+	@go clean -cache
 	@cd ui && npm run clean
 	@echo "$(GREEN)✓ Clean complete$(NC)"
 
