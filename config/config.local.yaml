@@ -5,8 +5,8 @@
 # Server configuration
 port: "3443"
 env: "local"
-base_url: "http://localhost:3443" # WHERE THIS INSTANCE RUNS - determines cookie Secure flag
-region_domain: "localhost"
+# base_url: auto-derived as http://localhost:$PORT when not set
+# Set BASE_URL env var only when behind a load balancer or on internal server
 auth_server_url: "http://localhost:5002" # Firebase hosting emulator (not direct function URL)
 cookie_domain: "" # Auto-derived from base_url if empty. Leave empty for localhost.
 
