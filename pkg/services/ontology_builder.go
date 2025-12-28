@@ -262,6 +262,36 @@ func (s *ontologyBuilderService) BuildTieredOntology(ctx context.Context, projec
 	return nil
 }
 
+// loadTablesWithColumns loads tables and attaches their columns in a single batch query.
+// This is more efficient than loading columns per-table (1 query vs N queries).
+// BuildTieredOntology uses this to ensure columns are available for prompt building.
+func (s *ontologyBuilderService) loadTablesWithColumns(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	// Load tables
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tables: %w", err)
+	}
+
+	// Load all columns in one query
+	allColumns, err := s.schemaRepo.ListColumnsByDatasource(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load columns: %w", err)
+	}
+
+	// Group columns by table ID
+	columnsByTable := make(map[uuid.UUID][]models.SchemaColumn)
+	for _, col := range allColumns {
+		columnsByTable[col.SchemaTableID] = append(columnsByTable[col.SchemaTableID], *col)
+	}
+
+	// Attach columns to tables
+	for _, table := range tables {
+		table.Columns = columnsByTable[table.ID]
+	}
+
+	return tables, nil
+}
+
 // ============================================================================
 // BuildEntitySummaries - Tier 1
 // ============================================================================
