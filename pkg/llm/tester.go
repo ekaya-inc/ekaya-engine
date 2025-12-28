@@ -103,13 +103,7 @@ func (t *connectionTester) Test(ctx context.Context, cfg *TestConfig) *TestResul
 	// Overall success
 	if result.LLMSuccess {
 		result.Success = true
-		if result.EmbeddingSuccess {
-			result.Message = "LLM and embedding connections successful"
-		} else if cfg.EmbeddingModel == "" {
-			result.Message = "LLM connection successful (embedding not configured)"
-		} else {
-			result.Message = "LLM connection successful, embedding failed"
-		}
+		result.Message = "LLM connection successful"
 	} else {
 		result.Message = result.LLMMessage
 	}
