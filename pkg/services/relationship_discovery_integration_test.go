@@ -722,25 +722,26 @@ func TestSchemaService_ReviewRelationship_StoredCorrectly_Integration(t *testing
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
 
-	// Create source table (orphan - no relationships)
+	// Create orphan table (PK holder - will be the TARGET in relationship)
 	orphanTable := tc.createTestTable(ctx, "public", "orphan_table", 1000)
 	orphanIDCol := tc.createTestColumn(ctx, orphanTable.ID, "id", "bigint", 1, true)
 
-	// Create target table
-	targetTable := tc.createTestTable(ctx, "public", "target_table", 500)
-	tc.createTestColumn(ctx, targetTable.ID, "id", "bigint", 1, true)
-	tc.createTestColumnWithStats(ctx, targetTable.ID, "ref_id", "bigint", 2, false, 300)
+	// Create FK table (FK holder - will be the SOURCE in relationship)
+	fkTable := tc.createTestTable(ctx, "public", "fk_table", 500)
+	tc.createTestColumn(ctx, fkTable.ID, "id", "bigint", 1, true)
+	tc.createTestColumnWithStats(ctx, fkTable.ID, "orphan_ref_id", "bigint", 2, false, 300)
 
-	// Create a review relationship directly (simulating what findReviewCandidates would create)
+	// Create a review relationship following FK convention: source=FK holder, target=PK holder
+	// This simulates what findReviewCandidates creates: fk_table.orphan_ref_id -> orphan_table.id
 	inferenceMethod := models.InferenceMethodValueOverlap
-	refCol, _ := tc.repo.GetColumnByName(ctx, targetTable.ID, "ref_id")
+	fkCol, _ := tc.repo.GetColumnByName(ctx, fkTable.ID, "orphan_ref_id")
 
 	rel := &models.SchemaRelationship{
 		ProjectID:        tc.projectID,
-		SourceTableID:    orphanTable.ID,
-		SourceColumnID:   orphanIDCol.ID,
-		TargetTableID:    targetTable.ID,
-		TargetColumnID:   refCol.ID,
+		SourceTableID:    fkTable.ID,     // FK holder (source)
+		SourceColumnID:   fkCol.ID,       // FK column
+		TargetTableID:    orphanTable.ID, // PK holder (target)
+		TargetColumnID:   orphanIDCol.ID, // PK column
 		RelationshipType: models.RelationshipTypeReview,
 		Cardinality:      models.CardinalityUnknown,
 		Confidence:       1.0,
@@ -751,9 +752,9 @@ func TestSchemaService_ReviewRelationship_StoredCorrectly_Integration(t *testing
 
 	metrics := &models.DiscoveryMetrics{
 		MatchRate:      1.0,
-		SourceDistinct: 500,
-		TargetDistinct: 300,
-		MatchedCount:   500,
+		SourceDistinct: 300,
+		TargetDistinct: 1000,
+		MatchedCount:   300,
 	}
 
 	err := tc.repo.UpsertRelationshipWithMetrics(ctx, rel, metrics)
@@ -777,6 +778,14 @@ func TestSchemaService_ReviewRelationship_StoredCorrectly_Integration(t *testing
 		t.Error("expected IsValidated to be false")
 	}
 
+	// Verify correct direction: FK table is source, orphan table is target
+	if retrieved.SourceTableID != fkTable.ID {
+		t.Errorf("expected SourceTableID to be FK table %s, got %s", fkTable.ID, retrieved.SourceTableID)
+	}
+	if retrieved.TargetTableID != orphanTable.ID {
+		t.Errorf("expected TargetTableID to be orphan table %s, got %s", orphanTable.ID, retrieved.TargetTableID)
+	}
+
 	// Verify it appears in relationships response
 	response, err := tc.service.GetRelationshipsResponse(ctx, tc.projectID, tc.dsID)
 	if err != nil {
@@ -787,6 +796,13 @@ func TestSchemaService_ReviewRelationship_StoredCorrectly_Integration(t *testing
 	for _, rd := range response.Relationships {
 		if rd.RelationshipType == models.RelationshipTypeReview {
 			found = true
+			// Verify direction in response: source should be FK table
+			if rd.SourceTableName != "fk_table" {
+				t.Errorf("expected source table 'fk_table', got %q", rd.SourceTableName)
+			}
+			if rd.TargetTableName != "orphan_table" {
+				t.Errorf("expected target table 'orphan_table', got %q", rd.TargetTableName)
+			}
 			break
 		}
 	}

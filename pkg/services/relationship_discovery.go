@@ -695,10 +695,10 @@ func (s *relationshipDiscoveryService) findReviewCandidates(
 				inferenceMethod := models.InferenceMethodValueOverlap
 				rel := &models.SchemaRelationship{
 					ProjectID:        projectID,
-					SourceTableID:    fkTable.ID,      // FK holder
-					SourceColumnID:   fkCol.ID,        // FK column
-					TargetTableID:    orphanTable.ID,  // PK holder
-					TargetColumnID:   pkCol.ID,        // PK column
+					SourceTableID:    fkTable.ID,     // FK holder
+					SourceColumnID:   fkCol.ID,       // FK column
+					TargetTableID:    orphanTable.ID, // PK holder
+					TargetColumnID:   pkCol.ID,       // PK column
 					RelationshipType: models.RelationshipTypeReview,
 					Cardinality:      models.CardinalityUnknown, // Will be determined on approval
 					Confidence:       overlap.MatchRate,
