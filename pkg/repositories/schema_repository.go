@@ -1435,8 +1435,8 @@ func (r *schemaRepository) GetNonPKColumnsByExactType(ctx context.Context, proje
 	// Includes column stats and table info for cardinality filtering.
 	query := `
 		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
-		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
-		       c.default_value, c.distinct_count, c.null_count, c.business_name, c.description, c.metadata,
+		       c.is_nullable, c.is_primary_key, c.is_selected, c.ordinal_position,
+		       c.distinct_count, c.null_count, c.business_name, c.description, c.metadata,
 		       c.created_at, c.updated_at,
 		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at
 		FROM engine_schema_columns c
