@@ -69,3 +69,7 @@ SPARK-CONFIGURATION.md
 # MCP configuration (contains project-specific URLs)
 .mcp.json
 !.mcp.json.example
+
+# Developer
+.dvx/
+

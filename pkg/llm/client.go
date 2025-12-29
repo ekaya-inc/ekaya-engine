@@ -51,6 +51,7 @@ func NewClient(cfg *Config, logger *zap.Logger) (*Client, error) {
 
 // GenerateResponse generates a chat completion response with usage stats.
 // Set thinking=true to enable chain-of-thought reasoning, false to disable it.
+// Uses chat_template_kwargs for vLLM/Nemotron/Qwen models that support it.
 func (c *Client) GenerateResponse(
 	ctx context.Context,
 	prompt string,
@@ -58,22 +59,16 @@ func (c *Client) GenerateResponse(
 	temperature float64,
 	thinking bool,
 ) (*GenerateResponseResult, error) {
-	// Prepend thinking control directive to the user prompt
-	thinkingDirective := "/no_think\n"
-	if thinking {
-		thinkingDirective = "/think\n"
-	}
-	promptWithDirective := thinkingDirective + prompt
-
 	messages := []openai.ChatCompletionMessage{
 		{Role: openai.ChatMessageRoleSystem, Content: systemMessage},
-		{Role: openai.ChatMessageRoleUser, Content: promptWithDirective},
+		{Role: openai.ChatMessageRoleUser, Content: prompt},
 	}
 
 	c.logger.Debug("LLM request",
 		zap.String("model", c.model),
 		zap.Int("prompt_len", len(prompt)),
-		zap.Float64("temperature", temperature))
+		zap.Float64("temperature", temperature),
+		zap.Bool("thinking", thinking))
 
 	start := time.Now()
 
@@ -81,6 +76,11 @@ func (c *Client) GenerateResponse(
 		Model:       c.model,
 		Messages:    messages,
 		Temperature: float32(temperature),
+		// Control thinking/reasoning mode via chat_template_kwargs
+		// Works with vLLM, Nemotron, Qwen3 and other models that support it
+		ChatTemplateKwargs: map[string]any{
+			"enable_thinking": thinking,
+		},
 	})
 	if err != nil {
 		c.logger.Error("LLM request failed",

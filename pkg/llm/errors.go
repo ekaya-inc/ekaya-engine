@@ -85,6 +85,18 @@ func ClassifyError(err error) *Error {
 		return NewError(ErrorTypeUnknown, "rate limited", true, err)
 	}
 
+	// CUDA/GPU errors (transient server-side issues, retryable)
+	if strings.Contains(lower, "cuda error") || strings.Contains(lower, "gpu error") ||
+		strings.Contains(lower, "out of memory") {
+		return NewError(ErrorTypeEndpoint, "GPU error", true, err)
+	}
+
+	// 5xx server errors (retryable)
+	if strings.Contains(errStr, "500") || strings.Contains(errStr, "502") ||
+		strings.Contains(errStr, "503") || strings.Contains(errStr, "504") {
+		return NewError(ErrorTypeEndpoint, "server error", true, err)
+	}
+
 	// Unknown error
 	return NewError(ErrorTypeUnknown, "llm error", false, err)
 }

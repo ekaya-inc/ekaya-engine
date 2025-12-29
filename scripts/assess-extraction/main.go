@@ -1,11 +1,16 @@
-// assess-extraction evaluates the LLM's performance during ontology extraction.
-// This tool assesses how well the model performed GIVEN the input it received.
+// assess-extraction evaluates LLM quality for model comparison.
 //
-// A score of 100 means the LLM did a perfect job with the input provided.
-// Use this tool to compare different models (Haiku vs Sonnet vs Opus).
+// This tool uses LLM-as-judge to assess how well a model performed during
+// ontology extraction. It evaluates the quality of extracted information
+// and generated questions.
 //
-// Separate from assess-deterministic which evaluates the deterministic code
-// (input preparation and post-processing).
+// A score of 100 means the model:
+//   - Asked smart questions (things that can't be inferred from data)
+//   - Correctly classified required vs optional questions
+//   - Generated accurate, non-generic entity descriptions
+//   - Correctly identified business domains and relationships
+//
+// Use this tool to compare models (Haiku vs Sonnet vs Opus) on the same project.
 //
 // Usage: go run ./scripts/assess-extraction <project-id>
 //
@@ -26,61 +31,126 @@ import (
 	"github.com/liushuangls/go-anthropic/v2"
 )
 
+// =============================================================================
+// Category Weights (must sum to 100)
+// =============================================================================
+
+const (
+	WeightQuestionQuality      = 30 // Key differentiator - better models ask better questions
+	WeightExtractedInfoQuality = 25 // Does the model correctly infer business meaning?
+	WeightDomainSummaryQuality = 20 // Are domain summaries useful and accurate?
+	WeightConsistency          = 15 // Internal consistency of the ontology
+	WeightEfficiency           = 10 // Token usage, completion rate
+)
+
+// Judge model to use for assessments
+const JudgeModel = "claude-sonnet-4-5-20250929"
+
+// =============================================================================
+// Output Data Types
+// =============================================================================
+
 // AssessmentResult contains the full assessment output
 type AssessmentResult struct {
-	CommitInfo          string                   `json:"commit_info"`
-	DatasourceName      string                   `json:"datasource_name"`
-	ProjectID           string                   `json:"project_id"`
-	ModelUnderTest      string                   `json:"model_under_test"`
-	LLMMetrics          LLMMetrics               `json:"llm_metrics"`
-	OutputAssessments   []ConversationAssessment `json:"output_assessments"`
-	QuestionsAssessment QuestionsAssessment      `json:"questions_assessment"`
-	OntologyAssessment  OntologyAssessment       `json:"ontology_assessment"`
-	FinalScore          int                      `json:"final_score"`
-	Summary             string                   `json:"summary"`
+	CommitInfo             string                 `json:"commit_info"`
+	DatasourceName         string                 `json:"datasource_name"`
+	ProjectID              string                 `json:"project_id"`
+	ModelUnderTest         string                 `json:"model_under_test"`
+	JudgeModel             string                 `json:"judge_model"`
+	SchemaStats            SchemaStats            `json:"schema_stats"`
+	ChecksSummary          ChecksSummary          `json:"checks_summary"`
+	FinalScore             int                    `json:"final_score"`
+	SmartSummary           string                 `json:"smart_summary"`
+	ModelComparisonMetrics ModelComparisonMetrics `json:"model_comparison_metrics"`
+	LLMJudgeCalls          int                    `json:"llm_judge_calls"`
+	LLMJudgeTokens         int                    `json:"llm_judge_tokens"`
 }
 
-type LLMMetrics struct {
-	TotalConversations    int     `json:"total_conversations"`
-	SuccessfulCalls       int     `json:"successful_calls"`
-	FailedCalls           int     `json:"failed_calls"`
-	TotalPromptTokens     int     `json:"total_prompt_tokens"`
-	TotalCompletionTokens int     `json:"total_completion_tokens"`
-	TotalTokens           int     `json:"total_tokens"`
-	MaxPromptTokens       int     `json:"max_prompt_tokens"`
-	TotalDurationMs       int     `json:"total_duration_ms"`
-	AvgDurationMs         float64 `json:"avg_duration_ms"`
-	TokensPerSecond       float64 `json:"tokens_per_second"`
+// SchemaStats contains basic schema statistics
+type SchemaStats struct {
+	TableCount        int `json:"table_count"`
+	ColumnCount       int `json:"column_count"`
+	RelationshipCount int `json:"relationship_count"`
 }
 
-type ConversationAssessment struct {
-	ConversationID string   `json:"conversation_id"`
-	OutputQuality  int      `json:"output_quality"` // 0-100
-	Hallucinations int      `json:"hallucinations"` // Count of hallucinated items
-	Issues         []string `json:"issues"`
+// ChecksSummary contains scores for all assessment categories
+type ChecksSummary struct {
+	QuestionQuality      *QuestionQualityScore      `json:"question_quality"`
+	ExtractedInfoQuality *ExtractedInfoQualityScore `json:"extracted_info_quality"`
+	DomainSummaryQuality *DomainSummaryQualityScore `json:"domain_summary_quality"`
+	Consistency          *ConsistencyScore          `json:"consistency"`
+	Efficiency           *EfficiencyScore           `json:"efficiency"`
 }
 
-type OntologyAssessment struct {
-	DomainAccuracy        int      `json:"domain_accuracy"`       // 0-100
-	EntityAccuracy        int      `json:"entity_accuracy"`       // 0-100
-	KeyColumnAccuracy     int      `json:"key_column_accuracy"`   // 0-100
-	RelationshipAccuracy  int      `json:"relationship_accuracy"` // 0-100
-	OverallScore          int      `json:"overall_score"`         // 0-100
-	Strengths             []string `json:"strengths"`
+// QuestionQualityScore contains question assessment results
+type QuestionQualityScore struct {
+	Score              int      `json:"score"`
+	Weight             int      `json:"weight"`
+	QuestionsSampled   int      `json:"questions_sampled"`
+	TotalQuestions     int      `json:"total_questions"`
+	InferrableCount    int      `json:"inferrable_count"`
+	MisclassifiedCount int      `json:"misclassified_count"`
+	InsightfulCount    int      `json:"insightful_count"`
+	Issues             []string `json:"issues"`
+}
+
+// ExtractedInfoQualityScore contains entity summary assessment results
+type ExtractedInfoQualityScore struct {
+	Score              int      `json:"score"`
+	Weight             int      `json:"weight"`
+	EntitiesSampled    int      `json:"entities_sampled"`
+	TotalEntities      int      `json:"total_entities"`
+	GenericCount       int      `json:"generic_count"`
+	DomainErrors       int      `json:"domain_errors"`
+	HallucinationCount int      `json:"hallucination_count"`
+	InsightfulCount    int      `json:"insightful_count"`
+	Issues             []string `json:"issues"`
+}
+
+// DomainSummaryQualityScore contains domain summary assessment results
+type DomainSummaryQualityScore struct {
+	Score                 int      `json:"score"`
+	Weight                int      `json:"weight"`
+	DescriptionAccuracy   int      `json:"description_accuracy"`
+	DomainGroupingScore   int      `json:"domain_grouping_score"`
+	RelationshipAccuracy  int      `json:"relationship_accuracy"`
+	SampleQuestionQuality int      `json:"sample_question_quality"`
 	Issues                []string `json:"issues"`
-	HallucinationExamples []string `json:"hallucination_examples"`
 }
 
-type QuestionsAssessment struct {
-	TotalQuestions    int      `json:"total_questions"`
-	RequiredQuestions int      `json:"required_questions"`
-	OptionalQuestions int      `json:"optional_questions"`
-	QuestionRelevance int      `json:"question_relevance"` // 0-100: Are questions relevant?
-	QuestionClarity   int      `json:"question_clarity"`   // 0-100: Are questions clear?
-	OverallScore      int      `json:"overall_score"`      // 0-100
-	Issues            []string `json:"issues"`
-	Examples          []string `json:"examples"`
+// ConsistencyScore contains consistency assessment results
+type ConsistencyScore struct {
+	Score                int      `json:"score"`
+	Weight               int      `json:"weight"`
+	CrossRefIssues       int      `json:"cross_ref_issues"`
+	DomainGroupingIssues int      `json:"domain_grouping_issues"`
+	Issues               []string `json:"issues"`
 }
+
+// EfficiencyScore contains efficiency metrics
+type EfficiencyScore struct {
+	Score             int      `json:"score"`
+	Weight            int      `json:"weight"`
+	TokensPerTable    float64  `json:"tokens_per_table"`
+	QuestionsPerTable float64  `json:"questions_per_table"`
+	CompletionRate    float64  `json:"completion_rate"`
+	Issues            []string `json:"issues"`
+}
+
+// ModelComparisonMetrics contains normalized metrics for cross-project comparison
+type ModelComparisonMetrics struct {
+	TokensPerTable          float64 `json:"tokens_per_table"`
+	QuestionsPerTable       float64 `json:"questions_per_table"`
+	InsightfulQuestionsRate float64 `json:"insightful_questions_rate"`
+	InferrableQuestionsRate float64 `json:"inferrable_questions_rate"`
+	GenericDescriptionRate  float64 `json:"generic_description_rate"`
+	HallucinationRate       float64 `json:"hallucination_rate"`
+	CompletionRate          float64 `json:"completion_rate"`
+}
+
+// =============================================================================
+// Database Types
+// =============================================================================
 
 // OntologyQuestion represents a stored question
 type OntologyQuestion struct {
@@ -123,11 +193,64 @@ type SchemaColumn struct {
 	IsPrimaryKey bool   `json:"is_primary_key"`
 }
 
+// SchemaRelationship represents a FK relationship
+type SchemaRelationship struct {
+	SourceTable  string `json:"source_table"`
+	SourceColumn string `json:"source_column"`
+	TargetTable  string `json:"target_table"`
+	TargetColumn string `json:"target_column"`
+}
+
 // Ontology represents the stored ontology
 type Ontology struct {
 	DomainSummary   json.RawMessage `json:"domain_summary"`
 	EntitySummaries json.RawMessage `json:"entity_summaries"`
 }
+
+// EntitySummary represents a parsed entity summary
+type EntitySummary struct {
+	TableName    string   `json:"table_name"`
+	BusinessName string   `json:"business_name"`
+	Description  string   `json:"description"`
+	Domain       string   `json:"domain"`
+	Synonyms     []string `json:"synonyms"`
+	KeyColumns   []struct {
+		Name     string   `json:"name"`
+		Synonyms []string `json:"synonyms"`
+	} `json:"key_columns"`
+	Relationships []string `json:"relationships"`
+}
+
+// DomainSummary represents a parsed domain summary
+type DomainSummary struct {
+	Description       string   `json:"description"`
+	Domains           []string `json:"domains"`
+	RelationshipGraph []struct {
+		From        string `json:"from"`
+		To          string `json:"to"`
+		Label       string `json:"label"`
+		Cardinality string `json:"cardinality"`
+	} `json:"relationship_graph"`
+	SampleQuestions []string `json:"sample_questions"`
+}
+
+// =============================================================================
+// Tracking for LLM Judge Usage
+// =============================================================================
+
+type judgeTracker struct {
+	calls  int
+	tokens int
+}
+
+func (t *judgeTracker) track(tokens int) {
+	t.calls++
+	t.tokens += tokens
+}
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
 
 func main() {
 	if len(os.Args) < 2 {
@@ -158,7 +281,9 @@ func main() {
 	}
 	defer conn.Close(ctx)
 
-	// Get datasource name
+	// Phase 1: Load data
+	fmt.Fprintf(os.Stderr, "Phase 1: Loading data...\n")
+
 	var datasourceName string
 	if err := conn.QueryRow(ctx, `
 		SELECT name FROM engine_datasources
@@ -169,10 +294,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Get commit info
-	commitInfo := getCommitInfo()
-
-	// Load data
 	conversations, err := loadConversations(ctx, conn, projectID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load conversations: %v\n", err)
@@ -182,6 +303,12 @@ func main() {
 	schema, err := loadSchema(ctx, conn, projectID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load schema: %v\n", err)
+		os.Exit(1)
+	}
+
+	relationships, err := loadRelationships(ctx, conn, projectID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load relationships: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -197,54 +324,86 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Get model under test from conversations
+	// Determine model under test
 	modelUnderTest := "unknown"
 	if len(conversations) > 0 {
 		modelUnderTest = conversations[0].Model
 	}
 
-	// Calculate LLM metrics
-	llmMetrics := calculateLLMMetrics(conversations)
+	// Calculate schema stats
+	schemaStats := SchemaStats{
+		TableCount:        len(schema),
+		RelationshipCount: len(relationships),
+	}
+	for _, t := range schema {
+		schemaStats.ColumnCount += len(t.Columns)
+	}
 
-	// Create Anthropic client for assessment
+	fmt.Fprintf(os.Stderr, "  Tables: %d, Columns: %d, Relationships: %d, Questions: %d\n",
+		schemaStats.TableCount, schemaStats.ColumnCount, schemaStats.RelationshipCount, len(questions))
+
+	// Create Anthropic client for assessments
 	client := anthropic.NewClient(apiKey)
+	tracker := &judgeTracker{}
 
-	// Run assessments (LLM evaluates LLM output)
-	fmt.Fprintf(os.Stderr, "Assessing LLM output quality...\n")
-	outputAssessments := assessOutputQuality(ctx, client, conversations, schema)
+	// Phase 2: Assess Question Quality (30%)
+	fmt.Fprintf(os.Stderr, "Phase 2: Assessing question quality...\n")
+	questionScore := assessQuestionQuality(ctx, client, tracker, questions, schema, ontology)
 
-	fmt.Fprintf(os.Stderr, "Assessing question quality...\n")
-	questionsAssessment := assessQuestions(ctx, client, questions, schema, ontology)
+	// Phase 3: Assess Extracted Information Quality (25%)
+	fmt.Fprintf(os.Stderr, "Phase 3: Assessing extracted information quality...\n")
+	extractedInfoScore := assessExtractedInfoQuality(ctx, client, tracker, schema, ontology)
 
-	fmt.Fprintf(os.Stderr, "Assessing ontology accuracy...\n")
-	ontologyAssessment := assessOntology(ctx, client, schema, ontology)
+	// Phase 4: Assess Domain Summary Quality (20%)
+	fmt.Fprintf(os.Stderr, "Phase 4: Assessing domain summary quality...\n")
+	domainSummaryScore := assessDomainSummaryQuality(ctx, client, tracker, schema, relationships, ontology)
 
-	// Calculate final score (weighted average)
-	// - Output quality: 35% (did LLM correctly process each request?)
-	// - Questions quality: 25% (did LLM generate good questions?)
-	// - Ontology accuracy: 40% (is the final ontology accurate?)
-	finalScore := calculateFinalScore(outputAssessments, questionsAssessment, ontologyAssessment)
+	// Phase 5: Assess Consistency (15%)
+	fmt.Fprintf(os.Stderr, "Phase 5: Assessing consistency...\n")
+	consistencyScore := assessConsistency(schema, relationships, ontology)
 
-	// Generate summary
-	summary := generateSummary(modelUnderTest, outputAssessments, questionsAssessment, ontologyAssessment, finalScore)
+	// Phase 6: Calculate Efficiency Metrics (10%)
+	fmt.Fprintf(os.Stderr, "Phase 6: Calculating efficiency metrics...\n")
+	efficiencyScore := calculateEfficiencyMetrics(conversations, questions, schema)
+
+	// Phase 7: Calculate final score and summary
+	fmt.Fprintf(os.Stderr, "Phase 7: Calculating final score...\n")
+
+	checksSummary := ChecksSummary{
+		QuestionQuality:      questionScore,
+		ExtractedInfoQuality: extractedInfoScore,
+		DomainSummaryQuality: domainSummaryScore,
+		Consistency:          consistencyScore,
+		Efficiency:           efficiencyScore,
+	}
+
+	finalScore := calculateWeightedScore(checksSummary)
+	smartSummary := generateSmartSummary(finalScore, checksSummary)
+	comparisonMetrics := calculateComparisonMetrics(checksSummary, schemaStats)
 
 	result := AssessmentResult{
-		CommitInfo:          commitInfo,
-		DatasourceName:      datasourceName,
-		ProjectID:           projectID.String(),
-		ModelUnderTest:      modelUnderTest,
-		LLMMetrics:          llmMetrics,
-		OutputAssessments:   outputAssessments,
-		QuestionsAssessment: questionsAssessment,
-		OntologyAssessment:  ontologyAssessment,
-		FinalScore:          finalScore,
-		Summary:             summary,
+		CommitInfo:             getCommitInfo(),
+		DatasourceName:         datasourceName,
+		ProjectID:              projectID.String(),
+		ModelUnderTest:         modelUnderTest,
+		JudgeModel:             JudgeModel,
+		SchemaStats:            schemaStats,
+		ChecksSummary:          checksSummary,
+		FinalScore:             finalScore,
+		SmartSummary:           smartSummary,
+		ModelComparisonMetrics: comparisonMetrics,
+		LLMJudgeCalls:          tracker.calls,
+		LLMJudgeTokens:         tracker.tokens,
 	}
 
 	// Output JSON
 	output, _ := json.MarshalIndent(result, "", "  ")
 	fmt.Println(string(output))
 }
+
+// =============================================================================
+// Data Loading Functions
+// =============================================================================
 
 func buildConnString() string {
 	host := getEnvOrDefault("PGHOST", "localhost")
@@ -304,40 +463,6 @@ func loadConversations(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID)
 	return conversations, rows.Err()
 }
 
-func calculateLLMMetrics(conversations []LLMConversation) LLMMetrics {
-	if len(conversations) == 0 {
-		return LLMMetrics{}
-	}
-
-	var metrics LLMMetrics
-	metrics.TotalConversations = len(conversations)
-
-	for _, c := range conversations {
-		if c.Status == "success" {
-			metrics.SuccessfulCalls++
-		} else {
-			metrics.FailedCalls++
-		}
-		metrics.TotalPromptTokens += c.PromptTokens
-		metrics.TotalCompletionTokens += c.CompletionTokens
-		metrics.TotalTokens += c.TotalTokens
-		metrics.TotalDurationMs += c.DurationMs
-		if c.PromptTokens > metrics.MaxPromptTokens {
-			metrics.MaxPromptTokens = c.PromptTokens
-		}
-	}
-
-	n := float64(metrics.TotalConversations)
-	metrics.AvgDurationMs = float64(metrics.TotalDurationMs) / n
-
-	if metrics.TotalDurationMs > 0 {
-		durationSec := float64(metrics.TotalDurationMs) / 1000.0
-		metrics.TokensPerSecond = float64(metrics.TotalCompletionTokens) / durationSec
-	}
-
-	return metrics
-}
-
 func loadSchema(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]SchemaTable, error) {
 	tableQuery := `
 		SELECT id, table_name, row_count
@@ -388,6 +513,37 @@ func loadSchema(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]Sch
 	return tables, nil
 }
 
+func loadRelationships(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]SchemaRelationship, error) {
+	query := `
+		SELECT
+			st.table_name as source_table,
+			sc.column_name as source_column,
+			tt.table_name as target_table,
+			tc.column_name as target_column
+		FROM engine_schema_relationships r
+		JOIN engine_schema_tables st ON r.source_table_id = st.id
+		JOIN engine_schema_columns sc ON r.source_column_id = sc.id
+		JOIN engine_schema_tables tt ON r.target_table_id = tt.id
+		JOIN engine_schema_columns tc ON r.target_column_id = tc.id
+		WHERE r.project_id = $1 AND r.deleted_at IS NULL`
+
+	rows, err := conn.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var relationships []SchemaRelationship
+	for rows.Next() {
+		var r SchemaRelationship
+		if err := rows.Scan(&r.SourceTable, &r.SourceColumn, &r.TargetTable, &r.TargetColumn); err != nil {
+			return nil, err
+		}
+		relationships = append(relationships, r)
+	}
+	return relationships, rows.Err()
+}
+
 func loadOntology(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) (*Ontology, error) {
 	query := `
 		SELECT domain_summary, entity_summaries
@@ -431,79 +587,500 @@ func loadQuestions(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]
 	return questions, rows.Err()
 }
 
-func assessOutputQuality(ctx context.Context, client *anthropic.Client, conversations []LLMConversation, schema []SchemaTable) []ConversationAssessment {
-	var assessments []ConversationAssessment
+// =============================================================================
+// Phase 2: Question Quality Assessment (30%)
+// =============================================================================
 
-	// Sample up to 5 conversations for detailed assessment
-	sampled := conversations
-	if len(sampled) > 5 {
-		sampled = []LLMConversation{
-			conversations[0],
-			conversations[len(conversations)/4],
-			conversations[len(conversations)/2],
-			conversations[3*len(conversations)/4],
-			conversations[len(conversations)-1],
+func assessQuestionQuality(ctx context.Context, client *anthropic.Client, tracker *judgeTracker, questions []OntologyQuestion, schema []SchemaTable, ontology *Ontology) *QuestionQualityScore {
+	score := &QuestionQualityScore{
+		Weight:         WeightQuestionQuality,
+		TotalQuestions: len(questions),
+		Issues:         []string{},
+	}
+
+	if len(questions) == 0 {
+		score.Score = 100 // No questions = nothing to penalize
+		return score
+	}
+
+	// Sample questions (up to 10 or 25%)
+	sampleSize := len(questions) / 4
+	if sampleSize < 5 {
+		sampleSize = min(5, len(questions))
+	}
+	if sampleSize > 10 {
+		sampleSize = 10
+	}
+
+	// Select evenly distributed samples
+	sampled := make([]OntologyQuestion, 0, sampleSize)
+	step := len(questions) / sampleSize
+	if step < 1 {
+		step = 1
+	}
+	for i := 0; i < len(questions) && len(sampled) < sampleSize; i += step {
+		sampled = append(sampled, questions[i])
+	}
+	score.QuestionsSampled = len(sampled)
+
+	// Build schema context for the judge
+	schemaContext := buildSchemaContext(schema)
+
+	// Assess each sampled question
+	var inferrableCount, misclassifiedCount, insightfulCount int
+	var issues []string
+
+	for _, q := range sampled {
+		result := assessSingleQuestion(ctx, client, tracker, q, schemaContext)
+		if result.isInferrable {
+			inferrableCount++
+		}
+		if result.isMisclassified {
+			misclassifiedCount++
+		}
+		if result.isInsightful {
+			insightfulCount++
+		}
+		if result.issue != "" {
+			issues = append(issues, result.issue)
 		}
 	}
 
-	for _, conv := range sampled {
-		assessment := assessSingleConversation(ctx, client, conv, schema)
-		assessments = append(assessments, assessment)
-	}
+	score.InferrableCount = inferrableCount
+	score.MisclassifiedCount = misclassifiedCount
+	score.InsightfulCount = insightfulCount
 
-	return assessments
+	// Calculate score: start at 100, penalize issues, reward insights
+	finalScore := 100
+	finalScore -= inferrableCount * 10   // -10 per inferrable question
+	finalScore -= misclassifiedCount * 5 // -5 per misclassified
+	finalScore += insightfulCount * 5    // +5 per insightful
+
+	// Clamp score
+	if finalScore < 0 {
+		finalScore = 0
+	}
+	if finalScore > 100 {
+		finalScore = 100
+	}
+	score.Score = finalScore
+
+	// Build issue summary
+	if inferrableCount > 0 {
+		score.Issues = append(score.Issues, fmt.Sprintf("%d question(s) could be inferred from data", inferrableCount))
+	}
+	if misclassifiedCount > 0 {
+		score.Issues = append(score.Issues, fmt.Sprintf("%d question(s) misclassified as required/optional", misclassifiedCount))
+	}
+	score.Issues = append(score.Issues, issues...)
+
+	return score
 }
 
-func assessSingleConversation(ctx context.Context, client *anthropic.Client, conv LLMConversation, schema []SchemaTable) ConversationAssessment {
-	// Build schema reference
-	var schemaRef strings.Builder
-	for _, t := range schema {
-		schemaRef.WriteString(fmt.Sprintf("%s: ", t.TableName))
-		var cols []string
-		for _, c := range t.Columns {
-			cols = append(cols, c.ColumnName)
-		}
-		schemaRef.WriteString(strings.Join(cols, ", "))
-		schemaRef.WriteString("\n")
-	}
+type questionAssessmentResult struct {
+	isInferrable    bool
+	isMisclassified bool
+	isInsightful    bool
+	issue           string
+}
 
-	prompt := fmt.Sprintf(`You are assessing LLM output quality for an ontology extraction task.
-Focus ONLY on how well the model performed given what it was provided.
+func assessSingleQuestion(ctx context.Context, client *anthropic.Client, tracker *judgeTracker, q OntologyQuestion, schemaContext string) questionAssessmentResult {
+	prompt := fmt.Sprintf(`You are evaluating whether an LLM asked a smart question during database ontology extraction.
 
-## GROUND TRUTH: Actual Schema (column names per table)
+## Schema Context
 %s
 
-## MODEL INPUT: Request sent to the model being tested
-%s
+## Question Being Evaluated
+Text: "%s"
+Is Required: %v
+Source Entity: %s
 
-## MODEL OUTPUT: Response from the model being tested
-%s
+## Evaluation Criteria
 
-## ASSESSMENT TASK
+1. **Could this be inferred from the schema/data?**
+   - BAD questions ask about things obvious from column names (created_at, id, is_active)
+   - GOOD questions ask about things that require domain knowledge (enum meanings, business rules)
 
-Evaluate the MODEL'S OUTPUT quality. Did it:
-1. Use ONLY column names that exist in the schema? (Hallucinations are severe failures)
-2. Produce well-structured, parseable output?
-3. Make reasonable inferences from the provided information?
+2. **Is the required/optional classification correct?**
+   - Required should be: genuinely unanswerable from schema (enum meanings, unclear abbreviations)
+   - Optional should be: nice-to-have clarifications, confirmations
+
+3. **Is this an insightful question?**
+   - Does it identify a genuine ambiguity?
+   - Would answering it significantly improve understanding?
 
 Return JSON:
 {
-  "output_quality": 0-100,
-  "hallucinations": <count of hallucinated column names or entities>,
-  "issues": ["specific issues with model output"]
+  "inferrable_score": 0-100,  // Higher = more inferrable from data (BAD)
+  "is_misclassified": true/false,  // Is required/optional wrong?
+  "should_be": "required" | "optional" | "correct",  // What it should be
+  "is_insightful": true/false,  // Is this a genuinely smart question?
+  "reasoning": "brief explanation"
 }
 
-SCORING GUIDE:
-- 100: Perfect output, no hallucinations, well-structured
-- 80-99: Minor issues, no hallucinations
-- 60-79: Some issues or 1-2 hallucinations
-- 40-59: Multiple issues or several hallucinations
-- 0-39: Major issues or many hallucinations
-
-Return ONLY JSON.`, schemaRef.String(), string(conv.RequestMessages), conv.ResponseContent)
+Return ONLY JSON.`, schemaContext, q.Text, q.IsRequired, stringOrEmpty(q.SourceEntityKey))
 
 	resp, err := client.CreateMessages(ctx, anthropic.MessagesRequest{
-		Model:     "claude-sonnet-4-5-20250929",
+		Model:     JudgeModel,
+		MaxTokens: 500,
+		Messages: []anthropic.Message{
+			{Role: anthropic.RoleUser, Content: []anthropic.MessageContent{
+				{Type: "text", Text: &prompt},
+			}},
+		},
+	})
+
+	if err != nil {
+		return questionAssessmentResult{issue: fmt.Sprintf("Judge error: %v", err)}
+	}
+
+	// Track usage
+	tracker.track(resp.Usage.InputTokens + resp.Usage.OutputTokens)
+
+	// Parse response
+	responseText := extractTextFromResponse(resp)
+	responseText = extractJSON(responseText)
+
+	var result struct {
+		InferrableScore int    `json:"inferrable_score"`
+		IsMisclassified bool   `json:"is_misclassified"`
+		ShouldBe        string `json:"should_be"`
+		IsInsightful    bool   `json:"is_insightful"`
+		Reasoning       string `json:"reasoning"`
+	}
+
+	if err := json.Unmarshal([]byte(responseText), &result); err != nil {
+		return questionAssessmentResult{issue: fmt.Sprintf("Parse error: %v", err)}
+	}
+
+	assessment := questionAssessmentResult{
+		isInferrable:    result.InferrableScore > 70,
+		isMisclassified: result.IsMisclassified,
+		isInsightful:    result.IsInsightful,
+	}
+
+	// Generate specific issue message
+	if assessment.isInferrable {
+		assessment.issue = fmt.Sprintf("Inferrable: \"%s\"", truncate(q.Text, 50))
+	} else if assessment.isMisclassified {
+		assessment.issue = fmt.Sprintf("Should be %s: \"%s\"", result.ShouldBe, truncate(q.Text, 50))
+	}
+
+	return assessment
+}
+
+// =============================================================================
+// Phase 3: Extracted Information Quality Assessment (25%)
+// =============================================================================
+
+func assessExtractedInfoQuality(ctx context.Context, client *anthropic.Client, tracker *judgeTracker, schema []SchemaTable, ontology *Ontology) *ExtractedInfoQualityScore {
+	score := &ExtractedInfoQualityScore{
+		Weight:        WeightExtractedInfoQuality,
+		TotalEntities: len(schema),
+		Issues:        []string{},
+	}
+
+	// Parse entity summaries from ontology
+	var entitySummaries map[string]EntitySummary
+	if err := json.Unmarshal(ontology.EntitySummaries, &entitySummaries); err != nil {
+		score.Issues = append(score.Issues, fmt.Sprintf("Failed to parse entity summaries: %v", err))
+		score.Score = 50
+		return score
+	}
+
+	if len(entitySummaries) == 0 {
+		score.Issues = append(score.Issues, "No entity summaries found")
+		score.Score = 0
+		return score
+	}
+
+	// Sample entities (up to 5 or 20%)
+	sampleSize := len(schema) / 5
+	if sampleSize < 3 {
+		sampleSize = min(3, len(schema))
+	}
+	if sampleSize > 5 {
+		sampleSize = 5
+	}
+
+	// Select evenly distributed samples
+	sampled := make([]SchemaTable, 0, sampleSize)
+	step := len(schema) / sampleSize
+	if step < 1 {
+		step = 1
+	}
+	for i := 0; i < len(schema) && len(sampled) < sampleSize; i += step {
+		sampled = append(sampled, schema[i])
+	}
+	score.EntitiesSampled = len(sampled)
+
+	// Assess each sampled entity
+	var genericCount, domainErrors, hallucinationCount, insightfulCount int
+	var issues []string
+
+	for _, table := range sampled {
+		entity, exists := entitySummaries[table.TableName]
+		if !exists {
+			issues = append(issues, fmt.Sprintf("Missing summary for %s", table.TableName))
+			continue
+		}
+
+		result := assessSingleEntity(ctx, client, tracker, table, entity)
+		if result.isGeneric {
+			genericCount++
+		}
+		if result.hasDomainError {
+			domainErrors++
+		}
+		if result.hasHallucination {
+			hallucinationCount++
+		}
+		if result.isInsightful {
+			insightfulCount++
+		}
+		if result.issue != "" {
+			issues = append(issues, result.issue)
+		}
+	}
+
+	score.GenericCount = genericCount
+	score.DomainErrors = domainErrors
+	score.HallucinationCount = hallucinationCount
+	score.InsightfulCount = insightfulCount
+
+	// Calculate score
+	finalScore := 100
+	finalScore -= genericCount * 5        // -5 per generic description
+	finalScore -= domainErrors * 10       // -10 per domain error
+	finalScore -= hallucinationCount * 15 // -15 per hallucination
+	finalScore += insightfulCount * 5     // +5 per insightful inference
+
+	if finalScore < 0 {
+		finalScore = 0
+	}
+	if finalScore > 100 {
+		finalScore = 100
+	}
+	score.Score = finalScore
+
+	// Build issue summary
+	if genericCount > 0 {
+		score.Issues = append(score.Issues, fmt.Sprintf("%d entity description(s) are generic/boilerplate", genericCount))
+	}
+	if domainErrors > 0 {
+		score.Issues = append(score.Issues, fmt.Sprintf("%d incorrect domain assignment(s)", domainErrors))
+	}
+	if hallucinationCount > 0 {
+		score.Issues = append(score.Issues, fmt.Sprintf("%d hallucinated business purpose(s)", hallucinationCount))
+	}
+	score.Issues = append(score.Issues, issues...)
+
+	return score
+}
+
+type entityAssessmentResult struct {
+	isGeneric        bool
+	hasDomainError   bool
+	hasHallucination bool
+	isInsightful     bool
+	issue            string
+}
+
+func assessSingleEntity(ctx context.Context, client *anthropic.Client, tracker *judgeTracker, table SchemaTable, entity EntitySummary) entityAssessmentResult {
+	// Build table schema description
+	var schemaDesc strings.Builder
+	schemaDesc.WriteString(fmt.Sprintf("Table: %s\n", table.TableName))
+	if table.RowCount != nil {
+		schemaDesc.WriteString(fmt.Sprintf("Row count: %d\n", *table.RowCount))
+	}
+	schemaDesc.WriteString("Columns:\n")
+	for _, col := range table.Columns {
+		pk := ""
+		if col.IsPrimaryKey {
+			pk = " [PK]"
+		}
+		schemaDesc.WriteString(fmt.Sprintf("  - %s: %s%s\n", col.ColumnName, col.DataType, pk))
+	}
+
+	// Build key columns list
+	keyColNames := make([]string, 0, len(entity.KeyColumns))
+	for _, kc := range entity.KeyColumns {
+		keyColNames = append(keyColNames, kc.Name)
+	}
+
+	prompt := fmt.Sprintf(`You are evaluating whether an LLM correctly extracted business information from a database table.
+
+## Actual Schema
+%s
+
+## LLM's Entity Summary
+Business Name: %s
+Description: %s
+Domain: %s
+Key Columns: %s
+Synonyms: %v
+
+## Evaluation Criteria
+
+1. **Is business_name accurate?**
+   - Does it correctly identify what this table represents?
+   - Is it too generic (just the table name)?
+
+2. **Is description accurate to the schema?**
+   - Does it correctly describe the entity based on columns present?
+   - Does it avoid making up purposes not evident in schema?
+   - Is it specific enough to be useful?
+
+3. **Is domain assignment correct?**
+   - Does the domain match what the table represents?
+
+4. **Are key_columns selections intelligent?**
+   - Did it pick business-relevant columns, not just PKs?
+
+Return JSON:
+{
+  "is_generic": true/false,  // Is the description too generic/boilerplate?
+  "has_domain_error": true/false,  // Is the domain assignment wrong?
+  "has_hallucination": true/false,  // Does it claim purposes not in schema?
+  "is_insightful": true/false,  // Does it correctly identify non-obvious entity purpose?
+  "reasoning": "brief explanation"
+}
+
+Return ONLY JSON.`, schemaDesc.String(), entity.BusinessName, entity.Description, entity.Domain, strings.Join(keyColNames, ", "), entity.Synonyms)
+
+	resp, err := client.CreateMessages(ctx, anthropic.MessagesRequest{
+		Model:     JudgeModel,
+		MaxTokens: 500,
+		Messages: []anthropic.Message{
+			{Role: anthropic.RoleUser, Content: []anthropic.MessageContent{
+				{Type: "text", Text: &prompt},
+			}},
+		},
+	})
+
+	if err != nil {
+		return entityAssessmentResult{issue: fmt.Sprintf("Judge error for %s: %v", table.TableName, err)}
+	}
+
+	tracker.track(resp.Usage.InputTokens + resp.Usage.OutputTokens)
+
+	responseText := extractTextFromResponse(resp)
+	responseText = extractJSON(responseText)
+
+	var result struct {
+		IsGeneric        bool   `json:"is_generic"`
+		HasDomainError   bool   `json:"has_domain_error"`
+		HasHallucination bool   `json:"has_hallucination"`
+		IsInsightful     bool   `json:"is_insightful"`
+		Reasoning        string `json:"reasoning"`
+	}
+
+	if err := json.Unmarshal([]byte(responseText), &result); err != nil {
+		return entityAssessmentResult{issue: fmt.Sprintf("Parse error for %s: %v", table.TableName, err)}
+	}
+
+	assessment := entityAssessmentResult{
+		isGeneric:        result.IsGeneric,
+		hasDomainError:   result.HasDomainError,
+		hasHallucination: result.HasHallucination,
+		isInsightful:     result.IsInsightful,
+	}
+
+	// Generate specific issue
+	if result.HasHallucination {
+		assessment.issue = fmt.Sprintf("Hallucination in %s: %s", table.TableName, truncate(result.Reasoning, 60))
+	} else if result.HasDomainError {
+		assessment.issue = fmt.Sprintf("Wrong domain for %s", table.TableName)
+	} else if result.IsGeneric {
+		assessment.issue = fmt.Sprintf("Generic description for %s", table.TableName)
+	}
+
+	return assessment
+}
+
+// =============================================================================
+// Phase 4: Domain Summary Quality Assessment (20%)
+// =============================================================================
+
+func assessDomainSummaryQuality(ctx context.Context, client *anthropic.Client, tracker *judgeTracker, schema []SchemaTable, relationships []SchemaRelationship, ontology *Ontology) *DomainSummaryQualityScore {
+	score := &DomainSummaryQualityScore{
+		Weight: WeightDomainSummaryQuality,
+		Issues: []string{},
+	}
+
+	// Parse domain summary
+	var domainSummary DomainSummary
+	if err := json.Unmarshal(ontology.DomainSummary, &domainSummary); err != nil {
+		score.Issues = append(score.Issues, fmt.Sprintf("Failed to parse domain summary: %v", err))
+		score.Score = 50
+		return score
+	}
+
+	// Build schema overview
+	var schemaOverview strings.Builder
+	schemaOverview.WriteString("Tables:\n")
+	for _, t := range schema {
+		rowCount := "unknown"
+		if t.RowCount != nil {
+			rowCount = fmt.Sprintf("%d", *t.RowCount)
+		}
+		schemaOverview.WriteString(fmt.Sprintf("  - %s (%d columns, %s rows)\n", t.TableName, len(t.Columns), rowCount))
+	}
+
+	schemaOverview.WriteString("\nFK Relationships:\n")
+	for _, r := range relationships {
+		schemaOverview.WriteString(fmt.Sprintf("  - %s.%s -> %s.%s\n", r.SourceTable, r.SourceColumn, r.TargetTable, r.TargetColumn))
+	}
+
+	// Build relationship graph from ontology
+	var graphStr strings.Builder
+	for _, edge := range domainSummary.RelationshipGraph {
+		graphStr.WriteString(fmt.Sprintf("  %s -> %s (%s, %s)\n", edge.From, edge.To, edge.Label, edge.Cardinality))
+	}
+
+	prompt := fmt.Sprintf(`You are evaluating the quality of a database domain summary generated by an LLM.
+
+## Actual Schema
+%s
+
+## LLM's Domain Summary
+Description: %s
+Domains: %v
+Relationship Graph:
+%s
+Sample Questions: %v
+
+## Evaluation Criteria
+
+1. **Description Accuracy (0-100)**
+   - Does it correctly identify what this database is for?
+   - Is it specific or generic boilerplate?
+
+2. **Domain Grouping Quality (0-100)**
+   - Do the domain categories make sense for this data?
+   - Are there missing domains or incorrectly grouped concepts?
+
+3. **Relationship Graph Accuracy (0-100)**
+   - Do the edges match actual FK relationships?
+   - Are cardinalities reasonable?
+
+4. **Sample Question Usefulness (0-100)**
+   - Could these questions be answered with SQL against this schema?
+   - Do they demonstrate understanding of the data model?
+
+Return JSON:
+{
+  "description_accuracy": 0-100,
+  "domain_grouping_score": 0-100,
+  "relationship_accuracy": 0-100,
+  "sample_question_quality": 0-100,
+  "issues": ["specific issues found"]
+}
+
+Return ONLY JSON.`, schemaOverview.String(), domainSummary.Description, domainSummary.Domains, graphStr.String(), domainSummary.SampleQuestions)
+
+	resp, err := client.CreateMessages(ctx, anthropic.MessagesRequest{
+		Model:     JudgeModel,
 		MaxTokens: 1000,
 		Messages: []anthropic.Message{
 			{Role: anthropic.RoleUser, Content: []anthropic.MessageContent{
@@ -513,347 +1090,346 @@ Return ONLY JSON.`, schemaRef.String(), string(conv.RequestMessages), conv.Respo
 	})
 
 	if err != nil {
-		return ConversationAssessment{
-			ConversationID: conv.ID.String(),
-			Issues:         []string{fmt.Sprintf("Assessment failed: %v", err)},
-		}
+		score.Issues = append(score.Issues, fmt.Sprintf("Judge error: %v", err))
+		score.Score = 50
+		return score
 	}
+
+	tracker.track(resp.Usage.InputTokens + resp.Usage.OutputTokens)
+
+	responseText := extractTextFromResponse(resp)
+	responseText = extractJSON(responseText)
 
 	var result struct {
-		OutputQuality  int      `json:"output_quality"`
-		Hallucinations int      `json:"hallucinations"`
-		Issues         []string `json:"issues"`
+		DescriptionAccuracy   int      `json:"description_accuracy"`
+		DomainGroupingScore   int      `json:"domain_grouping_score"`
+		RelationshipAccuracy  int      `json:"relationship_accuracy"`
+		SampleQuestionQuality int      `json:"sample_question_quality"`
+		Issues                []string `json:"issues"`
 	}
 
-	responseText := ""
-	for _, block := range resp.Content {
-		if block.Type == "text" && block.Text != nil {
-			responseText = *block.Text
-			break
-		}
-	}
-
-	responseText = extractJSON(responseText)
 	if err := json.Unmarshal([]byte(responseText), &result); err != nil {
-		return ConversationAssessment{
-			ConversationID: conv.ID.String(),
-			Issues:         []string{fmt.Sprintf("Parse error: %v", err)},
-		}
+		score.Issues = append(score.Issues, fmt.Sprintf("Parse error: %v", err))
+		score.Score = 50
+		return score
 	}
 
-	return ConversationAssessment{
-		ConversationID: conv.ID.String(),
-		OutputQuality:  result.OutputQuality,
-		Hallucinations: result.Hallucinations,
-		Issues:         result.Issues,
-	}
+	score.DescriptionAccuracy = result.DescriptionAccuracy
+	score.DomainGroupingScore = result.DomainGroupingScore
+	score.RelationshipAccuracy = result.RelationshipAccuracy
+	score.SampleQuestionQuality = result.SampleQuestionQuality
+	score.Issues = append(score.Issues, result.Issues...)
+
+	// Calculate overall score (average of components)
+	score.Score = (result.DescriptionAccuracy + result.DomainGroupingScore +
+		result.RelationshipAccuracy + result.SampleQuestionQuality) / 4
+
+	return score
 }
 
-func assessOntology(ctx context.Context, client *anthropic.Client, schema []SchemaTable, ontology *Ontology) OntologyAssessment {
-	var schemaDetail strings.Builder
-	schemaDetail.WriteString("## ACTUAL DATABASE SCHEMA\n\n")
-	for _, t := range schema {
-		schemaDetail.WriteString(fmt.Sprintf("### %s\n", t.TableName))
-		schemaDetail.WriteString(fmt.Sprintf("Columns (%d):\n", len(t.Columns)))
-		for _, c := range t.Columns {
-			pk := ""
-			if c.IsPrimaryKey {
-				pk = " [PK]"
+// =============================================================================
+// Phase 5: Consistency Assessment (15%)
+// =============================================================================
+
+func assessConsistency(schema []SchemaTable, relationships []SchemaRelationship, ontology *Ontology) *ConsistencyScore {
+	score := &ConsistencyScore{
+		Weight: WeightConsistency,
+		Issues: []string{},
+	}
+
+	// Parse entity summaries
+	var entitySummaries map[string]EntitySummary
+	if err := json.Unmarshal(ontology.EntitySummaries, &entitySummaries); err != nil {
+		score.Issues = append(score.Issues, "Failed to parse entity summaries")
+		score.Score = 50
+		return score
+	}
+
+	// Check 1: Cross-reference accuracy
+	// Do entity relationships list match FK relationships?
+	crossRefIssues := 0
+	for _, rel := range relationships {
+		sourceEntity, exists := entitySummaries[rel.SourceTable]
+		if !exists {
+			continue
+		}
+
+		// Check if relationship is mentioned in entity
+		found := false
+		for _, r := range sourceEntity.Relationships {
+			if strings.Contains(strings.ToLower(r), strings.ToLower(rel.TargetTable)) {
+				found = true
+				break
 			}
-			schemaDetail.WriteString(fmt.Sprintf("  - %s (%s)%s\n", c.ColumnName, c.DataType, pk))
 		}
-		schemaDetail.WriteString("\n")
-	}
-
-	prompt := fmt.Sprintf(`You are assessing LLM performance in ontology extraction.
-Focus ONLY on how well the model generated the ontology from the schema it was given.
-
-%s
-
-## GENERATED ONTOLOGY (by the model being tested)
-
-### Domain Summary
-%s
-
-### Entity Summaries
-%s
-
-## ASSESSMENT TASK
-
-Evaluate the MODEL'S ONTOLOGY generation:
-
-1. **Domain Accuracy** (0-100): Does the domain summary correctly describe what CAN BE INFERRED from the schema?
-2. **Entity Accuracy** (0-100): Do entity descriptions match what the schema shows?
-3. **Key Column Accuracy** (0-100): Do key_columns reference ACTUAL columns from the schema?
-   - Every hallucinated column name is a MAJOR penalty
-   - Check each referenced column exists in the actual schema
-4. **Relationship Accuracy** (0-100): Are relationships correctly identified from naming patterns?
-
-Return JSON:
-{
-  "domain_accuracy": 0-100,
-  "entity_accuracy": 0-100,
-  "key_column_accuracy": 0-100,
-  "relationship_accuracy": 0-100,
-  "overall_score": 0-100,
-  "strengths": ["what the model got right"],
-  "issues": ["specific model failures"],
-  "hallucination_examples": [
-    "Entity X references column 'user_id' but actual column is 'owner_id'",
-    "Entity Y includes non-existent column 'offer_value'"
-  ]
-}
-
-A score of 100 means the model did a PERFECT job with the schema it was given.
-
-Return ONLY JSON.`, schemaDetail.String(), string(ontology.DomainSummary), string(ontology.EntitySummaries))
-
-	resp, err := client.CreateMessages(ctx, anthropic.MessagesRequest{
-		Model:     "claude-sonnet-4-5-20250929",
-		MaxTokens: 4000,
-		Messages: []anthropic.Message{
-			{Role: anthropic.RoleUser, Content: []anthropic.MessageContent{
-				{Type: "text", Text: &prompt},
-			}},
-		},
-	})
-
-	if err != nil {
-		return OntologyAssessment{
-			Issues: []string{fmt.Sprintf("Assessment failed: %v", err)},
+		if !found {
+			crossRefIssues++
 		}
 	}
+	score.CrossRefIssues = crossRefIssues
 
-	responseText := ""
-	for _, block := range resp.Content {
-		if block.Type == "text" && block.Text != nil {
-			responseText = *block.Text
-			break
-		}
-	}
+	// Check 2: Domain grouping consistency
+	// Are FK-related tables in the same or logically connected domains?
+	domainGroupingIssues := 0
+	for _, rel := range relationships {
+		sourceEntity, sourceExists := entitySummaries[rel.SourceTable]
+		targetEntity, targetExists := entitySummaries[rel.TargetTable]
 
-	var result OntologyAssessment
-	responseText = extractJSON(responseText)
-	if err := json.Unmarshal([]byte(responseText), &result); err != nil {
-		return OntologyAssessment{
-			Issues: []string{fmt.Sprintf("Parse error: %v", err)},
-		}
-	}
-
-	return result
-}
-
-func assessQuestions(ctx context.Context, client *anthropic.Client, questions []OntologyQuestion, schema []SchemaTable, ontology *Ontology) QuestionsAssessment {
-	if len(questions) == 0 {
-		return QuestionsAssessment{
-			TotalQuestions:    0,
-			RequiredQuestions: 0,
-			OptionalQuestions: 0,
-			QuestionRelevance: 100,
-			QuestionClarity:   100,
-			OverallScore:      100,
-			Issues:            []string{},
-		}
-	}
-
-	var required, optional int
-	for _, q := range questions {
-		if q.IsRequired {
-			required++
-		} else {
-			optional++
-		}
-	}
-
-	var schemaSummary strings.Builder
-	for _, t := range schema {
-		schemaSummary.WriteString(fmt.Sprintf("Table: %s\n", t.TableName))
-		for _, c := range t.Columns {
-			pk := ""
-			if c.IsPrimaryKey {
-				pk = " [PK]"
-			}
-			schemaSummary.WriteString(fmt.Sprintf("  - %s (%s)%s\n", c.ColumnName, c.DataType, pk))
-		}
-	}
-
-	var questionsText strings.Builder
-	questionsText.WriteString("## REQUIRED QUESTIONS\n")
-	for _, q := range questions {
-		if q.IsRequired {
-			questionsText.WriteString(fmt.Sprintf("- %s\n", q.Text))
-			if q.Reasoning != nil && *q.Reasoning != "" {
-				questionsText.WriteString(fmt.Sprintf("  Reasoning: %s\n", *q.Reasoning))
+		if sourceExists && targetExists {
+			// Related tables should typically be in the same domain or related domains
+			if sourceEntity.Domain != targetEntity.Domain {
+				// This is a soft check - some cross-domain relationships are valid
+				// Only flag if domains seem completely unrelated
+				if !areDomainsRelated(sourceEntity.Domain, targetEntity.Domain) {
+					domainGroupingIssues++
+				}
 			}
 		}
 	}
-	questionsText.WriteString("\n## OPTIONAL QUESTIONS\n")
-	for _, q := range questions {
-		if !q.IsRequired {
-			questionsText.WriteString(fmt.Sprintf("- %s\n", q.Text))
-		}
+	score.DomainGroupingIssues = domainGroupingIssues
+
+	// Calculate score
+	totalChecks := len(relationships) * 2 // Two checks per relationship
+	if totalChecks == 0 {
+		score.Score = 100
+		return score
 	}
 
-	prompt := fmt.Sprintf(`You are assessing LLM performance in generating questions during ontology extraction.
-Focus on whether the MODEL generated good questions given the schema.
+	totalIssues := crossRefIssues + domainGroupingIssues
+	issueRate := float64(totalIssues) / float64(totalChecks)
+	score.Score = int((1 - issueRate) * 100)
+	if score.Score < 0 {
+		score.Score = 0
+	}
 
-## DATABASE SCHEMA (what the model was given)
-%s
+	// Build issue summary
+	if crossRefIssues > 0 {
+		score.Issues = append(score.Issues, fmt.Sprintf("%d relationship(s) not mentioned in entity summaries", crossRefIssues))
+	}
+	if domainGroupingIssues > 0 {
+		score.Issues = append(score.Issues, fmt.Sprintf("%d FK-related tables in unrelated domains", domainGroupingIssues))
+	}
 
-## QUESTIONS GENERATED BY MODEL
-%s
-
-## ASSESSMENT TASK
-
-Evaluate the MODEL'S question generation quality:
-
-1. **Question Relevance** (0-100): Are questions relevant to understanding the schema?
-   - Questions about ambiguous columns/relationships are GOOD
-   - Questions about obvious things (created_at, id) are BAD
-   - Repetitive questions across tables are BAD
-
-2. **Question Clarity** (0-100): Are questions well-formed and answerable?
-   - Clear, specific questions score high
-   - Vague or confusing questions score low
-
-Return JSON:
-{
-  "question_relevance": 0-100,
-  "question_clarity": 0-100,
-  "overall_score": 0-100,
-  "issues": ["specific issues with model's question generation"],
-  "examples": [
-    "GOOD: 'What do status values 2,4,5 mean?' - asking about ambiguous enum",
-    "BAD: 'What is the id column for?' - asking about obvious PK"
-  ]
+	return score
 }
 
-A score of 100 means the model asked exactly the right questions.
+func areDomainsRelated(d1, d2 string) bool {
+	// Define domain relationships
+	relatedDomains := map[string][]string{
+		"sales":      {"customer", "product", "finance", "inventory"},
+		"customer":   {"sales", "marketing", "operations"},
+		"product":    {"sales", "inventory", "operations"},
+		"finance":    {"sales", "operations"},
+		"operations": {"sales", "customer", "product", "inventory"},
+		"inventory":  {"sales", "product", "operations"},
+		"marketing":  {"customer", "sales"},
+		"analytics":  {"sales", "customer", "product", "finance", "operations"},
+		"hr":         {"operations"},
+	}
 
-Return ONLY JSON.`, schemaSummary.String(), questionsText.String())
+	d1Lower := strings.ToLower(d1)
+	d2Lower := strings.ToLower(d2)
 
-	resp, err := client.CreateMessages(ctx, anthropic.MessagesRequest{
-		Model:     "claude-sonnet-4-5-20250929",
-		MaxTokens: 2000,
-		Messages: []anthropic.Message{
-			{Role: anthropic.RoleUser, Content: []anthropic.MessageContent{
-				{Type: "text", Text: &prompt},
-			}},
-		},
-	})
+	if d1Lower == d2Lower {
+		return true
+	}
 
-	if err != nil {
-		return QuestionsAssessment{
-			TotalQuestions:    len(questions),
-			RequiredQuestions: required,
-			OptionalQuestions: optional,
-			Issues:            []string{fmt.Sprintf("Assessment failed: %v", err)},
+	related, exists := relatedDomains[d1Lower]
+	if exists {
+		for _, r := range related {
+			if r == d2Lower {
+				return true
+			}
 		}
 	}
 
-	responseText := ""
-	for _, block := range resp.Content {
-		if block.Type == "text" && block.Text != nil {
-			responseText = *block.Text
-			break
-		}
-	}
-
-	var result struct {
-		QuestionRelevance int      `json:"question_relevance"`
-		QuestionClarity   int      `json:"question_clarity"`
-		OverallScore      int      `json:"overall_score"`
-		Issues            []string `json:"issues"`
-		Examples          []string `json:"examples"`
-	}
-
-	responseText = extractJSON(responseText)
-	if err := json.Unmarshal([]byte(responseText), &result); err != nil {
-		return QuestionsAssessment{
-			TotalQuestions:    len(questions),
-			RequiredQuestions: required,
-			OptionalQuestions: optional,
-			Issues:            []string{fmt.Sprintf("Parse error: %v", err)},
-		}
-	}
-
-	return QuestionsAssessment{
-		TotalQuestions:    len(questions),
-		RequiredQuestions: required,
-		OptionalQuestions: optional,
-		QuestionRelevance: result.QuestionRelevance,
-		QuestionClarity:   result.QuestionClarity,
-		OverallScore:      result.OverallScore,
-		Issues:            result.Issues,
-		Examples:          result.Examples,
-	}
+	return false
 }
 
-func calculateFinalScore(outputs []ConversationAssessment, questions QuestionsAssessment, ontology OntologyAssessment) int {
-	// Weights:
-	// - Output quality: 35%
-	// - Questions quality: 25%
-	// - Ontology accuracy: 40%
+// =============================================================================
+// Phase 6: Efficiency Metrics (10%)
+// =============================================================================
 
-	var outputAvg float64
-	if len(outputs) > 0 {
-		var sum int
-		for _, o := range outputs {
-			sum += o.OutputQuality
-		}
-		outputAvg = float64(sum) / float64(len(outputs))
+func calculateEfficiencyMetrics(conversations []LLMConversation, questions []OntologyQuestion, schema []SchemaTable) *EfficiencyScore {
+	score := &EfficiencyScore{
+		Weight: WeightEfficiency,
+		Issues: []string{},
 	}
 
-	questionsScore := questions.OverallScore
-	ontologyScore := ontology.OverallScore
-
-	finalScore := outputAvg*0.35 + float64(questionsScore)*0.25 + float64(ontologyScore)*0.40
-
-	return int(finalScore)
-}
-
-func generateSummary(model string, outputs []ConversationAssessment, questions QuestionsAssessment, ontology OntologyAssessment, finalScore int) string {
-	var sb strings.Builder
-
-	sb.WriteString(fmt.Sprintf("LLM Extraction Assessment Score: %d/100\n", finalScore))
-	sb.WriteString(fmt.Sprintf("Model Under Test: %s\n\n", model))
-
-	// Output quality summary
-	var outputAvg float64
-	totalHallucinations := 0
-	if len(outputs) > 0 {
-		var sum int
-		for _, o := range outputs {
-			sum += o.OutputQuality
-			totalHallucinations += o.Hallucinations
-		}
-		outputAvg = float64(sum) / float64(len(outputs))
-	}
-	sb.WriteString(fmt.Sprintf("Output Quality: %.0f/100 (%d hallucinations)\n", outputAvg, totalHallucinations))
-
-	sb.WriteString(fmt.Sprintf("Questions Quality: %d/100\n", questions.OverallScore))
-	sb.WriteString(fmt.Sprintf("Ontology Accuracy: %d/100\n", ontology.OverallScore))
-
-	sb.WriteString("\n")
-
-	if len(ontology.HallucinationExamples) > 0 {
-		sb.WriteString("Hallucination Examples:\n")
-		for _, ex := range ontology.HallucinationExamples[:min(3, len(ontology.HallucinationExamples))] {
-			sb.WriteString(fmt.Sprintf("  - %s\n", ex))
-		}
+	if len(schema) == 0 {
+		score.Score = 100
+		return score
 	}
 
-	if finalScore >= 90 {
-		sb.WriteString("\nExcellent LLM performance!")
-	} else if finalScore >= 70 {
-		sb.WriteString("\nGood LLM performance with some issues.")
-	} else if finalScore >= 50 {
-		sb.WriteString("\nModerate LLM performance - consider using a stronger model.")
+	// Calculate tokens per table
+	totalTokens := 0
+	for _, c := range conversations {
+		totalTokens += c.TotalTokens
+	}
+	score.TokensPerTable = float64(totalTokens) / float64(len(schema))
+
+	// Calculate questions per table
+	score.QuestionsPerTable = float64(len(questions)) / float64(len(schema))
+
+	// Calculate completion rate (% of successful conversations)
+	successfulCount := 0
+	for _, c := range conversations {
+		if c.Status == "success" {
+			successfulCount++
+		}
+	}
+	if len(conversations) > 0 {
+		score.CompletionRate = float64(successfulCount) / float64(len(conversations)) * 100
 	} else {
-		sb.WriteString("\nPoor LLM performance - significant issues detected.")
+		score.CompletionRate = 100
 	}
 
+	// Score based on efficiency
+	// Benchmarks (adjust based on experience):
+	// - Good tokens/table: 500-2000
+	// - Good questions/table: 1-3
+	// - Good completion: 100%
+
+	efficiencyScore := 100
+
+	// Penalize if tokens/table is too high
+	if score.TokensPerTable > 3000 {
+		efficiencyScore -= 20
+		score.Issues = append(score.Issues, "High token usage per table")
+	} else if score.TokensPerTable > 2000 {
+		efficiencyScore -= 10
+		score.Issues = append(score.Issues, "Above-average token usage")
+	}
+
+	// Penalize if questions/table is too high (might indicate poor question targeting)
+	if score.QuestionsPerTable > 5 {
+		efficiencyScore -= 10
+		score.Issues = append(score.Issues, "High number of questions per table")
+	}
+
+	// Penalize for failed conversations
+	if score.CompletionRate < 100 {
+		penalty := int((100 - score.CompletionRate) / 5) // -20 for each 100% drop
+		efficiencyScore -= penalty
+		score.Issues = append(score.Issues, fmt.Sprintf("%.0f%% completion rate", score.CompletionRate))
+	}
+
+	if efficiencyScore < 0 {
+		efficiencyScore = 0
+	}
+	score.Score = efficiencyScore
+
+	return score
+}
+
+// =============================================================================
+// Phase 7: Final Score Calculation
+// =============================================================================
+
+func calculateWeightedScore(summary ChecksSummary) int {
+	weightedSum := 0
+
+	if summary.QuestionQuality != nil {
+		weightedSum += summary.QuestionQuality.Score * WeightQuestionQuality
+	}
+	if summary.ExtractedInfoQuality != nil {
+		weightedSum += summary.ExtractedInfoQuality.Score * WeightExtractedInfoQuality
+	}
+	if summary.DomainSummaryQuality != nil {
+		weightedSum += summary.DomainSummaryQuality.Score * WeightDomainSummaryQuality
+	}
+	if summary.Consistency != nil {
+		weightedSum += summary.Consistency.Score * WeightConsistency
+	}
+	if summary.Efficiency != nil {
+		weightedSum += summary.Efficiency.Score * WeightEfficiency
+	}
+
+	return weightedSum / 100
+}
+
+func generateSmartSummary(finalScore int, summary ChecksSummary) string {
+	if finalScore == 100 {
+		return "Score 100/100 - Excellent! All questions relevant, accurate entity descriptions, good domain understanding."
+	}
+
+	var issues []string
+
+	// Collect issues by weight priority
+	if summary.QuestionQuality != nil && len(summary.QuestionQuality.Issues) > 0 {
+		issues = append(issues, summary.QuestionQuality.Issues[0])
+	}
+	if summary.ExtractedInfoQuality != nil && len(summary.ExtractedInfoQuality.Issues) > 0 {
+		issues = append(issues, summary.ExtractedInfoQuality.Issues[0])
+	}
+	if summary.DomainSummaryQuality != nil && len(summary.DomainSummaryQuality.Issues) > 0 {
+		issues = append(issues, summary.DomainSummaryQuality.Issues[0])
+	}
+
+	// Build summary
+	parts := []string{fmt.Sprintf("Score %d/100", finalScore)}
+	if len(issues) > 0 {
+		maxIssues := 3
+		if len(issues) < maxIssues {
+			maxIssues = len(issues)
+		}
+		parts = append(parts, strings.Join(issues[:maxIssues], ". "))
+	}
+
+	return strings.Join(parts, " - ")
+}
+
+func calculateComparisonMetrics(summary ChecksSummary, stats SchemaStats) ModelComparisonMetrics {
+	metrics := ModelComparisonMetrics{}
+
+	if summary.Efficiency != nil {
+		metrics.TokensPerTable = summary.Efficiency.TokensPerTable
+		metrics.QuestionsPerTable = summary.Efficiency.QuestionsPerTable
+		metrics.CompletionRate = summary.Efficiency.CompletionRate / 100
+	}
+
+	if summary.QuestionQuality != nil && summary.QuestionQuality.TotalQuestions > 0 {
+		total := float64(summary.QuestionQuality.TotalQuestions)
+		metrics.InsightfulQuestionsRate = float64(summary.QuestionQuality.InsightfulCount) / total
+		metrics.InferrableQuestionsRate = float64(summary.QuestionQuality.InferrableCount) / total
+	}
+
+	if summary.ExtractedInfoQuality != nil && summary.ExtractedInfoQuality.TotalEntities > 0 {
+		total := float64(summary.ExtractedInfoQuality.TotalEntities)
+		metrics.GenericDescriptionRate = float64(summary.ExtractedInfoQuality.GenericCount) / total
+		metrics.HallucinationRate = float64(summary.ExtractedInfoQuality.HallucinationCount) / total
+	}
+
+	return metrics
+}
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+func buildSchemaContext(schema []SchemaTable) string {
+	var sb strings.Builder
+	for _, t := range schema {
+		sb.WriteString(fmt.Sprintf("Table: %s\n", t.TableName))
+		for _, c := range t.Columns {
+			pk := ""
+			if c.IsPrimaryKey {
+				pk = " [PK]"
+			}
+			sb.WriteString(fmt.Sprintf("  - %s: %s%s\n", c.ColumnName, c.DataType, pk))
+		}
+		sb.WriteString("\n")
+	}
 	return sb.String()
+}
+
+func extractTextFromResponse(resp anthropic.MessagesResponse) string {
+	for _, block := range resp.Content {
+		if block.Type == "text" && block.Text != nil {
+			return *block.Text
+		}
+	}
+	return ""
 }
 
 func extractJSON(s string) string {
@@ -863,6 +1439,20 @@ func extractJSON(s string) string {
 		return s[start : end+1]
 	}
 	return s
+}
+
+func stringOrEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }
 
 func min(a, b int) int {

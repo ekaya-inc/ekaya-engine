@@ -3,10 +3,34 @@ package workqueue
 import (
 	"context"
 	"errors"
+	"math"
+	"math/rand"
 	"sync"
+	"time"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"go.uber.org/zap"
 )
+
+// RetryConfig configures retry behavior for failed tasks.
+type RetryConfig struct {
+	MaxRetries     int           // Maximum number of retry attempts (0 = no retries)
+	InitialBackoff time.Duration // Initial backoff duration
+	MaxBackoff     time.Duration // Maximum backoff duration (cap)
+	BackoffFactor  float64       // Multiplier for exponential backoff
+}
+
+// DefaultRetryConfig returns sensible defaults for retry behavior.
+// Backoff schedule: 2s, 4s, 8s, 16s, then 30s (capped) for remaining retries.
+// With 24 retries: ~30s for first 4 quick retries + ~10min for 20 retries at 30s = ~10.5min max.
+func DefaultRetryConfig() RetryConfig {
+	return RetryConfig{
+		MaxRetries:     24,
+		InitialBackoff: 2 * time.Second,
+		MaxBackoff:     30 * time.Second,
+		BackoffFactor:  2.0,
+	}
+}
 
 // Queue manages task execution with configurable concurrency control.
 // The concurrency strategy determines how tasks are allowed to run:
@@ -21,6 +45,9 @@ type Queue struct {
 
 	// Concurrency control strategy
 	strategy ConcurrencyStrategy
+
+	// Retry configuration for transient errors
+	retryConfig RetryConfig
 
 	// done is closed when all tasks complete
 	done chan struct{}
@@ -37,6 +64,25 @@ type Queue struct {
 	logger *zap.Logger
 }
 
+// QueueOption configures a Queue.
+type QueueOption func(*Queue)
+
+// WithStrategy sets the concurrency strategy.
+func WithStrategy(strategy ConcurrencyStrategy) QueueOption {
+	return func(q *Queue) {
+		if strategy != nil {
+			q.strategy = strategy
+		}
+	}
+}
+
+// WithRetryConfig sets the retry configuration.
+func WithRetryConfig(config RetryConfig) QueueOption {
+	return func(q *Queue) {
+		q.retryConfig = config
+	}
+}
+
 // NewQueue creates a new work queue with the default serialized strategy.
 func NewQueue(logger *zap.Logger) *Queue {
 	return NewQueueWithStrategy(logger, nil)
@@ -44,19 +90,29 @@ func NewQueue(logger *zap.Logger) *Queue {
 
 // NewQueueWithStrategy creates a new work queue with a custom concurrency strategy.
 // If strategy is nil, defaults to SerializedStrategy (original behavior).
+// Deprecated: Use New() with WithStrategy() option instead.
 func NewQueueWithStrategy(logger *zap.Logger, strategy ConcurrencyStrategy) *Queue {
-	if strategy == nil {
-		strategy = NewSerializedStrategy()
-	}
+	return New(logger, WithStrategy(strategy))
+}
+
+// New creates a new work queue with the given options.
+func New(logger *zap.Logger, opts ...QueueOption) *Queue {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Queue{
-		tasks:    make([]*TaskState, 0),
-		strategy: strategy,
-		done:     make(chan struct{}),
-		ctx:      ctx,
-		cancel:   cancel,
-		logger:   logger.Named("workqueue"),
+	q := &Queue{
+		tasks:       make([]*TaskState, 0),
+		strategy:    NewSerializedStrategy(),
+		retryConfig: DefaultRetryConfig(),
+		done:        make(chan struct{}),
+		ctx:         ctx,
+		cancel:      cancel,
+		logger:      logger.Named("workqueue"),
 	}
+
+	for _, opt := range opts {
+		opt(q)
+	}
+
+	return q
 }
 
 // SetOnUpdate sets the callback invoked when task state changes.
@@ -139,14 +195,104 @@ func (q *Queue) tryStartTasksLocked() {
 	}
 }
 
-// runTask executes a task and handles completion.
+// runTask executes a task with retry logic for transient errors.
 func (q *Queue) runTask(ts *TaskState) {
 	defer q.wg.Done()
 
-	// Use the queue's cancellable context - decoupled from HTTP request lifecycle
-	// but can be cancelled when user requests queue cancellation (e.g., "Stop" button)
-	err := ts.Task.Execute(q.ctx, q)
+	var lastErr error
 
+	// Retry loop
+	for attempt := 0; attempt <= q.retryConfig.MaxRetries; attempt++ {
+		// Wait before retry (skip on first attempt)
+		if attempt > 0 {
+			backoff := q.calculateBackoff(attempt)
+			q.logger.Info("retrying task after backoff",
+				zap.String("task_id", ts.Task.ID()),
+				zap.String("task_name", ts.Task.Name()),
+				zap.Int("attempt", attempt),
+				zap.Int("max_retries", q.retryConfig.MaxRetries),
+				zap.Duration("backoff", backoff))
+
+			select {
+			case <-q.ctx.Done():
+				// Context cancelled during backoff - exit immediately
+				q.completeTaskFailure(ts, q.ctx.Err())
+				return
+			case <-time.After(backoff):
+				// Continue with retry
+			}
+		}
+
+		// Execute the task
+		err := ts.Task.Execute(q.ctx, q)
+
+		if err == nil {
+			// Success - complete the task
+			q.completeTaskSuccess(ts)
+			return
+		}
+
+		lastErr = err
+
+		// Check for context cancellation (not retryable)
+		if errors.Is(err, context.Canceled) {
+			break
+		}
+
+		// Check if error is retryable
+		if !llm.IsRetryable(err) {
+			q.logger.Warn("non-retryable error, failing task immediately",
+				zap.String("task_id", ts.Task.ID()),
+				zap.String("task_name", ts.Task.Name()),
+				zap.Error(err))
+			break
+		}
+
+		// Increment retry count
+		retryCount := ts.IncrementRetryCount()
+
+		// Check if we've exhausted retries
+		if attempt >= q.retryConfig.MaxRetries {
+			q.logger.Error("task failed after max retries",
+				zap.String("task_id", ts.Task.ID()),
+				zap.String("task_name", ts.Task.Name()),
+				zap.Int("retry_count", retryCount),
+				zap.Error(err))
+			break
+		}
+
+		q.logger.Warn("retryable error encountered",
+			zap.String("task_id", ts.Task.ID()),
+			zap.String("task_name", ts.Task.Name()),
+			zap.Int("attempt", attempt+1),
+			zap.Int("max_retries", q.retryConfig.MaxRetries),
+			zap.Error(err))
+	}
+
+	// Task failed after all retries (or non-retryable error)
+	q.completeTaskFailure(ts, lastErr)
+}
+
+// calculateBackoff computes the backoff duration for a retry attempt.
+// Uses exponential backoff with jitter.
+func (q *Queue) calculateBackoff(attempt int) time.Duration {
+	// Exponential backoff: initial * factor^(attempt-1)
+	backoff := float64(q.retryConfig.InitialBackoff) *
+		math.Pow(q.retryConfig.BackoffFactor, float64(attempt-1))
+
+	// Cap at max backoff
+	if backoff > float64(q.retryConfig.MaxBackoff) {
+		backoff = float64(q.retryConfig.MaxBackoff)
+	}
+
+	// Add jitter (±10%) to prevent thundering herd
+	jitter := backoff * 0.1 * (rand.Float64()*2 - 1)
+
+	return time.Duration(backoff + jitter)
+}
+
+// completeTaskSuccess marks a task as successfully completed.
+func (q *Queue) completeTaskSuccess(ts *TaskState) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -157,44 +303,64 @@ func (q *Queue) runTask(ts *TaskState) {
 		q.strategy.OnCompleteData()
 	}
 
-	if err != nil {
-		// Distinguish between pause, cancellation, and actual failures
-		if errors.Is(err, context.Canceled) {
-			if q.paused {
-				ts.SetStatus(TaskStatusPaused)
-				q.logger.Info("task paused",
-					zap.String("task_id", ts.Task.ID()),
-					zap.String("task_name", ts.Task.Name()))
-			} else {
-				ts.SetStatus(TaskStatusCancelled)
-				q.logger.Info("task cancelled",
-					zap.String("task_id", ts.Task.ID()),
-					zap.String("task_name", ts.Task.Name()))
-			}
-		} else {
-			ts.SetStatus(TaskStatusFailed)
-			ts.SetError(err)
-			q.logger.Error("task failed",
-				zap.String("task_id", ts.Task.ID()),
-				zap.String("task_name", ts.Task.Name()),
-				zap.Error(err))
-		}
-	} else {
-		ts.SetStatus(TaskStatusCompleted)
-		q.logger.Info("task completed",
-			zap.String("task_id", ts.Task.ID()),
-			zap.String("task_name", ts.Task.Name()))
-	}
+	ts.SetStatus(TaskStatusCompleted)
+	q.logger.Info("task completed",
+		zap.String("task_id", ts.Task.ID()),
+		zap.String("task_name", ts.Task.Name()),
+		zap.Int("retry_count", ts.GetRetryCount()))
 
 	q.notifyUpdateLocked()
 
-	// Check if all tasks are done
 	if q.allTasksDoneLocked() {
 		q.closeDoneLocked()
 		return
 	}
 
-	// Try to start more tasks
+	q.tryStartTasksLocked()
+}
+
+// completeTaskFailure marks a task as failed or cancelled/paused.
+func (q *Queue) completeTaskFailure(ts *TaskState, err error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	// Notify strategy that task completed
+	if ts.Task.RequiresLLM() {
+		q.strategy.OnCompleteLLM()
+	} else {
+		q.strategy.OnCompleteData()
+	}
+
+	// Distinguish between pause, cancellation, and actual failures
+	if errors.Is(err, context.Canceled) {
+		if q.paused {
+			ts.SetStatus(TaskStatusPaused)
+			q.logger.Info("task paused",
+				zap.String("task_id", ts.Task.ID()),
+				zap.String("task_name", ts.Task.Name()))
+		} else {
+			ts.SetStatus(TaskStatusCancelled)
+			q.logger.Info("task cancelled",
+				zap.String("task_id", ts.Task.ID()),
+				zap.String("task_name", ts.Task.Name()))
+		}
+	} else {
+		ts.SetStatus(TaskStatusFailed)
+		ts.SetError(err)
+		q.logger.Error("task failed",
+			zap.String("task_id", ts.Task.ID()),
+			zap.String("task_name", ts.Task.Name()),
+			zap.Int("retry_count", ts.GetRetryCount()),
+			zap.Error(err))
+	}
+
+	q.notifyUpdateLocked()
+
+	if q.allTasksDoneLocked() {
+		q.closeDoneLocked()
+		return
+	}
+
 	q.tryStartTasksLocked()
 }
 

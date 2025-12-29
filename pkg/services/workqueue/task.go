@@ -51,6 +51,7 @@ type TaskState struct {
 	StartedAt   *time.Time
 	CompletedAt *time.Time
 	Error       error
+	RetryCount  int // Number of retry attempts made
 
 	mu sync.RWMutex
 }
@@ -100,6 +101,21 @@ func (ts *TaskState) GetError() error {
 	return ts.Error
 }
 
+// GetRetryCount returns the retry count (thread-safe).
+func (ts *TaskState) GetRetryCount() int {
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+	return ts.RetryCount
+}
+
+// IncrementRetryCount increments and returns the new retry count (thread-safe).
+func (ts *TaskState) IncrementRetryCount() int {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ts.RetryCount++
+	return ts.RetryCount
+}
+
 // Snapshot returns an immutable copy of the task state.
 func (ts *TaskState) Snapshot() TaskSnapshot {
 	ts.mu.RLock()
@@ -118,6 +134,7 @@ func (ts *TaskState) Snapshot() TaskSnapshot {
 		StartedAt:   ts.StartedAt,
 		CompletedAt: ts.CompletedAt,
 		Error:       errMsg,
+		RetryCount:  ts.RetryCount,
 	}
 }
 
@@ -130,6 +147,7 @@ type TaskSnapshot struct {
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	Error       string     `json:"error,omitempty"`
+	RetryCount  int        `json:"retry_count,omitempty"`
 }
 
 // BaseTask provides common task functionality.

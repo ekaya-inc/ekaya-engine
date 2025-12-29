@@ -117,6 +117,7 @@ type WorkflowTask struct {
 	RequiresLLM bool   `json:"requires_llm"`
 	TableName   string `json:"table_name,omitempty"` // For per-table tasks
 	Error       string `json:"error,omitempty"`
+	RetryCount  int    `json:"retry_count,omitempty"` // Number of retry attempts made
 }
 
 // Task statuses
