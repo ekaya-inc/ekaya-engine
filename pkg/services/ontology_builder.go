@@ -408,7 +408,7 @@ For each table, provide:
 
 CRITICAL: Keep each entity summary under 75 tokens. Be concise.
 
-Return a JSON array of entity summaries.`
+Return a JSON object containing an "entity_summaries" array.`
 }
 
 func (s *ontologyBuilderService) buildTier1Prompt(tables []*models.SchemaTable, relationshipMap map[string][]string) string {
@@ -476,25 +476,25 @@ func (s *ontologyBuilderService) buildTier1PromptWithContext(tables []*models.Sc
 	}
 
 	prompt.WriteString("## Output Format\n\n")
-	prompt.WriteString("Return a JSON array:\n")
-	prompt.WriteString("```json\n")
-	prompt.WriteString(`[
-  {
-    "table_name": "orders",
-    "business_name": "Customer Orders",
-    "description": "Records of customer purchase transactions",
-    "domain": "sales",
-    "synonyms": ["purchases", "transactions", "sales"],
-    "key_columns": [
-      {"name": "total_amount", "synonyms": ["revenue", "price"]},
-      {"name": "order_date", "synonyms": ["purchase_date"]}
-    ],
-    "column_count": 12,
-    "relationships": ["customers", "products"]
-  }
-]
+	prompt.WriteString("Return ONLY raw JSON (no markdown code fences, no explanation before or after):\n\n")
+	prompt.WriteString(`{
+  "entity_summaries": [
+    {
+      "table_name": "orders",
+      "business_name": "Customer Orders",
+      "description": "Records of customer purchase transactions",
+      "domain": "sales",
+      "synonyms": ["purchases", "transactions", "sales"],
+      "key_columns": [
+        {"name": "total_amount", "synonyms": ["revenue", "price"]},
+        {"name": "order_date", "synonyms": ["purchase_date"]}
+      ],
+      "column_count": 12,
+      "relationships": ["customers", "products"]
+    }
+  ]
+}
 `)
-	prompt.WriteString("```\n")
 
 	return prompt.String()
 }
@@ -511,13 +511,17 @@ func (s *ontologyBuilderService) parseTier1Response(response string) (map[string
 		Relationships []string           `json:"relationships"`
 	}
 
-	summaries, err := llm.ParseJSONResponse[[]llmEntitySummary](response)
+	type tier1Response struct {
+		EntitySummaries []llmEntitySummary `json:"entity_summaries"`
+	}
+
+	parsed, err := llm.ParseJSONResponse[tier1Response](response)
 	if err != nil {
 		return nil, err
 	}
 
 	result := make(map[string]*models.EntitySummary)
-	for _, entity := range summaries {
+	for _, entity := range parsed.EntitySummaries {
 		result[entity.TableName] = &models.EntitySummary{
 			TableName:     entity.TableName,
 			BusinessName:  entity.BusinessName,
@@ -638,7 +642,7 @@ func (s *ontologyBuilderService) buildTier0PromptWithContext(entities map[string
 	}
 
 	prompt.WriteString("\n## Output Format\n\n")
-	prompt.WriteString("```json\n")
+	prompt.WriteString("/no_think\nReturn ONLY raw JSON (no markdown code fences, no explanation before or after):\n\n")
 	prompt.WriteString(`{
   "description": "E-commerce database tracking orders, customers, and inventory",
   "domains": ["sales", "customer", "inventory"],
@@ -649,7 +653,6 @@ func (s *ontologyBuilderService) buildTier0PromptWithContext(entities map[string
   ]
 }
 `)
-	prompt.WriteString("```\n")
 
 	return prompt.String()
 }
@@ -1147,9 +1150,8 @@ IMPORTANT: Only generate questions if there is genuine ambiguity. Many tables ar
 
 ## OUTPUT FORMAT
 
-Return ONLY a JSON object:
+Return ONLY raw JSON (no markdown code fences, no explanation before or after):
 
-%sjson
 {
   "analysis": "Brief summary of what this table represents and any ambiguities found",
   "entity_summary": {
@@ -1168,13 +1170,12 @@ Return ONLY a JSON object:
     }
   ]
 }
-%s
 
 Priority scale: 1=Critical, 2=High, 3=Medium, 4=Low, 5=Optional
 Categories: business_rules, relationship, terminology, enumeration, temporal, data_quality
 
 If the table is self-explanatory, return:
-%sjson
+
 {
   "analysis": "This table clearly represents X and all columns have obvious purposes.",
   "entity_summary": {
@@ -1184,8 +1185,7 @@ If the table is self-explanatory, return:
   },
   "questions": []
 }
-%s
-`, table.TableName, "```", "```", "```", "```"))
+`, table.TableName))
 
 	return sb.String()
 }
@@ -1455,22 +1455,24 @@ Generate 3-10 targeted questions that would SIGNIFICANTLY improve understanding 
 
 ## OUTPUT FORMAT
 
-Return ONLY a JSON array:
+Return ONLY a JSON object containing a "questions" array:
 
 %sjson
-[
-  {
-    "text": "The 'orders' table has a 'status' column. What are the possible order statuses?",
-    "priority": 1,
-    "category": "business_rules",
-    "reasoning": "Understanding order lifecycle is critical for reporting",
-    "affects": {
-      "tables": ["orders"],
-      "columns": ["orders.status"]
-    },
-    "detected_pattern": "status_column"
-  }
-]
+{
+  "questions": [
+    {
+      "text": "The 'orders' table has a 'status' column. What are the possible order statuses?",
+      "priority": 1,
+      "category": "business_rules",
+      "reasoning": "Understanding order lifecycle is critical for reporting",
+      "affects": {
+        "tables": ["orders"],
+        "columns": ["orders.status"]
+      },
+      "detected_pattern": "status_column"
+    }
+  ]
+}
 %s
 
 ## Priority Scale
@@ -1502,13 +1504,17 @@ func (s *ontologyBuilderService) parseQuestionsResponse(response string, project
 		DetectedPattern string `json:"detected_pattern"`
 	}
 
-	rawQuestions, err := llm.ParseJSONResponse[[]llmQuestion](response)
+	type questionsResponse struct {
+		Questions []llmQuestion `json:"questions"`
+	}
+
+	parsed, err := llm.ParseJSONResponse[questionsResponse](response)
 	if err != nil {
 		return nil, err
 	}
 
-	questions := make([]*models.OntologyQuestion, 0, len(rawQuestions))
-	for _, raw := range rawQuestions {
+	questions := make([]*models.OntologyQuestion, 0, len(parsed.Questions))
+	for _, raw := range parsed.Questions {
 		if raw.Text == "" {
 			continue
 		}
@@ -1998,8 +2004,8 @@ Analyze the user's description against the schema and extract:
 5. Entity hints (business names, domains, synonyms) for specific tables
 
 ## Output Format
-Return a JSON object:
-%sjson
+Return ONLY raw JSON (no markdown code fences, no explanation before or after):
+
 {
   "domain_context": {
     "summary": "Brief description of what this database represents",
@@ -2030,8 +2036,7 @@ Return a JSON object:
       "domain": "sales"
     }
   }
-}
-%s`, description, schemaSummary, "```", "```")
+}`, description, schemaSummary)
 }
 
 func (s *ontologyBuilderService) parseDescriptionProcessingResponse(response string, projectID uuid.UUID, ontologyID uuid.UUID, workflowID uuid.UUID) (*DescriptionProcessingResult, error) {
