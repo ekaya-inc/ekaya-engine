@@ -970,15 +970,15 @@ queryService := services.NewQueryService(queryRepo, datasourceService, adapterFa
 ## Implementation Steps
 
 ### Step 1: Create Retry Package
-- [ ] Create `pkg/retry/retry.go`
-- [ ] Implement `Config` struct with `MaxRetries`, `InitialDelay`, `MaxDelay`, `Multiplier`
-- [ ] Implement `DefaultConfig()` returning sensible defaults (3 retries, 100ms initial, 5s max, 2x multiplier)
-- [ ] Implement `Do(ctx, cfg, fn)` for operations returning only error
-- [ ] Implement `DoWithResult[T](ctx, cfg, fn)` for operations returning (T, error)
-- [ ] Implement `IsRetryable(err)` to detect transient errors
-- [ ] Implement `DoIfRetryable(ctx, cfg, fn)` that skips retries for permanent errors
-- [ ] Respect context cancellation during wait periods
-- [ ] Create `pkg/retry/retry_test.go` with unit tests
+- [x] Create `pkg/retry/retry.go`
+- [x] Implement `Config` struct with `MaxRetries`, `InitialDelay`, `MaxDelay`, `Multiplier`
+- [x] Implement `DefaultConfig()` returning sensible defaults (3 retries, 100ms initial, 5s max, 2x multiplier)
+- [x] Implement `Do(ctx, cfg, fn)` for operations returning only error
+- [x] Implement `DoWithResult[T](ctx, cfg, fn)` for operations returning (T, error)
+- [x] Implement `IsRetryable(err)` to detect transient errors
+- [x] Implement `DoIfRetryable(ctx, cfg, fn)` that skips retries for permanent errors
+- [x] Respect context cancellation during wait periods
+- [x] Create `pkg/retry/retry_test.go` with unit tests
 
 ### Step 2: Create Log Sanitizer
 - [ ] Create `pkg/logging/sanitizer.go`
@@ -1224,7 +1224,10 @@ NewAdapter(ctx context.Context, cfg *Config, connMgr *ConnectionManager, project
 - **ekaya-region:** `{projectID}:{userID}` (ADBC connections to metadata DB)
 - **ekaya-engine:** `{projectID}:{userID}:{datasourceID}` (pgxpool to customer datasources)
 
-**Rationale:** ekaya-engine must pool connections per datasource since each customer database has different credentials and endpoints.
+**Rationale:** The key includes all three components because:
+1. **`datasourceID`** - Each customer database has different connection endpoints and credentials
+2. **`userID`** - Datasources may be configured with user-level credentials rather than shared project credentials. When users have their own database credentials, each user needs a separate connection pool to the same datasource.
+3. **`projectID`** - Provides tenant isolation and enables per-project connection tracking
 
 ### Database Type
 - **ekaya-region:** ADBC (adbc.Database + adbc.Connection)
