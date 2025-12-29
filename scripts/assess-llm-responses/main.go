@@ -274,9 +274,9 @@ func main() {
 	}
 
 	// =========================================================================
-	// Phase 6: Token Efficiency Metrics
+	// Phase 6: Token Metrics
 	// =========================================================================
-	fmt.Fprintf(os.Stderr, "Phase 6: Calculating token efficiency metrics...\n")
+	fmt.Fprintf(os.Stderr, "Phase 6: Calculating token metrics...\n")
 
 	tokenMetrics := calculateTokenMetrics(taggedConversations, len(schema))
 	fmt.Fprintf(os.Stderr, "  Total tokens: %d across %d conversations\n",
@@ -284,7 +284,8 @@ func main() {
 	fmt.Fprintf(os.Stderr, "  Avg tokens per conversation: %.1f\n", tokenMetrics.AvgTokensPerConv)
 	fmt.Fprintf(os.Stderr, "  Max tokens in single conversation: %d\n", tokenMetrics.MaxTokens)
 	fmt.Fprintf(os.Stderr, "  Tokens per table analyzed: %.1f\n", tokenMetrics.TokensPerTable)
-	fmt.Fprintf(os.Stderr, "  Efficiency score: %d/10\n", tokenMetrics.EfficiencyScore)
+	fmt.Fprintf(os.Stderr, "  Throughput: %.1f tokens/sec (aggregate), %.1f tokens/sec (avg per request)\n",
+		tokenMetrics.TokensPerSecond, tokenMetrics.AvgTokensPerSecond)
 
 	if len(tokenMetrics.Issues) > 0 {
 		for _, issue := range tokenMetrics.Issues {
@@ -382,7 +383,9 @@ func main() {
 			"max_tokens":              tokenMetrics.MaxTokens,
 			"max_tokens_conv_id":      tokenMetrics.MaxTokensConvID,
 			"tokens_per_table":        tokenMetrics.TokensPerTable,
-			"efficiency_score":        tokenMetrics.EfficiencyScore,
+			"total_duration_ms":       tokenMetrics.TotalDurationMs,
+			"tokens_per_second":       tokenMetrics.TokensPerSecond,
+			"avg_tokens_per_second":   tokenMetrics.AvgTokensPerSecond,
 			"by_prompt_type":          formatPromptTypeStats(tokenMetrics.ByPromptType),
 			"issues":                  tokenMetrics.Issues,
 		},

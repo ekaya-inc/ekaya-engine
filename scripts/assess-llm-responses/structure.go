@@ -5,6 +5,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 )
 
 // =============================================================================
@@ -76,6 +78,7 @@ func checkStructure(tc TaggedConversation) StructureCheckResult {
 // =============================================================================
 
 // checkJSONParsing validates that response_content is valid JSON.
+// Uses llm.ExtractJSON to handle markdown fences, thinking tags, and other wrappers.
 // Returns score (20 if valid, 0 if not) and parsed response.
 func checkJSONParsing(responseContent string, issues *[]string) (int, map[string]interface{}) {
 	if responseContent == "" {
@@ -83,9 +86,18 @@ func checkJSONParsing(responseContent string, issues *[]string) (int, map[string
 		return 0, nil
 	}
 
+	// Extract JSON from response (handles markdown fences, <think> tags, etc.)
+	jsonStr, err := llm.ExtractJSON(responseContent)
+	if err != nil {
+		*issues = append(*issues, fmt.Sprintf("JSON extraction failed: %v", err))
+		return 0, nil
+	}
+
 	var parsed map[string]interface{}
-	if err := json.Unmarshal([]byte(responseContent), &parsed); err != nil {
-		*issues = append(*issues, fmt.Sprintf("JSON parsing failed: %v", err))
+	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+		// JSON extraction succeeded but unmarshal failed - might be an array response
+		*issues = append(*issues, fmt.Sprintf("JSON parsing failed (extracted: %s): %v",
+			truncateText(jsonStr, 100), err))
 		return 0, nil
 	}
 
@@ -114,12 +126,17 @@ func checkResponseStatus(conv LLMConversation, issues *[]string) int {
 // 3.3 Completeness Check (20 points)
 // =============================================================================
 
-// RequiredFields defines required top-level fields by prompt type
+// RequiredFields defines required top-level fields by prompt type.
+// These match the actual JSON structures requested in the prompts.
 var requiredFieldsByPromptType = map[PromptType][]string{
-	PromptTypeEntityAnalysis:        {"business_name", "description", "domain", "key_columns", "questions"},
-	PromptTypeTier1Batch:            {"entity_summaries"},
-	PromptTypeTier0Domain:           {"domain_summary"},
-	PromptTypeDescriptionProcessing: {"entity_hints"},
+	// entity_analysis: {"analysis": "...", "entity_summary": {...}, "questions": [...]}
+	PromptTypeEntityAnalysis: {"entity_summary", "questions"},
+	// tier1_batch: returns an ARRAY, not object - handled specially
+	PromptTypeTier1Batch: {}, // Empty - tier1 returns array, validated differently
+	// tier0_domain: {"description": "...", "domains": [...], "sample_questions": [...]}
+	PromptTypeTier0Domain: {"description", "domains", "sample_questions"},
+	// description_processing: {"domain_context": {...}, "clarifying_questions": [...], "entity_hints": {...}}
+	PromptTypeDescriptionProcessing: {"domain_context", "entity_hints"},
 }
 
 // checkCompleteness validates that required top-level fields are present.
@@ -129,6 +146,11 @@ func checkCompleteness(promptType PromptType, parsed map[string]interface{}, iss
 	requiredFields, ok := requiredFieldsByPromptType[promptType]
 	if !ok {
 		// Unknown prompt type - can't validate completeness, give full score
+		return 20
+	}
+
+	// No required fields (e.g., tier1_batch returns array) - give full score
+	if len(requiredFields) == 0 {
 		return 20
 	}
 
@@ -161,23 +183,26 @@ type FieldTypeSpec struct {
 	Expected string // "string", "array", "object"
 }
 
-// ExpectedFieldTypes defines expected types by prompt type
+// ExpectedFieldTypes defines expected types by prompt type.
+// These match the actual JSON structures requested in the prompts.
 var expectedFieldTypesByPromptType = map[PromptType][]FieldTypeSpec{
+	// entity_analysis returns nested structure
 	PromptTypeEntityAnalysis: {
-		{Field: "business_name", Expected: "string"},
-		{Field: "description", Expected: "string"},
-		{Field: "domain", Expected: "string"},
-		{Field: "key_columns", Expected: "array"},
+		{Field: "entity_summary", Expected: "object"},
 		{Field: "questions", Expected: "array"},
 	},
-	PromptTypeTier1Batch: {
-		{Field: "entity_summaries", Expected: "object"},
-	},
+	// tier1_batch returns an array - type check handled in checkJSONParsing
+	PromptTypeTier1Batch: {},
+	// tier0_domain returns flat structure
 	PromptTypeTier0Domain: {
-		{Field: "domain_summary", Expected: "object"},
+		{Field: "description", Expected: "string"},
+		{Field: "domains", Expected: "array"},
+		{Field: "sample_questions", Expected: "array"},
 	},
+	// description_processing returns nested structure
 	PromptTypeDescriptionProcessing: {
-		{Field: "entity_hints", Expected: "array"},
+		{Field: "domain_context", Expected: "object"},
+		{Field: "entity_hints", Expected: "object"},
 	},
 }
 

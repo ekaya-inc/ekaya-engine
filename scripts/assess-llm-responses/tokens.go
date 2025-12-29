@@ -16,12 +16,14 @@ type TokenMetrics struct {
 	MaxTokens             int     `json:"max_tokens"`
 	MaxTokensConvID       string  `json:"max_tokens_conv_id,omitempty"` // ID of conversation with max tokens
 	TokensPerTable        float64 `json:"tokens_per_table"`             // Total tokens / tables analyzed
-	EfficiencyScore       int     `json:"efficiency_score"`             // 0-10 points
+	TotalDurationMs       int64   `json:"total_duration_ms"`            // Sum of all conversation durations
+	TokensPerSecond       float64 `json:"tokens_per_second"`            // Throughput: total_tokens / total_duration
+	AvgTokensPerSecond    float64 `json:"avg_tokens_per_second"`        // Average of per-request tokens/sec
 
 	// Per-prompt-type breakdowns
 	ByPromptType map[PromptType]*PromptTypeTokenStats `json:"by_prompt_type"`
 
-	// Issues found during efficiency analysis
+	// Issues found during analysis
 	Issues []string `json:"issues,omitempty"`
 }
 
@@ -75,6 +77,10 @@ func calculateTokenMetrics(
 	}
 	metrics.ByPromptType[PromptTypeUnknown] = &PromptTypeTokenStats{}
 
+	// Track sum of per-request tokens/sec for averaging
+	var sumTokensPerSec float64
+	var countWithDuration int
+
 	// Iterate through all conversations to collect token data
 	for _, tc := range tagged {
 		conv := tc.Conversation
@@ -94,6 +100,16 @@ func calculateTokenMetrics(
 		}
 		if conv.CompletionTokens != nil {
 			metrics.TotalCompletionTokens += *conv.CompletionTokens
+		}
+
+		// Accumulate duration for throughput calculation
+		metrics.TotalDurationMs += int64(conv.DurationMs)
+
+		// Calculate per-request completion tokens/sec for averaging (LLM generation speed)
+		if conv.DurationMs > 0 && conv.CompletionTokens != nil && *conv.CompletionTokens > 0 {
+			perRequestTPS := float64(*conv.CompletionTokens) / (float64(conv.DurationMs) / 1000.0)
+			sumTokensPerSec += perRequestTPS
+			countWithDuration++
 		}
 
 		// Track max tokens
@@ -121,6 +137,11 @@ func calculateTokenMetrics(
 		}
 	}
 
+	// Calculate average tokens/sec per request
+	if countWithDuration > 0 {
+		metrics.AvgTokensPerSecond = sumTokensPerSec / float64(countWithDuration)
+	}
+
 	// Calculate averages
 	if metrics.TotalConversations > 0 {
 		metrics.AvgTokensPerConv = float64(metrics.TotalTokens) / float64(metrics.TotalConversations)
@@ -138,26 +159,24 @@ func calculateTokenMetrics(
 		metrics.TokensPerTable = float64(metrics.TotalTokens) / float64(tableCount)
 	}
 
-	// Calculate efficiency score
-	metrics.EfficiencyScore = calculateEfficiencyScore(metrics, &metrics.Issues)
+	// Calculate throughput (completion tokens per second - LLM generation speed)
+	if metrics.TotalDurationMs > 0 && metrics.TotalCompletionTokens > 0 {
+		metrics.TokensPerSecond = float64(metrics.TotalCompletionTokens) / (float64(metrics.TotalDurationMs) / 1000.0)
+	}
+
+	// Check for efficiency issues (for informational purposes, not scoring)
+	checkEfficiencyIssues(metrics, &metrics.Issues)
 
 	return metrics
 }
 
 // =============================================================================
-// Efficiency Score Calculation (10 points)
+// Efficiency Issue Detection (informational only, not scored)
 // =============================================================================
 
-// calculateEfficiencyScore evaluates token usage against benchmarks.
-// Returns a score from 0-10 where 10 is perfectly efficient.
-//
-// Scoring logic:
-//   - Start with 10 points
-//   - Penalty: -5 if any prompt type's average tokens > 2x expected max
-//     (suggests prompt bloat or repeated failures)
-func calculateEfficiencyScore(metrics TokenMetrics, issues *[]string) int {
-	score := 10
-
+// checkEfficiencyIssues identifies potential token usage issues.
+// Issues are logged for informational purposes but do not affect scoring.
+func checkEfficiencyIssues(metrics TokenMetrics, issues *[]string) {
 	// Check each prompt type against benchmarks
 	for promptType, benchmark := range tokenBenchmarks {
 		ptStats := metrics.ByPromptType[promptType]
@@ -165,7 +184,7 @@ func calculateEfficiencyScore(metrics TokenMetrics, issues *[]string) int {
 			continue
 		}
 
-		// Check if average exceeds 2x the expected max (threshold for penalty)
+		// Check if average exceeds 2x the expected max (potential issue)
 		threshold := benchmark.MaxExpected * 2
 		if ptStats.AvgTokens > float64(threshold) {
 			*issues = append(*issues, formatEfficiencyIssue(
@@ -173,15 +192,8 @@ func calculateEfficiencyScore(metrics TokenMetrics, issues *[]string) int {
 				ptStats.AvgTokens,
 				benchmark.MaxExpected,
 			))
-			score -= 5
 		}
 	}
-
-	// Clamp score to 0-10 range
-	if score < 0 {
-		score = 0
-	}
-	return score
 }
 
 // formatEfficiencyIssue creates a descriptive message for a token efficiency issue.

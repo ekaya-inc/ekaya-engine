@@ -173,53 +173,70 @@ func checkValueValidation(tc TaggedConversation, parsed map[string]interface{}) 
 // =============================================================================
 
 // checkRequiredStringFields validates that required string fields are non-empty.
-// - business_name: not empty
-// - description: not empty (min 10 chars)
-// - domain: not empty
+// For entity_analysis responses, checks nested entity_summary fields:
+// - entity_summary.business_name: not empty
+// - entity_summary.description: not empty (min 10 chars)
+// - entity_summary.domain: not empty
 // Penalty: -3 per empty required field (max -10, but clamped to score 0)
 func checkRequiredStringFields(parsed map[string]interface{}, issues *[]string) int {
 	score := 10
 	const penaltyPerField = 3
 
-	// Check business_name
-	if businessName, ok := parsed["business_name"].(string); ok {
+	// entity_analysis uses nested entity_summary structure
+	entitySummary, hasEntitySummary := parsed["entity_summary"].(map[string]interface{})
+	if !hasEntitySummary {
+		// If entity_summary is missing entirely, all fields are missing
+		*issues = append(*issues, "entity_summary is missing or not an object")
+		return 0
+	}
+
+	// Check business_name (nested in entity_summary)
+	if businessName, ok := entitySummary["business_name"].(string); ok {
 		if businessName == "" {
-			*issues = append(*issues, "business_name is empty")
+			*issues = append(*issues, "entity_summary.business_name is empty")
 			score -= penaltyPerField
 		}
 	} else {
-		// Not a string - may have been caught by type validation, but we still penalize for value
-		if _, exists := parsed["business_name"]; exists {
-			*issues = append(*issues, "business_name is not a valid string")
+		if _, exists := entitySummary["business_name"]; exists {
+			*issues = append(*issues, "entity_summary.business_name is not a valid string")
+			score -= penaltyPerField
+		} else {
+			*issues = append(*issues, "entity_summary.business_name is missing")
 			score -= penaltyPerField
 		}
 	}
 
-	// Check description (min 10 chars)
-	if description, ok := parsed["description"].(string); ok {
+	// Check description (min 10 chars, nested in entity_summary)
+	if description, ok := entitySummary["description"].(string); ok {
 		if description == "" {
-			*issues = append(*issues, "description is empty")
+			*issues = append(*issues, "entity_summary.description is empty")
 			score -= penaltyPerField
 		} else if len(description) < 10 {
-			*issues = append(*issues, fmt.Sprintf("description is too short (%d chars, min 10)", len(description)))
+			*issues = append(*issues, fmt.Sprintf("entity_summary.description is too short (%d chars, min 10)", len(description)))
 			score -= penaltyPerField
 		}
 	} else {
-		if _, exists := parsed["description"]; exists {
-			*issues = append(*issues, "description is not a valid string")
+		if _, exists := entitySummary["description"]; exists {
+			*issues = append(*issues, "entity_summary.description is not a valid string")
+			score -= penaltyPerField
+		} else {
+			*issues = append(*issues, "entity_summary.description is missing")
 			score -= penaltyPerField
 		}
 	}
 
-	// Check domain
-	if domain, ok := parsed["domain"].(string); ok {
+	// Check domain (nested in entity_summary)
+	if domain, ok := entitySummary["domain"].(string); ok {
 		if domain == "" {
-			*issues = append(*issues, "domain is empty")
+			*issues = append(*issues, "entity_summary.domain is empty")
 			score -= penaltyPerField
 		}
 	} else {
-		if _, exists := parsed["domain"]; exists {
-			*issues = append(*issues, "domain is not a valid string")
+		if _, exists := entitySummary["domain"]; exists {
+			*issues = append(*issues, "entity_summary.domain is not a valid string")
+			score -= penaltyPerField
+		} else {
+			*issues = append(*issues, "entity_summary.domain is missing")
 			score -= penaltyPerField
 		}
 	}
