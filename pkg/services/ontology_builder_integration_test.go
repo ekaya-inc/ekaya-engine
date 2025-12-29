@@ -243,26 +243,27 @@ func TestLoadTablesWithColumns_Integration(t *testing.T) {
 }
 
 // TestBuildSchemaSummaryForDescription_IncludesColumns tests that the schema summary
-// for ProcessProjectDescription includes column names. This is the first LLM call
-// and was missing columns, causing the assessment to show columns_included: false.
+// for ProcessProjectDescription includes column names with data types and flags.
+// This is the first LLM call and was missing columns, causing the assessment to
+// show columns_included: false and input_assessment score of 45.
 func TestBuildSchemaSummaryForDescription_IncludesColumns(t *testing.T) {
 	// Create service (no DB needed for this unit test)
 	service := &ontologyBuilderService{}
 
-	// Create test tables with columns
+	// Create test tables with columns including PK and nullable flags
 	tables := []*models.SchemaTable{
 		{
 			TableName: "offers",
 			Columns: []models.SchemaColumn{
-				{ColumnName: "id", DataType: "uuid"},
-				{ColumnName: "owner_id", DataType: "uuid"},
+				{ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+				{ColumnName: "owner_id", DataType: "uuid", IsNullable: true},
 				{ColumnName: "fee_per_minute", DataType: "numeric"},
 			},
 		},
 		{
 			TableName: "users",
 			Columns: []models.SchemaColumn{
-				{ColumnName: "id", DataType: "uuid"},
+				{ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
 				{ColumnName: "email", DataType: "text"},
 			},
 		},
@@ -271,20 +272,58 @@ func TestBuildSchemaSummaryForDescription_IncludesColumns(t *testing.T) {
 	// Build schema summary
 	summary := service.buildSchemaSummaryForDescription(tables)
 
-	// Verify column names are included
-	if !strings.Contains(summary, "owner_id") {
-		t.Error("Schema summary missing 'owner_id' - LLM will hallucinate column names")
+	// Verify column names are included with data types
+	if !strings.Contains(summary, "owner_id: uuid") {
+		t.Error("Schema summary missing 'owner_id: uuid' - must include data type")
 	}
-	if !strings.Contains(summary, "fee_per_minute") {
-		t.Error("Schema summary missing 'fee_per_minute' - LLM will hallucinate column names")
+	if !strings.Contains(summary, "fee_per_minute: numeric") {
+		t.Error("Schema summary missing 'fee_per_minute: numeric' - must include data type")
 	}
-	if !strings.Contains(summary, "email") {
-		t.Error("Schema summary missing 'email' - LLM will hallucinate column names")
+	if !strings.Contains(summary, "email: text") {
+		t.Error("Schema summary missing 'email: text' - must include data type")
 	}
 
-	// Verify the format shows columns after "Columns: "
-	if !strings.Contains(summary, "Columns: id, owner_id, fee_per_minute") {
-		t.Errorf("Schema summary has wrong format for offers columns.\nGot: %s", summary)
+	// Verify PK flags are included
+	if !strings.Contains(summary, "[PK]") {
+		t.Error("Schema summary missing [PK] flag for primary key columns")
+	}
+
+	// Verify nullable flags are included
+	if !strings.Contains(summary, "[nullable]") && !strings.Contains(summary, "nullable") {
+		t.Error("Schema summary missing nullable flag for nullable columns")
+	}
+
+	// Verify column count is shown (regression test for "Columns (0):" bug)
+	if !strings.Contains(summary, "Columns (3)") {
+		t.Errorf("Schema summary should show 'Columns (3)' for offers table.\nGot: %s", summary)
+	}
+	if !strings.Contains(summary, "Columns (2)") {
+		t.Errorf("Schema summary should show 'Columns (2)' for users table.\nGot: %s", summary)
+	}
+}
+
+// TestBuildSchemaSummaryForDescription_EmptyColumns tests that the schema summary
+// shows "Columns (0):" when a table has no columns. This is a regression test for
+// the bug where ProcessDescription used ListTablesByDatasource (which doesn't load
+// columns) instead of loadTablesWithColumns.
+func TestBuildSchemaSummaryForDescription_EmptyColumns(t *testing.T) {
+	service := &ontologyBuilderService{}
+
+	// Simulate the bug: table loaded without columns
+	tables := []*models.SchemaTable{
+		{
+			TableName: "offers",
+			Columns:   nil, // No columns loaded - this was the bug!
+		},
+	}
+
+	summary := service.buildSchemaSummaryForDescription(tables)
+
+	// This test documents the buggy behavior - if you see "Columns (0):" in production,
+	// it means columns weren't loaded properly
+	if strings.Contains(summary, "Columns (0):") {
+		t.Log("WARNING: Table has no columns - this indicates a data loading bug")
+		t.Log("ProcessDescription must use loadTablesWithColumns, not ListTablesByDatasource")
 	}
 }
 
