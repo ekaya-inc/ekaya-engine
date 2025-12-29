@@ -54,6 +54,12 @@ const (
 	InputScoreEntityAnalysisWeight = 50 // Most critical - sample value verification
 	InputScoreConversationWeight   = 30
 	InputScoreChecksWeight         = 20
+
+	// Post-process score weights (must sum to 100) - Phase 5
+	PostProcessEntitySummaryWeight = 40 // Entity summaries capture
+	PostProcessQuestionWeight      = 30 // Question capture
+	PostProcessDomainWeight        = 20 // Domain summary
+	PostProcessParseWeight         = 10 // LLM response parsing
 )
 
 // AssessmentResult contains the full assessment output
@@ -118,10 +124,51 @@ type EntityAnalysisCheck struct {
 	Score                 int      `json:"score"`
 }
 
+// EntitySummaryCheck contains output verification for entity summaries (Phase 5)
+type EntitySummaryCheck struct {
+	TableName         string   `json:"table_name"`
+	EntryExists       bool     `json:"entry_exists"`
+	HasBusinessName   bool     `json:"has_business_name"`
+	HasDescription    bool     `json:"has_description"`
+	HasValidDomain    bool     `json:"has_valid_domain"`
+	KeyColumnsValid   bool     `json:"key_columns_valid"`
+	InvalidKeyColumns []string `json:"invalid_key_columns,omitempty"`
+	IsExtraTable      bool     `json:"is_extra_table,omitempty"` // Table not in schema (hallucination)
+	Score             int      `json:"score"`
+	Issues            []string `json:"issues,omitempty"`
+}
+
+// QuestionCheck contains output verification for questions (Phase 5)
+type QuestionCheck struct {
+	TotalQuestions         int      `json:"total_questions"`
+	QuestionsWithText      int      `json:"questions_with_text"`
+	QuestionsWithReasoning int      `json:"questions_with_reasoning"`
+	QuestionsWithSource    int      `json:"questions_with_source"`
+	QuestionsWithCategory  int      `json:"questions_with_category"`
+	QuestionsWithPriority  int      `json:"questions_with_priority"`
+	InvalidSources         int      `json:"invalid_sources"`
+	InvalidPriorities      int      `json:"invalid_priorities"` // Priority outside 1-5
+	Score                  int      `json:"score"`
+	Issues                 []string `json:"issues,omitempty"`
+}
+
+// ConversationParseCheck contains output verification for LLM response parsing (Phase 5)
+type ConversationParseCheck struct {
+	TotalConversations int      `json:"total_conversations"`
+	SuccessfulParsed   int      `json:"successful_parsed"`
+	FailedParsed       int      `json:"failed_parsed"`
+	TruncatedResponses int      `json:"truncated_responses"`
+	Score              int      `json:"score"`
+	Issues             []string `json:"issues,omitempty"`
+}
+
 type PostProcessAssessment struct {
-	Checks []PostProcessCheck `json:"checks"`
-	Score  int                `json:"score"` // 0-100
-	Issues []string           `json:"issues"`
+	Checks                 []PostProcessCheck      `json:"checks"`
+	EntitySummaryChecks    []EntitySummaryCheck    `json:"entity_summary_checks,omitempty"`
+	QuestionCheck          *QuestionCheck          `json:"question_check,omitempty"`
+	ConversationParseCheck *ConversationParseCheck `json:"conversation_parse_check,omitempty"`
+	Score                  int                     `json:"score"` // 0-100
+	Issues                 []string                `json:"issues"`
 }
 
 type PostProcessCheck struct {
@@ -195,6 +242,8 @@ type OntologyQuestion struct {
 	IsRequired       bool      `json:"is_required"`
 	SourceEntityType *string   `json:"source_entity_type"`
 	SourceEntityKey  *string   `json:"source_entity_key"`
+	Category         *string   `json:"category"`
+	Priority         *int      `json:"priority"`
 }
 
 // Ontology represents the stored ontology
@@ -503,7 +552,7 @@ func loadOntology(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) (*On
 
 func loadQuestions(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]OntologyQuestion, error) {
 	query := `
-		SELECT id, text, reasoning, is_required, source_entity_type, source_entity_key
+		SELECT id, text, reasoning, is_required, source_entity_type, source_entity_key, category, priority
 		FROM engine_ontology_questions
 		WHERE project_id = $1
 		ORDER BY is_required DESC, priority ASC`
@@ -517,7 +566,7 @@ func loadQuestions(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]
 	var questions []OntologyQuestion
 	for rows.Next() {
 		var q OntologyQuestion
-		if err := rows.Scan(&q.ID, &q.Text, &q.Reasoning, &q.IsRequired, &q.SourceEntityType, &q.SourceEntityKey); err != nil {
+		if err := rows.Scan(&q.ID, &q.Text, &q.Reasoning, &q.IsRequired, &q.SourceEntityType, &q.SourceEntityKey, &q.Category, &q.Priority); err != nil {
 			return nil, err
 		}
 		questions = append(questions, q)
@@ -886,6 +935,270 @@ func extractTableNameFromContent(content string) string {
 	return ""
 }
 
+// assessEntitySummaries verifies entity summaries were captured correctly (Phase 5.1)
+func assessEntitySummaries(schema []SchemaTable, ontology *Ontology) []EntitySummaryCheck {
+	var checks []EntitySummaryCheck
+
+	if ontology == nil {
+		return checks
+	}
+
+	// Parse entity summaries JSON
+	var entitySummaries map[string]map[string]interface{}
+	if err := json.Unmarshal(ontology.EntitySummaries, &entitySummaries); err != nil {
+		// Return a failed check indicating parse error
+		return []EntitySummaryCheck{{
+			TableName: "*",
+			Issues:    []string{fmt.Sprintf("Failed to parse entity_summaries JSON: %v", err)},
+			Score:     0,
+		}}
+	}
+
+	// Build schema table lookup and column lookup for validation
+	schemaTables := make(map[string]bool)
+	columnsByTable := make(map[string]map[string]bool)
+	for _, t := range schema {
+		schemaTables[strings.ToLower(t.TableName)] = true
+		columnsByTable[strings.ToLower(t.TableName)] = make(map[string]bool)
+		for _, c := range t.Columns {
+			columnsByTable[strings.ToLower(t.TableName)][strings.ToLower(c.ColumnName)] = true
+		}
+	}
+
+	// Check each schema table
+	for _, table := range schema {
+		check := EntitySummaryCheck{
+			TableName: table.TableName,
+			Score:     100,
+		}
+
+		summary, exists := entitySummaries[table.TableName]
+		if !exists {
+			// Try lowercase
+			summary, exists = entitySummaries[strings.ToLower(table.TableName)]
+		}
+
+		check.EntryExists = exists
+		if !exists {
+			check.Issues = append(check.Issues, "No entity summary found")
+			check.Score = 0
+			checks = append(checks, check)
+			continue
+		}
+
+		// Check business_name
+		if bn, ok := summary["business_name"].(string); ok && bn != "" {
+			check.HasBusinessName = true
+		} else {
+			check.Issues = append(check.Issues, "Missing business_name")
+			check.Score -= 20
+		}
+
+		// Check description
+		if desc, ok := summary["description"].(string); ok && desc != "" {
+			check.HasDescription = true
+		} else {
+			check.Issues = append(check.Issues, "Missing description")
+			check.Score -= 20
+		}
+
+		// Check domain
+		if domain, ok := summary["domain"].(string); ok && domain != "" {
+			check.HasValidDomain = true
+		} else {
+			check.Issues = append(check.Issues, "Missing domain")
+			check.Score -= 10
+		}
+
+		// Check key_columns reference actual columns (detect hallucinations)
+		check.KeyColumnsValid = true
+		if keyColumns, ok := summary["key_columns"].([]interface{}); ok {
+			actualCols := columnsByTable[strings.ToLower(table.TableName)]
+			for _, kc := range keyColumns {
+				if colName, ok := kc.(string); ok {
+					if !actualCols[strings.ToLower(colName)] {
+						check.KeyColumnsValid = false
+						check.InvalidKeyColumns = append(check.InvalidKeyColumns, colName)
+					}
+				}
+			}
+			if !check.KeyColumnsValid {
+				check.Issues = append(check.Issues, fmt.Sprintf("Hallucinated key_columns: %v", check.InvalidKeyColumns))
+				check.Score -= 30
+			}
+		}
+
+		if check.Score < 0 {
+			check.Score = 0
+		}
+
+		checks = append(checks, check)
+	}
+
+	// Flag extra tables in entity_summaries that are NOT in the schema (potential hallucinations)
+	for tableName := range entitySummaries {
+		if !schemaTables[strings.ToLower(tableName)] {
+			checks = append(checks, EntitySummaryCheck{
+				TableName:    tableName,
+				IsExtraTable: true,
+				Issues:       []string{"Entity summary exists for table not in schema (potential hallucination)"},
+				Score:        0,
+			})
+		}
+	}
+
+	return checks
+}
+
+// assessQuestionCapture verifies questions were captured correctly (Phase 5.2)
+func assessQuestionCapture(questions []OntologyQuestion, schema []SchemaTable) *QuestionCheck {
+	check := &QuestionCheck{
+		TotalQuestions: len(questions),
+		Score:          100,
+	}
+
+	if len(questions) == 0 {
+		return check
+	}
+
+	// Build table lookup for source validation
+	validTables := make(map[string]bool)
+	for _, t := range schema {
+		validTables[strings.ToLower(t.TableName)] = true
+	}
+
+	for _, q := range questions {
+		if q.Text != "" {
+			check.QuestionsWithText++
+		}
+		if q.Reasoning != nil && *q.Reasoning != "" {
+			check.QuestionsWithReasoning++
+		}
+		if q.SourceEntityKey != nil && *q.SourceEntityKey != "" {
+			check.QuestionsWithSource++
+			// Validate source references actual table
+			if !validTables[strings.ToLower(*q.SourceEntityKey)] {
+				check.InvalidSources++
+			}
+		}
+		if q.Category != nil && *q.Category != "" {
+			check.QuestionsWithCategory++
+		}
+		// Track valid priorities vs invalid (outside 1-5 range)
+		if q.Priority != nil {
+			if *q.Priority >= 1 && *q.Priority <= 5 {
+				check.QuestionsWithPriority++
+			} else {
+				check.InvalidPriorities++
+			}
+		}
+	}
+
+	// Calculate score with PROPORTIONAL penalties based on percentage missing
+	// Max penalty weights: text=30, reasoning=20, source=15, invalid_source=20, category=10, priority=10
+	if check.QuestionsWithText < check.TotalQuestions {
+		missing := check.TotalQuestions - check.QuestionsWithText
+		missingPct := (missing * 100) / check.TotalQuestions
+		check.Issues = append(check.Issues, fmt.Sprintf("%d questions missing text (%d%%)", missing, missingPct))
+		check.Score -= (missingPct * 30) / 100
+	}
+	if check.QuestionsWithReasoning < check.TotalQuestions {
+		missing := check.TotalQuestions - check.QuestionsWithReasoning
+		missingPct := (missing * 100) / check.TotalQuestions
+		check.Issues = append(check.Issues, fmt.Sprintf("%d questions missing reasoning (%d%%)", missing, missingPct))
+		check.Score -= (missingPct * 20) / 100
+	}
+	if check.QuestionsWithSource < check.TotalQuestions {
+		missing := check.TotalQuestions - check.QuestionsWithSource
+		missingPct := (missing * 100) / check.TotalQuestions
+		check.Issues = append(check.Issues, fmt.Sprintf("%d questions missing source_entity_key (%d%%)", missing, missingPct))
+		check.Score -= (missingPct * 15) / 100
+	}
+	if check.InvalidSources > 0 {
+		invalidPct := (check.InvalidSources * 100) / check.TotalQuestions
+		check.Issues = append(check.Issues, fmt.Sprintf("%d questions reference non-existent tables (%d%%)", check.InvalidSources, invalidPct))
+		check.Score -= (invalidPct * 20) / 100
+	}
+	if check.QuestionsWithCategory < check.TotalQuestions {
+		missing := check.TotalQuestions - check.QuestionsWithCategory
+		missingPct := (missing * 100) / check.TotalQuestions
+		check.Issues = append(check.Issues, fmt.Sprintf("%d questions missing category (%d%%)", missing, missingPct))
+		check.Score -= (missingPct * 10) / 100
+	}
+	// Track both missing and invalid priorities
+	missingPriority := check.TotalQuestions - check.QuestionsWithPriority - check.InvalidPriorities
+	if missingPriority > 0 {
+		missingPct := (missingPriority * 100) / check.TotalQuestions
+		check.Issues = append(check.Issues, fmt.Sprintf("%d questions missing priority (%d%%)", missingPriority, missingPct))
+		check.Score -= (missingPct * 10) / 100
+	}
+	if check.InvalidPriorities > 0 {
+		invalidPct := (check.InvalidPriorities * 100) / check.TotalQuestions
+		check.Issues = append(check.Issues, fmt.Sprintf("%d questions have invalid priority outside 1-5 (%d%%)", check.InvalidPriorities, invalidPct))
+		check.Score -= (invalidPct * 10) / 100
+	}
+
+	if check.Score < 0 {
+		check.Score = 0
+	}
+
+	return check
+}
+
+// assessConversationParsing verifies LLM responses were parsed correctly (Phase 5.4)
+func assessConversationParsing(conversations []LLMConversation) *ConversationParseCheck {
+	check := &ConversationParseCheck{
+		TotalConversations: len(conversations),
+		Score:              100,
+	}
+
+	if len(conversations) == 0 {
+		return check
+	}
+
+	for _, conv := range conversations {
+		if conv.Status == "success" {
+			check.SuccessfulParsed++
+		} else {
+			check.FailedParsed++
+		}
+
+		// Detect truncation: incomplete JSON (missing closing braces/brackets)
+		if conv.ResponseContent != "" {
+			content := strings.TrimSpace(conv.ResponseContent)
+			// Check for obvious truncation patterns
+			if (strings.HasPrefix(content, "{") && !strings.HasSuffix(content, "}")) ||
+				(strings.HasPrefix(content, "[") && !strings.HasSuffix(content, "]")) {
+				check.TruncatedResponses++
+			} else if strings.HasPrefix(content, "{") || strings.HasPrefix(content, "[") {
+				// Try to parse as JSON to detect more subtle truncation
+				var dummy interface{}
+				if err := json.Unmarshal([]byte(content), &dummy); err != nil {
+					check.TruncatedResponses++
+				}
+			}
+		}
+	}
+
+	// Calculate score with PROPORTIONAL penalties based on percentage
+	if check.FailedParsed > 0 {
+		failPct := (check.FailedParsed * 100) / check.TotalConversations
+		check.Issues = append(check.Issues, fmt.Sprintf("%d conversations failed (%d%%)", check.FailedParsed, failPct))
+		check.Score -= failPct // Proportional: 10% failed = -10 points
+	}
+	if check.TruncatedResponses > 0 {
+		truncPct := (check.TruncatedResponses * 100) / check.TotalConversations
+		check.Issues = append(check.Issues, fmt.Sprintf("%d responses appear truncated (%d%%)", check.TruncatedResponses, truncPct))
+		check.Score -= truncPct // Proportional: 10% truncated = -10 points
+	}
+
+	if check.Score < 0 {
+		check.Score = 0
+	}
+
+	return check
+}
+
 func assessInputPreparation(schema []SchemaTable, conversations []LLMConversation, taggedConvs []TaggedConversation, gatheredDataMap map[string]*GatheredData, relationships []SchemaRelationship) InputAssessment {
 	var checks []InputCheck
 	var issues []string
@@ -1148,25 +1461,12 @@ func assessPostProcessing(schema []SchemaTable, conversations []LLMConversation,
 	var checks []PostProcessCheck
 	var issues []string
 
-	// Check 1: All LLM responses were successful
-	successfulConvs := 0
-	for _, c := range conversations {
-		if c.Status == "success" {
-			successfulConvs++
-		}
-	}
-	allSuccessful := successfulConvs == len(conversations)
-	checks = append(checks, PostProcessCheck{
-		Name:        "all_responses_successful",
-		Description: "All LLM conversations completed successfully",
-		Passed:      allSuccessful,
-		Details:     fmt.Sprintf("%d/%d successful", successfulConvs, len(conversations)),
-	})
-	if !allSuccessful {
-		issues = append(issues, fmt.Sprintf("%d conversations failed", len(conversations)-successfulConvs))
-	}
+	// Phase 5: Rigorous output assessments
+	entitySummaryChecks := assessEntitySummaries(schema, ontology)
+	questionCheck := assessQuestionCapture(questions, schema)
+	parseCheck := assessConversationParsing(conversations)
 
-	// Check 2: Ontology was created
+	// Check 1: Ontology was created
 	ontologyExists := ontology != nil
 	checks = append(checks, PostProcessCheck{
 		Name:        "ontology_created",
@@ -1178,68 +1478,15 @@ func assessPostProcessing(schema []SchemaTable, conversations []LLMConversation,
 		issues = append(issues, "No active ontology was created")
 	}
 
-	// Check 3: Entity summaries match schema tables
-	if ontologyExists {
-		var entitySummaries map[string]interface{}
-		if err := json.Unmarshal(ontology.EntitySummaries, &entitySummaries); err == nil {
-			entitiesCreated := len(entitySummaries)
-			expectedEntities := len(schema)
-			allEntitiesCreated := entitiesCreated >= expectedEntities
-			checks = append(checks, PostProcessCheck{
-				Name:        "all_entities_created",
-				Description: "Entity summaries created for all schema tables",
-				Passed:      allEntitiesCreated,
-				Details:     fmt.Sprintf("%d entities for %d tables", entitiesCreated, expectedEntities),
-			})
-			if !allEntitiesCreated {
-				issues = append(issues, fmt.Sprintf("Missing entity summaries: %d created for %d tables", entitiesCreated, expectedEntities))
-			}
-		}
-	}
-
-	// Check 4: Questions have source entity references
-	questionsWithSource := 0
-	for _, q := range questions {
-		if q.SourceEntityKey != nil && *q.SourceEntityKey != "" {
-			questionsWithSource++
-		}
-	}
-	allQuestionsHaveSource := len(questions) == 0 || questionsWithSource == len(questions)
-	checks = append(checks, PostProcessCheck{
-		Name:        "questions_have_source",
-		Description: "All questions reference their source entity",
-		Passed:      allQuestionsHaveSource,
-		Details:     fmt.Sprintf("%d/%d questions have source", questionsWithSource, len(questions)),
-	})
-	if !allQuestionsHaveSource {
-		issues = append(issues, fmt.Sprintf("%d questions missing source entity reference", len(questions)-questionsWithSource))
-	}
-
-	// Check 5: Questions have reasoning
-	questionsWithReasoning := 0
-	for _, q := range questions {
-		if q.Reasoning != nil && *q.Reasoning != "" {
-			questionsWithReasoning++
-		}
-	}
-	allQuestionsHaveReasoning := len(questions) == 0 || questionsWithReasoning == len(questions)
-	checks = append(checks, PostProcessCheck{
-		Name:        "questions_have_reasoning",
-		Description: "All questions include reasoning",
-		Passed:      allQuestionsHaveReasoning,
-		Details:     fmt.Sprintf("%d/%d questions have reasoning", questionsWithReasoning, len(questions)),
-	})
-	if !allQuestionsHaveReasoning {
-		issues = append(issues, fmt.Sprintf("%d questions missing reasoning", len(questions)-questionsWithReasoning))
-	}
-
-	// Check 6: Domain summary exists and is non-empty
+	// Check 2: Domain summary exists and is non-empty
+	domainSummaryScore := 0
 	domainSummaryExists := false
 	if ontologyExists {
 		var domainSummary interface{}
 		if err := json.Unmarshal(ontology.DomainSummary, &domainSummary); err == nil && domainSummary != nil {
 			if ds, ok := domainSummary.(map[string]interface{}); ok && len(ds) > 0 {
 				domainSummaryExists = true
+				domainSummaryScore = 100
 			}
 		}
 	}
@@ -1253,22 +1500,72 @@ func assessPostProcessing(schema []SchemaTable, conversations []LLMConversation,
 		issues = append(issues, "Domain summary missing or empty")
 	}
 
-	// Calculate score
-	passed := 0
-	for _, c := range checks {
-		if c.Passed {
-			passed++
+	// Calculate entity summary score from detailed checks
+	entitySummaryScore := 100
+	if len(entitySummaryChecks) > 0 {
+		totalScore := 0
+		for _, ec := range entitySummaryChecks {
+			totalScore += ec.Score
+			issues = append(issues, ec.Issues...)
 		}
-	}
-	score := 0
-	if len(checks) > 0 {
-		score = (passed * 100) / len(checks)
+		entitySummaryScore = totalScore / len(entitySummaryChecks)
+
+		// Add summary check
+		allPerfect := entitySummaryScore == 100
+		checks = append(checks, PostProcessCheck{
+			Name:        "entity_summaries_complete",
+			Description: "Entity summaries have all required fields (business_name, description, domain, valid key_columns)",
+			Passed:      allPerfect,
+			Details:     fmt.Sprintf("%d tables checked, avg score %d/100", len(entitySummaryChecks), entitySummaryScore),
+		})
 	}
 
+	// Add question check summary
+	if questionCheck != nil {
+		issues = append(issues, questionCheck.Issues...)
+		allPerfect := questionCheck.Score == 100
+		checks = append(checks, PostProcessCheck{
+			Name:        "questions_complete",
+			Description: "Questions have all required fields (text, reasoning, source, category, priority)",
+			Passed:      allPerfect,
+			Details:     fmt.Sprintf("%d questions, score %d/100", questionCheck.TotalQuestions, questionCheck.Score),
+		})
+	}
+
+	// Add parse check summary
+	if parseCheck != nil {
+		issues = append(issues, parseCheck.Issues...)
+		allPerfect := parseCheck.Score == 100
+		checks = append(checks, PostProcessCheck{
+			Name:        "responses_parsed",
+			Description: "All LLM responses parsed successfully without truncation",
+			Passed:      allPerfect,
+			Details:     fmt.Sprintf("%d/%d successful, %d truncated", parseCheck.SuccessfulParsed, parseCheck.TotalConversations, parseCheck.TruncatedResponses),
+		})
+	}
+
+	// Calculate weighted score using Phase 5 weights
+	questionScore := 100
+	if questionCheck != nil {
+		questionScore = questionCheck.Score
+	}
+	parseScore := 100
+	if parseCheck != nil {
+		parseScore = parseCheck.Score
+	}
+
+	finalScore := (entitySummaryScore*PostProcessEntitySummaryWeight +
+		questionScore*PostProcessQuestionWeight +
+		domainSummaryScore*PostProcessDomainWeight +
+		parseScore*PostProcessParseWeight) / 100
+
 	return PostProcessAssessment{
-		Checks: checks,
-		Score:  score,
-		Issues: issues,
+		Checks:                 checks,
+		EntitySummaryChecks:    entitySummaryChecks,
+		QuestionCheck:          questionCheck,
+		ConversationParseCheck: parseCheck,
+		Score:                  finalScore,
+		Issues:                 dedupeStrings(issues),
 	}
 }
 

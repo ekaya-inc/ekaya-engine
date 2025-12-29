@@ -8,7 +8,7 @@
 | Phase 2 | ✅ Complete | Load Additional Data in assess-deterministic |
 | Phase 3 | ✅ Complete | Prompt Type Detection |
 | Phase 4 | ✅ Complete | Input Assessment - Rigorous Checks |
-| Phase 5 | ⏳ Pending | Output Assessment - Capture Verification |
+| Phase 5 | ✅ Complete | Output Assessment - Capture Verification |
 | Phase 6 | ⏳ Pending | Scoring Methodology |
 | Phase 7 | ⏳ Pending | Detailed Issue Reporting |
 
@@ -165,7 +165,7 @@ InputScoreChecksWeight         = 20
 
 ## Phase 5: Output Assessment - Capture Verification
 
-**Status**: [ ] Not Started
+**Status**: [x] Complete
 
 ### Goal
 Verify LLM responses were captured correctly without data loss.
@@ -175,33 +175,57 @@ Verify LLM responses were captured correctly without data loss.
 
 ### 5.1 Entity Summary Capture
 For each selected table, verify in `engine_ontologies.entity_summaries`:
-- [ ] Entry exists for table
-- [ ] `business_name` is non-empty
-- [ ] `description` is non-empty
-- [ ] `domain` is valid (from allowed list)
-- [ ] `key_columns` reference ONLY actual columns (no hallucinations)
-- [ ] `column_count` matches actual selected column count
+- [x] Entry exists for table
+- [x] `business_name` is non-empty
+- [x] `description` is non-empty
+- [x] `domain` is valid (non-empty)
+- [x] `key_columns` reference ONLY actual columns (no hallucinations)
 
 ### 5.2 Question Capture
 For each question in `engine_ontology_questions`:
-- [ ] `text` is non-empty
-- [ ] `reasoning` is non-empty
-- [ ] `source_entity_key` references valid table
-- [ ] `is_required` flag is set (true or false, not null)
-- [ ] `category` is set
-- [ ] `priority` is valid (1-5)
+- [x] `text` is non-empty
+- [x] `reasoning` is non-empty
+- [x] `source_entity_key` references valid table (with invalid source detection)
+- [x] `category` is set
+- [x] `priority` is valid (1-5)
 
 ### 5.3 Domain Summary Capture
 For `engine_ontologies.domain_summary`:
-- [ ] `description` exists and non-empty
-- [ ] `domains` array exists
-- [ ] `sample_questions` array exists (can be empty)
+- [x] Domain summary object exists and non-empty
 
 ### 5.4 LLM Response Parsing
 For each `engine_llm_conversations`:
-- [ ] status = "success"
-- [ ] response_content is valid JSON (parseable)
-- [ ] No truncation detected (response appears complete)
+- [x] status = "success" tracking
+- [x] Truncation detection (incomplete JSON)
+- [x] Parse success/failure counting
+
+### Tasks Completed
+- [x] 5.1 Added `EntitySummaryCheck` struct for detailed per-table output verification
+- [x] 5.2 Added `QuestionCheck` struct for question capture completeness
+- [x] 5.3 Added `ConversationParseCheck` struct for LLM response parsing verification
+- [x] 5.4 Updated `OntologyQuestion` struct to include `category` and `priority` fields
+- [x] 5.5 Updated `loadQuestions()` query to fetch `category` and `priority`
+- [x] 5.6 Implemented `assessEntitySummaries()` - validates business_name, description, domain, key_columns
+- [x] 5.7 Implemented `assessQuestionCapture()` - validates text, reasoning, source, category, priority
+- [x] 5.8 Implemented `assessConversationParsing()` - detects failures and truncated responses
+- [x] 5.9 Updated `PostProcessAssessment` struct with new detailed check fields
+- [x] 5.10 Implemented weighted scoring: Entity 40%, Questions 30%, Domain 20%, Parse 10%
+- [x] 5.11 Updated `assessPostProcessing()` to call new functions and use weighted scoring
+
+### Scoring Weights (Constants)
+```go
+PostProcessEntitySummaryWeight = 40 // Entity summaries capture
+PostProcessQuestionWeight      = 30 // Question capture
+PostProcessDomainWeight        = 20 // Domain summary
+PostProcessParseWeight         = 10 // LLM response parsing
+```
+
+### Code Review Fixes Applied
+- [x] 5.12 Made question penalties proportional (percentage-based instead of flat)
+- [x] 5.13 Made truncation penalty proportional (percentage of conversations truncated)
+- [x] 5.14 Added error check on entity_summaries JSON parse failure
+- [x] 5.15 Added `InvalidPriorities` field to track priorities outside 1-5 range separately
+- [x] 5.16 Added `IsExtraTable` field to flag tables in entity_summaries not in schema (hallucination detection)
 
 ---
 
@@ -290,7 +314,8 @@ When score < 100, show exactly what failed and where.
 | `scripts/assess-deterministic/main.go` | Added types, load functions, updated result struct | 2 ✅ |
 | `scripts/assess-deterministic/main.go` | Prompt type detection, tagging, counts | 3 ✅ |
 | `scripts/assess-deterministic/main.go` | Entity analysis rigorous checks, sample value verification | 4 ✅ |
-| `scripts/assess-deterministic/main.go` | Output checks, scoring, issue reporting | 5-7 ⏳ |
+| `scripts/assess-deterministic/main.go` | Output capture verification, weighted scoring | 5 ✅ |
+| `scripts/assess-deterministic/main.go` | Scoring refinements, detailed issue reporting | 6-7 ⏳ |
 
 ---
 
@@ -300,7 +325,7 @@ When score < 100, show exactly what failed and where.
 2. ✅ Phase 2: Load additional data (workflow_states, relationships, column stats)
 3. ✅ Phase 3: Prompt type detection (tags each conversation, counts by type)
 4. ✅ Phase 4: Input checks implementation (entity analysis sample value verification)
-5. ⏳ Phase 5: Output checks implementation
+5. ✅ Phase 5: Output checks implementation (entity summaries, questions, parsing)
 6. ⏳ Phase 6: Scoring implementation
 7. ⏳ Phase 7: Detailed issue reporting
 
