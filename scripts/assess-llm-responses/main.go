@@ -241,12 +241,44 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  Hallucinated question sources: %d\n", hallucinationReport.HallucinatedSources)
 	}
 
+	// =========================================================================
+	// Phase 5: Value Validation
+	// =========================================================================
+	fmt.Fprintf(os.Stderr, "Phase 5: Running value validation...\n")
+
+	valueSummary := checkAllValueValidation(taggedConversations, structureSummary.Results, questions)
+	fmt.Fprintf(os.Stderr, "  Checked %d conversations, %d passed (%d%% average score)\n",
+		valueSummary.ConversationsChecked,
+		valueSummary.ConversationsPassed,
+		valueScoreToPercentage(int(valueSummary.AverageScore)))
+
+	if valueSummary.StringFieldIssues > 0 {
+		fmt.Fprintf(os.Stderr, "  String field issues: %d conversations\n", valueSummary.StringFieldIssues)
+	}
+	if valueSummary.PriorityIssues > 0 {
+		fmt.Fprintf(os.Stderr, "  Priority issues: %d conversations\n", valueSummary.PriorityIssues)
+	}
+	if valueSummary.BooleanTypeIssues > 0 {
+		fmt.Fprintf(os.Stderr, "  Boolean type issues: %d conversations\n", valueSummary.BooleanTypeIssues)
+	}
+	if valueSummary.CategoryMissing > 0 {
+		fmt.Fprintf(os.Stderr, "  Category missing: %d conversations\n", valueSummary.CategoryMissing)
+	}
+	if valueSummary.InvalidPriorities > 0 {
+		fmt.Fprintf(os.Stderr, "  Stored questions with invalid priority: %d/%d\n",
+			valueSummary.InvalidPriorities, valueSummary.QuestionsPriority)
+	}
+	if valueSummary.MissingCategories > 0 {
+		fmt.Fprintf(os.Stderr, "  Stored questions with missing category: %d/%d\n",
+			valueSummary.MissingCategories, valueSummary.QuestionCategories)
+	}
+
 	// Suppress unused variable warnings for future phases
 	_ = ontology
 
-	// Output summary through Phase 4
+	// Output summary through Phase 5
 	result := map[string]interface{}{
-		"phase":            "Phase 4: Hallucination Detection",
+		"phase":            "Phase 5: Value Validation",
 		"status":           "complete",
 		"commit_info":      commitInfo,
 		"datasource_name":  datasourceName,
@@ -282,6 +314,23 @@ func main() {
 			"hallucinated_sources":  hallucinationReport.HallucinatedSources,
 			"examples":              hallucinationReport.Examples,
 			"score":                 hallucinationReport.Score,
+		},
+		"value_validation": map[string]interface{}{
+			"conversations_checked": valueSummary.ConversationsChecked,
+			"conversations_passed":  valueSummary.ConversationsPassed,
+			"average_score":         valueSummary.AverageScore,
+			"average_score_pct":     valueScoreToPercentage(int(valueSummary.AverageScore)),
+			"total_issues":          valueSummary.TotalIssues,
+			"string_field_issues":   valueSummary.StringFieldIssues,
+			"priority_issues":       valueSummary.PriorityIssues,
+			"boolean_type_issues":   valueSummary.BooleanTypeIssues,
+			"category_missing":      valueSummary.CategoryMissing,
+			"stored_questions": map[string]interface{}{
+				"priority_checked":   valueSummary.QuestionsPriority,
+				"invalid_priorities": valueSummary.InvalidPriorities,
+				"category_checked":   valueSummary.QuestionCategories,
+				"missing_categories": valueSummary.MissingCategories,
+			},
 		},
 	}
 

@@ -111,7 +111,7 @@ Check `engine_ontology_questions.source_entity_key`:
 - Verify table exists in schema
 - Penalty: -2 per invalid source (max -10)
 
-### Phase 5: Value Validation
+### Phase 5: Value Validation ✅
 **5.1 Required String Fields (10 points)**
 Check non-empty strings:
 - `business_name` not empty
