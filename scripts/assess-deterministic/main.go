@@ -30,6 +30,20 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// Pre-compiled regex patterns for performance
+var (
+	reAnalyzeTable = regexp.MustCompile(`(?i)analyze the table "([^"]+)"`)
+	reTableName    = regexp.MustCompile(`(?i)table:\s*(\S+)`)
+)
+
+// Section markers to detect column boundaries in prompts
+var sectionMarkers = []string{
+	"## relationships",
+	"## task",
+	"## question classification",
+	"## instructions",
+}
+
 // Scoring weights
 const (
 	// Final score weights (must sum to 100)
@@ -205,6 +219,34 @@ type TaggedConversation struct {
 	Conversation LLMConversation
 	PromptType   PromptType `json:"prompt_type"`
 	TargetTable  string     `json:"target_table,omitempty"` // For entity_analysis only
+}
+
+// parseMessages extracts user and system content from conversation request messages.
+func parseMessages(conv LLMConversation) (userContent, systemContent string) {
+	var messages []map[string]string
+	if err := json.Unmarshal(conv.RequestMessages, &messages); err != nil {
+		return "", ""
+	}
+	for _, msg := range messages {
+		switch msg["role"] {
+		case "user":
+			userContent = msg["content"]
+		case "system":
+			systemContent = msg["content"]
+		}
+	}
+	return userContent, systemContent
+}
+
+// findSectionEnd finds the end of a column's section by looking for the next section marker.
+func findSectionEnd(content string, startIdx int) int {
+	minIdx := len(content)
+	for _, marker := range sectionMarkers {
+		if idx := strings.Index(content[startIdx:], marker); idx >= 0 && startIdx+idx < minIdx {
+			minIdx = startIdx + idx
+		}
+	}
+	return minIdx
 }
 
 func main() {
@@ -586,22 +628,10 @@ func countColumnsWithStats(schema []SchemaTable) int {
 // detectPromptType analyzes request_messages to determine the prompt type.
 // Returns the detected type and target table name (for entity_analysis only).
 func detectPromptType(conv LLMConversation) (PromptType, string) {
-	// Parse request_messages JSON array
-	var messages []map[string]string
-	if err := json.Unmarshal(conv.RequestMessages, &messages); err != nil {
-		return PromptTypeUnknown, ""
-	}
-
-	// Extract user and system content
-	var userContent, systemContent string
-	for _, msg := range messages {
-		switch msg["role"] {
-		case "user":
-			userContent = strings.ToLower(msg["content"])
-		case "system":
-			systemContent = strings.ToLower(msg["content"])
-		}
-	}
+	// Use helper to parse messages once
+	userContent, systemContent := parseMessages(conv)
+	userContent = strings.ToLower(userContent)
+	systemContent = strings.ToLower(systemContent)
 
 	// Detection order matters - most specific first
 
@@ -643,8 +673,8 @@ func detectPromptType(conv LLMConversation) (PromptType, string) {
 // extractTableName extracts the table name from an entity analysis prompt.
 // Looks for: Analyze the table "tablename"
 func extractTableName(content string) string {
-	re := regexp.MustCompile(`analyze the table "([^"]+)"`)
-	matches := re.FindStringSubmatch(content)
+	// Use pre-compiled regex for performance
+	matches := reAnalyzeTable.FindStringSubmatch(content)
 	if len(matches) >= 2 {
 		return matches[1]
 	}
@@ -705,18 +735,13 @@ func assessEntityAnalysisPrompts(
 			continue
 		}
 
+		// Parse messages once using helper
+		userContent, _ := parseMessages(tc.Conversation)
+		promptLower := strings.ToLower(userContent)
+
 		tableName := tc.TargetTable
 		if tableName == "" {
-			// Try to extract from prompt content
-			var messages []map[string]string
-			if err := json.Unmarshal(tc.Conversation.RequestMessages, &messages); err == nil {
-				for _, msg := range messages {
-					if msg["role"] == "user" {
-						tableName = extractTableNameFromContent(msg["content"])
-						break
-					}
-				}
-			}
+			tableName = extractTableNameFromContent(userContent)
 		}
 
 		check := EntityAnalysisCheck{
@@ -742,19 +767,6 @@ func assessEntityAnalysisPrompts(
 		check.TableFound = true
 		check.ColumnsExpected = len(table.Columns)
 
-		// Parse the prompt content
-		var promptContent string
-		var messages []map[string]string
-		if err := json.Unmarshal(tc.Conversation.RequestMessages, &messages); err == nil {
-			for _, msg := range messages {
-				if msg["role"] == "user" {
-					promptContent = msg["content"]
-					break
-				}
-			}
-		}
-		promptLower := strings.ToLower(promptContent)
-
 		// Check 1: Row count shown (when >= 0)
 		if table.RowCount != nil && *table.RowCount >= 0 {
 			rowCountStr := fmt.Sprintf("row count: %d", *table.RowCount)
@@ -769,51 +781,56 @@ func assessEntityAnalysisPrompts(
 		}
 
 		// Check 2: All columns present with types
-		// Prompt format: "  - column_name: data_type [flags]"
+		// Track which columns are found for sample value check
+		columnsFound := make(map[string]bool)
+		var missingColumns []string
 		for _, col := range table.Columns {
-			// Use more specific pattern to avoid false matches
-			colPattern := "- " + strings.ToLower(col.ColumnName) + ":"
+			colNameLower := strings.ToLower(col.ColumnName)
+			colPattern := "- " + colNameLower + ":"
 			if strings.Contains(promptLower, colPattern) {
 				check.ColumnsFound++
+				columnsFound[colNameLower] = true
+			} else {
+				missingColumns = append(missingColumns, col.ColumnName)
 			}
 		}
 		if check.ColumnsFound == 0 && check.ColumnsExpected > 0 {
-			// No columns found at all - fatal for this table
 			check.Issues = append(check.Issues, fmt.Sprintf("No columns found (expected %d)", check.ColumnsExpected))
 			check.Score = 0
-		} else if check.ColumnsFound < check.ColumnsExpected {
-			check.Issues = append(check.Issues, fmt.Sprintf("Missing columns: found %d/%d", check.ColumnsFound, check.ColumnsExpected))
-			check.Score -= (check.ColumnsExpected - check.ColumnsFound) * 2
+		} else if len(missingColumns) > 0 {
+			check.Issues = append(check.Issues, fmt.Sprintf("Missing columns: %v", missingColumns))
+			check.Score -= len(missingColumns) * 2
 		}
 
 		// Check 3: Sample values present when gathered data has samples
-		// This is the CRITICAL check
+		// Only check for columns that were found in the prompt (avoid double-counting)
 		for _, col := range table.Columns {
-			entityKey := fmt.Sprintf("%s.%s", strings.ToLower(tableName), strings.ToLower(col.ColumnName))
+			colNameLower := strings.ToLower(col.ColumnName)
+			if !columnsFound[colNameLower] {
+				continue // Skip columns not found in prompt
+			}
+
+			entityKey := fmt.Sprintf("%s.%s", strings.ToLower(tableName), colNameLower)
 			gathered := gatheredDataMap[entityKey]
 
 			if gathered != nil && len(gathered.SampleValues) > 0 {
 				check.SampleValuesExpected++
 
-				// Check if sample values line appears after the column
-				// Prompt format: "  - col: type\n      Sample values: [...]"
-				colPattern := "- " + strings.ToLower(col.ColumnName) + ":"
+				// Find column position and section boundary
+				colPattern := "- " + colNameLower + ":"
 				colIdx := strings.Index(promptLower, colPattern)
 				if colIdx >= 0 {
-					// Find the end of this column's section (next column or end of columns section)
-					nextColIdx := strings.Index(promptLower[colIdx+len(colPattern):], "\n  - ")
-					var section string
+					// Find section end using next column marker or section markers
+					sectionStart := colIdx + len(colPattern)
+					nextColIdx := strings.Index(promptLower[sectionStart:], "\n  - ")
+					var sectionEnd int
 					if nextColIdx >= 0 {
-						section = promptLower[colIdx : colIdx+len(colPattern)+nextColIdx]
+						sectionEnd = sectionStart + nextColIdx
 					} else {
-						// No next column, take up to relationships section or end
-						relIdx := strings.Index(promptLower[colIdx:], "## relationships")
-						if relIdx >= 0 {
-							section = promptLower[colIdx : colIdx+relIdx]
-						} else {
-							section = promptLower[colIdx:]
-						}
+						// Use helper to find next section marker
+						sectionEnd = findSectionEnd(promptLower, sectionStart)
 					}
+					section := promptLower[colIdx:sectionEnd]
 					if strings.Contains(section, "sample values:") {
 						check.SampleValuesFound++
 					}
@@ -825,15 +842,15 @@ func assessEntityAnalysisPrompts(
 			missing := check.SampleValuesExpected - check.SampleValuesFound
 			check.Issues = append(check.Issues, fmt.Sprintf("Missing sample values for %d columns (found %d/%d)",
 				missing, check.SampleValuesFound, check.SampleValuesExpected))
-			// This is critical - heavy penalty
-			check.Score -= missing * 10
+			// Proportional penalty: percentage of missing sample values
+			penalty := (missing * 50) / check.SampleValuesExpected // Max 50 points for sample values
+			check.Score -= penalty
 		}
 
 		// Check 4: Relationships included
 		expectedRels := relsByTable[strings.ToLower(tableName)]
 		check.RelationshipsExpected = len(expectedRels)
 		for _, rel := range expectedRels {
-			// Check for relationship pattern: source.col → target.col or similar
 			relPattern1 := strings.ToLower(rel.SourceTable + "." + rel.SourceColumn)
 			relPattern2 := strings.ToLower(rel.TargetTable + "." + rel.TargetColumn)
 			if strings.Contains(promptLower, relPattern1) || strings.Contains(promptLower, relPattern2) {
@@ -859,20 +876,13 @@ func assessEntityAnalysisPrompts(
 
 // extractTableNameFromContent extracts table name from various prompt patterns
 func extractTableNameFromContent(content string) string {
-	contentLower := strings.ToLower(content)
-
-	// Pattern 1: Analyze the table "tablename"
-	re1 := regexp.MustCompile(`analyze the table "([^"]+)"`)
-	if matches := re1.FindStringSubmatch(contentLower); len(matches) >= 2 {
+	// Use pre-compiled regex for performance
+	if matches := reAnalyzeTable.FindStringSubmatch(content); len(matches) >= 2 {
 		return matches[1]
 	}
-
-	// Pattern 2: Table: tablename
-	re2 := regexp.MustCompile(`table:\s*(\S+)`)
-	if matches := re2.FindStringSubmatch(contentLower); len(matches) >= 2 {
+	if matches := reTableName.FindStringSubmatch(content); len(matches) >= 2 {
 		return matches[1]
 	}
-
 	return ""
 }
 
@@ -904,7 +914,14 @@ func assessInputPreparation(schema []SchemaTable, conversations []LLMConversatio
 	// Assess each conversation
 	totalScore := 0
 	for i, conv := range conversations {
-		qa := assessConversationInput(i, conv, schema, tableNames, columnsByTable)
+		// Get tagged info for this conversation
+		var promptType PromptType
+		var targetTable string
+		if i < len(taggedConvs) {
+			promptType = taggedConvs[i].PromptType
+			targetTable = taggedConvs[i].TargetTable
+		}
+		qa := assessConversationInput(i, conv, promptType, targetTable, schema, tableNames, columnsByTable)
 		byConversation = append(byConversation, qa)
 		totalScore += qa.Score
 		issues = append(issues, qa.Issues...)
@@ -1050,7 +1067,7 @@ func assessInputPreparation(schema []SchemaTable, conversations []LLMConversatio
 	}
 }
 
-func assessConversationInput(index int, conv LLMConversation, schema []SchemaTable, tableNames map[string]bool, columnsByTable map[string]map[string]SchemaColumn) ConversationQA {
+func assessConversationInput(index int, conv LLMConversation, promptType PromptType, targetTable string, schema []SchemaTable, tableNames map[string]bool, columnsByTable map[string]map[string]SchemaColumn) ConversationQA {
 	requestStr := string(conv.RequestMessages)
 	requestLower := strings.ToLower(requestStr)
 
@@ -1116,6 +1133,8 @@ func assessConversationInput(index int, conv LLMConversation, schema []SchemaTab
 
 	return ConversationQA{
 		Index:           index,
+		PromptType:      promptType,
+		TargetTable:     targetTable,
 		TablesIncluded:  tablesIncluded,
 		ColumnsIncluded: columnsIncluded,
 		TypesIncluded:   typesIncluded,
