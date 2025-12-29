@@ -292,23 +292,41 @@ func main() {
 		}
 	}
 
-	// Suppress unused variable warnings for future phases
+	// =========================================================================
+	// Phase 7: Aggregate Scoring and Summary
+	// =========================================================================
+	fmt.Fprintf(os.Stderr, "Phase 7: Calculating final score...\n")
+
+	scoringResult := calculateFinalScoring(
+		structureSummary,
+		hallucinationReport,
+		valueSummary,
+		tokenMetrics,
+		taggedConversations,
+	)
+
+	fmt.Fprintf(os.Stderr, "  Final score: %d/100\n", scoringResult.FinalScore)
+	fmt.Fprintf(os.Stderr, "  %s\n", scoringResult.SmartSummary)
+
+	// Suppress unused variable warnings
 	_ = ontology
 
-	// Output summary through Phase 6
+	// Build final output matching the plan's AssessmentResult structure
 	result := map[string]interface{}{
-		"phase":            "Phase 6: Token Efficiency Metrics",
-		"status":           "complete",
 		"commit_info":      commitInfo,
 		"datasource_name":  datasourceName,
 		"project_id":       projectID.String(),
 		"model_under_test": modelUnderTest,
+
+		// Phase 2: Detection
+		"prompt_type_counts": promptTypeCounts,
+
+		// Phase 3-6: Detailed phase outputs
 		"data_loaded": map[string]interface{}{
-			"conversations":      len(conversations),
-			"tables":             len(schema),
-			"questions":          len(questions),
-			"ontology_loaded":    ontology != nil,
-			"prompt_type_counts": promptTypeCounts,
+			"conversations":   len(conversations),
+			"tables":          len(schema),
+			"questions":       len(questions),
+			"ontology_loaded": ontology != nil,
 		},
 		"lookup_maps": map[string]interface{}{
 			"valid_tables":        len(validTables),
@@ -325,15 +343,17 @@ func main() {
 			"completeness_issues":   structureSummary.CompletenessIssues,
 			"field_type_mismatches": structureSummary.FieldTypeMismatches,
 		},
-		"hallucination_detection": map[string]interface{}{
-			"conversations_checked": hallucinationReport.ConversationsChecked,
-			"total_hallucinations":  hallucinationReport.TotalHallucinations,
-			"hallucinated_tables":   hallucinationReport.HallucinatedTables,
-			"hallucinated_columns":  hallucinationReport.HallucinatedColumns,
-			"hallucinated_sources":  hallucinationReport.HallucinatedSources,
-			"examples":              hallucinationReport.Examples,
-			"score":                 hallucinationReport.Score,
+
+		// Phase 4: Hallucination details
+		"hallucination_report": map[string]interface{}{
+			"total_hallucinations": hallucinationReport.TotalHallucinations,
+			"hallucinated_tables":  hallucinationReport.HallucinatedTables,
+			"hallucinated_columns": hallucinationReport.HallucinatedColumns,
+			"hallucinated_sources": hallucinationReport.HallucinatedSources,
+			"examples":             hallucinationReport.Examples,
+			"score":                hallucinationReport.Score,
 		},
+
 		"value_validation": map[string]interface{}{
 			"conversations_checked": valueSummary.ConversationsChecked,
 			"conversations_passed":  valueSummary.ConversationsPassed,
@@ -351,6 +371,8 @@ func main() {
 				"missing_categories": valueSummary.MissingCategories,
 			},
 		},
+
+		// Phase 6: Token metrics
 		"token_metrics": map[string]interface{}{
 			"total_conversations":     tokenMetrics.TotalConversations,
 			"total_tokens":            tokenMetrics.TotalTokens,
@@ -364,6 +386,35 @@ func main() {
 			"by_prompt_type":          formatPromptTypeStats(tokenMetrics.ByPromptType),
 			"issues":                  tokenMetrics.Issues,
 		},
+
+		// Phase 7: Final scoring
+		"checks_summary": map[string]interface{}{
+			"structure": map[string]interface{}{
+				"score":                 scoringResult.ChecksSummary.Structure.Score,
+				"conversations_checked": scoringResult.ChecksSummary.Structure.ConversationsChecked,
+				"conversations_passed":  scoringResult.ChecksSummary.Structure.ConversationsPassed,
+				"issues":                scoringResult.ChecksSummary.Structure.Issues,
+			},
+			"hallucinations": map[string]interface{}{
+				"score":                scoringResult.ChecksSummary.Hallucinations.Score,
+				"total_hallucinations": scoringResult.ChecksSummary.Hallucinations.TotalHallucinations,
+				"issues":               scoringResult.ChecksSummary.Hallucinations.Issues,
+			},
+			"value_validity": map[string]interface{}{
+				"score":                 scoringResult.ChecksSummary.ValueValidity.Score,
+				"conversations_checked": scoringResult.ChecksSummary.ValueValidity.ConversationsChecked,
+				"conversations_passed":  scoringResult.ChecksSummary.ValueValidity.ConversationsPassed,
+				"issues":                scoringResult.ChecksSummary.ValueValidity.Issues,
+			},
+			"error_rate": map[string]interface{}{
+				"score":      scoringResult.ChecksSummary.ErrorRate.Score,
+				"successful": scoringResult.ChecksSummary.ErrorRate.Successful,
+				"failed":     scoringResult.ChecksSummary.ErrorRate.Failed,
+				"issues":     scoringResult.ChecksSummary.ErrorRate.Issues,
+			},
+		},
+		"final_score":   scoringResult.FinalScore,
+		"smart_summary": scoringResult.SmartSummary,
 	}
 
 	output, _ := json.MarshalIndent(result, "", "  ")

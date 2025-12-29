@@ -148,7 +148,7 @@ Compare to reasonable benchmarks:
 - Tier1 batch: 4000-15000 tokens expected
 - Penalty: -5 if average > 2x expected (suggests prompt bloat or repeated failures)
 
-### Phase 7: Aggregate Scoring and Summary
+### Phase 7: Aggregate Scoring and Summary ✅
 
 **7.1 Per-Conversation Scoring**
 Each conversation gets score 0-100 based on:
