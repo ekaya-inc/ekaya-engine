@@ -283,7 +283,8 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 	// Queue uses ParallelLLMStrategy: LLM tasks run in parallel (no limit),
 	// data tasks serialize with data tasks.
 	// This allows efficient batching of LLM requests to the model provider.
-	queue := workqueue.NewQueueWithStrategy(s.logger, workqueue.NewParallelLLMStrategy())
+	// Default retry config: 24 retries with exponential backoff (2s initial, 30s max, ~10min total).
+	queue := workqueue.New(s.logger, workqueue.WithStrategy(workqueue.NewParallelLLMStrategy()))
 	s.activeQueues.Store(workflow.ID, queue)
 
 	// Start single writer goroutine for task queue updates.
@@ -318,6 +319,7 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 				Status:      status,
 				RequiresLLM: snap.RequiresLLM,
 				Error:       snap.Error,
+				RetryCount:  snap.RetryCount,
 			}
 		}
 		// Send to single writer goroutine (non-blocking due to buffered channel)
