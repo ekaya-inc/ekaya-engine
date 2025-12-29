@@ -291,9 +291,9 @@ type CategoryScore struct {
 }
 ```
 
-## Implementation Details
+## Implementation Details ✅
 
-### File Structure
+### File Structure ✅
 ```
 scripts/assess-llm-responses/
 ├── main.go                 # Entry point, orchestration
