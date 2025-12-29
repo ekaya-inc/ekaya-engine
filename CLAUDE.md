@@ -55,6 +55,17 @@ golangci-lint run
 - Push to `main` branch → Automatic deployment to DEV environment
 - Push to `prod` branch → Automatic deployment to PROD environment
 
+### Building Scripts
+
+Scripts in `./scripts/` should be built to `bin/` (which is gitignored):
+```bash
+# Build a script
+go build -o bin/assess-deterministic ./scripts/assess-deterministic/...
+
+# Run a script (uses go run, no binary left behind)
+./scripts/assess-deterministic.sh <project-id>
+```
+
 ## Architecture Patterns
 
 ### Package Structure
