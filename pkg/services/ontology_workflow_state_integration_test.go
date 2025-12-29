@@ -354,3 +354,126 @@ func TestStartExtraction_EmptyDatasource_Integration(t *testing.T) {
 	// Cancel the workflow to clean up background goroutines
 	_ = tc.workflowService.Cancel(ctx, workflow.ID)
 }
+
+func TestStartExtraction_CleansUpPreviousOntologyWorkflowState_Integration(t *testing.T) {
+	tc := setupWorkflowStateTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create test table
+	usersTable := tc.createTestTable(ctx, "public", "users")
+	tc.createTestColumn(ctx, usersTable.ID, "id", "uuid", 1)
+	tc.createTestColumn(ctx, usersTable.ID, "email", "text", 2)
+
+	config := &models.WorkflowConfig{
+		DatasourceID: tc.dsID,
+	}
+
+	// === First extraction ===
+	workflow1, err := tc.workflowService.StartExtraction(ctx, tc.projectID, config)
+	if err != nil {
+		t.Fatalf("First StartExtraction failed: %v", err)
+	}
+
+	// Get the ontology ID for the first extraction
+	ontology1, err := tc.ontologyRepo.GetActive(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Failed to get first active ontology: %v", err)
+	}
+	if ontology1 == nil {
+		t.Fatal("Expected active ontology after first extraction")
+	}
+
+	// Verify workflow state exists for first ontology
+	states1, err := tc.stateRepo.ListByWorkflow(ctx, workflow1.ID)
+	if err != nil {
+		t.Fatalf("Failed to list workflow states for first extraction: %v", err)
+	}
+	if len(states1) == 0 {
+		t.Fatal("Expected workflow states after first extraction")
+	}
+	t.Logf("First extraction: %d workflow states created", len(states1))
+
+	// === Second extraction ===
+	// This should clean up workflow_state for ontology1 before creating new ontology
+	workflow2, err := tc.workflowService.StartExtraction(ctx, tc.projectID, config)
+	if err != nil {
+		t.Fatalf("Second StartExtraction failed: %v", err)
+	}
+
+	// Verify workflow state for first ontology was deleted
+	// Note: The first workflow is still running but its workflow_state should be gone
+	// because StartExtraction deletes by ontology_id before deactivating.
+	statesOld, err := listWorkflowStatesByOntology(ctx, tc, ontology1.ID)
+	if err != nil {
+		t.Fatalf("Failed to list old workflow states: %v", err)
+	}
+	if len(statesOld) != 0 {
+		t.Errorf("Expected old workflow states to be deleted by StartExtraction, found %d", len(statesOld))
+	}
+
+	// Verify new workflow state exists for second extraction
+	states2, err := tc.stateRepo.ListByWorkflow(ctx, workflow2.ID)
+	if err != nil {
+		t.Fatalf("Failed to list workflow states for second extraction: %v", err)
+	}
+	if len(states2) == 0 {
+		t.Fatal("Expected workflow states for second extraction")
+	}
+	t.Logf("Second extraction: %d new workflow states created", len(states2))
+
+	// Verify the new ontology is different from the old one
+	ontology2, err := tc.ontologyRepo.GetActive(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Failed to get second active ontology: %v", err)
+	}
+	if ontology2 == nil {
+		t.Fatal("Expected active ontology after second extraction")
+	}
+	if ontology2.ID == ontology1.ID {
+		t.Error("Expected new ontology ID after second extraction")
+	}
+	if ontology2.Version <= ontology1.Version {
+		t.Errorf("Expected higher version for second ontology, got %d <= %d",
+			ontology2.Version, ontology1.Version)
+	}
+
+	// Cleanup - cancel both workflows to stop background goroutines
+	// Note: Cancel cascade-deletes workflow_state, but that's fine for cleanup
+	_ = tc.workflowService.Cancel(ctx, workflow1.ID)
+	_ = tc.workflowService.Cancel(ctx, workflow2.ID)
+}
+
+// listWorkflowStatesByOntology queries workflow states by ontology_id directly.
+// Used for testing since Cancel deletes the workflow but preserves workflow_state.
+func listWorkflowStatesByOntology(ctx context.Context, tc *workflowStateTestContext, ontologyID uuid.UUID) ([]*models.WorkflowEntityState, error) {
+	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer scope.Close()
+
+	var states []*models.WorkflowEntityState
+	rows, err := scope.Conn.Query(ctx, `
+		SELECT id, project_id, ontology_id, workflow_id, entity_type, entity_key, status
+		FROM engine_workflow_state
+		WHERE ontology_id = $1
+	`, ontologyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var s models.WorkflowEntityState
+		if err := rows.Scan(&s.ID, &s.ProjectID, &s.OntologyID, &s.WorkflowID,
+			&s.EntityType, &s.EntityKey, &s.Status); err != nil {
+			return nil, err
+		}
+		states = append(states, &s)
+	}
+	return states, rows.Err()
+}

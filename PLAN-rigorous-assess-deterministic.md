@@ -1,5 +1,19 @@
 # PLAN: Rigorous assess-deterministic Tool
 
+## Current Status
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| Phase 1 | ✅ Complete | Preserve Workflow State Data |
+| Phase 2 | ⏳ Pending | Load Additional Data in assess-deterministic |
+| Phase 3 | ⏳ Pending | Prompt Type Detection |
+| Phase 4 | ⏳ Pending | Input Assessment - Rigorous Checks |
+| Phase 5 | ⏳ Pending | Output Assessment - Capture Verification |
+| Phase 6 | ⏳ Pending | Scoring Methodology |
+| Phase 7 | ⏳ Pending | Detailed Issue Reporting |
+
+---
+
 ## Goal
 Make assess-deterministic a rigorous tool where **score 100 = deterministic code is perfect**.
 
@@ -14,26 +28,28 @@ The `engine_workflow_state` table stores extracted data in `state_data.gathered`
 - `sample_values` (up to 50 distinct values)
 - `is_enum_candidate`, `value_fingerprint`, `scanned_at`
 
-**Problem**: This data is deleted when workflow completes.
-**Solution**: Preserve workflow_state data (Phase 1 prerequisite).
+**Problem**: This data was deleted when workflow completes.
+**Solution**: ✅ Phase 1 complete - workflow_state now preserved after completion, cleaned up only when new extraction starts.
 
 ---
 
 ## Phase 1: Preserve Workflow State Data
 
-**Status**: [ ] Not Started
+**Status**: [x] Complete
 
 ### Goal
 Keep workflow_state after completion so assess-deterministic can verify what data was available.
 
 ### Files
-- `pkg/services/ontology_builder.go`
+- `pkg/services/workflow_orchestrator.go` - Removed deletion in finalizeWorkflow()
+- `pkg/services/ontology_workflow.go` - Added cleanup in StartExtraction()
+- `pkg/repositories/workflow_state_repository.go` - Added DeleteByProject method
 
 ### Tasks
-- [ ] 1.1 Find where workflow_state is deleted on completion
-- [ ] 1.2 Modify to keep rows after workflow completion
-- [ ] 1.3 Add cleanup logic: delete old workflow_state when NEW workflow starts for same datasource
-- [ ] 1.4 Test that workflow_state persists after successful completion
+- [x] 1.1 Find where workflow_state is deleted on completion (workflow_orchestrator.go:478)
+- [x] 1.2 Modify to keep rows after workflow completion (removed DeleteByWorkflow call)
+- [x] 1.3 Add cleanup logic: delete old workflow_state when NEW workflow starts for same project
+- [x] 1.4 Updated mock in tool_executor_test.go to implement new interface method
 
 ---
 
@@ -244,24 +260,27 @@ When score < 100, show exactly what failed and where.
 
 ---
 
-## Files to Modify
+## Files Modified
 
-| File | Changes |
-|------|---------|
-| `pkg/services/ontology_builder.go` | Remove workflow_state cleanup on completion |
-| `scripts/assess-deterministic/main.go` | Complete rewrite with rigorous checks |
+| File | Changes | Phase |
+|------|---------|-------|
+| `pkg/services/workflow_orchestrator.go` | Removed DeleteByWorkflow call in finalizeWorkflow() | 1 ✅ |
+| `pkg/services/ontology_workflow.go` | Added DeleteByProject cleanup in StartExtraction() | 1 ✅ |
+| `pkg/repositories/workflow_state_repository.go` | Added DeleteByProject method | 1 ✅ |
+| `pkg/llm/tool_executor_test.go` | Updated mock to implement new interface | 1 ✅ |
+| `scripts/assess-deterministic/main.go` | Complete rewrite with rigorous checks | 2-7 ⏳ |
 
 ---
 
 ## Implementation Order
 
-1. Phase 1: Preserve workflow_state (prerequisite - without this, can't verify sample values)
-2. Phase 2: Load additional data
-3. Phase 3: Prompt type detection
-4. Phase 4: Input checks implementation
-5. Phase 5: Output checks implementation
-6. Phase 6: Scoring implementation
-7. Phase 7: Detailed issue reporting
+1. ✅ Phase 1: Preserve workflow_state (prerequisite - without this, can't verify sample values)
+2. ⏳ Phase 2: Load additional data
+3. ⏳ Phase 3: Prompt type detection
+4. ⏳ Phase 4: Input checks implementation
+5. ⏳ Phase 5: Output checks implementation
+6. ⏳ Phase 6: Scoring implementation
+7. ⏳ Phase 7: Detailed issue reporting
 
 ---
 

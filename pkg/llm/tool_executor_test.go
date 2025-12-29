@@ -143,6 +143,10 @@ func (m *mockWorkflowStateRepo) DeleteByWorkflow(ctx context.Context, workflowID
 	return m.err
 }
 
+func (m *mockWorkflowStateRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return m.err
+}
+
 func (m *mockWorkflowStateRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status models.WorkflowEntityStatus, lastError *string) error {
 	return m.err
 }

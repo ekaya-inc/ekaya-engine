@@ -475,13 +475,12 @@ func (o *Orchestrator) finalizeWorkflow(ctx context.Context, projectID, workflow
 	o.logger.Info("Clean ontology written successfully",
 		zap.String("workflow_id", workflowID.String()))
 
-	// Delete workflow state - ephemeral data no longer needed
-	if err := o.stateRepo.DeleteByWorkflow(tenantCtx, workflowID); err != nil {
-		return fmt.Errorf("delete workflow state: %w", err)
-	}
-
-	o.logger.Info("Workflow state cleaned up",
-		zap.String("workflow_id", workflowID.String()))
+	// NOTE: We intentionally preserve workflow_state after completion.
+	// The gathered data (sample_values, distinct_count, etc.) is valuable for:
+	// - assess-deterministic tool to verify input preparation quality
+	// - Debugging and auditing extraction runs
+	// Cleanup happens when a NEW extraction starts, deleting state for the
+	// previous ontology (see ontology_workflow.go StartExtraction).
 
 	return nil
 }

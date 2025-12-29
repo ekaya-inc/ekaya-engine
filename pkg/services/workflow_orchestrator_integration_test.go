@@ -216,7 +216,7 @@ func (tc *orchestratorTestContext) createWorkflowStates(ctx context.Context, wor
 // Integration Tests
 // ============================================================================
 
-func TestOrchestrator_FinalizeWorkflow_CleansUpState_Integration(t *testing.T) {
+func TestOrchestrator_FinalizeWorkflow_PreservesState_Integration(t *testing.T) {
 	tc := setupOrchestratorTest(t)
 	tc.cleanup()
 	defer tc.cleanup()
@@ -253,13 +253,14 @@ func TestOrchestrator_FinalizeWorkflow_CleansUpState_Integration(t *testing.T) {
 		t.Fatalf("finalizeWorkflow failed: %v", err)
 	}
 
-	// Verify states are deleted after finalization
+	// Verify states are PRESERVED after finalization (for assess-deterministic tool)
+	// Cleanup happens when a NEW extraction starts, not on finalization.
 	statesAfter, err := tc.stateRepo.ListByWorkflow(ctx, workflow.ID)
 	if err != nil {
 		t.Fatalf("ListByWorkflow after finalization failed: %v", err)
 	}
-	if len(statesAfter) != 0 {
-		t.Errorf("expected 0 workflow states after finalization, got %d", len(statesAfter))
+	if len(statesAfter) != 3 {
+		t.Errorf("expected 3 workflow states preserved after finalization, got %d", len(statesAfter))
 	}
 
 	// Verify ontology still exists
