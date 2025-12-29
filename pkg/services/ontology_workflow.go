@@ -78,6 +78,7 @@ type ontologyWorkflowService struct {
 	schemaRepo     repositories.SchemaRepository
 	stateRepo      repositories.WorkflowStateRepository
 	questionRepo   repositories.OntologyQuestionRepository
+	convRepo       repositories.ConversationRepository
 	dsSvc          DatasourceService
 	adapterFactory datasource.DatasourceAdapterFactory
 	builder        OntologyBuilderService
@@ -101,6 +102,7 @@ func NewOntologyWorkflowService(
 	schemaRepo repositories.SchemaRepository,
 	stateRepo repositories.WorkflowStateRepository,
 	questionRepo repositories.OntologyQuestionRepository,
+	convRepo repositories.ConversationRepository,
 	dsSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	builder OntologyBuilderService,
@@ -117,6 +119,7 @@ func NewOntologyWorkflowService(
 		schemaRepo:       schemaRepo,
 		stateRepo:        stateRepo,
 		questionRepo:     questionRepo,
+		convRepo:         convRepo,
 		dsSvc:            dsSvc,
 		adapterFactory:   adapterFactory,
 		builder:          builder,
@@ -581,6 +584,14 @@ func (s *ontologyWorkflowService) DeleteOntology(ctx context.Context, projectID 
 			zap.String("project_id", projectID.String()),
 			zap.Error(err))
 		return fmt.Errorf("delete ontologies: %w", err)
+	}
+
+	// Delete LLM conversations for this project (audit trail from ontology extraction)
+	if err := s.convRepo.DeleteByProject(ctx, projectID); err != nil {
+		s.logger.Error("Failed to delete LLM conversations",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return fmt.Errorf("delete llm conversations: %w", err)
 	}
 
 	s.logger.Info("Deleted all ontology data for project",

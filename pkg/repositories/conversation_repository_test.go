@@ -510,3 +510,130 @@ func TestConversationRepository_JSONBFieldsRoundTrip(t *testing.T) {
 		t.Errorf("expected 1 response tool call, got %d", len(fetched.ResponseToolCalls))
 	}
 }
+
+// ============================================================================
+// DeleteByProject Tests
+// ============================================================================
+
+func TestConversationRepository_DeleteByProject_DeletesAllConversations(t *testing.T) {
+	tc := setupConversationTest(t)
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create multiple conversations
+	for i := 0; i < 5; i++ {
+		tc.createTestConversation(ctx, "gpt-4", models.LLMConversationStatusSuccess)
+	}
+
+	// Verify they exist
+	conversations, err := tc.repo.GetByProject(ctx, tc.projectID, 100)
+	if err != nil {
+		t.Fatalf("failed to get conversations: %v", err)
+	}
+	if len(conversations) != 5 {
+		t.Fatalf("expected 5 conversations before delete, got %d", len(conversations))
+	}
+
+	// Delete all conversations for project
+	err = tc.repo.DeleteByProject(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("failed to delete conversations: %v", err)
+	}
+
+	// Verify they're gone
+	conversations, err = tc.repo.GetByProject(ctx, tc.projectID, 100)
+	if err != nil {
+		t.Fatalf("failed to get conversations after delete: %v", err)
+	}
+	if len(conversations) != 0 {
+		t.Errorf("expected 0 conversations after delete, got %d", len(conversations))
+	}
+}
+
+func TestConversationRepository_DeleteByProject_DoesNotAffectOtherProjects(t *testing.T) {
+	tc := setupConversationTest(t)
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create a second project
+	otherProjectID := uuid.MustParse("00000000-0000-0000-0000-000000000099")
+	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
+	if err != nil {
+		t.Fatalf("failed to create scope: %v", err)
+	}
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_projects (id, name, status)
+		VALUES ($1, $2, 'active')
+		ON CONFLICT (id) DO NOTHING
+	`, otherProjectID, "Other Project")
+	if err != nil {
+		t.Fatalf("failed to create other project: %v", err)
+	}
+	scope.Close()
+
+	// Create conversations for both projects
+	for i := 0; i < 3; i++ {
+		tc.createTestConversation(ctx, "gpt-4", models.LLMConversationStatusSuccess)
+	}
+
+	// Create conversations for other project
+	for i := 0; i < 2; i++ {
+		conv := &models.LLMConversation{
+			ProjectID:       otherProjectID,
+			Iteration:       i + 1,
+			Endpoint:        "https://api.openai.com/v1",
+			Model:           "gpt-4",
+			RequestMessages: []any{map[string]string{"role": "user", "content": "Test"}},
+			DurationMs:      100,
+			Status:          models.LLMConversationStatusSuccess,
+		}
+		if err := tc.repo.Save(ctx, conv); err != nil {
+			t.Fatalf("failed to save other project conversation: %v", err)
+		}
+	}
+
+	// Delete only tc.projectID conversations
+	err = tc.repo.DeleteByProject(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("failed to delete conversations: %v", err)
+	}
+
+	// Verify tc.projectID conversations are gone
+	conversations, err := tc.repo.GetByProject(ctx, tc.projectID, 100)
+	if err != nil {
+		t.Fatalf("failed to get conversations: %v", err)
+	}
+	if len(conversations) != 0 {
+		t.Errorf("expected 0 conversations for deleted project, got %d", len(conversations))
+	}
+
+	// Verify other project conversations still exist
+	conversations, err = tc.repo.GetByProject(ctx, otherProjectID, 100)
+	if err != nil {
+		t.Fatalf("failed to get other project conversations: %v", err)
+	}
+	if len(conversations) != 2 {
+		t.Errorf("expected 2 conversations for other project, got %d", len(conversations))
+	}
+
+	// Cleanup other project's conversations
+	_ = tc.repo.DeleteByProject(ctx, otherProjectID)
+}
+
+func TestConversationRepository_DeleteByProject_NoOpForEmptyProject(t *testing.T) {
+	tc := setupConversationTest(t)
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Don't create any conversations - delete should succeed without error
+	err := tc.repo.DeleteByProject(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("delete on empty project should not error: %v", err)
+	}
+}

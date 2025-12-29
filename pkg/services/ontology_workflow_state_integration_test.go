@@ -64,7 +64,7 @@ func setupWorkflowStateTest(t *testing.T) *workflowStateTestContext {
 	questionRepo := repositories.NewOntologyQuestionRepository()
 	workflowService := NewOntologyWorkflowService(
 		workflowRepo, ontologyRepo, schemaRepo, stateRepo, questionRepo,
-		nil, adapterFactory, builderService, getTenantCtx, logger)
+		nil, nil, adapterFactory, builderService, getTenantCtx, logger)
 
 	// Use unique project ID for test isolation
 	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000201")

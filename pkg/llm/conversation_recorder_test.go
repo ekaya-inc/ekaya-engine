@@ -54,6 +54,10 @@ func (m *mockConversationRepo) GetByConversationID(ctx context.Context, conversa
 	return nil, nil
 }
 
+func (m *mockConversationRepo) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
 func (m *mockConversationRepo) getSaved() []*models.LLMConversation {
 	m.mu.Lock()
 	defer m.mu.Unlock()
