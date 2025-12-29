@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -50,16 +51,22 @@ const (
 	FinalScoreInputWeight       = 50
 	FinalScorePostProcessWeight = 50
 
-	// Input score weights (must sum to 100)
+	// Input score weights (must sum to 100) - Phase 6
 	InputScoreEntityAnalysisWeight = 50 // Most critical - sample value verification
-	InputScoreConversationWeight   = 30
-	InputScoreChecksWeight         = 20
+	InputScoreTier1Weight          = 25 // Tier1 batch prompts
+	InputScoreDescriptionWeight    = 10 // Description processing prompt
+	InputScoreTier0Weight          = 5  // Tier0 domain prompt
+	InputScoreRelationshipsWeight  = 5  // Relationship inclusion
+	InputScoreGlobalChecksWeight   = 5  // Global checks
 
 	// Post-process score weights (must sum to 100) - Phase 5
 	PostProcessEntitySummaryWeight = 40 // Entity summaries capture
 	PostProcessQuestionWeight      = 30 // Question capture
 	PostProcessDomainWeight        = 20 // Domain summary
 	PostProcessParseWeight         = 10 // LLM response parsing
+
+	// Tier1 table coverage threshold (minimum % of tables that should be covered)
+	Tier1TableCoverageThreshold = 80
 )
 
 // AssessmentResult contains the full assessment output
@@ -71,6 +78,7 @@ type AssessmentResult struct {
 	PostProcessAssessment PostProcessAssessment `json:"post_process_assessment"`
 	FinalScore            int                   `json:"final_score"`
 	Summary               string                `json:"summary"`
+	SmartSummary          string                `json:"smart_summary"` // One-liner for quick scanning
 
 	// Data availability (Phase 2)
 	WorkflowStateCount int `json:"workflow_state_count"`
@@ -79,6 +87,9 @@ type AssessmentResult struct {
 
 	// Prompt detection (Phase 3)
 	PromptTypeCounts map[PromptType]int `json:"prompt_type_counts"`
+
+	// Phase 7: Detailed issue reporting
+	ChecksSummary ChecksSummary `json:"checks_summary"`
 }
 
 type InputAssessment struct {
@@ -86,8 +97,13 @@ type InputAssessment struct {
 	Checks               []InputCheck          `json:"checks"`
 	ByConversation       []ConversationQA      `json:"by_conversation"`
 	EntityAnalysisChecks []EntityAnalysisCheck `json:"entity_analysis_checks,omitempty"`
-	Score                int                   `json:"score"` // 0-100
-	Issues               []string              `json:"issues"`
+	// Phase 6 checks
+	DescriptionCheck   *DescriptionPromptCheck `json:"description_check,omitempty"`
+	Tier1Check         *Tier1Check             `json:"tier1_check,omitempty"`
+	Tier0Check         *Tier0Check             `json:"tier0_check,omitempty"`
+	RelationshipsCheck *RelationshipsCheck     `json:"relationships_check,omitempty"`
+	Score              int                     `json:"score"` // 0-100
+	Issues             []string                `json:"issues"`
 }
 
 type InputCheck struct {
@@ -160,6 +176,66 @@ type ConversationParseCheck struct {
 	TruncatedResponses int      `json:"truncated_responses"`
 	Score              int      `json:"score"`
 	Issues             []string `json:"issues,omitempty"`
+}
+
+// DescriptionPromptCheck contains checks for description_processing prompts (Phase 6)
+type DescriptionPromptCheck struct {
+	Found              bool     `json:"found"`
+	NotApplicable      bool     `json:"not_applicable,omitempty"` // True if no description prompt needed
+	HasUserDescription bool     `json:"has_user_description"`
+	HasSchemaOverview  bool     `json:"has_schema_overview"`
+	HasEntityHints     bool     `json:"has_entity_hints"`
+	Score              int      `json:"score"`
+	Issues             []string `json:"issues,omitempty"`
+}
+
+// Tier1Check contains checks for tier1_batch prompts (Phase 6)
+type Tier1Check struct {
+	Found           bool     `json:"found"`
+	PromptCount     int      `json:"prompt_count"`
+	TablesInPrompts int      `json:"tables_in_prompts"`
+	HasInstructions bool     `json:"has_instructions"`
+	Score           int      `json:"score"`
+	Issues          []string `json:"issues,omitempty"`
+}
+
+// Tier0Check contains checks for tier0_domain prompts (Phase 6)
+type Tier0Check struct {
+	Found               bool     `json:"found"`
+	NotApplicable       bool     `json:"not_applicable,omitempty"` // True for single-table schemas
+	HasEntitiesByDomain bool     `json:"has_entities_by_domain"`
+	HasDescriptions     bool     `json:"has_descriptions"`
+	Score               int      `json:"score"`
+	Issues              []string `json:"issues,omitempty"`
+}
+
+// RelationshipsCheck contains checks for relationship inclusion (Phase 6)
+type RelationshipsCheck struct {
+	TotalRelationships    int      `json:"total_relationships"`
+	RelationshipsIncluded int      `json:"relationships_included"`
+	Score                 int      `json:"score"`
+	Issues                []string `json:"issues,omitempty"`
+}
+
+// CategoryScore represents a score for a category in the summary (Phase 7)
+type CategoryScore struct {
+	Score         int      `json:"score"`
+	TablesChecked int      `json:"tables_checked,omitempty"`
+	TablesPassed  int      `json:"tables_passed,omitempty"`
+	Issues        []string `json:"issues"`
+}
+
+// ChecksSummary provides organized per-category scoring (Phase 7)
+type ChecksSummary struct {
+	DescriptionPrompt *CategoryScore `json:"description_prompt,omitempty"`
+	EntityAnalysis    *CategoryScore `json:"entity_analysis,omitempty"`
+	Tier1             *CategoryScore `json:"tier1,omitempty"`
+	Tier0             *CategoryScore `json:"tier0,omitempty"`
+	Relationships     *CategoryScore `json:"relationships,omitempty"`
+	EntitySummaries   *CategoryScore `json:"entity_summaries,omitempty"`
+	Questions         *CategoryScore `json:"questions,omitempty"`
+	DomainSummary     *CategoryScore `json:"domain_summary,omitempty"`
+	Parse             *CategoryScore `json:"parse,omitempty"`
 }
 
 type PostProcessAssessment struct {
@@ -404,6 +480,10 @@ func main() {
 	// Generate summary
 	summary := generateSummary(inputAssessment, postProcessAssessment, finalScore)
 
+	// Phase 7: Build checks summary and smart summary
+	checksSummary := buildChecksSummary(inputAssessment, postProcessAssessment)
+	smartSummary := generateSmartSummary(inputAssessment, postProcessAssessment, finalScore)
+
 	result := AssessmentResult{
 		CommitInfo:            commitInfo,
 		DatasourceName:        datasourceName,
@@ -412,6 +492,7 @@ func main() {
 		PostProcessAssessment: postProcessAssessment,
 		FinalScore:            finalScore,
 		Summary:               summary,
+		SmartSummary:          smartSummary,
 
 		// Phase 2: Data availability counts
 		WorkflowStateCount: len(workflowStates),
@@ -420,6 +501,9 @@ func main() {
 
 		// Phase 3: Prompt type detection
 		PromptTypeCounts: promptTypeCounts,
+
+		// Phase 7: Detailed issue reporting
+		ChecksSummary: checksSummary,
 	}
 
 	// Output JSON
@@ -923,6 +1007,259 @@ func assessEntityAnalysisPrompts(
 	return checks
 }
 
+// assessDescriptionPrompt assesses the description_processing prompt type (Phase 6).
+// Verifies user description, schema overview, and entity hints are present.
+func assessDescriptionPrompt(tagged []TaggedConversation) *DescriptionPromptCheck {
+	check := &DescriptionPromptCheck{
+		Score: 100,
+	}
+
+	// Find description_processing conversation
+	var descConv *TaggedConversation
+	for i := range tagged {
+		if tagged[i].PromptType == PromptTypeDescriptionProcessing {
+			descConv = &tagged[i]
+			check.Found = true
+			break
+		}
+	}
+
+	if !check.Found {
+		// No description prompt found - this is N/A if project has no user description
+		// Don't penalize since we can't verify if a description was expected
+		check.NotApplicable = true
+		check.Score = 100 // N/A scores as perfect
+		return check
+	}
+
+	userContent, _ := parseMessages(descConv.Conversation)
+	contentLower := strings.ToLower(userContent)
+
+	// Check 1: User description is present
+	if strings.Contains(contentLower, "user's description") ||
+		strings.Contains(contentLower, "user description") ||
+		strings.Contains(contentLower, "project description") {
+		check.HasUserDescription = true
+	} else {
+		check.Issues = append(check.Issues, "User description section missing")
+		check.Score -= 40
+	}
+
+	// Check 2: Schema overview is present
+	if strings.Contains(contentLower, "database schema") ||
+		strings.Contains(contentLower, "schema overview") ||
+		strings.Contains(contentLower, "## tables") {
+		check.HasSchemaOverview = true
+	} else {
+		check.Issues = append(check.Issues, "Schema overview section missing")
+		check.Score -= 30
+	}
+
+	// Check 3: Entity hints section exists
+	if strings.Contains(contentLower, "entity_hints") ||
+		strings.Contains(contentLower, "entity hints") {
+		check.HasEntityHints = true
+	} else {
+		check.Issues = append(check.Issues, "Entity hints section missing")
+		check.Score -= 30
+	}
+
+	if check.Score < 0 {
+		check.Score = 0
+	}
+
+	return check
+}
+
+// assessTier1Prompts assesses tier1_batch prompts (Phase 6).
+// Verifies tables section and entity summary instructions.
+func assessTier1Prompts(tagged []TaggedConversation, schema []SchemaTable) *Tier1Check {
+	check := &Tier1Check{
+		Score: 100,
+	}
+
+	// Build table name set
+	tableNames := make(map[string]bool)
+	for _, t := range schema {
+		tableNames[strings.ToLower(t.TableName)] = true
+	}
+
+	// Find all tier1 conversations
+	tablesSeenInPrompts := make(map[string]bool)
+	for _, tc := range tagged {
+		if tc.PromptType != PromptTypeTier1Batch {
+			continue
+		}
+		check.Found = true
+		check.PromptCount++
+
+		userContent, systemContent := parseMessages(tc.Conversation)
+		contentLower := strings.ToLower(userContent)
+		systemLower := strings.ToLower(systemContent)
+
+		// Check for tables section
+		if strings.Contains(contentLower, "## tables") {
+			// Count tables mentioned using word boundary matching
+			for tableName := range tableNames {
+				// Use word boundary regex to avoid false positives
+				// e.g., "user" should not match "user's" or "username"
+				pattern := `\b` + regexp.QuoteMeta(tableName) + `\b`
+				if matched, _ := regexp.MatchString(pattern, contentLower); matched {
+					tablesSeenInPrompts[tableName] = true
+				}
+			}
+		}
+
+		// Check for entity summary instructions
+		if strings.Contains(systemLower, "entity summar") {
+			check.HasInstructions = true
+		}
+	}
+
+	check.TablesInPrompts = len(tablesSeenInPrompts)
+
+	if !check.Found {
+		check.Issues = append(check.Issues, "No tier1_batch prompts found")
+		check.Score = 0
+		return check
+	}
+
+	// Scoring
+	if !check.HasInstructions {
+		check.Issues = append(check.Issues, "Entity summary instructions missing")
+		check.Score -= 30
+	}
+
+	// Check if most tables are covered
+	if len(tableNames) > 0 {
+		coverage := (check.TablesInPrompts * 100) / len(tableNames)
+		if coverage < Tier1TableCoverageThreshold {
+			check.Issues = append(check.Issues, fmt.Sprintf("Only %d%% of tables covered in tier1 prompts", coverage))
+			check.Score -= (100 - coverage) / 2 // Proportional penalty
+		}
+	}
+
+	if check.Score < 0 {
+		check.Score = 0
+	}
+
+	return check
+}
+
+// assessTier0Prompt assesses the tier0_domain prompt (Phase 6).
+// Verifies entities by domain and domain summary instructions.
+func assessTier0Prompt(tagged []TaggedConversation, schema []SchemaTable) *Tier0Check {
+	check := &Tier0Check{
+		Score: 100,
+	}
+
+	// Find tier0 conversation
+	var tier0Conv *TaggedConversation
+	for i := range tagged {
+		if tagged[i].PromptType == PromptTypeTier0Domain {
+			tier0Conv = &tagged[i]
+			check.Found = true
+			break
+		}
+	}
+
+	if !check.Found {
+		// For single-table schemas, tier0 (domain grouping) is not applicable
+		if len(schema) <= 1 {
+			check.NotApplicable = true
+			check.Score = 100 // N/A scores as perfect
+			return check
+		}
+		check.Issues = append(check.Issues, "No tier0_domain prompt found")
+		check.Score = 0
+		return check
+	}
+
+	userContent, _ := parseMessages(tier0Conv.Conversation)
+	contentLower := strings.ToLower(userContent)
+
+	// Check 1: Entities by domain section
+	if strings.Contains(contentLower, "entities by domain") ||
+		strings.Contains(contentLower, "## domains") {
+		check.HasEntitiesByDomain = true
+	} else {
+		check.Issues = append(check.Issues, "Entities by domain section missing")
+		check.Score -= 50
+	}
+
+	// Check 2: Entity descriptions included
+	if strings.Contains(contentLower, "entity descriptions") ||
+		strings.Contains(contentLower, "description:") {
+		check.HasDescriptions = true
+	} else {
+		check.Issues = append(check.Issues, "Entity descriptions missing")
+		check.Score -= 50
+	}
+
+	if check.Score < 0 {
+		check.Score = 0
+	}
+
+	return check
+}
+
+// assessRelationships assesses relationship inclusion across prompts (Phase 6).
+func assessRelationships(tagged []TaggedConversation, relationships []SchemaRelationship) *RelationshipsCheck {
+	check := &RelationshipsCheck{
+		TotalRelationships: len(relationships),
+		Score:              100,
+	}
+
+	if len(relationships) == 0 {
+		// No relationships to check
+		return check
+	}
+
+	// Check each relationship is mentioned in at least one entity_analysis prompt
+	relationshipsSeen := make(map[string]bool)
+
+	for _, tc := range tagged {
+		if tc.PromptType != PromptTypeEntityAnalysis {
+			continue
+		}
+
+		userContent, _ := parseMessages(tc.Conversation)
+		contentLower := strings.ToLower(userContent)
+
+		for _, rel := range relationships {
+			relKey := fmt.Sprintf("%s.%s->%s.%s",
+				strings.ToLower(rel.SourceTable),
+				strings.ToLower(rel.SourceColumn),
+				strings.ToLower(rel.TargetTable),
+				strings.ToLower(rel.TargetColumn))
+
+			if relationshipsSeen[relKey] {
+				continue
+			}
+
+			// Check for relationship mention (either direction)
+			pattern1 := strings.ToLower(rel.SourceTable + "." + rel.SourceColumn)
+			pattern2 := strings.ToLower(rel.TargetTable + "." + rel.TargetColumn)
+			if strings.Contains(contentLower, pattern1) || strings.Contains(contentLower, pattern2) {
+				relationshipsSeen[relKey] = true
+				check.RelationshipsIncluded++
+			}
+		}
+	}
+
+	// Scoring based on coverage
+	if check.TotalRelationships > 0 {
+		coverage := (check.RelationshipsIncluded * 100) / check.TotalRelationships
+		if coverage < 100 {
+			missing := check.TotalRelationships - check.RelationshipsIncluded
+			check.Issues = append(check.Issues, fmt.Sprintf("%d relationships not included in prompts (%d%%)", missing, 100-coverage))
+			check.Score = coverage
+		}
+	}
+
+	return check
+}
+
 // extractTableNameFromContent extracts table name from various prompt patterns
 func extractTableNameFromContent(content string) string {
 	// Use pre-compiled regex for performance
@@ -1225,7 +1562,6 @@ func assessInputPreparation(schema []SchemaTable, conversations []LLMConversatio
 	}
 
 	// Assess each conversation
-	totalScore := 0
 	for i, conv := range conversations {
 		// Get tagged info for this conversation
 		var promptType PromptType
@@ -1236,11 +1572,8 @@ func assessInputPreparation(schema []SchemaTable, conversations []LLMConversatio
 		}
 		qa := assessConversationInput(i, conv, promptType, targetTable, schema, tableNames, columnsByTable)
 		byConversation = append(byConversation, qa)
-		totalScore += qa.Score
 		issues = append(issues, qa.Issues...)
 	}
-
-	avgScore := totalScore / len(conversations)
 
 	// Global checks
 	checks = append(checks, InputCheck{
@@ -1365,16 +1698,85 @@ func assessInputPreparation(schema []SchemaTable, conversations []LLMConversatio
 		})
 	}
 
-	// Final score: weighted average of entity analysis, conversation quality, and global checks
+	// Phase 6: Additional prompt type assessments
+	descriptionCheck := assessDescriptionPrompt(taggedConvs)
+	tier1Check := assessTier1Prompts(taggedConvs, schema)
+	tier0Check := assessTier0Prompt(taggedConvs, schema)
+	relationshipsCheck := assessRelationships(taggedConvs, relationships)
+
+	// Add Phase 6 check summaries
+	if descriptionCheck != nil {
+		checks = append(checks, InputCheck{
+			Name:        "description_prompt",
+			Description: "Description processing prompt has required sections",
+			Passed:      descriptionCheck.Score == 100,
+			Details:     fmt.Sprintf("Score %d/100", descriptionCheck.Score),
+		})
+		issues = append(issues, descriptionCheck.Issues...)
+	}
+	if tier1Check != nil {
+		checks = append(checks, InputCheck{
+			Name:        "tier1_prompts",
+			Description: "Tier1 batch prompts cover tables with instructions",
+			Passed:      tier1Check.Score == 100,
+			Details:     fmt.Sprintf("Score %d/100, %d tables covered", tier1Check.Score, tier1Check.TablesInPrompts),
+		})
+		issues = append(issues, tier1Check.Issues...)
+	}
+	if tier0Check != nil {
+		checks = append(checks, InputCheck{
+			Name:        "tier0_prompt",
+			Description: "Tier0 domain prompt has required sections",
+			Passed:      tier0Check.Score == 100,
+			Details:     fmt.Sprintf("Score %d/100", tier0Check.Score),
+		})
+		issues = append(issues, tier0Check.Issues...)
+	}
+	if relationshipsCheck != nil {
+		checks = append(checks, InputCheck{
+			Name:        "relationships_included",
+			Description: "Relationships included in prompts",
+			Passed:      relationshipsCheck.Score == 100,
+			Details:     fmt.Sprintf("Score %d/100, %d/%d included", relationshipsCheck.Score, relationshipsCheck.RelationshipsIncluded, relationshipsCheck.TotalRelationships),
+		})
+		issues = append(issues, relationshipsCheck.Issues...)
+	}
+
+	// Phase 6: Weighted final score
+	// Weights: entity_analysis=50, tier1=25, description=10, tier0=5, relationships=5, global=5
+	descScore := 100
+	if descriptionCheck != nil {
+		descScore = descriptionCheck.Score
+	}
+	tier1Score := 100
+	if tier1Check != nil {
+		tier1Score = tier1Check.Score
+	}
+	tier0Score := 100
+	if tier0Check != nil {
+		tier0Score = tier0Check.Score
+	}
+	relScore := 100
+	if relationshipsCheck != nil {
+		relScore = relationshipsCheck.Score
+	}
+
 	finalScore := (entityAnalysisScore*InputScoreEntityAnalysisWeight +
-		avgScore*InputScoreConversationWeight +
-		checksScore*InputScoreChecksWeight) / 100
+		tier1Score*InputScoreTier1Weight +
+		descScore*InputScoreDescriptionWeight +
+		tier0Score*InputScoreTier0Weight +
+		relScore*InputScoreRelationshipsWeight +
+		checksScore*InputScoreGlobalChecksWeight) / 100
 
 	return InputAssessment{
 		TotalConversations:   len(conversations),
 		Checks:               checks,
 		ByConversation:       byConversation,
 		EntityAnalysisChecks: entityAnalysisChecks,
+		DescriptionCheck:     descriptionCheck,
+		Tier1Check:           tier1Check,
+		Tier0Check:           tier0Check,
+		RelationshipsCheck:   relationshipsCheck,
 		Score:                finalScore,
 		Issues:               dedupeStrings(issues),
 	}
@@ -1601,6 +2003,233 @@ func generateSummary(input InputAssessment, postProcess PostProcessAssessment, f
 	}
 
 	return sb.String()
+}
+
+// buildChecksSummary creates the Phase 7 organized per-category scoring output.
+func buildChecksSummary(input InputAssessment, postProcess PostProcessAssessment) ChecksSummary {
+	summary := ChecksSummary{}
+
+	// Input categories
+	if input.DescriptionCheck != nil {
+		summary.DescriptionPrompt = &CategoryScore{
+			Score:  input.DescriptionCheck.Score,
+			Issues: input.DescriptionCheck.Issues,
+		}
+	}
+
+	if len(input.EntityAnalysisChecks) > 0 {
+		tablesPassed := 0
+		totalScore := 0
+		var issues []string
+		for _, ea := range input.EntityAnalysisChecks {
+			totalScore += ea.Score
+			if ea.Score == 100 {
+				tablesPassed++
+			}
+			issues = append(issues, ea.Issues...)
+		}
+		summary.EntityAnalysis = &CategoryScore{
+			Score:         totalScore / len(input.EntityAnalysisChecks),
+			TablesChecked: len(input.EntityAnalysisChecks),
+			TablesPassed:  tablesPassed,
+			Issues:        issues,
+		}
+	}
+
+	if input.Tier1Check != nil {
+		summary.Tier1 = &CategoryScore{
+			Score:  input.Tier1Check.Score,
+			Issues: input.Tier1Check.Issues,
+		}
+	}
+
+	if input.Tier0Check != nil {
+		summary.Tier0 = &CategoryScore{
+			Score:  input.Tier0Check.Score,
+			Issues: input.Tier0Check.Issues,
+		}
+	}
+
+	if input.RelationshipsCheck != nil {
+		summary.Relationships = &CategoryScore{
+			Score:  input.RelationshipsCheck.Score,
+			Issues: input.RelationshipsCheck.Issues,
+		}
+	}
+
+	// Output categories
+	if len(postProcess.EntitySummaryChecks) > 0 {
+		tablesPassed := 0
+		totalScore := 0
+		var issues []string
+		for _, es := range postProcess.EntitySummaryChecks {
+			totalScore += es.Score
+			if es.Score == 100 {
+				tablesPassed++
+			}
+			issues = append(issues, es.Issues...)
+		}
+		summary.EntitySummaries = &CategoryScore{
+			Score:         totalScore / len(postProcess.EntitySummaryChecks),
+			TablesChecked: len(postProcess.EntitySummaryChecks),
+			TablesPassed:  tablesPassed,
+			Issues:        issues,
+		}
+	}
+
+	if postProcess.QuestionCheck != nil {
+		summary.Questions = &CategoryScore{
+			Score:  postProcess.QuestionCheck.Score,
+			Issues: postProcess.QuestionCheck.Issues,
+		}
+	}
+
+	// Domain summary check
+	domainScore := 100
+	var domainIssues []string
+	domainFound := false
+	for _, check := range postProcess.Checks {
+		if check.Name == "domain_summary_exists" {
+			domainFound = true
+			if !check.Passed {
+				domainScore = 0
+				domainIssues = append(domainIssues, "Domain summary missing or empty")
+			}
+			break
+		}
+	}
+	if domainFound {
+		summary.DomainSummary = &CategoryScore{
+			Score:  domainScore,
+			Issues: domainIssues,
+		}
+	}
+
+	if postProcess.ConversationParseCheck != nil {
+		summary.Parse = &CategoryScore{
+			Score:  postProcess.ConversationParseCheck.Score,
+			Issues: postProcess.ConversationParseCheck.Issues,
+		}
+	}
+
+	return summary
+}
+
+// generateSmartSummary creates a one-liner summary of the top issues.
+func generateSmartSummary(input InputAssessment, postProcess PostProcessAssessment, finalScore int) string {
+	if finalScore == 100 {
+		return "Score 100/100 - Perfect! Deterministic code is working correctly."
+	}
+
+	// Collect issues with their severity (score loss)
+	type issueInfo struct {
+		category  string
+		scoreLoss int
+		detail    string
+	}
+	var topIssues []issueInfo
+
+	// Check entity analysis
+	if len(input.EntityAnalysisChecks) > 0 {
+		tablesWithIssues := 0
+		missingSamples := 0
+		totalEAScore := 0
+		for _, ea := range input.EntityAnalysisChecks {
+			totalEAScore += ea.Score
+			if ea.Score < 100 {
+				tablesWithIssues++
+			}
+			if ea.SampleValuesExpected > 0 && ea.SampleValuesFound < ea.SampleValuesExpected {
+				missingSamples += ea.SampleValuesExpected - ea.SampleValuesFound
+			}
+		}
+		eaScore := totalEAScore / len(input.EntityAnalysisChecks)
+		if missingSamples > 0 {
+			// Score loss is proportional to how much entity analysis score dropped
+			scoreLoss := 50 - (eaScore * 50 / 100)
+			topIssues = append(topIssues, issueInfo{
+				category:  "entity_analysis",
+				scoreLoss: scoreLoss,
+				detail:    fmt.Sprintf("Sample values missing for %d columns", missingSamples),
+			})
+		} else if tablesWithIssues > 0 {
+			topIssues = append(topIssues, issueInfo{
+				category:  "entity_analysis",
+				scoreLoss: 50 - (eaScore * 50 / 100),
+				detail:    fmt.Sprintf("%d tables with issues", tablesWithIssues),
+			})
+		}
+	}
+
+	// Check entity summaries for hallucinations
+	hallucinations := 0
+	missingFields := 0
+	for _, es := range postProcess.EntitySummaryChecks {
+		if len(es.InvalidKeyColumns) > 0 {
+			hallucinations += len(es.InvalidKeyColumns)
+		}
+		if !es.HasBusinessName || !es.HasDescription {
+			missingFields++
+		}
+	}
+	if hallucinations > 0 {
+		topIssues = append(topIssues, issueInfo{
+			category:  "entity_summaries",
+			scoreLoss: 30,
+			detail:    fmt.Sprintf("%d hallucinated columns", hallucinations),
+		})
+	} else if missingFields > 0 {
+		topIssues = append(topIssues, issueInfo{
+			category:  "entity_summaries",
+			scoreLoss: 20,
+			detail:    fmt.Sprintf("%d tables missing fields", missingFields),
+		})
+	}
+
+	// Check questions
+	if postProcess.QuestionCheck != nil && postProcess.QuestionCheck.Score < 100 {
+		topIssues = append(topIssues, issueInfo{
+			category:  "questions",
+			scoreLoss: 100 - postProcess.QuestionCheck.Score,
+			detail:    "Questions missing metadata",
+		})
+	}
+
+	// Check parse failures
+	if postProcess.ConversationParseCheck != nil {
+		if postProcess.ConversationParseCheck.TruncatedResponses > 0 {
+			topIssues = append(topIssues, issueInfo{
+				category:  "parse",
+				scoreLoss: 10,
+				detail:    fmt.Sprintf("%d truncated responses", postProcess.ConversationParseCheck.TruncatedResponses),
+			})
+		}
+	}
+
+	// Sort issues by severity (highest score loss first)
+	sort.Slice(topIssues, func(i, j int) bool {
+		return topIssues[i].scoreLoss > topIssues[j].scoreLoss
+	})
+
+	// Build summary from top issues (max 3)
+	var parts []string
+	maxIssues := 3
+	if len(topIssues) < maxIssues {
+		maxIssues = len(topIssues)
+	}
+	for i := 0; i < maxIssues; i++ {
+		parts = append(parts, topIssues[i].detail)
+	}
+
+	if len(parts) == 0 {
+		// Fall back to generic message
+		if finalScore >= 90 {
+			return fmt.Sprintf("Score %d/100 - Near perfect, minor issues.", finalScore)
+		}
+		return fmt.Sprintf("Score %d/100 - Issues detected, see details.", finalScore)
+	}
+
+	return fmt.Sprintf("Score %d/100 - %s", finalScore, strings.Join(parts, ", "))
 }
 
 func boolToStatus(b bool, trueMsg, falseMsg string) string {
