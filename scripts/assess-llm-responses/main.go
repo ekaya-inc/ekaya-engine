@@ -213,15 +213,40 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  Field type mismatches: %d conversations\n", structureSummary.FieldTypeMismatches)
 	}
 
+	// =========================================================================
+	// Phase 4: Hallucination Detection
+	// =========================================================================
+	fmt.Fprintf(os.Stderr, "Phase 4: Running hallucination detection...\n")
+
+	hallucinationReport := checkAllHallucinations(
+		taggedConversations,
+		structureSummary.Results,
+		questions,
+		validTables,
+		validColumns,
+	)
+
+	fmt.Fprintf(os.Stderr, "  Checked %d conversations, found %d hallucinations (score: %d/100)\n",
+		hallucinationReport.ConversationsChecked,
+		hallucinationReport.TotalHallucinations,
+		hallucinationReport.Score)
+
+	if hallucinationReport.HallucinatedTables > 0 {
+		fmt.Fprintf(os.Stderr, "  Hallucinated tables: %d\n", hallucinationReport.HallucinatedTables)
+	}
+	if hallucinationReport.HallucinatedColumns > 0 {
+		fmt.Fprintf(os.Stderr, "  Hallucinated columns: %d\n", hallucinationReport.HallucinatedColumns)
+	}
+	if hallucinationReport.HallucinatedSources > 0 {
+		fmt.Fprintf(os.Stderr, "  Hallucinated question sources: %d\n", hallucinationReport.HallucinatedSources)
+	}
+
 	// Suppress unused variable warnings for future phases
 	_ = ontology
-	_ = questions
-	_ = validTables
-	_ = validColumns
 
-	// Output summary through Phase 3
+	// Output summary through Phase 4
 	result := map[string]interface{}{
-		"phase":            "Phase 3: Structural Checks",
+		"phase":            "Phase 4: Hallucination Detection",
 		"status":           "complete",
 		"commit_info":      commitInfo,
 		"datasource_name":  datasourceName,
@@ -248,6 +273,15 @@ func main() {
 			"status_failures":       structureSummary.StatusFailures,
 			"completeness_issues":   structureSummary.CompletenessIssues,
 			"field_type_mismatches": structureSummary.FieldTypeMismatches,
+		},
+		"hallucination_detection": map[string]interface{}{
+			"conversations_checked": hallucinationReport.ConversationsChecked,
+			"total_hallucinations":  hallucinationReport.TotalHallucinations,
+			"hallucinated_tables":   hallucinationReport.HallucinatedTables,
+			"hallucinated_columns":  hallucinationReport.HallucinatedColumns,
+			"hallucinated_sources":  hallucinationReport.HallucinatedSources,
+			"examples":              hallucinationReport.Examples,
+			"score":                 hallucinationReport.Score,
 		},
 	}
 
