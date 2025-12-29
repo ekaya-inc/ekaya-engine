@@ -84,27 +84,27 @@ type ChecksSummary struct {
 
 // QuestionQualityScore contains question assessment results
 type QuestionQualityScore struct {
-	Score             int      `json:"score"`
-	Weight            int      `json:"weight"`
-	QuestionsSampled  int      `json:"questions_sampled"`
-	TotalQuestions    int      `json:"total_questions"`
-	InferrableCount   int      `json:"inferrable_count"`
+	Score              int      `json:"score"`
+	Weight             int      `json:"weight"`
+	QuestionsSampled   int      `json:"questions_sampled"`
+	TotalQuestions     int      `json:"total_questions"`
+	InferrableCount    int      `json:"inferrable_count"`
 	MisclassifiedCount int      `json:"misclassified_count"`
-	InsightfulCount   int      `json:"insightful_count"`
-	Issues            []string `json:"issues"`
+	InsightfulCount    int      `json:"insightful_count"`
+	Issues             []string `json:"issues"`
 }
 
 // ExtractedInfoQualityScore contains entity summary assessment results
 type ExtractedInfoQualityScore struct {
-	Score             int      `json:"score"`
-	Weight            int      `json:"weight"`
-	EntitiesSampled   int      `json:"entities_sampled"`
-	TotalEntities     int      `json:"total_entities"`
-	GenericCount      int      `json:"generic_count"`
-	DomainErrors      int      `json:"domain_errors"`
+	Score              int      `json:"score"`
+	Weight             int      `json:"weight"`
+	EntitiesSampled    int      `json:"entities_sampled"`
+	TotalEntities      int      `json:"total_entities"`
+	GenericCount       int      `json:"generic_count"`
+	DomainErrors       int      `json:"domain_errors"`
 	HallucinationCount int      `json:"hallucination_count"`
-	InsightfulCount   int      `json:"insightful_count"`
-	Issues            []string `json:"issues"`
+	InsightfulCount    int      `json:"insightful_count"`
+	Issues             []string `json:"issues"`
 }
 
 // DomainSummaryQualityScore contains domain summary assessment results
@@ -120,21 +120,21 @@ type DomainSummaryQualityScore struct {
 
 // ConsistencyScore contains consistency assessment results
 type ConsistencyScore struct {
-	Score               int      `json:"score"`
-	Weight              int      `json:"weight"`
-	CrossRefIssues      int      `json:"cross_ref_issues"`
+	Score                int      `json:"score"`
+	Weight               int      `json:"weight"`
+	CrossRefIssues       int      `json:"cross_ref_issues"`
 	DomainGroupingIssues int      `json:"domain_grouping_issues"`
-	Issues              []string `json:"issues"`
+	Issues               []string `json:"issues"`
 }
 
 // EfficiencyScore contains efficiency metrics
 type EfficiencyScore struct {
-	Score            int      `json:"score"`
-	Weight           int      `json:"weight"`
-	TokensPerTable   float64  `json:"tokens_per_table"`
+	Score             int      `json:"score"`
+	Weight            int      `json:"weight"`
+	TokensPerTable    float64  `json:"tokens_per_table"`
 	QuestionsPerTable float64  `json:"questions_per_table"`
-	CompletionRate   float64  `json:"completion_rate"`
-	Issues           []string `json:"issues"`
+	CompletionRate    float64  `json:"completion_rate"`
+	Issues            []string `json:"issues"`
 }
 
 // ModelComparisonMetrics contains normalized metrics for cross-project comparison
@@ -209,12 +209,12 @@ type Ontology struct {
 
 // EntitySummary represents a parsed entity summary
 type EntitySummary struct {
-	TableName     string   `json:"table_name"`
-	BusinessName  string   `json:"business_name"`
-	Description   string   `json:"description"`
-	Domain        string   `json:"domain"`
-	Synonyms      []string `json:"synonyms"`
-	KeyColumns    []struct {
+	TableName    string   `json:"table_name"`
+	BusinessName string   `json:"business_name"`
+	Description  string   `json:"description"`
+	Domain       string   `json:"domain"`
+	Synonyms     []string `json:"synonyms"`
+	KeyColumns   []struct {
 		Name     string   `json:"name"`
 		Synonyms []string `json:"synonyms"`
 	} `json:"key_columns"`
@@ -223,7 +223,7 @@ type EntitySummary struct {
 
 // DomainSummary represents a parsed domain summary
 type DomainSummary struct {
-	Description       string `json:"description"`
+	Description       string   `json:"description"`
 	Domains           []string `json:"domains"`
 	RelationshipGraph []struct {
 		From        string `json:"from"`
@@ -652,9 +652,9 @@ func assessQuestionQuality(ctx context.Context, client *anthropic.Client, tracke
 
 	// Calculate score: start at 100, penalize issues, reward insights
 	finalScore := 100
-	finalScore -= inferrableCount * 10       // -10 per inferrable question
-	finalScore -= misclassifiedCount * 5     // -5 per misclassified
-	finalScore += insightfulCount * 5        // +5 per insightful
+	finalScore -= inferrableCount * 10   // -10 per inferrable question
+	finalScore -= misclassifiedCount * 5 // -5 per misclassified
+	finalScore += insightfulCount * 5    // +5 per insightful
 
 	// Clamp score
 	if finalScore < 0 {
@@ -850,10 +850,10 @@ func assessExtractedInfoQuality(ctx context.Context, client *anthropic.Client, t
 
 	// Calculate score
 	finalScore := 100
-	finalScore -= genericCount * 5          // -5 per generic description
-	finalScore -= domainErrors * 10         // -10 per domain error
-	finalScore -= hallucinationCount * 15   // -15 per hallucination
-	finalScore += insightfulCount * 5       // +5 per insightful inference
+	finalScore -= genericCount * 5        // -5 per generic description
+	finalScore -= domainErrors * 10       // -10 per domain error
+	finalScore -= hallucinationCount * 15 // -15 per hallucination
+	finalScore += insightfulCount * 5     // +5 per insightful inference
 
 	if finalScore < 0 {
 		finalScore = 0
@@ -879,11 +879,11 @@ func assessExtractedInfoQuality(ctx context.Context, client *anthropic.Client, t
 }
 
 type entityAssessmentResult struct {
-	isGeneric       bool
-	hasDomainError  bool
+	isGeneric        bool
+	hasDomainError   bool
 	hasHallucination bool
-	isInsightful    bool
-	issue           string
+	isInsightful     bool
+	issue            string
 }
 
 func assessSingleEntity(ctx context.Context, client *anthropic.Client, tracker *judgeTracker, table SchemaTable, entity EntitySummary) entityAssessmentResult {
@@ -968,11 +968,11 @@ Return ONLY JSON.`, schemaDesc.String(), entity.BusinessName, entity.Description
 	responseText = extractJSON(responseText)
 
 	var result struct {
-		IsGeneric       bool   `json:"is_generic"`
-		HasDomainError  bool   `json:"has_domain_error"`
+		IsGeneric        bool   `json:"is_generic"`
+		HasDomainError   bool   `json:"has_domain_error"`
 		HasHallucination bool   `json:"has_hallucination"`
-		IsInsightful    bool   `json:"is_insightful"`
-		Reasoning       string `json:"reasoning"`
+		IsInsightful     bool   `json:"is_insightful"`
+		Reasoning        string `json:"reasoning"`
 	}
 
 	if err := json.Unmarshal([]byte(responseText), &result); err != nil {
@@ -980,10 +980,10 @@ Return ONLY JSON.`, schemaDesc.String(), entity.BusinessName, entity.Description
 	}
 
 	assessment := entityAssessmentResult{
-		isGeneric:       result.IsGeneric,
-		hasDomainError:  result.HasDomainError,
+		isGeneric:        result.IsGeneric,
+		hasDomainError:   result.HasDomainError,
 		hasHallucination: result.HasHallucination,
-		isInsightful:    result.IsInsightful,
+		isInsightful:     result.IsInsightful,
 	}
 
 	// Generate specific issue
