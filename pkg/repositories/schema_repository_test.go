@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
@@ -846,8 +847,8 @@ func TestSchemaRepository_UpdateColumnSelection_NotFound(t *testing.T) {
 
 	nonExistentID := uuid.New()
 	err := tc.repo.UpdateColumnSelection(ctx, tc.projectID, nonExistentID, true)
-	if err == nil || err.Error() != "column not found" {
-		t.Errorf("expected 'column not found' error, got %v", err)
+	if err != apperrors.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
 
@@ -1242,14 +1243,14 @@ func TestSchemaRepository_NotFound(t *testing.T) {
 
 	// GetColumnByID
 	_, err = tc.repo.GetColumnByID(ctx, tc.projectID, nonExistentID)
-	if err == nil || err.Error() != "column not found" {
-		t.Errorf("expected 'column not found' error, got %v", err)
+	if err != apperrors.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 
 	// GetColumnByName
 	_, err = tc.repo.GetColumnByName(ctx, nonExistentID, "nonexistent")
-	if err == nil || err.Error() != "column not found" {
-		t.Errorf("expected 'column not found' error, got %v", err)
+	if err != apperrors.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 
 	// GetRelationshipByID
@@ -1267,8 +1268,8 @@ func TestSchemaRepository_NotFound(t *testing.T) {
 	// UpdateColumnStats with non-existent column
 	distinctCount := int64(100)
 	err = tc.repo.UpdateColumnStats(ctx, nonExistentID, &distinctCount, nil)
-	if err == nil || err.Error() != "column not found" {
-		t.Errorf("expected 'column not found' error, got %v", err)
+	if err != apperrors.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 
 	// SoftDeleteRelationship with non-existent relationship

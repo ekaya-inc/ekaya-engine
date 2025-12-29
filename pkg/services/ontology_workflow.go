@@ -78,6 +78,7 @@ type ontologyWorkflowService struct {
 	schemaRepo     repositories.SchemaRepository
 	stateRepo      repositories.WorkflowStateRepository
 	questionRepo   repositories.OntologyQuestionRepository
+	convRepo       repositories.ConversationRepository
 	dsSvc          DatasourceService
 	adapterFactory datasource.DatasourceAdapterFactory
 	builder        OntologyBuilderService
@@ -101,6 +102,7 @@ func NewOntologyWorkflowService(
 	schemaRepo repositories.SchemaRepository,
 	stateRepo repositories.WorkflowStateRepository,
 	questionRepo repositories.OntologyQuestionRepository,
+	convRepo repositories.ConversationRepository,
 	dsSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	builder OntologyBuilderService,
@@ -117,6 +119,7 @@ func NewOntologyWorkflowService(
 		schemaRepo:       schemaRepo,
 		stateRepo:        stateRepo,
 		questionRepo:     questionRepo,
+		convRepo:         convRepo,
 		dsSvc:            dsSvc,
 		adapterFactory:   adapterFactory,
 		builder:          builder,
@@ -134,7 +137,19 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 		config = models.DefaultWorkflowConfig()
 	}
 
-	// Step 1: Deactivate any existing active ontology
+	// Step 1: Get active ontology ID (needed for cleanup after deactivation).
+	// We capture the ID here before deactivating so we can clean up its workflow state.
+	previousOntology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	if err != nil {
+		s.logger.Error("Failed to get active ontology",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return nil, err
+	}
+
+	// Step 2: Deactivate existing ontology.
+	// This must succeed before we delete workflow state to ensure we don't lose
+	// data for an ontology that's still active (transaction safety).
 	if err := s.ontologyRepo.DeactivateAll(ctx, projectID); err != nil {
 		s.logger.Error("Failed to deactivate existing ontologies",
 			zap.String("project_id", projectID.String()),
@@ -142,7 +157,21 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 		return nil, err
 	}
 
-	// Step 2: Create new ontology version
+	// Step 3: Clean up workflow state from previous ontology.
+	// We preserve workflow_state after completion for assess-deterministic tool,
+	// but delete it here when starting a new extraction to prevent unbounded growth.
+	// Scoped to ontology (not project) to support future multi-ontology scenarios.
+	// Safe to delete now since the ontology has been deactivated.
+	if previousOntology != nil {
+		if err := s.stateRepo.DeleteByOntology(ctx, previousOntology.ID); err != nil {
+			s.logger.Error("Failed to clean up previous workflow states",
+				zap.String("ontology_id", previousOntology.ID.String()),
+				zap.Error(err))
+			return nil, err
+		}
+	}
+
+	// Step 4: Create new ontology version
 	nextVersion, err := s.ontologyRepo.GetNextVersion(ctx, projectID)
 	if err != nil {
 		s.logger.Error("Failed to get next ontology version",
@@ -168,7 +197,7 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 		return nil, err
 	}
 
-	// Step 3: Check for existing workflow for this ontology
+	// Step 5: Check for existing workflow for this ontology
 	// The unique index on ontology_id prevents duplicates at DB level, but we check here for better error messages
 	existing, err := s.workflowRepo.GetByOntology(ctx, ontology.ID)
 	if err != nil {
@@ -182,7 +211,7 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 		return nil, fmt.Errorf("workflow already exists for this ontology")
 	}
 
-	// Step 4: Create new workflow linked to the ontology
+	// Step 6: Create new workflow linked to the ontology
 	now := time.Now()
 	workflow := &models.OntologyWorkflow{
 		ID:         uuid.New(),
@@ -208,7 +237,7 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 		return nil, err
 	}
 
-	// Step 5: Initialize workflow state for all entities
+	// Step 7: Initialize workflow state for all entities
 	if err := s.initializeWorkflowEntities(ctx, projectID, workflow.ID, ontology.ID, config.DatasourceID); err != nil {
 		s.logger.Error("Failed to initialize workflow entities",
 			zap.String("workflow_id", workflow.ID.String()),
@@ -555,6 +584,14 @@ func (s *ontologyWorkflowService) DeleteOntology(ctx context.Context, projectID 
 			zap.String("project_id", projectID.String()),
 			zap.Error(err))
 		return fmt.Errorf("delete ontologies: %w", err)
+	}
+
+	// Delete LLM conversations for this project (audit trail from ontology extraction)
+	if err := s.convRepo.DeleteByProject(ctx, projectID); err != nil {
+		s.logger.Error("Failed to delete LLM conversations",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return fmt.Errorf("delete llm conversations: %w", err)
 	}
 
 	s.logger.Info("Deleted all ontology data for project",

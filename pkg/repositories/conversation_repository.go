@@ -20,6 +20,7 @@ type ConversationRepository interface {
 	GetByProject(ctx context.Context, projectID uuid.UUID, limit int) ([]*models.LLMConversation, error)
 	GetByContext(ctx context.Context, projectID uuid.UUID, key, value string) ([]*models.LLMConversation, error)
 	GetByConversationID(ctx context.Context, conversationID uuid.UUID) ([]*models.LLMConversation, error)
+	DeleteByProject(ctx context.Context, projectID uuid.UUID) error
 }
 
 type conversationRepository struct{}
@@ -224,6 +225,22 @@ func (r *conversationRepository) GetByConversationID(ctx context.Context, conver
 	defer rows.Close()
 
 	return scanConversationRows(rows)
+}
+
+func (r *conversationRepository) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `DELETE FROM engine_llm_conversations WHERE project_id = $1`
+
+	_, err := scope.Conn.Exec(ctx, query, projectID)
+	if err != nil {
+		return fmt.Errorf("failed to delete llm conversations: %w", err)
+	}
+
+	return nil
 }
 
 func scanConversationRows(rows pgx.Rows) ([]*models.LLMConversation, error) {

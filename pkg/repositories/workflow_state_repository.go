@@ -35,6 +35,7 @@ type WorkflowStateRepository interface {
 
 	// Batch operations
 	DeleteByWorkflow(ctx context.Context, workflowID uuid.UUID) error
+	DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error
 
 	// State updates
 	UpdateStatus(ctx context.Context, id uuid.UUID, status models.WorkflowEntityStatus, lastError *string) error
@@ -423,6 +424,22 @@ func (r *workflowStateRepository) DeleteByWorkflow(ctx context.Context, workflow
 	_, err := scope.Conn.Exec(ctx, query, workflowID)
 	if err != nil {
 		return fmt.Errorf("failed to delete workflow states: %w", err)
+	}
+
+	return nil
+}
+
+func (r *workflowStateRepository) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `DELETE FROM engine_workflow_state WHERE ontology_id = $1`
+
+	_, err := scope.Conn.Exec(ctx, query, ontologyID)
+	if err != nil {
+		return fmt.Errorf("failed to delete workflow states by ontology: %w", err)
 	}
 
 	return nil

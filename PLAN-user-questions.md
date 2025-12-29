@@ -279,37 +279,54 @@ Schema:
 
 ### 6. UI Task Indicator
 
-**Challenge:** Current task list is tied to active workflow. Need to show async ontology updates without blocking workflow.
+**Challenge:** Show async ontology updates without blocking workflow.
 
-**Solution:** Add task tracking independent of workflow state:
-
-```sql
-CREATE TABLE engine_background_tasks (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id UUID NOT NULL REFERENCES engine_projects(id),
-    task_type TEXT NOT NULL,  -- 'ontology_update', 'schema_analysis', etc.
-    description TEXT NOT NULL,
-    status TEXT NOT NULL,  -- 'pending', 'processing', 'completed', 'failed'
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    completed_at TIMESTAMPTZ
-);
-```
-
-When user confirms table with changes:
+**Solution:** Track in-memory using a simple map in the service layer:
 
 ```go
-// Create background task
-task := BackgroundTask{
-    ProjectID:   projectID,
-    TaskType:    "ontology_update",
-    Description: fmt.Sprintf("Updating %s", tableName),
-    Status:      "processing",
+type BackgroundTaskTracker struct {
+    mu    sync.RWMutex
+    tasks map[string]*BackgroundTask  // key: projectID:tableName
 }
-s.repo.CreateBackgroundTask(ctx, task)
 
-// Frontend polls GET /api/projects/{id}/tasks for active tasks
-// Shows "Updating orders" in task list
+type BackgroundTask struct {
+    ProjectID   string
+    TableName   string
+    Status      string  // "processing", "completed", "failed"
+    StartedAt   time.Time
+}
+
+func (t *BackgroundTaskTracker) Start(projectID, tableName string) {
+    t.mu.Lock()
+    defer t.mu.Unlock()
+    t.tasks[projectID+":"+tableName] = &BackgroundTask{
+        ProjectID: projectID,
+        TableName: tableName,
+        Status:    "processing",
+        StartedAt: time.Now(),
+    }
+}
+
+func (t *BackgroundTaskTracker) Complete(projectID, tableName string) {
+    t.mu.Lock()
+    defer t.mu.Unlock()
+    delete(t.tasks, projectID+":"+tableName)
+}
+
+func (t *BackgroundTaskTracker) GetActive(projectID string) []*BackgroundTask {
+    t.mu.RLock()
+    defer t.mu.RUnlock()
+    var active []*BackgroundTask
+    for _, task := range t.tasks {
+        if task.ProjectID == projectID {
+            active = append(active, task)
+        }
+    }
+    return active
+}
 ```
+
+Frontend polls `GET /api/projects/{id}/tasks` which reads from in-memory tracker.
 
 ### 7. UI Component Structure
 
@@ -356,7 +373,6 @@ TableConfirmationPanel
 ### Phase 1: Data Model Changes
 - Add confidence, requires_user_input, user_confirmed fields to ontology JSONB
 - Create engine_table_confirmations table
-- Create engine_background_tasks table
 - Update ontology extraction to store guesses instead of generating immediate questions
 
 ### Phase 2: Backend API
@@ -364,7 +380,7 @@ TableConfirmationPanel
 - Create GET /tables/next endpoint
 - Create POST /tables/{name}/confirm endpoint
 - Implement async processing for user changes
-- Background task tracking
+- In-memory background task tracking
 
 ### Phase 3: Frontend UI
 - Build TableConfirmationPanel component
@@ -387,7 +403,6 @@ TableConfirmationPanel
 ### Integration Tests
 - Full extraction → confirmation flow
 - User modification → LLM update → ontology storage
-- Background task lifecycle
 
 ### Manual Testing
 - Extract ontology for test_data database
@@ -406,8 +421,6 @@ TableConfirmationPanel
 
 ## Open Questions
 
-1. **Background task polling frequency** - How often should frontend poll for task updates?
-2. **Task retention** - When to delete completed background tasks?
-3. **Confidence thresholds** - What confidence level triggers requires_user_input?
-4. **Skip behavior** - Should skipped tables reappear later or require explicit "Review Skipped" action?
-5. **Bulk operations** - Should we support "Approve All Tables" for confident users?
+1. **Confidence thresholds** - What confidence level triggers requires_user_input?
+2. **Skip behavior** - Should skipped tables reappear later or require explicit "Review Skipped" action?
+3. **Bulk operations** - Should we support "Approve All Tables" for confident users?

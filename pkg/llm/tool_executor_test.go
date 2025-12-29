@@ -143,6 +143,10 @@ func (m *mockWorkflowStateRepo) DeleteByWorkflow(ctx context.Context, workflowID
 	return m.err
 }
 
+func (m *mockWorkflowStateRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return m.err
+}
+
 func (m *mockWorkflowStateRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status models.WorkflowEntityStatus, lastError *string) error {
 	return m.err
 }
@@ -379,6 +383,10 @@ func (m *mockSchemaRepo) GetPrimaryKeyColumns(ctx context.Context, projectID, da
 }
 
 func (m *mockSchemaRepo) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.RelationshipCandidate, error) {
+	return nil, m.err
+}
+
+func (m *mockSchemaRepo) GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error) {
 	return nil, m.err
 }
 

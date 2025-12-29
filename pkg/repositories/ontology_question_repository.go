@@ -38,6 +38,9 @@ type OntologyQuestionRepository interface {
 
 	// SubmitAnswer records an answer for a question.
 	SubmitAnswer(ctx context.Context, id uuid.UUID, answer string, answeredBy *uuid.UUID) error
+
+	// ListByOntologyID returns all questions for an ontology (for deduplication).
+	ListByOntologyID(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyQuestion, error)
 }
 
 type ontologyQuestionRepository struct{}
@@ -323,6 +326,41 @@ func (r *ontologyQuestionRepository) SubmitAnswer(ctx context.Context, id uuid.U
 	}
 
 	return nil
+}
+
+func (r *ontologyQuestionRepository) ListByOntologyID(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyQuestion, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT id, project_id, ontology_id, text, reasoning, category,
+		       priority, is_required, affects, source_entity_type, source_entity_key,
+		       status, answer, answered_by, answered_at, created_at, updated_at
+		FROM engine_ontology_questions
+		WHERE ontology_id = $1
+		ORDER BY created_at ASC`
+
+	rows, err := scope.Conn.Query(ctx, query, ontologyID)
+	if err != nil {
+		return nil, fmt.Errorf("list questions by ontology: %w", err)
+	}
+	defer rows.Close()
+
+	questions := make([]*models.OntologyQuestion, 0)
+	for rows.Next() {
+		q, err := scanQuestionRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		questions = append(questions, q)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating questions: %w", err)
+	}
+
+	return questions, nil
 }
 
 // ============================================================================

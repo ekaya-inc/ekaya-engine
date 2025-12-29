@@ -1,0 +1,2259 @@
+// assess-deterministic evaluates the DETERMINISTIC portions of ontology extraction:
+// - Input preparation: Did we correctly provide schema information to the LLM?
+// - Post-processing: Did we correctly parse and store LLM responses?
+//
+// This tool does NOT use an LLM for assessment - all checks are deterministic.
+// A score of 100 means the deterministic code is perfect. This is achievable.
+//
+// Separate from assess-extraction which evaluates LLM output quality.
+//
+// Usage: go run ./scripts/assess-deterministic <project-id>
+//
+// Database connection: Uses standard PG* environment variables
+//
+// NOTE: This standalone assessment script uses direct SQL queries rather than
+// the repository layer. This is intentional to keep the script self-contained
+// and avoid circular dependencies. The SQL may drift from repository implementations
+// over time - verify queries match if discrepancies are found.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"regexp"
+	"sort"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+)
+
+// Pre-compiled regex patterns for performance
+var (
+	reAnalyzeTable = regexp.MustCompile(`(?i)analyze the table "([^"]+)"`)
+	reTableName    = regexp.MustCompile(`(?i)table:\s*(\S+)`)
+)
+
+// Section markers to detect column boundaries in prompts
+var sectionMarkers = []string{
+	"## relationships",
+	"## task",
+	"## question classification",
+	"## instructions",
+}
+
+// Scoring weights
+const (
+	// Final score weights (must sum to 100)
+	FinalScoreInputWeight       = 50
+	FinalScorePostProcessWeight = 50
+
+	// Input score weights (must sum to 100) - Phase 6
+	InputScoreEntityAnalysisWeight = 50 // Most critical - sample value verification
+	InputScoreTier1Weight          = 25 // Tier1 batch prompts
+	InputScoreDescriptionWeight    = 10 // Description processing prompt
+	InputScoreTier0Weight          = 5  // Tier0 domain prompt
+	InputScoreRelationshipsWeight  = 5  // Relationship inclusion
+	InputScoreGlobalChecksWeight   = 5  // Global checks
+
+	// Post-process score weights (must sum to 100) - Phase 5
+	PostProcessEntitySummaryWeight = 40 // Entity summaries capture
+	PostProcessQuestionWeight      = 30 // Question capture
+	PostProcessDomainWeight        = 20 // Domain summary
+	PostProcessParseWeight         = 10 // LLM response parsing
+
+	// Tier1 table coverage threshold (minimum % of tables that should be covered)
+	Tier1TableCoverageThreshold = 80
+)
+
+// AssessmentResult contains the full assessment output
+type AssessmentResult struct {
+	CommitInfo            string                `json:"commit_info"`
+	DatasourceName        string                `json:"datasource_name"`
+	ProjectID             string                `json:"project_id"`
+	InputAssessment       InputAssessment       `json:"input_assessment"`
+	PostProcessAssessment PostProcessAssessment `json:"post_process_assessment"`
+	FinalScore            int                   `json:"final_score"`
+	Summary               string                `json:"summary"`
+	SmartSummary          string                `json:"smart_summary"` // One-liner for quick scanning
+
+	// Data availability (Phase 2)
+	WorkflowStateCount int `json:"workflow_state_count"`
+	RelationshipCount  int `json:"relationship_count"`
+	ColumnsWithStats   int `json:"columns_with_stats"`
+
+	// Prompt detection (Phase 3)
+	PromptTypeCounts map[PromptType]int `json:"prompt_type_counts"`
+
+	// Phase 7: Detailed issue reporting
+	ChecksSummary ChecksSummary `json:"checks_summary"`
+}
+
+type InputAssessment struct {
+	TotalConversations   int                   `json:"total_conversations"`
+	Checks               []InputCheck          `json:"checks"`
+	ByConversation       []ConversationQA      `json:"by_conversation"`
+	EntityAnalysisChecks []EntityAnalysisCheck `json:"entity_analysis_checks,omitempty"`
+	// Phase 6 checks
+	DescriptionCheck   *DescriptionPromptCheck `json:"description_check,omitempty"`
+	Tier1Check         *Tier1Check             `json:"tier1_check,omitempty"`
+	Tier0Check         *Tier0Check             `json:"tier0_check,omitempty"`
+	RelationshipsCheck *RelationshipsCheck     `json:"relationships_check,omitempty"`
+	Score              int                     `json:"score"` // 0-100
+	Issues             []string                `json:"issues"`
+}
+
+type InputCheck struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Passed      bool   `json:"passed"`
+	Details     string `json:"details"`
+}
+
+type ConversationQA struct {
+	Index           int        `json:"index"`
+	PromptType      PromptType `json:"prompt_type"`
+	TargetTable     string     `json:"target_table,omitempty"`
+	TablesIncluded  bool       `json:"tables_included"`
+	ColumnsIncluded bool       `json:"columns_included"`
+	TypesIncluded   bool       `json:"types_included"`
+	FlagsIncluded   bool       `json:"flags_included"`
+	Issues          []string   `json:"issues"`
+	Score           int        `json:"score"`
+}
+
+// EntityAnalysisCheck contains detailed checks for entity analysis prompts
+type EntityAnalysisCheck struct {
+	TableName             string   `json:"table_name"`
+	TableFound            bool     `json:"table_found"`
+	RowCountShown         bool     `json:"row_count_shown"`
+	ColumnsFound          int      `json:"columns_found"`
+	ColumnsExpected       int      `json:"columns_expected"`
+	SampleValuesFound     int      `json:"sample_values_found"`
+	SampleValuesExpected  int      `json:"sample_values_expected"`
+	RelationshipsFound    int      `json:"relationships_found"`
+	RelationshipsExpected int      `json:"relationships_expected"`
+	Issues                []string `json:"issues"`
+	Score                 int      `json:"score"`
+}
+
+// EntitySummaryCheck contains output verification for entity summaries (Phase 5)
+type EntitySummaryCheck struct {
+	TableName         string   `json:"table_name"`
+	EntryExists       bool     `json:"entry_exists"`
+	HasBusinessName   bool     `json:"has_business_name"`
+	HasDescription    bool     `json:"has_description"`
+	HasValidDomain    bool     `json:"has_valid_domain"`
+	KeyColumnsValid   bool     `json:"key_columns_valid"`
+	InvalidKeyColumns []string `json:"invalid_key_columns,omitempty"`
+	IsExtraTable      bool     `json:"is_extra_table,omitempty"` // Table not in schema (hallucination)
+	Score             int      `json:"score"`
+	Issues            []string `json:"issues,omitempty"`
+}
+
+// QuestionCheck contains output verification for questions (Phase 5)
+type QuestionCheck struct {
+	TotalQuestions         int      `json:"total_questions"`
+	QuestionsWithText      int      `json:"questions_with_text"`
+	QuestionsWithReasoning int      `json:"questions_with_reasoning"`
+	QuestionsWithSource    int      `json:"questions_with_source"`
+	QuestionsWithCategory  int      `json:"questions_with_category"`
+	QuestionsWithPriority  int      `json:"questions_with_priority"`
+	InvalidSources         int      `json:"invalid_sources"`
+	InvalidPriorities      int      `json:"invalid_priorities"` // Priority outside 1-5
+	Score                  int      `json:"score"`
+	Issues                 []string `json:"issues,omitempty"`
+}
+
+// ConversationParseCheck contains output verification for LLM response parsing (Phase 5)
+type ConversationParseCheck struct {
+	TotalConversations int      `json:"total_conversations"`
+	SuccessfulParsed   int      `json:"successful_parsed"`
+	FailedParsed       int      `json:"failed_parsed"`
+	TruncatedResponses int      `json:"truncated_responses"`
+	Score              int      `json:"score"`
+	Issues             []string `json:"issues,omitempty"`
+}
+
+// DescriptionPromptCheck contains checks for description_processing prompts (Phase 6)
+type DescriptionPromptCheck struct {
+	Found              bool     `json:"found"`
+	NotApplicable      bool     `json:"not_applicable,omitempty"` // True if no description prompt needed
+	HasUserDescription bool     `json:"has_user_description"`
+	HasSchemaOverview  bool     `json:"has_schema_overview"`
+	HasEntityHints     bool     `json:"has_entity_hints"`
+	Score              int      `json:"score"`
+	Issues             []string `json:"issues,omitempty"`
+}
+
+// Tier1Check contains checks for tier1_batch prompts (Phase 6)
+type Tier1Check struct {
+	Found           bool     `json:"found"`
+	PromptCount     int      `json:"prompt_count"`
+	TablesInPrompts int      `json:"tables_in_prompts"`
+	HasInstructions bool     `json:"has_instructions"`
+	Score           int      `json:"score"`
+	Issues          []string `json:"issues,omitempty"`
+}
+
+// Tier0Check contains checks for tier0_domain prompts (Phase 6)
+type Tier0Check struct {
+	Found               bool     `json:"found"`
+	NotApplicable       bool     `json:"not_applicable,omitempty"` // True for single-table schemas
+	HasEntitiesByDomain bool     `json:"has_entities_by_domain"`
+	HasDescriptions     bool     `json:"has_descriptions"`
+	Score               int      `json:"score"`
+	Issues              []string `json:"issues,omitempty"`
+}
+
+// RelationshipsCheck contains checks for relationship inclusion (Phase 6)
+type RelationshipsCheck struct {
+	TotalRelationships    int      `json:"total_relationships"`
+	RelationshipsIncluded int      `json:"relationships_included"`
+	Score                 int      `json:"score"`
+	Issues                []string `json:"issues,omitempty"`
+}
+
+// CategoryScore represents a score for a category in the summary (Phase 7)
+type CategoryScore struct {
+	Score         int      `json:"score"`
+	TablesChecked int      `json:"tables_checked,omitempty"`
+	TablesPassed  int      `json:"tables_passed,omitempty"`
+	Issues        []string `json:"issues"`
+}
+
+// ChecksSummary provides organized per-category scoring (Phase 7)
+type ChecksSummary struct {
+	DescriptionPrompt *CategoryScore `json:"description_prompt,omitempty"`
+	EntityAnalysis    *CategoryScore `json:"entity_analysis,omitempty"`
+	Tier1             *CategoryScore `json:"tier1,omitempty"`
+	Tier0             *CategoryScore `json:"tier0,omitempty"`
+	Relationships     *CategoryScore `json:"relationships,omitempty"`
+	EntitySummaries   *CategoryScore `json:"entity_summaries,omitempty"`
+	Questions         *CategoryScore `json:"questions,omitempty"`
+	DomainSummary     *CategoryScore `json:"domain_summary,omitempty"`
+	Parse             *CategoryScore `json:"parse,omitempty"`
+}
+
+type PostProcessAssessment struct {
+	Checks                 []PostProcessCheck      `json:"checks"`
+	EntitySummaryChecks    []EntitySummaryCheck    `json:"entity_summary_checks,omitempty"`
+	QuestionCheck          *QuestionCheck          `json:"question_check,omitempty"`
+	ConversationParseCheck *ConversationParseCheck `json:"conversation_parse_check,omitempty"`
+	Score                  int                     `json:"score"` // 0-100
+	Issues                 []string                `json:"issues"`
+}
+
+type PostProcessCheck struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Passed      bool   `json:"passed"`
+	Details     string `json:"details"`
+}
+
+// SchemaTable represents a table in the schema
+type SchemaTable struct {
+	ID        uuid.UUID      `json:"id"`
+	TableName string         `json:"table_name"`
+	RowCount  *int64         `json:"row_count"`
+	Columns   []SchemaColumn `json:"columns"`
+}
+
+// SchemaColumn represents a column
+type SchemaColumn struct {
+	ColumnName    string `json:"column_name"`
+	DataType      string `json:"data_type"`
+	IsPrimaryKey  bool   `json:"is_primary_key"`
+	IsNullable    bool   `json:"is_nullable"`
+	DistinctCount *int64 `json:"distinct_count,omitempty"`
+	NullCount     *int64 `json:"null_count,omitempty"`
+}
+
+// WorkflowEntityState represents a workflow state row
+type WorkflowEntityState struct {
+	ID         uuid.UUID       `json:"id"`
+	EntityType string          `json:"entity_type"`
+	EntityKey  string          `json:"entity_key"`
+	Status     string          `json:"status"`
+	StateData  json.RawMessage `json:"state_data"`
+}
+
+// GatheredData is the parsed gathered field for columns
+type GatheredData struct {
+	RowCount        *int64   `json:"row_count"`
+	NonNullCount    *int64   `json:"non_null_count"`
+	DistinctCount   *int64   `json:"distinct_count"`
+	NullPercent     *float64 `json:"null_percent"`
+	SampleValues    []any    `json:"sample_values"`
+	IsEnumCandidate bool     `json:"is_enum_candidate"`
+	ScannedAt       *string  `json:"scanned_at"`
+}
+
+// SchemaRelationship represents an approved relationship
+type SchemaRelationship struct {
+	SourceTable  string `json:"source_table"`
+	SourceColumn string `json:"source_column"`
+	TargetTable  string `json:"target_table"`
+	TargetColumn string `json:"target_column"`
+	Type         string `json:"type"`
+}
+
+// LLMConversation represents a stored conversation
+type LLMConversation struct {
+	ID              uuid.UUID       `json:"id"`
+	Model           string          `json:"model"`
+	RequestMessages json.RawMessage `json:"request_messages"`
+	ResponseContent string          `json:"response_content"`
+	Status          string          `json:"status"`
+}
+
+// OntologyQuestion represents a stored question
+type OntologyQuestion struct {
+	ID               uuid.UUID `json:"id"`
+	Text             string    `json:"text"`
+	Reasoning        *string   `json:"reasoning"`
+	IsRequired       bool      `json:"is_required"`
+	SourceEntityType *string   `json:"source_entity_type"`
+	SourceEntityKey  *string   `json:"source_entity_key"`
+	Category         *string   `json:"category"`
+	Priority         *int      `json:"priority"`
+}
+
+// Ontology represents the stored ontology
+type Ontology struct {
+	DomainSummary   json.RawMessage `json:"domain_summary"`
+	EntitySummaries json.RawMessage `json:"entity_summaries"`
+}
+
+// PromptType identifies the type of LLM prompt
+type PromptType string
+
+const (
+	PromptTypeEntityAnalysis        PromptType = "entity_analysis"
+	PromptTypeTier1Batch            PromptType = "tier1_batch"
+	PromptTypeTier0Domain           PromptType = "tier0_domain"
+	PromptTypeDescriptionProcessing PromptType = "description_processing"
+	PromptTypeUnknown               PromptType = "unknown"
+)
+
+// TaggedConversation wraps LLMConversation with detected type and extracted table
+type TaggedConversation struct {
+	Conversation LLMConversation
+	PromptType   PromptType `json:"prompt_type"`
+	TargetTable  string     `json:"target_table,omitempty"` // For entity_analysis only
+}
+
+// parseMessages extracts user and system content from conversation request messages.
+func parseMessages(conv LLMConversation) (userContent, systemContent string) {
+	var messages []map[string]string
+	if err := json.Unmarshal(conv.RequestMessages, &messages); err != nil {
+		return "", ""
+	}
+	for _, msg := range messages {
+		switch msg["role"] {
+		case "user":
+			userContent = msg["content"]
+		case "system":
+			systemContent = msg["content"]
+		}
+	}
+	return userContent, systemContent
+}
+
+// findSectionEnd finds the end of a column's section by looking for the next section marker.
+func findSectionEnd(content string, startIdx int) int {
+	minIdx := len(content)
+	for _, marker := range sectionMarkers {
+		if idx := strings.Index(content[startIdx:], marker); idx >= 0 && startIdx+idx < minIdx {
+			minIdx = startIdx + idx
+		}
+	}
+	return minIdx
+}
+
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Fprintf(os.Stderr, "Usage: %s <project-id>\n", os.Args[0])
+		os.Exit(1)
+	}
+
+	projectID, err := uuid.Parse(os.Args[1])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid project ID: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx := context.Background()
+
+	// Connect to database
+	connStr := buildConnString()
+	conn, err := pgx.Connect(ctx, connStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+	defer conn.Close(ctx)
+
+	// Get datasource name
+	var datasourceName string
+	if err := conn.QueryRow(ctx, `
+		SELECT name FROM engine_datasources
+		WHERE project_id = $1
+		LIMIT 1
+	`, projectID).Scan(&datasourceName); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to get datasource name: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Get commit info
+	commitInfo := getCommitInfo()
+
+	// Load data
+	schema, err := loadSchema(ctx, conn, projectID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load schema: %v\n", err)
+		os.Exit(1)
+	}
+
+	conversations, err := loadConversations(ctx, conn, projectID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load conversations: %v\n", err)
+		os.Exit(1)
+	}
+
+	ontology, err := loadOntology(ctx, conn, projectID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load ontology: %v\n", err)
+		os.Exit(1)
+	}
+
+	questions, err := loadQuestions(ctx, conn, projectID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load questions: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Load additional data (Phase 2)
+	workflowStates, err := loadWorkflowStates(ctx, conn, projectID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load workflow states: %v\n", err)
+		os.Exit(1)
+	}
+	if len(workflowStates) == 0 {
+		fmt.Fprintf(os.Stderr, "Warning: No workflow state found - gathered data checks will be skipped\n")
+	}
+
+	relationships, err := loadRelationships(ctx, conn, projectID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load relationships: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Tag conversations by prompt type (Phase 3)
+	taggedConversations := tagConversations(conversations)
+	promptTypeCounts := countPromptTypes(taggedConversations)
+
+	// Log detection summary
+	fmt.Fprintf(os.Stderr, "Prompt types detected: entity_analysis=%d, tier1_batch=%d, tier0_domain=%d, description_processing=%d, unknown=%d\n",
+		promptTypeCounts[PromptTypeEntityAnalysis],
+		promptTypeCounts[PromptTypeTier1Batch],
+		promptTypeCounts[PromptTypeTier0Domain],
+		promptTypeCounts[PromptTypeDescriptionProcessing],
+		promptTypeCounts[PromptTypeUnknown])
+
+	// Build gathered data map for rigorous checks (Phase 4)
+	gatheredDataMap := buildGatheredDataMap(workflowStates)
+
+	// Run deterministic assessments
+	fmt.Fprintf(os.Stderr, "Assessing input preparation quality...\n")
+	inputAssessment := assessInputPreparation(schema, conversations, taggedConversations, gatheredDataMap, relationships)
+
+	fmt.Fprintf(os.Stderr, "Assessing post-processing quality...\n")
+	postProcessAssessment := assessPostProcessing(schema, conversations, ontology, questions)
+
+	// Calculate final score (weighted average of input and post-processing)
+	finalScore := (inputAssessment.Score*FinalScoreInputWeight + postProcessAssessment.Score*FinalScorePostProcessWeight) / 100
+
+	// Generate summary
+	summary := generateSummary(inputAssessment, postProcessAssessment, finalScore)
+
+	// Phase 7: Build checks summary and smart summary
+	checksSummary := buildChecksSummary(inputAssessment, postProcessAssessment)
+	smartSummary := generateSmartSummary(inputAssessment, postProcessAssessment, finalScore)
+
+	result := AssessmentResult{
+		CommitInfo:            commitInfo,
+		DatasourceName:        datasourceName,
+		ProjectID:             projectID.String(),
+		InputAssessment:       inputAssessment,
+		PostProcessAssessment: postProcessAssessment,
+		FinalScore:            finalScore,
+		Summary:               summary,
+		SmartSummary:          smartSummary,
+
+		// Phase 2: Data availability counts
+		WorkflowStateCount: len(workflowStates),
+		RelationshipCount:  len(relationships),
+		ColumnsWithStats:   countColumnsWithStats(schema),
+
+		// Phase 3: Prompt type detection
+		PromptTypeCounts: promptTypeCounts,
+
+		// Phase 7: Detailed issue reporting
+		ChecksSummary: checksSummary,
+	}
+
+	// Output JSON
+	output, _ := json.MarshalIndent(result, "", "  ")
+	fmt.Println(string(output))
+}
+
+func buildConnString() string {
+	host := getEnvOrDefault("PGHOST", "localhost")
+	port := getEnvOrDefault("PGPORT", "5432")
+	user := getEnvOrDefault("PGUSER", "postgres")
+	password := os.Getenv("PGPASSWORD")
+	dbname := getEnvOrDefault("PGDATABASE", "ekaya_engine")
+
+	connStr := fmt.Sprintf("host=%s port=%s user=%s dbname=%s sslmode=disable",
+		host, port, user, dbname)
+	if password != "" {
+		connStr += fmt.Sprintf(" password=%s", password)
+	}
+	return connStr
+}
+
+func getEnvOrDefault(key, defaultVal string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return defaultVal
+}
+
+func getCommitInfo() string {
+	cmd := exec.Command("git", "describe", "--always", "--dirty")
+	output, err := cmd.Output()
+	if err != nil {
+		return "unknown"
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func loadSchema(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]SchemaTable, error) {
+	tableQuery := `
+		SELECT id, table_name, row_count
+		FROM engine_schema_tables
+		WHERE project_id = $1 AND deleted_at IS NULL AND is_selected = true
+		ORDER BY table_name`
+
+	rows, err := conn.Query(ctx, tableQuery, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tables []SchemaTable
+	for rows.Next() {
+		var t SchemaTable
+		if err := rows.Scan(&t.ID, &t.TableName, &t.RowCount); err != nil {
+			return nil, err
+		}
+		tables = append(tables, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Load columns for each table (including stats for Phase 2)
+	colQuery := `
+		SELECT column_name, data_type, is_primary_key, is_nullable, distinct_count, null_count
+		FROM engine_schema_columns
+		WHERE schema_table_id = $1 AND deleted_at IS NULL AND is_selected = true
+		ORDER BY ordinal_position`
+
+	for i := range tables {
+		colRows, err := conn.Query(ctx, colQuery, tables[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		for colRows.Next() {
+			var c SchemaColumn
+			if err := colRows.Scan(&c.ColumnName, &c.DataType, &c.IsPrimaryKey, &c.IsNullable, &c.DistinctCount, &c.NullCount); err != nil {
+				colRows.Close()
+				return nil, err
+			}
+			tables[i].Columns = append(tables[i].Columns, c)
+		}
+		colRows.Close()
+	}
+
+	return tables, nil
+}
+
+func loadConversations(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]LLMConversation, error) {
+	query := `
+		SELECT id, model, request_messages, COALESCE(response_content, ''), status
+		FROM engine_llm_conversations
+		WHERE project_id = $1
+		ORDER BY created_at ASC`
+
+	rows, err := conn.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var conversations []LLMConversation
+	for rows.Next() {
+		var c LLMConversation
+		if err := rows.Scan(&c.ID, &c.Model, &c.RequestMessages, &c.ResponseContent, &c.Status); err != nil {
+			return nil, err
+		}
+		conversations = append(conversations, c)
+	}
+	return conversations, rows.Err()
+}
+
+func loadOntology(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) (*Ontology, error) {
+	query := `
+		SELECT domain_summary, entity_summaries
+		FROM engine_ontologies
+		WHERE project_id = $1 AND is_active = true`
+
+	var o Ontology
+	err := conn.QueryRow(ctx, query, projectID).Scan(&o.DomainSummary, &o.EntitySummaries)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("no active ontology found")
+		}
+		return nil, err
+	}
+	return &o, nil
+}
+
+func loadQuestions(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]OntologyQuestion, error) {
+	query := `
+		SELECT id, text, reasoning, is_required, source_entity_type, source_entity_key, category, priority
+		FROM engine_ontology_questions
+		WHERE project_id = $1
+		ORDER BY is_required DESC, priority ASC`
+
+	rows, err := conn.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var questions []OntologyQuestion
+	for rows.Next() {
+		var q OntologyQuestion
+		if err := rows.Scan(&q.ID, &q.Text, &q.Reasoning, &q.IsRequired, &q.SourceEntityType, &q.SourceEntityKey, &q.Category, &q.Priority); err != nil {
+			return nil, err
+		}
+		questions = append(questions, q)
+	}
+	return questions, rows.Err()
+}
+
+// loadWorkflowStates loads workflow entity states for the active ontology.
+// Returns empty slice (not error) if no workflow state exists (pre-Phase 1 extractions).
+func loadWorkflowStates(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]WorkflowEntityState, error) {
+	query := `
+		SELECT ws.id, ws.entity_type, ws.entity_key, ws.status, ws.state_data
+		FROM engine_workflow_state ws
+		JOIN engine_ontologies o ON ws.ontology_id = o.id
+		WHERE o.project_id = $1 AND o.is_active = true
+		ORDER BY ws.entity_type, ws.entity_key`
+
+	rows, err := conn.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var states []WorkflowEntityState
+	for rows.Next() {
+		var s WorkflowEntityState
+		if err := rows.Scan(&s.ID, &s.EntityType, &s.EntityKey, &s.Status, &s.StateData); err != nil {
+			return nil, err
+		}
+		states = append(states, s)
+	}
+	return states, rows.Err()
+}
+
+// loadRelationships loads approved schema relationships.
+func loadRelationships(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]SchemaRelationship, error) {
+	query := `
+		SELECT
+			st.table_name as source_table,
+			sc.column_name as source_column,
+			tt.table_name as target_table,
+			tc.column_name as target_column,
+			COALESCE(r.cardinality, 'unknown') as type
+		FROM engine_schema_relationships r
+		JOIN engine_schema_tables st ON r.source_table_id = st.id
+		JOIN engine_schema_columns sc ON r.source_column_id = sc.id
+		JOIN engine_schema_tables tt ON r.target_table_id = tt.id
+		JOIN engine_schema_columns tc ON r.target_column_id = tc.id
+		WHERE st.project_id = $1
+		  AND r.is_approved = true
+		  AND st.is_selected = true
+		  AND st.deleted_at IS NULL
+		ORDER BY st.table_name, sc.column_name`
+
+	rows, err := conn.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var relationships []SchemaRelationship
+	for rows.Next() {
+		var r SchemaRelationship
+		if err := rows.Scan(&r.SourceTable, &r.SourceColumn, &r.TargetTable, &r.TargetColumn, &r.Type); err != nil {
+			return nil, err
+		}
+		relationships = append(relationships, r)
+	}
+	return relationships, rows.Err()
+}
+
+// buildGatheredDataMap creates a lookup from entity_key to gathered data.
+// Entity keys are in format "table_name.column_name".
+func buildGatheredDataMap(states []WorkflowEntityState) map[string]*GatheredData {
+	result := make(map[string]*GatheredData)
+	for _, state := range states {
+		if state.EntityType != "column" || len(state.StateData) == 0 {
+			continue
+		}
+
+		// Parse state_data to get gathered field
+		var stateData struct {
+			Gathered *GatheredData `json:"gathered"`
+		}
+		if err := json.Unmarshal(state.StateData, &stateData); err != nil {
+			continue
+		}
+		if stateData.Gathered != nil {
+			result[state.EntityKey] = stateData.Gathered
+		}
+	}
+	return result
+}
+
+// countColumnsWithStats counts columns that have statistics available.
+func countColumnsWithStats(schema []SchemaTable) int {
+	count := 0
+	for _, t := range schema {
+		for _, c := range t.Columns {
+			if c.DistinctCount != nil || c.NullCount != nil {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// detectPromptType analyzes request_messages to determine the prompt type.
+// Returns the detected type and target table name (for entity_analysis only).
+func detectPromptType(conv LLMConversation) (PromptType, string) {
+	// Use helper to parse messages once
+	userContent, systemContent := parseMessages(conv)
+	userContent = strings.ToLower(userContent)
+	systemContent = strings.ToLower(systemContent)
+
+	// Detection order matters - most specific first
+
+	// 1. ENTITY_ANALYSIS: Single table with sample values
+	// Markers: "## table schema" (singular), "question classification rules", "analyze the table"
+	if strings.Contains(userContent, "## table schema") &&
+		strings.Contains(userContent, "question classification rules") &&
+		strings.Contains(userContent, "analyze the table") {
+		targetTable := extractTableName(userContent)
+		return PromptTypeEntityAnalysis, targetTable
+	}
+
+	// 2. TIER0_DOMAIN: Domain summary from entity summaries
+	// Markers: "entities by domain", "entity descriptions", "domain summary" in system
+	if strings.Contains(userContent, "entities by domain") &&
+		strings.Contains(userContent, "entity descriptions") &&
+		strings.Contains(systemContent, "domain summary") {
+		return PromptTypeTier0Domain, ""
+	}
+
+	// 3. DESCRIPTION_PROCESSING: Process user's project description
+	// Markers: "user's description", "database schema", "entity_hints"
+	if strings.Contains(userContent, "user's description") &&
+		strings.Contains(userContent, "database schema") &&
+		strings.Contains(userContent, "entity_hints") {
+		return PromptTypeDescriptionProcessing, ""
+	}
+
+	// 4. TIER1_BATCH: Multiple tables batch (fallback for table prompts)
+	// Markers: "## tables", "entity summaries" in system
+	if strings.Contains(userContent, "## tables") &&
+		strings.Contains(systemContent, "entity summaries") {
+		return PromptTypeTier1Batch, ""
+	}
+
+	return PromptTypeUnknown, ""
+}
+
+// extractTableName extracts the table name from an entity analysis prompt.
+// Looks for: Analyze the table "tablename"
+func extractTableName(content string) string {
+	// Use pre-compiled regex for performance
+	matches := reAnalyzeTable.FindStringSubmatch(content)
+	if len(matches) >= 2 {
+		return matches[1]
+	}
+	return ""
+}
+
+// tagConversations tags each conversation with its prompt type.
+func tagConversations(conversations []LLMConversation) []TaggedConversation {
+	tagged := make([]TaggedConversation, len(conversations))
+	for i, conv := range conversations {
+		promptType, targetTable := detectPromptType(conv)
+		tagged[i] = TaggedConversation{
+			Conversation: conv,
+			PromptType:   promptType,
+			TargetTable:  targetTable,
+		}
+	}
+	return tagged
+}
+
+// countPromptTypes counts conversations by prompt type.
+func countPromptTypes(tagged []TaggedConversation) map[PromptType]int {
+	counts := make(map[PromptType]int)
+	for _, tc := range tagged {
+		counts[tc.PromptType]++
+	}
+	return counts
+}
+
+// assessEntityAnalysisPrompts performs rigorous checks on entity analysis prompts.
+// This is the most critical check - verifies sample values are included when available.
+func assessEntityAnalysisPrompts(
+	tagged []TaggedConversation,
+	schema []SchemaTable,
+	gatheredDataMap map[string]*GatheredData,
+	relationships []SchemaRelationship,
+) []EntityAnalysisCheck {
+	var checks []EntityAnalysisCheck
+
+	// Build table lookup
+	tableByName := make(map[string]SchemaTable)
+	for _, t := range schema {
+		tableByName[strings.ToLower(t.TableName)] = t
+	}
+
+	// Build relationship lookup by table
+	relsByTable := make(map[string][]SchemaRelationship)
+	for _, r := range relationships {
+		key := strings.ToLower(r.SourceTable)
+		relsByTable[key] = append(relsByTable[key], r)
+		// Also add as target (relationships are bidirectional in prompts)
+		targetKey := strings.ToLower(r.TargetTable)
+		relsByTable[targetKey] = append(relsByTable[targetKey], r)
+	}
+
+	for _, tc := range tagged {
+		if tc.PromptType != PromptTypeEntityAnalysis {
+			continue
+		}
+
+		// Parse messages once using helper
+		userContent, _ := parseMessages(tc.Conversation)
+		promptLower := strings.ToLower(userContent)
+
+		tableName := tc.TargetTable
+		if tableName == "" {
+			tableName = extractTableNameFromContent(userContent)
+		}
+
+		check := EntityAnalysisCheck{
+			TableName: tableName,
+			Score:     100,
+		}
+
+		if tableName == "" {
+			check.Issues = append(check.Issues, "Could not determine target table")
+			check.Score = 0
+			checks = append(checks, check)
+			continue
+		}
+
+		// Get expected table from schema
+		table, exists := tableByName[strings.ToLower(tableName)]
+		if !exists {
+			check.Issues = append(check.Issues, fmt.Sprintf("Table %s not found in schema", tableName))
+			check.Score = 0
+			checks = append(checks, check)
+			continue
+		}
+		check.TableFound = true
+		check.ColumnsExpected = len(table.Columns)
+
+		// Check 1: Row count shown (when >= 0)
+		if table.RowCount != nil && *table.RowCount >= 0 {
+			rowCountStr := fmt.Sprintf("row count: %d", *table.RowCount)
+			if strings.Contains(promptLower, rowCountStr) {
+				check.RowCountShown = true
+			} else {
+				check.Issues = append(check.Issues, fmt.Sprintf("Row count not shown (expected %d)", *table.RowCount))
+				check.Score -= 5
+			}
+		} else {
+			check.RowCountShown = true // N/A - no valid row count to show
+		}
+
+		// Check 2: All columns present with types
+		// Track which columns are found for sample value check
+		columnsFound := make(map[string]bool)
+		var missingColumns []string
+		for _, col := range table.Columns {
+			colNameLower := strings.ToLower(col.ColumnName)
+			colPattern := "- " + colNameLower + ":"
+			if strings.Contains(promptLower, colPattern) {
+				check.ColumnsFound++
+				columnsFound[colNameLower] = true
+			} else {
+				missingColumns = append(missingColumns, col.ColumnName)
+			}
+		}
+		if check.ColumnsFound == 0 && check.ColumnsExpected > 0 {
+			check.Issues = append(check.Issues, fmt.Sprintf("No columns found (expected %d)", check.ColumnsExpected))
+			check.Score = 0
+		} else if len(missingColumns) > 0 {
+			check.Issues = append(check.Issues, fmt.Sprintf("Missing columns: %v", missingColumns))
+			check.Score -= len(missingColumns) * 2
+		}
+
+		// Check 3: Sample values present when gathered data has samples
+		// Only check for columns that were found in the prompt (avoid double-counting)
+		for _, col := range table.Columns {
+			colNameLower := strings.ToLower(col.ColumnName)
+			if !columnsFound[colNameLower] {
+				continue // Skip columns not found in prompt
+			}
+
+			entityKey := fmt.Sprintf("%s.%s", strings.ToLower(tableName), colNameLower)
+			gathered := gatheredDataMap[entityKey]
+
+			if gathered != nil && len(gathered.SampleValues) > 0 {
+				check.SampleValuesExpected++
+
+				// Find column position and section boundary
+				colPattern := "- " + colNameLower + ":"
+				colIdx := strings.Index(promptLower, colPattern)
+				if colIdx >= 0 {
+					// Find section end using next column marker or section markers
+					sectionStart := colIdx + len(colPattern)
+					nextColIdx := strings.Index(promptLower[sectionStart:], "\n  - ")
+					var sectionEnd int
+					if nextColIdx >= 0 {
+						sectionEnd = sectionStart + nextColIdx
+					} else {
+						// Use helper to find next section marker
+						sectionEnd = findSectionEnd(promptLower, sectionStart)
+					}
+					section := promptLower[colIdx:sectionEnd]
+					if strings.Contains(section, "sample values:") {
+						check.SampleValuesFound++
+					}
+				}
+			}
+		}
+
+		if check.SampleValuesExpected > 0 && check.SampleValuesFound < check.SampleValuesExpected {
+			missing := check.SampleValuesExpected - check.SampleValuesFound
+			check.Issues = append(check.Issues, fmt.Sprintf("Missing sample values for %d columns (found %d/%d)",
+				missing, check.SampleValuesFound, check.SampleValuesExpected))
+			// Proportional penalty: percentage of missing sample values
+			penalty := (missing * 50) / check.SampleValuesExpected // Max 50 points for sample values
+			check.Score -= penalty
+		}
+
+		// Check 4: Relationships included
+		expectedRels := relsByTable[strings.ToLower(tableName)]
+		check.RelationshipsExpected = len(expectedRels)
+		for _, rel := range expectedRels {
+			relPattern1 := strings.ToLower(rel.SourceTable + "." + rel.SourceColumn)
+			relPattern2 := strings.ToLower(rel.TargetTable + "." + rel.TargetColumn)
+			if strings.Contains(promptLower, relPattern1) || strings.Contains(promptLower, relPattern2) {
+				check.RelationshipsFound++
+			}
+		}
+		if check.RelationshipsExpected > 0 && check.RelationshipsFound < check.RelationshipsExpected {
+			check.Issues = append(check.Issues, fmt.Sprintf("Missing relationships: found %d/%d",
+				check.RelationshipsFound, check.RelationshipsExpected))
+			check.Score -= 5
+		}
+
+		// Clamp score
+		if check.Score < 0 {
+			check.Score = 0
+		}
+
+		checks = append(checks, check)
+	}
+
+	return checks
+}
+
+// assessDescriptionPrompt assesses the description_processing prompt type (Phase 6).
+// Verifies user description, schema overview, and entity hints are present.
+func assessDescriptionPrompt(tagged []TaggedConversation) *DescriptionPromptCheck {
+	check := &DescriptionPromptCheck{
+		Score: 100,
+	}
+
+	// Find description_processing conversation
+	var descConv *TaggedConversation
+	for i := range tagged {
+		if tagged[i].PromptType == PromptTypeDescriptionProcessing {
+			descConv = &tagged[i]
+			check.Found = true
+			break
+		}
+	}
+
+	if !check.Found {
+		// No description prompt found - this is N/A if project has no user description
+		// Don't penalize since we can't verify if a description was expected
+		check.NotApplicable = true
+		check.Score = 100 // N/A scores as perfect
+		return check
+	}
+
+	userContent, _ := parseMessages(descConv.Conversation)
+	contentLower := strings.ToLower(userContent)
+
+	// Check 1: User description is present
+	if strings.Contains(contentLower, "user's description") ||
+		strings.Contains(contentLower, "user description") ||
+		strings.Contains(contentLower, "project description") {
+		check.HasUserDescription = true
+	} else {
+		check.Issues = append(check.Issues, "User description section missing")
+		check.Score -= 40
+	}
+
+	// Check 2: Schema overview is present
+	if strings.Contains(contentLower, "database schema") ||
+		strings.Contains(contentLower, "schema overview") ||
+		strings.Contains(contentLower, "## tables") {
+		check.HasSchemaOverview = true
+	} else {
+		check.Issues = append(check.Issues, "Schema overview section missing")
+		check.Score -= 30
+	}
+
+	// Check 3: Entity hints section exists
+	if strings.Contains(contentLower, "entity_hints") ||
+		strings.Contains(contentLower, "entity hints") {
+		check.HasEntityHints = true
+	} else {
+		check.Issues = append(check.Issues, "Entity hints section missing")
+		check.Score -= 30
+	}
+
+	if check.Score < 0 {
+		check.Score = 0
+	}
+
+	return check
+}
+
+// assessTier1Prompts assesses tier1_batch prompts (Phase 6).
+// Verifies tables section and entity summary instructions.
+func assessTier1Prompts(tagged []TaggedConversation, schema []SchemaTable) *Tier1Check {
+	check := &Tier1Check{
+		Score: 100,
+	}
+
+	// Build table name set
+	tableNames := make(map[string]bool)
+	for _, t := range schema {
+		tableNames[strings.ToLower(t.TableName)] = true
+	}
+
+	// Find all tier1 conversations
+	tablesSeenInPrompts := make(map[string]bool)
+	for _, tc := range tagged {
+		if tc.PromptType != PromptTypeTier1Batch {
+			continue
+		}
+		check.Found = true
+		check.PromptCount++
+
+		userContent, systemContent := parseMessages(tc.Conversation)
+		contentLower := strings.ToLower(userContent)
+		systemLower := strings.ToLower(systemContent)
+
+		// Check for tables section
+		if strings.Contains(contentLower, "## tables") {
+			// Count tables mentioned using word boundary matching
+			for tableName := range tableNames {
+				// Use word boundary regex to avoid false positives
+				// e.g., "user" should not match "user's" or "username"
+				pattern := `\b` + regexp.QuoteMeta(tableName) + `\b`
+				if matched, _ := regexp.MatchString(pattern, contentLower); matched {
+					tablesSeenInPrompts[tableName] = true
+				}
+			}
+		}
+
+		// Check for entity summary instructions
+		if strings.Contains(systemLower, "entity summar") {
+			check.HasInstructions = true
+		}
+	}
+
+	check.TablesInPrompts = len(tablesSeenInPrompts)
+
+	if !check.Found {
+		check.Issues = append(check.Issues, "No tier1_batch prompts found")
+		check.Score = 0
+		return check
+	}
+
+	// Scoring
+	if !check.HasInstructions {
+		check.Issues = append(check.Issues, "Entity summary instructions missing")
+		check.Score -= 30
+	}
+
+	// Check if most tables are covered
+	if len(tableNames) > 0 {
+		coverage := (check.TablesInPrompts * 100) / len(tableNames)
+		if coverage < Tier1TableCoverageThreshold {
+			check.Issues = append(check.Issues, fmt.Sprintf("Only %d%% of tables covered in tier1 prompts", coverage))
+			check.Score -= (100 - coverage) / 2 // Proportional penalty
+		}
+	}
+
+	if check.Score < 0 {
+		check.Score = 0
+	}
+
+	return check
+}
+
+// assessTier0Prompt assesses the tier0_domain prompt (Phase 6).
+// Verifies entities by domain and domain summary instructions.
+func assessTier0Prompt(tagged []TaggedConversation, schema []SchemaTable) *Tier0Check {
+	check := &Tier0Check{
+		Score: 100,
+	}
+
+	// Find tier0 conversation
+	var tier0Conv *TaggedConversation
+	for i := range tagged {
+		if tagged[i].PromptType == PromptTypeTier0Domain {
+			tier0Conv = &tagged[i]
+			check.Found = true
+			break
+		}
+	}
+
+	if !check.Found {
+		// For single-table schemas, tier0 (domain grouping) is not applicable
+		if len(schema) <= 1 {
+			check.NotApplicable = true
+			check.Score = 100 // N/A scores as perfect
+			return check
+		}
+		check.Issues = append(check.Issues, "No tier0_domain prompt found")
+		check.Score = 0
+		return check
+	}
+
+	userContent, _ := parseMessages(tier0Conv.Conversation)
+	contentLower := strings.ToLower(userContent)
+
+	// Check 1: Entities by domain section
+	if strings.Contains(contentLower, "entities by domain") ||
+		strings.Contains(contentLower, "## domains") {
+		check.HasEntitiesByDomain = true
+	} else {
+		check.Issues = append(check.Issues, "Entities by domain section missing")
+		check.Score -= 50
+	}
+
+	// Check 2: Entity descriptions included
+	if strings.Contains(contentLower, "entity descriptions") ||
+		strings.Contains(contentLower, "description:") {
+		check.HasDescriptions = true
+	} else {
+		check.Issues = append(check.Issues, "Entity descriptions missing")
+		check.Score -= 50
+	}
+
+	if check.Score < 0 {
+		check.Score = 0
+	}
+
+	return check
+}
+
+// assessRelationships assesses relationship inclusion across prompts (Phase 6).
+func assessRelationships(tagged []TaggedConversation, relationships []SchemaRelationship) *RelationshipsCheck {
+	check := &RelationshipsCheck{
+		TotalRelationships: len(relationships),
+		Score:              100,
+	}
+
+	if len(relationships) == 0 {
+		// No relationships to check
+		return check
+	}
+
+	// Check each relationship is mentioned in at least one entity_analysis prompt
+	relationshipsSeen := make(map[string]bool)
+
+	for _, tc := range tagged {
+		if tc.PromptType != PromptTypeEntityAnalysis {
+			continue
+		}
+
+		userContent, _ := parseMessages(tc.Conversation)
+		contentLower := strings.ToLower(userContent)
+
+		for _, rel := range relationships {
+			relKey := fmt.Sprintf("%s.%s->%s.%s",
+				strings.ToLower(rel.SourceTable),
+				strings.ToLower(rel.SourceColumn),
+				strings.ToLower(rel.TargetTable),
+				strings.ToLower(rel.TargetColumn))
+
+			if relationshipsSeen[relKey] {
+				continue
+			}
+
+			// Check for relationship mention (either direction)
+			pattern1 := strings.ToLower(rel.SourceTable + "." + rel.SourceColumn)
+			pattern2 := strings.ToLower(rel.TargetTable + "." + rel.TargetColumn)
+			if strings.Contains(contentLower, pattern1) || strings.Contains(contentLower, pattern2) {
+				relationshipsSeen[relKey] = true
+				check.RelationshipsIncluded++
+			}
+		}
+	}
+
+	// Scoring based on coverage
+	if check.TotalRelationships > 0 {
+		coverage := (check.RelationshipsIncluded * 100) / check.TotalRelationships
+		if coverage < 100 {
+			missing := check.TotalRelationships - check.RelationshipsIncluded
+			check.Issues = append(check.Issues, fmt.Sprintf("%d relationships not included in prompts (%d%%)", missing, 100-coverage))
+			check.Score = coverage
+		}
+	}
+
+	return check
+}
+
+// extractTableNameFromContent extracts table name from various prompt patterns
+func extractTableNameFromContent(content string) string {
+	// Use pre-compiled regex for performance
+	if matches := reAnalyzeTable.FindStringSubmatch(content); len(matches) >= 2 {
+		return matches[1]
+	}
+	if matches := reTableName.FindStringSubmatch(content); len(matches) >= 2 {
+		return matches[1]
+	}
+	return ""
+}
+
+// assessEntitySummaries verifies entity summaries were captured correctly (Phase 5.1)
+func assessEntitySummaries(schema []SchemaTable, ontology *Ontology) []EntitySummaryCheck {
+	var checks []EntitySummaryCheck
+
+	if ontology == nil {
+		return checks
+	}
+
+	// Parse entity summaries JSON
+	var entitySummaries map[string]map[string]interface{}
+	if err := json.Unmarshal(ontology.EntitySummaries, &entitySummaries); err != nil {
+		// Return a failed check indicating parse error
+		return []EntitySummaryCheck{{
+			TableName: "*",
+			Issues:    []string{fmt.Sprintf("Failed to parse entity_summaries JSON: %v", err)},
+			Score:     0,
+		}}
+	}
+
+	// Build schema table lookup and column lookup for validation
+	schemaTables := make(map[string]bool)
+	columnsByTable := make(map[string]map[string]bool)
+	for _, t := range schema {
+		schemaTables[strings.ToLower(t.TableName)] = true
+		columnsByTable[strings.ToLower(t.TableName)] = make(map[string]bool)
+		for _, c := range t.Columns {
+			columnsByTable[strings.ToLower(t.TableName)][strings.ToLower(c.ColumnName)] = true
+		}
+	}
+
+	// Check each schema table
+	for _, table := range schema {
+		check := EntitySummaryCheck{
+			TableName: table.TableName,
+			Score:     100,
+		}
+
+		summary, exists := entitySummaries[table.TableName]
+		if !exists {
+			// Try lowercase
+			summary, exists = entitySummaries[strings.ToLower(table.TableName)]
+		}
+
+		check.EntryExists = exists
+		if !exists {
+			check.Issues = append(check.Issues, "No entity summary found")
+			check.Score = 0
+			checks = append(checks, check)
+			continue
+		}
+
+		// Check business_name
+		if bn, ok := summary["business_name"].(string); ok && bn != "" {
+			check.HasBusinessName = true
+		} else {
+			check.Issues = append(check.Issues, "Missing business_name")
+			check.Score -= 20
+		}
+
+		// Check description
+		if desc, ok := summary["description"].(string); ok && desc != "" {
+			check.HasDescription = true
+		} else {
+			check.Issues = append(check.Issues, "Missing description")
+			check.Score -= 20
+		}
+
+		// Check domain
+		if domain, ok := summary["domain"].(string); ok && domain != "" {
+			check.HasValidDomain = true
+		} else {
+			check.Issues = append(check.Issues, "Missing domain")
+			check.Score -= 10
+		}
+
+		// Check key_columns reference actual columns (detect hallucinations)
+		check.KeyColumnsValid = true
+		if keyColumns, ok := summary["key_columns"].([]interface{}); ok {
+			actualCols := columnsByTable[strings.ToLower(table.TableName)]
+			for _, kc := range keyColumns {
+				if colName, ok := kc.(string); ok {
+					if !actualCols[strings.ToLower(colName)] {
+						check.KeyColumnsValid = false
+						check.InvalidKeyColumns = append(check.InvalidKeyColumns, colName)
+					}
+				}
+			}
+			if !check.KeyColumnsValid {
+				check.Issues = append(check.Issues, fmt.Sprintf("Hallucinated key_columns: %v", check.InvalidKeyColumns))
+				check.Score -= 30
+			}
+		}
+
+		if check.Score < 0 {
+			check.Score = 0
+		}
+
+		checks = append(checks, check)
+	}
+
+	// Flag extra tables in entity_summaries that are NOT in the schema (potential hallucinations)
+	for tableName := range entitySummaries {
+		if !schemaTables[strings.ToLower(tableName)] {
+			checks = append(checks, EntitySummaryCheck{
+				TableName:    tableName,
+				IsExtraTable: true,
+				Issues:       []string{"Entity summary exists for table not in schema (potential hallucination)"},
+				Score:        0,
+			})
+		}
+	}
+
+	return checks
+}
+
+// assessQuestionCapture verifies questions were captured correctly (Phase 5.2)
+func assessQuestionCapture(questions []OntologyQuestion, schema []SchemaTable) *QuestionCheck {
+	check := &QuestionCheck{
+		TotalQuestions: len(questions),
+		Score:          100,
+	}
+
+	if len(questions) == 0 {
+		return check
+	}
+
+	// Build table lookup for source validation
+	validTables := make(map[string]bool)
+	for _, t := range schema {
+		validTables[strings.ToLower(t.TableName)] = true
+	}
+
+	for _, q := range questions {
+		if q.Text != "" {
+			check.QuestionsWithText++
+		}
+		if q.Reasoning != nil && *q.Reasoning != "" {
+			check.QuestionsWithReasoning++
+		}
+		if q.SourceEntityKey != nil && *q.SourceEntityKey != "" {
+			check.QuestionsWithSource++
+			// Validate source references actual table
+			if !validTables[strings.ToLower(*q.SourceEntityKey)] {
+				check.InvalidSources++
+			}
+		}
+		if q.Category != nil && *q.Category != "" {
+			check.QuestionsWithCategory++
+		}
+		// Track valid priorities vs invalid (outside 1-5 range)
+		if q.Priority != nil {
+			if *q.Priority >= 1 && *q.Priority <= 5 {
+				check.QuestionsWithPriority++
+			} else {
+				check.InvalidPriorities++
+			}
+		}
+	}
+
+	// Calculate score with PROPORTIONAL penalties based on percentage missing
+	// Max penalty weights: text=30, reasoning=20, source=15, invalid_source=20, category=10, priority=10
+	if check.QuestionsWithText < check.TotalQuestions {
+		missing := check.TotalQuestions - check.QuestionsWithText
+		missingPct := (missing * 100) / check.TotalQuestions
+		check.Issues = append(check.Issues, fmt.Sprintf("%d questions missing text (%d%%)", missing, missingPct))
+		check.Score -= (missingPct * 30) / 100
+	}
+	if check.QuestionsWithReasoning < check.TotalQuestions {
+		missing := check.TotalQuestions - check.QuestionsWithReasoning
+		missingPct := (missing * 100) / check.TotalQuestions
+		check.Issues = append(check.Issues, fmt.Sprintf("%d questions missing reasoning (%d%%)", missing, missingPct))
+		check.Score -= (missingPct * 20) / 100
+	}
+	if check.QuestionsWithSource < check.TotalQuestions {
+		missing := check.TotalQuestions - check.QuestionsWithSource
+		missingPct := (missing * 100) / check.TotalQuestions
+		check.Issues = append(check.Issues, fmt.Sprintf("%d questions missing source_entity_key (%d%%)", missing, missingPct))
+		check.Score -= (missingPct * 15) / 100
+	}
+	if check.InvalidSources > 0 {
+		invalidPct := (check.InvalidSources * 100) / check.TotalQuestions
+		check.Issues = append(check.Issues, fmt.Sprintf("%d questions reference non-existent tables (%d%%)", check.InvalidSources, invalidPct))
+		check.Score -= (invalidPct * 20) / 100
+	}
+	if check.QuestionsWithCategory < check.TotalQuestions {
+		missing := check.TotalQuestions - check.QuestionsWithCategory
+		missingPct := (missing * 100) / check.TotalQuestions
+		check.Issues = append(check.Issues, fmt.Sprintf("%d questions missing category (%d%%)", missing, missingPct))
+		check.Score -= (missingPct * 10) / 100
+	}
+	// Track both missing and invalid priorities
+	missingPriority := check.TotalQuestions - check.QuestionsWithPriority - check.InvalidPriorities
+	if missingPriority > 0 {
+		missingPct := (missingPriority * 100) / check.TotalQuestions
+		check.Issues = append(check.Issues, fmt.Sprintf("%d questions missing priority (%d%%)", missingPriority, missingPct))
+		check.Score -= (missingPct * 10) / 100
+	}
+	if check.InvalidPriorities > 0 {
+		invalidPct := (check.InvalidPriorities * 100) / check.TotalQuestions
+		check.Issues = append(check.Issues, fmt.Sprintf("%d questions have invalid priority outside 1-5 (%d%%)", check.InvalidPriorities, invalidPct))
+		check.Score -= (invalidPct * 10) / 100
+	}
+
+	if check.Score < 0 {
+		check.Score = 0
+	}
+
+	return check
+}
+
+// assessConversationParsing verifies LLM responses were parsed correctly (Phase 5.4)
+func assessConversationParsing(conversations []LLMConversation) *ConversationParseCheck {
+	check := &ConversationParseCheck{
+		TotalConversations: len(conversations),
+		Score:              100,
+	}
+
+	if len(conversations) == 0 {
+		return check
+	}
+
+	for _, conv := range conversations {
+		if conv.Status == "success" {
+			check.SuccessfulParsed++
+		} else {
+			check.FailedParsed++
+		}
+
+		// Detect truncation: incomplete JSON (missing closing braces/brackets)
+		if conv.ResponseContent != "" {
+			content := strings.TrimSpace(conv.ResponseContent)
+			// Check for obvious truncation patterns
+			if (strings.HasPrefix(content, "{") && !strings.HasSuffix(content, "}")) ||
+				(strings.HasPrefix(content, "[") && !strings.HasSuffix(content, "]")) {
+				check.TruncatedResponses++
+			} else if strings.HasPrefix(content, "{") || strings.HasPrefix(content, "[") {
+				// Try to parse as JSON to detect more subtle truncation
+				var dummy interface{}
+				if err := json.Unmarshal([]byte(content), &dummy); err != nil {
+					check.TruncatedResponses++
+				}
+			}
+		}
+	}
+
+	// Calculate score with PROPORTIONAL penalties based on percentage
+	if check.FailedParsed > 0 {
+		failPct := (check.FailedParsed * 100) / check.TotalConversations
+		check.Issues = append(check.Issues, fmt.Sprintf("%d conversations failed (%d%%)", check.FailedParsed, failPct))
+		check.Score -= failPct // Proportional: 10% failed = -10 points
+	}
+	if check.TruncatedResponses > 0 {
+		truncPct := (check.TruncatedResponses * 100) / check.TotalConversations
+		check.Issues = append(check.Issues, fmt.Sprintf("%d responses appear truncated (%d%%)", check.TruncatedResponses, truncPct))
+		check.Score -= truncPct // Proportional: 10% truncated = -10 points
+	}
+
+	if check.Score < 0 {
+		check.Score = 0
+	}
+
+	return check
+}
+
+func assessInputPreparation(schema []SchemaTable, conversations []LLMConversation, taggedConvs []TaggedConversation, gatheredDataMap map[string]*GatheredData, relationships []SchemaRelationship) InputAssessment {
+	var checks []InputCheck
+	var issues []string
+	var byConversation []ConversationQA
+
+	if len(conversations) == 0 {
+		return InputAssessment{
+			TotalConversations: 0,
+			Checks:             checks,
+			Score:              0,
+			Issues:             []string{"No conversations found"},
+		}
+	}
+
+	// Build lookup maps for verification
+	tableNames := make(map[string]bool)
+	columnsByTable := make(map[string]map[string]SchemaColumn)
+	for _, t := range schema {
+		tableNames[strings.ToLower(t.TableName)] = true
+		columnsByTable[strings.ToLower(t.TableName)] = make(map[string]SchemaColumn)
+		for _, c := range t.Columns {
+			columnsByTable[strings.ToLower(t.TableName)][strings.ToLower(c.ColumnName)] = c
+		}
+	}
+
+	// Assess each conversation
+	for i, conv := range conversations {
+		// Get tagged info for this conversation
+		var promptType PromptType
+		var targetTable string
+		if i < len(taggedConvs) {
+			promptType = taggedConvs[i].PromptType
+			targetTable = taggedConvs[i].TargetTable
+		}
+		qa := assessConversationInput(i, conv, promptType, targetTable, schema, tableNames, columnsByTable)
+		byConversation = append(byConversation, qa)
+		issues = append(issues, qa.Issues...)
+	}
+
+	// Global checks
+	checks = append(checks, InputCheck{
+		Name:        "conversations_exist",
+		Description: "At least one LLM conversation was recorded",
+		Passed:      len(conversations) > 0,
+		Details:     fmt.Sprintf("%d conversations found", len(conversations)),
+	})
+
+	// Check first conversation (domain extraction) has full schema
+	if len(conversations) > 0 {
+		firstConv := conversations[0]
+		requestStr := string(firstConv.RequestMessages)
+
+		// Count how many tables are mentioned
+		tablesFound := 0
+		for tableName := range tableNames {
+			if strings.Contains(strings.ToLower(requestStr), tableName) {
+				tablesFound++
+			}
+		}
+
+		allTablesIncluded := tablesFound == len(tableNames)
+		checks = append(checks, InputCheck{
+			Name:        "first_conv_has_all_tables",
+			Description: "First conversation (domain extraction) includes all schema tables",
+			Passed:      allTablesIncluded,
+			Details:     fmt.Sprintf("%d/%d tables found in first conversation", tablesFound, len(tableNames)),
+		})
+
+		if !allTablesIncluded {
+			issues = append(issues, fmt.Sprintf("First conversation missing %d tables", len(tableNames)-tablesFound))
+		}
+	}
+
+	// Check for negative row counts being displayed (should be filtered)
+	negativeRowCountShown := false
+	for _, conv := range conversations {
+		requestStr := string(conv.RequestMessages)
+		// Look for patterns like "Row count: -1" or "Rows: -1"
+		if matched, _ := regexp.MatchString(`(?i)(row\s*(count)?:?\s*-1|rows?:?\s*-1)`, requestStr); matched {
+			negativeRowCountShown = true
+			break
+		}
+	}
+	checks = append(checks, InputCheck{
+		Name:        "no_negative_row_counts",
+		Description: "Negative row counts (-1) are not displayed in prompts",
+		Passed:      !negativeRowCountShown,
+		Details:     boolToStatus(!negativeRowCountShown, "No -1 row counts shown", "Found -1 row count in prompts"),
+	})
+	if negativeRowCountShown {
+		issues = append(issues, "Negative row count (-1) shown in prompts - should be filtered")
+	}
+
+	// Calculate check score
+	checksPassed := 0
+	for _, c := range checks {
+		if c.Passed {
+			checksPassed++
+		}
+	}
+	checksScore := 0
+	if len(checks) > 0 {
+		checksScore = (checksPassed * 100) / len(checks)
+	}
+
+	// Validate taggedConvs matches conversations
+	if len(taggedConvs) != len(conversations) {
+		issues = append(issues, fmt.Sprintf("Internal error: tagged conversations (%d) != conversations (%d)",
+			len(taggedConvs), len(conversations)))
+	}
+
+	// Warn if gathered data is empty (critical sample value check will be skipped)
+	if len(gatheredDataMap) == 0 {
+		checks = append(checks, InputCheck{
+			Name:        "gathered_data_available",
+			Description: "Workflow state with gathered data is available for verification",
+			Passed:      false,
+			Details:     "No gathered data - sample value verification skipped (pre-Phase 1 extraction?)",
+		})
+		issues = append(issues, "WARNING: No gathered data available - sample value checks skipped")
+	}
+
+	// Phase 4: Rigorous entity analysis checks
+	entityAnalysisChecks := assessEntityAnalysisPrompts(taggedConvs, schema, gatheredDataMap, relationships)
+
+	// Calculate entity analysis score and sample value coverage
+	entityAnalysisScore := 100
+	totalSampleValuesExpected := 0
+	totalSampleValuesFound := 0
+
+	if len(entityAnalysisChecks) > 0 {
+		totalEAScore := 0
+		for _, ea := range entityAnalysisChecks {
+			totalEAScore += ea.Score
+			totalSampleValuesExpected += ea.SampleValuesExpected
+			totalSampleValuesFound += ea.SampleValuesFound
+			issues = append(issues, ea.Issues...)
+		}
+		entityAnalysisScore = totalEAScore / len(entityAnalysisChecks)
+
+		// Add sample value coverage check
+		sampleValueCoverage := 100
+		if totalSampleValuesExpected > 0 {
+			sampleValueCoverage = (totalSampleValuesFound * 100) / totalSampleValuesExpected
+		}
+		checks = append(checks, InputCheck{
+			Name:        "sample_values_coverage",
+			Description: "Sample values included in prompts when available in gathered data",
+			Passed:      sampleValueCoverage == 100,
+			Details:     fmt.Sprintf("Sample values verified: %d/%d columns (%d%%)", totalSampleValuesFound, totalSampleValuesExpected, sampleValueCoverage),
+		})
+
+		// Add entity analysis summary check
+		allPerfect := entityAnalysisScore == 100
+		checks = append(checks, InputCheck{
+			Name:        "entity_analysis_complete",
+			Description: "Entity analysis prompts include all required data",
+			Passed:      allPerfect,
+			Details:     fmt.Sprintf("%d tables analyzed, avg score %d/100", len(entityAnalysisChecks), entityAnalysisScore),
+		})
+	}
+
+	// Phase 6: Additional prompt type assessments
+	descriptionCheck := assessDescriptionPrompt(taggedConvs)
+	tier1Check := assessTier1Prompts(taggedConvs, schema)
+	tier0Check := assessTier0Prompt(taggedConvs, schema)
+	relationshipsCheck := assessRelationships(taggedConvs, relationships)
+
+	// Add Phase 6 check summaries
+	if descriptionCheck != nil {
+		checks = append(checks, InputCheck{
+			Name:        "description_prompt",
+			Description: "Description processing prompt has required sections",
+			Passed:      descriptionCheck.Score == 100,
+			Details:     fmt.Sprintf("Score %d/100", descriptionCheck.Score),
+		})
+		issues = append(issues, descriptionCheck.Issues...)
+	}
+	if tier1Check != nil {
+		checks = append(checks, InputCheck{
+			Name:        "tier1_prompts",
+			Description: "Tier1 batch prompts cover tables with instructions",
+			Passed:      tier1Check.Score == 100,
+			Details:     fmt.Sprintf("Score %d/100, %d tables covered", tier1Check.Score, tier1Check.TablesInPrompts),
+		})
+		issues = append(issues, tier1Check.Issues...)
+	}
+	if tier0Check != nil {
+		checks = append(checks, InputCheck{
+			Name:        "tier0_prompt",
+			Description: "Tier0 domain prompt has required sections",
+			Passed:      tier0Check.Score == 100,
+			Details:     fmt.Sprintf("Score %d/100", tier0Check.Score),
+		})
+		issues = append(issues, tier0Check.Issues...)
+	}
+	if relationshipsCheck != nil {
+		checks = append(checks, InputCheck{
+			Name:        "relationships_included",
+			Description: "Relationships included in prompts",
+			Passed:      relationshipsCheck.Score == 100,
+			Details:     fmt.Sprintf("Score %d/100, %d/%d included", relationshipsCheck.Score, relationshipsCheck.RelationshipsIncluded, relationshipsCheck.TotalRelationships),
+		})
+		issues = append(issues, relationshipsCheck.Issues...)
+	}
+
+	// Phase 6: Weighted final score
+	// Weights: entity_analysis=50, tier1=25, description=10, tier0=5, relationships=5, global=5
+	descScore := 100
+	if descriptionCheck != nil {
+		descScore = descriptionCheck.Score
+	}
+	tier1Score := 100
+	if tier1Check != nil {
+		tier1Score = tier1Check.Score
+	}
+	tier0Score := 100
+	if tier0Check != nil {
+		tier0Score = tier0Check.Score
+	}
+	relScore := 100
+	if relationshipsCheck != nil {
+		relScore = relationshipsCheck.Score
+	}
+
+	finalScore := (entityAnalysisScore*InputScoreEntityAnalysisWeight +
+		tier1Score*InputScoreTier1Weight +
+		descScore*InputScoreDescriptionWeight +
+		tier0Score*InputScoreTier0Weight +
+		relScore*InputScoreRelationshipsWeight +
+		checksScore*InputScoreGlobalChecksWeight) / 100
+
+	return InputAssessment{
+		TotalConversations:   len(conversations),
+		Checks:               checks,
+		ByConversation:       byConversation,
+		EntityAnalysisChecks: entityAnalysisChecks,
+		DescriptionCheck:     descriptionCheck,
+		Tier1Check:           tier1Check,
+		Tier0Check:           tier0Check,
+		RelationshipsCheck:   relationshipsCheck,
+		Score:                finalScore,
+		Issues:               dedupeStrings(issues),
+	}
+}
+
+func assessConversationInput(index int, conv LLMConversation, promptType PromptType, targetTable string, schema []SchemaTable, tableNames map[string]bool, columnsByTable map[string]map[string]SchemaColumn) ConversationQA {
+	requestStr := string(conv.RequestMessages)
+	requestLower := strings.ToLower(requestStr)
+
+	var issues []string
+	score := 100 // Start at 100, deduct for issues
+
+	// Check 1: Tables included
+	tablesFound := 0
+	for tableName := range tableNames {
+		if strings.Contains(requestLower, tableName) {
+			tablesFound++
+		}
+	}
+	tablesIncluded := tablesFound > 0
+	if !tablesIncluded {
+		issues = append(issues, fmt.Sprintf("Conv %d: No table names found in request", index))
+		score -= 25
+	}
+
+	// Check 2: Columns included
+	columnsFound := 0
+	totalColumns := 0
+	for _, cols := range columnsByTable {
+		for colName := range cols {
+			totalColumns++
+			if strings.Contains(requestLower, colName) {
+				columnsFound++
+			}
+		}
+	}
+	columnsIncluded := columnsFound > 0
+	if !columnsIncluded && totalColumns > 0 {
+		issues = append(issues, fmt.Sprintf("Conv %d: No column names found in request", index))
+		score -= 25
+	}
+
+	// Check 3: Data types included
+	commonTypes := []string{"uuid", "text", "varchar", "integer", "int", "bigint", "boolean", "timestamp", "numeric", "jsonb"}
+	typesFound := 0
+	for _, dt := range commonTypes {
+		if strings.Contains(requestLower, dt) {
+			typesFound++
+		}
+	}
+	typesIncluded := typesFound >= 2 // At least 2 different types
+	if !typesIncluded {
+		issues = append(issues, fmt.Sprintf("Conv %d: Insufficient data types in request", index))
+		score -= 15
+	}
+
+	// Check 4: PK/nullable flags included
+	flagsIncluded := strings.Contains(requestLower, "[pk]") ||
+		strings.Contains(requestLower, "primary key") ||
+		strings.Contains(requestLower, "nullable")
+	if !flagsIncluded {
+		issues = append(issues, fmt.Sprintf("Conv %d: No PK/nullable flags in request", index))
+		score -= 10
+	}
+
+	if score < 0 {
+		score = 0
+	}
+
+	return ConversationQA{
+		Index:           index,
+		PromptType:      promptType,
+		TargetTable:     targetTable,
+		TablesIncluded:  tablesIncluded,
+		ColumnsIncluded: columnsIncluded,
+		TypesIncluded:   typesIncluded,
+		FlagsIncluded:   flagsIncluded,
+		Issues:          issues,
+		Score:           score,
+	}
+}
+
+func assessPostProcessing(schema []SchemaTable, conversations []LLMConversation, ontology *Ontology, questions []OntologyQuestion) PostProcessAssessment {
+	var checks []PostProcessCheck
+	var issues []string
+
+	// Phase 5: Rigorous output assessments
+	entitySummaryChecks := assessEntitySummaries(schema, ontology)
+	questionCheck := assessQuestionCapture(questions, schema)
+	parseCheck := assessConversationParsing(conversations)
+
+	// Check 1: Ontology was created
+	ontologyExists := ontology != nil
+	checks = append(checks, PostProcessCheck{
+		Name:        "ontology_created",
+		Description: "Active ontology was created from LLM responses",
+		Passed:      ontologyExists,
+		Details:     boolToStatus(ontologyExists, "Ontology exists", "No active ontology"),
+	})
+	if !ontologyExists {
+		issues = append(issues, "No active ontology was created")
+	}
+
+	// Check 2: Domain summary exists and is non-empty
+	domainSummaryScore := 0
+	domainSummaryExists := false
+	if ontologyExists {
+		var domainSummary interface{}
+		if err := json.Unmarshal(ontology.DomainSummary, &domainSummary); err == nil && domainSummary != nil {
+			if ds, ok := domainSummary.(map[string]interface{}); ok && len(ds) > 0 {
+				domainSummaryExists = true
+				domainSummaryScore = 100
+			}
+		}
+	}
+	checks = append(checks, PostProcessCheck{
+		Name:        "domain_summary_exists",
+		Description: "Domain summary was extracted and stored",
+		Passed:      domainSummaryExists,
+		Details:     boolToStatus(domainSummaryExists, "Domain summary exists", "Missing or empty domain summary"),
+	})
+	if !domainSummaryExists {
+		issues = append(issues, "Domain summary missing or empty")
+	}
+
+	// Calculate entity summary score from detailed checks
+	entitySummaryScore := 100
+	if len(entitySummaryChecks) > 0 {
+		totalScore := 0
+		for _, ec := range entitySummaryChecks {
+			totalScore += ec.Score
+			issues = append(issues, ec.Issues...)
+		}
+		entitySummaryScore = totalScore / len(entitySummaryChecks)
+
+		// Add summary check
+		allPerfect := entitySummaryScore == 100
+		checks = append(checks, PostProcessCheck{
+			Name:        "entity_summaries_complete",
+			Description: "Entity summaries have all required fields (business_name, description, domain, valid key_columns)",
+			Passed:      allPerfect,
+			Details:     fmt.Sprintf("%d tables checked, avg score %d/100", len(entitySummaryChecks), entitySummaryScore),
+		})
+	}
+
+	// Add question check summary
+	if questionCheck != nil {
+		issues = append(issues, questionCheck.Issues...)
+		allPerfect := questionCheck.Score == 100
+		checks = append(checks, PostProcessCheck{
+			Name:        "questions_complete",
+			Description: "Questions have all required fields (text, reasoning, source, category, priority)",
+			Passed:      allPerfect,
+			Details:     fmt.Sprintf("%d questions, score %d/100", questionCheck.TotalQuestions, questionCheck.Score),
+		})
+	}
+
+	// Add parse check summary
+	if parseCheck != nil {
+		issues = append(issues, parseCheck.Issues...)
+		allPerfect := parseCheck.Score == 100
+		checks = append(checks, PostProcessCheck{
+			Name:        "responses_parsed",
+			Description: "All LLM responses parsed successfully without truncation",
+			Passed:      allPerfect,
+			Details:     fmt.Sprintf("%d/%d successful, %d truncated", parseCheck.SuccessfulParsed, parseCheck.TotalConversations, parseCheck.TruncatedResponses),
+		})
+	}
+
+	// Calculate weighted score using Phase 5 weights
+	questionScore := 100
+	if questionCheck != nil {
+		questionScore = questionCheck.Score
+	}
+	parseScore := 100
+	if parseCheck != nil {
+		parseScore = parseCheck.Score
+	}
+
+	finalScore := (entitySummaryScore*PostProcessEntitySummaryWeight +
+		questionScore*PostProcessQuestionWeight +
+		domainSummaryScore*PostProcessDomainWeight +
+		parseScore*PostProcessParseWeight) / 100
+
+	return PostProcessAssessment{
+		Checks:                 checks,
+		EntitySummaryChecks:    entitySummaryChecks,
+		QuestionCheck:          questionCheck,
+		ConversationParseCheck: parseCheck,
+		Score:                  finalScore,
+		Issues:                 dedupeStrings(issues),
+	}
+}
+
+func generateSummary(input InputAssessment, postProcess PostProcessAssessment, finalScore int) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("Deterministic Assessment Score: %d/100\n\n", finalScore))
+
+	sb.WriteString(fmt.Sprintf("Input Preparation: %d/100\n", input.Score))
+	if len(input.Issues) > 0 {
+		sb.WriteString("  Issues:\n")
+		for _, issue := range input.Issues[:min(3, len(input.Issues))] {
+			sb.WriteString(fmt.Sprintf("    - %s\n", issue))
+		}
+	}
+
+	sb.WriteString(fmt.Sprintf("\nPost-Processing: %d/100\n", postProcess.Score))
+	if len(postProcess.Issues) > 0 {
+		sb.WriteString("  Issues:\n")
+		for _, issue := range postProcess.Issues[:min(3, len(postProcess.Issues))] {
+			sb.WriteString(fmt.Sprintf("    - %s\n", issue))
+		}
+	}
+
+	if finalScore == 100 {
+		sb.WriteString("\nPERFECT SCORE: Deterministic code is working correctly!")
+	} else if finalScore >= 90 {
+		sb.WriteString("\nNear perfect - minor issues to address.")
+	} else if finalScore >= 70 {
+		sb.WriteString("\nGood but needs improvement in the areas listed above.")
+	} else {
+		sb.WriteString("\nSignificant issues need to be addressed.")
+	}
+
+	return sb.String()
+}
+
+// buildChecksSummary creates the Phase 7 organized per-category scoring output.
+func buildChecksSummary(input InputAssessment, postProcess PostProcessAssessment) ChecksSummary {
+	summary := ChecksSummary{}
+
+	// Input categories
+	if input.DescriptionCheck != nil {
+		summary.DescriptionPrompt = &CategoryScore{
+			Score:  input.DescriptionCheck.Score,
+			Issues: input.DescriptionCheck.Issues,
+		}
+	}
+
+	if len(input.EntityAnalysisChecks) > 0 {
+		tablesPassed := 0
+		totalScore := 0
+		var issues []string
+		for _, ea := range input.EntityAnalysisChecks {
+			totalScore += ea.Score
+			if ea.Score == 100 {
+				tablesPassed++
+			}
+			issues = append(issues, ea.Issues...)
+		}
+		summary.EntityAnalysis = &CategoryScore{
+			Score:         totalScore / len(input.EntityAnalysisChecks),
+			TablesChecked: len(input.EntityAnalysisChecks),
+			TablesPassed:  tablesPassed,
+			Issues:        issues,
+		}
+	}
+
+	if input.Tier1Check != nil {
+		summary.Tier1 = &CategoryScore{
+			Score:  input.Tier1Check.Score,
+			Issues: input.Tier1Check.Issues,
+		}
+	}
+
+	if input.Tier0Check != nil {
+		summary.Tier0 = &CategoryScore{
+			Score:  input.Tier0Check.Score,
+			Issues: input.Tier0Check.Issues,
+		}
+	}
+
+	if input.RelationshipsCheck != nil {
+		summary.Relationships = &CategoryScore{
+			Score:  input.RelationshipsCheck.Score,
+			Issues: input.RelationshipsCheck.Issues,
+		}
+	}
+
+	// Output categories
+	if len(postProcess.EntitySummaryChecks) > 0 {
+		tablesPassed := 0
+		totalScore := 0
+		var issues []string
+		for _, es := range postProcess.EntitySummaryChecks {
+			totalScore += es.Score
+			if es.Score == 100 {
+				tablesPassed++
+			}
+			issues = append(issues, es.Issues...)
+		}
+		summary.EntitySummaries = &CategoryScore{
+			Score:         totalScore / len(postProcess.EntitySummaryChecks),
+			TablesChecked: len(postProcess.EntitySummaryChecks),
+			TablesPassed:  tablesPassed,
+			Issues:        issues,
+		}
+	}
+
+	if postProcess.QuestionCheck != nil {
+		summary.Questions = &CategoryScore{
+			Score:  postProcess.QuestionCheck.Score,
+			Issues: postProcess.QuestionCheck.Issues,
+		}
+	}
+
+	// Domain summary check
+	domainScore := 100
+	var domainIssues []string
+	domainFound := false
+	for _, check := range postProcess.Checks {
+		if check.Name == "domain_summary_exists" {
+			domainFound = true
+			if !check.Passed {
+				domainScore = 0
+				domainIssues = append(domainIssues, "Domain summary missing or empty")
+			}
+			break
+		}
+	}
+	if domainFound {
+		summary.DomainSummary = &CategoryScore{
+			Score:  domainScore,
+			Issues: domainIssues,
+		}
+	}
+
+	if postProcess.ConversationParseCheck != nil {
+		summary.Parse = &CategoryScore{
+			Score:  postProcess.ConversationParseCheck.Score,
+			Issues: postProcess.ConversationParseCheck.Issues,
+		}
+	}
+
+	return summary
+}
+
+// generateSmartSummary creates a one-liner summary of the top issues.
+func generateSmartSummary(input InputAssessment, postProcess PostProcessAssessment, finalScore int) string {
+	if finalScore == 100 {
+		return "Score 100/100 - Perfect! Deterministic code is working correctly."
+	}
+
+	// Collect issues with their severity (score loss)
+	type issueInfo struct {
+		category  string
+		scoreLoss int
+		detail    string
+	}
+	var topIssues []issueInfo
+
+	// Check entity analysis
+	if len(input.EntityAnalysisChecks) > 0 {
+		tablesWithIssues := 0
+		missingSamples := 0
+		totalEAScore := 0
+		for _, ea := range input.EntityAnalysisChecks {
+			totalEAScore += ea.Score
+			if ea.Score < 100 {
+				tablesWithIssues++
+			}
+			if ea.SampleValuesExpected > 0 && ea.SampleValuesFound < ea.SampleValuesExpected {
+				missingSamples += ea.SampleValuesExpected - ea.SampleValuesFound
+			}
+		}
+		eaScore := totalEAScore / len(input.EntityAnalysisChecks)
+		if missingSamples > 0 {
+			// Score loss is proportional to how much entity analysis score dropped
+			scoreLoss := 50 - (eaScore * 50 / 100)
+			topIssues = append(topIssues, issueInfo{
+				category:  "entity_analysis",
+				scoreLoss: scoreLoss,
+				detail:    fmt.Sprintf("Sample values missing for %d columns", missingSamples),
+			})
+		} else if tablesWithIssues > 0 {
+			topIssues = append(topIssues, issueInfo{
+				category:  "entity_analysis",
+				scoreLoss: 50 - (eaScore * 50 / 100),
+				detail:    fmt.Sprintf("%d tables with issues", tablesWithIssues),
+			})
+		}
+	}
+
+	// Check entity summaries for hallucinations
+	hallucinations := 0
+	missingFields := 0
+	for _, es := range postProcess.EntitySummaryChecks {
+		if len(es.InvalidKeyColumns) > 0 {
+			hallucinations += len(es.InvalidKeyColumns)
+		}
+		if !es.HasBusinessName || !es.HasDescription {
+			missingFields++
+		}
+	}
+	if hallucinations > 0 {
+		topIssues = append(topIssues, issueInfo{
+			category:  "entity_summaries",
+			scoreLoss: 30,
+			detail:    fmt.Sprintf("%d hallucinated columns", hallucinations),
+		})
+	} else if missingFields > 0 {
+		topIssues = append(topIssues, issueInfo{
+			category:  "entity_summaries",
+			scoreLoss: 20,
+			detail:    fmt.Sprintf("%d tables missing fields", missingFields),
+		})
+	}
+
+	// Check questions
+	if postProcess.QuestionCheck != nil && postProcess.QuestionCheck.Score < 100 {
+		topIssues = append(topIssues, issueInfo{
+			category:  "questions",
+			scoreLoss: 100 - postProcess.QuestionCheck.Score,
+			detail:    "Questions missing metadata",
+		})
+	}
+
+	// Check parse failures
+	if postProcess.ConversationParseCheck != nil {
+		if postProcess.ConversationParseCheck.TruncatedResponses > 0 {
+			topIssues = append(topIssues, issueInfo{
+				category:  "parse",
+				scoreLoss: 10,
+				detail:    fmt.Sprintf("%d truncated responses", postProcess.ConversationParseCheck.TruncatedResponses),
+			})
+		}
+	}
+
+	// Sort issues by severity (highest score loss first)
+	sort.Slice(topIssues, func(i, j int) bool {
+		return topIssues[i].scoreLoss > topIssues[j].scoreLoss
+	})
+
+	// Build summary from top issues (max 3)
+	var parts []string
+	maxIssues := 3
+	if len(topIssues) < maxIssues {
+		maxIssues = len(topIssues)
+	}
+	for i := 0; i < maxIssues; i++ {
+		parts = append(parts, topIssues[i].detail)
+	}
+
+	if len(parts) == 0 {
+		// Fall back to generic message
+		if finalScore >= 90 {
+			return fmt.Sprintf("Score %d/100 - Near perfect, minor issues.", finalScore)
+		}
+		return fmt.Sprintf("Score %d/100 - Issues detected, see details.", finalScore)
+	}
+
+	return fmt.Sprintf("Score %d/100 - %s", finalScore, strings.Join(parts, ", "))
+}
+
+func boolToStatus(b bool, trueMsg, falseMsg string) string {
+	if b {
+		return trueMsg
+	}
+	return falseMsg
+}
+
+func dedupeStrings(strs []string) []string {
+	seen := make(map[string]bool)
+	var result []string
+	for _, s := range strs {
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

@@ -262,6 +262,36 @@ func (s *ontologyBuilderService) BuildTieredOntology(ctx context.Context, projec
 	return nil
 }
 
+// loadTablesWithColumns loads tables and attaches their columns in a single batch query.
+// This is more efficient than loading columns per-table (1 query vs N queries).
+// BuildTieredOntology uses this to ensure columns are available for prompt building.
+func (s *ontologyBuilderService) loadTablesWithColumns(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	// Load tables
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tables: %w", err)
+	}
+
+	// Load all columns in one query
+	allColumns, err := s.schemaRepo.ListColumnsByDatasource(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load columns: %w", err)
+	}
+
+	// Group columns by table ID
+	columnsByTable := make(map[uuid.UUID][]models.SchemaColumn)
+	for _, col := range allColumns {
+		columnsByTable[col.SchemaTableID] = append(columnsByTable[col.SchemaTableID], *col)
+	}
+
+	// Attach columns to tables
+	for _, table := range tables {
+		table.Columns = columnsByTable[table.ID]
+	}
+
+	return tables, nil
+}
+
 // ============================================================================
 // BuildEntitySummaries - Tier 1
 // ============================================================================
@@ -413,7 +443,7 @@ func (s *ontologyBuilderService) buildTier1PromptWithContext(tables []*models.Sc
 
 	for _, table := range tables {
 		prompt.WriteString(fmt.Sprintf("### %s\n", table.TableName))
-		if table.RowCount != nil {
+		if table.RowCount != nil && *table.RowCount >= 0 {
 			prompt.WriteString(fmt.Sprintf("Row count: %d\n", *table.RowCount))
 		}
 
@@ -887,7 +917,7 @@ func (s *ontologyBuilderService) buildEntityAnalysisPrompt(
 
 	sb.WriteString("## TABLE SCHEMA\n\n")
 	sb.WriteString(fmt.Sprintf("Table: %s\n", table.TableName))
-	if table.RowCount != nil {
+	if table.RowCount != nil && *table.RowCount >= 0 {
 		sb.WriteString(fmt.Sprintf("Row count: %d\n", *table.RowCount))
 	}
 	sb.WriteString("\nColumns:\n")
@@ -1027,16 +1057,91 @@ func (s *ontologyBuilderService) buildEntityAnalysisPrompt(
 		}
 	}
 
+	sb.WriteString(`
+## QUESTION CLASSIFICATION RULES
+
+When generating questions, set "is_required" based on these criteria:
+
+### REQUIRED QUESTIONS (is_required: true)
+
+Use REQUIRED for questions where the answer fundamentally changes how we understand or query this table:
+
+1. **Enum meanings with numeric/coded values**
+   - Example: status column with values [2, 4, 5, 6] - what do these numbers mean?
+   - Example: type column with values ["A", "B", "C"] - what business logic do these represent?
+   - Why: Cannot write correct WHERE clauses without knowing value meanings
+
+2. **Financial/monetary column purposes**
+   - Example: Is 'amount' gross or net? Pre-tax or post-tax?
+   - Example: Does 'price' include shipping or exclude it?
+   - Why: Misinterpretation has business impact on calculations
+
+3. **Ambiguous foreign key relationships**
+   - Example: Does user_id represent creator, assignee, or owner?
+   - Example: What is the relationship between owner_id and entity_id?
+   - Why: Affects join logic and query correctness
+
+4. **Critical business rules encoded in data**
+   - Example: What constitutes an 'active' record when there's no explicit status?
+   - Example: Can entity_type be 'engagement' in addition to 'channel'?
+   - Why: Fundamental to understanding the data model
+
+### OPTIONAL QUESTIONS (is_required: false)
+
+Use OPTIONAL for questions that provide helpful context but can be reasonably inferred:
+
+1. **Self-explanatory enum values**
+   - Example: status with values ["pending", "approved", "rejected"]
+   - Why: Values are descriptive enough to understand meaning
+
+2. **Inferable relationships from naming**
+   - Example: Is channel_id a reference to the channels table? (obvious from naming)
+   - Example: Is marker_at used for pagination? (reasonable assumption from "_at" suffix)
+   - Why: We can make reasonable assumptions based on conventions
+
+3. **Nice-to-know context**
+   - Example: What department typically uses this table?
+   - Example: How frequently is this data updated?
+   - Why: Doesn't affect query correctness
+
+4. **Schema design rationale**
+   - Example: Why is this column nullable?
+   - Example: Why are there separate created_at and updated_at columns?
+   - Why: Design choices, not business logic
+
+### NEVER ASK (don't generate these questions at all)
+
+Do not generate questions for obvious or standard schema elements:
+
+1. **Standard timestamp columns**
+   - created_at, updated_at, deleted_at - these are self-explanatory
+
+2. **Standard audit columns**
+   - created_by, modified_by, version - standard audit trail fields
+
+3. **Auto-increment/UUID primary keys**
+   - id, uuid columns marked [PK] - their purpose is obvious
+
+4. **Questions already answered by sample data**
+   - If sample data shows status values ["active", "inactive"], don't ask what the values mean
+   - If distinct_count is 2 and sample shows [true, false], it's obviously boolean logic
+
+5. **Repetitive questions across similar columns**
+   - If you've asked about marker_at in one table, don't ask the same question for marker_at in other tables
+   - Reference the earlier question instead: "Same meaning as marker_at in X table?"
+
+`)
+
 	sb.WriteString(fmt.Sprintf(`
 ## TASK
 
 Analyze the table "%s" and determine if there are any questions that would significantly improve understanding of this entity.
 
 Focus on:
-1. Status/type/state columns - what do their values mean?
-2. Unclear column purposes - what data do they hold?
-3. Business rules - any constraints or workflows encoded?
-4. Relationships - any unclear foreign key meanings?
+1. Enum/status columns - what do their VALUES mean (not obvious ones)?
+2. Financial columns - what EXACTLY do they represent?
+3. Foreign keys - what is the BUSINESS MEANING of the relationship?
+4. Business rules - any CRITICAL constraints or workflows encoded?
 
 IMPORTANT: Only generate questions if there is genuine ambiguity. Many tables are self-explanatory.
 
@@ -1286,7 +1391,7 @@ func (s *ontologyBuilderService) buildSchemaContext(tables []*models.SchemaTable
 		}
 
 		sb.WriteString(fmt.Sprintf("### TABLE: %s%s\n", table.TableName, centralityNote))
-		if table.RowCount != nil {
+		if table.RowCount != nil && *table.RowCount >= 0 {
 			sb.WriteString(fmt.Sprintf("Row count: %d\n", *table.RowCount))
 		}
 		sb.WriteString("Columns:\n")
@@ -1751,10 +1856,10 @@ func (s *ontologyBuilderService) ProcessProjectDescription(ctx context.Context, 
 		return nil, fmt.Errorf("workflow has no config")
 	}
 
-	// Load schema tables for context
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, workflow.Config.DatasourceID)
+	// Load schema tables with columns for context
+	tables, err := s.loadTablesWithColumns(ctx, projectID, workflow.Config.DatasourceID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list tables: %w", err)
+		return nil, fmt.Errorf("failed to load tables: %w", err)
 	}
 
 	// Build schema summary for LLM
@@ -1853,16 +1958,25 @@ func (s *ontologyBuilderService) buildSchemaSummaryForDescription(tables []*mode
 
 	for _, table := range tables {
 		sb.WriteString(fmt.Sprintf("### %s\n", table.TableName))
-		if table.RowCount != nil {
+		if table.RowCount != nil && *table.RowCount >= 0 {
 			sb.WriteString(fmt.Sprintf("Rows: %d\n", *table.RowCount))
 		}
-		sb.WriteString("Columns: ")
-		colNames := make([]string, 0, len(table.Columns))
+		sb.WriteString(fmt.Sprintf("Columns (%d):\n", len(table.Columns)))
 		for _, col := range table.Columns {
-			colNames = append(colNames, col.ColumnName)
+			flags := []string{}
+			if col.IsPrimaryKey {
+				flags = append(flags, "PK")
+			}
+			if col.IsNullable {
+				flags = append(flags, "nullable")
+			}
+			flagStr := ""
+			if len(flags) > 0 {
+				flagStr = " [" + strings.Join(flags, ", ") + "]"
+			}
+			sb.WriteString(fmt.Sprintf("  - %s: %s%s\n", col.ColumnName, col.DataType, flagStr))
 		}
-		sb.WriteString(strings.Join(colNames, ", "))
-		sb.WriteString("\n\n")
+		sb.WriteString("\n")
 	}
 
 	return sb.String()

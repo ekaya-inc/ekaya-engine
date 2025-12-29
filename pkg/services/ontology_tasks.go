@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -341,6 +343,15 @@ func (t *UnderstandEntityTask) Execute(ctx context.Context, enqueuer workqueue.T
 		return fmt.Errorf("analyze entity: %w", err)
 	}
 
+	// Deduplicate questions against existing ones in this ontology
+	if len(questions) > 0 {
+		existingQuestions, err := t.questionRepo.ListByOntologyID(tenantCtx, t.ontologyID)
+		if err != nil {
+			return fmt.Errorf("load existing questions for deduplication: %w", err)
+		}
+		questions = deduplicateQuestions(questions, existingQuestions)
+	}
+
 	// Write questions to the dedicated questions table (decoupled from workflow lifecycle)
 	if len(questions) > 0 {
 		// Populate project and ontology IDs for each question
@@ -579,3 +590,110 @@ func (t *ScanTableDataTask) Execute(ctx context.Context, enqueuer workqueue.Task
 
 // NOTE: TransitionToAnalyzingTask was removed in chunk 5.
 // The orchestrator handles phase transitions and task enqueueing directly.
+
+// ============================================================================
+// Question Deduplication
+// ============================================================================
+
+// deduplicateQuestions removes questions that are substantially similar to existing ones.
+// This prevents asking "What is marker_at?" multiple times across different tables.
+func deduplicateQuestions(newQuestions []*models.OntologyQuestion, existingQuestions []*models.OntologyQuestion) []*models.OntologyQuestion {
+	if len(existingQuestions) == 0 {
+		return newQuestions
+	}
+
+	result := make([]*models.OntologyQuestion, 0, len(newQuestions))
+	for _, newQ := range newQuestions {
+		isDuplicate := false
+		for _, existingQ := range existingQuestions {
+			if isSimilarQuestion(newQ.Text, existingQ.Text) {
+				isDuplicate = true
+				break
+			}
+		}
+		if !isDuplicate {
+			result = append(result, newQ)
+		}
+	}
+
+	return result
+}
+
+// columnNamePattern matches common column name patterns in questions
+var columnNamePattern = regexp.MustCompile(`['"\x60]([a-z_][a-z0-9_]*)['"\x60]`)
+
+// isSimilarQuestion checks if two questions are asking about the same thing.
+// Two questions are considered similar if they:
+// 1. Reference the same column name AND
+// 2. Ask the same type of question (what/why/how)
+func isSimilarQuestion(q1, q2 string) bool {
+	q1Lower := strings.ToLower(q1)
+	q2Lower := strings.ToLower(q2)
+
+	// Extract column names from both questions
+	cols1 := extractColumnNames(q1Lower)
+	cols2 := extractColumnNames(q2Lower)
+
+	// Find common column names
+	commonCols := findCommonStrings(cols1, cols2)
+	if len(commonCols) == 0 {
+		return false
+	}
+
+	// Check if both questions have similar intent (what/why/how/when/does/is)
+	intent1 := extractQuestionIntent(q1Lower)
+	intent2 := extractQuestionIntent(q2Lower)
+
+	return intent1 == intent2 && intent1 != ""
+}
+
+// extractColumnNames finds column names mentioned in a question.
+// Looks for quoted identifiers like 'column_name', "column_name", or `column_name`
+func extractColumnNames(question string) []string {
+	matches := columnNamePattern.FindAllStringSubmatch(question, -1)
+	cols := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if len(m) > 1 {
+			cols = append(cols, m[1])
+		}
+	}
+	return cols
+}
+
+// extractQuestionIntent identifies the type of question being asked.
+func extractQuestionIntent(question string) string {
+	// Check if question starts with specific patterns (most reliable)
+	if strings.HasPrefix(question, "what ") {
+		return "what"
+	}
+	if strings.HasPrefix(question, "why ") {
+		return "why"
+	}
+	if strings.HasPrefix(question, "how ") {
+		return "how"
+	}
+	if strings.HasPrefix(question, "when ") {
+		return "when"
+	}
+	if strings.HasPrefix(question, "does ") || strings.HasPrefix(question, "is ") ||
+		strings.HasPrefix(question, "are ") || strings.HasPrefix(question, "can ") {
+		return "does"
+	}
+	return ""
+}
+
+// findCommonStrings returns strings that appear in both slices.
+func findCommonStrings(a, b []string) []string {
+	set := make(map[string]bool)
+	for _, s := range a {
+		set[s] = true
+	}
+
+	common := make([]string, 0)
+	for _, s := range b {
+		if set[s] {
+			common = append(common, s)
+		}
+	}
+	return common
+}

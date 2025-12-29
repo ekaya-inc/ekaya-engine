@@ -6,8 +6,8 @@
 # Server configuration
 port: "3443"
 env: "dev"
-base_url: "http://localhost:3443"  # WHERE THIS INSTANCE RUNS - localhost self-hosted
-region_domain: "localhost"
+# base_url: auto-derived as http://localhost:$PORT when not set
+# Set BASE_URL env var only when behind a load balancer or on internal server
 auth_server_url: "https://auth.dev.ekaya.ai"  # WHERE AUTH SERVER IS - deployed dev
 cookie_domain: ""  # Auto-derived: localhost → "" (no domain restrictions, works over HTTP)
 

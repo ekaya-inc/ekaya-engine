@@ -13,12 +13,11 @@ import (
 // Secrets (passwords, keys) must only come from environment variables.
 type Config struct {
 	// Server configuration
-	BindAddr     string `yaml:"bind_addr" env:"BIND_ADDR" env-default:"127.0.0.1"`
-	Port         string `yaml:"port" env:"PORT" env-default:"3443"`
-	Env          string `yaml:"env" env:"ENVIRONMENT" env-default:"local"`
-	BaseURL      string `yaml:"base_url" env:"BASE_URL" env-default:"http://localhost:3443"`
-	RegionDomain string `yaml:"region_domain" env:"REGION_DOMAIN" env-default:"localhost"`
-	Version      string `yaml:"-"` // Set at load time, not from config
+	BindAddr string `yaml:"bind_addr" env:"BIND_ADDR" env-default:"127.0.0.1"`
+	Port     string `yaml:"port" env:"PORT" env-default:"3443"`
+	Env      string `yaml:"env" env:"ENVIRONMENT" env-default:"local"`
+	BaseURL  string `yaml:"base_url" env:"BASE_URL" env-default:""` // Auto-derived from Port if empty
+	Version  string `yaml:"-"`                                      // Set at load time, not from config
 
 	// Authentication configuration
 	Auth AuthConfig `yaml:"auth"`
@@ -148,6 +147,11 @@ func Load(version string) (*Config, error) {
 	// Parse complex fields
 	if err := cfg.parseComplexFields(); err != nil {
 		return nil, fmt.Errorf("failed to parse config fields: %w", err)
+	}
+
+	// Auto-derive BaseURL from Port if not explicitly set
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = fmt.Sprintf("http://localhost:%s", cfg.Port)
 	}
 
 	return cfg, nil

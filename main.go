@@ -171,7 +171,7 @@ func main() {
 
 	ontologyWorkflowService := services.NewOntologyWorkflowService(
 		ontologyWorkflowRepo, ontologyRepo, schemaRepo, workflowStateRepo, ontologyQuestionRepo,
-		datasourceService, adapterFactory, ontologyBuilderService, getTenantCtx, logger)
+		convRepo, datasourceService, adapterFactory, ontologyBuilderService, getTenantCtx, logger)
 	ontologyChatService := services.NewOntologyChatService(
 		ontologyChatRepo, ontologyRepo, knowledgeRepo,
 		schemaRepo, ontologyWorkflowRepo, workflowStateRepo, llmFactory, datasourceService, adapterFactory, logger)
