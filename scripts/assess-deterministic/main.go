@@ -37,8 +37,9 @@ const (
 	FinalScorePostProcessWeight = 50
 
 	// Input score weights (must sum to 100)
-	InputScoreConversationWeight = 70
-	InputScoreChecksWeight       = 30
+	InputScoreEntityAnalysisWeight = 50 // Most critical - sample value verification
+	InputScoreConversationWeight   = 30
+	InputScoreChecksWeight         = 20
 )
 
 // AssessmentResult contains the full assessment output
@@ -61,11 +62,12 @@ type AssessmentResult struct {
 }
 
 type InputAssessment struct {
-	TotalConversations int              `json:"total_conversations"`
-	Checks             []InputCheck     `json:"checks"`
-	ByConversation     []ConversationQA `json:"by_conversation"`
-	Score              int              `json:"score"` // 0-100
-	Issues             []string         `json:"issues"`
+	TotalConversations   int                   `json:"total_conversations"`
+	Checks               []InputCheck          `json:"checks"`
+	ByConversation       []ConversationQA      `json:"by_conversation"`
+	EntityAnalysisChecks []EntityAnalysisCheck `json:"entity_analysis_checks,omitempty"`
+	Score                int                   `json:"score"` // 0-100
+	Issues               []string              `json:"issues"`
 }
 
 type InputCheck struct {
@@ -76,13 +78,30 @@ type InputCheck struct {
 }
 
 type ConversationQA struct {
-	Index           int      `json:"index"`
-	TablesIncluded  bool     `json:"tables_included"`
-	ColumnsIncluded bool     `json:"columns_included"`
-	TypesIncluded   bool     `json:"types_included"`
-	FlagsIncluded   bool     `json:"flags_included"`
-	Issues          []string `json:"issues"`
-	Score           int      `json:"score"`
+	Index           int        `json:"index"`
+	PromptType      PromptType `json:"prompt_type"`
+	TargetTable     string     `json:"target_table,omitempty"`
+	TablesIncluded  bool       `json:"tables_included"`
+	ColumnsIncluded bool       `json:"columns_included"`
+	TypesIncluded   bool       `json:"types_included"`
+	FlagsIncluded   bool       `json:"flags_included"`
+	Issues          []string   `json:"issues"`
+	Score           int        `json:"score"`
+}
+
+// EntityAnalysisCheck contains detailed checks for entity analysis prompts
+type EntityAnalysisCheck struct {
+	TableName             string   `json:"table_name"`
+	TableFound            bool     `json:"table_found"`
+	RowCountShown         bool     `json:"row_count_shown"`
+	ColumnsFound          int      `json:"columns_found"`
+	ColumnsExpected       int      `json:"columns_expected"`
+	SampleValuesFound     int      `json:"sample_values_found"`
+	SampleValuesExpected  int      `json:"sample_values_expected"`
+	RelationshipsFound    int      `json:"relationships_found"`
+	RelationshipsExpected int      `json:"relationships_expected"`
+	Issues                []string `json:"issues"`
+	Score                 int      `json:"score"`
 }
 
 type PostProcessAssessment struct {
@@ -278,9 +297,12 @@ func main() {
 		promptTypeCounts[PromptTypeDescriptionProcessing],
 		promptTypeCounts[PromptTypeUnknown])
 
+	// Build gathered data map for rigorous checks (Phase 4)
+	gatheredDataMap := buildGatheredDataMap(workflowStates)
+
 	// Run deterministic assessments
 	fmt.Fprintf(os.Stderr, "Assessing input preparation quality...\n")
-	inputAssessment := assessInputPreparation(schema, conversations)
+	inputAssessment := assessInputPreparation(schema, conversations, taggedConversations, gatheredDataMap, relationships)
 
 	fmt.Fprintf(os.Stderr, "Assessing post-processing quality...\n")
 	postProcessAssessment := assessPostProcessing(schema, conversations, ontology, questions)
@@ -652,7 +674,209 @@ func countPromptTypes(tagged []TaggedConversation) map[PromptType]int {
 	return counts
 }
 
-func assessInputPreparation(schema []SchemaTable, conversations []LLMConversation) InputAssessment {
+// assessEntityAnalysisPrompts performs rigorous checks on entity analysis prompts.
+// This is the most critical check - verifies sample values are included when available.
+func assessEntityAnalysisPrompts(
+	tagged []TaggedConversation,
+	schema []SchemaTable,
+	gatheredDataMap map[string]*GatheredData,
+	relationships []SchemaRelationship,
+) []EntityAnalysisCheck {
+	var checks []EntityAnalysisCheck
+
+	// Build table lookup
+	tableByName := make(map[string]SchemaTable)
+	for _, t := range schema {
+		tableByName[strings.ToLower(t.TableName)] = t
+	}
+
+	// Build relationship lookup by table
+	relsByTable := make(map[string][]SchemaRelationship)
+	for _, r := range relationships {
+		key := strings.ToLower(r.SourceTable)
+		relsByTable[key] = append(relsByTable[key], r)
+		// Also add as target (relationships are bidirectional in prompts)
+		targetKey := strings.ToLower(r.TargetTable)
+		relsByTable[targetKey] = append(relsByTable[targetKey], r)
+	}
+
+	for _, tc := range tagged {
+		if tc.PromptType != PromptTypeEntityAnalysis {
+			continue
+		}
+
+		tableName := tc.TargetTable
+		if tableName == "" {
+			// Try to extract from prompt content
+			var messages []map[string]string
+			if err := json.Unmarshal(tc.Conversation.RequestMessages, &messages); err == nil {
+				for _, msg := range messages {
+					if msg["role"] == "user" {
+						tableName = extractTableNameFromContent(msg["content"])
+						break
+					}
+				}
+			}
+		}
+
+		check := EntityAnalysisCheck{
+			TableName: tableName,
+			Score:     100,
+		}
+
+		if tableName == "" {
+			check.Issues = append(check.Issues, "Could not determine target table")
+			check.Score = 0
+			checks = append(checks, check)
+			continue
+		}
+
+		// Get expected table from schema
+		table, exists := tableByName[strings.ToLower(tableName)]
+		if !exists {
+			check.Issues = append(check.Issues, fmt.Sprintf("Table %s not found in schema", tableName))
+			check.Score = 0
+			checks = append(checks, check)
+			continue
+		}
+		check.TableFound = true
+		check.ColumnsExpected = len(table.Columns)
+
+		// Parse the prompt content
+		var promptContent string
+		var messages []map[string]string
+		if err := json.Unmarshal(tc.Conversation.RequestMessages, &messages); err == nil {
+			for _, msg := range messages {
+				if msg["role"] == "user" {
+					promptContent = msg["content"]
+					break
+				}
+			}
+		}
+		promptLower := strings.ToLower(promptContent)
+
+		// Check 1: Row count shown (when >= 0)
+		if table.RowCount != nil && *table.RowCount >= 0 {
+			rowCountStr := fmt.Sprintf("row count: %d", *table.RowCount)
+			if strings.Contains(promptLower, rowCountStr) {
+				check.RowCountShown = true
+			} else {
+				check.Issues = append(check.Issues, fmt.Sprintf("Row count not shown (expected %d)", *table.RowCount))
+				check.Score -= 5
+			}
+		} else {
+			check.RowCountShown = true // N/A - no valid row count to show
+		}
+
+		// Check 2: All columns present with types
+		// Prompt format: "  - column_name: data_type [flags]"
+		for _, col := range table.Columns {
+			// Use more specific pattern to avoid false matches
+			colPattern := "- " + strings.ToLower(col.ColumnName) + ":"
+			if strings.Contains(promptLower, colPattern) {
+				check.ColumnsFound++
+			}
+		}
+		if check.ColumnsFound == 0 && check.ColumnsExpected > 0 {
+			// No columns found at all - fatal for this table
+			check.Issues = append(check.Issues, fmt.Sprintf("No columns found (expected %d)", check.ColumnsExpected))
+			check.Score = 0
+		} else if check.ColumnsFound < check.ColumnsExpected {
+			check.Issues = append(check.Issues, fmt.Sprintf("Missing columns: found %d/%d", check.ColumnsFound, check.ColumnsExpected))
+			check.Score -= (check.ColumnsExpected - check.ColumnsFound) * 2
+		}
+
+		// Check 3: Sample values present when gathered data has samples
+		// This is the CRITICAL check
+		for _, col := range table.Columns {
+			entityKey := fmt.Sprintf("%s.%s", strings.ToLower(tableName), strings.ToLower(col.ColumnName))
+			gathered := gatheredDataMap[entityKey]
+
+			if gathered != nil && len(gathered.SampleValues) > 0 {
+				check.SampleValuesExpected++
+
+				// Check if sample values line appears after the column
+				// Prompt format: "  - col: type\n      Sample values: [...]"
+				colPattern := "- " + strings.ToLower(col.ColumnName) + ":"
+				colIdx := strings.Index(promptLower, colPattern)
+				if colIdx >= 0 {
+					// Find the end of this column's section (next column or end of columns section)
+					nextColIdx := strings.Index(promptLower[colIdx+len(colPattern):], "\n  - ")
+					var section string
+					if nextColIdx >= 0 {
+						section = promptLower[colIdx : colIdx+len(colPattern)+nextColIdx]
+					} else {
+						// No next column, take up to relationships section or end
+						relIdx := strings.Index(promptLower[colIdx:], "## relationships")
+						if relIdx >= 0 {
+							section = promptLower[colIdx : colIdx+relIdx]
+						} else {
+							section = promptLower[colIdx:]
+						}
+					}
+					if strings.Contains(section, "sample values:") {
+						check.SampleValuesFound++
+					}
+				}
+			}
+		}
+
+		if check.SampleValuesExpected > 0 && check.SampleValuesFound < check.SampleValuesExpected {
+			missing := check.SampleValuesExpected - check.SampleValuesFound
+			check.Issues = append(check.Issues, fmt.Sprintf("Missing sample values for %d columns (found %d/%d)",
+				missing, check.SampleValuesFound, check.SampleValuesExpected))
+			// This is critical - heavy penalty
+			check.Score -= missing * 10
+		}
+
+		// Check 4: Relationships included
+		expectedRels := relsByTable[strings.ToLower(tableName)]
+		check.RelationshipsExpected = len(expectedRels)
+		for _, rel := range expectedRels {
+			// Check for relationship pattern: source.col → target.col or similar
+			relPattern1 := strings.ToLower(rel.SourceTable + "." + rel.SourceColumn)
+			relPattern2 := strings.ToLower(rel.TargetTable + "." + rel.TargetColumn)
+			if strings.Contains(promptLower, relPattern1) || strings.Contains(promptLower, relPattern2) {
+				check.RelationshipsFound++
+			}
+		}
+		if check.RelationshipsExpected > 0 && check.RelationshipsFound < check.RelationshipsExpected {
+			check.Issues = append(check.Issues, fmt.Sprintf("Missing relationships: found %d/%d",
+				check.RelationshipsFound, check.RelationshipsExpected))
+			check.Score -= 5
+		}
+
+		// Clamp score
+		if check.Score < 0 {
+			check.Score = 0
+		}
+
+		checks = append(checks, check)
+	}
+
+	return checks
+}
+
+// extractTableNameFromContent extracts table name from various prompt patterns
+func extractTableNameFromContent(content string) string {
+	contentLower := strings.ToLower(content)
+
+	// Pattern 1: Analyze the table "tablename"
+	re1 := regexp.MustCompile(`analyze the table "([^"]+)"`)
+	if matches := re1.FindStringSubmatch(contentLower); len(matches) >= 2 {
+		return matches[1]
+	}
+
+	// Pattern 2: Table: tablename
+	re2 := regexp.MustCompile(`table:\s*(\S+)`)
+	if matches := re2.FindStringSubmatch(contentLower); len(matches) >= 2 {
+		return matches[1]
+	}
+
+	return ""
+}
+
+func assessInputPreparation(schema []SchemaTable, conversations []LLMConversation, taggedConvs []TaggedConversation, gatheredDataMap map[string]*GatheredData, relationships []SchemaRelationship) InputAssessment {
 	var checks []InputCheck
 	var issues []string
 	var byConversation []ConversationQA
@@ -754,15 +978,75 @@ func assessInputPreparation(schema []SchemaTable, conversations []LLMConversatio
 		checksScore = (checksPassed * 100) / len(checks)
 	}
 
-	// Final score is weighted: conversation quality + global checks
-	finalScore := (avgScore*InputScoreConversationWeight + checksScore*InputScoreChecksWeight) / 100
+	// Validate taggedConvs matches conversations
+	if len(taggedConvs) != len(conversations) {
+		issues = append(issues, fmt.Sprintf("Internal error: tagged conversations (%d) != conversations (%d)",
+			len(taggedConvs), len(conversations)))
+	}
+
+	// Warn if gathered data is empty (critical sample value check will be skipped)
+	if len(gatheredDataMap) == 0 {
+		checks = append(checks, InputCheck{
+			Name:        "gathered_data_available",
+			Description: "Workflow state with gathered data is available for verification",
+			Passed:      false,
+			Details:     "No gathered data - sample value verification skipped (pre-Phase 1 extraction?)",
+		})
+		issues = append(issues, "WARNING: No gathered data available - sample value checks skipped")
+	}
+
+	// Phase 4: Rigorous entity analysis checks
+	entityAnalysisChecks := assessEntityAnalysisPrompts(taggedConvs, schema, gatheredDataMap, relationships)
+
+	// Calculate entity analysis score and sample value coverage
+	entityAnalysisScore := 100
+	totalSampleValuesExpected := 0
+	totalSampleValuesFound := 0
+
+	if len(entityAnalysisChecks) > 0 {
+		totalEAScore := 0
+		for _, ea := range entityAnalysisChecks {
+			totalEAScore += ea.Score
+			totalSampleValuesExpected += ea.SampleValuesExpected
+			totalSampleValuesFound += ea.SampleValuesFound
+			issues = append(issues, ea.Issues...)
+		}
+		entityAnalysisScore = totalEAScore / len(entityAnalysisChecks)
+
+		// Add sample value coverage check
+		sampleValueCoverage := 100
+		if totalSampleValuesExpected > 0 {
+			sampleValueCoverage = (totalSampleValuesFound * 100) / totalSampleValuesExpected
+		}
+		checks = append(checks, InputCheck{
+			Name:        "sample_values_coverage",
+			Description: "Sample values included in prompts when available in gathered data",
+			Passed:      sampleValueCoverage == 100,
+			Details:     fmt.Sprintf("Sample values verified: %d/%d columns (%d%%)", totalSampleValuesFound, totalSampleValuesExpected, sampleValueCoverage),
+		})
+
+		// Add entity analysis summary check
+		allPerfect := entityAnalysisScore == 100
+		checks = append(checks, InputCheck{
+			Name:        "entity_analysis_complete",
+			Description: "Entity analysis prompts include all required data",
+			Passed:      allPerfect,
+			Details:     fmt.Sprintf("%d tables analyzed, avg score %d/100", len(entityAnalysisChecks), entityAnalysisScore),
+		})
+	}
+
+	// Final score: weighted average of entity analysis, conversation quality, and global checks
+	finalScore := (entityAnalysisScore*InputScoreEntityAnalysisWeight +
+		avgScore*InputScoreConversationWeight +
+		checksScore*InputScoreChecksWeight) / 100
 
 	return InputAssessment{
-		TotalConversations: len(conversations),
-		Checks:             checks,
-		ByConversation:     byConversation,
-		Score:              finalScore,
-		Issues:             dedupeStrings(issues),
+		TotalConversations:   len(conversations),
+		Checks:               checks,
+		ByConversation:       byConversation,
+		EntityAnalysisChecks: entityAnalysisChecks,
+		Score:                finalScore,
+		Issues:               dedupeStrings(issues),
 	}
 }
 

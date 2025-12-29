@@ -7,7 +7,7 @@
 | Phase 1 | ✅ Complete | Preserve Workflow State Data |
 | Phase 2 | ✅ Complete | Load Additional Data in assess-deterministic |
 | Phase 3 | ✅ Complete | Prompt Type Detection |
-| Phase 4 | ⏳ Pending | Input Assessment - Rigorous Checks |
+| Phase 4 | ✅ Complete | Input Assessment - Rigorous Checks |
 | Phase 5 | ⏳ Pending | Output Assessment - Capture Verification |
 | Phase 6 | ⏳ Pending | Scoring Methodology |
 | Phase 7 | ⏳ Pending | Detailed Issue Reporting |
@@ -114,7 +114,7 @@ Identify what type of prompt each conversation represents.
 
 ## Phase 4: Input Assessment - Rigorous Checks
 
-**Status**: [ ] Not Started
+**Status**: [x] Complete
 
 ### Goal
 For each prompt type, verify ALL required data is present.
@@ -122,36 +122,44 @@ For each prompt type, verify ALL required data is present.
 ### Files
 - `scripts/assess-deterministic/main.go`
 
-### 4.1 Description Processing Prompt Checks
-- [ ] All selected tables present
-- [ ] Each table shows column count matching schema
-- [ ] Each column shows: name, data_type, [PK] flag, [nullable] flag
-- [ ] Row counts shown when >= 0 (not -1)
+### Tasks Completed
+- [x] 4.1 Added `EntityAnalysisCheck` struct with detailed check fields
+- [x] 4.2 Updated `InputAssessment` to include `EntityAnalysisChecks` slice
+- [x] 4.3 Implemented `assessEntityAnalysisPrompts()` function for rigorous checks:
+  - Table name detection from tagged conversation or prompt content
+  - Row count verification (when >= 0)
+  - Column presence check (pattern: `- column_name:` to avoid false matches)
+  - **Sample values verification against gathered data** (CRITICAL)
+  - Relationship inclusion check
+- [x] 4.4 Added `extractTableNameFromContent()` helper for fallback table name extraction
+- [x] 4.5 Updated `assessInputPreparation()` signature to accept tagged conversations, gathered data map, and relationships
+- [x] 4.6 Integrated entity analysis score into final input score (weighted 50%)
+- [x] 4.7 Updated `main()` to build gathered data map and call with new parameters
 
-### 4.2 Entity Analysis Prompt Checks (CRITICAL)
-For each table analyzed:
-- [ ] Table name present
-- [ ] Row count present (when >= 0)
-- [ ] All selected columns listed with correct data_type, PK flag, nullable flag
-- [ ] **Sample values present when row_count > 0 AND distinct_count > 0**
-- [ ] Distinct count shown for enum candidates
-- [ ] Relationships for this table included
-- [ ] Question classification rules included
+### Code Review Fixes Applied
+- [x] 4.8 Added `InputScoreEntityAnalysisWeight` constant, updated formula to use all constants
+- [x] 4.9 Added validation that `taggedConvs` and `conversations` have same length
+- [x] 4.10 Improved column detection pattern from `col:` to `- col:` (avoids false matches)
+- [x] 4.11 Improved sample values search to use next column boundary instead of fixed 500 chars
+- [x] 4.12 Added `gathered_data_available` check - warns when gathered data empty (skips critical check)
+- [x] 4.13 Added `sample_values_coverage` check - shows "Sample values verified: X/Y columns (Z%)"
+- [x] 4.14 Made 0 columns found = score 0 (fatal for that table)
 
-### 4.3 Tier1 Prompt Checks
-- [ ] All tables in batch present
-- [ ] Each table has columns with types and flags
-- [ ] Related tables shown for each table
-- [ ] Domain context included (if available)
+### Scoring Weights (Constants)
+```go
+InputScoreEntityAnalysisWeight = 50 // Most critical - sample value verification
+InputScoreConversationWeight   = 30
+InputScoreChecksWeight         = 20
+```
 
-### 4.4 Tier0 Prompt Checks
-- [ ] Entity summaries grouped by domain
-- [ ] All entities from Tier1 present
-- [ ] Domain context included
+### New Checks Added to Output
+- `gathered_data_available` - Fails if no gathered data (warns about skipped checks)
+- `sample_values_coverage` - Shows exact coverage percentage
+- `entity_analysis_complete` - Overall entity analysis pass/fail
 
-### 4.5 Relationship Checks (All Prompts)
-- [ ] All `engine_schema_relationships` with `is_approved=true` appear in relevant prompts
-- [ ] Relationship format correct (source_table.column -> target_table.column)
+### Deferred Checks
+- Description processing, Tier1, Tier0 prompt type-specific checks (less critical)
+- Question classification rules inclusion check
 
 ---
 
@@ -281,7 +289,8 @@ When score < 100, show exactly what failed and where.
 | `pkg/llm/tool_executor_test.go` | Updated mock to implement new interface | 1 ✅ |
 | `scripts/assess-deterministic/main.go` | Added types, load functions, updated result struct | 2 ✅ |
 | `scripts/assess-deterministic/main.go` | Prompt type detection, tagging, counts | 3 ✅ |
-| `scripts/assess-deterministic/main.go` | Rigorous checks, scoring, issue reporting | 4-7 ⏳ |
+| `scripts/assess-deterministic/main.go` | Entity analysis rigorous checks, sample value verification | 4 ✅ |
+| `scripts/assess-deterministic/main.go` | Output checks, scoring, issue reporting | 5-7 ⏳ |
 
 ---
 
@@ -290,7 +299,7 @@ When score < 100, show exactly what failed and where.
 1. ✅ Phase 1: Preserve workflow_state (prerequisite - without this, can't verify sample values)
 2. ✅ Phase 2: Load additional data (workflow_states, relationships, column stats)
 3. ✅ Phase 3: Prompt type detection (tags each conversation, counts by type)
-4. ⏳ Phase 4: Input checks implementation
+4. ✅ Phase 4: Input checks implementation (entity analysis sample value verification)
 5. ⏳ Phase 5: Output checks implementation
 6. ⏳ Phase 6: Scoring implementation
 7. ⏳ Phase 7: Detailed issue reporting
