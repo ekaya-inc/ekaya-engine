@@ -1,16 +1,11 @@
-// assess-extraction evaluates how well the ontology extraction system worked
-// with the data it was given. A score of 100 means perfect extraction - the
-// system did everything possible with the available inputs.
+// assess-extraction evaluates the LLM's performance during ontology extraction.
+// This tool assesses how well the model performed GIVEN the input it received.
 //
-// Unlike assess-ontology (which evaluates overall ontology quality including
-// knowledge gaps), this tool focuses on extraction accuracy:
-// - Did we extract the correct information to give to the LLM?
-// - Did the LLM generate the ontology correctly from that input?
-// - Are questions reasonable given what is known?
-// - Is required vs optional classification appropriate?
+// A score of 100 means the LLM did a perfect job with the input provided.
+// Use this tool to compare different models (Haiku vs Sonnet vs Opus).
 //
-// Knowledge gaps do NOT affect the score - those are input data problems,
-// not extraction problems.
+// Separate from assess-deterministic which evaluates the deterministic code
+// (input preparation and post-processing).
 //
 // Usage: go run ./scripts/assess-extraction <project-id>
 //
@@ -36,61 +31,55 @@ type AssessmentResult struct {
 	CommitInfo          string                   `json:"commit_info"`
 	DatasourceName      string                   `json:"datasource_name"`
 	ProjectID           string                   `json:"project_id"`
-	ModelUsed           string                   `json:"model_used"`
+	ModelUnderTest      string                   `json:"model_under_test"`
 	LLMMetrics          LLMMetrics               `json:"llm_metrics"`
-	InputAssessment     InputAssessment          `json:"input_assessment"`
 	OutputAssessments   []ConversationAssessment `json:"output_assessments"`
 	QuestionsAssessment QuestionsAssessment      `json:"questions_assessment"`
 	OntologyAssessment  OntologyAssessment       `json:"ontology_assessment"`
 	FinalScore          int                      `json:"final_score"`
+	Summary             string                   `json:"summary"`
 }
 
-// ProjectKnowledge represents a stored knowledge fact
-type ProjectKnowledge struct {
-	ID       uuid.UUID `json:"id"`
-	FactType string    `json:"fact_type"`
-	Key      string    `json:"key"`
-	Value    string    `json:"value"`
-	Context  *string   `json:"context"`
-}
-
-type InputAssessment struct {
-	SchemaIncluded  bool     `json:"schema_included"`
-	ColumnsIncluded bool     `json:"columns_included"`
-	WellFormed      bool     `json:"well_formed"`
-	Issues          []string `json:"issues"`
-	Score           int      `json:"score"` // 0-100
+type LLMMetrics struct {
+	TotalConversations    int     `json:"total_conversations"`
+	SuccessfulCalls       int     `json:"successful_calls"`
+	FailedCalls           int     `json:"failed_calls"`
+	TotalPromptTokens     int     `json:"total_prompt_tokens"`
+	TotalCompletionTokens int     `json:"total_completion_tokens"`
+	TotalTokens           int     `json:"total_tokens"`
+	MaxPromptTokens       int     `json:"max_prompt_tokens"`
+	TotalDurationMs       int     `json:"total_duration_ms"`
+	AvgDurationMs         float64 `json:"avg_duration_ms"`
+	TokensPerSecond       float64 `json:"tokens_per_second"`
 }
 
 type ConversationAssessment struct {
 	ConversationID string   `json:"conversation_id"`
-	TaskType       string   `json:"task_type"`
-	InputQuality   int      `json:"input_quality"`  // 0-100
 	OutputQuality  int      `json:"output_quality"` // 0-100
+	Hallucinations int      `json:"hallucinations"` // Count of hallucinated items
 	Issues         []string `json:"issues"`
 }
 
 type OntologyAssessment struct {
-	DomainAccuracy       int      `json:"domain_accuracy"`       // 0-100
-	EntityAccuracy       int      `json:"entity_accuracy"`       // 0-100
-	KeyColumnAccuracy    int      `json:"key_column_accuracy"`   // 0-100
-	RelationshipAccuracy int      `json:"relationship_accuracy"` // 0-100
-	OverallScore         int      `json:"overall_score"`         // 0-100
-	Strengths            []string `json:"strengths"`
-	Issues               []string `json:"issues"`
-	Examples             []string `json:"examples"` // Specific examples of good/bad
+	DomainAccuracy        int      `json:"domain_accuracy"`       // 0-100
+	EntityAccuracy        int      `json:"entity_accuracy"`       // 0-100
+	KeyColumnAccuracy     int      `json:"key_column_accuracy"`   // 0-100
+	RelationshipAccuracy  int      `json:"relationship_accuracy"` // 0-100
+	OverallScore          int      `json:"overall_score"`         // 0-100
+	Strengths             []string `json:"strengths"`
+	Issues                []string `json:"issues"`
+	HallucinationExamples []string `json:"hallucination_examples"`
 }
 
 type QuestionsAssessment struct {
-	TotalQuestions         int      `json:"total_questions"`
-	RequiredQuestions      int      `json:"required_questions"`
-	OptionalQuestions      int      `json:"optional_questions"`
-	RequiredClassification int      `json:"required_classification"` // 0-100: Are required questions truly required?
-	OptionalClassification int      `json:"optional_classification"` // 0-100: Are optional questions truly optional?
-	QuestionQuality        int      `json:"question_quality"`        // 0-100: Are questions well-formed and useful?
-	OverallScore           int      `json:"overall_score"`           // 0-100
-	Issues                 []string `json:"issues"`
-	Examples               []string `json:"examples"`
+	TotalQuestions    int      `json:"total_questions"`
+	RequiredQuestions int      `json:"required_questions"`
+	OptionalQuestions int      `json:"optional_questions"`
+	QuestionRelevance int      `json:"question_relevance"` // 0-100: Are questions relevant?
+	QuestionClarity   int      `json:"question_clarity"`   // 0-100: Are questions clear?
+	OverallScore      int      `json:"overall_score"`      // 0-100
+	Issues            []string `json:"issues"`
+	Examples          []string `json:"examples"`
 }
 
 // OntologyQuestion represents a stored question
@@ -117,23 +106,6 @@ type LLMConversation struct {
 	TotalTokens      int             `json:"total_tokens"`
 	DurationMs       int             `json:"duration_ms"`
 	Status           string          `json:"status"`
-}
-
-// LLMMetrics contains aggregated LLM performance metrics
-type LLMMetrics struct {
-	TotalConversations    int     `json:"total_conversations"`
-	SuccessfulCalls       int     `json:"successful_calls"`
-	FailedCalls           int     `json:"failed_calls"`
-	TotalPromptTokens     int     `json:"total_prompt_tokens"`
-	TotalCompletionTokens int     `json:"total_completion_tokens"`
-	TotalTokens           int     `json:"total_tokens"`
-	MaxPromptTokens       int     `json:"max_prompt_tokens"`
-	TotalDurationMs       int     `json:"total_duration_ms"`
-	AvgPromptTokens       float64 `json:"avg_prompt_tokens"`
-	AvgCompletionTokens   float64 `json:"avg_completion_tokens"`
-	AvgDurationMs         float64 `json:"avg_duration_ms"`
-	TokensPerSecond       float64 `json:"tokens_per_second"`
-	PromptTokensPerSec    float64 `json:"prompt_tokens_per_second"`
 }
 
 // SchemaTable represents a table in the schema
@@ -186,7 +158,7 @@ func main() {
 	}
 	defer conn.Close(ctx)
 
-	// Get datasource name for this project
+	// Get datasource name
 	var datasourceName string
 	if err := conn.QueryRow(ctx, `
 		SELECT name FROM engine_datasources
@@ -225,45 +197,48 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Get model used from conversations
-	modelUsed := "unknown"
+	// Get model under test from conversations
+	modelUnderTest := "unknown"
 	if len(conversations) > 0 {
-		modelUsed = conversations[0].Model
+		modelUnderTest = conversations[0].Model
 	}
 
 	// Calculate LLM metrics
 	llmMetrics := calculateLLMMetrics(conversations)
 
-	// Create Anthropic client
+	// Create Anthropic client for assessment
 	client := anthropic.NewClient(apiKey)
 
-	// Run assessments
-	fmt.Fprintf(os.Stderr, "Assessing input extraction quality...\n")
-	inputAssessment := assessInputQuality(ctx, client, conversations, schema)
-
+	// Run assessments (LLM evaluates LLM output)
 	fmt.Fprintf(os.Stderr, "Assessing LLM output quality...\n")
 	outputAssessments := assessOutputQuality(ctx, client, conversations, schema)
 
-	fmt.Fprintf(os.Stderr, "Assessing question classification...\n")
+	fmt.Fprintf(os.Stderr, "Assessing question quality...\n")
 	questionsAssessment := assessQuestions(ctx, client, questions, schema, ontology)
 
-	fmt.Fprintf(os.Stderr, "Assessing ontology extraction accuracy...\n")
+	fmt.Fprintf(os.Stderr, "Assessing ontology accuracy...\n")
 	ontologyAssessment := assessOntology(ctx, client, schema, ontology)
 
 	// Calculate final score (weighted average)
-	finalScore := calculateFinalScore(inputAssessment, outputAssessments, questionsAssessment, ontologyAssessment)
+	// - Output quality: 35% (did LLM correctly process each request?)
+	// - Questions quality: 25% (did LLM generate good questions?)
+	// - Ontology accuracy: 40% (is the final ontology accurate?)
+	finalScore := calculateFinalScore(outputAssessments, questionsAssessment, ontologyAssessment)
+
+	// Generate summary
+	summary := generateSummary(modelUnderTest, outputAssessments, questionsAssessment, ontologyAssessment, finalScore)
 
 	result := AssessmentResult{
 		CommitInfo:          commitInfo,
 		DatasourceName:      datasourceName,
 		ProjectID:           projectID.String(),
-		ModelUsed:           modelUsed,
+		ModelUnderTest:      modelUnderTest,
 		LLMMetrics:          llmMetrics,
-		InputAssessment:     inputAssessment,
 		OutputAssessments:   outputAssessments,
 		QuestionsAssessment: questionsAssessment,
 		OntologyAssessment:  ontologyAssessment,
 		FinalScore:          finalScore,
+		Summary:             summary,
 	}
 
 	// Output JSON
@@ -304,9 +279,9 @@ func getCommitInfo() string {
 
 func loadConversations(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]LLMConversation, error) {
 	query := `
-		SELECT id, model, request_messages, response_content,
+		SELECT id, model, request_messages, COALESCE(response_content, ''),
 		       COALESCE(prompt_tokens, 0), COALESCE(completion_tokens, 0),
-		       COALESCE(total_tokens, 0), duration_ms, status
+		       COALESCE(total_tokens, 0), COALESCE(duration_ms, 0), status
 		FROM engine_llm_conversations
 		WHERE project_id = $1
 		ORDER BY created_at ASC`
@@ -320,13 +295,9 @@ func loadConversations(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID)
 	var conversations []LLMConversation
 	for rows.Next() {
 		var c LLMConversation
-		var responseContent *string
-		if err := rows.Scan(&c.ID, &c.Model, &c.RequestMessages, &responseContent,
+		if err := rows.Scan(&c.ID, &c.Model, &c.RequestMessages, &c.ResponseContent,
 			&c.PromptTokens, &c.CompletionTokens, &c.TotalTokens, &c.DurationMs, &c.Status); err != nil {
 			return nil, err
-		}
-		if responseContent != nil {
-			c.ResponseContent = *responseContent
 		}
 		conversations = append(conversations, c)
 	}
@@ -356,24 +327,18 @@ func calculateLLMMetrics(conversations []LLMConversation) LLMMetrics {
 		}
 	}
 
-	// Calculate averages
 	n := float64(metrics.TotalConversations)
-	metrics.AvgPromptTokens = float64(metrics.TotalPromptTokens) / n
-	metrics.AvgCompletionTokens = float64(metrics.TotalCompletionTokens) / n
 	metrics.AvgDurationMs = float64(metrics.TotalDurationMs) / n
 
-	// Calculate tokens per second (output generation speed)
 	if metrics.TotalDurationMs > 0 {
 		durationSec := float64(metrics.TotalDurationMs) / 1000.0
 		metrics.TokensPerSecond = float64(metrics.TotalCompletionTokens) / durationSec
-		metrics.PromptTokensPerSec = float64(metrics.TotalPromptTokens) / durationSec
 	}
 
 	return metrics
 }
 
 func loadSchema(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]SchemaTable, error) {
-	// Load tables
 	tableQuery := `
 		SELECT id, table_name, row_count
 		FROM engine_schema_tables
@@ -398,7 +363,6 @@ func loadSchema(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]Sch
 		return nil, err
 	}
 
-	// Load columns for each table
 	colQuery := `
 		SELECT column_name, data_type, is_primary_key
 		FROM engine_schema_columns
@@ -467,110 +431,12 @@ func loadQuestions(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]
 	return questions, rows.Err()
 }
 
-func assessInputQuality(ctx context.Context, client *anthropic.Client, conversations []LLMConversation, schema []SchemaTable) InputAssessment {
-	if len(conversations) == 0 {
-		return InputAssessment{
-			SchemaIncluded:  false,
-			ColumnsIncluded: false,
-			WellFormed:      false,
-			Issues:          []string{"No conversations found"},
-			Score:           0,
-		}
-	}
-
-	// Build schema summary for comparison
-	var schemaSummary strings.Builder
-	for _, t := range schema {
-		schemaSummary.WriteString(fmt.Sprintf("Table: %s (%d columns)\n", t.TableName, len(t.Columns)))
-		for _, c := range t.Columns {
-			pk := ""
-			if c.IsPrimaryKey {
-				pk = " [PK]"
-			}
-			schemaSummary.WriteString(fmt.Sprintf("  - %s (%s)%s\n", c.ColumnName, c.DataType, pk))
-		}
-	}
-
-	// Always check the FIRST conversation - this is the domain extraction phase
-	// which should include the full schema with column names
-	sampleConv := conversations[0]
-
-	prompt := fmt.Sprintf(`You are assessing whether the ontology extraction system correctly EXTRACTED and PROVIDED
-schema information to the LLM. This is about extraction quality, not about the schema itself.
-
-A score of 100 is achievable if the extraction system did everything correctly with the data available.
-
-## ACTUAL DATABASE SCHEMA (what was available to extract)
-%s
-
-## LLM REQUEST THAT WAS SENT (what extraction system provided)
-%s
-
-## ASSESSMENT TASK
-Evaluate whether the extraction system correctly provided the available schema information to the LLM.
-
-Return a JSON object:
-{
-  "schema_included": true/false,  // Were table names from the schema included in the request?
-  "columns_included": true/false, // Were actual column names from the schema included in the request?
-  "well_formed": true/false,      // Was the prompt well-structured for LLM understanding?
-  "issues": ["list of extraction failures - things the system could have done better"],
-  "score": 0-100  // Extraction quality score (100 = perfect extraction of available data)
-}
-
-IMPORTANT: This assesses EXTRACTION quality, not schema completeness.
-- If schema has 10 tables and all 10 appear in the request → schema_included = true
-- If schema columns appear in the request → columns_included = true
-- Issues should focus on what the extraction system failed to provide, NOT what's missing from the schema
-
-Return ONLY the JSON object, no other text.`, schemaSummary.String(), string(sampleConv.RequestMessages))
-
-	resp, err := client.CreateMessages(ctx, anthropic.MessagesRequest{
-		Model:     "claude-sonnet-4-5-20250929",
-		MaxTokens: 1000,
-		Messages: []anthropic.Message{
-			{Role: anthropic.RoleUser, Content: []anthropic.MessageContent{
-				{Type: "text", Text: &prompt},
-			}},
-		},
-	})
-
-	if err != nil {
-		return InputAssessment{
-			Issues: []string{fmt.Sprintf("Assessment failed: %v", err)},
-			Score:  0,
-		}
-	}
-
-	// Parse response
-	var result InputAssessment
-	responseText := ""
-	for _, block := range resp.Content {
-		if block.Type == "text" && block.Text != nil {
-			responseText = *block.Text
-			break
-		}
-	}
-
-	// Extract JSON from response
-	responseText = extractJSON(responseText)
-	if err := json.Unmarshal([]byte(responseText), &result); err != nil {
-		return InputAssessment{
-			Issues: []string{fmt.Sprintf("Failed to parse assessment: %v", err)},
-			Score:  0,
-		}
-	}
-
-	return result
-}
-
 func assessOutputQuality(ctx context.Context, client *anthropic.Client, conversations []LLMConversation, schema []SchemaTable) []ConversationAssessment {
 	var assessments []ConversationAssessment
 
 	// Sample up to 5 conversations for detailed assessment
 	sampled := conversations
 	if len(sampled) > 5 {
-		// Take first, last, and 3 from middle
 		sampled = []LLMConversation{
 			conversations[0],
 			conversations[len(conversations)/4],
@@ -601,35 +467,38 @@ func assessSingleConversation(ctx context.Context, client *anthropic.Client, con
 		schemaRef.WriteString("\n")
 	}
 
-	prompt := fmt.Sprintf(`You are assessing whether the LLM produced ACCURATE output given the input it received.
-This is about extraction quality - did the LLM correctly process what it was given?
+	prompt := fmt.Sprintf(`You are assessing LLM output quality for an ontology extraction task.
+Focus ONLY on how well the model performed given what it was provided.
 
-A score of 100 is achievable if the LLM did everything correctly with the data it was provided.
-
-## ACTUAL SCHEMA (column names per table - ground truth)
+## GROUND TRUTH: Actual Schema (column names per table)
 %s
 
-## REQUEST SENT TO MODEL (what the LLM received)
+## MODEL INPUT: Request sent to the model being tested
 %s
 
-## MODEL'S RESPONSE (what the LLM produced)
+## MODEL OUTPUT: Response from the model being tested
 %s
 
 ## ASSESSMENT TASK
-Evaluate whether the LLM correctly processed the input it was given.
+
+Evaluate the MODEL'S OUTPUT quality. Did it:
+1. Use ONLY column names that exist in the schema? (Hallucinations are severe failures)
+2. Produce well-structured, parseable output?
+3. Make reasonable inferences from the provided information?
 
 Return JSON:
 {
-  "task_type": "entity_summary|table_analysis|domain_summary|other",
-  "input_quality": 0-100,   // Was the input well-formed and complete for this task?
-  "output_quality": 0-100,  // Did the LLM produce accurate output GIVEN THE INPUT?
-  "issues": ["specific extraction failures - e.g., 'LLM hallucinated column X when input showed column Y'"]
+  "output_quality": 0-100,
+  "hallucinations": <count of hallucinated column names or entities>,
+  "issues": ["specific issues with model output"]
 }
 
-CRITICAL FOCUS:
-- Hallucination = LLM mentioned something NOT in the input it received → severe penalty
-- Accurate grounding = LLM only referenced what was in its input → high score
-- Do NOT penalize for knowledge gaps in the input - only assess what the LLM did with what it got
+SCORING GUIDE:
+- 100: Perfect output, no hallucinations, well-structured
+- 80-99: Minor issues, no hallucinations
+- 60-79: Some issues or 1-2 hallucinations
+- 40-59: Multiple issues or several hallucinations
+- 0-39: Major issues or many hallucinations
 
 Return ONLY JSON.`, schemaRef.String(), string(conv.RequestMessages), conv.ResponseContent)
 
@@ -651,10 +520,9 @@ Return ONLY JSON.`, schemaRef.String(), string(conv.RequestMessages), conv.Respo
 	}
 
 	var result struct {
-		TaskType      string   `json:"task_type"`
-		InputQuality  int      `json:"input_quality"`
-		OutputQuality int      `json:"output_quality"`
-		Issues        []string `json:"issues"`
+		OutputQuality  int      `json:"output_quality"`
+		Hallucinations int      `json:"hallucinations"`
+		Issues         []string `json:"issues"`
 	}
 
 	responseText := ""
@@ -675,15 +543,13 @@ Return ONLY JSON.`, schemaRef.String(), string(conv.RequestMessages), conv.Respo
 
 	return ConversationAssessment{
 		ConversationID: conv.ID.String(),
-		TaskType:       result.TaskType,
-		InputQuality:   result.InputQuality,
 		OutputQuality:  result.OutputQuality,
+		Hallucinations: result.Hallucinations,
 		Issues:         result.Issues,
 	}
 }
 
 func assessOntology(ctx context.Context, client *anthropic.Client, schema []SchemaTable, ontology *Ontology) OntologyAssessment {
-	// Build detailed schema
 	var schemaDetail strings.Builder
 	schemaDetail.WriteString("## ACTUAL DATABASE SCHEMA\n\n")
 	for _, t := range schema {
@@ -699,12 +565,12 @@ func assessOntology(ctx context.Context, client *anthropic.Client, schema []Sche
 		schemaDetail.WriteString("\n")
 	}
 
-	prompt := fmt.Sprintf(`You are assessing whether the ontology extraction system correctly generated an ontology
-from the available schema data. A score of 100 is achievable if extraction was perfect.
+	prompt := fmt.Sprintf(`You are assessing LLM performance in ontology extraction.
+Focus ONLY on how well the model generated the ontology from the schema it was given.
 
 %s
 
-## GENERATED ONTOLOGY
+## GENERATED ONTOLOGY (by the model being tested)
 
 ### Domain Summary
 %s
@@ -714,25 +580,14 @@ from the available schema data. A score of 100 is achievable if extraction was p
 
 ## ASSESSMENT TASK
 
-Evaluate whether the extraction system correctly used the available schema to generate the ontology.
-This is about EXTRACTION ACCURACY, not about knowledge gaps or missing business context.
+Evaluate the MODEL'S ONTOLOGY generation:
 
 1. **Domain Accuracy** (0-100): Does the domain summary correctly describe what CAN BE INFERRED from the schema?
-   - Should not penalize for missing business context that isn't in the schema
-   - Should penalize for incorrect inferences or hallucinations
-
-2. **Entity Accuracy** (0-100): Do entity summaries correctly describe each table based on schema evidence?
-   - Business names should be reasonable inferences from table/column names
-   - Descriptions should match what the schema shows
-
+2. **Entity Accuracy** (0-100): Do entity descriptions match what the schema shows?
 3. **Key Column Accuracy** (0-100): Do key_columns reference ACTUAL columns from the schema?
-   - Hallucinated column names = severe penalty
-   - All referenced columns must exist in the actual schema
-   - Column counts should match
-
-4. **Relationship Accuracy** (0-100): Are relationships correctly identified FROM THE SCHEMA?
-   - Foreign key patterns (e.g., user_id → users) should be detected
-   - Should not penalize for relationships that can't be inferred from schema
+   - Every hallucinated column name is a MAJOR penalty
+   - Check each referenced column exists in the actual schema
+4. **Relationship Accuracy** (0-100): Are relationships correctly identified from naming patterns?
 
 Return JSON:
 {
@@ -741,23 +596,15 @@ Return JSON:
   "key_column_accuracy": 0-100,
   "relationship_accuracy": 0-100,
   "overall_score": 0-100,
-  "strengths": ["what extraction got right"],
-  "issues": ["specific extraction failures - NOT missing business context"],
-  "examples": [
-    "GOOD: users key_columns correctly references user_id, username from actual schema",
-    "BAD: offers.key_columns includes 'user_id' but actual column is 'owner_id' - hallucination"
+  "strengths": ["what the model got right"],
+  "issues": ["specific model failures"],
+  "hallucination_examples": [
+    "Entity X references column 'user_id' but actual column is 'owner_id'",
+    "Entity Y includes non-existent column 'offer_value'"
   ]
 }
 
-IMPORTANT: A score of 100 means perfect extraction given the schema. Do NOT penalize for:
-- Missing business context that isn't in the schema
-- Relationships that can't be inferred from naming patterns
-- Domain terminology that requires external knowledge
-
-DO penalize for:
-- Hallucinated column names
-- Incorrect inferences from schema
-- Missed obvious patterns (e.g., *_id columns not linked to their tables)
+A score of 100 means the model did a PERFECT job with the schema it was given.
 
 Return ONLY JSON.`, schemaDetail.String(), string(ontology.DomainSummary), string(ontology.EntitySummaries))
 
@@ -799,18 +646,16 @@ Return ONLY JSON.`, schemaDetail.String(), string(ontology.DomainSummary), strin
 func assessQuestions(ctx context.Context, client *anthropic.Client, questions []OntologyQuestion, schema []SchemaTable, ontology *Ontology) QuestionsAssessment {
 	if len(questions) == 0 {
 		return QuestionsAssessment{
-			TotalQuestions:         0,
-			RequiredQuestions:      0,
-			OptionalQuestions:      0,
-			RequiredClassification: 100, // No questions is valid
-			OptionalClassification: 100,
-			QuestionQuality:        100,
-			OverallScore:           100,
-			Issues:                 []string{},
+			TotalQuestions:    0,
+			RequiredQuestions: 0,
+			OptionalQuestions: 0,
+			QuestionRelevance: 100,
+			QuestionClarity:   100,
+			OverallScore:      100,
+			Issues:            []string{},
 		}
 	}
 
-	// Count required vs optional
 	var required, optional int
 	for _, q := range questions {
 		if q.IsRequired {
@@ -820,7 +665,6 @@ func assessQuestions(ctx context.Context, client *anthropic.Client, questions []
 		}
 	}
 
-	// Build schema summary
 	var schemaSummary strings.Builder
 	for _, t := range schema {
 		schemaSummary.WriteString(fmt.Sprintf("Table: %s\n", t.TableName))
@@ -833,7 +677,6 @@ func assessQuestions(ctx context.Context, client *anthropic.Client, questions []
 		}
 	}
 
-	// Build questions list
 	var questionsText strings.Builder
 	questionsText.WriteString("## REQUIRED QUESTIONS\n")
 	for _, q := range questions {
@@ -842,73 +685,52 @@ func assessQuestions(ctx context.Context, client *anthropic.Client, questions []
 			if q.Reasoning != nil && *q.Reasoning != "" {
 				questionsText.WriteString(fmt.Sprintf("  Reasoning: %s\n", *q.Reasoning))
 			}
-			if q.SourceEntityKey != nil {
-				questionsText.WriteString(fmt.Sprintf("  Source: %s\n", *q.SourceEntityKey))
-			}
 		}
 	}
 	questionsText.WriteString("\n## OPTIONAL QUESTIONS\n")
 	for _, q := range questions {
 		if !q.IsRequired {
-			questionsText.WriteString(fmt.Sprintf("- %s (priority: %d)\n", q.Text, q.Priority))
-			if q.Reasoning != nil && *q.Reasoning != "" {
-				questionsText.WriteString(fmt.Sprintf("  Reasoning: %s\n", *q.Reasoning))
-			}
+			questionsText.WriteString(fmt.Sprintf("- %s\n", q.Text))
 		}
 	}
 
-	prompt := fmt.Sprintf(`You are assessing whether questions generated during ontology extraction are correctly classified.
-A score of 100 is achievable if the classification is perfect given the available information.
+	prompt := fmt.Sprintf(`You are assessing LLM performance in generating questions during ontology extraction.
+Focus on whether the MODEL generated good questions given the schema.
 
-## DATABASE SCHEMA (available information)
+## DATABASE SCHEMA (what the model was given)
 %s
 
-## DOMAIN SUMMARY
-%s
-
-## GENERATED QUESTIONS
+## QUESTIONS GENERATED BY MODEL
 %s
 
 ## ASSESSMENT TASK
 
-Evaluate the CLASSIFICATION of questions, not whether questions exist:
+Evaluate the MODEL'S question generation quality:
 
-1. **Required Classification** (0-100): Are REQUIRED questions correctly classified?
-   - REQUIRED = Cannot proceed with ontology without this answer
-   - Example GOOD required: "What do values 1,2,3,4 in status column mean?" - enums with visible values need business meaning
-   - Example BAD required: "What is created_at?" - obvious timestamp field, should be optional or not asked
-   - Example BAD required: Asking about something already visible in schema
+1. **Question Relevance** (0-100): Are questions relevant to understanding the schema?
+   - Questions about ambiguous columns/relationships are GOOD
+   - Questions about obvious things (created_at, id) are BAD
+   - Repetitive questions across tables are BAD
 
-2. **Optional Classification** (0-100): Are OPTIONAL questions correctly classified?
-   - OPTIONAL = Nice to know, but we can make reasonable assumptions
-   - Example GOOD optional: "Is marker_at used for pagination?" - we can assume yes based on naming
-   - Example BAD optional: Should be required because the answer fundamentally changes understanding
-
-3. **Question Quality** (0-100): Are questions well-formed and useful?
-   - Questions should be clear and answerable
-   - Should not ask about things already visible in schema
-   - Should focus on business logic, not obvious schema facts
+2. **Question Clarity** (0-100): Are questions well-formed and answerable?
+   - Clear, specific questions score high
+   - Vague or confusing questions score low
 
 Return JSON:
 {
-  "required_classification": 0-100,
-  "optional_classification": 0-100,
-  "question_quality": 0-100,
+  "question_relevance": 0-100,
+  "question_clarity": 0-100,
   "overall_score": 0-100,
-  "issues": ["specific classification errors"],
+  "issues": ["specific issues with model's question generation"],
   "examples": [
-    "GOOD: 'What are valid state values?' is correctly required - enum values need business meaning",
-    "BAD: 'What is user_id?' is required but should not be a question at all - it's obviously a user identifier",
-    "BAD: 'What do offer_type values 2,4,5,6 mean?' is optional but should be required - enum meanings are critical"
+    "GOOD: 'What do status values 2,4,5 mean?' - asking about ambiguous enum",
+    "BAD: 'What is the id column for?' - asking about obvious PK"
   ]
 }
 
-IMPORTANT: A score of 100 means perfect classification. Key principles:
-- Enum values with visible numbers (1,2,3 or 2,4,5,6) → REQUIRED to ask their meaning
-- Obvious fields (created_at, updated_at, id) → Should NOT be questions at all
-- Business logic questions → REQUIRED if critical, OPTIONAL if inferable
+A score of 100 means the model asked exactly the right questions.
 
-Return ONLY JSON.`, schemaSummary.String(), string(ontology.DomainSummary), questionsText.String())
+Return ONLY JSON.`, schemaSummary.String(), questionsText.String())
 
 	resp, err := client.CreateMessages(ctx, anthropic.MessagesRequest{
 		Model:     "claude-sonnet-4-5-20250929",
@@ -938,12 +760,11 @@ Return ONLY JSON.`, schemaSummary.String(), string(ontology.DomainSummary), ques
 	}
 
 	var result struct {
-		RequiredClassification int      `json:"required_classification"`
-		OptionalClassification int      `json:"optional_classification"`
-		QuestionQuality        int      `json:"question_quality"`
-		OverallScore           int      `json:"overall_score"`
-		Issues                 []string `json:"issues"`
-		Examples               []string `json:"examples"`
+		QuestionRelevance int      `json:"question_relevance"`
+		QuestionClarity   int      `json:"question_clarity"`
+		OverallScore      int      `json:"overall_score"`
+		Issues            []string `json:"issues"`
+		Examples          []string `json:"examples"`
 	}
 
 	responseText = extractJSON(responseText)
@@ -957,25 +778,22 @@ Return ONLY JSON.`, schemaSummary.String(), string(ontology.DomainSummary), ques
 	}
 
 	return QuestionsAssessment{
-		TotalQuestions:         len(questions),
-		RequiredQuestions:      required,
-		OptionalQuestions:      optional,
-		RequiredClassification: result.RequiredClassification,
-		OptionalClassification: result.OptionalClassification,
-		QuestionQuality:        result.QuestionQuality,
-		OverallScore:           result.OverallScore,
-		Issues:                 result.Issues,
-		Examples:               result.Examples,
+		TotalQuestions:    len(questions),
+		RequiredQuestions: required,
+		OptionalQuestions: optional,
+		QuestionRelevance: result.QuestionRelevance,
+		QuestionClarity:   result.QuestionClarity,
+		OverallScore:      result.OverallScore,
+		Issues:            result.Issues,
+		Examples:          result.Examples,
 	}
 }
 
-func calculateFinalScore(input InputAssessment, outputs []ConversationAssessment, questions QuestionsAssessment, ontology OntologyAssessment) int {
-	// Weights for extraction quality assessment:
-	// - Input extraction: 20% (did we correctly provide data to LLM?)
-	// - Output quality: 25% (did LLM correctly process the input?)
-	// - Questions classification: 25% (are required/optional correctly classified?)
-	// - Ontology accuracy: 30% (is the final ontology accurate given input?)
-	inputScore := input.Score
+func calculateFinalScore(outputs []ConversationAssessment, questions QuestionsAssessment, ontology OntologyAssessment) int {
+	// Weights:
+	// - Output quality: 35%
+	// - Questions quality: 25%
+	// - Ontology accuracy: 40%
 
 	var outputAvg float64
 	if len(outputs) > 0 {
@@ -989,17 +807,67 @@ func calculateFinalScore(input InputAssessment, outputs []ConversationAssessment
 	questionsScore := questions.OverallScore
 	ontologyScore := ontology.OverallScore
 
-	finalScore := float64(inputScore)*0.20 + outputAvg*0.25 + float64(questionsScore)*0.25 + float64(ontologyScore)*0.30
+	finalScore := outputAvg*0.35 + float64(questionsScore)*0.25 + float64(ontologyScore)*0.40
 
 	return int(finalScore)
 }
 
+func generateSummary(model string, outputs []ConversationAssessment, questions QuestionsAssessment, ontology OntologyAssessment, finalScore int) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("LLM Extraction Assessment Score: %d/100\n", finalScore))
+	sb.WriteString(fmt.Sprintf("Model Under Test: %s\n\n", model))
+
+	// Output quality summary
+	var outputAvg float64
+	totalHallucinations := 0
+	if len(outputs) > 0 {
+		var sum int
+		for _, o := range outputs {
+			sum += o.OutputQuality
+			totalHallucinations += o.Hallucinations
+		}
+		outputAvg = float64(sum) / float64(len(outputs))
+	}
+	sb.WriteString(fmt.Sprintf("Output Quality: %.0f/100 (%d hallucinations)\n", outputAvg, totalHallucinations))
+
+	sb.WriteString(fmt.Sprintf("Questions Quality: %d/100\n", questions.OverallScore))
+	sb.WriteString(fmt.Sprintf("Ontology Accuracy: %d/100\n", ontology.OverallScore))
+
+	sb.WriteString("\n")
+
+	if len(ontology.HallucinationExamples) > 0 {
+		sb.WriteString("Hallucination Examples:\n")
+		for _, ex := range ontology.HallucinationExamples[:min(3, len(ontology.HallucinationExamples))] {
+			sb.WriteString(fmt.Sprintf("  - %s\n", ex))
+		}
+	}
+
+	if finalScore >= 90 {
+		sb.WriteString("\nExcellent LLM performance!")
+	} else if finalScore >= 70 {
+		sb.WriteString("\nGood LLM performance with some issues.")
+	} else if finalScore >= 50 {
+		sb.WriteString("\nModerate LLM performance - consider using a stronger model.")
+	} else {
+		sb.WriteString("\nPoor LLM performance - significant issues detected.")
+	}
+
+	return sb.String()
+}
+
 func extractJSON(s string) string {
-	// Find JSON object in response
 	start := strings.Index(s, "{")
 	end := strings.LastIndex(s, "}")
 	if start >= 0 && end > start {
 		return s[start : end+1]
 	}
 	return s
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

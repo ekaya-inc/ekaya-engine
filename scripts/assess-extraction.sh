@@ -1,20 +1,15 @@
 #!/bin/bash
-# Assess ontology extraction quality for a given project
+# Assess LLM extraction quality for ontology generation
 # Usage: ./scripts/assess-extraction.sh <project-id>
 #
-# This tool rates how well the ontology extraction system worked with the
-# data it was given. A score of 100 means perfect extraction - the system
-# did everything possible with the available inputs.
+# This tool evaluates the LLM's performance during ontology extraction.
+# It assesses how well the model performed GIVEN the input it received.
 #
-# Unlike assess-ontology (which evaluates overall ontology quality including
-# knowledge gaps), this tool focuses on extraction accuracy:
-# - Did we extract the correct information to give to the LLM?
-# - Did the LLM generate the ontology correctly from that input?
-# - Are questions reasonable given what is known?
-# - Is required vs optional classification appropriate?
+# A score of 100 means the LLM did a perfect job with the input provided.
+# Use this tool to compare different models (Haiku vs Sonnet vs Opus).
 #
-# Knowledge gaps do NOT affect the score - those are input data problems,
-# not extraction problems.
+# Separate from assess-deterministic which evaluates the deterministic code
+# (input preparation and post-processing).
 #
 # Requires:
 #   - ANTHROPIC_API_KEY environment variable
