@@ -10,6 +10,11 @@
 // Usage: go run ./scripts/assess-deterministic <project-id>
 //
 // Database connection: Uses standard PG* environment variables
+//
+// NOTE: This standalone assessment script uses direct SQL queries rather than
+// the repository layer. This is intentional to keep the script self-contained
+// and avoid circular dependencies. The SQL may drift from repository implementations
+// over time - verify queries match if discrepancies are found.
 package main
 
 import (
@@ -23,6 +28,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+)
+
+// Scoring weights
+const (
+	// Final score weights (must sum to 100)
+	FinalScoreInputWeight       = 50
+	FinalScorePostProcessWeight = 50
+
+	// Input score weights (must sum to 100)
+	InputScoreConversationWeight = 70
+	InputScoreChecksWeight       = 30
 )
 
 // AssessmentResult contains the full assessment output
@@ -39,6 +55,9 @@ type AssessmentResult struct {
 	WorkflowStateCount int `json:"workflow_state_count"`
 	RelationshipCount  int `json:"relationship_count"`
 	ColumnsWithStats   int `json:"columns_with_stats"`
+
+	// Prompt detection (Phase 3)
+	PromptTypeCounts map[PromptType]int `json:"prompt_type_counts"`
 }
 
 type InputAssessment struct {
@@ -151,6 +170,24 @@ type Ontology struct {
 	EntitySummaries json.RawMessage `json:"entity_summaries"`
 }
 
+// PromptType identifies the type of LLM prompt
+type PromptType string
+
+const (
+	PromptTypeEntityAnalysis        PromptType = "entity_analysis"
+	PromptTypeTier1Batch            PromptType = "tier1_batch"
+	PromptTypeTier0Domain           PromptType = "tier0_domain"
+	PromptTypeDescriptionProcessing PromptType = "description_processing"
+	PromptTypeUnknown               PromptType = "unknown"
+)
+
+// TaggedConversation wraps LLMConversation with detected type and extracted table
+type TaggedConversation struct {
+	Conversation LLMConversation
+	PromptType   PromptType `json:"prompt_type"`
+	TargetTable  string     `json:"target_table,omitempty"` // For entity_analysis only
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: %s <project-id>\n", os.Args[0])
@@ -229,6 +266,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Tag conversations by prompt type (Phase 3)
+	taggedConversations := tagConversations(conversations)
+	promptTypeCounts := countPromptTypes(taggedConversations)
+
+	// Log detection summary
+	fmt.Fprintf(os.Stderr, "Prompt types detected: entity_analysis=%d, tier1_batch=%d, tier0_domain=%d, description_processing=%d, unknown=%d\n",
+		promptTypeCounts[PromptTypeEntityAnalysis],
+		promptTypeCounts[PromptTypeTier1Batch],
+		promptTypeCounts[PromptTypeTier0Domain],
+		promptTypeCounts[PromptTypeDescriptionProcessing],
+		promptTypeCounts[PromptTypeUnknown])
+
 	// Run deterministic assessments
 	fmt.Fprintf(os.Stderr, "Assessing input preparation quality...\n")
 	inputAssessment := assessInputPreparation(schema, conversations)
@@ -236,8 +285,8 @@ func main() {
 	fmt.Fprintf(os.Stderr, "Assessing post-processing quality...\n")
 	postProcessAssessment := assessPostProcessing(schema, conversations, ontology, questions)
 
-	// Calculate final score (50% input, 50% post-processing)
-	finalScore := (inputAssessment.Score + postProcessAssessment.Score) / 2
+	// Calculate final score (weighted average of input and post-processing)
+	finalScore := (inputAssessment.Score*FinalScoreInputWeight + postProcessAssessment.Score*FinalScorePostProcessWeight) / 100
 
 	// Generate summary
 	summary := generateSummary(inputAssessment, postProcessAssessment, finalScore)
@@ -255,6 +304,9 @@ func main() {
 		WorkflowStateCount: len(workflowStates),
 		RelationshipCount:  len(relationships),
 		ColumnsWithStats:   countColumnsWithStats(schema),
+
+		// Phase 3: Prompt type detection
+		PromptTypeCounts: promptTypeCounts,
 	}
 
 	// Output JSON
@@ -509,6 +561,97 @@ func countColumnsWithStats(schema []SchemaTable) int {
 	return count
 }
 
+// detectPromptType analyzes request_messages to determine the prompt type.
+// Returns the detected type and target table name (for entity_analysis only).
+func detectPromptType(conv LLMConversation) (PromptType, string) {
+	// Parse request_messages JSON array
+	var messages []map[string]string
+	if err := json.Unmarshal(conv.RequestMessages, &messages); err != nil {
+		return PromptTypeUnknown, ""
+	}
+
+	// Extract user and system content
+	var userContent, systemContent string
+	for _, msg := range messages {
+		switch msg["role"] {
+		case "user":
+			userContent = strings.ToLower(msg["content"])
+		case "system":
+			systemContent = strings.ToLower(msg["content"])
+		}
+	}
+
+	// Detection order matters - most specific first
+
+	// 1. ENTITY_ANALYSIS: Single table with sample values
+	// Markers: "## table schema" (singular), "question classification rules", "analyze the table"
+	if strings.Contains(userContent, "## table schema") &&
+		strings.Contains(userContent, "question classification rules") &&
+		strings.Contains(userContent, "analyze the table") {
+		targetTable := extractTableName(userContent)
+		return PromptTypeEntityAnalysis, targetTable
+	}
+
+	// 2. TIER0_DOMAIN: Domain summary from entity summaries
+	// Markers: "entities by domain", "entity descriptions", "domain summary" in system
+	if strings.Contains(userContent, "entities by domain") &&
+		strings.Contains(userContent, "entity descriptions") &&
+		strings.Contains(systemContent, "domain summary") {
+		return PromptTypeTier0Domain, ""
+	}
+
+	// 3. DESCRIPTION_PROCESSING: Process user's project description
+	// Markers: "user's description", "database schema", "entity_hints"
+	if strings.Contains(userContent, "user's description") &&
+		strings.Contains(userContent, "database schema") &&
+		strings.Contains(userContent, "entity_hints") {
+		return PromptTypeDescriptionProcessing, ""
+	}
+
+	// 4. TIER1_BATCH: Multiple tables batch (fallback for table prompts)
+	// Markers: "## tables", "entity summaries" in system
+	if strings.Contains(userContent, "## tables") &&
+		strings.Contains(systemContent, "entity summaries") {
+		return PromptTypeTier1Batch, ""
+	}
+
+	return PromptTypeUnknown, ""
+}
+
+// extractTableName extracts the table name from an entity analysis prompt.
+// Looks for: Analyze the table "tablename"
+func extractTableName(content string) string {
+	re := regexp.MustCompile(`analyze the table "([^"]+)"`)
+	matches := re.FindStringSubmatch(content)
+	if len(matches) >= 2 {
+		return matches[1]
+	}
+	return ""
+}
+
+// tagConversations tags each conversation with its prompt type.
+func tagConversations(conversations []LLMConversation) []TaggedConversation {
+	tagged := make([]TaggedConversation, len(conversations))
+	for i, conv := range conversations {
+		promptType, targetTable := detectPromptType(conv)
+		tagged[i] = TaggedConversation{
+			Conversation: conv,
+			PromptType:   promptType,
+			TargetTable:  targetTable,
+		}
+	}
+	return tagged
+}
+
+// countPromptTypes counts conversations by prompt type.
+func countPromptTypes(tagged []TaggedConversation) map[PromptType]int {
+	counts := make(map[PromptType]int)
+	for _, tc := range tagged {
+		counts[tc.PromptType]++
+	}
+	return counts
+}
+
 func assessInputPreparation(schema []SchemaTable, conversations []LLMConversation) InputAssessment {
 	var checks []InputCheck
 	var issues []string
@@ -611,8 +754,8 @@ func assessInputPreparation(schema []SchemaTable, conversations []LLMConversatio
 		checksScore = (checksPassed * 100) / len(checks)
 	}
 
-	// Final score is weighted: 70% conversation quality, 30% global checks
-	finalScore := (avgScore*70 + checksScore*30) / 100
+	// Final score is weighted: conversation quality + global checks
+	finalScore := (avgScore*InputScoreConversationWeight + checksScore*InputScoreChecksWeight) / 100
 
 	return InputAssessment{
 		TotalConversations: len(conversations),

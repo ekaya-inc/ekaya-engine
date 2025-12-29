@@ -6,7 +6,7 @@
 |-------|--------|-------------|
 | Phase 1 | ✅ Complete | Preserve Workflow State Data |
 | Phase 2 | ✅ Complete | Load Additional Data in assess-deterministic |
-| Phase 3 | ⏳ Pending | Prompt Type Detection |
+| Phase 3 | ✅ Complete | Prompt Type Detection |
 | Phase 4 | ⏳ Pending | Input Assessment - Rigorous Checks |
 | Phase 5 | ⏳ Pending | Output Assessment - Capture Verification |
 | Phase 6 | ⏳ Pending | Scoring Methodology |
@@ -85,7 +85,7 @@ Load all data needed for rigorous verification.
 
 ## Phase 3: Prompt Type Detection
 
-**Status**: [ ] Not Started
+**Status**: [x] Complete
 
 ### Goal
 Identify what type of prompt each conversation represents.
@@ -101,10 +101,14 @@ Identify what type of prompt each conversation represents.
 | tier1 | Batch entity summary task |
 | tier0 | Domain summary task |
 
-### Tasks
-- [ ] 3.1 Parse `request_messages` JSON structure
-- [ ] 3.2 Implement detection heuristics for each prompt type
-- [ ] 3.3 Tag each conversation with its prompt type
+### Tasks Completed
+- [x] 3.1 Added PromptType enum with 5 values (entity_analysis, tier1_batch, tier0_domain, description_processing, unknown)
+- [x] 3.2 Added TaggedConversation struct
+- [x] 3.3 Implemented detectPromptType() with marker-based detection (order matters: most specific first)
+- [x] 3.4 Implemented extractTableName() regex helper for entity_analysis prompts
+- [x] 3.5 Added tagConversations() and countPromptTypes() helper functions
+- [x] 3.6 Updated AssessmentResult with PromptTypeCounts map
+- [x] 3.7 Updated main() to tag conversations and log detection summary
 
 ---
 
@@ -276,7 +280,8 @@ When score < 100, show exactly what failed and where.
 | `pkg/repositories/workflow_state_repository.go` | Added DeleteByOntology method | 1 ✅ |
 | `pkg/llm/tool_executor_test.go` | Updated mock to implement new interface | 1 ✅ |
 | `scripts/assess-deterministic/main.go` | Added types, load functions, updated result struct | 2 ✅ |
-| `scripts/assess-deterministic/main.go` | Prompt detection, rigorous checks, scoring | 3-7 ⏳ |
+| `scripts/assess-deterministic/main.go` | Prompt type detection, tagging, counts | 3 ✅ |
+| `scripts/assess-deterministic/main.go` | Rigorous checks, scoring, issue reporting | 4-7 ⏳ |
 
 ---
 
@@ -284,7 +289,7 @@ When score < 100, show exactly what failed and where.
 
 1. ✅ Phase 1: Preserve workflow_state (prerequisite - without this, can't verify sample values)
 2. ✅ Phase 2: Load additional data (workflow_states, relationships, column stats)
-3. ⏳ Phase 3: Prompt type detection
+3. ✅ Phase 3: Prompt type detection (tags each conversation, counts by type)
 4. ⏳ Phase 4: Input checks implementation
 5. ⏳ Phase 5: Output checks implementation
 6. ⏳ Phase 6: Scoring implementation
