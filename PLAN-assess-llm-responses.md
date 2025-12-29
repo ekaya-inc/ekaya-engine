@@ -63,7 +63,7 @@ Classify each conversation by prompt type (reuse from `assess-deterministic`):
 - `description_processing` - User description processing
 - `unknown` - Unable to classify
 
-### Phase 3: Per-Response Structural Checks
+### Phase 3: Per-Response Structural Checks ✅
 For EACH conversation, check:
 
 **3.1 JSON Parsing (20 points)**

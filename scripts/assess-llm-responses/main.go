@@ -189,9 +189,39 @@ func main() {
 		modelUnderTest = conversations[0].Model
 	}
 
-	// Phase 1 complete - output summary
+	// =========================================================================
+	// Phase 3: Per-Response Structural Checks
+	// =========================================================================
+	fmt.Fprintf(os.Stderr, "Phase 3: Running structural checks...\n")
+
+	structureSummary := checkAllStructures(taggedConversations)
+	fmt.Fprintf(os.Stderr, "  Checked %d conversations, %d passed (%.1f%% average score)\n",
+		structureSummary.ConversationsChecked,
+		structureSummary.ConversationsPassed,
+		structureSummary.AverageScore)
+
+	if structureSummary.JSONParseFailures > 0 {
+		fmt.Fprintf(os.Stderr, "  JSON parse failures: %d\n", structureSummary.JSONParseFailures)
+	}
+	if structureSummary.StatusFailures > 0 {
+		fmt.Fprintf(os.Stderr, "  Status failures: %d\n", structureSummary.StatusFailures)
+	}
+	if structureSummary.CompletenessIssues > 0 {
+		fmt.Fprintf(os.Stderr, "  Completeness issues: %d conversations\n", structureSummary.CompletenessIssues)
+	}
+	if structureSummary.FieldTypeMismatches > 0 {
+		fmt.Fprintf(os.Stderr, "  Field type mismatches: %d conversations\n", structureSummary.FieldTypeMismatches)
+	}
+
+	// Suppress unused variable warnings for future phases
+	_ = ontology
+	_ = questions
+	_ = validTables
+	_ = validColumns
+
+	// Output summary through Phase 3
 	result := map[string]interface{}{
-		"phase":            "Phase 1: Data Loading",
+		"phase":            "Phase 3: Structural Checks",
 		"status":           "complete",
 		"commit_info":      commitInfo,
 		"datasource_name":  datasourceName,
@@ -207,6 +237,17 @@ func main() {
 		"lookup_maps": map[string]interface{}{
 			"valid_tables":        len(validTables),
 			"total_valid_columns": countTotalColumns(validColumns),
+		},
+		"structure_checks": map[string]interface{}{
+			"conversations_checked": structureSummary.ConversationsChecked,
+			"conversations_passed":  structureSummary.ConversationsPassed,
+			"average_score":         structureSummary.AverageScore,
+			"average_score_pct":     structureScoreToPercentage(int(structureSummary.AverageScore)),
+			"total_issues":          structureSummary.TotalIssues,
+			"json_parse_failures":   structureSummary.JSONParseFailures,
+			"status_failures":       structureSummary.StatusFailures,
+			"completeness_issues":   structureSummary.CompletenessIssues,
+			"field_type_mismatches": structureSummary.FieldTypeMismatches,
 		},
 	}
 

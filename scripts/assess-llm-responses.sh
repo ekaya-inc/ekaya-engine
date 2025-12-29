@@ -2,7 +2,7 @@
 # Assess LLM response quality for ontology extraction
 # Usage: ./scripts/assess-llm-responses.sh <project-id>
 #
-# This tool evaluates LLM RESPONSE quality using deterministic checks:
+# This tool evaluates the LLM RESPONSE quality during ontology extraction:
 # - Structural validity: Is JSON parseable and well-formed?
 # - Schema compliance: Does response match expected structure for prompt type?
 # - Hallucination detection: Do referenced entities exist in actual schema?
@@ -10,14 +10,12 @@
 # - Value validation: Are enum values valid? Priority 1-5? Domains non-empty?
 #
 # This tool does NOT use an LLM for assessment - all checks are deterministic.
-# A score of 100 means the model produced perfect responses (objective).
-#
-# Separate from assess-deterministic which evaluates CODE quality.
+# It assesses how well the LLM performed, not the code quality.
 #
 # Requires:
 #   - PG* environment variables for database connection
 #
-# Output: JSON assessment with final score 0-100
+# Output: JSON assessment with detailed scoring
 
 set -e
 
