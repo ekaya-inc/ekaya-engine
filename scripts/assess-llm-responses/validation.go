@@ -37,16 +37,16 @@ type ValueValidationSummary struct {
 	Results              []ValueValidationResult `json:"results"`
 
 	// Per-check breakdown
-	StringFieldIssues  int `json:"string_field_issues"`  // Conversations with string issues
-	PriorityIssues     int `json:"priority_issues"`      // Conversations with priority issues
-	BooleanTypeIssues  int `json:"boolean_type_issues"`  // Conversations with boolean issues
-	CategoryMissing    int `json:"category_missing"`     // Conversations with missing categories
-	QuestionsPriority  int `json:"questions_priority"`   // Questions checked for priority
-	InvalidPriorities  int `json:"invalid_priorities"`   // Questions with invalid priority
-	QuestionsBoolean   int `json:"questions_boolean"`    // Questions checked for boolean
-	InvalidBooleans    int `json:"invalid_booleans"`     // Questions with invalid boolean type
-	QuestionCategories int `json:"question_categories"`  // Questions checked for category
-	MissingCategories  int `json:"missing_categories"`   // Questions with missing category
+	StringFieldIssues  int `json:"string_field_issues"` // Conversations with string issues
+	PriorityIssues     int `json:"priority_issues"`     // Conversations with priority issues
+	BooleanTypeIssues  int `json:"boolean_type_issues"` // Conversations with boolean issues
+	CategoryMissing    int `json:"category_missing"`    // Conversations with missing categories
+	QuestionsPriority  int `json:"questions_priority"`  // Questions checked for priority
+	InvalidPriorities  int `json:"invalid_priorities"`  // Questions with invalid priority
+	QuestionsBoolean   int `json:"questions_boolean"`   // Questions checked for boolean
+	InvalidBooleans    int `json:"invalid_booleans"`    // Questions with invalid boolean type
+	QuestionCategories int `json:"question_categories"` // Questions checked for category
+	MissingCategories  int `json:"missing_categories"`  // Questions with missing category
 }
 
 // =============================================================================

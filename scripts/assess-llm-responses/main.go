@@ -273,12 +273,31 @@ func main() {
 			valueSummary.MissingCategories, valueSummary.QuestionCategories)
 	}
 
+	// =========================================================================
+	// Phase 6: Token Efficiency Metrics
+	// =========================================================================
+	fmt.Fprintf(os.Stderr, "Phase 6: Calculating token efficiency metrics...\n")
+
+	tokenMetrics := calculateTokenMetrics(taggedConversations, len(schema))
+	fmt.Fprintf(os.Stderr, "  Total tokens: %d across %d conversations\n",
+		tokenMetrics.TotalTokens, tokenMetrics.TotalConversations)
+	fmt.Fprintf(os.Stderr, "  Avg tokens per conversation: %.1f\n", tokenMetrics.AvgTokensPerConv)
+	fmt.Fprintf(os.Stderr, "  Max tokens in single conversation: %d\n", tokenMetrics.MaxTokens)
+	fmt.Fprintf(os.Stderr, "  Tokens per table analyzed: %.1f\n", tokenMetrics.TokensPerTable)
+	fmt.Fprintf(os.Stderr, "  Efficiency score: %d/10\n", tokenMetrics.EfficiencyScore)
+
+	if len(tokenMetrics.Issues) > 0 {
+		for _, issue := range tokenMetrics.Issues {
+			fmt.Fprintf(os.Stderr, "  Issue: %s\n", issue)
+		}
+	}
+
 	// Suppress unused variable warnings for future phases
 	_ = ontology
 
-	// Output summary through Phase 5
+	// Output summary through Phase 6
 	result := map[string]interface{}{
-		"phase":            "Phase 5: Value Validation",
+		"phase":            "Phase 6: Token Efficiency Metrics",
 		"status":           "complete",
 		"commit_info":      commitInfo,
 		"datasource_name":  datasourceName,
@@ -331,6 +350,19 @@ func main() {
 				"category_checked":   valueSummary.QuestionCategories,
 				"missing_categories": valueSummary.MissingCategories,
 			},
+		},
+		"token_metrics": map[string]interface{}{
+			"total_conversations":     tokenMetrics.TotalConversations,
+			"total_tokens":            tokenMetrics.TotalTokens,
+			"total_prompt_tokens":     tokenMetrics.TotalPromptTokens,
+			"total_completion_tokens": tokenMetrics.TotalCompletionTokens,
+			"avg_tokens_per_conv":     tokenMetrics.AvgTokensPerConv,
+			"max_tokens":              tokenMetrics.MaxTokens,
+			"max_tokens_conv_id":      tokenMetrics.MaxTokensConvID,
+			"tokens_per_table":        tokenMetrics.TokensPerTable,
+			"efficiency_score":        tokenMetrics.EfficiencyScore,
+			"by_prompt_type":          formatPromptTypeStats(tokenMetrics.ByPromptType),
+			"issues":                  tokenMetrics.Issues,
 		},
 	}
 
