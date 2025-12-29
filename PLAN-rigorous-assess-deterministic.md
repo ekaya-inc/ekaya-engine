@@ -5,7 +5,7 @@
 | Phase | Status | Description |
 |-------|--------|-------------|
 | Phase 1 | ✅ Complete | Preserve Workflow State Data |
-| Phase 2 | ⏳ Pending | Load Additional Data in assess-deterministic |
+| Phase 2 | ✅ Complete | Load Additional Data in assess-deterministic |
 | Phase 3 | ⏳ Pending | Prompt Type Detection |
 | Phase 4 | ⏳ Pending | Input Assessment - Rigorous Checks |
 | Phase 5 | ⏳ Pending | Output Assessment - Capture Verification |
@@ -43,19 +43,19 @@ Keep workflow_state after completion so assess-deterministic can verify what dat
 ### Files
 - `pkg/services/workflow_orchestrator.go` - Removed deletion in finalizeWorkflow()
 - `pkg/services/ontology_workflow.go` - Added cleanup in StartExtraction()
-- `pkg/repositories/workflow_state_repository.go` - Added DeleteByProject method
+- `pkg/repositories/workflow_state_repository.go` - Added DeleteByOntology method
 
 ### Tasks
 - [x] 1.1 Find where workflow_state is deleted on completion (workflow_orchestrator.go:478)
 - [x] 1.2 Modify to keep rows after workflow completion (removed DeleteByWorkflow call)
-- [x] 1.3 Add cleanup logic: delete old workflow_state when NEW workflow starts for same project
+- [x] 1.3 Add cleanup logic: delete old workflow_state when NEW extraction starts (scoped to ontology)
 - [x] 1.4 Updated mock in tool_executor_test.go to implement new interface method
 
 ---
 
 ## Phase 2: Load Additional Data in assess-deterministic
 
-**Status**: [ ] Not Started
+**Status**: [x] Complete
 
 ### Goal
 Load all data needed for rigorous verification.
@@ -64,15 +64,22 @@ Load all data needed for rigorous verification.
 - `scripts/assess-deterministic/main.go`
 
 ### Current Data Loaded
-- schema (tables + columns)
+- schema (tables + columns with stats)
 - conversations
 - ontology
 - questions
+- **NEW**: workflow_states (with gathered data: sample_values, distinct_count, etc.)
+- **NEW**: relationships (approved schema relationships)
 
-### New Data to Load
-- [ ] 2.1 Load `engine_workflow_state` for gathered data (sample_values, distinct_count)
-- [ ] 2.2 Load `engine_schema_relationships` for relationship verification
-- [ ] 2.3 Ensure columns include all stats (distinct_count, null_count from schema_columns)
+### Tasks Completed
+- [x] 2.1 Added types: `WorkflowEntityState`, `GatheredData`, `SchemaRelationship`
+- [x] 2.2 Added `loadWorkflowStates()` - loads from `engine_workflow_state` via active ontology
+- [x] 2.3 Added `loadRelationships()` - loads approved relationships with table/column names
+- [x] 2.4 Updated `loadSchema()` column query to include `distinct_count`, `null_count`
+- [x] 2.5 Added `buildGatheredDataMap()` for O(1) lookup by entity_key
+- [x] 2.6 Added `countColumnsWithStats()` helper
+- [x] 2.7 Updated `AssessmentResult` with `workflow_state_count`, `relationship_count`, `columns_with_stats`
+- [x] 2.8 Updated `main()` to call new loaders and populate result
 
 ---
 
@@ -265,17 +272,18 @@ When score < 100, show exactly what failed and where.
 | File | Changes | Phase |
 |------|---------|-------|
 | `pkg/services/workflow_orchestrator.go` | Removed DeleteByWorkflow call in finalizeWorkflow() | 1 ✅ |
-| `pkg/services/ontology_workflow.go` | Added DeleteByProject cleanup in StartExtraction() | 1 ✅ |
-| `pkg/repositories/workflow_state_repository.go` | Added DeleteByProject method | 1 ✅ |
+| `pkg/services/ontology_workflow.go` | Added DeleteByOntology cleanup in StartExtraction() | 1 ✅ |
+| `pkg/repositories/workflow_state_repository.go` | Added DeleteByOntology method | 1 ✅ |
 | `pkg/llm/tool_executor_test.go` | Updated mock to implement new interface | 1 ✅ |
-| `scripts/assess-deterministic/main.go` | Complete rewrite with rigorous checks | 2-7 ⏳ |
+| `scripts/assess-deterministic/main.go` | Added types, load functions, updated result struct | 2 ✅ |
+| `scripts/assess-deterministic/main.go` | Prompt detection, rigorous checks, scoring | 3-7 ⏳ |
 
 ---
 
 ## Implementation Order
 
 1. ✅ Phase 1: Preserve workflow_state (prerequisite - without this, can't verify sample values)
-2. ⏳ Phase 2: Load additional data
+2. ✅ Phase 2: Load additional data (workflow_states, relationships, column stats)
 3. ⏳ Phase 3: Prompt type detection
 4. ⏳ Phase 4: Input checks implementation
 5. ⏳ Phase 5: Output checks implementation

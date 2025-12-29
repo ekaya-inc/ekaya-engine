@@ -34,6 +34,11 @@ type AssessmentResult struct {
 	PostProcessAssessment PostProcessAssessment `json:"post_process_assessment"`
 	FinalScore            int                   `json:"final_score"`
 	Summary               string                `json:"summary"`
+
+	// Data availability (Phase 2)
+	WorkflowStateCount int `json:"workflow_state_count"`
+	RelationshipCount  int `json:"relationship_count"`
+	ColumnsWithStats   int `json:"columns_with_stats"`
 }
 
 type InputAssessment struct {
@@ -84,10 +89,41 @@ type SchemaTable struct {
 
 // SchemaColumn represents a column
 type SchemaColumn struct {
-	ColumnName   string `json:"column_name"`
-	DataType     string `json:"data_type"`
-	IsPrimaryKey bool   `json:"is_primary_key"`
-	IsNullable   bool   `json:"is_nullable"`
+	ColumnName    string `json:"column_name"`
+	DataType      string `json:"data_type"`
+	IsPrimaryKey  bool   `json:"is_primary_key"`
+	IsNullable    bool   `json:"is_nullable"`
+	DistinctCount *int64 `json:"distinct_count,omitempty"`
+	NullCount     *int64 `json:"null_count,omitempty"`
+}
+
+// WorkflowEntityState represents a workflow state row
+type WorkflowEntityState struct {
+	ID         uuid.UUID       `json:"id"`
+	EntityType string          `json:"entity_type"`
+	EntityKey  string          `json:"entity_key"`
+	Status     string          `json:"status"`
+	StateData  json.RawMessage `json:"state_data"`
+}
+
+// GatheredData is the parsed gathered field for columns
+type GatheredData struct {
+	RowCount        *int64   `json:"row_count"`
+	NonNullCount    *int64   `json:"non_null_count"`
+	DistinctCount   *int64   `json:"distinct_count"`
+	NullPercent     *float64 `json:"null_percent"`
+	SampleValues    []any    `json:"sample_values"`
+	IsEnumCandidate bool     `json:"is_enum_candidate"`
+	ScannedAt       *string  `json:"scanned_at"`
+}
+
+// SchemaRelationship represents an approved relationship
+type SchemaRelationship struct {
+	SourceTable  string `json:"source_table"`
+	SourceColumn string `json:"source_column"`
+	TargetTable  string `json:"target_table"`
+	TargetColumn string `json:"target_column"`
+	Type         string `json:"type"`
 }
 
 // LLMConversation represents a stored conversation
@@ -177,6 +213,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Load additional data (Phase 2)
+	workflowStates, err := loadWorkflowStates(ctx, conn, projectID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load workflow states: %v\n", err)
+		os.Exit(1)
+	}
+	if len(workflowStates) == 0 {
+		fmt.Fprintf(os.Stderr, "Warning: No workflow state found - gathered data checks will be skipped\n")
+	}
+
+	relationships, err := loadRelationships(ctx, conn, projectID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load relationships: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Run deterministic assessments
 	fmt.Fprintf(os.Stderr, "Assessing input preparation quality...\n")
 	inputAssessment := assessInputPreparation(schema, conversations)
@@ -198,6 +250,11 @@ func main() {
 		PostProcessAssessment: postProcessAssessment,
 		FinalScore:            finalScore,
 		Summary:               summary,
+
+		// Phase 2: Data availability counts
+		WorkflowStateCount: len(workflowStates),
+		RelationshipCount:  len(relationships),
+		ColumnsWithStats:   countColumnsWithStats(schema),
 	}
 
 	// Output JSON
@@ -261,9 +318,9 @@ func loadSchema(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]Sch
 		return nil, err
 	}
 
-	// Load columns for each table
+	// Load columns for each table (including stats for Phase 2)
 	colQuery := `
-		SELECT column_name, data_type, is_primary_key, is_nullable
+		SELECT column_name, data_type, is_primary_key, is_nullable, distinct_count, null_count
 		FROM engine_schema_columns
 		WHERE schema_table_id = $1 AND deleted_at IS NULL AND is_selected = true
 		ORDER BY ordinal_position`
@@ -275,7 +332,7 @@ func loadSchema(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]Sch
 		}
 		for colRows.Next() {
 			var c SchemaColumn
-			if err := colRows.Scan(&c.ColumnName, &c.DataType, &c.IsPrimaryKey, &c.IsNullable); err != nil {
+			if err := colRows.Scan(&c.ColumnName, &c.DataType, &c.IsPrimaryKey, &c.IsNullable, &c.DistinctCount, &c.NullCount); err != nil {
 				colRows.Close()
 				return nil, err
 			}
@@ -350,6 +407,106 @@ func loadQuestions(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]
 		questions = append(questions, q)
 	}
 	return questions, rows.Err()
+}
+
+// loadWorkflowStates loads workflow entity states for the active ontology.
+// Returns empty slice (not error) if no workflow state exists (pre-Phase 1 extractions).
+func loadWorkflowStates(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]WorkflowEntityState, error) {
+	query := `
+		SELECT ws.id, ws.entity_type, ws.entity_key, ws.status, ws.state_data
+		FROM engine_workflow_state ws
+		JOIN engine_ontologies o ON ws.ontology_id = o.id
+		WHERE o.project_id = $1 AND o.is_active = true
+		ORDER BY ws.entity_type, ws.entity_key`
+
+	rows, err := conn.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var states []WorkflowEntityState
+	for rows.Next() {
+		var s WorkflowEntityState
+		if err := rows.Scan(&s.ID, &s.EntityType, &s.EntityKey, &s.Status, &s.StateData); err != nil {
+			return nil, err
+		}
+		states = append(states, s)
+	}
+	return states, rows.Err()
+}
+
+// loadRelationships loads approved schema relationships.
+func loadRelationships(ctx context.Context, conn *pgx.Conn, projectID uuid.UUID) ([]SchemaRelationship, error) {
+	query := `
+		SELECT
+			st.table_name as source_table,
+			sc.column_name as source_column,
+			tt.table_name as target_table,
+			tc.column_name as target_column,
+			COALESCE(r.cardinality, 'unknown') as type
+		FROM engine_schema_relationships r
+		JOIN engine_schema_tables st ON r.source_table_id = st.id
+		JOIN engine_schema_columns sc ON r.source_column_id = sc.id
+		JOIN engine_schema_tables tt ON r.target_table_id = tt.id
+		JOIN engine_schema_columns tc ON r.target_column_id = tc.id
+		WHERE st.project_id = $1
+		  AND r.is_approved = true
+		  AND st.is_selected = true
+		  AND st.deleted_at IS NULL
+		ORDER BY st.table_name, sc.column_name`
+
+	rows, err := conn.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var relationships []SchemaRelationship
+	for rows.Next() {
+		var r SchemaRelationship
+		if err := rows.Scan(&r.SourceTable, &r.SourceColumn, &r.TargetTable, &r.TargetColumn, &r.Type); err != nil {
+			return nil, err
+		}
+		relationships = append(relationships, r)
+	}
+	return relationships, rows.Err()
+}
+
+// buildGatheredDataMap creates a lookup from entity_key to gathered data.
+// Entity keys are in format "table_name.column_name".
+func buildGatheredDataMap(states []WorkflowEntityState) map[string]*GatheredData {
+	result := make(map[string]*GatheredData)
+	for _, state := range states {
+		if state.EntityType != "column" || len(state.StateData) == 0 {
+			continue
+		}
+
+		// Parse state_data to get gathered field
+		var stateData struct {
+			Gathered *GatheredData `json:"gathered"`
+		}
+		if err := json.Unmarshal(state.StateData, &stateData); err != nil {
+			continue
+		}
+		if stateData.Gathered != nil {
+			result[state.EntityKey] = stateData.Gathered
+		}
+	}
+	return result
+}
+
+// countColumnsWithStats counts columns that have statistics available.
+func countColumnsWithStats(schema []SchemaTable) int {
+	count := 0
+	for _, t := range schema {
+		for _, c := range t.Columns {
+			if c.DistinctCount != nil || c.NullCount != nil {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 func assessInputPreparation(schema []SchemaTable, conversations []LLMConversation) InputAssessment {
