@@ -55,7 +55,7 @@ Load all data needed for assessment:
 - Questions from `engine_ontology_questions`
 - Prompt type detection (reuse logic from `assess-deterministic`)
 
-### Phase 2: Prompt Type Detection
+### Phase 2: Prompt Type Detection ✅
 Classify each conversation by prompt type (reuse from `assess-deterministic`):
 - `entity_analysis` - Single table analysis
 - `tier1_batch` - Multiple table batch
