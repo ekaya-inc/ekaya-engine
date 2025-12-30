@@ -570,6 +570,8 @@ Validates that:
 
 ### Phase 9: MCP Tool for Pre-Approved Queries
 
+**Status: [x] Complete**
+
 **File: `pkg/mcp/tools/queries.go`**
 
 ```go
