@@ -11,6 +11,31 @@ import type { DatasourceType } from './datasource';
 export type SqlDialect = 'PostgreSQL' | 'MySQL' | 'SQLite' | 'MSSQL';
 
 /**
+ * Parameter types supported for parameterized queries
+ */
+export type ParameterType =
+  | 'string'
+  | 'integer'
+  | 'decimal'
+  | 'boolean'
+  | 'date'
+  | 'timestamp'
+  | 'uuid'
+  | 'string[]'
+  | 'integer[]';
+
+/**
+ * Query parameter definition
+ */
+export interface QueryParameter {
+  name: string;
+  type: ParameterType;
+  description: string;
+  required: boolean;
+  default: unknown | null;
+}
+
+/**
  * Maps datasource types to CodeMirror SQL dialects
  */
 export const datasourceTypeToDialect: Record<DatasourceType, SqlDialect> = {
@@ -41,6 +66,7 @@ export interface Query {
   last_used_at: string | null;
   created_at: string;
   updated_at: string;
+  parameters: QueryParameter[];
 }
 
 /**
@@ -52,6 +78,7 @@ export interface CreateQueryRequest {
   additional_context?: string;
   sql_query: string;
   is_enabled: boolean;
+  parameters?: QueryParameter[];
 }
 
 /**
@@ -71,6 +98,7 @@ export interface UpdateQueryRequest {
  */
 export interface ExecuteQueryRequest {
   limit?: number;
+  parameters?: Record<string, unknown>;
 }
 
 /**
@@ -79,6 +107,8 @@ export interface ExecuteQueryRequest {
 export interface TestQueryRequest {
   sql_query: string;
   limit?: number;
+  parameter_definitions?: QueryParameter[];
+  parameter_values?: Record<string, unknown>;
 }
 
 /**

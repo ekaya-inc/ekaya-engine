@@ -18,6 +18,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	_ "github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource/postgres" // Register postgres adapter
+	"github.com/ekaya-inc/ekaya-engine/pkg/audit"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/config"
 	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
@@ -152,13 +153,16 @@ func main() {
 	// Create adapter factory for datasource connections
 	adapterFactory := datasource.NewDatasourceAdapterFactory(connManager)
 
+	// Create security auditor for SIEM logging
+	securityAuditor := audit.NewSecurityAuditor(logger)
+
 	// Create services
 	projectService := services.NewProjectService(db, projectRepo, userRepo, redisClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, projectService, logger)
 	schemaService := services.NewSchemaService(schemaRepo, datasourceService, adapterFactory, logger)
 	discoveryService := services.NewRelationshipDiscoveryService(schemaRepo, datasourceService, adapterFactory, logger)
-	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, logger)
+	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
 	mcpConfigService := services.NewMCPConfigService(mcpConfigRepo, cfg.BaseURL, logger)
 
@@ -232,6 +236,16 @@ func main() {
 		Logger:            logger,
 	})
 	mcptools.RegisterDeveloperTools(mcpServer.MCP(), developerToolDeps)
+
+	// Register approved queries tools (separate tool group from developer tools)
+	queryToolDeps := &mcptools.QueryToolDeps{
+		DB:               db,
+		MCPConfigService: mcpConfigService,
+		ProjectService:   projectService,
+		QueryService:     queryService,
+		Logger:           logger,
+	}
+	mcptools.RegisterApprovedQueriesTools(mcpServer.MCP(), queryToolDeps)
 	mcpHandler := handlers.NewMCPHandler(mcpServer, logger)
 	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, logger)
 	mcpHandler.RegisterRoutes(mux, mcpAuthMiddleware)

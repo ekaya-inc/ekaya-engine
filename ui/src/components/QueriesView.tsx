@@ -25,10 +25,13 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSqlValidation, type ValidationStatus } from '../hooks/useSqlValidation';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
-import type { DatasourceSchema, Query, SqlDialect, CreateQueryRequest } from '../types';
+import type { DatasourceSchema, Query, SqlDialect, CreateQueryRequest, QueryParameter, ExecuteQueryResponse } from '../types';
 import { toCodeMirrorSchema } from '../utils/schemaUtils';
 
 import { DeleteQueryDialog } from './DeleteQueryDialog';
+import { ParameterEditor } from './ParameterEditor';
+import { ParameterInputForm } from './ParameterInputForm';
+import { QueryResultsTable } from './QueryResultsTable';
 import { SqlEditor } from './SqlEditor';
 import { Button } from './ui/Button';
 import {
@@ -51,6 +54,7 @@ interface EditingState {
   additional_context: string;
   sql_query: string;
   is_enabled: boolean;
+  parameters: QueryParameter[];
 }
 
 const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => {
@@ -61,6 +65,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [schema, setSchema] = useState<DatasourceSchema | null>(null);
+  const [queryResults, setQueryResults] = useState<ExecuteQueryResponse | null>(null);
 
   // UI state
   const [selectedQuery, setSelectedQuery] = useState<Query | null>(null);
@@ -74,10 +79,15 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
     additional_context: '',
     sql_query: '',
     is_enabled: true,
+    parameters: [],
   });
 
   // Form state for editing
   const [editingState, setEditingState] = useState<EditingState | null>(null);
+
+  // Parameter values for test/execute
+  const [testParameterValues, setTestParameterValues] = useState<Record<string, unknown>>({});
+  const [executeParameterValues, setExecuteParameterValues] = useState<Record<string, unknown>>({});
 
   // Action states
   const [isSaving, setIsSaving] = useState(false);
@@ -164,24 +174,36 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
       additional_context: '',
       sql_query: '',
       is_enabled: true,
+      parameters: [],
     });
     setTestPassed(false);
+    setTestParameterValues({});
     createValidation.reset();
   };
 
   /**
    * Test query before saving
    */
-  const handleTestQuery = async (sql: string, isCreateMode: boolean) => {
+  const handleTestQuery = async (
+    sql: string,
+    isCreateMode: boolean,
+    parameters?: QueryParameter[],
+    parameterValues?: Record<string, unknown>
+  ) => {
     setIsTesting(true);
 
     try {
       const response = await engineApi.testQuery(projectId, datasourceId, {
         sql_query: sql,
         limit: 10,
+        ...(parameters !== undefined && { parameter_definitions: parameters }),
+        ...(parameterValues !== undefined && { parameter_values: parameterValues }),
       });
 
       if (response.success) {
+        if (response.data) {
+          setQueryResults(response.data);
+        }
         toast({
           title: 'Query executed successfully',
           description: `Returned ${response.data?.row_count ?? 0} rows`,
@@ -194,6 +216,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         }
         return true;
       } else {
+        setQueryResults(null);
         toast({
           title: 'Query execution failed',
           description: response.error ?? 'Unknown error',
@@ -202,6 +225,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         return false;
       }
     } catch (err) {
+      setQueryResults(null);
       toast({
         title: 'Query execution failed',
         description: err instanceof Error ? err.message : 'Unknown error',
@@ -244,6 +268,10 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         request.additional_context = newQuery.additional_context.trim();
       }
 
+      if (newQuery.parameters.length > 0) {
+        request.parameters = newQuery.parameters;
+      }
+
       const response = await engineApi.createQuery(projectId, datasourceId, request);
 
       if (response.success && response.data) {
@@ -284,9 +312,12 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
       additional_context: query.additional_context ?? '',
       sql_query: query.sql_query,
       is_enabled: query.is_enabled,
+      parameters: query.parameters ?? [],
     });
+    setQueryResults(null);
     editValidation.reset();
     setEditTestPassed(false);
+    setTestParameterValues({});
   };
 
   /**
@@ -416,14 +447,19 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
     setIsTesting(true);
 
     try {
+      const executeRequest =
+        query.parameters && query.parameters.length > 0
+          ? { limit: 100, parameters: executeParameterValues }
+          : { limit: 100 };
       const response = await engineApi.executeQuery(
         projectId,
         datasourceId,
         query.query_id,
-        { limit: 100 }
+        executeRequest
       );
 
       if (response.success && response.data) {
+        setQueryResults(response.data);
         toast({
           title: 'Query executed successfully',
           description: `Returned ${response.data.row_count} rows`,
@@ -432,6 +468,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         // Refresh to get updated usage count
         await loadQueries();
       } else {
+        setQueryResults(null);
         toast({
           title: 'Query execution failed',
           description: response.error ?? 'Unknown error',
@@ -439,6 +476,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         });
       }
     } catch (err) {
+      setQueryResults(null);
       toast({
         title: 'Query execution failed',
         description: err instanceof Error ? err.message : 'Unknown error',
@@ -513,6 +551,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     setSelectedQuery(null);
                     setEditingQueryId(null);
                     setEditingState(null);
+                    setQueryResults(null);
                     resetCreateForm();
                   }}
                   className="h-8 px-2"
@@ -548,6 +587,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                         setIsCreating(false);
                         setEditingQueryId(null);
                         setEditingState(null);
+                        setQueryResults(null);
                       }}
                       className={`w-full text-left p-2 rounded-lg transition-colors ${
                         selectedQuery?.query_id === query.query_id
@@ -659,10 +699,32 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                       schema={codeMirrorSchema}
                       validationStatus={getValidationStatus(createValidation.status)}
                       validationError={createValidation.error ?? undefined}
-                      placeholder="SELECT * FROM..."
+                      placeholder="SELECT * FROM... Use {{param_name}} for parameters"
                       minHeight="200px"
                     />
                   </div>
+
+                  <ParameterEditor
+                    parameters={newQuery.parameters}
+                    onChange={(parameters) => {
+                      setNewQuery({ ...newQuery, parameters });
+                      setTestPassed(false);
+                    }}
+                    sqlQuery={newQuery.sql_query}
+                  />
+
+                  {newQuery.parameters.length > 0 && (
+                    <div className="border-t border-border-light pt-4">
+                      <h3 className="text-sm font-medium text-text-primary mb-3">
+                        Test with Parameter Values
+                      </h3>
+                      <ParameterInputForm
+                        parameters={newQuery.parameters}
+                        values={testParameterValues}
+                        onChange={setTestParameterValues}
+                      />
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-2">
                     <input
@@ -685,7 +747,14 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                   <div className="flex justify-between gap-2 pt-4 border-t border-border-light">
                     <Button
                       variant="outline"
-                      onClick={() => handleTestQuery(newQuery.sql_query, true)}
+                      onClick={() =>
+                        handleTestQuery(
+                          newQuery.sql_query,
+                          true,
+                          newQuery.parameters,
+                          testParameterValues
+                        )
+                      }
                       disabled={!newQuery.sql_query.trim() || isTesting}
                     >
                       {isTesting ? (
@@ -801,10 +870,32 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                       schema={codeMirrorSchema}
                       validationStatus={getValidationStatus(editValidation.status)}
                       validationError={editValidation.error ?? undefined}
-                      placeholder="SELECT * FROM..."
+                      placeholder="SELECT * FROM... Use {{param_name}} for parameters"
                       minHeight="200px"
                     />
                   </div>
+
+                  <ParameterEditor
+                    parameters={editingState.parameters}
+                    onChange={(parameters) => {
+                      setEditingState({ ...editingState, parameters });
+                      setEditTestPassed(false);
+                    }}
+                    sqlQuery={editingState.sql_query}
+                  />
+
+                  {editingState.parameters.length > 0 && (
+                    <div className="border-t border-border-light pt-4">
+                      <h3 className="text-sm font-medium text-text-primary mb-3">
+                        Test with Parameter Values
+                      </h3>
+                      <ParameterInputForm
+                        parameters={editingState.parameters}
+                        values={testParameterValues}
+                        onChange={setTestParameterValues}
+                      />
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-2">
                     <input
@@ -830,7 +921,14 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                   <div className="flex justify-between gap-2 pt-4 border-t border-border-light">
                     <Button
                       variant="outline"
-                      onClick={() => handleTestQuery(editingState.sql_query, false)}
+                      onClick={() =>
+                        handleTestQuery(
+                          editingState.sql_query,
+                          false,
+                          editingState.parameters,
+                          testParameterValues
+                        )
+                      }
                       disabled={!editingState.sql_query.trim() || isTesting}
                     >
                       {isTesting ? (
@@ -976,6 +1074,16 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     />
                   </div>
 
+                  {selectedQuery.parameters && selectedQuery.parameters.length > 0 && (
+                    <div className="border-t border-border-light pt-4">
+                      <ParameterInputForm
+                        parameters={selectedQuery.parameters}
+                        values={executeParameterValues}
+                        onChange={setExecuteParameterValues}
+                      />
+                    </div>
+                  )}
+
                   <div className="flex gap-2 pt-4 border-t border-border-light">
                     <Button
                       onClick={() => handleExecuteQuery(selectedQuery)}
@@ -989,6 +1097,16 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                       Execute Query
                     </Button>
                   </div>
+
+                  {queryResults && (
+                    <QueryResultsTable
+                      columns={queryResults.columns}
+                      rows={queryResults.rows}
+                      totalRowCount={queryResults.row_count}
+                      maxRows={10}
+                      maxColumns={20}
+                    />
+                  )}
                 </CardContent>
               </>
             ) : (
@@ -1006,6 +1124,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     onClick={() => {
                       setIsCreating(true);
                       setSelectedQuery(null);
+                      setQueryResults(null);
                       resetCreateForm();
                     }}
                   >

@@ -82,6 +82,10 @@ func (m *mockQueryExecutor) ExecuteQuery(ctx context.Context, sqlQuery string, l
 	return &QueryExecutionResult{}, nil
 }
 
+func (m *mockQueryExecutor) ExecuteQueryWithParams(ctx context.Context, sqlQuery string, params []any, limit int) (*QueryExecutionResult, error) {
+	return &QueryExecutionResult{}, nil
+}
+
 func (m *mockQueryExecutor) Execute(ctx context.Context, sqlStatement string) (*ExecuteResult, error) {
 	return &ExecuteResult{}, nil
 }

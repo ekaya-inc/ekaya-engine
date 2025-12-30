@@ -140,6 +140,7 @@ func (tc *queryTestContext) createTestQuery(ctx context.Context, prompt, sqlQuer
 		Dialect:               "postgres",
 		IsEnabled:             true,
 		UsageCount:            0,
+		Parameters:            []models.QueryParameter{}, // Initialize empty parameters
 	}
 
 	if err := tc.repo.Create(ctx, query); err != nil {
@@ -168,6 +169,7 @@ func TestQueryRepository_Create(t *testing.T) {
 		Dialect:               "postgres",
 		IsEnabled:             true,
 		UsageCount:            0,
+		Parameters:            []models.QueryParameter{},
 	}
 
 	err := tc.repo.Create(ctx, query)
@@ -227,6 +229,7 @@ func TestQueryRepository_Create_WithAdditionalContext(t *testing.T) {
 		SQLQuery:              "SELECT * FROM users WHERE status = 'active'",
 		Dialect:               "postgres",
 		IsEnabled:             true,
+		Parameters:            []models.QueryParameter{},
 	}
 
 	err := tc.repo.Create(ctx, query)
@@ -375,6 +378,7 @@ func TestQueryRepository_Update_NotFound(t *testing.T) {
 		SQLQuery:              "SELECT 1",
 		Dialect:               "postgres",
 		IsEnabled:             true,
+		Parameters:            []models.QueryParameter{},
 	}
 
 	err := tc.repo.Update(ctx, query)
@@ -631,6 +635,7 @@ func TestQueryRepository_NoTenantScope(t *testing.T) {
 		SQLQuery:              "SELECT 1",
 		Dialect:               "postgres",
 		IsEnabled:             true,
+		Parameters:            []models.QueryParameter{},
 	}
 
 	err := tc.repo.Create(ctx, query)
@@ -744,5 +749,425 @@ func TestQueryRepository_SoftDeleteDoesNotAffectOthers(t *testing.T) {
 	}
 	if !foundQuery3 {
 		t.Error("query3 should still exist")
+	}
+}
+
+// ============================================================================
+// Parameters Tests
+// ============================================================================
+
+func TestQueryRepository_Create_WithParameters(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	query := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Get orders by customer",
+		SQLQuery:              "SELECT * FROM orders WHERE customer_id = {{customer_id}} AND status = {{status}}",
+		Dialect:               "postgres",
+		IsEnabled:             true,
+		Parameters: []models.QueryParameter{
+			{
+				Name:        "customer_id",
+				Type:        "uuid",
+				Description: "The customer's unique identifier",
+				Required:    true,
+				Default:     nil,
+			},
+			{
+				Name:        "status",
+				Type:        "string",
+				Description: "Order status filter",
+				Required:    false,
+				Default:     "pending",
+			},
+		},
+	}
+
+	err := tc.repo.Create(ctx, query)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Verify data was persisted with parameters
+	retrieved, err := tc.repo.GetByID(ctx, tc.projectID, query.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+
+	if len(retrieved.Parameters) != 2 {
+		t.Fatalf("expected 2 parameters, got %d", len(retrieved.Parameters))
+	}
+
+	// Verify first parameter
+	param1 := retrieved.Parameters[0]
+	if param1.Name != "customer_id" {
+		t.Errorf("expected parameter name 'customer_id', got %q", param1.Name)
+	}
+	if param1.Type != "uuid" {
+		t.Errorf("expected parameter type 'uuid', got %q", param1.Type)
+	}
+	if param1.Description != "The customer's unique identifier" {
+		t.Errorf("expected parameter description 'The customer's unique identifier', got %q", param1.Description)
+	}
+	if !param1.Required {
+		t.Error("expected parameter to be required")
+	}
+	if param1.Default != nil {
+		t.Errorf("expected parameter default to be nil, got %v", param1.Default)
+	}
+
+	// Verify second parameter
+	param2 := retrieved.Parameters[1]
+	if param2.Name != "status" {
+		t.Errorf("expected parameter name 'status', got %q", param2.Name)
+	}
+	if param2.Type != "string" {
+		t.Errorf("expected parameter type 'string', got %q", param2.Type)
+	}
+	if param2.Required {
+		t.Error("expected parameter to not be required")
+	}
+	if param2.Default != "pending" {
+		t.Errorf("expected parameter default 'pending', got %v", param2.Default)
+	}
+}
+
+func TestQueryRepository_Create_WithoutParameters(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	query := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Get all users",
+		SQLQuery:              "SELECT * FROM users",
+		Dialect:               "postgres",
+		IsEnabled:             true,
+		Parameters:            []models.QueryParameter{}, // Empty parameters
+	}
+
+	err := tc.repo.Create(ctx, query)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Verify data was persisted without parameters
+	retrieved, err := tc.repo.GetByID(ctx, tc.projectID, query.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+
+	if len(retrieved.Parameters) != 0 {
+		t.Errorf("expected 0 parameters, got %d", len(retrieved.Parameters))
+	}
+}
+
+func TestQueryRepository_Update_WithParameters(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create query without parameters
+	query := tc.createTestQuery(ctx, "Original", "SELECT * FROM users")
+
+	// Update to add parameters
+	query.SQLQuery = "SELECT * FROM users WHERE email = {{email}}"
+	query.Parameters = []models.QueryParameter{
+		{
+			Name:        "email",
+			Type:        "string",
+			Description: "User email address",
+			Required:    true,
+			Default:     nil,
+		},
+	}
+
+	err := tc.repo.Update(ctx, query)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	// Verify parameters persisted
+	retrieved, err := tc.repo.GetByID(ctx, tc.projectID, query.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+
+	if len(retrieved.Parameters) != 1 {
+		t.Fatalf("expected 1 parameter, got %d", len(retrieved.Parameters))
+	}
+
+	param := retrieved.Parameters[0]
+	if param.Name != "email" {
+		t.Errorf("expected parameter name 'email', got %q", param.Name)
+	}
+	if param.Type != "string" {
+		t.Errorf("expected parameter type 'string', got %q", param.Type)
+	}
+}
+
+func TestQueryRepository_Update_RemoveParameters(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create query with parameters
+	query := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Get user by email",
+		SQLQuery:              "SELECT * FROM users WHERE email = {{email}}",
+		Dialect:               "postgres",
+		IsEnabled:             true,
+		Parameters: []models.QueryParameter{
+			{
+				Name:        "email",
+				Type:        "string",
+				Description: "User email",
+				Required:    true,
+				Default:     nil,
+			},
+		},
+	}
+
+	err := tc.repo.Create(ctx, query)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Update to remove parameters
+	query.SQLQuery = "SELECT * FROM users"
+	query.Parameters = []models.QueryParameter{}
+
+	err = tc.repo.Update(ctx, query)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	// Verify parameters removed
+	retrieved, err := tc.repo.GetByID(ctx, tc.projectID, query.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+
+	if len(retrieved.Parameters) != 0 {
+		t.Errorf("expected 0 parameters after removal, got %d", len(retrieved.Parameters))
+	}
+}
+
+func TestQueryRepository_ListByDatasource_WithParameters(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create query with parameters
+	query := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Get orders by date range",
+		SQLQuery:              "SELECT * FROM orders WHERE created_at BETWEEN {{start_date}} AND {{end_date}}",
+		Dialect:               "postgres",
+		IsEnabled:             true,
+		Parameters: []models.QueryParameter{
+			{
+				Name:        "start_date",
+				Type:        "date",
+				Description: "Start date",
+				Required:    true,
+				Default:     nil,
+			},
+			{
+				Name:        "end_date",
+				Type:        "date",
+				Description: "End date",
+				Required:    true,
+				Default:     nil,
+			},
+		},
+	}
+
+	err := tc.repo.Create(ctx, query)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Create another query without parameters
+	tc.createTestQuery(ctx, "Simple query", "SELECT 1")
+
+	// List all queries
+	queries, err := tc.repo.ListByDatasource(ctx, tc.projectID, tc.dsID)
+	if err != nil {
+		t.Fatalf("ListByDatasource failed: %v", err)
+	}
+
+	if len(queries) != 2 {
+		t.Fatalf("expected 2 queries, got %d", len(queries))
+	}
+
+	// Find the parameterized query
+	var paramQuery *models.Query
+	for _, q := range queries {
+		if q.ID == query.ID {
+			paramQuery = q
+			break
+		}
+	}
+
+	if paramQuery == nil {
+		t.Fatal("parameterized query not found in list")
+	}
+
+	if len(paramQuery.Parameters) != 2 {
+		t.Errorf("expected 2 parameters in listed query, got %d", len(paramQuery.Parameters))
+	}
+}
+
+func TestQueryRepository_ListEnabled_WithParameters(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create enabled query with parameters
+	query := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Get user by ID",
+		SQLQuery:              "SELECT * FROM users WHERE id = {{user_id}}",
+		Dialect:               "postgres",
+		IsEnabled:             true,
+		Parameters: []models.QueryParameter{
+			{
+				Name:        "user_id",
+				Type:        "integer",
+				Description: "User ID",
+				Required:    true,
+				Default:     nil,
+			},
+		},
+	}
+
+	err := tc.repo.Create(ctx, query)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// List enabled queries
+	queries, err := tc.repo.ListEnabled(ctx, tc.projectID, tc.dsID)
+	if err != nil {
+		t.Fatalf("ListEnabled failed: %v", err)
+	}
+
+	if len(queries) != 1 {
+		t.Fatalf("expected 1 enabled query, got %d", len(queries))
+	}
+
+	if len(queries[0].Parameters) != 1 {
+		t.Errorf("expected 1 parameter in enabled query, got %d", len(queries[0].Parameters))
+	}
+}
+
+func TestQueryRepository_Parameters_WithVariousTypes(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	query := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Complex query with all types",
+		SQLQuery:              "SELECT * FROM table WHERE col1 = {{string_param}} AND col2 = {{int_param}}",
+		Dialect:               "postgres",
+		IsEnabled:             true,
+		Parameters: []models.QueryParameter{
+			{
+				Name:        "string_param",
+				Type:        "string",
+				Description: "String parameter",
+				Required:    true,
+				Default:     "default_value",
+			},
+			{
+				Name:        "int_param",
+				Type:        "integer",
+				Description: "Integer parameter",
+				Required:    false,
+				Default:     float64(42), // JSON numbers are float64
+			},
+			{
+				Name:        "bool_param",
+				Type:        "boolean",
+				Description: "Boolean parameter",
+				Required:    false,
+				Default:     true,
+			},
+			{
+				Name:        "array_param",
+				Type:        "string[]",
+				Description: "String array parameter",
+				Required:    false,
+				Default:     []interface{}{"a", "b", "c"},
+			},
+		},
+	}
+
+	err := tc.repo.Create(ctx, query)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Retrieve and verify all parameter types
+	retrieved, err := tc.repo.GetByID(ctx, tc.projectID, query.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+
+	if len(retrieved.Parameters) != 4 {
+		t.Fatalf("expected 4 parameters, got %d", len(retrieved.Parameters))
+	}
+
+	// Verify each parameter type
+	paramMap := make(map[string]models.QueryParameter)
+	for _, p := range retrieved.Parameters {
+		paramMap[p.Name] = p
+	}
+
+	if p := paramMap["string_param"]; p.Default != "default_value" {
+		t.Errorf("expected string default 'default_value', got %v", p.Default)
+	}
+
+	if p := paramMap["int_param"]; p.Default != float64(42) {
+		t.Errorf("expected int default 42, got %v", p.Default)
+	}
+
+	if p := paramMap["bool_param"]; p.Default != true {
+		t.Errorf("expected bool default true, got %v", p.Default)
+	}
+
+	// Array comparison needs to be done carefully since it comes back as []interface{}
+	if p := paramMap["array_param"]; p.Default != nil {
+		arr, ok := p.Default.([]interface{})
+		if !ok {
+			t.Errorf("expected array default to be []interface{}, got %T", p.Default)
+		} else if len(arr) != 3 {
+			t.Errorf("expected array length 3, got %d", len(arr))
+		}
 	}
 }
