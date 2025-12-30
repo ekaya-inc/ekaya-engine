@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
@@ -49,7 +50,8 @@ func setupQueriesIntegrationTest(t *testing.T) *queriesIntegrationTestContext {
 	}
 
 	// Create the real adapter factory (not a mock) for query execution
-	adapterFactory := datasource.NewDatasourceAdapterFactory()
+	// Pass nil for connection manager since tests use unmanaged pools
+	adapterFactory := datasource.NewDatasourceAdapterFactory(nil)
 
 	// Create datasource repository and service
 	dsRepo := repositories.NewDatasourceRepository()
@@ -101,8 +103,13 @@ func (tc *queriesIntegrationTestContext) makeRequest(method, path string, body a
 	}
 	ctx = database.SetTenantScope(ctx, scope)
 
-	// Set up auth claims
-	claims := &auth.Claims{ProjectID: tc.projectID.String()}
+	// Set up auth claims with user ID (Subject) for connection pooling
+	claims := &auth.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject: "test-user-integration",
+		},
+		ProjectID: tc.projectID.String(),
+	}
 	ctx = context.WithValue(ctx, auth.ClaimsKey, claims)
 
 	req = req.WithContext(ctx)

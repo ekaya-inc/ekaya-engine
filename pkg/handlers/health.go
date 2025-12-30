@@ -24,8 +24,8 @@ type PingResponse struct {
 // HealthResponse contains comprehensive health check information including
 // connection manager statistics for monitoring connection pool health.
 type HealthResponse struct {
-	Status      string                         `json:"status"`
-	Connections *datasource.ConnectionStats    `json:"connections,omitempty"`
+	Status      string                      `json:"status"`
+	Connections *datasource.ConnectionStats `json:"connections,omitempty"`
 }
 
 // HealthHandler handles health check and ping endpoints.

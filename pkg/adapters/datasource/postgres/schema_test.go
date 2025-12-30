@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
 )
 
@@ -48,7 +50,8 @@ func setupSchemaDiscovererTest(t *testing.T) *schemaDiscovererTestContext {
 		SSLMode:  "disable",
 	}
 
-	discoverer, err := NewSchemaDiscoverer(ctx, cfg)
+	// Pass nil for connection manager and zero IDs for unmanaged pool (test mode)
+	discoverer, err := NewSchemaDiscoverer(ctx, cfg, nil, uuid.Nil, uuid.Nil, "")
 	if err != nil {
 		t.Fatalf("failed to create schema discoverer: %v", err)
 	}
@@ -568,7 +571,8 @@ func TestSchemaDiscoverer_Close(t *testing.T) {
 		SSLMode:  "disable",
 	}
 
-	discoverer, err := NewSchemaDiscoverer(ctx, cfg)
+	// Pass nil for connection manager and zero IDs for unmanaged pool (test mode)
+	discoverer, err := NewSchemaDiscoverer(ctx, cfg, nil, uuid.Nil, uuid.Nil, "")
 	if err != nil {
 		t.Fatalf("failed to create discoverer: %v", err)
 	}

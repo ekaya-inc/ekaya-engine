@@ -29,11 +29,11 @@ const testEncryptionKey = "dux2otOLmF8mbcGKm/hk4+WBVT05FmorIokpgrypt9Y="
 // Named differently to avoid conflict with mockAdapterFactory in config_test.go.
 type integrationMockAdapterFactory struct{}
 
-func (f *integrationMockAdapterFactory) NewConnectionTester(ctx context.Context, dsType string, config map[string]any) (datasource.ConnectionTester, error) {
+func (f *integrationMockAdapterFactory) NewConnectionTester(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.ConnectionTester, error) {
 	return &integrationMockConnectionTester{}, nil
 }
 
-func (f *integrationMockAdapterFactory) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any) (datasource.SchemaDiscoverer, error) {
+func (f *integrationMockAdapterFactory) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.SchemaDiscoverer, error) {
 	return nil, nil
 }
 
@@ -43,7 +43,7 @@ func (f *integrationMockAdapterFactory) ListTypes() []datasource.DatasourceAdapt
 	}
 }
 
-func (f *integrationMockAdapterFactory) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any) (datasource.QueryExecutor, error) {
+func (f *integrationMockAdapterFactory) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.QueryExecutor, error) {
 	return nil, nil
 }
 
