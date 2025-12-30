@@ -40,7 +40,9 @@ Enable saved queries to accept named, typed parameters that MCP clients can supp
 
 ### Phase 1: Database Schema Changes
 
-**New Migration: `XXX_query_parameters.up.sql`**
+**Status: [x] Complete**
+
+**New Migration: `012_query_parameters.up.sql`**
 
 ```sql
 -- Add parameters column to engine_queries table
