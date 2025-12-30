@@ -191,7 +191,7 @@ func main() {
 		ontologyChatRepo, ontologyRepo, knowledgeRepo,
 		schemaRepo, ontologyWorkflowRepo, workflowStateRepo, llmFactory, datasourceService, adapterFactory, logger)
 	relationshipWorkflowService := services.NewRelationshipWorkflowService(
-		ontologyWorkflowRepo, relationshipCandidateRepo, schemaRepo, workflowStateRepo,
+		ontologyWorkflowRepo, relationshipCandidateRepo, schemaRepo, workflowStateRepo, ontologyRepo,
 		datasourceService, adapterFactory, llmFactory, discoveryService, getTenantCtx, logger)
 
 	mux := http.NewServeMux()

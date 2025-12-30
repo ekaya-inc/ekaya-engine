@@ -82,6 +82,7 @@ type relationshipWorkflowService struct {
 	candidateRepo    repositories.RelationshipCandidateRepository
 	schemaRepo       repositories.SchemaRepository
 	stateRepo        repositories.WorkflowStateRepository
+	ontologyRepo     repositories.OntologyRepository
 	dsSvc            DatasourceService
 	adapterFactory   datasource.DatasourceAdapterFactory
 	llmFactory       llm.LLMClientFactory
@@ -100,6 +101,7 @@ func NewRelationshipWorkflowService(
 	candidateRepo repositories.RelationshipCandidateRepository,
 	schemaRepo repositories.SchemaRepository,
 	stateRepo repositories.WorkflowStateRepository,
+	ontologyRepo repositories.OntologyRepository,
 	dsSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
@@ -116,6 +118,7 @@ func NewRelationshipWorkflowService(
 		candidateRepo:    candidateRepo,
 		schemaRepo:       schemaRepo,
 		stateRepo:        stateRepo,
+		ontologyRepo:     ontologyRepo,
 		dsSvc:            dsSvc,
 		adapterFactory:   adapterFactory,
 		llmFactory:       llmFactory,
@@ -143,27 +146,52 @@ func (s *relationshipWorkflowService) StartDetection(ctx context.Context, projec
 		return nil, fmt.Errorf("relationship detection already in progress for this datasource")
 	}
 
-	// Step 2: Create a temporary ontology for this workflow
-	// We need an ontology ID for the workflow, but this won't be the "real" ontology
-	// until the ontology phase runs later
-	ontology := &models.TieredOntology{
-		ID:              uuid.New(),
-		ProjectID:       projectID,
-		Version:         0, // Temporary version, will be replaced by actual ontology
-		IsActive:        false,
-		EntitySummaries: make(map[string]*models.EntitySummary),
-		ColumnDetails:   make(map[string][]models.ColumnDetail),
-		Metadata:        make(map[string]any),
-	}
-
-	// Create temporary ontology - this is just a placeholder for the workflow
-	// The actual ontology will be created during the ontology phase
-	ontologyRepo := repositories.NewOntologyRepository()
-	if err := ontologyRepo.Create(ctx, ontology); err != nil {
-		s.logger.Error("Failed to create temporary ontology",
+	// Step 2: Get or create ontology for this project
+	// Reuse existing active ontology if one exists, otherwise create a new one
+	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	if err != nil {
+		s.logger.Error("Failed to check for existing ontology",
 			zap.String("project_id", projectID.String()),
 			zap.Error(err))
-		return nil, err
+		return nil, fmt.Errorf("check existing ontology: %w", err)
+	}
+
+	if ontology == nil {
+		// No active ontology exists - create one
+		nextVersion, err := s.ontologyRepo.GetNextVersion(ctx, projectID)
+		if err != nil {
+			s.logger.Error("Failed to get next ontology version",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			return nil, fmt.Errorf("get next version: %w", err)
+		}
+
+		ontology = &models.TieredOntology{
+			ID:              uuid.New(),
+			ProjectID:       projectID,
+			Version:         nextVersion,
+			IsActive:        true,
+			EntitySummaries: make(map[string]*models.EntitySummary),
+			ColumnDetails:   make(map[string][]models.ColumnDetail),
+			Metadata:        make(map[string]any),
+		}
+
+		if err := s.ontologyRepo.Create(ctx, ontology); err != nil {
+			s.logger.Error("Failed to create ontology",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			return nil, fmt.Errorf("failed to create ontology: %w", err)
+		}
+
+		s.logger.Info("Created new ontology for relationship detection",
+			zap.String("project_id", projectID.String()),
+			zap.String("ontology_id", ontology.ID.String()),
+			zap.Int("version", nextVersion))
+	} else {
+		s.logger.Info("Reusing existing ontology for relationship detection",
+			zap.String("project_id", projectID.String()),
+			zap.String("ontology_id", ontology.ID.String()),
+			zap.Int("version", ontology.Version))
 	}
 
 	// Step 3: Create workflow for relationships phase

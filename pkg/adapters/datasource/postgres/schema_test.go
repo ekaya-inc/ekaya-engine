@@ -553,6 +553,46 @@ func TestSchemaDiscoverer_AnalyzeJoin_NoMatch(t *testing.T) {
 	}
 }
 
+func TestSchemaDiscoverer_AnalyzeJoin_CrossTypeComparison(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// Create temporary tables with mismatched column types to test cross-type joins.
+	// This simulates real-world scenarios where a text column (e.g., external_id)
+	// might reference a bigint column (e.g., id) or vice versa.
+	setupSQL := `
+		CREATE TEMP TABLE test_text_col (id SERIAL PRIMARY KEY, ref_id TEXT);
+		CREATE TEMP TABLE test_bigint_col (id BIGINT PRIMARY KEY);
+		INSERT INTO test_text_col (ref_id) VALUES ('1'), ('2'), ('3');
+		INSERT INTO test_bigint_col (id) VALUES (1), (2), (3);
+	`
+
+	// Get underlying pool to execute setup SQL
+	_, err := tc.discoverer.pool.Exec(ctx, setupSQL)
+	if err != nil {
+		t.Fatalf("failed to create test tables: %v", err)
+	}
+
+	// Attempt to join text column to bigint column.
+	// The values match semantically ('1' = 1, '2' = 2, etc.) but types differ.
+	result, err := tc.discoverer.AnalyzeJoin(ctx,
+		"pg_temp", "test_text_col", "ref_id",
+		"pg_temp", "test_bigint_col", "id")
+
+	// Should succeed (not fail with type mismatch error)
+	if err != nil {
+		t.Fatalf("AnalyzeJoin should handle cross-type comparison (text vs bigint), got error: %v", err)
+	}
+
+	// Verify the join found matches (all 3 rows should match)
+	if result.JoinCount != 3 {
+		t.Errorf("expected 3 matched rows, got %d", result.JoinCount)
+	}
+	if result.OrphanCount != 0 {
+		t.Errorf("expected 0 orphans, got %d", result.OrphanCount)
+	}
+}
+
 func TestSchemaDiscoverer_Close(t *testing.T) {
 	testDB := testhelpers.GetTestDB(t)
 

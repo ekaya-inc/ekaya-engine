@@ -311,6 +311,7 @@ func (d *SchemaDiscoverer) AnalyzeJoin(ctx context.Context,
 	tgtTable := pgx.Identifier{targetTable}.Sanitize()
 	tgtCol := pgx.Identifier{targetColumn}.Sanitize()
 
+	// Cast columns to text to handle cross-type comparisons (e.g., text vs bigint)
 	query := fmt.Sprintf(`
 		WITH join_stats AS (
 			SELECT
@@ -318,12 +319,12 @@ func (d *SchemaDiscoverer) AnalyzeJoin(ctx context.Context,
 				COUNT(DISTINCT s.%s) as source_matched,
 				COUNT(DISTINCT t.%s) as target_matched
 			FROM %s.%s s
-			JOIN %s.%s t ON s.%s = t.%s
+			JOIN %s.%s t ON s.%s::text = t.%s::text
 		),
 		orphan_stats AS (
 			SELECT COUNT(*) as orphan_count
 			FROM %s.%s s
-			LEFT JOIN %s.%s t ON s.%s = t.%s
+			LEFT JOIN %s.%s t ON s.%s::text = t.%s::text
 			WHERE t.%s IS NULL AND s.%s IS NOT NULL
 		)
 		SELECT join_count, source_matched, target_matched, orphan_count

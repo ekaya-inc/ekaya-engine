@@ -368,6 +368,78 @@ func (m *rwsMockStateRepository) FindQuestionByID(ctx context.Context, questionI
 	return nil, nil, nil, nil
 }
 
+// rwsMockOntologyRepository is a mock for OntologyRepository.
+type rwsMockOntologyRepository struct {
+	activeOntology      *models.TieredOntology
+	getActiveErr        error
+	createErr           error
+	createdOntology     *models.TieredOntology
+	getNextVersionValue int
+	getNextVersionErr   error
+}
+
+func (m *rwsMockOntologyRepository) Create(ctx context.Context, ontology *models.TieredOntology) error {
+	if m.createErr != nil {
+		return m.createErr
+	}
+	m.createdOntology = ontology
+	return nil
+}
+
+func (m *rwsMockOntologyRepository) GetActive(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error) {
+	if m.getActiveErr != nil {
+		return nil, m.getActiveErr
+	}
+	return m.activeOntology, nil
+}
+
+func (m *rwsMockOntologyRepository) GetByVersion(ctx context.Context, projectID uuid.UUID, version int) (*models.TieredOntology, error) {
+	return nil, nil
+}
+
+func (m *rwsMockOntologyRepository) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
+	return nil
+}
+
+func (m *rwsMockOntologyRepository) UpdateEntitySummary(ctx context.Context, projectID uuid.UUID, tableName string, summary *models.EntitySummary) error {
+	return nil
+}
+
+func (m *rwsMockOntologyRepository) UpdateEntitySummaries(ctx context.Context, projectID uuid.UUID, summaries map[string]*models.EntitySummary) error {
+	return nil
+}
+
+func (m *rwsMockOntologyRepository) UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
+	return nil
+}
+
+func (m *rwsMockOntologyRepository) UpdateMetadata(ctx context.Context, projectID uuid.UUID, metadata map[string]any) error {
+	return nil
+}
+
+func (m *rwsMockOntologyRepository) SetActive(ctx context.Context, projectID uuid.UUID, version int) error {
+	return nil
+}
+
+func (m *rwsMockOntologyRepository) DeactivateAll(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
+func (m *rwsMockOntologyRepository) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
+	if m.getNextVersionErr != nil {
+		return 0, m.getNextVersionErr
+	}
+	return m.getNextVersionValue, nil
+}
+
+func (m *rwsMockOntologyRepository) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
+func (m *rwsMockOntologyRepository) WriteCleanOntology(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
 // rwsMockDatasourceService is a mock for DatasourceService.
 type rwsMockDatasourceService struct {
 	datasource *models.Datasource
@@ -496,6 +568,7 @@ func newTestRelationshipWorkflowService(
 	candidateRepo *rwsMockCandidateRepository,
 	schemaRepo *rwsMockSchemaRepository,
 	stateRepo *rwsMockStateRepository,
+	ontologyRepo *rwsMockOntologyRepository,
 	dsSvc *rwsMockDatasourceService,
 	adapterFactory *rwsMockAdapterFactory,
 	llmFactory *rwsMockLLMFactory,
@@ -505,6 +578,7 @@ func newTestRelationshipWorkflowService(
 		candidateRepo:    candidateRepo,
 		schemaRepo:       schemaRepo,
 		stateRepo:        stateRepo,
+		ontologyRepo:     ontologyRepo,
 		dsSvc:            dsSvc,
 		adapterFactory:   adapterFactory,
 		llmFactory:       llmFactory,
@@ -536,6 +610,7 @@ func TestRelationshipWorkflow_EnqueueColumnScans_EmptyColumns(t *testing.T) {
 		&rwsMockCandidateRepository{},
 		schemaRepo,
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -582,6 +657,7 @@ func TestRelationshipWorkflow_EnqueueColumnScans_WithColumns(t *testing.T) {
 		&rwsMockCandidateRepository{},
 		schemaRepo,
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -627,6 +703,7 @@ func TestRelationshipWorkflow_EnqueueColumnScans_SkipsOrphanedColumns(t *testing
 		&rwsMockCandidateRepository{},
 		schemaRepo,
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -662,6 +739,7 @@ func TestRelationshipWorkflow_EnqueueColumnScans_ListTablesError(t *testing.T) {
 		&rwsMockCandidateRepository{},
 		schemaRepo,
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -695,6 +773,7 @@ func TestRelationshipWorkflow_EnqueueColumnScans_ListColumnsError(t *testing.T) 
 		&rwsMockCandidateRepository{},
 		schemaRepo,
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -729,6 +808,7 @@ func TestRelationshipWorkflow_EnqueueTestJoins_EmptyCandidates(t *testing.T) {
 		candidateRepo,
 		&rwsMockSchemaRepository{},
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -766,6 +846,7 @@ func TestRelationshipWorkflow_EnqueueTestJoins_WithCandidates(t *testing.T) {
 		candidateRepo,
 		&rwsMockSchemaRepository{},
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -799,6 +880,7 @@ func TestRelationshipWorkflow_EnqueueTestJoins_GetCandidatesError(t *testing.T) 
 		candidateRepo,
 		&rwsMockSchemaRepository{},
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -830,6 +912,7 @@ func TestRelationshipWorkflow_UpdateProgress_Success(t *testing.T) {
 		&rwsMockCandidateRepository{},
 		&rwsMockSchemaRepository{},
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -873,6 +956,7 @@ func TestRelationshipWorkflow_UpdateProgress_Error(t *testing.T) {
 		&rwsMockCandidateRepository{},
 		&rwsMockSchemaRepository{},
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -899,6 +983,7 @@ func TestRelationshipWorkflow_MarkWorkflowFailed_Success(t *testing.T) {
 		&rwsMockCandidateRepository{},
 		&rwsMockSchemaRepository{},
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -930,6 +1015,7 @@ func TestRelationshipWorkflow_FinalizeWorkflow_Success(t *testing.T) {
 		candidateRepo,
 		&rwsMockSchemaRepository{},
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -965,6 +1051,7 @@ func TestRelationshipWorkflow_FinalizeWorkflow_WithPendingCandidates(t *testing.
 		candidateRepo,
 		&rwsMockSchemaRepository{},
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -1012,6 +1099,7 @@ func TestRelationshipWorkflow_InitializeWorkflowEntities_Success(t *testing.T) {
 		&rwsMockCandidateRepository{},
 		schemaRepo,
 		stateRepo,
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -1068,6 +1156,7 @@ func TestRelationshipWorkflow_InitializeWorkflowEntities_SkipsOrphanedColumns(t 
 		&rwsMockCandidateRepository{},
 		schemaRepo,
 		stateRepo,
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -1107,6 +1196,7 @@ func TestRelationshipWorkflow_GetStatus_Success(t *testing.T) {
 		&rwsMockCandidateRepository{},
 		&rwsMockSchemaRepository{},
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -1134,6 +1224,7 @@ func TestRelationshipWorkflow_GetStatus_Error(t *testing.T) {
 		&rwsMockCandidateRepository{},
 		&rwsMockSchemaRepository{},
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -1160,6 +1251,7 @@ func TestRelationshipWorkflow_Cancel_Success(t *testing.T) {
 		candidateRepo,
 		&rwsMockSchemaRepository{},
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -1184,6 +1276,7 @@ func TestRelationshipWorkflow_Cancel_DeleteCandidatesError(t *testing.T) {
 		candidateRepo,
 		&rwsMockSchemaRepository{},
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -1220,6 +1313,7 @@ func TestRelationshipWorkflow_SaveRelationships_RequiredPendingError(t *testing.
 		candidateRepo,
 		&rwsMockSchemaRepository{},
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -1260,6 +1354,7 @@ func TestRelationshipWorkflow_SaveRelationships_NoDatasourceID(t *testing.T) {
 		candidateRepo,
 		&rwsMockSchemaRepository{},
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -1329,6 +1424,7 @@ func TestRelationshipWorkflow_SaveRelationships_Success(t *testing.T) {
 		candidateRepo,
 		schemaRepo,
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -1390,6 +1486,7 @@ func TestRelationshipWorkflow_SaveRelationships_ColumnNotFound(t *testing.T) {
 		candidateRepo,
 		schemaRepo,
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -1441,6 +1538,7 @@ func TestRelationshipWorkflow_SaveRelationships_EmptyAccepted(t *testing.T) {
 		candidateRepo,
 		schemaRepo,
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -1470,6 +1568,7 @@ func TestRelationshipWorkflow_Heartbeat_StartStop(t *testing.T) {
 		&rwsMockCandidateRepository{},
 		&rwsMockSchemaRepository{},
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -1507,6 +1606,7 @@ func TestRelationshipWorkflow_TaskQueueWriter_StartStop(t *testing.T) {
 		&rwsMockCandidateRepository{},
 		&rwsMockSchemaRepository{},
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -1562,23 +1662,40 @@ func TestRelationshipWorkflow_StartDetection_Success(t *testing.T) {
 		},
 	}
 
+	ontologyRepo := &rwsMockOntologyRepository{
+		activeOntology:      nil, // No existing ontology
+		getNextVersionValue: 1,
+	}
+
 	svc := newTestRelationshipWorkflowService(
 		workflowRepo,
 		&rwsMockCandidateRepository{},
 		schemaRepo,
 		&rwsMockStateRepository{},
+		ontologyRepo,
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
 	)
 
-	// StartDetection will fail when trying to create the ontology because we don't have a real DB
-	// This is a limitation of unit testing - we'd need integration tests to fully test this flow
-	_, err := svc.StartDetection(context.Background(), projectID, datasourceID)
+	workflow, err := svc.StartDetection(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("StartDetection() error = %v, want nil", err)
+	}
 
-	// We expect an error because we can't create the ontology without DB
-	if err == nil {
-		t.Error("expected error due to ontology creation, got nil")
+	// Verify workflow was created
+	if workflow == nil {
+		t.Fatal("expected workflow to be created")
+	}
+
+	// Verify ontology was created (since none existed)
+	if ontologyRepo.createdOntology == nil {
+		t.Error("expected ontology to be created")
+	}
+
+	// Verify workflow references the created ontology
+	if workflow.OntologyID != ontologyRepo.createdOntology.ID {
+		t.Errorf("workflow.OntologyID = %v, want %v", workflow.OntologyID, ontologyRepo.createdOntology.ID)
 	}
 }
 
@@ -1604,6 +1721,7 @@ func TestRelationshipWorkflow_StartDetection_ExistingActiveWorkflow(t *testing.T
 		&rwsMockCandidateRepository{},
 		&rwsMockSchemaRepository{},
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -1641,6 +1759,7 @@ func TestRelationshipWorkflow_StartDetection_ClaimOwnershipFails(t *testing.T) {
 		&rwsMockCandidateRepository{},
 		schemaRepo,
 		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
 		&rwsMockDatasourceService{},
 		&rwsMockAdapterFactory{},
 		&rwsMockLLMFactory{},
@@ -1651,5 +1770,186 @@ func TestRelationshipWorkflow_StartDetection_ClaimOwnershipFails(t *testing.T) {
 	_, err := svc.StartDetection(context.Background(), projectID, datasourceID)
 	if err == nil {
 		t.Error("expected error, got nil")
+	}
+}
+
+// ============================================================================
+// Tests for Ontology Reuse Behavior
+// ============================================================================
+
+func TestRelationshipWorkflow_StartDetection_ReusesExistingActiveOntology(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	existingOntologyID := uuid.New()
+
+	// Existing active ontology for this project
+	existingOntology := &models.TieredOntology{
+		ID:        existingOntologyID,
+		ProjectID: projectID,
+		Version:   1,
+		IsActive:  true,
+	}
+
+	ontologyRepo := &rwsMockOntologyRepository{
+		activeOntology: existingOntology,
+	}
+
+	workflowRepo := &rwsMockWorkflowRepository{
+		workflow:             nil, // No existing workflow
+		claimOwnershipResult: true,
+	}
+
+	schemaRepo := &rwsMockSchemaRepository{
+		mockSchemaRepository: mockSchemaRepository{
+			tables:  []*models.SchemaTable{},
+			columns: []*models.SchemaColumn{},
+		},
+	}
+
+	svc := newTestRelationshipWorkflowService(
+		workflowRepo,
+		&rwsMockCandidateRepository{},
+		schemaRepo,
+		&rwsMockStateRepository{},
+		ontologyRepo,
+		&rwsMockDatasourceService{},
+		&rwsMockAdapterFactory{},
+		&rwsMockLLMFactory{},
+	)
+
+	workflow, err := svc.StartDetection(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("StartDetection() error = %v, want nil", err)
+	}
+
+	// Should reuse the existing ontology, not create a new one
+	if ontologyRepo.createdOntology != nil {
+		t.Error("should NOT have created a new ontology when active one exists")
+	}
+
+	// Workflow should reference the existing ontology
+	if workflow.OntologyID != existingOntologyID {
+		t.Errorf("workflow.OntologyID = %v, want %v (existing)", workflow.OntologyID, existingOntologyID)
+	}
+}
+
+func TestRelationshipWorkflow_StartDetection_CreatesActiveOntologyWhenNoneExists(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	// No existing active ontology
+	ontologyRepo := &rwsMockOntologyRepository{
+		activeOntology:      nil, // No active ontology
+		getNextVersionValue: 1,
+	}
+
+	workflowRepo := &rwsMockWorkflowRepository{
+		workflow:             nil, // No existing workflow
+		claimOwnershipResult: true,
+	}
+
+	schemaRepo := &rwsMockSchemaRepository{
+		mockSchemaRepository: mockSchemaRepository{
+			tables:  []*models.SchemaTable{},
+			columns: []*models.SchemaColumn{},
+		},
+	}
+
+	svc := newTestRelationshipWorkflowService(
+		workflowRepo,
+		&rwsMockCandidateRepository{},
+		schemaRepo,
+		&rwsMockStateRepository{},
+		ontologyRepo,
+		&rwsMockDatasourceService{},
+		&rwsMockAdapterFactory{},
+		&rwsMockLLMFactory{},
+	)
+
+	workflow, err := svc.StartDetection(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("StartDetection() error = %v, want nil", err)
+	}
+
+	// Should have created a new ontology
+	if ontologyRepo.createdOntology == nil {
+		t.Fatal("should have created a new ontology when none exists")
+	}
+
+	// New ontology should be active
+	if !ontologyRepo.createdOntology.IsActive {
+		t.Error("created ontology should have IsActive = true")
+	}
+
+	// Workflow should reference the new ontology
+	if workflow.OntologyID != ontologyRepo.createdOntology.ID {
+		t.Errorf("workflow.OntologyID = %v, want %v (created)", workflow.OntologyID, ontologyRepo.createdOntology.ID)
+	}
+}
+
+func TestRelationshipWorkflow_StartDetection_SecondRunReusesOntology(t *testing.T) {
+	// This test verifies that running relationship detection twice on the same project
+	// reuses the same ontology (no duplicate key violation)
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	existingOntologyID := uuid.New()
+
+	// Simulate second run: ontology already exists from first run
+	existingOntology := &models.TieredOntology{
+		ID:        existingOntologyID,
+		ProjectID: projectID,
+		Version:   1,
+		IsActive:  true,
+	}
+
+	ontologyRepo := &rwsMockOntologyRepository{
+		activeOntology: existingOntology,
+	}
+
+	// First workflow completed (terminal state)
+	completedWorkflow := &models.OntologyWorkflow{
+		ID:           uuid.New(),
+		ProjectID:    projectID,
+		DatasourceID: &datasourceID,
+		State:        models.WorkflowStateCompleted, // Terminal state
+		Phase:        models.WorkflowPhaseRelationships,
+	}
+
+	workflowRepo := &rwsMockWorkflowRepository{
+		workflow:             completedWorkflow, // Previous workflow completed
+		claimOwnershipResult: true,
+	}
+
+	schemaRepo := &rwsMockSchemaRepository{
+		mockSchemaRepository: mockSchemaRepository{
+			tables:  []*models.SchemaTable{},
+			columns: []*models.SchemaColumn{},
+		},
+	}
+
+	svc := newTestRelationshipWorkflowService(
+		workflowRepo,
+		&rwsMockCandidateRepository{},
+		schemaRepo,
+		&rwsMockStateRepository{},
+		ontologyRepo,
+		&rwsMockDatasourceService{},
+		&rwsMockAdapterFactory{},
+		&rwsMockLLMFactory{},
+	)
+
+	workflow, err := svc.StartDetection(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("StartDetection() on second run error = %v, want nil", err)
+	}
+
+	// Should NOT create a new ontology
+	if ontologyRepo.createdOntology != nil {
+		t.Error("second run should NOT create a new ontology")
+	}
+
+	// New workflow should reference the existing ontology
+	if workflow.OntologyID != existingOntologyID {
+		t.Errorf("workflow.OntologyID = %v, want %v (existing)", workflow.OntologyID, existingOntologyID)
 	}
 }
