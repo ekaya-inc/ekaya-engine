@@ -164,18 +164,28 @@ interface QueryResultsTableProps {
 - Long strings → truncate with ellipsis, full value in tooltip
 - Numbers → right-aligned
 
-### 6. Testing
+### 6. Testing ✅ [x] COMPLETE
 
 **New test file:** `ui/src/components/__tests__/QueryResultsTable.test.tsx`
 
 Test cases:
-- Renders column headers correctly
-- Displays correct number of rows (respects maxRows)
-- Shows row count summary
-- Handles empty results
-- Handles null values in cells
-- Truncates to maxColumns
-- Shows truncation warning when applicable
+- Renders column headers correctly ✅
+- Displays correct number of rows (respects maxRows) ✅
+- Shows row count summary ✅
+- Handles empty results ✅
+- Handles null values in cells ✅
+- Truncates to maxColumns ✅
+- Shows truncation warning when applicable ✅
+
+**Additional test coverage (beyond requirements):**
+- Boolean value styling
+- No truncation warning when not needed
+- Alternating row colors
+- Copy buttons for cell values
+- Number formatting
+- Sticky first column
+
+**Status:** Complete - All 13 tests passing (verified Dec 30, 2025)
 
 ## File Changes Summary
 
