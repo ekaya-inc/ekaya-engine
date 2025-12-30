@@ -131,6 +131,12 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 		}
 	}
 
+	// Ensure Parameters is never nil (database column has NOT NULL constraint)
+	params := req.Parameters
+	if params == nil {
+		params = []models.QueryParameter{}
+	}
+
 	// Create query model with dialect derived from datasource type
 	query := &models.Query{
 		ProjectID:             projectID,
@@ -139,7 +145,7 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 		SQLQuery:              req.SQLQuery,
 		Dialect:               ds.DatasourceType, // Derived from datasource type
 		IsEnabled:             req.IsEnabled,
-		Parameters:            req.Parameters,
+		Parameters:            params,
 		UsageCount:            0,
 	}
 
@@ -370,13 +376,20 @@ func (s *queryService) Test(ctx context.Context, projectID, datasourceID uuid.UU
 	defer executor.Close()
 
 	// Execute query with or without parameters
+	// Check for parameter definitions (not just values) since defaults may apply
 	var result *datasource.QueryExecutionResult
-	if len(req.ParameterValues) > 0 {
+	if len(req.ParameterDefinitions) > 0 {
+		// Use parameter values or empty map (defaults will apply)
+		paramValues := req.ParameterValues
+		if paramValues == nil {
+			paramValues = map[string]any{}
+		}
+
 		// Validate and coerce parameter values
-		if err := s.validateRequiredParameters(req.ParameterDefinitions, req.ParameterValues); err != nil {
+		if err := s.validateRequiredParameters(req.ParameterDefinitions, paramValues); err != nil {
 			return nil, err
 		}
-		coercedParams, err := s.coerceParameterTypes(req.ParameterDefinitions, req.ParameterValues)
+		coercedParams, err := s.coerceParameterTypes(req.ParameterDefinitions, paramValues)
 		if err != nil {
 			return nil, err
 		}

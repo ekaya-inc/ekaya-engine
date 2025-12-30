@@ -56,11 +56,14 @@ func (tc *schemaEntityTestContext) ensureTestProjectAndOntology() {
 		tc.t.Fatalf("failed to ensure test project: %v", err)
 	}
 
+	// Delete any existing workflow and ontology for this project to start fresh
+	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontology_workflows WHERE project_id = $1`, tc.projectID)
+	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontologies WHERE project_id = $1`, tc.projectID)
+
 	// Create ontology
 	_, err = scope.Conn.Exec(ctx, `
 		INSERT INTO engine_ontologies (id, project_id, version, is_active)
 		VALUES ($1, $2, 1, true)
-		ON CONFLICT (id) DO NOTHING
 	`, tc.ontologyID, tc.projectID)
 	if err != nil {
 		tc.t.Fatalf("failed to ensure test ontology: %v", err)
