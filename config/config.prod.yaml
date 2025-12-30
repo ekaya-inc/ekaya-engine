@@ -33,8 +33,10 @@ redis:
 
 # Datasource configuration
 datasource:
-  connection_ttl_minutes: 5
-  max_connections_per_user: 1
+  connection_ttl_minutes: 5      # How long idle connections are kept
+  max_connections_per_user: 10   # Limit per user to prevent exhaustion
+  pool_max_conns: 10             # Max connections per datasource pool
+  pool_min_conns: 1              # Min connections per datasource pool
 
 # SDAP configuration
 # SDAP auth settings should be provided via environment variables

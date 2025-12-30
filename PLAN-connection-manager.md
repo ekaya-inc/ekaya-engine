@@ -1039,11 +1039,11 @@ queryService := services.NewQueryService(queryRepo, datasourceService, adapterFa
   - Update calls to factory methods
 
 ### Step 9: Add Configuration
-- [ ] Modify `config/config.go`
-- [ ] Add `DatasourceConfig` struct with connection manager settings
-- [ ] Add `Datasource DatasourceConfig` field to main `Config` struct
-- [ ] Set sensible defaults (TTL: 5min, MaxPerUser: 10, PoolMax: 10, PoolMin: 1)
-- [ ] Update config.yaml.example with new datasource section
+- [x] Modify `config/config.go`
+- [x] Add `DatasourceConfig` struct with connection manager settings
+- [x] Add `Datasource DatasourceConfig` field to main `Config` struct
+- [x] Set sensible defaults (TTL: 5min, MaxPerUser: 10, PoolMax: 10, PoolMin: 1)
+- [x] Update config.yaml.example with new datasource section
 
 ### Step 10: Wire in Main
 - [ ] Modify `main.go`
