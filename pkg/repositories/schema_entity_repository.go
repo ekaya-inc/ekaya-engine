@@ -17,6 +17,7 @@ type SchemaEntityRepository interface {
 	// Entity operations
 	Create(ctx context.Context, entity *models.SchemaEntity) error
 	GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.SchemaEntity, error)
+	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.SchemaEntity, error)
 	GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.SchemaEntity, error)
 	DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error
 
@@ -24,6 +25,7 @@ type SchemaEntityRepository interface {
 	CreateOccurrence(ctx context.Context, occ *models.SchemaEntityOccurrence) error
 	GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.SchemaEntityOccurrence, error)
 	GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.SchemaEntityOccurrence, error)
+	GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.SchemaEntityOccurrence, error)
 }
 
 type schemaEntityRepository struct{}
@@ -89,6 +91,43 @@ func (r *schemaEntityRepository) GetByOntology(ctx context.Context, ontologyID u
 	rows, err := scope.Conn.Query(ctx, query, ontologyID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query schema entities: %w", err)
+	}
+	defer rows.Close()
+
+	var entities []*models.SchemaEntity
+	for rows.Next() {
+		entity, err := scanSchemaEntity(rows)
+		if err != nil {
+			return nil, err
+		}
+		entities = append(entities, entity)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating schema entities: %w", err)
+	}
+
+	return entities, nil
+}
+
+func (r *schemaEntityRepository) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.SchemaEntity, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT e.id, e.project_id, e.ontology_id, e.name, e.description,
+		       e.primary_schema, e.primary_table, e.primary_column,
+		       e.created_at, e.updated_at
+		FROM engine_schema_entities e
+		JOIN engine_ontologies o ON e.ontology_id = o.id
+		WHERE e.project_id = $1 AND o.is_active = true
+		ORDER BY e.name`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query schema entities by project: %w", err)
 	}
 	defer rows.Close()
 
@@ -230,6 +269,42 @@ func (r *schemaEntityRepository) GetOccurrencesByTable(ctx context.Context, onto
 	rows, err := scope.Conn.Query(ctx, query, ontologyID, schema, table)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query entity occurrences by table: %w", err)
+	}
+	defer rows.Close()
+
+	var occurrences []*models.SchemaEntityOccurrence
+	for rows.Next() {
+		occ, err := scanSchemaEntityOccurrence(rows)
+		if err != nil {
+			return nil, err
+		}
+		occurrences = append(occurrences, occ)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating entity occurrences: %w", err)
+	}
+
+	return occurrences, nil
+}
+
+func (r *schemaEntityRepository) GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.SchemaEntityOccurrence, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT o.id, o.entity_id, o.schema_name, o.table_name, o.column_name, o.role, o.confidence, o.created_at
+		FROM engine_schema_entity_occurrences o
+		JOIN engine_schema_entities e ON o.entity_id = e.id
+		JOIN engine_ontologies ont ON e.ontology_id = ont.id
+		WHERE e.project_id = $1 AND ont.is_active = true
+		ORDER BY o.schema_name, o.table_name, o.column_name`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query entity occurrences by project: %w", err)
 	}
 	defer rows.Close()
 
