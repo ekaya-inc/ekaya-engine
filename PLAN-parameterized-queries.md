@@ -785,6 +785,8 @@ var approvedQueriesToolNames = map[string]bool{
 
 ### Phase 10: Frontend UI Changes
 
+**Status: [x] Complete**
+
 **File: `ui/src/components/QueriesView.tsx`**
 
 #### Parameter Definition UI
