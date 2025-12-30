@@ -98,7 +98,7 @@ type mockAdapterFactory struct {
 	factoryErr error
 }
 
-func (m *mockAdapterFactory) NewConnectionTester(ctx context.Context, dsType string, config map[string]any) (datasource.ConnectionTester, error) {
+func (m *mockAdapterFactory) NewConnectionTester(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.ConnectionTester, error) {
 	if m.factoryErr != nil {
 		return nil, m.factoryErr
 	}
@@ -108,11 +108,11 @@ func (m *mockAdapterFactory) NewConnectionTester(ctx context.Context, dsType str
 	return m.tester, nil
 }
 
-func (m *mockAdapterFactory) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any) (datasource.SchemaDiscoverer, error) {
+func (m *mockAdapterFactory) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.SchemaDiscoverer, error) {
 	return nil, errors.New("not implemented in mock")
 }
 
-func (m *mockAdapterFactory) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any) (datasource.QueryExecutor, error) {
+func (m *mockAdapterFactory) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.QueryExecutor, error) {
 	return nil, errors.New("not implemented in mock")
 }
 

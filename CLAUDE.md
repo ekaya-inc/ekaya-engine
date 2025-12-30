@@ -210,7 +210,7 @@ When manually testing the ontology extraction workflow, use Chrome browser integ
 | `engine_ontologies` | Ontology data (entity_summaries, column_details) |
 | `engine_ontology_questions` | Questions generated during analysis (decoupled from workflow) |
 | `engine_ontology_chat_messages` | LLM conversation history |
-| `engine_workflow_state` | Per-entity state (table/column/global) |
+| `engine_workflow_state` | Per-entity state (table/column/global). Preserved after workflow completes for assessor scripts; deleted when new extraction starts. |
 | `engine_project_knowledge` | Project-level knowledge and context |
 
 ### Clear Tables Before Testing

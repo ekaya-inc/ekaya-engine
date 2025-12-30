@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
@@ -18,11 +19,11 @@ type mockAdapterFactory struct {
 	types []datasource.DatasourceAdapterInfo
 }
 
-func (m *mockAdapterFactory) NewConnectionTester(_ context.Context, _ string, _ map[string]any) (datasource.ConnectionTester, error) {
+func (m *mockAdapterFactory) NewConnectionTester(_ context.Context, _ string, _ map[string]any, _ uuid.UUID, _ uuid.UUID, _ string) (datasource.ConnectionTester, error) {
 	return nil, nil
 }
 
-func (m *mockAdapterFactory) NewSchemaDiscoverer(_ context.Context, _ string, _ map[string]any) (datasource.SchemaDiscoverer, error) {
+func (m *mockAdapterFactory) NewSchemaDiscoverer(_ context.Context, _ string, _ map[string]any, _ uuid.UUID, _ uuid.UUID, _ string) (datasource.SchemaDiscoverer, error) {
 	return nil, nil
 }
 
@@ -33,7 +34,7 @@ func (m *mockAdapterFactory) ListTypes() []datasource.DatasourceAdapterInfo {
 	return []datasource.DatasourceAdapterInfo{}
 }
 
-func (m *mockAdapterFactory) NewQueryExecutor(_ context.Context, _ string, _ map[string]any) (datasource.QueryExecutor, error) {
+func (m *mockAdapterFactory) NewQueryExecutor(_ context.Context, _ string, _ map[string]any, _ uuid.UUID, _ uuid.UUID, _ string) (datasource.QueryExecutor, error) {
 	return nil, nil
 }
 

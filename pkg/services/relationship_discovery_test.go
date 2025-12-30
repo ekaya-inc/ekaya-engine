@@ -5,12 +5,29 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
+
+// ============================================================================
+// Test Helpers
+// ============================================================================
+
+// testContextWithAuth creates a context with JWT claims for testing
+func testContextWithAuthRD(projectID, userID string) context.Context {
+	claims := &auth.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject: userID,
+		},
+		ProjectID: projectID,
+	}
+	return context.WithValue(context.Background(), auth.ClaimsKey, claims)
+}
 
 // ============================================================================
 // Mock Implementations for Relationship Discovery Tests
@@ -137,11 +154,11 @@ type rdMockAdapterFactory struct {
 	discovererErr error
 }
 
-func (m *rdMockAdapterFactory) NewConnectionTester(ctx context.Context, dsType string, config map[string]any) (datasource.ConnectionTester, error) {
+func (m *rdMockAdapterFactory) NewConnectionTester(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.ConnectionTester, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (m *rdMockAdapterFactory) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any) (datasource.SchemaDiscoverer, error) {
+func (m *rdMockAdapterFactory) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.SchemaDiscoverer, error) {
 	if m.discovererErr != nil {
 		return nil, m.discovererErr
 	}
@@ -152,7 +169,7 @@ func (m *rdMockAdapterFactory) ListTypes() []datasource.DatasourceAdapterInfo {
 	return nil
 }
 
-func (m *rdMockAdapterFactory) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any) (datasource.QueryExecutor, error) {
+func (m *rdMockAdapterFactory) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.QueryExecutor, error) {
 	return nil, errors.New("not implemented")
 }
 
@@ -180,7 +197,8 @@ func TestRelationshipDiscoveryService_DiscoverRelationships_DatasourceError(t *t
 
 	service := newTestRelationshipDiscoveryService(repo, dsSvc, factory)
 
-	_, err := service.DiscoverRelationships(context.Background(), projectID, datasourceID)
+	ctx := testContextWithAuthRD(projectID.String(), "test-user-id")
+	_, err := service.DiscoverRelationships(ctx, projectID, datasourceID)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -208,7 +226,8 @@ func TestRelationshipDiscoveryService_DiscoverRelationships_AdapterError(t *test
 
 	service := newTestRelationshipDiscoveryService(repo, dsSvc, factory)
 
-	_, err := service.DiscoverRelationships(context.Background(), projectID, datasourceID)
+	ctx := testContextWithAuthRD(projectID.String(), "test-user-id")
+	_, err := service.DiscoverRelationships(ctx, projectID, datasourceID)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -243,7 +262,8 @@ func TestRelationshipDiscoveryService_DiscoverRelationships_EmptyTables(t *testi
 
 	service := newTestRelationshipDiscoveryService(repo, dsSvc, factory)
 
-	result, err := service.DiscoverRelationships(context.Background(), projectID, datasourceID)
+	ctx := testContextWithAuthRD(projectID.String(), "test-user-id")
+	result, err := service.DiscoverRelationships(ctx, projectID, datasourceID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -319,7 +339,8 @@ func TestRelationshipDiscoveryService_DiscoverRelationships_Success(t *testing.T
 
 	service := newTestRelationshipDiscoveryService(repo, dsSvc, factory)
 
-	result, err := service.DiscoverRelationships(context.Background(), projectID, datasourceID)
+	ctx := testContextWithAuthRD(projectID.String(), "test-user-id")
+	result, err := service.DiscoverRelationships(ctx, projectID, datasourceID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -385,7 +406,8 @@ func TestRelationshipDiscoveryService_DiscoverRelationships_LowMatchRate(t *test
 
 	service := newTestRelationshipDiscoveryService(repo, dsSvc, factory)
 
-	result, err := service.DiscoverRelationships(context.Background(), projectID, datasourceID)
+	ctx := testContextWithAuthRD(projectID.String(), "test-user-id")
+	result, err := service.DiscoverRelationships(ctx, projectID, datasourceID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

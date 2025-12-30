@@ -1053,33 +1053,33 @@ queryService := services.NewQueryService(queryRepo, datasourceService, adapterFa
 - [x] Defer `connManager.Close()` on shutdown
 
 ### Step 11: Testing
-- [ ] Create `pkg/retry/retry_test.go`
+- [x] Create `pkg/retry/retry_test.go`
   - Test exponential backoff timing
   - Test context cancellation during retry
   - Test max retries exhaustion
   - Test successful retry after transient failure
   - Test `IsRetryable()` with various error patterns (connection refused, timeout, etc.)
   - Test `DoIfRetryable()` skips retries for non-transient errors
-- [ ] Create `pkg/logging/sanitizer_test.go`
+- [x] Create `pkg/logging/sanitizer_test.go`
   - Test password redaction in connection strings (`password=secret` → `password=[REDACTED]`)
   - Test JWT token redaction (`Bearer eyJ...` → `Bearer [REDACTED]`)
   - Test API key redaction
   - Test connection string format redaction (`://user:pass@host` → `://[REDACTED]@[REDACTED]`)
   - Test query truncation at MaxQueryLogLength
-- [ ] Create `pkg/adapters/datasource/connection_manager_test.go`
+- [x] Create `pkg/adapters/datasource/connection_manager_test.go`
   - Test pool reuse for same `(projectID, userID, datasourceID)` tuple
   - Test TTL expiration and cleanup
   - Test health check recovery from bad connections
   - Test concurrent access (race detector)
   - Test retry behavior on pool creation failure
   - Test per-user connection limit enforcement (returns error when exceeded)
-- [ ] Create `pkg/adapters/datasource/postgres/adapter_security_test.go`
+- [x] Create `pkg/adapters/datasource/postgres/adapter_security_test.go`
   - Test SQL injection prevention with parameterized queries
   - Test password URL escaping handles special characters: `@`, `/`, `#`, `?`, `;`, spaces
   - Test connection string building with malicious inputs
   - Test that passwords with SQL injection attempts are safely escaped
-- [ ] Update existing integration tests to pass context with user ID
-- [ ] Verify connection reuse in integration tests (inspect pool stats)
+- [x] Update existing integration tests to pass context with user ID
+- [x] Verify connection reuse in integration tests (inspect pool stats)
 
 ### Step 12: Observability
 - [ ] Add metrics endpoint exposing connection manager stats
