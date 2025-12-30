@@ -18,10 +18,13 @@ import (
 
 // CandidateCounts holds counts of candidates by status.
 type CandidateCounts struct {
-	Confirmed   int
-	NeedsReview int
-	Rejected    int
-	CanSave     bool
+	Confirmed       int
+	NeedsReview     int
+	Rejected        int
+	EntityCount     int
+	OccurrenceCount int
+	IslandCount     int
+	CanSave         bool
 }
 
 // CandidatesGrouped holds candidates grouped by status.
@@ -29,6 +32,12 @@ type CandidatesGrouped struct {
 	Confirmed   []*models.RelationshipCandidate
 	NeedsReview []*models.RelationshipCandidate
 	Rejected    []*models.RelationshipCandidate
+}
+
+// EntityWithOccurrences represents a discovered entity with its occurrences.
+type EntityWithOccurrences struct {
+	Entity      *models.SchemaEntity
+	Occurrences []*models.SchemaEntityOccurrence
 }
 
 // RelationshipWorkflowService provides operations for relationship discovery workflow management.
@@ -47,6 +56,9 @@ type RelationshipWorkflowService interface {
 
 	// GetCandidatesGrouped returns candidates grouped by status for a datasource.
 	GetCandidatesGrouped(ctx context.Context, datasourceID uuid.UUID) (*CandidatesGrouped, error)
+
+	// GetEntitiesWithOccurrences returns discovered entities with their occurrences for a datasource.
+	GetEntitiesWithOccurrences(ctx context.Context, datasourceID uuid.UUID) ([]*EntityWithOccurrences, error)
 
 	// UpdateCandidateDecision updates a candidate's decision, verifying it belongs to the datasource.
 	UpdateCandidateDecision(ctx context.Context, datasourceID, candidateID uuid.UUID, decision string) (*models.RelationshipCandidate, error)
@@ -1050,6 +1062,25 @@ func (s *relationshipWorkflowService) GetStatusWithCounts(ctx context.Context, d
 		}
 	}
 
+	// Get entity counts
+	ontology, err := s.ontologyRepo.GetActive(ctx, workflow.ProjectID)
+	if err == nil && ontology != nil {
+		entities, err := s.entityRepo.GetByOntology(ctx, ontology.ID)
+		if err == nil {
+			counts.EntityCount = len(entities)
+			for _, entity := range entities {
+				occurrences, err := s.entityRepo.GetOccurrencesByEntity(ctx, entity.ID)
+				if err == nil {
+					counts.OccurrenceCount += len(occurrences)
+				}
+			}
+		}
+	}
+
+	// Island count would come from graph analysis - for now, set to 0
+	// This will be populated when graph connectivity data is stored
+	counts.IslandCount = 0
+
 	// Can save if workflow is complete and no pending candidates remain
 	counts.CanSave = workflow.State == models.WorkflowStateCompleted && counts.NeedsReview == 0
 
@@ -1097,6 +1128,60 @@ func (s *relationshipWorkflowService) GetCandidatesGrouped(ctx context.Context, 
 	}
 
 	return grouped, nil
+}
+
+func (s *relationshipWorkflowService) GetEntitiesWithOccurrences(ctx context.Context, datasourceID uuid.UUID) ([]*EntityWithOccurrences, error) {
+	// Get latest workflow for this datasource
+	workflow, err := s.workflowRepo.GetLatestByDatasourceAndPhase(ctx, datasourceID, models.WorkflowPhaseRelationships)
+	if err != nil {
+		s.logger.Error("Failed to get workflow",
+			zap.String("datasource_id", datasourceID.String()),
+			zap.Error(err))
+		return nil, err
+	}
+	if workflow == nil {
+		return nil, fmt.Errorf("no relationship workflow found for datasource")
+	}
+
+	// Get the active ontology for this workflow
+	ontology, err := s.ontologyRepo.GetActive(ctx, workflow.ProjectID)
+	if err != nil {
+		s.logger.Error("Failed to get active ontology",
+			zap.String("workflow_id", workflow.ID.String()),
+			zap.Error(err))
+		return nil, err
+	}
+	if ontology == nil {
+		return nil, fmt.Errorf("no active ontology found for project")
+	}
+
+	// Get all entities for this ontology
+	entities, err := s.entityRepo.GetByOntology(ctx, ontology.ID)
+	if err != nil {
+		s.logger.Error("Failed to get entities",
+			zap.String("ontology_id", ontology.ID.String()),
+			zap.Error(err))
+		return nil, err
+	}
+
+	// Fetch occurrences for each entity
+	result := make([]*EntityWithOccurrences, 0, len(entities))
+	for _, entity := range entities {
+		occurrences, err := s.entityRepo.GetOccurrencesByEntity(ctx, entity.ID)
+		if err != nil {
+			s.logger.Error("Failed to get occurrences",
+				zap.String("entity_id", entity.ID.String()),
+				zap.Error(err))
+			return nil, err
+		}
+
+		result = append(result, &EntityWithOccurrences{
+			Entity:      entity,
+			Occurrences: occurrences,
+		})
+	}
+
+	return result, nil
 }
 
 func (s *relationshipWorkflowService) UpdateCandidateDecision(ctx context.Context, datasourceID, candidateID uuid.UUID, decision string) (*models.RelationshipCandidate, error) {

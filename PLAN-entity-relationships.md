@@ -355,7 +355,7 @@ ORDER BY e.name, o.table_name;
 
 ---
 
-## Phase 8: API Endpoints
+## Phase 8: API Endpoints [x]
 
 **Goal:** Expose entities via REST API, adapting the existing workflow API pattern.
 

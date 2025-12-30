@@ -29,9 +29,14 @@ type RelationshipWorkflowStatusResponse struct {
 	State            string                   `json:"state"`
 	Progress         *models.WorkflowProgress `json:"progress,omitempty"`
 	TaskQueue        []models.WorkflowTask    `json:"task_queue,omitempty"`
+	// Legacy candidate counts (deprecated, will be removed)
 	ConfirmedCount   int                      `json:"confirmed_count"`
 	NeedsReviewCount int                      `json:"needs_review_count"`
 	RejectedCount    int                      `json:"rejected_count"`
+	// New entity counts
+	EntityCount      int                      `json:"entity_count"`
+	OccurrenceCount  int                      `json:"occurrence_count"`
+	IslandCount      int                      `json:"island_count"`
 	CanSave          bool                     `json:"can_save"`
 }
 
@@ -60,6 +65,32 @@ type CandidateResponse struct {
 // CandidateDecisionRequest for PUT /relationships/candidates/{cid}
 type CandidateDecisionRequest struct {
 	Decision string `json:"decision"` // "accepted" or "rejected"
+}
+
+// EntityOccurrenceResponse represents a single occurrence of an entity in a table/column.
+type EntityOccurrenceResponse struct {
+	ID         string   `json:"id"`
+	SchemaName string   `json:"schema_name"`
+	TableName  string   `json:"table_name"`
+	ColumnName string   `json:"column_name"`
+	Role       *string  `json:"role,omitempty"`
+	Confidence float64  `json:"confidence"`
+}
+
+// EntityResponse represents a discovered entity with its occurrences.
+type EntityResponse struct {
+	ID            string                     `json:"id"`
+	Name          string                     `json:"name"`
+	Description   string                     `json:"description"`
+	PrimarySchema string                     `json:"primary_schema"`
+	PrimaryTable  string                     `json:"primary_table"`
+	PrimaryColumn string                     `json:"primary_column"`
+	Occurrences   []EntityOccurrenceResponse `json:"occurrences"`
+}
+
+// EntitiesResponse for GET /relationships/entities
+type EntitiesResponse struct {
+	Entities []EntityResponse `json:"entities"`
 }
 
 // SaveRelationshipsResponse for POST /relationships/save
@@ -98,6 +129,8 @@ func (h *RelationshipWorkflowHandler) RegisterRoutes(mux *http.ServeMux, authMid
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetStatus)))
 	mux.HandleFunc("GET "+base+"/candidates",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetCandidates)))
+	mux.HandleFunc("GET "+base+"/entities",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetEntities)))
 	mux.HandleFunc("PUT "+base+"/candidates/{cid}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.UpdateCandidate)))
 	mux.HandleFunc("POST "+base+"/cancel",
@@ -169,6 +202,9 @@ func (h *RelationshipWorkflowHandler) GetStatus(w http.ResponseWriter, r *http.R
 		ConfirmedCount:   counts.Confirmed,
 		NeedsReviewCount: counts.NeedsReview,
 		RejectedCount:    counts.Rejected,
+		EntityCount:      counts.EntityCount,
+		OccurrenceCount:  counts.OccurrenceCount,
+		IslandCount:      counts.IslandCount,
 		CanSave:          counts.CanSave,
 	}
 
@@ -215,6 +251,59 @@ func (h *RelationshipWorkflowHandler) GetCandidates(w http.ResponseWriter, r *ht
 		Confirmed:   confirmed,
 		NeedsReview: needsReview,
 		Rejected:    rejected,
+	}
+
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// GetEntities handles GET /api/projects/{pid}/datasources/{dsid}/relationships/entities
+func (h *RelationshipWorkflowHandler) GetEntities(w http.ResponseWriter, r *http.Request) {
+	_, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	if !ok {
+		return
+	}
+
+	entitiesWithOccurrences, err := h.workflowService.GetEntitiesWithOccurrences(r.Context(), datasourceID)
+	if err != nil {
+		h.logger.Error("Failed to get entities",
+			zap.String("datasource_id", datasourceID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "get_entities_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Convert to response format
+	entities := make([]EntityResponse, 0, len(entitiesWithOccurrences))
+	for _, ew := range entitiesWithOccurrences {
+		occurrences := make([]EntityOccurrenceResponse, 0, len(ew.Occurrences))
+		for _, occ := range ew.Occurrences {
+			occurrences = append(occurrences, EntityOccurrenceResponse{
+				ID:         occ.ID.String(),
+				SchemaName: occ.SchemaName,
+				TableName:  occ.TableName,
+				ColumnName: occ.ColumnName,
+				Role:       occ.Role,
+				Confidence: occ.Confidence,
+			})
+		}
+
+		entities = append(entities, EntityResponse{
+			ID:            ew.Entity.ID.String(),
+			Name:          ew.Entity.Name,
+			Description:   ew.Entity.Description,
+			PrimarySchema: ew.Entity.PrimarySchema,
+			PrimaryTable:  ew.Entity.PrimaryTable,
+			PrimaryColumn: ew.Entity.PrimaryColumn,
+			Occurrences:   occurrences,
+		})
+	}
+
+	response := EntitiesResponse{
+		Entities: entities,
 	}
 
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
