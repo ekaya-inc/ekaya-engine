@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
@@ -17,18 +18,19 @@ import (
 
 // QueryResponse matches frontend Query interface.
 type QueryResponse struct {
-	QueryID               string  `json:"query_id"`
-	ProjectID             string  `json:"project_id"`
-	DatasourceID          string  `json:"datasource_id"`
-	NaturalLanguagePrompt string  `json:"natural_language_prompt"`
-	AdditionalContext     *string `json:"additional_context,omitempty"`
-	SQLQuery              string  `json:"sql_query"`
-	Dialect               string  `json:"dialect"`
-	IsEnabled             bool    `json:"is_enabled"`
-	UsageCount            int     `json:"usage_count"`
-	LastUsedAt            *string `json:"last_used_at,omitempty"`
-	CreatedAt             string  `json:"created_at"`
-	UpdatedAt             string  `json:"updated_at"`
+	QueryID               string                  `json:"query_id"`
+	ProjectID             string                  `json:"project_id"`
+	DatasourceID          string                  `json:"datasource_id"`
+	NaturalLanguagePrompt string                  `json:"natural_language_prompt"`
+	AdditionalContext     *string                 `json:"additional_context,omitempty"`
+	SQLQuery              string                  `json:"sql_query"`
+	Dialect               string                  `json:"dialect"`
+	IsEnabled             bool                    `json:"is_enabled"`
+	Parameters            []models.QueryParameter `json:"parameters,omitempty"`
+	UsageCount            int                     `json:"usage_count"`
+	LastUsedAt            *string                 `json:"last_used_at,omitempty"`
+	CreatedAt             string                  `json:"created_at"`
+	UpdatedAt             string                  `json:"updated_at"`
 }
 
 // ListQueriesResponse wraps array for frontend compatibility.
@@ -39,10 +41,11 @@ type ListQueriesResponse struct {
 // CreateQueryRequest for POST body.
 // Note: Dialect is derived from datasource type in the service layer.
 type CreateQueryRequest struct {
-	NaturalLanguagePrompt string `json:"natural_language_prompt"`
-	AdditionalContext     string `json:"additional_context,omitempty"`
-	SQLQuery              string `json:"sql_query"`
-	IsEnabled             bool   `json:"is_enabled"`
+	NaturalLanguagePrompt string                  `json:"natural_language_prompt"`
+	AdditionalContext     string                  `json:"additional_context,omitempty"`
+	SQLQuery              string                  `json:"sql_query"`
+	IsEnabled             bool                    `json:"is_enabled"`
+	Parameters            []models.QueryParameter `json:"parameters,omitempty"`
 }
 
 // UpdateQueryRequest for PUT body (all fields optional).
@@ -56,7 +59,8 @@ type UpdateQueryRequest struct {
 
 // ExecuteQueryRequest for POST execute body.
 type ExecuteQueryRequest struct {
-	Limit int `json:"limit,omitempty"`
+	Limit      int            `json:"limit,omitempty"`
+	Parameters map[string]any `json:"parameters,omitempty"`
 }
 
 // ExecuteQueryResponse for query execution results.
@@ -68,8 +72,10 @@ type ExecuteQueryResponse struct {
 
 // TestQueryRequest for POST test body.
 type TestQueryRequest struct {
-	SQLQuery string `json:"sql_query"`
-	Limit    int    `json:"limit,omitempty"`
+	SQLQuery             string                  `json:"sql_query"`
+	Limit                int                     `json:"limit,omitempty"`
+	ParameterDefinitions []models.QueryParameter `json:"parameter_definitions,omitempty"`
+	ParameterValues      map[string]any          `json:"parameter_values,omitempty"`
 }
 
 // ValidateQueryRequest for POST validate body.
@@ -79,6 +85,18 @@ type ValidateQueryRequest struct {
 
 // ValidateQueryResponse for validation results.
 type ValidateQueryResponse struct {
+	Valid   bool   `json:"valid"`
+	Message string `json:"message,omitempty"`
+}
+
+// ValidateParametersRequest for POST validate-parameters body.
+type ValidateParametersRequest struct {
+	SQLQuery   string                  `json:"sql_query"`
+	Parameters []models.QueryParameter `json:"parameters"`
+}
+
+// ValidateParametersResponse for parameter validation results.
+type ValidateParametersResponse struct {
 	Valid   bool   `json:"valid"`
 	Message string `json:"message,omitempty"`
 }
@@ -127,6 +145,8 @@ func (h *QueriesHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Test)))
 	mux.HandleFunc("POST "+base+"/validate",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Validate)))
+	mux.HandleFunc("POST "+base+"/validate-parameters",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.ValidateParameters)))
 
 	// Filtering endpoints
 	mux.HandleFunc("GET "+base+"/enabled",
@@ -199,6 +219,7 @@ func (h *QueriesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		AdditionalContext:     req.AdditionalContext,
 		SQLQuery:              req.SQLQuery,
 		IsEnabled:             req.IsEnabled,
+		Parameters:            req.Parameters,
 	}
 
 	query, err := h.queryService.Create(r.Context(), projectID, datasourceID, serviceReq)
@@ -377,7 +398,15 @@ func (h *QueriesHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		Limit: req.Limit,
 	}
 
-	result, err := h.queryService.Execute(r.Context(), projectID, queryID, serviceReq)
+	var result *datasource.QueryExecutionResult
+	var err error
+
+	// Use ExecuteWithParameters if parameters are provided
+	if len(req.Parameters) > 0 {
+		result, err = h.queryService.ExecuteWithParameters(r.Context(), projectID, queryID, req.Parameters, serviceReq)
+	} else {
+		result, err = h.queryService.Execute(r.Context(), projectID, queryID, serviceReq)
+	}
 	if err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			if err := ErrorResponse(w, http.StatusNotFound, "not_found", "Query not found"); err != nil {
@@ -429,8 +458,10 @@ func (h *QueriesHandler) Test(w http.ResponseWriter, r *http.Request) {
 	}
 
 	serviceReq := &services.TestQueryRequest{
-		SQLQuery: req.SQLQuery,
-		Limit:    req.Limit,
+		SQLQuery:             req.SQLQuery,
+		Limit:                req.Limit,
+		ParameterDefinitions: req.ParameterDefinitions,
+		ParameterValues:      req.ParameterValues,
 	}
 
 	result, err := h.queryService.Test(r.Context(), projectID, datasourceID, serviceReq)
@@ -523,6 +554,53 @@ func (h *QueriesHandler) Validate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ValidateParameters handles POST /api/projects/{pid}/datasources/{did}/queries/validate-parameters
+func (h *QueriesHandler) ValidateParameters(w http.ResponseWriter, r *http.Request) {
+	_, _, ok := h.parseProjectAndDatasource(w, r)
+	if !ok {
+		return
+	}
+
+	var req ValidateParametersRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if req.SQLQuery == "" {
+		if err := ErrorResponse(w, http.StatusBadRequest, "missing_sql", "SQL query is required"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	err := h.queryService.ValidateParameterizedQuery(req.SQLQuery, req.Parameters)
+	if err != nil {
+		// Validation failure returns success=false with message
+		data := ValidateParametersResponse{
+			Valid:   false,
+			Message: err.Error(),
+		}
+		response := ApiResponse{Success: true, Data: data}
+		if err := WriteJSON(w, http.StatusOK, response); err != nil {
+			h.logger.Error("Failed to write response", zap.Error(err))
+		}
+		return
+	}
+
+	data := ValidateParametersResponse{
+		Valid:   true,
+		Message: "Parameters are valid",
+	}
+
+	response := ApiResponse{Success: true, Data: data}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
 // ListEnabled handles GET /api/projects/{pid}/datasources/{did}/queries/enabled
 func (h *QueriesHandler) ListEnabled(w http.ResponseWriter, r *http.Request) {
 	projectID, datasourceID, ok := h.parseProjectAndDatasource(w, r)
@@ -601,6 +679,7 @@ func (h *QueriesHandler) toQueryResponse(q *models.Query) QueryResponse {
 		SQLQuery:              q.SQLQuery,
 		Dialect:               q.Dialect,
 		IsEnabled:             q.IsEnabled,
+		Parameters:            q.Parameters,
 		UsageCount:            q.UsageCount,
 		CreatedAt:             q.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:             q.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
