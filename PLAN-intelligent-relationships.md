@@ -1088,7 +1088,7 @@ function CandidateCard({ candidate, variant, onAccept, onReject }: CandidateCard
 3. [x] Implement `NameInferenceTask` - naming pattern detection
 4. [x] Implement `TestJoinTask` - SQL join to determine cardinality and orphan metrics
 5. [x] Implement `AnalyzeRelationshipsTask` - LLM analysis with join metrics
-6. [ ] Add LLM prompt for relationship analysis
+6. [x] Add LLM prompt for relationship analysis
 
 ### Milestone 3: Workflow Orchestration
 

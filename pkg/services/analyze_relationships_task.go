@@ -11,6 +11,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/prompts"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services/workqueue"
 )
@@ -107,9 +108,13 @@ func (t *AnalyzeRelationshipsTask) Execute(ctx context.Context, enqueuer workque
 		return fmt.Errorf("build candidate contexts: %w", err)
 	}
 
-	// Build prompt
-	prompt := t.buildAnalysisPrompt(tableContextMap, candidateContexts)
-	systemMessage := t.buildSystemMessage()
+	// Convert to prompt package types
+	promptTables := t.convertToPromptTables(tableContextMap)
+	promptCandidates := t.convertToPromptCandidates(candidateContexts)
+
+	// Build prompt using prompts package
+	prompt := prompts.BuildRelationshipAnalysisPrompt(promptTables, promptCandidates)
+	systemMessage := prompts.BuildRelationshipAnalysisSystemMessage()
 
 	// Call LLM
 	llmClient, err := t.llmFactory.CreateForProject(tenantCtx, t.projectID)
@@ -289,153 +294,81 @@ func getTableNameForColumn(col *models.SchemaColumn, tableMap TableContextMap) s
 	return ""
 }
 
-// ============================================================================
-// Prompt Building
-// ============================================================================
+// convertToPromptTables converts internal TableContextMap to prompts package types.
+func (t *AnalyzeRelationshipsTask) convertToPromptTables(tableContextMap TableContextMap) []prompts.TableContext {
+	tables := make([]prompts.TableContext, 0, len(tableContextMap))
 
-func (t *AnalyzeRelationshipsTask) buildSystemMessage() string {
-	return `You are a database relationship analysis expert. Your task is to review detected relationship candidates and determine which are true foreign key relationships.`
-}
-
-func (t *AnalyzeRelationshipsTask) buildAnalysisPrompt(tableContextMap TableContextMap, candidates []*CandidateContext) string {
-	var prompt strings.Builder
-
-	prompt.WriteString("# Database Relationship Analysis\n\n")
-	prompt.WriteString("Analyze the following relationship candidates and determine which are true foreign key relationships.\n\n")
-
-	// Schema context
-	prompt.WriteString("## Database Schema\n\n")
 	for tableName, ctx := range tableContextMap {
-		prompt.WriteString(fmt.Sprintf("### %s\n", tableName))
-		if ctx.Table.RowCount != nil {
-			prompt.WriteString(fmt.Sprintf("Row count: %d\n", *ctx.Table.RowCount))
+		// Find primary key column name
+		pkColumn := ""
+		for _, colCtx := range ctx.Columns {
+			if colCtx.Column.IsPrimaryKey {
+				pkColumn = colCtx.Column.ColumnName
+				break
+			}
 		}
-		prompt.WriteString("Columns:\n")
+
+		// Convert columns
+		promptColumns := make([]prompts.ColumnContext, 0, len(ctx.Columns))
 		for _, colCtx := range ctx.Columns {
 			col := colCtx.Column
-			flags := ""
-			if col.IsPrimaryKey {
-				flags += " [PK]"
-			}
-			if colCtx.LooksLikeForeignKey {
-				flags += " [looks like FK]"
-			}
-			prompt.WriteString(fmt.Sprintf("- %s (%s)%s\n", col.ColumnName, col.DataType, flags))
+
+			// Determine if this is already a known FK
+			isForeignKey := false
+			fkTarget := ""
+			// TODO: Check if column is already a known FK from schema_relationships
+			// For now, we'll leave this as false
+
+			promptColumns = append(promptColumns, prompts.ColumnContext{
+				Name:               col.ColumnName,
+				DataType:           col.DataType,
+				IsNullable:         col.IsNullable,
+				NullPercent:        0.0, // TODO: Get from workflow_state if available
+				IsPrimaryKey:       col.IsPrimaryKey,
+				IsForeignKey:       isForeignKey,
+				ForeignKeyTarget:   fkTarget,
+				LooksLikeForeignKey: colCtx.LooksLikeForeignKey,
+			})
 		}
-		prompt.WriteString("\n")
+
+		tables = append(tables, prompts.TableContext{
+			Name:     tableName,
+			RowCount: ctx.Table.RowCount,
+			PKColumn: pkColumn,
+			Columns:  promptColumns,
+		})
 	}
 
-	// Candidates to analyze
-	prompt.WriteString("## Relationship Candidates\n\n")
-	prompt.WriteString("For each candidate, you have the following information:\n\n")
-	for i, c := range candidates {
-		prompt.WriteString(fmt.Sprintf("### Candidate %d: %s.%s → %s.%s\n",
-			i+1, c.SourceTable, c.SourceColumn, c.TargetTable, c.TargetColumn))
-		prompt.WriteString(fmt.Sprintf("- **Detection method**: %s\n", c.DetectionMethod))
-		prompt.WriteString(fmt.Sprintf("- **Column types**: %s → %s\n", c.SourceColumnType, c.TargetColumnType))
+	return tables
+}
 
-		if c.ValueMatchRate != nil {
-			prompt.WriteString(fmt.Sprintf("- **Sample value match rate**: %.1f%%\n", *c.ValueMatchRate*100))
-		}
+// convertToPromptCandidates converts internal CandidateContext to prompts package types.
+func (t *AnalyzeRelationshipsTask) convertToPromptCandidates(candidates []*CandidateContext) []prompts.CandidateContext {
+	promptCandidates := make([]prompts.CandidateContext, 0, len(candidates))
 
-		if c.Cardinality != nil {
-			prompt.WriteString(fmt.Sprintf("- **Cardinality**: %s\n", *c.Cardinality))
-		}
-
-		if c.JoinMatchRate != nil {
-			prompt.WriteString(fmt.Sprintf("- **Join match rate**: %.1f%% (%d source rows)\n",
-				*c.JoinMatchRate*100, valueOrZero(c.SourceRowCount)))
-		}
-
-		if c.OrphanRate != nil {
-			prompt.WriteString(fmt.Sprintf("- **Orphan rate**: %.1f%% (source rows with no match)\n",
-				*c.OrphanRate*100))
-		}
-
-		if c.TargetCoverage != nil {
-			prompt.WriteString(fmt.Sprintf("- **Target coverage**: %.1f%% (of %d target rows)\n",
-				*c.TargetCoverage*100, valueOrZero(c.TargetRowCount)))
-		}
-
-		prompt.WriteString("\n")
+	for _, c := range candidates {
+		promptCandidates = append(promptCandidates, prompts.CandidateContext{
+			ID:               c.ID,
+			SourceTable:      c.SourceTable,
+			SourceColumn:     c.SourceColumn,
+			SourceColumnType: c.SourceColumnType,
+			TargetTable:      c.TargetTable,
+			TargetColumn:     c.TargetColumn,
+			TargetColumnType: c.TargetColumnType,
+			DetectionMethod:  c.DetectionMethod,
+			ValueMatchRate:   c.ValueMatchRate,
+			Cardinality:      c.Cardinality,
+			JoinMatchRate:    c.JoinMatchRate,
+			OrphanRate:       c.OrphanRate,
+			TargetCoverage:   c.TargetCoverage,
+			SourceRowCount:   c.SourceRowCount,
+			TargetRowCount:   c.TargetRowCount,
+		})
 	}
 
-	// Analysis guidelines
-	prompt.WriteString("## Analysis Guidelines\n\n")
-	prompt.WriteString("**Strong signals for CONFIRM**:\n")
-	prompt.WriteString("- Cardinality is N:1 (many source rows → one target row, typical FK pattern)\n")
-	prompt.WriteString("- Column naming follows FK convention (e.g., user_id → users.id)\n")
-	prompt.WriteString("- High join match rate (>70%) and low orphan rate (<30%)\n")
-	prompt.WriteString("- Target column is a primary key\n")
-	prompt.WriteString("- Type match is exact (uuid→uuid, int→int, text→text)\n\n")
-
-	prompt.WriteString("**Strong signals for REJECT**:\n")
-	prompt.WriteString("- High orphan rate (>50%) suggests weak or coincidental relationship\n")
-	prompt.WriteString("- Cardinality is N:M without clear junction table semantics\n")
-	prompt.WriteString("- Column names suggest different domains (e.g., order_total → user_id)\n")
-	prompt.WriteString("- Neither column is a key (both are regular data columns)\n\n")
-
-	prompt.WriteString("**Mark as NEEDS_REVIEW when**:\n")
-	prompt.WriteString("- Uncertain about business meaning (e.g., ambiguous column names)\n")
-	prompt.WriteString("- Moderate orphan rate (30-50%) - could be data quality issue or optional FK\n")
-	prompt.WriteString("- Cardinality unexpected for naming pattern\n\n")
-
-	prompt.WriteString("## Interpretation Guide\n")
-	prompt.WriteString("- **Orphan Rate**: Percentage of source rows that don't match any target row\n")
-	prompt.WriteString("  - 0-10%: Normal for optional FKs or data in transition\n")
-	prompt.WriteString("  - 10-30%: Warning sign, but may still be valid FK with data quality issues\n")
-	prompt.WriteString("  - >50%: Likely not a real FK relationship\n")
-	prompt.WriteString("- **Orphan Rate vs Null Rate**: Orphans are non-null values that don't match; different from NULL FKs\n")
-	prompt.WriteString("- **Target Coverage**: Low coverage means few target rows are actually referenced (may indicate unused/stale data)\n\n")
-
-	prompt.WriteString("## Output Format\n\n")
-	prompt.WriteString("Respond in JSON with:\n")
-	prompt.WriteString("- `decisions`: Array of decisions for each candidate\n")
-	prompt.WriteString("  - `candidate_id`: The candidate ID from above\n")
-	prompt.WriteString("  - `action`: One of \"confirm\", \"reject\", \"needs_review\"\n")
-	prompt.WriteString("  - `confidence`: 0.0-1.0 (how confident you are in this decision)\n")
-	prompt.WriteString("  - `reasoning`: Brief explanation (1-2 sentences)\n")
-	prompt.WriteString("- `new_relationships`: Array of additional relationships you infer from schema (may be empty)\n")
-	prompt.WriteString("  - `source_table`, `source_column`, `target_table`, `target_column`\n")
-	prompt.WriteString("  - `confidence`: 0.0-1.0\n")
-	prompt.WriteString("  - `reasoning`: Why you think this is a relationship\n\n")
-
-	prompt.WriteString("Example:\n")
-	prompt.WriteString("```json\n")
-	prompt.WriteString(`{
-  "decisions": [
-    {
-      "candidate_id": "abc-123",
-      "action": "confirm",
-      "confidence": 0.95,
-      "reasoning": "Clear FK pattern: orders.user_id → users.id. N:1 cardinality with 98% match rate confirms strong relationship."
-    }
-  ],
-  "new_relationships": [
-    {
-      "source_table": "order_items",
-      "source_column": "product_id",
-      "target_table": "products",
-      "target_column": "id",
-      "confidence": 0.85,
-      "reasoning": "Standard FK naming pattern not detected by value matching. Column name clearly indicates product reference."
-    }
-  ]
-}
-`)
-	prompt.WriteString("```\n\n")
-
-	prompt.WriteString("Return ONLY the JSON, no additional text.\n")
-
-	return prompt.String()
+	return promptCandidates
 }
 
-func valueOrZero(ptr *int64) int64 {
-	if ptr != nil {
-		return *ptr
-	}
-	return 0
-}
 
 // ============================================================================
 // Output Parsing

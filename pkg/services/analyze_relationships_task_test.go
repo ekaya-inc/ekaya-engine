@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/prompts"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services/workqueue"
 )
@@ -528,7 +529,10 @@ func TestAnalyzeRelationshipsTask_BuildPrompt(t *testing.T) {
 		},
 	}
 
-	prompt := task.buildAnalysisPrompt(tableContextMap, candidates)
+	// Convert to prompts package types and build prompt
+	promptTables := task.convertToPromptTables(tableContextMap)
+	promptCandidates := task.convertToPromptCandidates(candidates)
+	prompt := prompts.BuildRelationshipAnalysisPrompt(promptTables, promptCandidates)
 
 	// Verify prompt contains key sections
 	assert.Contains(t, prompt, "Database Relationship Analysis")
