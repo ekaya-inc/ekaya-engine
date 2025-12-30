@@ -460,7 +460,7 @@ Expected response:
 
 ---
 
-## Phase 9: UI Display
+## Phase 9: UI Display [x]
 
 **Goal:** Replace candidate-based UI with entity-based display in the discovery dialog.
 

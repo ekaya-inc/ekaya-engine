@@ -16,19 +16,17 @@ import {
   Check,
   Circle,
   Loader2,
-  Pause,
   X,
-  XCircle,
 } from 'lucide-react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 import relationshipWorkflowApi from '../services/relationshipWorkflowApi';
 import type {
-  CandidatesResponse,
+  EntitiesResponse,
   RelationshipWorkflowStatusResponse,
 } from '../types';
 
-import { CandidateList } from './relationships/CandidateList';
+import { EntityList } from './relationships/EntityList';
 import { Button } from './ui/Button';
 import {
   Card,
@@ -49,43 +47,6 @@ interface RelationshipDiscoveryProgressProps {
 // Polling interval in milliseconds
 const POLL_INTERVAL_MS = 2000;
 
-// Task status helpers
-type TaskStatus = 'queued' | 'processing' | 'complete' | 'failed' | 'paused';
-
-const getTaskStatusIcon = (status: TaskStatus, requiresLlm: boolean) => {
-  switch (status) {
-    case 'complete':
-      return <Check className="h-4 w-4 text-green-500" />;
-    case 'processing':
-      return requiresLlm ? (
-        <Brain className="h-4 w-4 text-purple-500 animate-pulse" />
-      ) : (
-        <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
-      );
-    case 'queued':
-      return <Circle className="h-4 w-4 text-text-tertiary" />;
-    case 'paused':
-      return <Pause className="h-4 w-4 text-amber-500" />;
-    case 'failed':
-      return <XCircle className="h-4 w-4 text-red-500" />;
-    default:
-      return <Circle className="h-4 w-4 text-text-tertiary" />;
-  }
-};
-
-const getTaskRowBackground = (status: TaskStatus): string => {
-  switch (status) {
-    case 'processing':
-      return 'bg-blue-500/5 border-l-2 border-l-blue-500';
-    case 'paused':
-      return 'bg-amber-500/5 border-l-2 border-l-amber-500';
-    case 'failed':
-      return 'bg-red-500/5 border-l-2 border-l-red-500';
-    default:
-      return 'border-l-2 border-l-transparent';
-  }
-};
-
 export const RelationshipDiscoveryProgress = ({
   projectId,
   datasourceId,
@@ -96,14 +57,11 @@ export const RelationshipDiscoveryProgress = ({
   // Workflow state
   const [workflowStarted, setWorkflowStarted] = useState(false);
   const [status, setStatus] = useState<RelationshipWorkflowStatusResponse | null>(null);
-  const [candidates, setCandidates] = useState<CandidatesResponse>({
-    confirmed: [],
-    needs_review: [],
-    rejected: [],
+  const [entities, setEntities] = useState<EntitiesResponse>({
+    entities: [],
+    island_tables: [],
   });
   const [error, setError] = useState<string | null>(null);
-  const [candidateError, setCandidateError] = useState<string | null>(null);
-  const [loadingCandidateId, setLoadingCandidateId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [saveResult, setSaveResult] = useState<number | null>(null);
@@ -117,7 +75,7 @@ export const RelationshipDiscoveryProgress = ({
   const isWorkflowComplete = status?.state === 'completed';
   const isWorkflowFailed = status?.state === 'failed';
   const canSave = status?.can_save === true && isWorkflowComplete;
-  const hasNeedsReview = candidates.needs_review.length > 0;
+  const hasEntities = entities.entities.length > 0;
 
   // Stop polling
   const stopPolling = useCallback(() => {
@@ -127,20 +85,20 @@ export const RelationshipDiscoveryProgress = ({
     }
   }, []);
 
-  // Fetch status and candidates
-  const fetchStatusAndCandidates = useCallback(async () => {
+  // Fetch status and entities
+  const fetchStatusAndEntities = useCallback(async () => {
     if (!projectId || !datasourceId) return;
 
     try {
-      const [statusResponse, candidatesResponse] = await Promise.all([
+      const [statusResponse, entitiesResponse] = await Promise.all([
         relationshipWorkflowApi.getStatus(projectId, datasourceId),
-        relationshipWorkflowApi.getCandidates(projectId, datasourceId),
+        relationshipWorkflowApi.getEntities(projectId, datasourceId),
       ]);
 
       if (!isMountedRef.current) return;
 
       setStatus(statusResponse);
-      setCandidates(candidatesResponse);
+      setEntities(entitiesResponse);
 
       // Stop polling when workflow completes or fails
       if (statusResponse.state === 'completed' || statusResponse.state === 'failed') {
@@ -163,16 +121,15 @@ export const RelationshipDiscoveryProgress = ({
   const startPolling = useCallback(() => {
     stopPolling();
     // Fetch immediately
-    fetchStatusAndCandidates();
+    fetchStatusAndEntities();
     // Then poll
-    pollingRef.current = setInterval(fetchStatusAndCandidates, POLL_INTERVAL_MS);
-  }, [fetchStatusAndCandidates, stopPolling]);
+    pollingRef.current = setInterval(fetchStatusAndEntities, POLL_INTERVAL_MS);
+  }, [fetchStatusAndEntities, stopPolling]);
 
   // Start workflow
   const startWorkflow = useCallback(async () => {
     try {
       setError(null);
-      setCandidateError(null);
       setSaveResult(null);
       await relationshipWorkflowApi.startDetection(projectId, datasourceId);
       setWorkflowStarted(true);
@@ -183,66 +140,6 @@ export const RelationshipDiscoveryProgress = ({
       setError(errorMessage);
     }
   }, [projectId, datasourceId, startPolling]);
-
-  // Handle Accept candidate
-  const handleAccept = useCallback(
-    async (candidateId: string) => {
-      setLoadingCandidateId(candidateId);
-      setCandidateError(null);
-      try {
-        await relationshipWorkflowApi.updateCandidate(
-          projectId,
-          datasourceId,
-          candidateId,
-          'accepted'
-        );
-        // Refresh candidates and status
-        const [candidatesResponse, statusResponse] = await Promise.all([
-          relationshipWorkflowApi.getCandidates(projectId, datasourceId),
-          relationshipWorkflowApi.getStatus(projectId, datasourceId),
-        ]);
-        setCandidates(candidatesResponse);
-        setStatus(statusResponse);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Failed to accept relationship';
-        console.error('Failed to accept candidate:', err);
-        setCandidateError(errorMessage);
-      } finally {
-        setLoadingCandidateId(null);
-      }
-    },
-    [projectId, datasourceId]
-  );
-
-  // Handle Reject candidate
-  const handleReject = useCallback(
-    async (candidateId: string) => {
-      setLoadingCandidateId(candidateId);
-      setCandidateError(null);
-      try {
-        await relationshipWorkflowApi.updateCandidate(
-          projectId,
-          datasourceId,
-          candidateId,
-          'rejected'
-        );
-        // Refresh candidates and status
-        const [candidatesResponse, statusResponse] = await Promise.all([
-          relationshipWorkflowApi.getCandidates(projectId, datasourceId),
-          relationshipWorkflowApi.getStatus(projectId, datasourceId),
-        ]);
-        setCandidates(candidatesResponse);
-        setStatus(statusResponse);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Failed to reject relationship';
-        console.error('Failed to reject candidate:', err);
-        setCandidateError(errorMessage);
-      } finally {
-        setLoadingCandidateId(null);
-      }
-    },
-    [projectId, datasourceId]
-  );
 
   // Handle Cancel
   const handleCancel = useCallback(async () => {
@@ -287,10 +184,8 @@ export const RelationshipDiscoveryProgress = ({
       stopPolling();
       setWorkflowStarted(false);
       setStatus(null);
-      setCandidates({ confirmed: [], needs_review: [], rejected: [] });
+      setEntities({ entities: [], island_tables: [] });
       setError(null);
-      setCandidateError(null);
-      setLoadingCandidateId(null);
       setSaveResult(null);
     }
   }, [isOpen, stopPolling]);
@@ -299,12 +194,12 @@ export const RelationshipDiscoveryProgress = ({
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && isWorkflowRunning) {
-        fetchStatusAndCandidates();
+        fetchStatusAndEntities();
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [isWorkflowRunning, fetchStatusAndCandidates]);
+  }, [isWorkflowRunning, fetchStatusAndEntities]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -316,21 +211,6 @@ export const RelationshipDiscoveryProgress = ({
   }, [stopPolling]);
 
   if (!isOpen) return null;
-
-  // Calculate task counts
-  const taskQueue = status?.task_queue ?? [];
-  const taskCounts = taskQueue.reduce(
-    (acc, task) => {
-      acc[task.status] = (acc[task.status] ?? 0) + 1;
-      return acc;
-    },
-    {} as Record<string, number>
-  );
-
-  // Calculate progress percentage
-  const completedTasks = taskCounts['complete'] ?? 0;
-  const totalTasks = taskQueue.length;
-  const progressPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -404,110 +284,63 @@ export const RelationshipDiscoveryProgress = ({
           {/* Main workflow content */}
           {!error && saveResult === null && (
             <div className="grid grid-cols-1 lg:grid-cols-3 h-full">
-              {/* Left: Work Queue */}
+              {/* Left: Discovery Steps */}
               <div className="border-r border-border-light p-4 overflow-y-auto">
                 <div className="space-y-4">
                   {/* Header with progress */}
                   <div>
-                    <h3 className="font-semibold text-text-primary">Work Queue</h3>
-                    <div className="mt-2 flex flex-wrap gap-3 text-sm">
-                      {(taskCounts['complete'] ?? 0) > 0 && (
-                        <span className="flex items-center gap-1 text-green-600">
-                          <Check className="h-3 w-3" />
-                          {taskCounts['complete']} complete
-                        </span>
+                    <h3 className="font-semibold text-text-primary">Discovery Steps</h3>
+                  </div>
+
+                  {/* Discovery phases */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3 px-3 py-2 rounded">
+                      <Check className="h-4 w-4 text-green-500" />
+                      <span className="text-sm text-text-primary">Collecting column statistics</span>
+                    </div>
+                    <div className="flex items-center gap-3 px-3 py-2 rounded">
+                      <Check className="h-4 w-4 text-green-500" />
+                      <span className="text-sm text-text-primary">Filtering entity candidates</span>
+                    </div>
+                    <div className="flex items-center gap-3 px-3 py-2 rounded">
+                      <Check className="h-4 w-4 text-green-500" />
+                      <span className="text-sm text-text-primary">Analyzing graph connectivity</span>
+                    </div>
+                    <div className="flex items-center gap-3 px-3 py-2 rounded">
+                      {isWorkflowComplete ? (
+                        <Check className="h-4 w-4 text-green-500" />
+                      ) : isWorkflowRunning ? (
+                        <Brain className="h-4 w-4 text-purple-500 animate-pulse" />
+                      ) : (
+                        <Circle className="h-4 w-4 text-text-tertiary" />
                       )}
-                      {(taskCounts['processing'] ?? 0) > 0 && (
-                        <span className="flex items-center gap-1 text-blue-600">
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                          {taskCounts['processing']} processing
-                        </span>
-                      )}
-                      {(taskCounts['queued'] ?? 0) > 0 && (
-                        <span className="flex items-center gap-1 text-text-secondary">
-                          <Circle className="h-3 w-3" />
-                          {taskCounts['queued']} queued
-                        </span>
-                      )}
-                      {(taskCounts['failed'] ?? 0) > 0 && (
-                        <span className="flex items-center gap-1 text-red-600">
-                          <XCircle className="h-3 w-3" />
-                          {taskCounts['failed']} failed
-                        </span>
-                      )}
+                      <span className="text-sm text-text-primary">Discovering entities (LLM)</span>
                     </div>
                   </div>
 
-                  {/* Progress bar */}
-                  <div>
-                    <div className="flex justify-between text-xs text-text-secondary mb-1">
-                      <span>Progress</span>
-                      <span>{progressPercent}%</span>
-                    </div>
-                    <div className="h-2 bg-surface-secondary rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-blue-500 transition-all duration-300"
-                        style={{ width: `${progressPercent}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Task list */}
-                  <div className="space-y-1">
-                    {taskQueue
-                      .filter((task) => task.status !== 'complete')
-                      .map((task) => (
-                        <div
-                          key={task.id}
-                          className={`flex items-center gap-3 px-3 py-2 rounded ${getTaskRowBackground(task.status as TaskStatus)}`}
-                        >
-                          {getTaskStatusIcon(task.status as TaskStatus, task.requires_llm)}
-                          <span className="text-sm text-text-primary flex-1 truncate">
-                            {task.name}
-                          </span>
-                        </div>
-                      ))}
-                    {taskQueue.length === 0 && isWorkflowRunning && (
-                      <div className="text-sm text-text-secondary text-center py-4">
-                        Initializing workflow...
+                  {/* Connectivity info */}
+                  {entities.island_tables && entities.island_tables.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-border-light">
+                      <div className="text-xs font-medium text-text-secondary mb-2">Connectivity:</div>
+                      <div className="flex items-center gap-2 text-sm">
+                        <AlertTriangle className="h-3 w-3 text-amber-500" />
+                        <span className="text-text-secondary">
+                          {entities.island_tables.length} disconnected table{entities.island_tables.length !== 1 ? 's' : ''}
+                        </span>
                       </div>
-                    )}
-                    {taskQueue.filter((t) => t.status !== 'complete').length === 0 &&
-                      taskQueue.length > 0 && (
-                        <div className="text-sm text-green-600 text-center py-4">
-                          All tasks complete
-                        </div>
-                      )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Right: Candidates */}
+              {/* Right: Discovered Entities */}
               <div className="lg:col-span-2 p-4 overflow-y-auto">
                 <h3 className="font-semibold text-text-primary mb-4">
-                  Relationship Candidates
+                  Discovered Entities
                 </h3>
-                {/* Candidate action error */}
-                {candidateError && (
-                  <div className="mb-4 rounded-lg bg-red-50 dark:bg-red-950/20 p-3">
-                    <div className="flex items-center gap-2 text-red-700 dark:text-red-300 text-sm">
-                      <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                      <span>{candidateError}</span>
-                      <button
-                        type="button"
-                        onClick={() => setCandidateError(null)}
-                        className="ml-auto text-red-500 hover:text-red-700"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                )}
-                <CandidateList
-                  candidates={candidates}
-                  onAccept={handleAccept}
-                  onReject={handleReject}
-                  loadingCandidateId={loadingCandidateId}
+                <EntityList
+                  entities={entities.entities}
+                  isLoading={isWorkflowRunning && entities.entities.length === 0}
                 />
               </div>
             </div>
@@ -516,16 +349,12 @@ export const RelationshipDiscoveryProgress = ({
 
         {/* Footer */}
         <div className="border-t border-border-light p-4 flex items-center justify-between flex-shrink-0">
-          {/* Warning message */}
+          {/* Entity summary */}
           <div className="flex-1">
-            {hasNeedsReview && isWorkflowComplete && (
-              <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 text-sm">
-                <AlertTriangle className="h-4 w-4" />
-                <span>
-                  {candidates.needs_review.length} relationship
-                  {candidates.needs_review.length !== 1 ? 's need' : ' needs'} your review
-                  before saving
-                </span>
+            {hasEntities && isWorkflowComplete && (
+              <div className="text-sm text-text-secondary">
+                {entities.entities.length} entities discovered with{' '}
+                {entities.entities.reduce((sum, e) => sum + e.occurrences.length, 0)} column mappings
               </div>
             )}
           </div>
@@ -558,10 +387,10 @@ export const RelationshipDiscoveryProgress = ({
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                       Saving...
                     </>
-                  ) : candidates.confirmed.length === 0 ? (
-                    'No Relationships to Save'
+                  ) : !hasEntities ? (
+                    'No Entities to Save'
                   ) : (
-                    `Save ${candidates.confirmed.length} Relationship${candidates.confirmed.length !== 1 ? 's' : ''}`
+                    `Save ${entities.entities.length} Entity${entities.entities.length !== 1 ? ' Relationships' : ' Relationship'}`
                   )}
                 </Button>
               </>

@@ -8,6 +8,7 @@ import type {
   CancelWorkflowResponse,
   CandidateResponse,
   CandidatesResponse,
+  EntitiesResponse,
   RelationshipWorkflowStatusResponse,
   SaveRelationshipsResponse,
   StartDetectionResponse,
@@ -141,6 +142,19 @@ class RelationshipWorkflowApiService {
     return this.makeRequest<SaveRelationshipsResponse>(
       `/${projectId}/datasources/${datasourceId}/relationships/save`,
       { method: 'POST' }
+    );
+  }
+
+  /**
+   * Get discovered entities with their occurrences
+   * GET /api/projects/{pid}/datasources/{dsid}/relationships/entities
+   */
+  async getEntities(
+    projectId: string,
+    datasourceId: string
+  ): Promise<EntitiesResponse> {
+    return this.makeRequest<EntitiesResponse>(
+      `/${projectId}/datasources/${datasourceId}/relationships/entities`
     );
   }
 }
