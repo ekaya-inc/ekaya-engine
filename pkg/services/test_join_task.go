@@ -160,14 +160,14 @@ func (t *TestJoinTask) Execute(ctx context.Context, enqueuer workqueue.TaskEnque
 
 // JoinMetrics holds the calculated metrics from join analysis.
 type JoinMetrics struct {
-	Cardinality     string
-	JoinMatchRate   float64
-	OrphanRate      float64
-	TargetCoverage  float64
-	SourceRowCount  int64
-	TargetRowCount  int64
-	MatchedRows     int64
-	OrphanRows      int64
+	Cardinality    string
+	JoinMatchRate  float64
+	OrphanRate     float64
+	TargetCoverage float64
+	SourceRowCount int64
+	TargetRowCount int64
+	MatchedRows    int64
+	OrphanRows     int64
 }
 
 // calculateMetrics computes cardinality and percentages from join analysis result.
@@ -214,19 +214,22 @@ func (t *TestJoinTask) calculateMetrics(
 //   - 1:N - One source row can have many target rows
 //   - N:M - Many-to-many (junction table or data quality issue)
 //
-// Algorithm based on join counts:
-// - JoinCount: total join rows (can be > source if duplicates)
-// - SourceMatched: distinct source values that matched
-// - TargetMatched: distinct target values that were referenced
+// The SQL analysis provides:
+//   - JoinCount: total rows from inner join
+//   - SourceMatched: COUNT(DISTINCT source_column) in join results
+//   - TargetMatched: COUNT(DISTINCT target_column) in join results
 //
-// Source cardinality (left side):
-//   - If JoinCount ≈ SourceMatched: each source matches once (source is "1")
-//   - If JoinCount > SourceMatched: some sources match multiple times (source is "N")
+// Key insight: SourceMatched/TargetMatched count distinct COLUMN VALUES, not rows.
+// For a typical FK relationship (source.fk → target.pk):
+//   - SourceMatched = distinct FK values that matched
+//   - TargetMatched = distinct PK values that were referenced
+//   - JoinCount = source rows that matched (no inflation from unique target)
 //
-// Target cardinality (right side):
-//   - If TargetMatched ≈ SourceMatched: each target matches one source (target is "1")
-//   - If TargetMatched < SourceMatched: multiple sources share same target (target is "1")
-//   - If TargetMatched > SourceMatched: one source matches multiple targets (target is "N")
+// Detection strategy:
+//   - N:M: Both JoinCount/SourceMatched > 1 AND JoinCount/TargetMatched > 1
+//   - N:1: Only JoinCount/TargetMatched > 1 (many sources share each target)
+//   - 1:N: Only JoinCount/SourceMatched > 1 (each source has many targets)
+//   - 1:1: Both ratios ≈ 1
 func (t *TestJoinTask) determineCardinality(
 	joinResult *datasource.JoinAnalysis,
 	sourceRowCount, targetRowCount int64,
@@ -239,37 +242,36 @@ func (t *TestJoinTask) determineCardinality(
 	// Use a small tolerance for "approximately equal" comparisons
 	const tolerance = 0.05
 
-	// Calculate average matches per source and per target
+	// Calculate ratios
+	// avgTargetsPerSource: if > 1, each distinct source value maps to multiple targets
 	avgTargetsPerSource := float64(joinResult.JoinCount) / float64(joinResult.SourceMatched)
+	// avgSourcesPerTarget: if > 1, each distinct target value is referenced by multiple sources
 	avgSourcesPerTarget := float64(joinResult.JoinCount) / float64(joinResult.TargetMatched)
 
-	// Determine if source side is "1" or "many"
-	// If avgTargetsPerSource ≈ 1: each source matches ~1 target → source is "1"
-	// If avgTargetsPerSource > 1: each source matches multiple targets → but need to check target side
-	sourceIsOne := avgTargetsPerSource <= (1.0 + tolerance)
-
-	// Determine if target side is "1" or "many"
-	// If avgSourcesPerTarget ≈ 1: each target matches ~1 source → target is "1"
-	// If avgSourcesPerTarget > 1: each target matches multiple sources → target is "many"
-	targetIsOne := avgSourcesPerTarget <= (1.0 + tolerance)
+	sourceHasMultiple := avgTargetsPerSource > (1.0 + tolerance)
+	targetHasMultiple := avgSourcesPerTarget > (1.0 + tolerance)
 
 	switch {
-	case sourceIsOne && targetIsOne:
-		return "1:1"
-	case sourceIsOne && !targetIsOne:
-		// This shouldn't normally happen (source matches 1, but target matches many?)
-		// Treat as N:M to be safe
-		return "N:M"
-	case !sourceIsOne && targetIsOne:
-		// avgTargetsPerSource > 1 and avgSourcesPerTarget ≈ 1
-		// Could be either 1:N (one source, many targets) or N:1 (many sources, one target)
-		// Check the ratio of distinct values
-		if float64(joinResult.TargetMatched) > float64(joinResult.SourceMatched)*(1.0+tolerance) {
-			return "1:N" // More targets than sources: one source can have many targets
+	case sourceHasMultiple && targetHasMultiple:
+		// Both sides have row inflation
+		// For FK→PK relationships, source can have duplicate FK values (normal for N:1)
+		// Distinguish N:1 from N:M by checking if target looks like the "one" side
+		// Heuristic: if target_matched <= source_matched, target is likely the "one" side
+		if joinResult.TargetMatched <= joinResult.SourceMatched {
+			return "N:1" // Typical FK pattern with duplicate FK values
 		}
-		return "N:1" // More sources than targets (or equal): many sources to one target
+		return "N:M" // Junction table: more distinct targets than sources
+	case !sourceHasMultiple && targetHasMultiple:
+		// Many sources share each target → N:1 (typical FK pattern)
+		// Example: many orders reference the same user
+		return "N:1"
+	case sourceHasMultiple && !targetHasMultiple:
+		// Each source maps to multiple targets → 1:N
+		// Example: one user has many phone numbers
+		return "1:N"
 	default:
-		return "N:M" // Many-to-many (junction table likely)
+		// Both ratios ≈ 1 → 1:1
+		return "1:1"
 	}
 }
 

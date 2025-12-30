@@ -75,8 +75,8 @@ func setupTestJoinTest(t *testing.T) *testJoinTestContext {
 				Config: map[string]any{
 					"host":     host,
 					"port":     port.Int(),
-					"user":     "postgres",
-					"password": "postgres",
+					"user":     "ekaya",
+					"password": "test_password",
 					"database": "test_data",
 					"ssl_mode": "disable",
 				},
