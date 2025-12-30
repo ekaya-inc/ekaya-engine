@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -176,7 +177,19 @@ func (h *OntologyHandler) StartExtraction(w http.ResponseWriter, r *http.Request
 		h.logger.Error("Failed to start extraction",
 			zap.String("project_id", projectID.String()),
 			zap.Error(err))
-		if err := ErrorResponse(w, http.StatusInternalServerError, "extraction_failed", err.Error()); err != nil {
+
+		// Map service errors to appropriate HTTP status codes
+		statusCode := http.StatusInternalServerError
+		errorCode := "extraction_failed"
+		errorMsg := err.Error()
+
+		if strings.Contains(err.Error(), "relationships phase must complete") {
+			statusCode = http.StatusBadRequest
+			errorCode = "relationships_not_complete"
+			errorMsg = "Relationship detection must be completed before starting ontology extraction. Please run relationship detection first."
+		}
+
+		if err := ErrorResponse(w, statusCode, errorCode, errorMsg); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))
 		}
 		return

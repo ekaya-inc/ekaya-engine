@@ -1093,15 +1093,15 @@ function CandidateCard({ candidate, variant, onAccept, onReject }: CandidateCard
 ### Milestone 3: Workflow Orchestration
 
 1. [x] Create `RelationshipWorkflowService` (or extend existing)
-2. [x] Implement relationships phase orchestration (5-phase pipeline with 27 unit tests)
-3. [ ] Update `OntologyWorkflowService` to check relationships complete
-4. [ ] Update `OntologyWorkflowService` to skip scanning (reuse data)
+2. [x] Implement relationships phase orchestration (5-phase pipeline with 29 unit tests)
+3. [x] Update `OntologyWorkflowService` to check relationships complete
+4. [x] Update `OntologyWorkflowService` to skip scanning (reuse data)
 
 ### Milestone 4: API Handlers
 
-1. [ ] Add relationship workflow endpoints
-2. [ ] Add candidate CRUD endpoints
-3. [ ] Update ontology endpoints to check relationships prerequisite
+1. [x] Add relationship workflow endpoints
+2. [x] Add candidate CRUD endpoints
+3. [x] Update ontology endpoints to check relationships prerequisite
 
 ### Milestone 5: Frontend
 
