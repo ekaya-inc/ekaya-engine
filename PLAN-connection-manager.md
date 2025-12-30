@@ -1004,10 +1004,10 @@ queryService := services.NewQueryService(queryRepo, datasourceService, adapterFa
 - [x] Add context helpers for extracting `projectID` and `userID` from incoming requests
 
 ### Step 5: Update Factory Interface
-- [ ] Modify `pkg/adapters/datasource/factory.go`
-- [ ] Add `connMgr *ConnectionManager` field to `registryFactory`
-- [ ] Update `NewDatasourceAdapterFactory()` to accept connection manager
-- [ ] Update all factory methods to pass `projectID`, `userID`, `datasourceID` to adapters
+- [x] Modify `pkg/adapters/datasource/factory.go`
+- [x] Add `connMgr *ConnectionManager` field to `registryFactory`
+- [x] Update `NewDatasourceAdapterFactory()` to accept connection manager
+- [x] Update all factory methods to pass `projectID`, `userID`, `datasourceID` to adapters
 
 ### Step 6: Update Registry Interface
 - [ ] Modify `pkg/adapters/datasource/registry.go`
