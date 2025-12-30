@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services/workqueue"
@@ -58,6 +59,7 @@ type relationshipWorkflowService struct {
 	stateRepo         repositories.WorkflowStateRepository
 	dsSvc             DatasourceService
 	adapterFactory    datasource.DatasourceAdapterFactory
+	llmFactory        llm.LLMClientFactory
 	discoveryService  RelationshipDiscoveryService
 	getTenantCtx      TenantContextFunc
 	logger            *zap.Logger
@@ -75,6 +77,7 @@ func NewRelationshipWorkflowService(
 	stateRepo repositories.WorkflowStateRepository,
 	dsSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
+	llmFactory llm.LLMClientFactory,
 	discoveryService RelationshipDiscoveryService,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
@@ -90,6 +93,7 @@ func NewRelationshipWorkflowService(
 		stateRepo:        stateRepo,
 		dsSvc:            dsSvc,
 		adapterFactory:   adapterFactory,
+		llmFactory:       llmFactory,
 		discoveryService: discoveryService,
 		getTenantCtx:     getTenantCtx,
 		logger:           namedLogger,
@@ -292,13 +296,246 @@ func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, datasou
 	// 4. Test join (per candidate, parallel) - SQL join to get cardinality
 	// 5. Analyze relationships (single LLM task) - confirm/reject/add candidates
 
-	// TODO: Implement task orchestration
-	// For now, just mark as complete
-	s.logger.Info("Relationship workflow orchestration not yet implemented",
+	ctx := context.Background()
+
+	// Phase 1: Scan all columns in parallel
+	s.logger.Info("Phase 1: Scanning columns",
 		zap.String("workflow_id", workflowID.String()))
 
+	if err := s.updateProgress(ctx, projectID, workflowID, "Scanning columns...", 10); err != nil {
+		s.logger.Error("Failed to update progress", zap.Error(err))
+	}
+
+	if err := s.enqueueColumnScans(ctx, projectID, workflowID, datasourceID, queue); err != nil {
+		s.logger.Error("Failed to enqueue column scan tasks", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("column scan: %v", err))
+		return
+	}
+
+	// Wait for all column scans to complete
+	if err := queue.Wait(ctx); err != nil {
+		s.logger.Error("Column scan phase failed", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("column scan failed: %v", err))
+		return
+	}
+
+	// Phase 2: Match values (single task)
+	s.logger.Info("Phase 2: Matching values",
+		zap.String("workflow_id", workflowID.String()))
+
+	if err := s.updateProgress(ctx, projectID, workflowID, "Matching column values...", 30); err != nil {
+		s.logger.Error("Failed to update progress", zap.Error(err))
+	}
+
+	valueMatchTask := NewValueMatchTask(
+		s.stateRepo,
+		s.candidateRepo,
+		s.schemaRepo,
+		s.getTenantCtx,
+		projectID,
+		workflowID,
+		datasourceID,
+		s.logger,
+	)
+	queue.Enqueue(valueMatchTask)
+
+	if err := queue.Wait(ctx); err != nil {
+		s.logger.Error("Value match phase failed", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("value match failed: %v", err))
+		return
+	}
+
+	// Phase 3: Infer from names (single task)
+	s.logger.Info("Phase 3: Inferring relationships from names",
+		zap.String("workflow_id", workflowID.String()))
+
+	if err := s.updateProgress(ctx, projectID, workflowID, "Inferring relationships from naming patterns...", 50); err != nil {
+		s.logger.Error("Failed to update progress", zap.Error(err))
+	}
+
+	nameInferenceTask := NewNameInferenceTask(
+		s.candidateRepo,
+		s.schemaRepo,
+		s.getTenantCtx,
+		projectID,
+		workflowID,
+		datasourceID,
+		s.logger,
+	)
+	queue.Enqueue(nameInferenceTask)
+
+	if err := queue.Wait(ctx); err != nil {
+		s.logger.Error("Name inference phase failed", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("name inference failed: %v", err))
+		return
+	}
+
+	// Phase 4: Test joins for all candidates (parallel)
+	s.logger.Info("Phase 4: Testing joins for candidates",
+		zap.String("workflow_id", workflowID.String()))
+
+	if err := s.updateProgress(ctx, projectID, workflowID, "Testing SQL joins...", 60); err != nil {
+		s.logger.Error("Failed to update progress", zap.Error(err))
+	}
+
+	if err := s.enqueueTestJoins(ctx, projectID, workflowID, datasourceID, queue); err != nil {
+		s.logger.Error("Failed to enqueue test join tasks", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("test join: %v", err))
+		return
+	}
+
+	if err := queue.Wait(ctx); err != nil {
+		s.logger.Error("Test join phase failed", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("test join failed: %v", err))
+		return
+	}
+
+	// Phase 5: LLM analysis (single task)
+	s.logger.Info("Phase 5: Analyzing relationships with LLM",
+		zap.String("workflow_id", workflowID.String()))
+
+	if err := s.updateProgress(ctx, projectID, workflowID, "Analyzing relationships...", 80); err != nil {
+		s.logger.Error("Failed to update progress", zap.Error(err))
+	}
+
+	analyzeTask := NewAnalyzeRelationshipsTask(
+		s.candidateRepo,
+		s.schemaRepo,
+		s.llmFactory,
+		s.getTenantCtx,
+		projectID,
+		workflowID,
+		datasourceID,
+		s.logger,
+	)
+	queue.Enqueue(analyzeTask)
+
+	if err := queue.Wait(ctx); err != nil {
+		s.logger.Error("Analyze relationships phase failed", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("analyze relationships failed: %v", err))
+		return
+	}
+
 	// Mark workflow as complete
+	s.logger.Info("All phases complete - finalizing workflow",
+		zap.String("workflow_id", workflowID.String()))
+
+	if err := s.updateProgress(ctx, projectID, workflowID, "Complete", 100); err != nil {
+		s.logger.Error("Failed to update progress", zap.Error(err))
+	}
+
 	s.finalizeWorkflow(projectID, workflowID)
+}
+
+// enqueueColumnScans creates and enqueues column scan tasks for all columns.
+func (s *relationshipWorkflowService) enqueueColumnScans(ctx context.Context, projectID, workflowID, datasourceID uuid.UUID, queue *workqueue.Queue) error {
+	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("get tenant context: %w", err)
+	}
+	defer cleanup()
+
+	// Get all tables for this datasource
+	tables, err := s.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return fmt.Errorf("list tables: %w", err)
+	}
+
+	// Get all columns for this datasource
+	columns, err := s.schemaRepo.ListColumnsByDatasource(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return fmt.Errorf("list columns: %w", err)
+	}
+
+	// Build table lookup
+	tableByID := make(map[uuid.UUID]*models.SchemaTable)
+	for _, t := range tables {
+		tableByID[t.ID] = t
+	}
+
+	// Enqueue scan task for each column
+	for _, col := range columns {
+		table := tableByID[col.SchemaTableID]
+		if table == nil {
+			continue
+		}
+
+		task := NewColumnScanTask(
+			s.stateRepo,
+			s.dsSvc,
+			s.adapterFactory,
+			s.getTenantCtx,
+			projectID,
+			workflowID,
+			datasourceID,
+			table.TableName,
+			table.SchemaName,
+			col.ColumnName,
+		)
+		queue.Enqueue(task)
+	}
+
+	s.logger.Info("Enqueued column scan tasks",
+		zap.String("workflow_id", workflowID.String()),
+		zap.Int("count", len(columns)))
+
+	return nil
+}
+
+// enqueueTestJoins creates and enqueues test join tasks for all candidates.
+func (s *relationshipWorkflowService) enqueueTestJoins(ctx context.Context, projectID, workflowID, datasourceID uuid.UUID, queue *workqueue.Queue) error {
+	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("get tenant context: %w", err)
+	}
+	defer cleanup()
+
+	// Get all candidates for this workflow
+	candidates, err := s.candidateRepo.GetByWorkflow(tenantCtx, workflowID)
+	if err != nil {
+		return fmt.Errorf("get candidates: %w", err)
+	}
+
+	// Enqueue test join task for each candidate
+	for _, candidate := range candidates {
+		task := NewTestJoinTask(
+			s.candidateRepo,
+			s.schemaRepo,
+			s.dsSvc,
+			s.adapterFactory,
+			s.getTenantCtx,
+			projectID,
+			workflowID,
+			datasourceID,
+			candidate.ID,
+			s.logger,
+		)
+		queue.Enqueue(task)
+	}
+
+	s.logger.Info("Enqueued test join tasks",
+		zap.String("workflow_id", workflowID.String()),
+		zap.Int("count", len(candidates)))
+
+	return nil
+}
+
+// updateProgress updates the workflow progress.
+func (s *relationshipWorkflowService) updateProgress(ctx context.Context, projectID, workflowID uuid.UUID, message string, percent int) error {
+	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("get tenant context: %w", err)
+	}
+	defer cleanup()
+
+	progress := &models.WorkflowProgress{
+		CurrentPhase: string(models.WorkflowPhaseRelationships),
+		Message:      message,
+		Current:      percent,
+		Total:        100,
+	}
+
+	return s.workflowRepo.UpdateProgress(tenantCtx, workflowID, progress)
 }
 
 // finalizeWorkflow marks workflow as complete.
@@ -440,29 +677,43 @@ func (s *relationshipWorkflowService) SaveRelationships(ctx context.Context, wor
 		return fmt.Errorf("get accepted candidates: %w", err)
 	}
 
-	// Get workflow to extract projectID
+	// Get workflow to extract projectID and datasourceID
 	workflow, err := s.workflowRepo.GetByID(ctx, workflowID)
 	if err != nil {
 		return fmt.Errorf("get workflow: %w", err)
 	}
 
+	if workflow.DatasourceID == nil {
+		return fmt.Errorf("workflow has no datasource ID")
+	}
+
+	// Load all columns for the datasource once (avoid N+N queries)
+	allColumns, err := s.schemaRepo.ListColumnsByDatasource(ctx, workflow.ProjectID, *workflow.DatasourceID)
+	if err != nil {
+		return fmt.Errorf("list columns: %w", err)
+	}
+
+	// Build lookup map by column ID for O(1) access
+	columnByID := make(map[uuid.UUID]*models.SchemaColumn, len(allColumns))
+	for _, col := range allColumns {
+		columnByID[col.ID] = col
+	}
+
 	// Create relationships from accepted candidates
 	savedCount := 0
 	for _, candidate := range accepted {
-		// Get source and target columns to get table IDs
-		sourceCol, err := s.schemaRepo.GetColumnByID(ctx, workflow.ProjectID, candidate.SourceColumnID)
-		if err != nil {
-			s.logger.Error("Failed to get source column",
-				zap.String("column_id", candidate.SourceColumnID.String()),
-				zap.Error(err))
+		// Look up columns from pre-loaded map
+		sourceCol, ok := columnByID[candidate.SourceColumnID]
+		if !ok {
+			s.logger.Error("Source column not found in schema",
+				zap.String("column_id", candidate.SourceColumnID.String()))
 			continue
 		}
 
-		targetCol, err := s.schemaRepo.GetColumnByID(ctx, workflow.ProjectID, candidate.TargetColumnID)
-		if err != nil {
-			s.logger.Error("Failed to get target column",
-				zap.String("column_id", candidate.TargetColumnID.String()),
-				zap.Error(err))
+		targetCol, ok := columnByID[candidate.TargetColumnID]
+		if !ok {
+			s.logger.Error("Target column not found in schema",
+				zap.String("column_id", candidate.TargetColumnID.String()))
 			continue
 		}
 
