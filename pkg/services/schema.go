@@ -41,7 +41,7 @@ type SchemaService interface {
 	GetRelationshipsResponse(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RelationshipsResponse, error)
 
 	// GetRelationshipCandidates returns all relationship candidates including rejected ones with summary stats.
-	GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RelationshipCandidatesResponse, error)
+	GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.LegacyRelationshipCandidatesResponse, error)
 
 	// UpdateTableMetadata updates business_name and/or description for a table.
 	UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error
@@ -643,7 +643,7 @@ func (s *schemaService) GetRelationshipsResponse(ctx context.Context, projectID,
 }
 
 // GetRelationshipCandidates returns all relationship candidates including rejected ones with summary stats.
-func (s *schemaService) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RelationshipCandidatesResponse, error) {
+func (s *schemaService) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.LegacyRelationshipCandidatesResponse, error) {
 	// Get all candidates including rejected ones
 	candidates, err := s.schemaRepo.GetRelationshipCandidates(ctx, projectID, datasourceID)
 	if err != nil {
@@ -666,12 +666,12 @@ func (s *schemaService) GetRelationshipCandidates(ctx context.Context, projectID
 	}
 
 	// Convert to response type (candidates is already the right type)
-	result := make([]models.RelationshipCandidate, len(candidates))
+	result := make([]models.LegacyRelationshipCandidate, len(candidates))
 	for i, c := range candidates {
 		result[i] = *c
 	}
 
-	return &models.RelationshipCandidatesResponse{
+	return &models.LegacyRelationshipCandidatesResponse{
 		Candidates: result,
 		Summary:    summary,
 	}, nil

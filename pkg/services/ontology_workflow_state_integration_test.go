@@ -164,9 +164,50 @@ func (tc *workflowStateTestContext) cleanup() {
 	// Delete in order: workflow_state -> workflows -> ontologies -> schema
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_workflow_state WHERE project_id = $1`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontology_workflows WHERE project_id = $1`, tc.projectID)
-	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_tiered_ontologies WHERE project_id = $1`, tc.projectID)
+	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontologies WHERE project_id = $1`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_schema_columns WHERE project_id = $1`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_schema_tables WHERE project_id = $1`, tc.projectID)
+}
+
+// ensureCompletedRelationshipWorkflow creates a completed relationship workflow
+// to satisfy the prerequisite for ontology extraction.
+func (tc *workflowStateTestContext) ensureCompletedRelationshipWorkflow(ctx context.Context) {
+	tc.t.Helper()
+
+	// Create a temporary ontology for the workflow
+	ontology := &models.TieredOntology{
+		ID:              uuid.New(),
+		ProjectID:       tc.projectID,
+		Version:         0,
+		IsActive:        false,
+		EntitySummaries: make(map[string]*models.EntitySummary),
+		ColumnDetails:   make(map[string][]models.ColumnDetail),
+		Metadata:        make(map[string]any),
+	}
+
+	if err := tc.ontologyRepo.Create(ctx, ontology); err != nil {
+		tc.t.Fatalf("Failed to create temporary ontology for relationship workflow: %v", err)
+	}
+
+	// Create a completed relationship workflow
+	workflow := &models.OntologyWorkflow{
+		ID:           uuid.New(),
+		ProjectID:    tc.projectID,
+		OntologyID:   ontology.ID,
+		State:        models.WorkflowStateCompleted,
+		Phase:        models.WorkflowPhaseRelationships,
+		DatasourceID: &tc.dsID,
+		Progress: &models.WorkflowProgress{
+			Current: 100,
+			Total:   100,
+			Message: "Complete",
+		},
+		TaskQueue: []models.WorkflowTask{},
+	}
+
+	if err := tc.workflowRepo.Create(ctx, workflow); err != nil {
+		tc.t.Fatalf("Failed to create completed relationship workflow: %v", err)
+	}
 }
 
 // createTestTable creates a test table and returns it.
@@ -232,6 +273,9 @@ func TestStartExtraction_InitializesWorkflowState_Integration(t *testing.T) {
 	tc.createTestColumn(ctx, ordersTable.ID, "id", "uuid", 1)
 	tc.createTestColumn(ctx, ordersTable.ID, "user_id", "uuid", 2)
 	tc.createTestColumn(ctx, ordersTable.ID, "total", "numeric", 3)
+
+	// Prerequisite: relationship workflow must complete before ontology extraction
+	tc.ensureCompletedRelationshipWorkflow(ctx)
 
 	// Start extraction
 	config := &models.WorkflowConfig{
@@ -322,6 +366,9 @@ func TestStartExtraction_EmptyDatasource_Integration(t *testing.T) {
 
 	// Don't create any tables - datasource is empty
 
+	// Prerequisite: relationship workflow must complete before ontology extraction
+	tc.ensureCompletedRelationshipWorkflow(ctx)
+
 	// Start extraction
 	config := &models.WorkflowConfig{
 		DatasourceID: tc.dsID,
@@ -368,6 +415,9 @@ func TestStartExtraction_CleansUpPreviousOntologyWorkflowState_Integration(t *te
 	usersTable := tc.createTestTable(ctx, "public", "users")
 	tc.createTestColumn(ctx, usersTable.ID, "id", "uuid", 1)
 	tc.createTestColumn(ctx, usersTable.ID, "email", "text", 2)
+
+	// Prerequisite: relationship workflow must complete before ontology extraction
+	tc.ensureCompletedRelationshipWorkflow(ctx)
 
 	config := &models.WorkflowConfig{
 		DatasourceID: tc.dsID,

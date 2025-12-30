@@ -328,6 +328,10 @@ func (m *mockSchemaRepository) GetOrphanTables(ctx context.Context, projectID, d
 }
 
 func (m *mockSchemaRepository) UpsertRelationshipWithMetrics(ctx context.Context, rel *models.SchemaRelationship, metrics *models.DiscoveryMetrics) error {
+	if rel.ID == uuid.Nil {
+		rel.ID = uuid.New()
+	}
+	m.upsertedRelationships = append(m.upsertedRelationships, rel)
 	return nil
 }
 
@@ -343,7 +347,7 @@ func (m *mockSchemaRepository) GetPrimaryKeyColumns(ctx context.Context, project
 	return nil, nil
 }
 
-func (m *mockSchemaRepository) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.RelationshipCandidate, error) {
+func (m *mockSchemaRepository) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.LegacyRelationshipCandidate, error) {
 	return nil, nil
 }
 

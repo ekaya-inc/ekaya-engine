@@ -133,6 +133,7 @@ func (tc *orchestratorTestContext) createTestWorkflow(ctx context.Context, ontol
 		ProjectID:  tc.projectID,
 		OntologyID: ontologyID,
 		State:      models.WorkflowStateRunning,
+		Phase:      models.WorkflowPhaseOntology, // Required by DB constraint
 		Config: &models.WorkflowConfig{
 			DatasourceID: uuid.New(),
 		},

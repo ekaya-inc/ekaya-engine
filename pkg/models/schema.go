@@ -320,8 +320,9 @@ type DiscoveryResults struct {
 	OrphanTableNames           []string `json:"orphan_table_names,omitempty"`
 }
 
-// RelationshipCandidate represents a potential relationship found during discovery.
-type RelationshipCandidate struct {
+// LegacyRelationshipCandidate represents a potential relationship found during OLD discovery system.
+// Deprecated: This is from the old discovery system. New system uses RelationshipCandidate.
+type LegacyRelationshipCandidate struct {
 	ID              uuid.UUID `json:"id"`
 	SourceTable     string    `json:"source_table"`
 	SourceColumn    string    `json:"source_column"`
@@ -332,10 +333,11 @@ type RelationshipCandidate struct {
 	RejectionReason *string   `json:"rejection_reason,omitempty"`
 }
 
-// RelationshipCandidatesResponse contains candidates with summary statistics.
-type RelationshipCandidatesResponse struct {
-	Candidates []RelationshipCandidate `json:"candidates"`
-	Summary    CandidatesSummary       `json:"summary"`
+// LegacyRelationshipCandidatesResponse contains candidates with summary statistics (old system).
+// Deprecated: Use new RelationshipCandidate model instead.
+type LegacyRelationshipCandidatesResponse struct {
+	Candidates []LegacyRelationshipCandidate `json:"candidates"`
+	Summary    CandidatesSummary             `json:"summary"`
 }
 
 // CandidatesSummary provides aggregate stats for relationship candidates.

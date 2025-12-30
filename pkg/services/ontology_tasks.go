@@ -2,10 +2,8 @@ package services
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -469,7 +467,7 @@ func NewScanTableDataTask(
 }
 
 // Execute implements workqueue.Task.
-// Scans all columns in the table and updates their scan data in workflow state.
+// Scans all columns in the table by enqueueing ColumnScanTask for each column.
 func (t *ScanTableDataTask) Execute(ctx context.Context, enqueuer workqueue.TaskEnqueuer) error {
 	tenantCtx, cleanup, err := t.getTenantCtx(ctx, t.projectID)
 	if err != nil {
@@ -489,101 +487,26 @@ func (t *ScanTableDataTask) Execute(ctx context.Context, enqueuer workqueue.Task
 		return fmt.Errorf("update table workflow state status to scanning: %w", err)
 	}
 
-	// Get datasource with decrypted config
-	ds, err := t.dsSvc.Get(tenantCtx, t.projectID, t.datasourceID)
-	if err != nil {
-		return fmt.Errorf("get datasource: %w", err)
-	}
-
-	// Create schema discoverer for background task.
-	// Background tasks use empty userID since they run outside user session context.
-	// Connection manager pools by (projectID, userID, datasourceID), so empty userID
-	// means all background tasks for this project share one connection pool.
-	discoverer, err := t.adapterFactory.NewSchemaDiscoverer(ctx, ds.DatasourceType, ds.Config, t.projectID, t.datasourceID, "")
-	if err != nil {
-		return fmt.Errorf("create schema discoverer: %w", err)
-	}
-	defer discoverer.Close()
-
-	// Get column statistics
-	stats, err := discoverer.AnalyzeColumnStats(ctx, t.schemaName, t.tableName, t.columnNames)
-	if err != nil {
-		return fmt.Errorf("analyze column stats: %w", err)
-	}
-
-	// Build map for quick lookup
-	statsMap := make(map[string]datasource.ColumnStats)
-	for _, s := range stats {
-		statsMap[s.ColumnName] = s
-	}
-
-	// Scan each column and update workflow state with gathered data
+	// Enqueue ColumnScanTask for each column
 	for _, colName := range t.columnNames {
-		colStats := statsMap[colName]
-
-		// Get sample values (up to 50)
-		sampleValues, err := discoverer.GetDistinctValues(ctx, t.schemaName, t.tableName, colName, 50)
-		if err != nil {
-			// Log but continue - some columns may not be scannable (e.g., binary types)
-			sampleValues = nil
-		}
-
-		// Calculate null percentage
-		nullPercent := 0.0
-		if colStats.RowCount > 0 {
-			nullPercent = float64(colStats.RowCount-colStats.NonNullCount) / float64(colStats.RowCount) * 100
-		}
-
-		// Determine if column is an enum candidate
-		// Heuristic: distinct_count <= 50 AND distinct_count < row_count * 0.1
-		isEnumCandidate := false
-		if colStats.DistinctCount > 0 && colStats.DistinctCount <= 50 && colStats.RowCount > 0 {
-			if float64(colStats.DistinctCount) < float64(colStats.RowCount)*0.1 {
-				isEnumCandidate = true
-			}
-		}
-
-		// Compute value fingerprint for change detection
-		fingerprint := ""
-		if len(sampleValues) > 0 {
-			sorted := make([]string, len(sampleValues))
-			copy(sorted, sampleValues)
-			sort.Strings(sorted)
-			hash := sha256.Sum256([]byte(fmt.Sprintf("%v", sorted)))
-			fingerprint = fmt.Sprintf("%x", hash[:8]) // Use first 8 bytes
-		}
-
-		scannedAt := time.Now()
-
-		// Update column workflow state with gathered data
-		colEntityKey := models.ColumnEntityKey(t.tableName, colName)
-		ws, err := t.workflowStateRepo.GetByEntity(tenantCtx, t.workflowID, models.WorkflowEntityTypeColumn, colEntityKey)
-		if err != nil {
-			return fmt.Errorf("get column workflow state: %w", err)
-		}
-		if ws == nil {
-			return fmt.Errorf("column workflow state not found: %s", colEntityKey)
-		}
-
-		ws.Status = models.WorkflowEntityStatusScanned
-		ws.StateData = &models.WorkflowStateData{
-			Gathered: map[string]any{
-				"row_count":         colStats.RowCount,
-				"non_null_count":    colStats.NonNullCount,
-				"distinct_count":    colStats.DistinctCount,
-				"null_percent":      nullPercent,
-				"sample_values":     sampleValues,
-				"is_enum_candidate": isEnumCandidate,
-				"value_fingerprint": fingerprint,
-				"scanned_at":        scannedAt,
-			},
-		}
-		if err := t.workflowStateRepo.Update(tenantCtx, ws); err != nil {
-			return fmt.Errorf("update column workflow state: %w", err)
-		}
+		colTask := NewColumnScanTask(
+			t.workflowStateRepo,
+			t.dsSvc,
+			t.adapterFactory,
+			t.getTenantCtx,
+			t.projectID,
+			t.workflowID,
+			t.datasourceID,
+			t.tableName,
+			t.schemaName,
+			colName,
+		)
+		enqueuer.Enqueue(colTask)
 	}
 
 	// Update table workflow state status to scanned
+	// Note: This happens immediately after enqueueing column tasks.
+	// The orchestrator will track individual column completion via workflow state.
 	if err := t.workflowStateRepo.UpdateStatus(tenantCtx, tableWS.ID, models.WorkflowEntityStatusScanned, nil); err != nil {
 		return fmt.Errorf("update table workflow state status to scanned: %w", err)
 	}

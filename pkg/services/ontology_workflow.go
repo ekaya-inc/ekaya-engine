@@ -137,6 +137,26 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 		config = models.DefaultWorkflowConfig()
 	}
 
+	// Step 0: Check if relationships phase has completed for this datasource (Milestone 3.3)
+	// The relationships phase must complete before ontology extraction can start.
+	relWorkflow, err := s.workflowRepo.GetLatestByDatasourceAndPhase(ctx, config.DatasourceID, models.WorkflowPhaseRelationships)
+	if err != nil {
+		s.logger.Error("Failed to check relationships workflow status",
+			zap.String("datasource_id", config.DatasourceID.String()),
+			zap.Error(err))
+		return nil, fmt.Errorf("check relationships workflow: %w", err)
+	}
+	if relWorkflow == nil {
+		return nil, fmt.Errorf("relationships phase must complete before ontology extraction: no relationship workflow found for datasource")
+	}
+	if relWorkflow.State != models.WorkflowStateCompleted {
+		return nil, fmt.Errorf("relationships phase must complete before ontology extraction: current state is %s", relWorkflow.State)
+	}
+
+	s.logger.Info("Relationships phase verified complete",
+		zap.String("datasource_id", config.DatasourceID.String()),
+		zap.String("rel_workflow_id", relWorkflow.ID.String()))
+
 	// Step 1: Get active ontology ID (needed for cleanup after deactivation).
 	// We capture the ID here before deactivating so we can clean up its workflow state.
 	previousOntology, err := s.ontologyRepo.GetActive(ctx, projectID)
@@ -218,6 +238,7 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 		ProjectID:  projectID,
 		OntologyID: ontology.ID,
 		State:      models.WorkflowStatePending,
+		Phase:      models.WorkflowPhaseOntology, // This is the ontology extraction phase
 		Progress: &models.WorkflowProgress{
 			CurrentPhase: models.WorkflowPhaseInitializing,
 			Current:      0,
@@ -238,7 +259,8 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 	}
 
 	// Step 7: Initialize workflow state for all entities
-	if err := s.initializeWorkflowEntities(ctx, projectID, workflow.ID, ontology.ID, config.DatasourceID); err != nil {
+	// Pass the relationships workflow ID to reuse scan data (Milestone 3.4)
+	if err := s.initializeWorkflowEntities(ctx, projectID, workflow.ID, ontology.ID, config.DatasourceID, relWorkflow.ID); err != nil {
 		s.logger.Error("Failed to initialize workflow entities",
 			zap.String("workflow_id", workflow.ID.String()),
 			zap.Error(err))
@@ -720,10 +742,13 @@ func (s *ontologyWorkflowService) persistTaskQueue(projectID, workflowID uuid.UU
 
 // initializeWorkflowEntities creates workflow state rows for all entities.
 // Creates one global entity, one entity per table, and one entity per column.
-// All entities start with status='pending'.
+//
+// If relWorkflowID is provided (non-nil), scan data from the relationships phase
+// will be copied to column entities, and both column and table entities will be
+// marked as "scanned" instead of "pending" (Milestone 3.4: skip scanning/reuse data).
 func (s *ontologyWorkflowService) initializeWorkflowEntities(
 	ctx context.Context,
-	projectID, workflowID, ontologyID, datasourceID uuid.UUID,
+	projectID, workflowID, ontologyID, datasourceID, relWorkflowID uuid.UUID,
 ) error {
 	// Get all tables for this datasource
 	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
@@ -737,10 +762,32 @@ func (s *ontologyWorkflowService) initializeWorkflowEntities(
 		return fmt.Errorf("list columns: %w", err)
 	}
 
+	// Load scan data from relationships workflow (Milestone 3.4)
+	// This allows us to skip the scanning phase and reuse data
+	relScanData := make(map[string]*models.WorkflowStateData) // entityKey -> stateData
+	if relWorkflowID != uuid.Nil {
+		relStates, err := s.stateRepo.ListByWorkflow(ctx, relWorkflowID)
+		if err != nil {
+			s.logger.Warn("Failed to load relationships workflow state, will scan from scratch",
+				zap.String("rel_workflow_id", relWorkflowID.String()),
+				zap.Error(err))
+		} else {
+			for _, state := range relStates {
+				// Only copy column scan data (relationships workflow only has column entities)
+				if state.EntityType == models.WorkflowEntityTypeColumn && state.StateData != nil && state.StateData.Gathered != nil {
+					relScanData[state.EntityKey] = state.StateData
+				}
+			}
+			s.logger.Info("Loaded scan data from relationships workflow",
+				zap.String("rel_workflow_id", relWorkflowID.String()),
+				zap.Int("columns_with_scan_data", len(relScanData)))
+		}
+	}
+
 	// Build entity states slice
 	states := make([]*models.WorkflowEntityState, 0, 1+len(tables)+len(columns))
 
-	// 1. Global entity
+	// 1. Global entity (always pending - no scan data to reuse)
 	states = append(states, &models.WorkflowEntityState{
 		ProjectID:  projectID,
 		OntologyID: ontologyID,
@@ -751,35 +798,76 @@ func (s *ontologyWorkflowService) initializeWorkflowEntities(
 		StateData:  &models.WorkflowStateData{},
 	})
 
-	// 2. Table entities
+	// Track tables that have all columns with scan data
+	tableHasAllColumnData := make(map[string]bool)
+	tableCols := make(map[string]int)
+
+	// Build table lookup and count columns per table
 	tableByID := make(map[uuid.UUID]*models.SchemaTable)
 	for _, table := range tables {
 		tableByID[table.ID] = table
+		tableHasAllColumnData[table.TableName] = true // Assume true, will be set false if any column lacks data
+	}
+	for _, col := range columns {
+		table := tableByID[col.SchemaTableID]
+		if table == nil {
+			continue
+		}
+		tableCols[table.TableName]++
+		entityKey := models.ColumnEntityKey(table.TableName, col.ColumnName)
+		if _, hasScanData := relScanData[entityKey]; !hasScanData {
+			tableHasAllColumnData[table.TableName] = false
+		}
+	}
+
+	// 2. Table entities
+	// If all columns for a table have scan data, mark table as "scanned" (skip scanning phase)
+	tablesWithScanData := 0
+	for _, table := range tables {
+		status := models.WorkflowEntityStatusPending
+		if len(relScanData) > 0 && tableHasAllColumnData[table.TableName] && tableCols[table.TableName] > 0 {
+			status = models.WorkflowEntityStatusScanned
+			tablesWithScanData++
+		}
 		states = append(states, &models.WorkflowEntityState{
 			ProjectID:  projectID,
 			OntologyID: ontologyID,
 			WorkflowID: workflowID,
 			EntityType: models.WorkflowEntityTypeTable,
 			EntityKey:  models.TableEntityKey(table.TableName),
-			Status:     models.WorkflowEntityStatusPending,
+			Status:     status,
 			StateData:  &models.WorkflowStateData{},
 		})
 	}
 
 	// 3. Column entities
+	// Copy scan data from relationships workflow if available
+	columnsWithScanData := 0
 	for _, col := range columns {
 		table := tableByID[col.SchemaTableID]
 		if table == nil {
 			continue // Skip orphaned columns
 		}
+		entityKey := models.ColumnEntityKey(table.TableName, col.ColumnName)
+
+		status := models.WorkflowEntityStatusPending
+		stateData := &models.WorkflowStateData{}
+
+		// Copy scan data from relationships workflow if available
+		if scanData, hasScanData := relScanData[entityKey]; hasScanData {
+			status = models.WorkflowEntityStatusScanned
+			stateData = scanData
+			columnsWithScanData++
+		}
+
 		states = append(states, &models.WorkflowEntityState{
 			ProjectID:  projectID,
 			OntologyID: ontologyID,
 			WorkflowID: workflowID,
 			EntityType: models.WorkflowEntityTypeColumn,
-			EntityKey:  models.ColumnEntityKey(table.TableName, col.ColumnName),
-			Status:     models.WorkflowEntityStatusPending,
-			StateData:  &models.WorkflowStateData{},
+			EntityKey:  entityKey,
+			Status:     status,
+			StateData:  stateData,
 		})
 	}
 
@@ -792,7 +880,9 @@ func (s *ontologyWorkflowService) initializeWorkflowEntities(
 		zap.String("workflow_id", workflowID.String()),
 		zap.Int("total_entities", len(states)),
 		zap.Int("tables", len(tables)),
-		zap.Int("columns", len(columns)))
+		zap.Int("columns", len(columns)),
+		zap.Int("tables_with_scan_data", tablesWithScanData),
+		zap.Int("columns_with_scan_data", columnsWithScanData))
 
 	return nil
 }
