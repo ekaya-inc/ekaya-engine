@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
@@ -13,22 +14,46 @@ import (
 
 // QueryExecutor provides PostgreSQL query execution.
 type QueryExecutor struct {
-	pool *pgxpool.Pool
+	pool         *pgxpool.Pool
+	connMgr      *datasource.ConnectionManager
+	projectID    uuid.UUID
+	userID       string
+	datasourceID uuid.UUID
+	ownedPool    bool // true if we created the pool (for tests or direct instantiation)
 }
 
-// NewQueryExecutor creates a PostgreSQL query executor.
-func NewQueryExecutor(ctx context.Context, cfg *Config) (*QueryExecutor, error) {
-	connStr := fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Database, cfg.SSLMode,
-	)
+// NewQueryExecutor creates a PostgreSQL query executor using the connection manager.
+// If connMgr is nil, creates an unmanaged pool (for tests or direct instantiation).
+func NewQueryExecutor(ctx context.Context, cfg *Config, connMgr *datasource.ConnectionManager, projectID, datasourceID uuid.UUID, userID string) (*QueryExecutor, error) {
+	connStr := buildConnectionString(cfg)
 
-	pool, err := pgxpool.New(ctx, connStr)
-	if err != nil {
-		return nil, fmt.Errorf("connect to postgres: %w", err)
+	if connMgr == nil {
+		// Fallback for direct instantiation (tests)
+		pool, err := pgxpool.New(ctx, connStr)
+		if err != nil {
+			return nil, fmt.Errorf("connect to postgres: %w", err)
+		}
+
+		return &QueryExecutor{
+			pool:      pool,
+			ownedPool: true,
+		}, nil
 	}
 
-	return &QueryExecutor{pool: pool}, nil
+	// Use connection manager for reusable pool
+	pool, err := connMgr.GetOrCreatePool(ctx, projectID, userID, datasourceID, connStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pooled connection: %w", err)
+	}
+
+	return &QueryExecutor{
+		pool:         pool,
+		connMgr:      connMgr,
+		projectID:    projectID,
+		userID:       userID,
+		datasourceID: datasourceID,
+		ownedPool:    false,
+	}, nil
 }
 
 // ExecuteQuery runs a SQL query and returns the results.
@@ -141,9 +166,12 @@ func (e *QueryExecutor) ValidateQuery(ctx context.Context, sqlQuery string) erro
 	return nil
 }
 
-// Close releases the connection pool.
+// Close releases the adapter (but NOT the pool if managed).
 func (e *QueryExecutor) Close() error {
-	e.pool.Close()
+	if e.ownedPool && e.pool != nil {
+		e.pool.Close()
+	}
+	// If using connection manager, don't close the pool - it's managed by TTL
 	return nil
 }
 

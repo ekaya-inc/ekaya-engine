@@ -1015,12 +1015,12 @@ queryService := services.NewQueryService(queryRepo, datasourceService, adapterFa
 - [x] Update global registry maps to use new signatures
 
 ### Step 7: Update PostgreSQL Adapter
-- [ ] Modify `pkg/adapters/datasource/postgres/adapter.go`
-- [ ] Add `connMgr`, `projectID`, `userID`, `datasourceID`, `ownedPool` fields
-- [ ] Update `NewAdapter()` to use connection manager when available
-- [ ] Modify `Close()` to skip closing managed pools
-- [ ] Update `pkg/adapters/datasource/postgres/schema.go` (NewSchemaDiscoverer)
-- [ ] Update `pkg/adapters/datasource/postgres/query.go` (NewQueryExecutor) if exists
+- [x] Modify `pkg/adapters/datasource/postgres/adapter.go`
+- [x] Add `connMgr`, `projectID`, `userID`, `datasourceID`, `ownedPool` fields
+- [x] Update `NewAdapter()` to use connection manager when available
+- [x] Modify `Close()` to skip closing managed pools
+- [x] Update `pkg/adapters/datasource/postgres/schema.go` (NewSchemaDiscoverer)
+- [x] Update `pkg/adapters/datasource/postgres/query.go` (NewQueryExecutor) if exists
 
 ### Step 8: Update Service Layer
 - [ ] Modify `pkg/services/schema.go`

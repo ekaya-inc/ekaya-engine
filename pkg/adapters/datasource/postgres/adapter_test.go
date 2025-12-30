@@ -7,6 +7,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestFromMap_ValidConfig(t *testing.T) {
@@ -190,7 +192,8 @@ func TestAdapter_Integration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	adapter, err := NewAdapter(ctx, cfg)
+	// Pass nil for connection manager in tests (creates unmanaged pool)
+	adapter, err := NewAdapter(ctx, cfg, nil, uuid.Nil, uuid.Nil, "")
 	if err != nil {
 		t.Fatalf("failed to create adapter: %v", err)
 	}
@@ -218,7 +221,8 @@ func TestAdapter_ConnectionFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	adapter, err := NewAdapter(ctx, cfg)
+	// Pass nil for connection manager in tests (creates unmanaged pool)
+	adapter, err := NewAdapter(ctx, cfg, nil, uuid.Nil, uuid.Nil, "")
 	if err != nil {
 		// Connection failed at creation time - this is expected
 		return
