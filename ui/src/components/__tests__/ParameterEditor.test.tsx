@@ -127,7 +127,11 @@ describe('ParameterEditor', () => {
     );
 
     const typeSelects = screen.getAllByRole('combobox');
-    fireEvent.change(typeSelects[0], { target: { value: 'uuid' } });
+    const firstSelect = typeSelects[0];
+    expect(firstSelect).toBeDefined();
+    if (firstSelect) {
+      fireEvent.change(firstSelect, { target: { value: 'uuid' } });
+    }
 
     expect(mockOnChange).toHaveBeenCalledWith([
       {
@@ -151,7 +155,7 @@ describe('ParameterEditor', () => {
     // Find the button that contains a trash icon (look for svg with lucide-trash-2 class)
     const firstDeleteButton = deleteButtons.find((btn) => {
       const svg = btn.querySelector('svg');
-      return svg && svg.classList.contains('lucide-trash-2');
+      return svg?.classList.contains('lucide-trash-2');
     });
 
     if (firstDeleteButton) {
@@ -162,8 +166,11 @@ describe('ParameterEditor', () => {
       const iconButtons = deleteButtons.filter((btn) =>
         btn.className.includes('h-8 w-8')
       );
-      fireEvent.click(iconButtons[0]);
-      expect(mockOnChange).toHaveBeenCalledWith([sampleParameters[1]]);
+      const firstIconButton = iconButtons[0];
+      if (firstIconButton) {
+        fireEvent.click(firstIconButton);
+        expect(mockOnChange).toHaveBeenCalledWith([sampleParameters[1]]);
+      }
     }
   });
 

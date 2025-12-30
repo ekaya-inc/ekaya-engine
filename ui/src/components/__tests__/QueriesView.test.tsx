@@ -80,6 +80,7 @@ const mockQueries: Query[] = [
     last_used_at: '2024-01-20T00:00:00Z',
     created_at: '2024-01-15T00:00:00Z',
     updated_at: '2024-01-15T00:00:00Z',
+    parameters: [],
   },
   {
     query_id: 'query-2',
@@ -94,6 +95,7 @@ const mockQueries: Query[] = [
     last_used_at: null,
     created_at: '2024-01-10T00:00:00Z',
     updated_at: '2024-01-10T00:00:00Z',
+    parameters: [],
   },
 ];
 
