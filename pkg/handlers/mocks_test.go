@@ -320,12 +320,12 @@ func (m *mockSchemaService) GetRelationshipsResponse(ctx context.Context, projec
 	}, nil
 }
 
-func (m *mockSchemaService) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RelationshipCandidatesResponse, error) {
+func (m *mockSchemaService) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.LegacyRelationshipCandidatesResponse, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
-	return &models.RelationshipCandidatesResponse{
-		Candidates: []models.RelationshipCandidate{},
+	return &models.LegacyRelationshipCandidatesResponse{
+		Candidates: []models.LegacyRelationshipCandidate{},
 		Summary:    models.CandidatesSummary{},
 	}, nil
 }

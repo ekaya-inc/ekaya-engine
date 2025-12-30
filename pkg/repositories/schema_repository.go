@@ -62,7 +62,7 @@ type SchemaRepository interface {
 	GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error)
 	UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount *int64, isJoinable *bool, joinabilityReason *string) error
 	GetPrimaryKeyColumns(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error)
-	GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.RelationshipCandidate, error)
+	GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.LegacyRelationshipCandidate, error)
 	// GetNonPKColumnsByExactType returns non-primary-key columns with exact data type match for review candidate discovery.
 	GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error)
 }
@@ -1363,7 +1363,7 @@ func (r *schemaRepository) GetPrimaryKeyColumns(ctx context.Context, projectID, 
 	return columns, nil
 }
 
-func (r *schemaRepository) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.RelationshipCandidate, error) {
+func (r *schemaRepository) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.LegacyRelationshipCandidate, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
@@ -1404,9 +1404,9 @@ func (r *schemaRepository) GetRelationshipCandidates(ctx context.Context, projec
 	}
 	defer rows.Close()
 
-	candidates := make([]*models.RelationshipCandidate, 0)
+	candidates := make([]*models.LegacyRelationshipCandidate, 0)
 	for rows.Next() {
-		var c models.RelationshipCandidate
+		var c models.LegacyRelationshipCandidate
 		err := rows.Scan(
 			&c.ID,
 			&c.SourceTable, &c.SourceColumn,

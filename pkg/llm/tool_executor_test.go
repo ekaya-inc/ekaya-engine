@@ -382,7 +382,7 @@ func (m *mockSchemaRepo) GetPrimaryKeyColumns(ctx context.Context, projectID, da
 	return nil, m.err
 }
 
-func (m *mockSchemaRepo) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.RelationshipCandidate, error) {
+func (m *mockSchemaRepo) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.LegacyRelationshipCandidate, error) {
 	return nil, m.err
 }
 

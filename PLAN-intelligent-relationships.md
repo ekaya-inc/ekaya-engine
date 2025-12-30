@@ -1083,7 +1083,7 @@ function CandidateCard({ candidate, variant, onAccept, onReject }: CandidateCard
 
 ### Milestone 2: Detection Pipeline
 
-1. [ ] Extract column scanning from `ontology_tasks.go` into shared `ColumnScanTask`
+1. [x] Extract column scanning from `ontology_tasks.go` into shared `ColumnScanTask`
 2. [ ] Implement `ValueMatchTask` - pairwise sample value comparison
 3. [ ] Implement `NameInferenceTask` - naming pattern detection
 4. [ ] Implement `TestJoinTask` - SQL join to determine cardinality and orphan metrics
