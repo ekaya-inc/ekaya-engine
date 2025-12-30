@@ -270,6 +270,8 @@ func SubstituteParameters(
 
 ### Phase 5: SQL Injection Detection with libinjection
 
+**Status: [x] Complete**
+
 **Dependency: `github.com/corazawaf/libinjection-go`**
 
 This library is a Go port of the battle-tested libinjection C library used by ModSecurity WAF.
