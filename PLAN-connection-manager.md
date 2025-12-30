@@ -1082,10 +1082,10 @@ queryService := services.NewQueryService(queryRepo, datasourceService, adapterFa
 - [x] Verify connection reuse in integration tests (inspect pool stats)
 
 ### Step 12: Observability
-- [ ] Add metrics endpoint exposing connection manager stats
-- [ ] Log connection pool creation/reuse/cleanup events at INFO level
-- [ ] Add health check for connection manager in `/health` endpoint
-- [ ] Expose connection stats in `/health` response
+- [x] Add metrics endpoint exposing connection manager stats
+- [x] Log connection pool creation/reuse/cleanup events at INFO level
+- [x] Add health check for connection manager in `/health` endpoint
+- [x] Expose connection stats in `/health` response
 
 ### Step 13: Health Endpoint Integration
 
