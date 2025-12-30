@@ -138,8 +138,18 @@ func main() {
 	workflowStateRepo := repositories.NewWorkflowStateRepository()
 	ontologyQuestionRepo := repositories.NewOntologyQuestionRepository()
 
+	// Create connection manager with config-driven settings
+	connManagerCfg := datasource.ConnectionManagerConfig{
+		TTLMinutes:            cfg.Datasource.ConnectionTTLMinutes,
+		MaxConnectionsPerUser: cfg.Datasource.MaxConnectionsPerUser,
+		PoolMaxConns:          cfg.Datasource.PoolMaxConns,
+		PoolMinConns:          cfg.Datasource.PoolMinConns,
+	}
+	connManager := datasource.NewConnectionManager(connManagerCfg, logger)
+	defer connManager.Close()
+
 	// Create adapter factory for datasource connections
-	adapterFactory := datasource.NewDatasourceAdapterFactory()
+	adapterFactory := datasource.NewDatasourceAdapterFactory(connManager)
 
 	// Create services
 	projectService := services.NewProjectService(db, projectRepo, userRepo, redisClient, cfg.BaseURL, logger)

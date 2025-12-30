@@ -1046,11 +1046,11 @@ queryService := services.NewQueryService(queryRepo, datasourceService, adapterFa
 - [x] Update config.yaml.example with new datasource section
 
 ### Step 10: Wire in Main
-- [ ] Modify `main.go`
-- [ ] Create `ConnectionManagerConfig` from `cfg.Datasource`
-- [ ] Create `ConnectionManager` before adapter factory with config and logger
-- [ ] Pass connection manager to factory constructor
-- [ ] Defer `connManager.Close()` on shutdown
+- [x] Modify `main.go`
+- [x] Create `ConnectionManagerConfig` from `cfg.Datasource`
+- [x] Create `ConnectionManager` before adapter factory with config and logger
+- [x] Pass connection manager to factory constructor
+- [x] Defer `connManager.Close()` on shutdown
 
 ### Step 11: Testing
 - [ ] Create `pkg/retry/retry_test.go`
