@@ -180,6 +180,7 @@ check: ## Run strict quality checks (fails on any issue)
 
 run: ## Build website and run the server (no watch)
 	@echo "$(YELLOW)Building UI...$(NC)"
+	@cd ui && if [ ! -f node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then echo "$(YELLOW)Installing UI dependencies...$(NC)" && npm install; fi
 	@cd ui && npm run build
 	@echo "$(GREEN)✓ UI built$(NC)"
 	@echo "$(YELLOW)Starting ekaya-engine on port $(PORT)...$(NC)"
@@ -189,10 +190,12 @@ dev-ui: ## Watch UI files and rebuild to dist/ for Go server
 	@echo "$(YELLOW)Watching UI files and rebuilding to ui/dist/...$(NC)"
 	@echo "Changes will be served by the Go server on http://localhost:3443"
 	@echo "Refresh browser to see changes."
+	@cd ui && if [ ! -f node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then echo "$(YELLOW)Installing UI dependencies...$(NC)" && npm install; fi
 	@cd ui && npm run watch
 
 dev-server: ## Start development mode with auto-reload (using air)
 	@echo "$(YELLOW)Building UI for Go server...$(NC)"
+	@cd ui && if [ ! -f node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then echo "$(YELLOW)Installing UI dependencies...$(NC)" && npm install; fi
 	@cd ui && npm run build
 	@echo "$(GREEN)✓ UI built and available at http://localhost:3443$(NC)"
 	@echo "$(YELLOW)Starting development mode with auto-reload...$(NC)"
