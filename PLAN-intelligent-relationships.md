@@ -1111,13 +1111,6 @@ function CandidateCard({ candidate, variant, onAccept, onReject }: CandidateCard
 4. [x] Route already exists at `/relationships`
 5. [x] Updated `RelationshipDiscoveryProgress` with full workflow UI
 
-### Milestone 6: Integration & Testing
-
-1. [ ] End-to-end test: relationships → ontology flow
-2. [ ] Test candidate review UX
-3. [ ] Test Cancel/Save behavior
-4. [ ] Performance testing with large schemas
-
 ---
 
 ## Files to Create/Modify
