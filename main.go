@@ -137,6 +137,7 @@ func main() {
 	knowledgeRepo := repositories.NewKnowledgeRepository()
 	workflowStateRepo := repositories.NewWorkflowStateRepository()
 	ontologyQuestionRepo := repositories.NewOntologyQuestionRepository()
+	relationshipCandidateRepo := repositories.NewRelationshipCandidateRepository()
 
 	// Create connection manager with config-driven settings
 	connManagerCfg := datasource.ConnectionManagerConfig{
@@ -185,6 +186,9 @@ func main() {
 	ontologyChatService := services.NewOntologyChatService(
 		ontologyChatRepo, ontologyRepo, knowledgeRepo,
 		schemaRepo, ontologyWorkflowRepo, workflowStateRepo, llmFactory, datasourceService, adapterFactory, logger)
+	relationshipWorkflowService := services.NewRelationshipWorkflowService(
+		ontologyWorkflowRepo, relationshipCandidateRepo, schemaRepo, workflowStateRepo,
+		datasourceService, adapterFactory, llmFactory, discoveryService, getTenantCtx, logger)
 
 	mux := http.NewServeMux()
 
@@ -277,6 +281,11 @@ func main() {
 
 	ontologyChatHandler := handlers.NewOntologyChatHandler(ontologyChatService, knowledgeService, logger)
 	ontologyChatHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register relationship workflow handler (protected)
+	relationshipWorkflowHandler := handlers.NewRelationshipWorkflowHandler(
+		relationshipWorkflowService, logger)
+	relationshipWorkflowHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"
