@@ -113,6 +113,34 @@ func (t *ValueMatchTask) Execute(ctx context.Context, enqueuer workqueue.TaskEnq
 		return fmt.Errorf("list workflow states: %w", err)
 	}
 
+	// Load all columns and tables once to avoid N+N queries
+	columns, err := t.schemaRepo.ListColumnsByDatasource(tenantCtx, t.projectID, t.datasourceID)
+	if err != nil {
+		return fmt.Errorf("list columns: %w", err)
+	}
+	tables, err := t.schemaRepo.ListTablesByDatasource(tenantCtx, t.projectID, t.datasourceID)
+	if err != nil {
+		return fmt.Errorf("list tables: %w", err)
+	}
+
+	// Build lookup maps once
+	tableIDByName := make(map[string]uuid.UUID)
+	for _, table := range tables {
+		tableIDByName[table.TableName] = table.ID
+	}
+
+	columnByTableAndName := make(map[string]*models.SchemaColumn)
+	for _, col := range columns {
+		// Find table name for this column
+		for tableName, tableID := range tableIDByName {
+			if col.SchemaTableID == tableID {
+				key := fmt.Sprintf("%s.%s", tableName, col.ColumnName)
+				columnByTableAndName[key] = col
+				break
+			}
+		}
+	}
+
 	// Filter to scanned column entities and extract scan data
 	scannedColumns := make([]*columnScanInfo, 0)
 	for _, state := range allStates {
@@ -124,7 +152,7 @@ func (t *ValueMatchTask) Execute(ctx context.Context, enqueuer workqueue.TaskEnq
 		}
 
 		// Extract column info from state data
-		colInfo, err := t.extractColumnInfo(tenantCtx, state)
+		colInfo, err := t.extractColumnInfo(tenantCtx, state, columnByTableAndName)
 		if err != nil {
 			t.logger.Warn("Failed to extract column info from state",
 				zap.String("entity_key", state.EntityKey),
@@ -211,7 +239,7 @@ type columnScanInfo struct {
 }
 
 // extractColumnInfo extracts column information from workflow state.
-func (t *ValueMatchTask) extractColumnInfo(ctx context.Context, state *models.WorkflowEntityState) (*columnScanInfo, error) {
+func (t *ValueMatchTask) extractColumnInfo(ctx context.Context, state *models.WorkflowEntityState, columnByTableAndName map[string]*models.SchemaColumn) (*columnScanInfo, error) {
 	// Parse entity key: "table.column"
 	parts := strings.SplitN(state.EntityKey, ".", 2)
 	if len(parts) != 2 {
@@ -277,10 +305,11 @@ func (t *ValueMatchTask) extractColumnInfo(ctx context.Context, state *models.Wo
 		}
 	}
 
-	// Get column metadata from schema repository
-	column, err := t.getColumnByName(ctx, tableName, columnName)
-	if err != nil {
-		return nil, fmt.Errorf("get column metadata: %w", err)
+	// Get column metadata from lookup map
+	key := fmt.Sprintf("%s.%s", tableName, columnName)
+	column, ok := columnByTableAndName[key]
+	if !ok {
+		return nil, fmt.Errorf("column not found: %s", key)
 	}
 
 	return &columnScanInfo{
@@ -294,42 +323,6 @@ func (t *ValueMatchTask) extractColumnInfo(ctx context.Context, state *models.Wo
 		nullPercent:   nullPercent,
 		sampleValues:  sampleValues,
 	}, nil
-}
-
-// getColumnByName retrieves column metadata by table and column name.
-func (t *ValueMatchTask) getColumnByName(ctx context.Context, tableName, columnName string) (*models.SchemaColumn, error) {
-	// Get all columns for the datasource
-	columns, err := t.schemaRepo.ListColumnsByDatasource(ctx, t.projectID, t.datasourceID)
-	if err != nil {
-		return nil, fmt.Errorf("list columns: %w", err)
-	}
-
-	// Find matching column
-	// We need to match both table and column name
-	tables, err := t.schemaRepo.ListTablesByDatasource(ctx, t.projectID, t.datasourceID)
-	if err != nil {
-		return nil, fmt.Errorf("list tables: %w", err)
-	}
-
-	// Build table name to ID map
-	tableIDByName := make(map[string]uuid.UUID)
-	for _, table := range tables {
-		tableIDByName[table.TableName] = table.ID
-	}
-
-	tableID, ok := tableIDByName[tableName]
-	if !ok {
-		return nil, fmt.Errorf("table not found: %s", tableName)
-	}
-
-	// Find column
-	for _, col := range columns {
-		if col.SchemaTableID == tableID && col.ColumnName == columnName {
-			return col, nil
-		}
-	}
-
-	return nil, fmt.Errorf("column not found: %s.%s", tableName, columnName)
 }
 
 // filterJoinable filters columns to those suitable for FK relationships.
