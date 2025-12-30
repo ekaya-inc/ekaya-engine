@@ -1085,7 +1085,7 @@ function CandidateCard({ candidate, variant, onAccept, onReject }: CandidateCard
 
 1. [x] Extract column scanning from `ontology_tasks.go` into shared `ColumnScanTask`
 2. [x] Implement `ValueMatchTask` - pairwise sample value comparison
-3. [ ] Implement `NameInferenceTask` - naming pattern detection
+3. [x] Implement `NameInferenceTask` - naming pattern detection
 4. [ ] Implement `TestJoinTask` - SQL join to determine cardinality and orphan metrics
 5. [ ] Implement `AnalyzeRelationshipsTask` - LLM analysis with join metrics
 6. [ ] Add LLM prompt for relationship analysis
