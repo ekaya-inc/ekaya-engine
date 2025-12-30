@@ -85,7 +85,7 @@ const CellRenderer = ({ value }: { value: unknown }) => {
       }
       toast(toastOptions);
       setTimeout(() => setIsCopied(false), 2000);
-    } catch (error) {
+    } catch {
       toast({
         title: 'Failed to copy',
         description: 'Could not copy to clipboard',
