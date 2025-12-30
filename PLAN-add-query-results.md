@@ -57,11 +57,13 @@ Currently `QueriesView.tsx` shows only a toast notification with row count. Need
 
 ## Implementation Steps
 
-### 1. Install dependency
+### 1. Install dependency ✅
 
 ```bash
 cd ui && npm install @tanstack/react-table
 ```
+
+**Status:** Complete - dependency installed and lock file updated
 
 ### 2. Create QueryResultsTable component
 
