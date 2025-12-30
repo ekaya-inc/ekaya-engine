@@ -238,6 +238,7 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 		ProjectID:  projectID,
 		OntologyID: ontology.ID,
 		State:      models.WorkflowStatePending,
+		Phase:      models.WorkflowPhaseOntology, // This is the ontology extraction phase
 		Progress: &models.WorkflowProgress{
 			CurrentPhase: models.WorkflowPhaseInitializing,
 			Current:      0,
