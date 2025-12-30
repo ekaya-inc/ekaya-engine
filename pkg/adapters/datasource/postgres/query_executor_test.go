@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
 )
 
@@ -46,7 +48,8 @@ func setupQueryExecutorTest(t *testing.T) *queryExecutorTestContext {
 		SSLMode:  "disable",
 	}
 
-	executor, err := NewQueryExecutor(ctx, cfg)
+	// Pass nil for connection manager and zero IDs for unmanaged pool (test mode)
+	executor, err := NewQueryExecutor(ctx, cfg, nil, uuid.Nil, uuid.Nil, "")
 	if err != nil {
 		t.Fatalf("failed to create query executor: %v", err)
 	}

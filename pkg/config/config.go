@@ -99,7 +99,11 @@ type DatasourceConfig struct {
 	// ConnectionTTLMinutes is how long idle datasource connections are kept alive.
 	ConnectionTTLMinutes int `yaml:"connection_ttl_minutes" env:"DATASOURCE_CONNECTION_TTL_MINUTES" env-default:"5"`
 	// MaxConnectionsPerUser limits concurrent datasource connections per user.
-	MaxConnectionsPerUser int `yaml:"max_connections_per_user" env:"DATASOURCE_MAX_CONNECTIONS_PER_USER" env-default:"1"`
+	MaxConnectionsPerUser int `yaml:"max_connections_per_user" env:"DATASOURCE_MAX_CONNECTIONS_PER_USER" env-default:"10"`
+	// PoolMaxConns is the maximum number of connections per datasource pool.
+	PoolMaxConns int32 `yaml:"pool_max_conns" env:"DATASOURCE_POOL_MAX_CONNS" env-default:"10"`
+	// PoolMinConns is the minimum number of connections per datasource pool.
+	PoolMinConns int32 `yaml:"pool_min_conns" env:"DATASOURCE_POOL_MIN_CONNS" env-default:"1"`
 }
 
 // CommunityAIConfig holds endpoints for free community AI models.

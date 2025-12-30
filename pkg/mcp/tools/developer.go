@@ -487,7 +487,8 @@ func registerQueryTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 			return nil, err
 		}
 
-		executor, err := deps.AdapterFactory.NewQueryExecutor(tenantCtx, dsType, dsConfig)
+		// TODO: Extract userID from context and datasourceID from getDefaultDatasourceConfig when step 8 is implemented
+		executor, err := deps.AdapterFactory.NewQueryExecutor(tenantCtx, dsType, dsConfig, projectID, uuid.Nil, "")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create query executor: %w", err)
 		}
@@ -591,7 +592,8 @@ func registerSampleTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 			return nil, err
 		}
 
-		executor, err := deps.AdapterFactory.NewQueryExecutor(tenantCtx, dsType, dsConfig)
+		// TODO: Extract userID from context and datasourceID from getDefaultDatasourceConfig when step 8 is implemented
+		executor, err := deps.AdapterFactory.NewQueryExecutor(tenantCtx, dsType, dsConfig, projectID, uuid.Nil, "")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create query executor: %w", err)
 		}
@@ -666,7 +668,8 @@ func registerExecuteTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 			return nil, err
 		}
 
-		executor, err := deps.AdapterFactory.NewQueryExecutor(tenantCtx, dsType, dsConfig)
+		// TODO: Extract userID from context and datasourceID from getDefaultDatasourceConfig when step 8 is implemented
+		executor, err := deps.AdapterFactory.NewQueryExecutor(tenantCtx, dsType, dsConfig, projectID, uuid.Nil, "")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create query executor: %w", err)
 		}
@@ -760,7 +763,8 @@ func registerValidateTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 			return nil, err
 		}
 
-		executor, err := deps.AdapterFactory.NewQueryExecutor(tenantCtx, dsType, dsConfig)
+		// TODO: Extract userID from context and datasourceID from getDefaultDatasourceConfig when step 8 is implemented
+		executor, err := deps.AdapterFactory.NewQueryExecutor(tenantCtx, dsType, dsConfig, projectID, uuid.Nil, "")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create query executor: %w", err)
 		}

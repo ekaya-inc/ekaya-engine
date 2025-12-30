@@ -44,7 +44,8 @@ func setupWorkflowStateTest(t *testing.T) *workflowStateTestContext {
 	stateRepo := repositories.NewWorkflowStateRepository()
 
 	// Create mock dependencies for the service
-	adapterFactory := datasource.NewDatasourceAdapterFactory()
+	// Pass nil for connection manager since tests use unmanaged pools
+	adapterFactory := datasource.NewDatasourceAdapterFactory(nil)
 
 	// Create getTenantCtx function
 	getTenantCtx := func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {

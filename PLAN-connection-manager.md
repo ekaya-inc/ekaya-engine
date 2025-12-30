@@ -970,116 +970,122 @@ queryService := services.NewQueryService(queryRepo, datasourceService, adapterFa
 ## Implementation Steps
 
 ### Step 1: Create Retry Package
-- [ ] Create `pkg/retry/retry.go`
-- [ ] Implement `Config` struct with `MaxRetries`, `InitialDelay`, `MaxDelay`, `Multiplier`
-- [ ] Implement `DefaultConfig()` returning sensible defaults (3 retries, 100ms initial, 5s max, 2x multiplier)
-- [ ] Implement `Do(ctx, cfg, fn)` for operations returning only error
-- [ ] Implement `DoWithResult[T](ctx, cfg, fn)` for operations returning (T, error)
-- [ ] Implement `IsRetryable(err)` to detect transient errors
-- [ ] Implement `DoIfRetryable(ctx, cfg, fn)` that skips retries for permanent errors
-- [ ] Respect context cancellation during wait periods
-- [ ] Create `pkg/retry/retry_test.go` with unit tests
+- [x] Create `pkg/retry/retry.go`
+- [x] Implement `Config` struct with `MaxRetries`, `InitialDelay`, `MaxDelay`, `Multiplier`
+- [x] Implement `DefaultConfig()` returning sensible defaults (3 retries, 100ms initial, 5s max, 2x multiplier)
+- [x] Implement `Do(ctx, cfg, fn)` for operations returning only error
+- [x] Implement `DoWithResult[T](ctx, cfg, fn)` for operations returning (T, error)
+- [x] Implement `IsRetryable(err)` to detect transient errors
+- [x] Implement `DoIfRetryable(ctx, cfg, fn)` that skips retries for permanent errors
+- [x] Respect context cancellation during wait periods
+- [x] Create `pkg/retry/retry_test.go` with unit tests
 
 ### Step 2: Create Log Sanitizer
-- [ ] Create `pkg/logging/sanitizer.go`
-- [ ] Implement `SanitizeConnectionString()` to redact passwords from connection strings
-- [ ] Implement `SanitizeError()` to redact passwords, JWT tokens, API keys from error messages
-- [ ] Implement `SanitizeQuery()` to truncate and sanitize SQL queries
-- [ ] Implement `TruncateString()` helper
-- [ ] Use compiled regex patterns for performance
-- [ ] Create `pkg/logging/sanitizer_test.go` with unit tests
+- [x] Create `pkg/logging/sanitizer.go`
+- [x] Implement `SanitizeConnectionString()` to redact passwords from connection strings
+- [x] Implement `SanitizeError()` to redact passwords, JWT tokens, API keys from error messages
+- [x] Implement `SanitizeQuery()` to truncate and sanitize SQL queries
+- [x] Implement `TruncateString()` helper
+- [x] Use compiled regex patterns for performance
+- [x] Create `pkg/logging/sanitizer_test.go` with unit tests
 
 ### Step 3: Create Connection Manager
-- [ ] Create `pkg/adapters/datasource/connection_manager.go`
-- [ ] Implement `ConnectionManager` struct with TTL-based pooling
-- [ ] Implement background cleanup goroutine
-- [ ] Add `GetOrCreatePool()`, `Close()`, `GetStats()` methods
-- [ ] Use `retry.DoWithResult()` for pool creation
-- [ ] Use `retry.Do()` for health checks
-- [ ] Follow lock ordering rules from ekaya-region reference (manager lock → connection lock)
+- [x] Create `pkg/adapters/datasource/connection_manager.go`
+- [x] Implement `ConnectionManager` struct with TTL-based pooling
+- [x] Implement background cleanup goroutine
+- [x] Add `GetOrCreatePool()`, `Close()`, `GetStats()` methods
+- [x] Use `retry.DoWithResult()` for pool creation
+- [x] Use `retry.Do()` for health checks
+- [x] Follow lock ordering rules from ekaya-region reference (manager lock → connection lock)
 
 ### Step 4: Add User Context Extraction
-- [ ] Create `pkg/auth/context.go` (if not exists)
-- [ ] Implement `GetUserIDFromContext(ctx)` to extract user ID from JWT claims
-- [ ] Add context helpers for extracting `projectID` and `userID` from incoming requests
+- [x] Create `pkg/auth/context.go` (if not exists)
+- [x] Implement `GetUserIDFromContext(ctx)` to extract user ID from JWT claims
+- [x] Add context helpers for extracting `projectID` and `userID` from incoming requests
 
 ### Step 5: Update Factory Interface
-- [ ] Modify `pkg/adapters/datasource/factory.go`
-- [ ] Add `connMgr *ConnectionManager` field to `registryFactory`
-- [ ] Update `NewDatasourceAdapterFactory()` to accept connection manager
-- [ ] Update all factory methods to pass `projectID`, `userID`, `datasourceID` to adapters
+- [x] Modify `pkg/adapters/datasource/factory.go`
+- [x] Add `connMgr *ConnectionManager` field to `registryFactory`
+- [x] Update `NewDatasourceAdapterFactory()` to accept connection manager
+- [x] Update all factory methods to pass `projectID`, `userID`, `datasourceID` to adapters
 
 ### Step 6: Update Registry Interface
-- [ ] Modify `pkg/adapters/datasource/registry.go`
-- [ ] Update factory function signatures to accept `(ctx, config, connMgr, projectID, userID, datasourceID)`
-- [ ] Update global registry maps to use new signatures
+- [x] Modify `pkg/adapters/datasource/registry.go`
+- [x] Update factory function signatures to accept `(ctx, config, connMgr, projectID, userID, datasourceID)`
+- [x] Update global registry maps to use new signatures
 
 ### Step 7: Update PostgreSQL Adapter
-- [ ] Modify `pkg/adapters/datasource/postgres/adapter.go`
-- [ ] Add `connMgr`, `projectID`, `userID`, `datasourceID`, `ownedPool` fields
-- [ ] Update `NewAdapter()` to use connection manager when available
-- [ ] Modify `Close()` to skip closing managed pools
-- [ ] Update `pkg/adapters/datasource/postgres/schema.go` (NewSchemaDiscoverer)
-- [ ] Update `pkg/adapters/datasource/postgres/query.go` (NewQueryExecutor) if exists
+- [x] Modify `pkg/adapters/datasource/postgres/adapter.go`
+- [x] Add `connMgr`, `projectID`, `userID`, `datasourceID`, `ownedPool` fields
+- [x] Update `NewAdapter()` to use connection manager when available
+- [x] Modify `Close()` to skip closing managed pools
+- [x] Update `pkg/adapters/datasource/postgres/schema.go` (NewSchemaDiscoverer)
+- [x] Update `pkg/adapters/datasource/postgres/query.go` (NewQueryExecutor) if exists
 
 ### Step 8: Update Service Layer
-- [ ] Modify `pkg/services/schema.go`
+- [x] Modify `pkg/services/schema.go`
   - Extract `userID` from context in all methods calling factory
   - Pass `projectID`, `userID`, `datasourceID` to factory methods
-- [ ] Modify `pkg/services/query.go`
+- [x] Modify `pkg/services/query.go`
   - Same context extraction pattern
   - Update `Execute()` and `Test()` methods
-- [ ] Modify `pkg/services/datasource.go`
+- [x] Modify `pkg/services/datasource.go`
   - `TestConnection()` continues using unmanaged pools (no reuse needed for one-off tests)
+- [x] Modify `pkg/services/ontology_chat.go`
+  - Update calls to factory methods
+- [x] Modify `pkg/services/ontology_tasks.go`
+  - Update calls to factory methods
+- [x] Modify `pkg/services/relationship_discovery.go`
+  - Update calls to factory methods
 
 ### Step 9: Add Configuration
-- [ ] Modify `config/config.go`
-- [ ] Add `DatasourceConfig` struct with connection manager settings
-- [ ] Add `Datasource DatasourceConfig` field to main `Config` struct
-- [ ] Set sensible defaults (TTL: 5min, MaxPerUser: 10, PoolMax: 10, PoolMin: 1)
-- [ ] Update config.yaml.example with new datasource section
+- [x] Modify `config/config.go`
+- [x] Add `DatasourceConfig` struct with connection manager settings
+- [x] Add `Datasource DatasourceConfig` field to main `Config` struct
+- [x] Set sensible defaults (TTL: 5min, MaxPerUser: 10, PoolMax: 10, PoolMin: 1)
+- [x] Update config.yaml.example with new datasource section
 
 ### Step 10: Wire in Main
-- [ ] Modify `main.go`
-- [ ] Create `ConnectionManagerConfig` from `cfg.Datasource`
-- [ ] Create `ConnectionManager` before adapter factory with config and logger
-- [ ] Pass connection manager to factory constructor
-- [ ] Defer `connManager.Close()` on shutdown
+- [x] Modify `main.go`
+- [x] Create `ConnectionManagerConfig` from `cfg.Datasource`
+- [x] Create `ConnectionManager` before adapter factory with config and logger
+- [x] Pass connection manager to factory constructor
+- [x] Defer `connManager.Close()` on shutdown
 
 ### Step 11: Testing
-- [ ] Create `pkg/retry/retry_test.go`
+- [x] Create `pkg/retry/retry_test.go`
   - Test exponential backoff timing
   - Test context cancellation during retry
   - Test max retries exhaustion
   - Test successful retry after transient failure
   - Test `IsRetryable()` with various error patterns (connection refused, timeout, etc.)
   - Test `DoIfRetryable()` skips retries for non-transient errors
-- [ ] Create `pkg/logging/sanitizer_test.go`
+- [x] Create `pkg/logging/sanitizer_test.go`
   - Test password redaction in connection strings (`password=secret` → `password=[REDACTED]`)
   - Test JWT token redaction (`Bearer eyJ...` → `Bearer [REDACTED]`)
   - Test API key redaction
   - Test connection string format redaction (`://user:pass@host` → `://[REDACTED]@[REDACTED]`)
   - Test query truncation at MaxQueryLogLength
-- [ ] Create `pkg/adapters/datasource/connection_manager_test.go`
+- [x] Create `pkg/adapters/datasource/connection_manager_test.go`
   - Test pool reuse for same `(projectID, userID, datasourceID)` tuple
   - Test TTL expiration and cleanup
   - Test health check recovery from bad connections
   - Test concurrent access (race detector)
   - Test retry behavior on pool creation failure
   - Test per-user connection limit enforcement (returns error when exceeded)
-- [ ] Create `pkg/adapters/datasource/postgres/adapter_security_test.go`
+- [x] Create `pkg/adapters/datasource/postgres/adapter_security_test.go`
   - Test SQL injection prevention with parameterized queries
   - Test password URL escaping handles special characters: `@`, `/`, `#`, `?`, `;`, spaces
   - Test connection string building with malicious inputs
   - Test that passwords with SQL injection attempts are safely escaped
-- [ ] Update existing integration tests to pass context with user ID
-- [ ] Verify connection reuse in integration tests (inspect pool stats)
+- [x] Update existing integration tests to pass context with user ID
+- [x] Verify connection reuse in integration tests (inspect pool stats)
 
 ### Step 12: Observability
-- [ ] Add metrics endpoint exposing connection manager stats
-- [ ] Log connection pool creation/reuse/cleanup events at INFO level
-- [ ] Add health check for connection manager in `/health` endpoint
-- [ ] Expose connection stats in `/health` response
+- [x] Add metrics endpoint exposing connection manager stats
+- [x] Log connection pool creation/reuse/cleanup events at INFO level
+- [x] Add health check for connection manager in `/health` endpoint
+- [x] Expose connection stats in `/health` response
 
 ### Step 13: Health Endpoint Integration
 
@@ -1224,7 +1230,10 @@ NewAdapter(ctx context.Context, cfg *Config, connMgr *ConnectionManager, project
 - **ekaya-region:** `{projectID}:{userID}` (ADBC connections to metadata DB)
 - **ekaya-engine:** `{projectID}:{userID}:{datasourceID}` (pgxpool to customer datasources)
 
-**Rationale:** ekaya-engine must pool connections per datasource since each customer database has different credentials and endpoints.
+**Rationale:** The key includes all three components because:
+1. **`datasourceID`** - Each customer database has different connection endpoints and credentials
+2. **`userID`** - Datasources may be configured with user-level credentials rather than shared project credentials. When users have their own database credentials, each user needs a separate connection pool to the same datasource.
+3. **`projectID`** - Provides tenant isolation and enables per-project connection tracking
 
 ### Database Type
 - **ekaya-region:** ADBC (adbc.Database + adbc.Connection)

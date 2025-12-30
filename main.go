@@ -138,8 +138,18 @@ func main() {
 	workflowStateRepo := repositories.NewWorkflowStateRepository()
 	ontologyQuestionRepo := repositories.NewOntologyQuestionRepository()
 
+	// Create connection manager with config-driven settings
+	connManagerCfg := datasource.ConnectionManagerConfig{
+		TTLMinutes:            cfg.Datasource.ConnectionTTLMinutes,
+		MaxConnectionsPerUser: cfg.Datasource.MaxConnectionsPerUser,
+		PoolMaxConns:          cfg.Datasource.PoolMaxConns,
+		PoolMinConns:          cfg.Datasource.PoolMinConns,
+	}
+	connManager := datasource.NewConnectionManager(connManagerCfg, logger)
+	defer connManager.Close()
+
 	// Create adapter factory for datasource connections
-	adapterFactory := datasource.NewDatasourceAdapterFactory()
+	adapterFactory := datasource.NewDatasourceAdapterFactory(connManager)
 
 	// Create services
 	projectService := services.NewProjectService(db, projectRepo, userRepo, redisClient, cfg.BaseURL, logger)
@@ -179,7 +189,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	// Register health handler
-	healthHandler := handlers.NewHealthHandler(cfg, logger)
+	healthHandler := handlers.NewHealthHandler(cfg, connManager, logger)
 	healthHandler.RegisterRoutes(mux)
 
 	// Register auth handler (public - no auth required)

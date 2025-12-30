@@ -5,14 +5,27 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
+
+// testContextWithAuth creates a context with JWT claims for testing
+func testContextWithAuth(projectID, userID string) context.Context {
+	claims := &auth.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject: userID,
+		},
+		ProjectID: projectID,
+	}
+	return context.WithValue(context.Background(), auth.ClaimsKey, claims)
+}
 
 // ============================================================================
 // Mock Implementations
@@ -446,11 +459,11 @@ type mockSchemaAdapterFactory struct {
 	discovererErr error
 }
 
-func (m *mockSchemaAdapterFactory) NewConnectionTester(ctx context.Context, dsType string, config map[string]any) (datasource.ConnectionTester, error) {
+func (m *mockSchemaAdapterFactory) NewConnectionTester(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.ConnectionTester, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (m *mockSchemaAdapterFactory) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any) (datasource.SchemaDiscoverer, error) {
+func (m *mockSchemaAdapterFactory) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.SchemaDiscoverer, error) {
 	if m.discovererErr != nil {
 		return nil, m.discovererErr
 	}
@@ -461,7 +474,7 @@ func (m *mockSchemaAdapterFactory) ListTypes() []datasource.DatasourceAdapterInf
 	return nil
 }
 
-func (m *mockSchemaAdapterFactory) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any) (datasource.QueryExecutor, error) {
+func (m *mockSchemaAdapterFactory) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.QueryExecutor, error) {
 	return nil, errors.New("not implemented in mock")
 }
 
@@ -522,7 +535,8 @@ func TestSchemaService_RefreshDatasourceSchema_Success(t *testing.T) {
 
 	service := newTestSchemaService(repo, dsSvc, factory)
 
-	result, err := service.RefreshDatasourceSchema(context.Background(), projectID, datasourceID)
+	ctx := testContextWithAuth(projectID.String(), "test-user-id")
+	result, err := service.RefreshDatasourceSchema(ctx, projectID, datasourceID)
 	if err != nil {
 		t.Fatalf("RefreshDatasourceSchema failed: %v", err)
 	}
@@ -568,7 +582,8 @@ func TestSchemaService_RefreshDatasourceSchema_NoTables(t *testing.T) {
 
 	service := newTestSchemaService(repo, dsSvc, factory)
 
-	result, err := service.RefreshDatasourceSchema(context.Background(), projectID, datasourceID)
+	ctx := testContextWithAuth(projectID.String(), "test-user-id")
+	result, err := service.RefreshDatasourceSchema(ctx, projectID, datasourceID)
 	if err != nil {
 		t.Fatalf("RefreshDatasourceSchema failed: %v", err)
 	}
@@ -660,7 +675,8 @@ func TestSchemaService_RefreshDatasourceSchema_NoFKSupport(t *testing.T) {
 
 	service := newTestSchemaService(repo, dsSvc, factory)
 
-	result, err := service.RefreshDatasourceSchema(context.Background(), projectID, datasourceID)
+	ctx := testContextWithAuth(projectID.String(), "test-user-id")
+	result, err := service.RefreshDatasourceSchema(ctx, projectID, datasourceID)
 	if err != nil {
 		t.Fatalf("RefreshDatasourceSchema failed: %v", err)
 	}
@@ -2047,5 +2063,37 @@ func TestSchemaService_GetDatasourceSchemaForPrompt_WithRelationships(t *testing
 	}
 	if !contains(prompt, "(N:1)") {
 		t.Error("expected cardinality")
+	}
+}
+
+// ============================================================================
+// Tests for RefreshDatasourceSchema Auth Extraction
+// ============================================================================
+
+func TestSchemaService_RefreshDatasourceSchema_NoAuthContext(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	repo := &mockSchemaRepository{}
+	dsSvc := &mockDatasourceService{
+		datasource: &models.Datasource{
+			ID:             datasourceID,
+			ProjectID:      projectID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{"host": "localhost"},
+		},
+	}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	// Context without auth claims
+	_, err := service.RefreshDatasourceSchema(context.Background(), projectID, datasourceID)
+
+	if err == nil {
+		t.Fatal("expected error when context has no auth claims, got nil")
+	}
+	if err.Error() != "user ID not found in context: user ID not found in context" {
+		t.Errorf("unexpected error: %v", err)
 	}
 }

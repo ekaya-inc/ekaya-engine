@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
@@ -110,14 +111,20 @@ func NewRelationshipDiscoveryService(
 
 // DiscoverRelationships runs the complete discovery algorithm.
 func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.DiscoveryResults, error) {
+	// Extract userID from context (JWT claims)
+	userID, err := auth.RequireUserIDFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("user ID not found in context: %w", err)
+	}
+
 	// Get datasource with decrypted config
 	ds, err := s.datasourceSvc.Get(ctx, projectID, datasourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get datasource: %w", err)
 	}
 
-	// Create schema discoverer
-	discoverer, err := s.adapterFactory.NewSchemaDiscoverer(ctx, ds.DatasourceType, ds.Config)
+	// Create schema discoverer with identity parameters for connection pooling
+	discoverer, err := s.adapterFactory.NewSchemaDiscoverer(ctx, ds.DatasourceType, ds.Config, projectID, datasourceID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create schema discoverer: %w", err)
 	}

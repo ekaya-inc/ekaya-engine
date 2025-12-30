@@ -3,6 +3,8 @@ package datasource
 import (
 	"context"
 	"sync"
+
+	"github.com/google/uuid"
 )
 
 // DatasourceAdapterInfo describes a registered adapter for UI discovery.
@@ -14,11 +16,12 @@ type DatasourceAdapterInfo struct {
 }
 
 // DatasourceAdapterRegistration contains info + factories for creating adapters.
+// Factory functions accept connection manager and identity parameters for connection pooling.
 type DatasourceAdapterRegistration struct {
 	Info                    DatasourceAdapterInfo
-	Factory                 func(ctx context.Context, config map[string]any) (ConnectionTester, error)
-	SchemaDiscovererFactory func(ctx context.Context, config map[string]any) (SchemaDiscoverer, error)
-	QueryExecutorFactory    func(ctx context.Context, config map[string]any) (QueryExecutor, error)
+	Factory                 func(ctx context.Context, config map[string]any, connMgr *ConnectionManager, projectID, datasourceID uuid.UUID, userID string) (ConnectionTester, error)
+	SchemaDiscovererFactory func(ctx context.Context, config map[string]any, connMgr *ConnectionManager, projectID, datasourceID uuid.UUID, userID string) (SchemaDiscoverer, error)
+	QueryExecutorFactory    func(ctx context.Context, config map[string]any, connMgr *ConnectionManager, projectID, datasourceID uuid.UUID, userID string) (QueryExecutor, error)
 }
 
 var (
@@ -49,7 +52,7 @@ func RegisteredAdapters() []DatasourceAdapterInfo {
 
 // GetFactory returns the factory for a datasource type.
 // Returns nil if type is not registered.
-func GetFactory(dsType string) func(ctx context.Context, config map[string]any) (ConnectionTester, error) {
+func GetFactory(dsType string) func(ctx context.Context, config map[string]any, connMgr *ConnectionManager, projectID, datasourceID uuid.UUID, userID string) (ConnectionTester, error) {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 
@@ -61,7 +64,7 @@ func GetFactory(dsType string) func(ctx context.Context, config map[string]any) 
 
 // GetSchemaDiscovererFactory returns the schema discoverer factory for a datasource type.
 // Returns nil if type is not registered or doesn't support schema discovery.
-func GetSchemaDiscovererFactory(dsType string) func(ctx context.Context, config map[string]any) (SchemaDiscoverer, error) {
+func GetSchemaDiscovererFactory(dsType string) func(ctx context.Context, config map[string]any, connMgr *ConnectionManager, projectID, datasourceID uuid.UUID, userID string) (SchemaDiscoverer, error) {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 
@@ -73,7 +76,7 @@ func GetSchemaDiscovererFactory(dsType string) func(ctx context.Context, config 
 
 // GetQueryExecutorFactory returns the query executor factory for a datasource type.
 // Returns nil if type is not registered or doesn't support query execution.
-func GetQueryExecutorFactory(dsType string) func(ctx context.Context, config map[string]any) (QueryExecutor, error) {
+func GetQueryExecutorFactory(dsType string) func(ctx context.Context, config map[string]any, connMgr *ConnectionManager, projectID, datasourceID uuid.UUID, userID string) (QueryExecutor, error) {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 

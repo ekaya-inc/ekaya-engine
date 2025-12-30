@@ -10,6 +10,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	sqlvalidator "github.com/ekaya-inc/ekaya-engine/pkg/sql"
@@ -258,6 +259,12 @@ func (s *queryService) SetEnabledStatus(ctx context.Context, projectID, queryID 
 
 // Execute runs a saved query and tracks usage.
 func (s *queryService) Execute(ctx context.Context, projectID, queryID uuid.UUID, req *ExecuteQueryRequest) (*datasource.QueryExecutionResult, error) {
+	// Extract userID from context (JWT claims)
+	userID, err := auth.RequireUserIDFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("user ID not found in context: %w", err)
+	}
+
 	// Get query
 	query, err := s.queryRepo.GetByID(ctx, projectID, queryID)
 	if err != nil {
@@ -273,8 +280,8 @@ func (s *queryService) Execute(ctx context.Context, projectID, queryID uuid.UUID
 		return nil, fmt.Errorf("failed to get datasource: %w", err)
 	}
 
-	// Create query executor
-	executor, err := s.adapterFactory.NewQueryExecutor(ctx, ds.DatasourceType, ds.Config)
+	// Create query executor with identity parameters for connection pooling
+	executor, err := s.adapterFactory.NewQueryExecutor(ctx, ds.DatasourceType, ds.Config, projectID, query.DatasourceID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create query executor: %w", err)
 	}
@@ -304,6 +311,12 @@ func (s *queryService) Execute(ctx context.Context, projectID, queryID uuid.UUID
 
 // Test executes a SQL query without saving it.
 func (s *queryService) Test(ctx context.Context, projectID, datasourceID uuid.UUID, req *TestQueryRequest) (*datasource.QueryExecutionResult, error) {
+	// Extract userID from context (JWT claims)
+	userID, err := auth.RequireUserIDFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("user ID not found in context: %w", err)
+	}
+
 	// Validate request
 	if strings.TrimSpace(req.SQLQuery) == "" {
 		return nil, fmt.Errorf("SQL query is required")
@@ -322,8 +335,8 @@ func (s *queryService) Test(ctx context.Context, projectID, datasourceID uuid.UU
 		return nil, fmt.Errorf("failed to get datasource: %w", err)
 	}
 
-	// Create query executor
-	executor, err := s.adapterFactory.NewQueryExecutor(ctx, ds.DatasourceType, ds.Config)
+	// Create query executor with identity parameters for connection pooling
+	executor, err := s.adapterFactory.NewQueryExecutor(ctx, ds.DatasourceType, ds.Config, projectID, datasourceID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create query executor: %w", err)
 	}
@@ -340,6 +353,12 @@ func (s *queryService) Test(ctx context.Context, projectID, datasourceID uuid.UU
 
 // Validate checks if a SQL query is syntactically valid.
 func (s *queryService) Validate(ctx context.Context, projectID, datasourceID uuid.UUID, sqlQuery string) error {
+	// Extract userID from context (JWT claims)
+	userID, err := auth.RequireUserIDFromContext(ctx)
+	if err != nil {
+		return fmt.Errorf("user ID not found in context: %w", err)
+	}
+
 	// Validate input
 	if strings.TrimSpace(sqlQuery) == "" {
 		return fmt.Errorf("SQL query is required")
@@ -358,8 +377,8 @@ func (s *queryService) Validate(ctx context.Context, projectID, datasourceID uui
 		return fmt.Errorf("failed to get datasource: %w", err)
 	}
 
-	// Create query executor
-	executor, err := s.adapterFactory.NewQueryExecutor(ctx, ds.DatasourceType, ds.Config)
+	// Create query executor with identity parameters for connection pooling
+	executor, err := s.adapterFactory.NewQueryExecutor(ctx, ds.DatasourceType, ds.Config, projectID, datasourceID, userID)
 	if err != nil {
 		return fmt.Errorf("failed to create query executor: %w", err)
 	}
