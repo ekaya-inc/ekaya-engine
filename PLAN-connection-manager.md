@@ -1010,9 +1010,9 @@ queryService := services.NewQueryService(queryRepo, datasourceService, adapterFa
 - [x] Update all factory methods to pass `projectID`, `userID`, `datasourceID` to adapters
 
 ### Step 6: Update Registry Interface
-- [ ] Modify `pkg/adapters/datasource/registry.go`
-- [ ] Update factory function signatures to accept `(ctx, config, connMgr, projectID, userID, datasourceID)`
-- [ ] Update global registry maps to use new signatures
+- [x] Modify `pkg/adapters/datasource/registry.go`
+- [x] Update factory function signatures to accept `(ctx, config, connMgr, projectID, userID, datasourceID)`
+- [x] Update global registry maps to use new signatures
 
 ### Step 7: Update PostgreSQL Adapter
 - [ ] Modify `pkg/adapters/datasource/postgres/adapter.go`
