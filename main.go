@@ -161,7 +161,7 @@ func main() {
 	projectService := services.NewProjectService(db, projectRepo, userRepo, redisClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, projectService, logger)
-	schemaService := services.NewSchemaService(schemaRepo, datasourceService, adapterFactory, logger)
+	schemaService := services.NewSchemaService(schemaRepo, schemaEntityRepo, datasourceService, adapterFactory, logger)
 	discoveryService := services.NewRelationshipDiscoveryService(schemaRepo, datasourceService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
@@ -247,6 +247,16 @@ func main() {
 		Logger:           logger,
 	}
 	mcptools.RegisterApprovedQueriesTools(mcpServer.MCP(), queryToolDeps)
+
+	// Register schema tools for entity/role semantic context
+	schemaToolDeps := &mcptools.SchemaToolDeps{
+		DB:             db,
+		ProjectService: projectService,
+		SchemaService:  schemaService,
+		Logger:         logger,
+	}
+	mcptools.RegisterSchemaTools(mcpServer.MCP(), schemaToolDeps)
+
 	mcpHandler := handlers.NewMCPHandler(mcpServer, logger)
 	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, logger)
 	mcpHandler.RegisterRoutes(mux, mcpAuthMiddleware)
