@@ -21,18 +21,18 @@ import (
 
 // rwsMockWorkflowRepository is a mock for OntologyWorkflowRepository.
 type rwsMockWorkflowRepository struct {
-	workflow              *models.OntologyWorkflow
-	createErr             error
-	getByIDErr            error
-	getLatestErr          error
-	updateStateErr        error
-	updateProgressErr     error
-	updateTaskQueueErr    error
-	deleteErr             error
-	claimOwnershipResult  bool
-	claimOwnershipErr     error
-	updateHeartbeatErr    error
-	releaseOwnershipErr   error
+	workflow             *models.OntologyWorkflow
+	createErr            error
+	getByIDErr           error
+	getLatestErr         error
+	updateStateErr       error
+	updateProgressErr    error
+	updateTaskQueueErr   error
+	deleteErr            error
+	claimOwnershipResult bool
+	claimOwnershipErr    error
+	updateHeartbeatErr   error
+	releaseOwnershipErr  error
 
 	// Capture for verification
 	createdWorkflow  *models.OntologyWorkflow
@@ -170,6 +170,13 @@ func (m *rwsMockCandidateRepository) GetByID(ctx context.Context, id uuid.UUID) 
 }
 
 func (m *rwsMockCandidateRepository) GetByWorkflow(ctx context.Context, workflowID uuid.UUID) ([]*models.RelationshipCandidate, error) {
+	if m.getByWorkflowErr != nil {
+		return nil, m.getByWorkflowErr
+	}
+	return m.candidates, nil
+}
+
+func (m *rwsMockCandidateRepository) GetByWorkflowWithNames(ctx context.Context, workflowID uuid.UUID) ([]*models.RelationshipCandidate, error) {
 	if m.getByWorkflowErr != nil {
 		return nil, m.getByWorkflowErr
 	}
@@ -1194,11 +1201,19 @@ func TestRelationshipWorkflow_Cancel_DeleteCandidatesError(t *testing.T) {
 
 func TestRelationshipWorkflow_SaveRelationships_RequiredPendingError(t *testing.T) {
 	workflowID := uuid.New()
+	projectID := uuid.New()
+	datasourceID := uuid.New()
 
 	candidateRepo := &rwsMockCandidateRepository{
 		countRequiredResult: 5,
 	}
-	workflowRepo := &rwsMockWorkflowRepository{}
+	workflowRepo := &rwsMockWorkflowRepository{
+		workflow: &models.OntologyWorkflow{
+			ID:           workflowID,
+			ProjectID:    projectID,
+			DatasourceID: &datasourceID,
+		},
+	}
 
 	svc := newTestRelationshipWorkflowService(
 		workflowRepo,
@@ -1210,9 +1225,12 @@ func TestRelationshipWorkflow_SaveRelationships_RequiredPendingError(t *testing.
 		&rwsMockLLMFactory{},
 	)
 
-	err := svc.SaveRelationships(context.Background(), workflowID)
+	savedCount, err := svc.SaveRelationships(context.Background(), workflowID)
 	if err == nil {
 		t.Fatal("SaveRelationships() expected error, got nil")
+	}
+	if savedCount != 0 {
+		t.Errorf("savedCount = %d, want 0", savedCount)
 	}
 	expectedErr := "cannot save: 5 relationships require user review"
 	if err.Error() != expectedErr {
@@ -1247,9 +1265,12 @@ func TestRelationshipWorkflow_SaveRelationships_NoDatasourceID(t *testing.T) {
 		&rwsMockLLMFactory{},
 	)
 
-	err := svc.SaveRelationships(context.Background(), workflowID)
+	savedCount, err := svc.SaveRelationships(context.Background(), workflowID)
 	if err == nil {
 		t.Fatal("SaveRelationships() expected error, got nil")
+	}
+	if savedCount != 0 {
+		t.Errorf("savedCount = %d, want 0", savedCount)
 	}
 	if err.Error() != "workflow has no datasource ID" {
 		t.Errorf("unexpected error: %v", err)
@@ -1313,9 +1334,12 @@ func TestRelationshipWorkflow_SaveRelationships_Success(t *testing.T) {
 		&rwsMockLLMFactory{},
 	)
 
-	err := svc.SaveRelationships(context.Background(), workflowID)
+	savedCount, err := svc.SaveRelationships(context.Background(), workflowID)
 	if err != nil {
 		t.Fatalf("SaveRelationships() error = %v, want nil", err)
+	}
+	if savedCount != 1 {
+		t.Errorf("savedCount = %d, want 1", savedCount)
 	}
 
 	// Verify relationship was created
@@ -1371,10 +1395,13 @@ func TestRelationshipWorkflow_SaveRelationships_ColumnNotFound(t *testing.T) {
 		&rwsMockLLMFactory{},
 	)
 
-	// Should not return error, but log warning and skip the candidate
-	err := svc.SaveRelationships(context.Background(), workflowID)
-	if err != nil {
-		t.Fatalf("SaveRelationships() error = %v, want nil (should skip missing columns)", err)
+	// With fail-fast behavior, should return error when column not found
+	savedCount, err := svc.SaveRelationships(context.Background(), workflowID)
+	if err == nil {
+		t.Fatal("SaveRelationships() expected error for missing column, got nil")
+	}
+	if savedCount != 0 {
+		t.Errorf("savedCount = %d, want 0", savedCount)
 	}
 
 	// No relationships should be created since column not found
@@ -1419,9 +1446,12 @@ func TestRelationshipWorkflow_SaveRelationships_EmptyAccepted(t *testing.T) {
 		&rwsMockLLMFactory{},
 	)
 
-	err := svc.SaveRelationships(context.Background(), workflowID)
+	savedCount, err := svc.SaveRelationships(context.Background(), workflowID)
 	if err != nil {
 		t.Fatalf("SaveRelationships() error = %v, want nil", err)
+	}
+	if savedCount != 0 {
+		t.Errorf("savedCount = %d, want 0", savedCount)
 	}
 }
 
@@ -1595,7 +1625,7 @@ func TestRelationshipWorkflow_StartDetection_ClaimOwnershipFails(t *testing.T) {
 	datasourceID := uuid.New()
 
 	workflowRepo := &rwsMockWorkflowRepository{
-		workflow:             nil, // No existing workflow
+		workflow:             nil,   // No existing workflow
 		claimOwnershipResult: false, // Ownership claimed by another server
 	}
 

@@ -16,6 +16,21 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/services/workqueue"
 )
 
+// CandidateCounts holds counts of candidates by status.
+type CandidateCounts struct {
+	Confirmed   int
+	NeedsReview int
+	Rejected    int
+	CanSave     bool
+}
+
+// CandidatesGrouped holds candidates grouped by status.
+type CandidatesGrouped struct {
+	Confirmed   []*models.RelationshipCandidate
+	NeedsReview []*models.RelationshipCandidate
+	Rejected    []*models.RelationshipCandidate
+}
+
 // RelationshipWorkflowService provides operations for relationship discovery workflow management.
 type RelationshipWorkflowService interface {
 	// StartDetection initiates a new relationship detection workflow.
@@ -24,14 +39,24 @@ type RelationshipWorkflowService interface {
 	// GetStatus returns the current workflow status for a datasource.
 	GetStatus(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyWorkflow, error)
 
+	// GetStatusWithCounts returns workflow status with candidate counts.
+	GetStatusWithCounts(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyWorkflow, *CandidateCounts, error)
+
 	// GetByID returns a specific workflow by its ID.
 	GetByID(ctx context.Context, workflowID uuid.UUID) (*models.OntologyWorkflow, error)
+
+	// GetCandidatesGrouped returns candidates grouped by status for a datasource.
+	GetCandidatesGrouped(ctx context.Context, datasourceID uuid.UUID) (*CandidatesGrouped, error)
+
+	// UpdateCandidateDecision updates a candidate's decision, verifying it belongs to the datasource.
+	UpdateCandidateDecision(ctx context.Context, datasourceID, candidateID uuid.UUID, decision string) (*models.RelationshipCandidate, error)
 
 	// Cancel cancels a running workflow.
 	Cancel(ctx context.Context, workflowID uuid.UUID) error
 
 	// SaveRelationships saves accepted candidates as relationships and marks workflow complete.
-	SaveRelationships(ctx context.Context, workflowID uuid.UUID) error
+	// Returns the count of saved relationships.
+	SaveRelationships(ctx context.Context, workflowID uuid.UUID) (int, error)
 
 	// UpdateProgress updates the workflow progress.
 	UpdateProgress(ctx context.Context, workflowID uuid.UUID, progress *models.WorkflowProgress) error
@@ -53,20 +78,20 @@ type relationshipHeartbeatInfo struct {
 }
 
 type relationshipWorkflowService struct {
-	workflowRepo      repositories.OntologyWorkflowRepository
-	candidateRepo     repositories.RelationshipCandidateRepository
-	schemaRepo        repositories.SchemaRepository
-	stateRepo         repositories.WorkflowStateRepository
-	dsSvc             DatasourceService
-	adapterFactory    datasource.DatasourceAdapterFactory
-	llmFactory        llm.LLMClientFactory
-	discoveryService  RelationshipDiscoveryService
-	getTenantCtx      TenantContextFunc
-	logger            *zap.Logger
-	serverInstanceID  uuid.UUID
-	activeQueues      sync.Map // workflowID -> *workqueue.Queue
-	taskQueueWriters  sync.Map // workflowID -> *taskQueueWriter
-	heartbeatStop     sync.Map // workflowID -> *relationshipHeartbeatInfo
+	workflowRepo     repositories.OntologyWorkflowRepository
+	candidateRepo    repositories.RelationshipCandidateRepository
+	schemaRepo       repositories.SchemaRepository
+	stateRepo        repositories.WorkflowStateRepository
+	dsSvc            DatasourceService
+	adapterFactory   datasource.DatasourceAdapterFactory
+	llmFactory       llm.LLMClientFactory
+	discoveryService RelationshipDiscoveryService
+	getTenantCtx     TenantContextFunc
+	logger           *zap.Logger
+	serverInstanceID uuid.UUID
+	activeQueues     sync.Map // workflowID -> *workqueue.Queue
+	taskQueueWriters sync.Map // workflowID -> *taskQueueWriter
+	heartbeatStop    sync.Map // workflowID -> *relationshipHeartbeatInfo
 }
 
 // NewRelationshipWorkflowService creates a new relationship workflow service.
@@ -660,37 +685,167 @@ func (s *relationshipWorkflowService) Cancel(ctx context.Context, workflowID uui
 	return nil
 }
 
-func (s *relationshipWorkflowService) SaveRelationships(ctx context.Context, workflowID uuid.UUID) error {
+func (s *relationshipWorkflowService) GetStatusWithCounts(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyWorkflow, *CandidateCounts, error) {
+	workflow, err := s.workflowRepo.GetLatestByDatasourceAndPhase(ctx, datasourceID, models.WorkflowPhaseRelationships)
+	if err != nil {
+		s.logger.Error("Failed to get workflow status",
+			zap.String("datasource_id", datasourceID.String()),
+			zap.Error(err))
+		return nil, nil, err
+	}
+	if workflow == nil {
+		return nil, nil, nil
+	}
+
+	// Get candidates grouped by status
+	candidates, err := s.candidateRepo.GetByWorkflowWithNames(ctx, workflow.ID)
+	if err != nil {
+		s.logger.Error("Failed to get candidates",
+			zap.String("workflow_id", workflow.ID.String()),
+			zap.Error(err))
+		return nil, nil, err
+	}
+
+	counts := &CandidateCounts{}
+	for _, c := range candidates {
+		switch c.Status {
+		case models.RelCandidateStatusAccepted:
+			counts.Confirmed++
+		case models.RelCandidateStatusPending:
+			counts.NeedsReview++
+		case models.RelCandidateStatusRejected:
+			counts.Rejected++
+		}
+	}
+
+	// Can save if workflow is complete and no pending candidates remain
+	counts.CanSave = workflow.State == models.WorkflowStateCompleted && counts.NeedsReview == 0
+
+	return workflow, counts, nil
+}
+
+func (s *relationshipWorkflowService) GetCandidatesGrouped(ctx context.Context, datasourceID uuid.UUID) (*CandidatesGrouped, error) {
+	// Get latest workflow for this datasource
+	workflow, err := s.workflowRepo.GetLatestByDatasourceAndPhase(ctx, datasourceID, models.WorkflowPhaseRelationships)
+	if err != nil {
+		s.logger.Error("Failed to get workflow",
+			zap.String("datasource_id", datasourceID.String()),
+			zap.Error(err))
+		return nil, err
+	}
+	if workflow == nil {
+		return nil, fmt.Errorf("no relationship workflow found for datasource")
+	}
+
+	// Get all candidates with table/column names
+	candidates, err := s.candidateRepo.GetByWorkflowWithNames(ctx, workflow.ID)
+	if err != nil {
+		s.logger.Error("Failed to get candidates",
+			zap.String("workflow_id", workflow.ID.String()),
+			zap.Error(err))
+		return nil, err
+	}
+
+	// Group by status
+	grouped := &CandidatesGrouped{
+		Confirmed:   make([]*models.RelationshipCandidate, 0),
+		NeedsReview: make([]*models.RelationshipCandidate, 0),
+		Rejected:    make([]*models.RelationshipCandidate, 0),
+	}
+
+	for _, c := range candidates {
+		switch c.Status {
+		case models.RelCandidateStatusAccepted:
+			grouped.Confirmed = append(grouped.Confirmed, c)
+		case models.RelCandidateStatusPending:
+			grouped.NeedsReview = append(grouped.NeedsReview, c)
+		case models.RelCandidateStatusRejected:
+			grouped.Rejected = append(grouped.Rejected, c)
+		}
+	}
+
+	return grouped, nil
+}
+
+func (s *relationshipWorkflowService) UpdateCandidateDecision(ctx context.Context, datasourceID, candidateID uuid.UUID, decision string) (*models.RelationshipCandidate, error) {
+	// Get the candidate first
+	candidate, err := s.candidateRepo.GetByID(ctx, candidateID)
+	if err != nil {
+		s.logger.Error("Failed to get candidate",
+			zap.String("candidate_id", candidateID.String()),
+			zap.Error(err))
+		return nil, err
+	}
+	if candidate == nil {
+		return nil, fmt.Errorf("candidate not found")
+	}
+
+	// Security check: verify candidate belongs to this datasource
+	if candidate.DatasourceID != datasourceID {
+		s.logger.Warn("Candidate datasource mismatch",
+			zap.String("candidate_id", candidateID.String()),
+			zap.String("expected_datasource", datasourceID.String()),
+			zap.String("actual_datasource", candidate.DatasourceID.String()))
+		return nil, fmt.Errorf("candidate not found") // Don't reveal existence
+	}
+
+	// Validate decision
+	var status models.RelationshipCandidateStatus
+	switch decision {
+	case "accepted":
+		status = models.RelCandidateStatusAccepted
+	case "rejected":
+		status = models.RelCandidateStatusRejected
+	default:
+		return nil, fmt.Errorf("invalid decision: must be 'accepted' or 'rejected'")
+	}
+
+	// Update status
+	candidate.Status = status
+	if err := s.candidateRepo.Update(ctx, candidate); err != nil {
+		s.logger.Error("Failed to update candidate",
+			zap.String("candidate_id", candidateID.String()),
+			zap.Error(err))
+		return nil, err
+	}
+
+	return candidate, nil
+}
+
+func (s *relationshipWorkflowService) SaveRelationships(ctx context.Context, workflowID uuid.UUID) (int, error) {
+	// Get workflow to extract projectID and datasourceID
+	workflow, err := s.workflowRepo.GetByID(ctx, workflowID)
+	if err != nil {
+		return 0, fmt.Errorf("get workflow: %w", err)
+	}
+	if workflow == nil {
+		return 0, fmt.Errorf("workflow not found")
+	}
+
+	if workflow.DatasourceID == nil {
+		return 0, fmt.Errorf("workflow has no datasource ID")
+	}
+
 	// Check for required pending candidates
 	requiredPending, err := s.candidateRepo.CountRequiredPending(ctx, workflowID)
 	if err != nil {
-		return fmt.Errorf("check required pending candidates: %w", err)
+		return 0, fmt.Errorf("check required pending candidates: %w", err)
 	}
 
 	if requiredPending > 0 {
-		return fmt.Errorf("cannot save: %d relationships require user review", requiredPending)
+		return 0, fmt.Errorf("cannot save: %d relationships require user review", requiredPending)
 	}
 
 	// Get all accepted candidates
 	accepted, err := s.candidateRepo.GetByWorkflowAndStatus(ctx, workflowID, models.RelCandidateStatusAccepted)
 	if err != nil {
-		return fmt.Errorf("get accepted candidates: %w", err)
-	}
-
-	// Get workflow to extract projectID and datasourceID
-	workflow, err := s.workflowRepo.GetByID(ctx, workflowID)
-	if err != nil {
-		return fmt.Errorf("get workflow: %w", err)
-	}
-
-	if workflow.DatasourceID == nil {
-		return fmt.Errorf("workflow has no datasource ID")
+		return 0, fmt.Errorf("get accepted candidates: %w", err)
 	}
 
 	// Load all columns for the datasource once (avoid N+N queries)
 	allColumns, err := s.schemaRepo.ListColumnsByDatasource(ctx, workflow.ProjectID, *workflow.DatasourceID)
 	if err != nil {
-		return fmt.Errorf("list columns: %w", err)
+		return 0, fmt.Errorf("list columns: %w", err)
 	}
 
 	// Build lookup map by column ID for O(1) access
@@ -705,16 +860,12 @@ func (s *relationshipWorkflowService) SaveRelationships(ctx context.Context, wor
 		// Look up columns from pre-loaded map
 		sourceCol, ok := columnByID[candidate.SourceColumnID]
 		if !ok {
-			s.logger.Error("Source column not found in schema",
-				zap.String("column_id", candidate.SourceColumnID.String()))
-			continue
+			return 0, fmt.Errorf("source column %s not found in schema", candidate.SourceColumnID)
 		}
 
 		targetCol, ok := columnByID[candidate.TargetColumnID]
 		if !ok {
-			s.logger.Error("Target column not found in schema",
-				zap.String("column_id", candidate.TargetColumnID.String()))
-			continue
+			return 0, fmt.Errorf("target column %s not found in schema", candidate.TargetColumnID)
 		}
 
 		// Determine relationship type based on how it was detected
@@ -767,10 +918,7 @@ func (s *relationshipWorkflowService) SaveRelationships(ctx context.Context, wor
 		}
 
 		if err := s.schemaRepo.UpsertRelationshipWithMetrics(ctx, rel, metrics); err != nil {
-			s.logger.Error("Failed to create relationship",
-				zap.String("candidate_id", candidate.ID.String()),
-				zap.Error(err))
-			continue
+			return 0, fmt.Errorf("create relationship for candidate %s: %w", candidate.ID, err)
 		}
 
 		savedCount++
@@ -780,7 +928,7 @@ func (s *relationshipWorkflowService) SaveRelationships(ctx context.Context, wor
 		zap.String("workflow_id", workflowID.String()),
 		zap.Int("saved_count", savedCount))
 
-	return nil
+	return savedCount, nil
 }
 
 func (s *relationshipWorkflowService) UpdateProgress(ctx context.Context, workflowID uuid.UUID, progress *models.WorkflowProgress) error {
