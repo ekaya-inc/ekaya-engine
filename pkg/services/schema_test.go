@@ -487,7 +487,7 @@ func (m *mockSchemaAdapterFactory) NewQueryExecutor(ctx context.Context, dsType 
 // ============================================================================
 
 func newTestSchemaService(repo *mockSchemaRepository, dsSvc *mockDatasourceService, factory *mockSchemaAdapterFactory) SchemaService {
-	return NewSchemaService(repo, dsSvc, factory, zap.NewNop())
+	return NewSchemaService(repo, nil, dsSvc, factory, zap.NewNop())
 }
 
 // ============================================================================

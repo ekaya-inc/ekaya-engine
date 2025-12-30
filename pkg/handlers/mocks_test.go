@@ -310,6 +310,16 @@ func (m *mockSchemaService) GetDatasourceSchemaForPrompt(ctx context.Context, pr
 	return "Schema prompt for datasource", nil
 }
 
+func (m *mockSchemaService) GetDatasourceSchemaWithEntities(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error) {
+	if m.err != nil {
+		return "", m.err
+	}
+	if m.prompt != "" {
+		return m.prompt, nil
+	}
+	return "Schema with entities for datasource", nil
+}
+
 func (m *mockSchemaService) GetRelationshipsResponse(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RelationshipsResponse, error) {
 	if m.err != nil {
 		return nil, m.err
