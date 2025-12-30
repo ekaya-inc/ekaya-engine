@@ -12,8 +12,8 @@ type SchemaEntity struct {
 	ID            uuid.UUID `json:"id"`
 	ProjectID     uuid.UUID `json:"project_id"`
 	OntologyID    uuid.UUID `json:"ontology_id"`
-	Name          string    `json:"name"`          // e.g., "user", "account", "order"
-	Description   string    `json:"description"`   // LLM explanation of the entity
+	Name          string    `json:"name"`           // e.g., "user", "account", "order"
+	Description   string    `json:"description"`    // LLM explanation of the entity
 	PrimarySchema string    `json:"primary_schema"` // Schema where entity is primarily defined
 	PrimaryTable  string    `json:"primary_table"`  // Table where entity is primarily defined
 	PrimaryColumn string    `json:"primary_column"` // Column where entity is primarily defined

@@ -308,12 +308,12 @@ type EntityDiscoveryOutput struct {
 
 // DiscoveredEntity represents a domain entity identified by the LLM.
 type DiscoveredEntity struct {
-	Name          string               `json:"name"`
-	Description   string               `json:"description"`
-	PrimarySchema string               `json:"primary_schema"`
-	PrimaryTable  string               `json:"primary_table"`
-	PrimaryColumn string               `json:"primary_column"`
-	Occurrences   []EntityOccurrence   `json:"occurrences"`
+	Name          string             `json:"name"`
+	Description   string             `json:"description"`
+	PrimarySchema string             `json:"primary_schema"`
+	PrimaryTable  string             `json:"primary_table"`
+	PrimaryColumn string             `json:"primary_column"`
+	Occurrences   []EntityOccurrence `json:"occurrences"`
 }
 
 // EntityOccurrence represents a single occurrence of an entity in a table.

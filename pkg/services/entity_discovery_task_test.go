@@ -164,12 +164,12 @@ func TestBuildPrompt(t *testing.T) {
 		},
 		excluded: []ColumnFilterResult{
 			{
-				SchemaName:   "public",
-				TableName:    "orders",
-				ColumnName:   "created_at",
-				DataType:     "timestamp",
-				IsCandidate:  false,
-				Reason:       "excluded type (timestamp)",
+				SchemaName:  "public",
+				TableName:   "orders",
+				ColumnName:  "created_at",
+				DataType:    "timestamp",
+				IsCandidate: false,
+				Reason:      "excluded type (timestamp)",
 			},
 		},
 		components: []ConnectedComponent{

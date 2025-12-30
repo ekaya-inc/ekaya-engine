@@ -24,20 +24,20 @@ type StartDetectionResponse struct {
 
 // RelationshipWorkflowStatusResponse for GET /relationships/status
 type RelationshipWorkflowStatusResponse struct {
-	WorkflowID       string                   `json:"workflow_id"`
-	Phase            string                   `json:"phase"`
-	State            string                   `json:"state"`
-	Progress         *models.WorkflowProgress `json:"progress,omitempty"`
-	TaskQueue        []models.WorkflowTask    `json:"task_queue,omitempty"`
+	WorkflowID string                   `json:"workflow_id"`
+	Phase      string                   `json:"phase"`
+	State      string                   `json:"state"`
+	Progress   *models.WorkflowProgress `json:"progress,omitempty"`
+	TaskQueue  []models.WorkflowTask    `json:"task_queue,omitempty"`
 	// Legacy candidate counts (deprecated, will be removed)
-	ConfirmedCount   int                      `json:"confirmed_count"`
-	NeedsReviewCount int                      `json:"needs_review_count"`
-	RejectedCount    int                      `json:"rejected_count"`
+	ConfirmedCount   int `json:"confirmed_count"`
+	NeedsReviewCount int `json:"needs_review_count"`
+	RejectedCount    int `json:"rejected_count"`
 	// New entity counts
-	EntityCount      int                      `json:"entity_count"`
-	OccurrenceCount  int                      `json:"occurrence_count"`
-	IslandCount      int                      `json:"island_count"`
-	CanSave          bool                     `json:"can_save"`
+	EntityCount     int  `json:"entity_count"`
+	OccurrenceCount int  `json:"occurrence_count"`
+	IslandCount     int  `json:"island_count"`
+	CanSave         bool `json:"can_save"`
 }
 
 // CandidatesResponse for GET /relationships/candidates
@@ -69,12 +69,12 @@ type CandidateDecisionRequest struct {
 
 // EntityOccurrenceResponse represents a single occurrence of an entity in a table/column.
 type EntityOccurrenceResponse struct {
-	ID         string   `json:"id"`
-	SchemaName string   `json:"schema_name"`
-	TableName  string   `json:"table_name"`
-	ColumnName string   `json:"column_name"`
-	Role       *string  `json:"role,omitempty"`
-	Confidence float64  `json:"confidence"`
+	ID         string  `json:"id"`
+	SchemaName string  `json:"schema_name"`
+	TableName  string  `json:"table_name"`
+	ColumnName string  `json:"column_name"`
+	Role       *string `json:"role,omitempty"`
+	Confidence float64 `json:"confidence"`
 }
 
 // EntityResponse represents a discovered entity with its occurrences.
