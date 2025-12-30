@@ -17,19 +17,19 @@ import (
 
 // QueryToolDeps contains dependencies for approved queries tools.
 type QueryToolDeps struct {
-	DB                *database.DB
-	MCPConfigService  services.MCPConfigService
-	ProjectService    services.ProjectService
-	QueryService      services.QueryService
-	Logger            *zap.Logger
+	DB               *database.DB
+	MCPConfigService services.MCPConfigService
+	ProjectService   services.ProjectService
+	QueryService     services.QueryService
+	Logger           *zap.Logger
 }
 
 const approvedQueriesToolGroup = "approved_queries"
 
 // approvedQueriesToolNames lists all tools in the approved queries group.
 var approvedQueriesToolNames = map[string]bool{
-	"list_approved_queries":    true,
-	"execute_approved_query":   true,
+	"list_approved_queries":  true,
+	"execute_approved_query": true,
 }
 
 // RegisterApprovedQueriesTools registers tools for executing pre-approved queries.

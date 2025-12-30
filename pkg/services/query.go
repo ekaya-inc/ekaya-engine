@@ -46,10 +46,11 @@ type QueryService interface {
 // CreateQueryRequest contains fields for creating a new query.
 // Note: Dialect is derived from datasource type, not provided by caller.
 type CreateQueryRequest struct {
-	NaturalLanguagePrompt string `json:"natural_language_prompt"`
-	AdditionalContext     string `json:"additional_context,omitempty"`
-	SQLQuery              string `json:"sql_query"`
-	IsEnabled             bool   `json:"is_enabled"`
+	NaturalLanguagePrompt string                  `json:"natural_language_prompt"`
+	AdditionalContext     string                  `json:"additional_context,omitempty"`
+	SQLQuery              string                  `json:"sql_query"`
+	IsEnabled             bool                    `json:"is_enabled"`
+	Parameters            []models.QueryParameter `json:"parameters,omitempty"`
 }
 
 // UpdateQueryRequest contains fields for updating a query.
@@ -69,8 +70,10 @@ type ExecuteQueryRequest struct {
 
 // TestQueryRequest contains a SQL query to test without saving.
 type TestQueryRequest struct {
-	SQLQuery string `json:"sql_query"`
-	Limit    int    `json:"limit,omitempty"` // 0 = no limit
+	SQLQuery             string                  `json:"sql_query"`
+	Limit                int                     `json:"limit,omitempty"` // 0 = no limit
+	ParameterDefinitions []models.QueryParameter `json:"parameter_definitions,omitempty"`
+	ParameterValues      map[string]any          `json:"parameter_values,omitempty"`
 }
 
 type queryService struct {
@@ -121,6 +124,13 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 		return nil, fmt.Errorf("failed to get datasource: %w", err)
 	}
 
+	// Validate parameters if provided
+	if len(req.Parameters) > 0 {
+		if err := s.ValidateParameterizedQuery(req.SQLQuery, req.Parameters); err != nil {
+			return nil, fmt.Errorf("parameter validation failed: %w", err)
+		}
+	}
+
 	// Create query model with dialect derived from datasource type
 	query := &models.Query{
 		ProjectID:             projectID,
@@ -129,6 +139,7 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 		SQLQuery:              req.SQLQuery,
 		Dialect:               ds.DatasourceType, // Derived from datasource type
 		IsEnabled:             req.IsEnabled,
+		Parameters:            req.Parameters,
 		UsageCount:            0,
 	}
 
@@ -338,6 +349,13 @@ func (s *queryService) Test(ctx context.Context, projectID, datasourceID uuid.UU
 	}
 	req.SQLQuery = validationResult.NormalizedSQL
 
+	// Validate parameters if provided
+	if len(req.ParameterDefinitions) > 0 {
+		if err := s.ValidateParameterizedQuery(req.SQLQuery, req.ParameterDefinitions); err != nil {
+			return nil, fmt.Errorf("parameter validation failed: %w", err)
+		}
+	}
+
 	// Get datasource config
 	ds, err := s.datasourceSvc.Get(ctx, projectID, datasourceID)
 	if err != nil {
@@ -351,10 +369,39 @@ func (s *queryService) Test(ctx context.Context, projectID, datasourceID uuid.UU
 	}
 	defer executor.Close()
 
-	// Execute query
-	result, err := executor.ExecuteQuery(ctx, req.SQLQuery, req.Limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute query: %w", err)
+	// Execute query with or without parameters
+	var result *datasource.QueryExecutionResult
+	if len(req.ParameterValues) > 0 {
+		// Validate and coerce parameter values
+		if err := s.validateRequiredParameters(req.ParameterDefinitions, req.ParameterValues); err != nil {
+			return nil, err
+		}
+		coercedParams, err := s.coerceParameterTypes(req.ParameterDefinitions, req.ParameterValues)
+		if err != nil {
+			return nil, err
+		}
+
+		// Check for SQL injection
+		injectionResults := sqlvalidator.CheckAllParameters(coercedParams)
+		if len(injectionResults) > 0 {
+			return nil, fmt.Errorf("potential SQL injection detected in parameter '%s'", injectionResults[0].ParamName)
+		}
+
+		// Substitute parameters
+		preparedSQL, orderedValues, err := sqlvalidator.SubstituteParameters(req.SQLQuery, req.ParameterDefinitions, coercedParams)
+		if err != nil {
+			return nil, err
+		}
+
+		result, err = executor.ExecuteQueryWithParams(ctx, preparedSQL, orderedValues, req.Limit)
+		if err != nil {
+			return nil, fmt.Errorf("failed to execute parameterized query: %w", err)
+		}
+	} else {
+		result, err = executor.ExecuteQuery(ctx, req.SQLQuery, req.Limit)
+		if err != nil {
+			return nil, fmt.Errorf("failed to execute query: %w", err)
+		}
 	}
 
 	return result, nil
