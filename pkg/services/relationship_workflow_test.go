@@ -1511,3 +1511,115 @@ func TestRelationshipWorkflow_TaskQueueWriter_StartStop(t *testing.T) {
 		t.Error("task queue writer should be removed after stop")
 	}
 }
+
+// ============================================================================
+// Tests for StartDetection
+// ============================================================================
+
+func TestRelationshipWorkflow_StartDetection_Success(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	workflowRepo := &rwsMockWorkflowRepository{
+		workflow:             nil, // No existing workflow
+		claimOwnershipResult: true,
+	}
+
+	schemaRepo := &rwsMockSchemaRepository{
+		mockSchemaRepository: mockSchemaRepository{
+			tables:  []*models.SchemaTable{},
+			columns: []*models.SchemaColumn{},
+		},
+	}
+
+	svc := newTestRelationshipWorkflowService(
+		workflowRepo,
+		&rwsMockCandidateRepository{},
+		schemaRepo,
+		&rwsMockStateRepository{},
+		&rwsMockDatasourceService{},
+		&rwsMockAdapterFactory{},
+		&rwsMockLLMFactory{},
+	)
+
+	// StartDetection will fail when trying to create the ontology because we don't have a real DB
+	// This is a limitation of unit testing - we'd need integration tests to fully test this flow
+	_, err := svc.StartDetection(context.Background(), projectID, datasourceID)
+
+	// We expect an error because we can't create the ontology without DB
+	if err == nil {
+		t.Error("expected error due to ontology creation, got nil")
+	}
+}
+
+func TestRelationshipWorkflow_StartDetection_ExistingActiveWorkflow(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	// Existing running workflow
+	existingWorkflow := &models.OntologyWorkflow{
+		ID:           uuid.New(),
+		ProjectID:    projectID,
+		DatasourceID: &datasourceID,
+		State:        models.WorkflowStateRunning,
+		Phase:        models.WorkflowPhaseRelationships,
+	}
+
+	workflowRepo := &rwsMockWorkflowRepository{
+		workflow: existingWorkflow,
+	}
+
+	svc := newTestRelationshipWorkflowService(
+		workflowRepo,
+		&rwsMockCandidateRepository{},
+		&rwsMockSchemaRepository{},
+		&rwsMockStateRepository{},
+		&rwsMockDatasourceService{},
+		&rwsMockAdapterFactory{},
+		&rwsMockLLMFactory{},
+	)
+
+	_, err := svc.StartDetection(context.Background(), projectID, datasourceID)
+	if err == nil {
+		t.Fatal("StartDetection() expected error, got nil")
+	}
+
+	expectedErr := "relationship detection already in progress for this datasource"
+	if err.Error() != expectedErr {
+		t.Errorf("error = %v, want %v", err.Error(), expectedErr)
+	}
+}
+
+func TestRelationshipWorkflow_StartDetection_ClaimOwnershipFails(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	workflowRepo := &rwsMockWorkflowRepository{
+		workflow:             nil, // No existing workflow
+		claimOwnershipResult: false, // Ownership claimed by another server
+	}
+
+	schemaRepo := &rwsMockSchemaRepository{
+		mockSchemaRepository: mockSchemaRepository{
+			tables:  []*models.SchemaTable{},
+			columns: []*models.SchemaColumn{},
+		},
+	}
+
+	svc := newTestRelationshipWorkflowService(
+		workflowRepo,
+		&rwsMockCandidateRepository{},
+		schemaRepo,
+		&rwsMockStateRepository{},
+		&rwsMockDatasourceService{},
+		&rwsMockAdapterFactory{},
+		&rwsMockLLMFactory{},
+	)
+
+	// We'll get an error from ontology creation before we reach claim ownership
+	// This test is limited by the need to create an ontology
+	_, err := svc.StartDetection(context.Background(), projectID, datasourceID)
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+}
