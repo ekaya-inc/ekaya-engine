@@ -326,7 +326,7 @@ Summary: 8 entities discovered, 32 total occurrences
 
 ---
 
-## Phase 7: Store Entities in Database
+## Phase 7: Store Entities in Database ✅ [x]
 
 **Goal:** Persist discovered entities and occurrences to database.
 
@@ -345,8 +345,13 @@ ORDER BY e.name, o.table_name;
 
 **Success Criteria:** Entities and occurrences are persisted correctly.
 
-**Files to modify:**
-- `pkg/services/relationship_workflow.go` - Save entities after LLM discovery
+**Implementation:** The `EntityDiscoveryTask.persistEntities()` method in `pkg/services/entity_discovery_task.go` handles all persistence:
+- Creates entity records via `entityRepo.Create()` (line 376)
+- Creates occurrence records via `entityRepo.CreateOccurrence()` (line 403)
+- Logs creation of entities and occurrences with details (lines 385-421)
+
+**Files modified:**
+- `pkg/services/entity_discovery_task.go` - `persistEntities()` method saves entities after LLM discovery ✅
 
 ---
 
