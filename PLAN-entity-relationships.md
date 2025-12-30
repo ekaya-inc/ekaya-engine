@@ -11,7 +11,7 @@ Each phase is tested by clicking **[Find Relationships]** in the UI. Phases are 
 
 ---
 
-## Phase 1: Column Statistics Collection
+## Phase 1: Column Statistics Collection ✅
 
 **Goal:** Collect distinct counts for all columns across all tables BEFORE any LLM calls.
 
@@ -255,40 +255,298 @@ ORDER BY e.name, o.table_name;
 
 ## Phase 8: API Endpoints
 
-**Goal:** Expose entities via REST API.
+**Goal:** Expose entities via REST API, adapting the existing workflow API pattern.
 
-**Endpoints:**
-- `GET /api/projects/{id}/entities` - List entities for project
-- `GET /api/projects/{id}/entities/{entityId}/occurrences` - Get occurrences with roles
+### Existing API Structure (to adapt)
+
+Current endpoints in `relationshipWorkflowApi.ts`:
+```
+POST /api/projects/{pid}/datasources/{dsid}/relationships/detect  → Start workflow
+GET  /api/projects/{pid}/datasources/{dsid}/relationships/status  → Workflow status
+GET  /api/projects/{pid}/datasources/{dsid}/relationships/candidates → Get candidates
+PUT  /api/projects/{pid}/datasources/{dsid}/relationships/candidates/{cid} → Accept/reject
+POST /api/projects/{pid}/datasources/{dsid}/relationships/save    → Save accepted
+POST /api/projects/{pid}/datasources/{dsid}/relationships/cancel  → Cancel workflow
+```
+
+### New/Modified Endpoints
+
+**Keep unchanged:**
+- `POST .../detect` - Start workflow (backend changes, API same)
+- `GET .../status` - Workflow status (add entity counts)
+- `POST .../save` - Save (now saves entities → relationships)
+- `POST .../cancel` - Cancel workflow
+
+**Replace candidates with entities:**
+- ~~`GET .../candidates`~~ → `GET .../entities` - Returns discovered entities with occurrences
+- ~~`PUT .../candidates/{cid}`~~ → Not needed (no accept/reject per candidate)
+
+**New entity endpoints (for future editing, deferred):**
+- `GET /api/projects/{pid}/entities` - List all entities for project
+- `GET /api/projects/{pid}/entities/{eid}` - Get entity with occurrences
+
+### Response Types
+
+**EntityResponse:**
+```typescript
+interface EntityResponse {
+  id: string;
+  name: string;                    // "user", "account"
+  description: string;             // LLM explanation
+  primary_schema: string;
+  primary_table: string;
+  primary_column: string;
+  occurrences: EntityOccurrenceResponse[];
+}
+
+interface EntityOccurrenceResponse {
+  id: string;
+  schema_name: string;
+  table_name: string;
+  column_name: string;
+  role: string | null;             // "visitor", "host", "owner", or null
+  confidence: number;
+}
+```
+
+**Modified RelationshipWorkflowStatusResponse:**
+```typescript
+interface RelationshipWorkflowStatusResponse {
+  workflow_id: string;
+  phase: 'stats' | 'filtering' | 'graph' | 'entity_discovery' | 'complete';
+  state: RelationshipWorkflowState;
+  progress?: WorkflowProgress;
+  task_queue?: TaskProgressResponse[];
+  // NEW: entity counts instead of candidate counts
+  entity_count: number;
+  occurrence_count: number;
+  island_count: number;            // tables not connected
+  can_save: boolean;
+}
+```
 
 **Test:** After [Find Relationships] completes:
 ```bash
-curl http://localhost:3443/api/projects/{project_id}/entities | jq
+curl http://localhost:3443/api/projects/{pid}/datasources/{dsid}/relationships/entities | jq
 ```
 
-**Success Criteria:** API returns entities and occurrences correctly.
+Expected response:
+```json
+{
+  "entities": [
+    {
+      "id": "...",
+      "name": "user",
+      "description": "A person who uses the system",
+      "primary_table": "users",
+      "primary_column": "id",
+      "occurrences": [
+        {"table_name": "orders", "column_name": "user_id", "role": null},
+        {"table_name": "visits", "column_name": "visitor_id", "role": "visitor"},
+        {"table_name": "visits", "column_name": "host_id", "role": "host"}
+      ]
+    }
+  ]
+}
+```
+
+**Success Criteria:** API returns entities with occurrences and roles.
 
 **Files to modify:**
-- `pkg/handlers/entity_handler.go` (new)
-- `main.go` - Register routes
+- `pkg/handlers/relationship_workflow.go` - Modify status, add entities endpoint
+- `main.go` - Register new routes
 
 ---
 
 ## Phase 9: UI Display
 
-**Goal:** Replace "891 candidates" view with entity list showing roles.
+**Goal:** Replace candidate-based UI with entity-based display in the discovery dialog.
 
-**UI changes:**
-- Show entity cards with name, description, primary table
-- Expand to show occurrences with roles
-- Show connectivity status (connected vs islands)
+### Conceptual Shift
 
-**Test:** Click [Find Relationships], verify UI shows:
-- Entity list instead of candidate list
-- Roles displayed for each occurrence
-- No more "891 candidates"
+| Current (Candidates) | New (Entities) |
+|---------------------|----------------|
+| 891 individual relationships | ~10-20 semantic entities |
+| User accepts/rejects each | User reviews entity definitions |
+| `needs_review` / `confirmed` / `rejected` | Just display entities |
+| CandidateCard with confidence scores | EntityCard with occurrences list |
+| Manual curation required | Automatic semantic discovery |
 
-**Success Criteria:** UI displays entities with roles, workflow completes without token errors.
+### Current UI Files (from analysis)
+
+```
+ui/src/
+├── pages/
+│   └── RelationshipsPage.tsx           # Main page - KEEP, minor changes
+├── components/
+│   ├── RelationshipDiscoveryProgress.tsx  # Discovery dialog - MAJOR changes
+│   ├── AddRelationshipDialog.tsx          # Manual add - KEEP unchanged
+│   ├── RemoveRelationshipDialog.tsx       # Manual remove - KEEP unchanged
+│   └── relationships/
+│       ├── CandidateCard.tsx              # REPLACE with EntityCard
+│       └── CandidateList.tsx              # REPLACE with EntityList
+├── services/
+│   └── relationshipWorkflowApi.ts         # MODIFY for entities
+└── types/
+    └── relationshipWorkflow.ts            # MODIFY for entities
+```
+
+### New UI Components
+
+**1. EntityCard.tsx** (replaces CandidateCard.tsx)
+```tsx
+// Displays a single entity with expandable occurrences
+interface EntityCardProps {
+  entity: EntityResponse;
+  defaultExpanded?: boolean;
+}
+
+// Layout:
+// ┌─────────────────────────────────────────────┐
+// │ 👤 user                                      │
+// │ "A person who uses the system"              │
+// │ Primary: users.id                           │
+// │ ▼ 4 occurrences                             │
+// │   ├─ orders.user_id                         │
+// │   ├─ visits.visitor_id (visitor)            │
+// │   ├─ visits.host_id (host)                  │
+// │   └─ properties.owner_id (owner)            │
+// └─────────────────────────────────────────────┘
+```
+
+**2. EntityList.tsx** (replaces CandidateList.tsx)
+```tsx
+// Displays all discovered entities
+interface EntityListProps {
+  entities: EntityResponse[];
+  isLoading?: boolean;
+}
+
+// No needs_review/confirmed/rejected sections
+// Just a list of EntityCards
+```
+
+**3. Modify RelationshipDiscoveryProgress.tsx**
+
+Current layout (2 panes):
+```
+┌──────────────────┬────────────────────────────┐
+│ Work Queue       │ Relationship Candidates    │
+│ ○ Task 1         │ [CandidateCard] Accept/Rej │
+│ ● Task 2         │ [CandidateCard] Accept/Rej │
+│ ○ Task 3         │ [CandidateCard] Accept/Rej │
+│                  │ ... 891 more ...           │
+└──────────────────┴────────────────────────────┘
+```
+
+New layout (2 panes):
+```
+┌──────────────────┬────────────────────────────┐
+│ Discovery Steps  │ Discovered Entities        │
+│ ✓ Column stats   │ [EntityCard] user          │
+│ ✓ Filtering      │ [EntityCard] account       │
+│ ✓ Graph analysis │ [EntityCard] product       │
+│ ● Entity LLM     │ [EntityCard] order         │
+│                  │                            │
+│ ──────────────── │ 8 entities, 32 occurrences │
+│ Connectivity:    │                            │
+│ ✓ All connected  │                            │
+└──────────────────┴────────────────────────────┘
+```
+
+**4. Modify types/relationshipWorkflow.ts**
+
+Remove:
+```typescript
+// DELETE these
+export type DetectionMethod = 'value_match' | 'name_inference' | 'llm' | 'hybrid';
+export interface CandidateResponse { ... }
+export interface CandidatesResponse { ... }
+export interface CandidateDecisionRequest { ... }
+```
+
+Add:
+```typescript
+// ADD these
+export interface EntityResponse {
+  id: string;
+  name: string;
+  description: string;
+  primary_schema: string;
+  primary_table: string;
+  primary_column: string;
+  occurrences: EntityOccurrenceResponse[];
+}
+
+export interface EntityOccurrenceResponse {
+  id: string;
+  schema_name: string;
+  table_name: string;
+  column_name: string;
+  role: string | null;
+  confidence: number;
+}
+
+export interface EntitiesResponse {
+  entities: EntityResponse[];
+  island_tables: string[];  // Tables not connected to any entity
+}
+
+export type DiscoveryPhase = 'stats' | 'filtering' | 'graph' | 'entity_discovery' | 'complete';
+```
+
+**5. Modify relationshipWorkflowApi.ts**
+
+```typescript
+// REMOVE
+async getCandidates(...): Promise<CandidatesResponse>
+async updateCandidate(...): Promise<CandidateResponse>
+
+// ADD
+async getEntities(projectId: string, datasourceId: string): Promise<EntitiesResponse> {
+  return this.makeRequest<EntitiesResponse>(
+    `/${projectId}/datasources/${datasourceId}/relationships/entities`
+  );
+}
+```
+
+### Test Protocol
+
+**Test:** Click [Find Relationships], verify:
+
+1. **Left pane shows discovery phases** (not individual table tasks):
+   - ✓ Collecting column statistics
+   - ✓ Filtering entity candidates
+   - ✓ Analyzing graph connectivity
+   - ● Discovering entities (LLM)
+
+2. **Right pane shows entities** (not 891 candidates):
+   - Entity cards with name, description
+   - Expandable occurrence list with roles
+   - No Accept/Reject buttons
+
+3. **Footer shows**:
+   - "8 entities discovered, 32 column mappings"
+   - "Save Entities" button (not "Save X Relationships")
+
+4. **After save**:
+   - Entities persisted to `engine_schema_entities`
+   - Relationships derived from entity occurrences
+   - RelationshipsPage shows relationships as before
+
+**Success Criteria:**
+- No "891 candidates" or token limit errors
+- Entities display with roles (visitor, host, owner)
+- Workflow completes in <30 seconds (one LLM call vs many)
+
+**Files to modify:**
+- `ui/src/components/RelationshipDiscoveryProgress.tsx` - Major rewrite
+- `ui/src/components/relationships/EntityCard.tsx` (new)
+- `ui/src/components/relationships/EntityList.tsx` (new)
+- `ui/src/components/relationships/CandidateCard.tsx` - DELETE or keep for legacy
+- `ui/src/components/relationships/CandidateList.tsx` - DELETE or keep for legacy
+- `ui/src/services/relationshipWorkflowApi.ts` - Replace candidates with entities
+- `ui/src/types/relationshipWorkflow.ts` - Replace candidate types with entity types
 
 ---
 
@@ -306,9 +564,28 @@ curl http://localhost:3443/api/projects/{project_id}/entities | jq
 | 8 | API endpoints | curl | JSON response |
 | 9 | UI display | Browser | Entities shown |
 
+## Phase 10: MCP/Ontology Integration (Future)
+
+**Goal:** Expose entity/role information to MCP clients for intelligent query generation.
+
+**Why this matters:** When an MCP client asks "show me top 5 hosts by booking count," the LLM needs to know:
+- `visits.host_id` represents entity "user" with role "host"
+- `visits.visitor_id` represents entity "user" with role "visitor"
+- These are different join paths to the same `users` table
+
+**Integration points:**
+- Ontology export should include entity definitions with roles
+- Schema context for text2sql should include role semantics
+- MCP tool descriptions should expose entity/role metadata
+
+**Deferred to future work** - entities must exist first (Phases 1-9).
+
+---
+
 ## Cleanup (After All Phases)
 
 - Remove or deprecate `engine_relationship_candidates` table
 - Remove `TestJoinTask` (or repurpose for validation)
 - Remove `AnalyzeRelationshipsTask` (replaced by `EntityDiscoveryTask`)
 - Consolidate migrations before launch
+- Update MCP schema tools to expose entity/role information

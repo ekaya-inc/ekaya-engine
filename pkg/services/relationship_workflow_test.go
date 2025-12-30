@@ -450,7 +450,15 @@ func (m *rwsMockDatasourceService) Get(ctx context.Context, projectID, datasourc
 	if m.err != nil {
 		return nil, m.err
 	}
-	return m.datasource, nil
+	if m.datasource != nil {
+		return m.datasource, nil
+	}
+	// Return a default datasource if none is set (for tests that don't need it)
+	return &models.Datasource{
+		ID:             datasourceID,
+		DatasourceType: "postgres",
+		Config:         map[string]any{},
+	}, nil
 }
 
 func (m *rwsMockDatasourceService) GetByName(ctx context.Context, projectID uuid.UUID, name string) (*models.Datasource, error) {
@@ -487,7 +495,13 @@ func (m *rwsMockAdapterFactory) NewSchemaDiscoverer(ctx context.Context, dsType 
 	if m.discovererErr != nil {
 		return nil, m.discovererErr
 	}
-	return m.discoverer, nil
+	if m.discoverer != nil {
+		return m.discoverer, nil
+	}
+	// Return a default mock discoverer if none is set (for tests that don't need it)
+	return &rwsMockSchemaDiscoverer{
+		columnStats: make(map[string][]datasource.ColumnStats),
+	}, nil
 }
 
 func (m *rwsMockAdapterFactory) NewConnectionTester(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.ConnectionTester, error) {
@@ -1951,5 +1965,281 @@ func TestRelationshipWorkflow_StartDetection_SecondRunReusesOntology(t *testing.
 	// New workflow should reference the existing ontology
 	if workflow.OntologyID != existingOntologyID {
 		t.Errorf("workflow.OntologyID = %v, want %v (existing)", workflow.OntologyID, existingOntologyID)
+	}
+}
+
+// ============================================================================
+// Tests for Column Statistics Collection
+// ============================================================================
+
+// rwsMockSchemaDiscoverer is a mock for SchemaDiscoverer interface.
+type rwsMockSchemaDiscoverer struct {
+	columnStats map[string][]datasource.ColumnStats // key: schema.table
+	statsErr    error
+}
+
+func (m *rwsMockSchemaDiscoverer) DiscoverTables(ctx context.Context) ([]datasource.TableMetadata, error) {
+	return nil, nil
+}
+
+func (m *rwsMockSchemaDiscoverer) DiscoverColumns(ctx context.Context, schemaName, tableName string) ([]datasource.ColumnMetadata, error) {
+	return nil, nil
+}
+
+func (m *rwsMockSchemaDiscoverer) DiscoverForeignKeys(ctx context.Context) ([]datasource.ForeignKeyMetadata, error) {
+	return nil, nil
+}
+
+func (m *rwsMockSchemaDiscoverer) SupportsForeignKeys() bool {
+	return true
+}
+
+func (m *rwsMockSchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, tableName string, columnNames []string) ([]datasource.ColumnStats, error) {
+	if m.statsErr != nil {
+		return nil, m.statsErr
+	}
+	key := schemaName + "." + tableName
+	if stats, ok := m.columnStats[key]; ok {
+		return stats, nil
+	}
+	// Return default stats for each column
+	result := make([]datasource.ColumnStats, len(columnNames))
+	for i, name := range columnNames {
+		result[i] = datasource.ColumnStats{
+			ColumnName:    name,
+			RowCount:      100,
+			NonNullCount:  100,
+			DistinctCount: 50,
+		}
+	}
+	return result, nil
+}
+
+func (m *rwsMockSchemaDiscoverer) CheckValueOverlap(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string, sampleLimit int) (*datasource.ValueOverlapResult, error) {
+	return nil, nil
+}
+
+func (m *rwsMockSchemaDiscoverer) AnalyzeJoin(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+	return nil, nil
+}
+
+func (m *rwsMockSchemaDiscoverer) GetDistinctValues(ctx context.Context, schemaName, tableName, columnName string, limit int) ([]string, error) {
+	return nil, nil
+}
+
+func (m *rwsMockSchemaDiscoverer) Close() error {
+	return nil
+}
+
+func TestRelationshipWorkflow_CollectColumnStatistics_Success(t *testing.T) {
+	projectID := uuid.New()
+	workflowID := uuid.New()
+	datasourceID := uuid.New()
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+
+	mockDiscoverer := &rwsMockSchemaDiscoverer{
+		columnStats: map[string][]datasource.ColumnStats{
+			"public.users": {
+				{ColumnName: "id", RowCount: 100, NonNullCount: 100, DistinctCount: 100},
+				{ColumnName: "email", RowCount: 100, NonNullCount: 100, DistinctCount: 100},
+				{ColumnName: "status", RowCount: 100, NonNullCount: 100, DistinctCount: 4},
+			},
+			"public.orders": {
+				{ColumnName: "id", RowCount: 500, NonNullCount: 500, DistinctCount: 500},
+				{ColumnName: "user_id", RowCount: 500, NonNullCount: 500, DistinctCount: 95},
+			},
+		},
+	}
+
+	schemaRepo := &rwsMockSchemaRepository{
+		mockSchemaRepository: mockSchemaRepository{
+			tables: []*models.SchemaTable{
+				{
+					ID:         usersTableID,
+					TableName:  "users",
+					SchemaName: "public",
+				},
+				{
+					ID:         ordersTableID,
+					TableName:  "orders",
+					SchemaName: "public",
+				},
+			},
+			columns: []*models.SchemaColumn{
+				{SchemaTableID: usersTableID, ColumnName: "id"},
+				{SchemaTableID: usersTableID, ColumnName: "email"},
+				{SchemaTableID: usersTableID, ColumnName: "status"},
+				{SchemaTableID: ordersTableID, ColumnName: "id"},
+				{SchemaTableID: ordersTableID, ColumnName: "user_id"},
+			},
+		},
+	}
+
+	adapterFactory := &rwsMockAdapterFactory{
+		discoverer: mockDiscoverer,
+	}
+
+	dsSvc := &rwsMockDatasourceService{
+		datasource: &models.Datasource{
+			ID:             datasourceID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{},
+		},
+	}
+
+	svc := newTestRelationshipWorkflowService(
+		&rwsMockWorkflowRepository{},
+		&rwsMockCandidateRepository{},
+		schemaRepo,
+		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
+		dsSvc,
+		adapterFactory,
+		&rwsMockLLMFactory{},
+	)
+
+	// Call collectColumnStatistics
+	err := svc.collectColumnStatistics(
+		context.Background(),
+		projectID,
+		workflowID,
+		datasourceID,
+	)
+
+	if err != nil {
+		t.Fatalf("collectColumnStatistics() error = %v, want nil", err)
+	}
+}
+
+func TestRelationshipWorkflow_CollectColumnStatistics_GetDatasourceError(t *testing.T) {
+	projectID := uuid.New()
+	workflowID := uuid.New()
+	datasourceID := uuid.New()
+
+	dsSvc := &rwsMockDatasourceService{
+		err: errors.New("datasource not found"),
+	}
+
+	svc := newTestRelationshipWorkflowService(
+		&rwsMockWorkflowRepository{},
+		&rwsMockCandidateRepository{},
+		&rwsMockSchemaRepository{},
+		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
+		dsSvc,
+		&rwsMockAdapterFactory{},
+		&rwsMockLLMFactory{},
+	)
+
+	err := svc.collectColumnStatistics(
+		context.Background(),
+		projectID,
+		workflowID,
+		datasourceID,
+	)
+
+	if err == nil {
+		t.Fatal("collectColumnStatistics() error = nil, want error")
+	}
+}
+
+func TestRelationshipWorkflow_CollectColumnStatistics_CreateAdapterError(t *testing.T) {
+	projectID := uuid.New()
+	workflowID := uuid.New()
+	datasourceID := uuid.New()
+
+	dsSvc := &rwsMockDatasourceService{
+		datasource: &models.Datasource{
+			ID:             datasourceID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{},
+		},
+	}
+
+	adapterFactory := &rwsMockAdapterFactory{
+		discovererErr: errors.New("failed to create adapter"),
+	}
+
+	svc := newTestRelationshipWorkflowService(
+		&rwsMockWorkflowRepository{},
+		&rwsMockCandidateRepository{},
+		&rwsMockSchemaRepository{},
+		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
+		dsSvc,
+		adapterFactory,
+		&rwsMockLLMFactory{},
+	)
+
+	err := svc.collectColumnStatistics(
+		context.Background(),
+		projectID,
+		workflowID,
+		datasourceID,
+	)
+
+	if err == nil {
+		t.Fatal("collectColumnStatistics() error = nil, want error")
+	}
+}
+
+func TestRelationshipWorkflow_CollectColumnStatistics_AnalyzeStatsError(t *testing.T) {
+	projectID := uuid.New()
+	workflowID := uuid.New()
+	datasourceID := uuid.New()
+	usersTableID := uuid.New()
+
+	mockDiscoverer := &rwsMockSchemaDiscoverer{
+		statsErr: errors.New("failed to analyze stats"),
+	}
+
+	schemaRepo := &rwsMockSchemaRepository{
+		mockSchemaRepository: mockSchemaRepository{
+			tables: []*models.SchemaTable{
+				{
+					ID:         usersTableID,
+					TableName:  "users",
+					SchemaName: "public",
+				},
+			},
+			columns: []*models.SchemaColumn{
+				{SchemaTableID: usersTableID, ColumnName: "id"},
+			},
+		},
+	}
+
+	adapterFactory := &rwsMockAdapterFactory{
+		discoverer: mockDiscoverer,
+	}
+
+	dsSvc := &rwsMockDatasourceService{
+		datasource: &models.Datasource{
+			ID:             datasourceID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{},
+		},
+	}
+
+	svc := newTestRelationshipWorkflowService(
+		&rwsMockWorkflowRepository{},
+		&rwsMockCandidateRepository{},
+		schemaRepo,
+		&rwsMockStateRepository{},
+		&rwsMockOntologyRepository{},
+		dsSvc,
+		adapterFactory,
+		&rwsMockLLMFactory{},
+	)
+
+	err := svc.collectColumnStatistics(
+		context.Background(),
+		projectID,
+		workflowID,
+		datasourceID,
+	)
+
+	if err == nil {
+		t.Fatal("collectColumnStatistics() error = nil, want error")
 	}
 }

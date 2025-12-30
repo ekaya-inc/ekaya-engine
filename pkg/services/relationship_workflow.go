@@ -343,6 +343,7 @@ func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, datasou
 	}()
 
 	// Task flow:
+	// 0. Collect column statistics (for all tables) - distinct counts, row counts, ratios
 	// 1. Scan columns (parallel) - populate workflow_state with sample values
 	// 2. Match values (single task) - create candidates from value overlap
 	// 3. Infer from names (single task) - create candidates from naming patterns
@@ -350,6 +351,20 @@ func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, datasou
 	// 5. Analyze relationships (single LLM task) - confirm/reject/add candidates
 
 	ctx := context.Background()
+
+	// Phase 0: Collect column statistics for all tables
+	s.logger.Info("Phase 0: Collecting column statistics",
+		zap.String("workflow_id", workflowID.String()))
+
+	if err := s.updateProgress(ctx, projectID, workflowID, "Collecting column statistics...", 5); err != nil {
+		s.logger.Error("Failed to update progress", zap.Error(err))
+	}
+
+	if err := s.collectColumnStatistics(ctx, projectID, workflowID, datasourceID); err != nil {
+		s.logger.Error("Failed to collect column statistics", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("column statistics: %v", err))
+		return
+	}
 
 	// Phase 1: Scan all columns in parallel
 	s.logger.Info("Phase 1: Scanning columns",
@@ -478,6 +493,105 @@ func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, datasou
 	}
 
 	s.finalizeWorkflow(projectID, workflowID)
+}
+
+// collectColumnStatistics gathers statistics for all columns across all tables.
+// Logs detailed statistics per column and a summary across all tables.
+func (s *relationshipWorkflowService) collectColumnStatistics(ctx context.Context, projectID, workflowID, datasourceID uuid.UUID) error {
+	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("get tenant context: %w", err)
+	}
+	defer cleanup()
+
+	// Get datasource to create adapter
+	ds, err := s.dsSvc.Get(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return fmt.Errorf("get datasource: %w", err)
+	}
+
+	// Create schema discoverer adapter
+	adapter, err := s.adapterFactory.NewSchemaDiscoverer(tenantCtx, ds.DatasourceType, ds.Config, projectID, datasourceID, "")
+	if err != nil {
+		return fmt.Errorf("create schema discoverer: %w", err)
+	}
+	defer adapter.Close()
+
+	// Get all tables for this datasource
+	tables, err := s.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return fmt.Errorf("list tables: %w", err)
+	}
+
+	// Get all columns for this datasource
+	columns, err := s.schemaRepo.ListColumnsByDatasource(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return fmt.Errorf("list columns: %w", err)
+	}
+
+	// Build table lookup and group columns by table
+	tableByID := make(map[uuid.UUID]*models.SchemaTable)
+	columnsByTableID := make(map[uuid.UUID][]*models.SchemaColumn)
+	for _, t := range tables {
+		tableByID[t.ID] = t
+		columnsByTableID[t.ID] = make([]*models.SchemaColumn, 0)
+	}
+
+	for _, col := range columns {
+		columnsByTableID[col.SchemaTableID] = append(columnsByTableID[col.SchemaTableID], col)
+	}
+
+	totalColumns := 0
+
+	// Collect stats for each table
+	for _, table := range tables {
+		tableCols := columnsByTableID[table.ID]
+		if len(tableCols) == 0 {
+			continue
+		}
+
+		// Get column names for this table
+		columnNames := make([]string, len(tableCols))
+		for i, col := range tableCols {
+			columnNames[i] = col.ColumnName
+		}
+
+		// Call AnalyzeColumnStats for this table
+		stats, err := adapter.AnalyzeColumnStats(tenantCtx, table.SchemaName, table.TableName, columnNames)
+		if err != nil {
+			s.logger.Error("Failed to analyze column stats",
+				zap.String("table", fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)),
+				zap.Error(err))
+			return fmt.Errorf("analyze column stats for %s.%s: %w", table.SchemaName, table.TableName, err)
+		}
+
+		// Log detailed statistics for this table
+		s.logger.Info(fmt.Sprintf("Column statistics: %s.%s (%d columns)", table.SchemaName, table.TableName, len(stats)),
+			zap.String("workflow_id", workflowID.String()))
+
+		for _, stat := range stats {
+			percentage := 0.0
+			if stat.RowCount > 0 {
+				percentage = (float64(stat.DistinctCount) / float64(stat.RowCount)) * 100.0
+			}
+
+			s.logger.Info(fmt.Sprintf("  - %s: %d distinct / %d rows (%.1f%%)",
+				stat.ColumnName,
+				stat.DistinctCount,
+				stat.RowCount,
+				percentage))
+		}
+
+		totalColumns += len(stats)
+	}
+
+	// Log summary
+	s.logger.Info(fmt.Sprintf("Summary: Collected stats for %d columns across %d tables",
+		totalColumns,
+		len(tables)),
+		zap.String("workflow_id", workflowID.String()))
+
+	return nil
 }
 
 // enqueueColumnScans creates and enqueues column scan tasks for all columns.
