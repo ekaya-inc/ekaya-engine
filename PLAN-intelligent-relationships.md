@@ -1105,11 +1105,11 @@ function CandidateCard({ candidate, variant, onAccept, onReject }: CandidateCard
 
 ### Milestone 5: Frontend
 
-1. [ ] Create `RelationshipsPage`
-2. [ ] Create `CandidateList` and `CandidateCard` components
-3. [ ] Reuse `WorkQueue` component
-4. [ ] Add route and navigation
-5. [ ] Update dashboard to show relationship status
+1. [x] Create `RelationshipsPage` (existing page updated with workflow integration)
+2. [x] Create `CandidateList` and `CandidateCard` components
+3. [x] Reuse `WorkQueue` component pattern in `RelationshipDiscoveryProgress`
+4. [x] Route already exists at `/relationships`
+5. [x] Updated `RelationshipDiscoveryProgress` with full workflow UI
 
 ### Milestone 6: Integration & Testing
 
