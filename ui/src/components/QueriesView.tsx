@@ -25,12 +25,13 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSqlValidation, type ValidationStatus } from '../hooks/useSqlValidation';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
-import type { DatasourceSchema, Query, SqlDialect, CreateQueryRequest, QueryParameter } from '../types';
+import type { DatasourceSchema, Query, SqlDialect, CreateQueryRequest, QueryParameter, ExecuteQueryResponse } from '../types';
 import { toCodeMirrorSchema } from '../utils/schemaUtils';
 
 import { DeleteQueryDialog } from './DeleteQueryDialog';
 import { ParameterEditor } from './ParameterEditor';
 import { ParameterInputForm } from './ParameterInputForm';
+import { QueryResultsTable } from './QueryResultsTable';
 import { SqlEditor } from './SqlEditor';
 import { Button } from './ui/Button';
 import {
@@ -64,6 +65,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [schema, setSchema] = useState<DatasourceSchema | null>(null);
+  const [queryResults, setQueryResults] = useState<ExecuteQueryResponse | null>(null);
 
   // UI state
   const [selectedQuery, setSelectedQuery] = useState<Query | null>(null);
@@ -199,6 +201,9 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
       });
 
       if (response.success) {
+        if (response.data) {
+          setQueryResults(response.data);
+        }
         toast({
           title: 'Query executed successfully',
           description: `Returned ${response.data?.row_count ?? 0} rows`,
@@ -211,6 +216,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         }
         return true;
       } else {
+        setQueryResults(null);
         toast({
           title: 'Query execution failed',
           description: response.error ?? 'Unknown error',
@@ -219,6 +225,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         return false;
       }
     } catch (err) {
+      setQueryResults(null);
       toast({
         title: 'Query execution failed',
         description: err instanceof Error ? err.message : 'Unknown error',
@@ -307,6 +314,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
       is_enabled: query.is_enabled,
       parameters: query.parameters ?? [],
     });
+    setQueryResults(null);
     editValidation.reset();
     setEditTestPassed(false);
     setTestParameterValues({});
@@ -451,6 +459,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
       );
 
       if (response.success && response.data) {
+        setQueryResults(response.data);
         toast({
           title: 'Query executed successfully',
           description: `Returned ${response.data.row_count} rows`,
@@ -459,6 +468,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         // Refresh to get updated usage count
         await loadQueries();
       } else {
+        setQueryResults(null);
         toast({
           title: 'Query execution failed',
           description: response.error ?? 'Unknown error',
@@ -466,6 +476,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         });
       }
     } catch (err) {
+      setQueryResults(null);
       toast({
         title: 'Query execution failed',
         description: err instanceof Error ? err.message : 'Unknown error',
@@ -540,6 +551,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     setSelectedQuery(null);
                     setEditingQueryId(null);
                     setEditingState(null);
+                    setQueryResults(null);
                     resetCreateForm();
                   }}
                   className="h-8 px-2"
@@ -575,6 +587,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                         setIsCreating(false);
                         setEditingQueryId(null);
                         setEditingState(null);
+                        setQueryResults(null);
                       }}
                       className={`w-full text-left p-2 rounded-lg transition-colors ${
                         selectedQuery?.query_id === query.query_id
@@ -1084,6 +1097,16 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                       Execute Query
                     </Button>
                   </div>
+
+                  {queryResults && (
+                    <QueryResultsTable
+                      columns={queryResults.columns}
+                      rows={queryResults.rows}
+                      totalRowCount={queryResults.row_count}
+                      maxRows={10}
+                      maxColumns={20}
+                    />
+                  )}
                 </CardContent>
               </>
             ) : (
@@ -1101,6 +1124,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     onClick={() => {
                       setIsCreating(true);
                       setSelectedQuery(null);
+                      setQueryResults(null);
                       resetCreateForm();
                     }}
                   >

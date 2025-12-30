@@ -86,7 +86,7 @@ cd ui && npm install @tanstack/react-table
 
 **Status:** Complete - component implemented with full test coverage (13 passing tests)
 
-### 3. Update QueriesView.tsx
+### 3. Update QueriesView.tsx ✅ [x]
 
 **Changes to `ui/src/components/QueriesView.tsx`:**
 
@@ -126,6 +126,8 @@ onClick={() => {
   ...
 }}
 ```
+
+**Status:** Complete - All changes implemented and tested. Tests pass (108/108) and TypeScript type check passes.
 
 ### 4. Component Props Interface
 
