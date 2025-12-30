@@ -360,9 +360,24 @@ func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, datasou
 		s.logger.Error("Failed to update progress", zap.Error(err))
 	}
 
-	if err := s.collectColumnStatistics(ctx, projectID, workflowID, datasourceID); err != nil {
+	statsMap, err := s.collectColumnStatistics(ctx, projectID, workflowID, datasourceID)
+	if err != nil {
 		s.logger.Error("Failed to collect column statistics", zap.Error(err))
 		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("column statistics: %v", err))
+		return
+	}
+
+	// Phase 0.5: Filter columns to identify entity candidates
+	s.logger.Info("Phase 0.5: Filtering entity candidates",
+		zap.String("workflow_id", workflowID.String()))
+
+	if err := s.updateProgress(ctx, projectID, workflowID, "Filtering entity candidates...", 8); err != nil {
+		s.logger.Error("Failed to update progress", zap.Error(err))
+	}
+
+	if err := s.filterEntityCandidates(ctx, projectID, workflowID, datasourceID, statsMap); err != nil {
+		s.logger.Error("Failed to filter entity candidates", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("entity filtering: %v", err))
 		return
 	}
 
@@ -497,36 +512,37 @@ func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, datasou
 
 // collectColumnStatistics gathers statistics for all columns across all tables.
 // Logs detailed statistics per column and a summary across all tables.
-func (s *relationshipWorkflowService) collectColumnStatistics(ctx context.Context, projectID, workflowID, datasourceID uuid.UUID) error {
+// Returns a map of "schema.table.column" -> ColumnStats for use by filtering.
+func (s *relationshipWorkflowService) collectColumnStatistics(ctx context.Context, projectID, workflowID, datasourceID uuid.UUID) (map[string]datasource.ColumnStats, error) {
 	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
 	if err != nil {
-		return fmt.Errorf("get tenant context: %w", err)
+		return nil, fmt.Errorf("get tenant context: %w", err)
 	}
 	defer cleanup()
 
 	// Get datasource to create adapter
 	ds, err := s.dsSvc.Get(tenantCtx, projectID, datasourceID)
 	if err != nil {
-		return fmt.Errorf("get datasource: %w", err)
+		return nil, fmt.Errorf("get datasource: %w", err)
 	}
 
 	// Create schema discoverer adapter
 	adapter, err := s.adapterFactory.NewSchemaDiscoverer(tenantCtx, ds.DatasourceType, ds.Config, projectID, datasourceID, "")
 	if err != nil {
-		return fmt.Errorf("create schema discoverer: %w", err)
+		return nil, fmt.Errorf("create schema discoverer: %w", err)
 	}
 	defer adapter.Close()
 
 	// Get all tables for this datasource
 	tables, err := s.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID)
 	if err != nil {
-		return fmt.Errorf("list tables: %w", err)
+		return nil, fmt.Errorf("list tables: %w", err)
 	}
 
 	// Get all columns for this datasource
 	columns, err := s.schemaRepo.ListColumnsByDatasource(tenantCtx, projectID, datasourceID)
 	if err != nil {
-		return fmt.Errorf("list columns: %w", err)
+		return nil, fmt.Errorf("list columns: %w", err)
 	}
 
 	// Build table lookup and group columns by table
@@ -541,6 +557,8 @@ func (s *relationshipWorkflowService) collectColumnStatistics(ctx context.Contex
 		columnsByTableID[col.SchemaTableID] = append(columnsByTableID[col.SchemaTableID], col)
 	}
 
+	// Map to store stats by "schema.table.column" key
+	statsMap := make(map[string]datasource.ColumnStats)
 	totalColumns := 0
 
 	// Collect stats for each table
@@ -562,7 +580,7 @@ func (s *relationshipWorkflowService) collectColumnStatistics(ctx context.Contex
 			s.logger.Error("Failed to analyze column stats",
 				zap.String("table", fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)),
 				zap.Error(err))
-			return fmt.Errorf("analyze column stats for %s.%s: %w", table.SchemaName, table.TableName, err)
+			return nil, fmt.Errorf("analyze column stats for %s.%s: %w", table.SchemaName, table.TableName, err)
 		}
 
 		// Log detailed statistics for this table
@@ -580,6 +598,10 @@ func (s *relationshipWorkflowService) collectColumnStatistics(ctx context.Contex
 				stat.DistinctCount,
 				stat.RowCount,
 				percentage))
+
+			// Store stats in map for filtering
+			statsKey := fmt.Sprintf("%s.%s.%s", table.SchemaName, table.TableName, stat.ColumnName)
+			statsMap[statsKey] = stat
 		}
 
 		totalColumns += len(stats)
@@ -590,6 +612,46 @@ func (s *relationshipWorkflowService) collectColumnStatistics(ctx context.Contex
 		totalColumns,
 		len(tables)),
 		zap.String("workflow_id", workflowID.String()))
+
+	return statsMap, nil
+}
+
+// filterEntityCandidates applies heuristics to filter columns and identify entity candidates.
+// Logs results showing candidates vs excluded columns with reasoning.
+func (s *relationshipWorkflowService) filterEntityCandidates(
+	ctx context.Context,
+	projectID, workflowID, datasourceID uuid.UUID,
+	statsMap map[string]datasource.ColumnStats,
+) error {
+	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("get tenant context: %w", err)
+	}
+	defer cleanup()
+
+	// Get all tables for this datasource
+	tables, err := s.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return fmt.Errorf("list tables: %w", err)
+	}
+
+	// Get all columns for this datasource
+	columns, err := s.schemaRepo.ListColumnsByDatasource(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return fmt.Errorf("list columns: %w", err)
+	}
+
+	// Build table lookup by UUID string
+	tableByID := make(map[string]*models.SchemaTable)
+	for _, t := range tables {
+		tableByID[t.ID.String()] = t
+	}
+
+	// Apply filtering heuristics
+	candidates, excluded := FilterEntityCandidates(columns, tableByID, statsMap, s.logger)
+
+	// Log results
+	LogFilterResults(candidates, excluded, s.logger)
 
 	return nil
 }

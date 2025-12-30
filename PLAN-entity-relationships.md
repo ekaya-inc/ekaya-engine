@@ -42,7 +42,7 @@ Summary: Collected stats for 156 columns across 21 tables
 
 ---
 
-## Phase 2: Column Filtering (Entity Candidates)
+## Phase 2: Column Filtering (Entity Candidates) ✅
 
 **Goal:** Filter columns to identify entity candidates using heuristics. No LLM yet.
 

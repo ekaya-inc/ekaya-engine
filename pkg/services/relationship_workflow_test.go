@@ -2100,7 +2100,7 @@ func TestRelationshipWorkflow_CollectColumnStatistics_Success(t *testing.T) {
 	)
 
 	// Call collectColumnStatistics
-	err := svc.collectColumnStatistics(
+	_, err := svc.collectColumnStatistics(
 		context.Background(),
 		projectID,
 		workflowID,
@@ -2132,7 +2132,7 @@ func TestRelationshipWorkflow_CollectColumnStatistics_GetDatasourceError(t *test
 		&rwsMockLLMFactory{},
 	)
 
-	err := svc.collectColumnStatistics(
+	_, err := svc.collectColumnStatistics(
 		context.Background(),
 		projectID,
 		workflowID,
@@ -2172,7 +2172,7 @@ func TestRelationshipWorkflow_CollectColumnStatistics_CreateAdapterError(t *test
 		&rwsMockLLMFactory{},
 	)
 
-	err := svc.collectColumnStatistics(
+	_, err := svc.collectColumnStatistics(
 		context.Background(),
 		projectID,
 		workflowID,
@@ -2232,7 +2232,7 @@ func TestRelationshipWorkflow_CollectColumnStatistics_AnalyzeStatsError(t *testi
 		&rwsMockLLMFactory{},
 	)
 
-	err := svc.collectColumnStatistics(
+	_, err := svc.collectColumnStatistics(
 		context.Background(),
 		projectID,
 		workflowID,
