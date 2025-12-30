@@ -224,8 +224,12 @@ func (s *datasourceService) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 // TestConnection tests connectivity to a datasource without saving it.
+// Uses unmanaged connection pools (no connection manager) since this is a one-off test.
 func (s *datasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any) error {
-	adapter, err := s.adapterFactory.NewConnectionTester(ctx, dsType, config)
+	// Pass uuid.Nil and empty string for identity parameters since this is a test connection
+	// that hasn't been saved yet. Connection manager will be nil in the factory, which
+	// triggers unmanaged pool creation.
+	adapter, err := s.adapterFactory.NewConnectionTester(ctx, dsType, config, uuid.Nil, uuid.Nil, "")
 	if err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
 	}

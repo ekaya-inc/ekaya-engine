@@ -495,8 +495,11 @@ func (t *ScanTableDataTask) Execute(ctx context.Context, enqueuer workqueue.Task
 		return fmt.Errorf("get datasource: %w", err)
 	}
 
-	// Create schema discoverer
-	discoverer, err := t.adapterFactory.NewSchemaDiscoverer(ctx, ds.DatasourceType, ds.Config)
+	// Create schema discoverer for background task.
+	// Background tasks use empty userID since they run outside user session context.
+	// Connection manager pools by (projectID, userID, datasourceID), so empty userID
+	// means all background tasks for this project share one connection pool.
+	discoverer, err := t.adapterFactory.NewSchemaDiscoverer(ctx, ds.DatasourceType, ds.Config, t.projectID, t.datasourceID, "")
 	if err != nil {
 		return fmt.Errorf("create schema discoverer: %w", err)
 	}

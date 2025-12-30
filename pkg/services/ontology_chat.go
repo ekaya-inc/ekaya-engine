@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -158,6 +159,16 @@ func (s *ontologyChatService) Initialize(ctx context.Context, projectID uuid.UUI
 }
 
 func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UUID, message string, eventChan chan<- models.ChatEvent) error {
+	// Extract userID from context (JWT claims)
+	userID, err := auth.RequireUserIDFromContext(ctx)
+	if err != nil {
+		s.logger.Error("User ID not found in context",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		eventChan <- models.NewErrorEvent("Authentication required")
+		return fmt.Errorf("user ID not found in context: %w", err)
+	}
+
 	// Get workflow first to get ontologyID for all messages
 	workflow, err := s.workflowRepo.GetLatestByProject(ctx, projectID)
 	if err != nil {
@@ -203,8 +214,8 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 		return err
 	}
 
-	// Create query executor
-	queryExecutor, err := s.adapterFactory.NewQueryExecutor(ctx, ds.DatasourceType, ds.Config)
+	// Create query executor with identity parameters for connection pooling
+	queryExecutor, err := s.adapterFactory.NewQueryExecutor(ctx, ds.DatasourceType, ds.Config, projectID, workflow.Config.DatasourceID, userID)
 	if err != nil {
 		s.logger.Error("Failed to create query executor",
 			zap.String("project_id", projectID.String()),

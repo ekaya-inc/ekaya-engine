@@ -1023,14 +1023,20 @@ queryService := services.NewQueryService(queryRepo, datasourceService, adapterFa
 - [x] Update `pkg/adapters/datasource/postgres/query.go` (NewQueryExecutor) if exists
 
 ### Step 8: Update Service Layer
-- [ ] Modify `pkg/services/schema.go`
+- [x] Modify `pkg/services/schema.go`
   - Extract `userID` from context in all methods calling factory
   - Pass `projectID`, `userID`, `datasourceID` to factory methods
-- [ ] Modify `pkg/services/query.go`
+- [x] Modify `pkg/services/query.go`
   - Same context extraction pattern
   - Update `Execute()` and `Test()` methods
-- [ ] Modify `pkg/services/datasource.go`
+- [x] Modify `pkg/services/datasource.go`
   - `TestConnection()` continues using unmanaged pools (no reuse needed for one-off tests)
+- [x] Modify `pkg/services/ontology_chat.go`
+  - Update calls to factory methods
+- [x] Modify `pkg/services/ontology_tasks.go`
+  - Update calls to factory methods
+- [x] Modify `pkg/services/relationship_discovery.go`
+  - Update calls to factory methods
 
 ### Step 9: Add Configuration
 - [ ] Modify `config/config.go`
