@@ -999,9 +999,9 @@ queryService := services.NewQueryService(queryRepo, datasourceService, adapterFa
 - [x] Follow lock ordering rules from ekaya-region reference (manager lock → connection lock)
 
 ### Step 4: Add User Context Extraction
-- [ ] Create `pkg/auth/context.go` (if not exists)
-- [ ] Implement `GetUserIDFromContext(ctx)` to extract user ID from JWT claims
-- [ ] Add context helpers for extracting `projectID` and `userID` from incoming requests
+- [x] Create `pkg/auth/context.go` (if not exists)
+- [x] Implement `GetUserIDFromContext(ctx)` to extract user ID from JWT claims
+- [x] Add context helpers for extracting `projectID` and `userID` from incoming requests
 
 ### Step 5: Update Factory Interface
 - [ ] Modify `pkg/adapters/datasource/factory.go`
