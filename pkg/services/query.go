@@ -3,16 +3,20 @@ package services
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
+	"github.com/ekaya-inc/ekaya-engine/pkg/audit"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
+	sqlpkg "github.com/ekaya-inc/ekaya-engine/pkg/sql"
 	sqlvalidator "github.com/ekaya-inc/ekaya-engine/pkg/sql"
 )
 
@@ -33,8 +37,10 @@ type QueryService interface {
 
 	// Query Execution
 	Execute(ctx context.Context, projectID, queryID uuid.UUID, req *ExecuteQueryRequest) (*datasource.QueryExecutionResult, error)
+	ExecuteWithParameters(ctx context.Context, projectID, queryID uuid.UUID, params map[string]any, req *ExecuteQueryRequest) (*datasource.QueryExecutionResult, error)
 	Test(ctx context.Context, projectID, datasourceID uuid.UUID, req *TestQueryRequest) (*datasource.QueryExecutionResult, error)
 	Validate(ctx context.Context, projectID, datasourceID uuid.UUID, sqlQuery string) error
+	ValidateParameterizedQuery(sqlQuery string, params []models.QueryParameter) error
 }
 
 // CreateQueryRequest contains fields for creating a new query.
@@ -71,6 +77,7 @@ type queryService struct {
 	queryRepo      repositories.QueryRepository
 	datasourceSvc  DatasourceService
 	adapterFactory datasource.DatasourceAdapterFactory
+	auditor        *audit.SecurityAuditor
 	logger         *zap.Logger
 }
 
@@ -79,12 +86,14 @@ func NewQueryService(
 	queryRepo repositories.QueryRepository,
 	datasourceSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
+	auditor *audit.SecurityAuditor,
 	logger *zap.Logger,
 ) QueryService {
 	return &queryService{
 		queryRepo:      queryRepo,
 		datasourceSvc:  datasourceSvc,
 		adapterFactory: adapterFactory,
+		auditor:        auditor,
 		logger:         logger,
 	}
 }
@@ -390,4 +399,365 @@ func (s *queryService) Validate(ctx context.Context, projectID, datasourceID uui
 	}
 
 	return nil
+}
+
+// ExecuteWithParameters runs a parameterized query with supplied values.
+func (s *queryService) ExecuteWithParameters(
+	ctx context.Context,
+	projectID, queryID uuid.UUID,
+	params map[string]any,
+	req *ExecuteQueryRequest,
+) (*datasource.QueryExecutionResult, error) {
+	// Extract userID from context (JWT claims)
+	userID, err := auth.RequireUserIDFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("user ID not found in context: %w", err)
+	}
+
+	// 1. Get query
+	query, err := s.queryRepo.GetByID(ctx, projectID, queryID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return nil, apperrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get query: %w", err)
+	}
+
+	// 2. Validate required parameters are provided
+	if err := s.validateRequiredParameters(query.Parameters, params); err != nil {
+		return nil, err
+	}
+
+	// 3. Type-check and coerce parameter values
+	coercedParams, err := s.coerceParameterTypes(query.Parameters, params)
+	if err != nil {
+		return nil, err
+	}
+
+	// 4. Check for SQL injection attempts
+	injectionResults := sqlpkg.CheckAllParameters(coercedParams)
+	if len(injectionResults) > 0 {
+		// Log to SIEM for all detected injection attempts
+		for _, result := range injectionResults {
+			s.auditor.LogInjectionAttempt(ctx, projectID, queryID,
+				audit.SQLInjectionDetails{
+					ParamName:   result.ParamName,
+					ParamValue:  fmt.Sprintf("%v", result.ParamValue),
+					Fingerprint: result.Fingerprint,
+					QueryName:   query.NaturalLanguagePrompt,
+				},
+				getClientIPFromContext(ctx),
+			)
+		}
+		return nil, fmt.Errorf("potential SQL injection detected in parameter '%s'",
+			injectionResults[0].ParamName)
+	}
+
+	// 5. Substitute parameters to get prepared SQL
+	preparedSQL, orderedValues, err := sqlpkg.SubstituteParameters(
+		query.SQLQuery, query.Parameters, coercedParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to substitute parameters: %w", err)
+	}
+
+	// 6. Get datasource config
+	ds, err := s.datasourceSvc.Get(ctx, projectID, query.DatasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get datasource: %w", err)
+	}
+
+	// 7. Create query executor with identity parameters for connection pooling
+	executor, err := s.adapterFactory.NewQueryExecutor(ctx, ds.DatasourceType, ds.Config, projectID, query.DatasourceID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create query executor: %w", err)
+	}
+	defer executor.Close()
+
+	// 8. Execute with parameterized binding
+	limit := 0
+	if req != nil {
+		limit = req.Limit
+	}
+
+	result, err := executor.ExecuteQueryWithParams(ctx, preparedSQL, orderedValues, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute query: %w", err)
+	}
+
+	// 9. Increment usage count (fire-and-forget, log warning on failure)
+	if err := s.queryRepo.IncrementUsageCount(ctx, queryID); err != nil {
+		s.logger.Warn("Failed to increment usage count",
+			zap.String("query_id", queryID.String()),
+			zap.Error(err),
+		)
+	}
+
+	return result, nil
+}
+
+// ValidateParameterizedQuery validates SQL template and parameter definitions.
+func (s *queryService) ValidateParameterizedQuery(
+	sqlQuery string,
+	params []models.QueryParameter,
+) error {
+	// Check all {{param}} in SQL have definitions
+	return sqlpkg.ValidateParameterDefinitions(sqlQuery, params)
+}
+
+// validateRequiredParameters checks that all required parameters are provided.
+func (s *queryService) validateRequiredParameters(
+	paramDefs []models.QueryParameter,
+	suppliedParams map[string]any,
+) error {
+	for _, p := range paramDefs {
+		if p.Required {
+			value, exists := suppliedParams[p.Name]
+			// Check if provided and not nil
+			if !exists || value == nil {
+				// Check if there's a default value
+				if p.Default == nil {
+					return fmt.Errorf("required parameter '%s' is missing", p.Name)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// coerceParameterTypes validates and coerces parameter values to their declared types.
+func (s *queryService) coerceParameterTypes(
+	paramDefs []models.QueryParameter,
+	suppliedParams map[string]any,
+) (map[string]any, error) {
+	coerced := make(map[string]any)
+
+	// Build lookup for parameter definitions
+	defLookup := make(map[string]models.QueryParameter)
+	for _, p := range paramDefs {
+		defLookup[p.Name] = p
+	}
+
+	// Process each supplied parameter
+	for name, value := range suppliedParams {
+		def, exists := defLookup[name]
+		if !exists {
+			return nil, fmt.Errorf("unknown parameter '%s'", name)
+		}
+
+		// Skip nil values - they'll use defaults during substitution
+		if value == nil {
+			continue
+		}
+
+		// Coerce based on type
+		coercedValue, err := s.coerceValue(value, def.Type, name)
+		if err != nil {
+			return nil, err
+		}
+		coerced[name] = coercedValue
+	}
+
+	return coerced, nil
+}
+
+// coerceValue attempts to coerce a value to the target type.
+func (s *queryService) coerceValue(value any, targetType string, paramName string) (any, error) {
+	switch targetType {
+	case "string":
+		return s.coerceToString(value)
+	case "integer":
+		return s.coerceToInteger(value, paramName)
+	case "decimal":
+		return s.coerceToDecimal(value, paramName)
+	case "boolean":
+		return s.coerceToBoolean(value, paramName)
+	case "date":
+		return s.coerceToDate(value, paramName)
+	case "timestamp":
+		return s.coerceToTimestamp(value, paramName)
+	case "uuid":
+		return s.coerceToUUID(value, paramName)
+	case "string[]":
+		return s.coerceToStringArray(value, paramName)
+	case "integer[]":
+		return s.coerceToIntegerArray(value, paramName)
+	default:
+		return nil, fmt.Errorf("unsupported parameter type '%s' for parameter '%s'", targetType, paramName)
+	}
+}
+
+func (s *queryService) coerceToString(value any) (string, error) {
+	if str, ok := value.(string); ok {
+		return str, nil
+	}
+	return fmt.Sprintf("%v", value), nil
+}
+
+func (s *queryService) coerceToInteger(value any, paramName string) (int64, error) {
+	switch v := value.(type) {
+	case int:
+		return int64(v), nil
+	case int32:
+		return int64(v), nil
+	case int64:
+		return v, nil
+	case float64:
+		return int64(v), nil
+	case float32:
+		return int64(v), nil
+	case string:
+		i, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("parameter '%s': cannot convert '%s' to integer: %w", paramName, v, err)
+		}
+		return i, nil
+	default:
+		return 0, fmt.Errorf("parameter '%s': cannot convert type %T to integer", paramName, value)
+	}
+}
+
+func (s *queryService) coerceToDecimal(value any, paramName string) (float64, error) {
+	switch v := value.(type) {
+	case float64:
+		return v, nil
+	case float32:
+		return float64(v), nil
+	case int:
+		return float64(v), nil
+	case int32:
+		return float64(v), nil
+	case int64:
+		return float64(v), nil
+	case string:
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return 0, fmt.Errorf("parameter '%s': cannot convert '%s' to decimal: %w", paramName, v, err)
+		}
+		return f, nil
+	default:
+		return 0, fmt.Errorf("parameter '%s': cannot convert type %T to decimal", paramName, value)
+	}
+}
+
+func (s *queryService) coerceToBoolean(value any, paramName string) (bool, error) {
+	switch v := value.(type) {
+	case bool:
+		return v, nil
+	case string:
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return false, fmt.Errorf("parameter '%s': cannot convert '%s' to boolean: %w", paramName, v, err)
+		}
+		return b, nil
+	case int, int32, int64:
+		// Treat non-zero as true
+		return v != 0, nil
+	case float32, float64:
+		return v != 0, nil
+	default:
+		return false, fmt.Errorf("parameter '%s': cannot convert type %T to boolean", paramName, value)
+	}
+}
+
+func (s *queryService) coerceToDate(value any, paramName string) (string, error) {
+	str, err := s.coerceToString(value)
+	if err != nil {
+		return "", err
+	}
+
+	// Validate ISO 8601 date format (YYYY-MM-DD)
+	_, err = time.Parse("2006-01-02", str)
+	if err != nil {
+		return "", fmt.Errorf("parameter '%s': invalid date format '%s', expected YYYY-MM-DD: %w", paramName, str, err)
+	}
+	return str, nil
+}
+
+func (s *queryService) coerceToTimestamp(value any, paramName string) (string, error) {
+	str, err := s.coerceToString(value)
+	if err != nil {
+		return "", err
+	}
+
+	// Validate ISO 8601 timestamp format
+	_, err = time.Parse(time.RFC3339, str)
+	if err != nil {
+		return "", fmt.Errorf("parameter '%s': invalid timestamp format '%s', expected RFC3339: %w", paramName, str, err)
+	}
+	return str, nil
+}
+
+func (s *queryService) coerceToUUID(value any, paramName string) (string, error) {
+	str, err := s.coerceToString(value)
+	if err != nil {
+		return "", err
+	}
+
+	// Validate UUID format
+	_, err = uuid.Parse(str)
+	if err != nil {
+		return "", fmt.Errorf("parameter '%s': invalid UUID format '%s': %w", paramName, str, err)
+	}
+	return str, nil
+}
+
+func (s *queryService) coerceToStringArray(value any, paramName string) ([]string, error) {
+	// Handle []interface{} from JSON
+	if arr, ok := value.([]interface{}); ok {
+		result := make([]string, len(arr))
+		for i, v := range arr {
+			str, err := s.coerceToString(v)
+			if err != nil {
+				return nil, fmt.Errorf("parameter '%s': array element %d: %w", paramName, i, err)
+			}
+			result[i] = str
+		}
+		return result, nil
+	}
+
+	// Handle []string directly
+	if arr, ok := value.([]string); ok {
+		return arr, nil
+	}
+
+	return nil, fmt.Errorf("parameter '%s': cannot convert type %T to string array", paramName, value)
+}
+
+func (s *queryService) coerceToIntegerArray(value any, paramName string) ([]int64, error) {
+	// Handle []interface{} from JSON
+	if arr, ok := value.([]interface{}); ok {
+		result := make([]int64, len(arr))
+		for i, v := range arr {
+			intVal, err := s.coerceToInteger(v, fmt.Sprintf("%s[%d]", paramName, i))
+			if err != nil {
+				return nil, err
+			}
+			result[i] = intVal
+		}
+		return result, nil
+	}
+
+	// Handle []int64 directly
+	if arr, ok := value.([]int64); ok {
+		return arr, nil
+	}
+
+	// Handle []int
+	if arr, ok := value.([]int); ok {
+		result := make([]int64, len(arr))
+		for i, v := range arr {
+			result[i] = int64(v)
+		}
+		return result, nil
+	}
+
+	return nil, fmt.Errorf("parameter '%s': cannot convert type %T to integer array", paramName, value)
+}
+
+// getClientIPFromContext extracts the client IP from the request context.
+// Returns empty string if not found.
+func getClientIPFromContext(ctx context.Context) string {
+	// In a real implementation, this would extract from HTTP context
+	// For now, return a placeholder
+	return ""
 }

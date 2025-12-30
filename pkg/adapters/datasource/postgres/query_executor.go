@@ -103,6 +103,56 @@ func (e *QueryExecutor) ExecuteQuery(ctx context.Context, sqlQuery string, limit
 	}, nil
 }
 
+// ExecuteQueryWithParams runs a parameterized SQL query with positional parameters.
+// The SQL should use $1, $2, etc. for parameter placeholders.
+// pgx handles parameterized queries natively, preventing SQL injection.
+func (e *QueryExecutor) ExecuteQueryWithParams(ctx context.Context, sqlQuery string, params []any, limit int) (*datasource.QueryExecutionResult, error) {
+	// Apply limit if specified
+	queryToRun := sqlQuery
+	if limit > 0 {
+		queryToRun = fmt.Sprintf("SELECT * FROM (%s) AS _limited LIMIT %d", sqlQuery, limit)
+	}
+
+	// Execute with parameters - pgx handles parameterized queries natively
+	rows, err := e.pool.Query(ctx, queryToRun, params...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute parameterized query: %w", err)
+	}
+	defer rows.Close()
+
+	// Get column names
+	fieldDescs := rows.FieldDescriptions()
+	columns := make([]string, len(fieldDescs))
+	for i, fd := range fieldDescs {
+		columns[i] = string(fd.Name)
+	}
+
+	// Collect rows
+	resultRows := make([]map[string]any, 0)
+	for rows.Next() {
+		values, err := rows.Values()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read row values: %w", err)
+		}
+
+		rowMap := make(map[string]any)
+		for i, col := range columns {
+			rowMap[col] = values[i]
+		}
+		resultRows = append(resultRows, rowMap)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	return &datasource.QueryExecutionResult{
+		Columns:  columns,
+		Rows:     resultRows,
+		RowCount: len(resultRows),
+	}, nil
+}
+
 // Execute runs any SQL statement (DDL/DML) and returns results.
 func (e *QueryExecutor) Execute(ctx context.Context, sqlStatement string) (*datasource.ExecuteResult, error) {
 	rows, err := e.pool.Query(ctx, sqlStatement)

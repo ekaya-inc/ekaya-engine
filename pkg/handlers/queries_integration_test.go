@@ -16,6 +16,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	_ "github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource/postgres" // Register postgres adapter
+	"github.com/ekaya-inc/ekaya-engine/pkg/audit"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
@@ -57,9 +58,12 @@ func setupQueriesIntegrationTest(t *testing.T) *queriesIntegrationTestContext {
 	dsRepo := repositories.NewDatasourceRepository()
 	dsSvc := services.NewDatasourceService(dsRepo, encryptor, adapterFactory, nil, zap.NewNop())
 
+	// Create security auditor
+	auditor := audit.NewSecurityAuditor(zap.NewNop())
+
 	// Create query repository and service
 	queryRepo := repositories.NewQueryRepository()
-	querySvc := services.NewQueryService(queryRepo, dsSvc, adapterFactory, zap.NewNop())
+	querySvc := services.NewQueryService(queryRepo, dsSvc, adapterFactory, auditor, zap.NewNop())
 
 	// Create handler
 	handler := NewQueriesHandler(querySvc, zap.NewNop())

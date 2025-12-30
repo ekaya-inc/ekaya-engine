@@ -105,6 +105,12 @@ type QueryExecutor interface {
 	// The limit parameter caps the number of rows returned (0 = no limit).
 	ExecuteQuery(ctx context.Context, sqlQuery string, limit int) (*QueryExecutionResult, error)
 
+	// ExecuteQueryWithParams runs a parameterized SQL query with positional parameters.
+	// The SQL should use $1, $2, etc. for parameter placeholders.
+	// The params slice provides values in order corresponding to the placeholders.
+	// The limit parameter caps the number of rows returned (0 = no limit).
+	ExecuteQueryWithParams(ctx context.Context, sqlQuery string, params []any, limit int) (*QueryExecutionResult, error)
+
 	// Execute runs any SQL statement (DDL/DML) and returns results.
 	// For statements with RETURNING clauses, returns rows in the result.
 	// For INSERT/UPDATE/DELETE without RETURNING, returns RowsAffected.
