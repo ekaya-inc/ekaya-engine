@@ -596,3 +596,435 @@ func TestQueryExecutor_Execute_TruncateNonExistentTable(t *testing.T) {
 		t.Fatal("expected error for TRUNCATE on non-existent table")
 	}
 }
+
+// ============================================================================
+// ExecuteQueryWithParams Tests - Parameterized Queries
+// ============================================================================
+
+func TestQueryExecutor_ExecuteQueryWithParams_Simple(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	sql := "SELECT $1::integer as num, $2::text as greeting"
+	params := []any{42, "hello"}
+
+	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	if err != nil {
+		t.Fatalf("ExecuteQueryWithParams failed: %v", err)
+	}
+
+	if len(result.Columns) != 2 {
+		t.Errorf("expected 2 columns, got %d", len(result.Columns))
+	}
+	if result.Columns[0] != "num" {
+		t.Errorf("expected first column 'num', got %q", result.Columns[0])
+	}
+	if result.Columns[1] != "greeting" {
+		t.Errorf("expected second column 'greeting', got %q", result.Columns[1])
+	}
+
+	if result.RowCount != 1 {
+		t.Errorf("expected 1 row, got %d", result.RowCount)
+	}
+	if len(result.Rows) != 1 {
+		t.Fatalf("expected 1 row in Rows slice, got %d", len(result.Rows))
+	}
+
+	row := result.Rows[0]
+	if row["greeting"] != "hello" {
+		t.Errorf("expected greeting 'hello', got %v", row["greeting"])
+	}
+}
+
+func TestQueryExecutor_ExecuteQueryWithParams_WhereClause(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// Query events table with parameterized WHERE clause using id (guaranteed to exist)
+	sql := "SELECT * FROM events WHERE id > $1 LIMIT 5"
+	params := []any{0}
+
+	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	if err != nil {
+		t.Fatalf("ExecuteQueryWithParams with WHERE failed: %v", err)
+	}
+
+	// Should get some results
+	if len(result.Columns) == 0 {
+		t.Error("expected at least one column")
+	}
+}
+
+func TestQueryExecutor_ExecuteQueryWithParams_MultipleParams(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	sql := `
+		SELECT *
+		FROM events
+		WHERE id > $1
+		  AND created_at >= $2
+		LIMIT 10
+	`
+	params := []any{0, "2020-01-01"}
+
+	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	if err != nil {
+		t.Fatalf("ExecuteQueryWithParams with multiple params failed: %v", err)
+	}
+
+	if len(result.Columns) == 0 {
+		t.Error("expected at least one column")
+	}
+}
+
+func TestQueryExecutor_ExecuteQueryWithParams_NumericTypes(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	sql := `
+		SELECT
+			$1::integer as int_val,
+			$2::bigint as bigint_val,
+			$3::numeric as numeric_val,
+			$4::float as float_val
+	`
+	params := []any{42, int64(9999999999), 123.45, 67.89}
+
+	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	if err != nil {
+		t.Fatalf("ExecuteQueryWithParams with numeric types failed: %v", err)
+	}
+
+	if result.RowCount != 1 {
+		t.Fatalf("expected 1 row, got %d", result.RowCount)
+	}
+
+	row := result.Rows[0]
+	if row["int_val"] == nil {
+		t.Error("expected int_val to be non-nil")
+	}
+	if row["bigint_val"] == nil {
+		t.Error("expected bigint_val to be non-nil")
+	}
+	if row["numeric_val"] == nil {
+		t.Error("expected numeric_val to be non-nil")
+	}
+	if row["float_val"] == nil {
+		t.Error("expected float_val to be non-nil")
+	}
+}
+
+func TestQueryExecutor_ExecuteQueryWithParams_BooleanType(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	sql := "SELECT $1::boolean as bool_true, $2::boolean as bool_false"
+	params := []any{true, false}
+
+	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	if err != nil {
+		t.Fatalf("ExecuteQueryWithParams with boolean failed: %v", err)
+	}
+
+	row := result.Rows[0]
+	if row["bool_true"] != true {
+		t.Errorf("expected bool_true to be true, got %v", row["bool_true"])
+	}
+	if row["bool_false"] != false {
+		t.Errorf("expected bool_false to be false, got %v", row["bool_false"])
+	}
+}
+
+func TestQueryExecutor_ExecuteQueryWithParams_DateTypes(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	sql := `
+		SELECT
+			$1::date as date_val,
+			$2::timestamp as timestamp_val,
+			$3::timestamptz as timestamptz_val
+	`
+	params := []any{"2024-01-15", "2024-01-15 10:30:00", "2024-01-15T10:30:00Z"}
+
+	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	if err != nil {
+		t.Fatalf("ExecuteQueryWithParams with date types failed: %v", err)
+	}
+
+	row := result.Rows[0]
+	if row["date_val"] == nil {
+		t.Error("expected date_val to be non-nil")
+	}
+	if row["timestamp_val"] == nil {
+		t.Error("expected timestamp_val to be non-nil")
+	}
+	if row["timestamptz_val"] == nil {
+		t.Error("expected timestamptz_val to be non-nil")
+	}
+}
+
+func TestQueryExecutor_ExecuteQueryWithParams_UUIDType(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	testUUID := "550e8400-e29b-41d4-a716-446655440000"
+	sql := "SELECT $1::uuid as uuid_val"
+	params := []any{testUUID}
+
+	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	if err != nil {
+		t.Fatalf("ExecuteQueryWithParams with UUID failed: %v", err)
+	}
+
+	row := result.Rows[0]
+	if row["uuid_val"] == nil {
+		t.Error("expected uuid_val to be non-nil")
+	}
+}
+
+func TestQueryExecutor_ExecuteQueryWithParams_ArrayTypes(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	sql := `
+		SELECT
+			$1::text[] as text_array,
+			$2::integer[] as int_array
+	`
+	params := []any{[]string{"one", "two", "three"}, []int64{1, 2, 3}}
+
+	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	if err != nil {
+		t.Fatalf("ExecuteQueryWithParams with arrays failed: %v", err)
+	}
+
+	row := result.Rows[0]
+	if row["text_array"] == nil {
+		t.Error("expected text_array to be non-nil")
+	}
+	if row["int_array"] == nil {
+		t.Error("expected int_array to be non-nil")
+	}
+}
+
+func TestQueryExecutor_ExecuteQueryWithParams_INClause(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	sql := "SELECT * FROM events WHERE id = ANY($1::integer[]) LIMIT 10"
+	params := []any{[]int64{1, 2, 3}}
+
+	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	if err != nil {
+		t.Fatalf("ExecuteQueryWithParams with IN clause failed: %v", err)
+	}
+
+	// Verify we got results (if ids 1,2,3 exist in test data)
+	if len(result.Columns) == 0 {
+		t.Error("expected at least one column")
+	}
+}
+
+func TestQueryExecutor_ExecuteQueryWithParams_NullValue(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	sql := "SELECT $1::text as null_val, $2::text as non_null_val"
+	params := []any{nil, "not null"}
+
+	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	if err != nil {
+		t.Fatalf("ExecuteQueryWithParams with null failed: %v", err)
+	}
+
+	row := result.Rows[0]
+	if row["null_val"] != nil {
+		t.Errorf("expected null_val to be nil, got %v", row["null_val"])
+	}
+	if row["non_null_val"] != "not null" {
+		t.Errorf("expected non_null_val 'not null', got %v", row["non_null_val"])
+	}
+}
+
+func TestQueryExecutor_ExecuteQueryWithParams_WithLimit(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// First check we have enough rows
+	checkSQL := "SELECT COUNT(*) as cnt FROM events WHERE id > $1"
+	checkResult, err := tc.executor.ExecuteQueryWithParams(ctx, checkSQL, []any{0}, 0)
+	if err != nil {
+		t.Fatalf("check query failed: %v", err)
+	}
+
+	// Skip if not enough rows
+	if len(checkResult.Rows) == 0 {
+		t.Skip("no rows to test limit")
+	}
+
+	// Now test with limit
+	sql := "SELECT * FROM events WHERE id > $1"
+	params := []any{0}
+
+	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 3)
+	if err != nil {
+		t.Fatalf("ExecuteQueryWithParams with limit failed: %v", err)
+	}
+
+	if result.RowCount > 3 {
+		t.Errorf("expected at most 3 rows with limit, got %d", result.RowCount)
+	}
+}
+
+func TestQueryExecutor_ExecuteQueryWithParams_SameParamMultipleTimes(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// Use same parameter twice in query
+	sql := "SELECT $1::text as first, $1::text as second, $2::integer as num"
+	params := []any{"repeated", 42}
+
+	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	if err != nil {
+		t.Fatalf("ExecuteQueryWithParams with repeated param failed: %v", err)
+	}
+
+	row := result.Rows[0]
+	if row["first"] != "repeated" {
+		t.Errorf("expected first 'repeated', got %v", row["first"])
+	}
+	if row["second"] != "repeated" {
+		t.Errorf("expected second 'repeated', got %v", row["second"])
+	}
+}
+
+func TestQueryExecutor_ExecuteQueryWithParams_NoResults(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	sql := "SELECT * FROM events WHERE id = $1 AND 1=0"
+	params := []any{99999}
+
+	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	if err != nil {
+		t.Fatalf("ExecuteQueryWithParams failed: %v", err)
+	}
+
+	if result.RowCount != 0 {
+		t.Errorf("expected 0 rows, got %d", result.RowCount)
+	}
+	if len(result.Rows) != 0 {
+		t.Errorf("expected empty Rows slice, got %d", len(result.Rows))
+	}
+	// Columns should still be populated
+	if len(result.Columns) == 0 {
+		t.Error("expected columns even with no results")
+	}
+}
+
+func TestQueryExecutor_ExecuteQueryWithParams_WrongParamCount(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// SQL expects 2 params but we provide 1
+	sql := "SELECT $1::integer as first, $2::integer as second"
+	params := []any{42}
+
+	_, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	if err == nil {
+		t.Fatal("expected error when param count doesn't match")
+	}
+}
+
+func TestQueryExecutor_ExecuteQueryWithParams_InvalidType(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// Try to pass string where integer expected
+	sql := "SELECT $1::integer as num"
+	params := []any{"not a number"}
+
+	_, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	if err == nil {
+		t.Fatal("expected error for type mismatch")
+	}
+}
+
+func TestQueryExecutor_ExecuteQueryWithParams_SQLInjectionPrevention(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// This should be treated as a literal integer value, not SQL injection
+	// If parameterization is broken, this would cause a syntax error
+	maliciousInput := "1; DROP TABLE events; --"
+
+	sql := "SELECT * FROM events WHERE id::text = $1 LIMIT 1"
+	params := []any{maliciousInput}
+
+	// This should NOT drop the table - it should just find no results
+	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	if err != nil {
+		t.Fatalf("ExecuteQueryWithParams failed: %v", err)
+	}
+
+	// Should return 0 results (no id matches the malicious string as text)
+	if result.RowCount != 0 {
+		t.Logf("note: got %d rows, which is fine - means the string matched some data", result.RowCount)
+	}
+
+	// Verify the events table still exists by querying it
+	verifyResult, err := tc.executor.ExecuteQuery(ctx, "SELECT COUNT(*) as cnt FROM events", 0)
+	if err != nil {
+		t.Fatalf("SECURITY FAILURE: events table was affected by injection attempt: %v", err)
+	}
+	if verifyResult.RowCount != 1 {
+		t.Error("SECURITY FAILURE: events table appears to be missing or corrupted")
+	}
+}
+
+func TestQueryExecutor_ExecuteQueryWithParams_ComplexQuery(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	sql := `
+		SELECT
+			id,
+			COUNT(*) as event_count,
+			MIN(created_at) as earliest,
+			MAX(created_at) as latest
+		FROM events
+		WHERE id > $1
+		  AND created_at >= $2
+		GROUP BY id
+		HAVING COUNT(*) > $3
+		ORDER BY event_count DESC
+		LIMIT 10
+	`
+	params := []any{0, "2020-01-01", 0}
+
+	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	if err != nil {
+		t.Fatalf("ExecuteQueryWithParams with complex query failed: %v", err)
+	}
+
+	if len(result.Columns) != 4 {
+		t.Errorf("expected 4 columns, got %d", len(result.Columns))
+	}
+}
+
+func TestQueryExecutor_ExecuteQueryWithParams_ContextCancellation(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	sql := "SELECT pg_sleep(10), $1::integer"
+	params := []any{42}
+
+	_, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	if err == nil {
+		t.Error("expected error when context is cancelled")
+	}
+}

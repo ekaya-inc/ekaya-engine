@@ -399,6 +399,10 @@ func (m *mockQueryExecutor) ExecuteQuery(ctx context.Context, sqlQuery string, l
 	return m.result, m.err
 }
 
+func (m *mockQueryExecutor) ExecuteQueryWithParams(ctx context.Context, sqlQuery string, params []any, limit int) (*datasource.QueryExecutionResult, error) {
+	return m.result, m.err
+}
+
 func (m *mockQueryExecutor) ValidateQuery(ctx context.Context, sqlQuery string) error {
 	return m.err
 }
