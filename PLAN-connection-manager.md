@@ -990,13 +990,13 @@ queryService := services.NewQueryService(queryRepo, datasourceService, adapterFa
 - [x] Create `pkg/logging/sanitizer_test.go` with unit tests
 
 ### Step 3: Create Connection Manager
-- [ ] Create `pkg/adapters/datasource/connection_manager.go`
-- [ ] Implement `ConnectionManager` struct with TTL-based pooling
-- [ ] Implement background cleanup goroutine
-- [ ] Add `GetOrCreatePool()`, `Close()`, `GetStats()` methods
-- [ ] Use `retry.DoWithResult()` for pool creation
-- [ ] Use `retry.Do()` for health checks
-- [ ] Follow lock ordering rules from ekaya-region reference (manager lock → connection lock)
+- [x] Create `pkg/adapters/datasource/connection_manager.go`
+- [x] Implement `ConnectionManager` struct with TTL-based pooling
+- [x] Implement background cleanup goroutine
+- [x] Add `GetOrCreatePool()`, `Close()`, `GetStats()` methods
+- [x] Use `retry.DoWithResult()` for pool creation
+- [x] Use `retry.Do()` for health checks
+- [x] Follow lock ordering rules from ekaya-region reference (manager lock → connection lock)
 
 ### Step 4: Add User Context Extraction
 - [ ] Create `pkg/auth/context.go` (if not exists)
