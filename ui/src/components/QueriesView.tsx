@@ -194,8 +194,8 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
       const response = await engineApi.testQuery(projectId, datasourceId, {
         sql_query: sql,
         limit: 10,
-        parameter_definitions: parameters,
-        parameter_values: parameterValues,
+        ...(parameters !== undefined && { parameter_definitions: parameters }),
+        ...(parameterValues !== undefined && { parameter_values: parameterValues }),
       });
 
       if (response.success) {
@@ -439,17 +439,15 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
     setIsTesting(true);
 
     try {
+      const executeRequest =
+        query.parameters && query.parameters.length > 0
+          ? { limit: 100, parameters: executeParameterValues }
+          : { limit: 100 };
       const response = await engineApi.executeQuery(
         projectId,
         datasourceId,
         query.query_id,
-        {
-          limit: 100,
-          parameters:
-            query.parameters && query.parameters.length > 0
-              ? executeParameterValues
-              : undefined,
-        }
+        executeRequest
       );
 
       if (response.success && response.data) {

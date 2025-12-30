@@ -3,7 +3,6 @@
  * Renders input fields for parameter values with type-appropriate controls
  */
 
-import { useState } from 'react';
 
 import type { QueryParameter } from '../types/query';
 

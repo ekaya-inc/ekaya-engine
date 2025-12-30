@@ -26,7 +26,10 @@ const extractParametersFromSql = (sql: string): string[] => {
   let match;
 
   while ((match = regex.exec(sql)) !== null) {
-    matches.add(match[1]);
+    const paramName = match[1];
+    if (paramName !== undefined) {
+      matches.add(paramName);
+    }
   }
 
   return Array.from(matches);
@@ -102,8 +105,11 @@ export const ParameterEditor = ({
     value: unknown
   ) => {
     const updated = [...parameters];
-    updated[index] = { ...updated[index], [field]: value };
-    onChange(updated);
+    const existingParam = updated[index];
+    if (existingParam !== undefined) {
+      updated[index] = { ...existingParam, [field]: value };
+      onChange(updated);
+    }
   };
 
   const toggleExpanded = (index: number) => {
@@ -189,7 +195,7 @@ export const ParameterEditor = ({
       {/* Parameter list */}
       {parameters.length === 0 ? (
         <div className="text-sm text-text-secondary text-center py-4 border border-dashed border-border-light rounded-lg">
-          No parameters defined. Click "Add Parameter" to create one.
+          No parameters defined. Click &quot;Add Parameter&quot; to create one.
         </div>
       ) : (
         <div className="space-y-2">
