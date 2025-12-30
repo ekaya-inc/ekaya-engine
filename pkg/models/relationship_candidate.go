@@ -96,7 +96,6 @@ func IsValidUserDecision(d UserDecision) bool {
 	return false
 }
 
-
 // ============================================================================
 // Relationship Candidate Model
 // ============================================================================
@@ -108,9 +107,15 @@ type RelationshipCandidate struct {
 	WorkflowID   uuid.UUID `json:"workflow_id"`
 	DatasourceID uuid.UUID `json:"datasource_id"`
 
-	// Source and target
+	// Source and target (IDs are stored in DB)
 	SourceColumnID uuid.UUID `json:"source_column_id"`
 	TargetColumnID uuid.UUID `json:"target_column_id"`
+
+	// Source and target names (populated by join queries, not stored in DB)
+	SourceTable  string `json:"source_table,omitempty"`
+	SourceColumn string `json:"source_column,omitempty"`
+	TargetTable  string `json:"target_table,omitempty"`
+	TargetColumn string `json:"target_column,omitempty"`
 
 	// Detection results
 	DetectionMethod DetectionMethod `json:"detection_method"`
@@ -122,18 +127,18 @@ type RelationshipCandidate struct {
 	NameSimilarity *float64 `json:"name_similarity,omitempty"`  // Column name similarity score
 
 	// Metrics from test join (actual SQL join)
-	Cardinality     *string  `json:"cardinality,omitempty"`      // "1:1", "1:N", "N:1", "N:M"
-	JoinMatchRate   *float64 `json:"join_match_rate,omitempty"`  // Actual match rate from join
-	OrphanRate      *float64 `json:"orphan_rate,omitempty"`      // % of source rows with no match
-	TargetCoverage  *float64 `json:"target_coverage,omitempty"`  // % of target rows that are referenced
-	SourceRowCount  *int64   `json:"source_row_count,omitempty"` // Total source rows
-	TargetRowCount  *int64   `json:"target_row_count,omitempty"` // Total target rows
-	MatchedRows     *int64   `json:"matched_rows,omitempty"`     // Source rows with matches
-	OrphanRows      *int64   `json:"orphan_rows,omitempty"`      // Source rows without matches
+	Cardinality    *string  `json:"cardinality,omitempty"`      // "1:1", "1:N", "N:1", "N:M"
+	JoinMatchRate  *float64 `json:"join_match_rate,omitempty"`  // Actual match rate from join
+	OrphanRate     *float64 `json:"orphan_rate,omitempty"`      // % of source rows with no match
+	TargetCoverage *float64 `json:"target_coverage,omitempty"`  // % of target rows that are referenced
+	SourceRowCount *int64   `json:"source_row_count,omitempty"` // Total source rows
+	TargetRowCount *int64   `json:"target_row_count,omitempty"` // Total target rows
+	MatchedRows    *int64   `json:"matched_rows,omitempty"`     // Source rows with matches
+	OrphanRows     *int64   `json:"orphan_rows,omitempty"`      // Source rows without matches
 
 	// Review state
-	Status       RelationshipCandidateStatus `json:"status"`                   // pending, accepted, rejected
-	IsRequired   bool                        `json:"is_required"`              // Must user make a call before save?
+	Status       RelationshipCandidateStatus `json:"status"`                  // pending, accepted, rejected
+	IsRequired   bool                        `json:"is_required"`             // Must user make a call before save?
 	UserDecision *UserDecision               `json:"user_decision,omitempty"` // accepted, rejected (after user action)
 
 	CreatedAt time.Time `json:"created_at"`

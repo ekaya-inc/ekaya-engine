@@ -17,6 +17,7 @@ type RelationshipCandidateRepository interface {
 	Create(ctx context.Context, candidate *models.RelationshipCandidate) error
 	GetByID(ctx context.Context, id uuid.UUID) (*models.RelationshipCandidate, error)
 	GetByWorkflow(ctx context.Context, workflowID uuid.UUID) ([]*models.RelationshipCandidate, error)
+	GetByWorkflowWithNames(ctx context.Context, workflowID uuid.UUID) ([]*models.RelationshipCandidate, error)
 	GetByWorkflowAndStatus(ctx context.Context, workflowID uuid.UUID, status models.RelationshipCandidateStatus) ([]*models.RelationshipCandidate, error)
 	GetRequiredPending(ctx context.Context, workflowID uuid.UUID) ([]*models.RelationshipCandidate, error)
 	Update(ctx context.Context, candidate *models.RelationshipCandidate) error
@@ -126,6 +127,66 @@ func (r *relationshipCandidateRepository) GetByWorkflow(ctx context.Context, wor
 	defer rows.Close()
 
 	return scanRelationshipCandidateRows(rows)
+}
+
+func (r *relationshipCandidateRepository) GetByWorkflowWithNames(ctx context.Context, workflowID uuid.UUID) ([]*models.RelationshipCandidate, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT c.id, c.workflow_id, c.datasource_id, c.source_column_id, c.target_column_id,
+		       c.detection_method, c.confidence, c.llm_reasoning,
+		       c.value_match_rate, c.name_similarity,
+		       c.cardinality, c.join_match_rate, c.orphan_rate, c.target_coverage,
+		       c.source_row_count, c.target_row_count, c.matched_rows, c.orphan_rows,
+		       c.status, c.is_required, c.user_decision,
+		       c.created_at, c.updated_at,
+		       st.table_name AS source_table,
+		       sc.column_name AS source_column,
+		       tt.table_name AS target_table,
+		       tc.column_name AS target_column
+		FROM engine_relationship_candidates c
+		JOIN engine_schema_columns sc ON c.source_column_id = sc.id
+		JOIN engine_schema_tables st ON sc.schema_table_id = st.id
+		JOIN engine_schema_columns tc ON c.target_column_id = tc.id
+		JOIN engine_schema_tables tt ON tc.schema_table_id = tt.id
+		WHERE c.workflow_id = $1
+		ORDER BY c.confidence DESC, c.created_at ASC`
+
+	rows, err := scope.Conn.Query(ctx, query, workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query relationship candidates with names: %w", err)
+	}
+	defer rows.Close()
+
+	var candidates []*models.RelationshipCandidate
+	for rows.Next() {
+		var c models.RelationshipCandidate
+
+		err := rows.Scan(
+			&c.ID, &c.WorkflowID, &c.DatasourceID, &c.SourceColumnID, &c.TargetColumnID,
+			&c.DetectionMethod, &c.Confidence, &c.LLMReasoning,
+			&c.ValueMatchRate, &c.NameSimilarity,
+			&c.Cardinality, &c.JoinMatchRate, &c.OrphanRate, &c.TargetCoverage,
+			&c.SourceRowCount, &c.TargetRowCount, &c.MatchedRows, &c.OrphanRows,
+			&c.Status, &c.IsRequired, &c.UserDecision,
+			&c.CreatedAt, &c.UpdatedAt,
+			&c.SourceTable, &c.SourceColumn, &c.TargetTable, &c.TargetColumn,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan relationship candidate with names: %w", err)
+		}
+
+		candidates = append(candidates, &c)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating relationship candidate rows: %w", err)
+	}
+
+	return candidates, nil
 }
 
 func (r *relationshipCandidateRepository) GetByWorkflowAndStatus(ctx context.Context, workflowID uuid.UUID, status models.RelationshipCandidateStatus) ([]*models.RelationshipCandidate, error) {
