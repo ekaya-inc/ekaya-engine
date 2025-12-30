@@ -139,6 +139,7 @@ func main() {
 	workflowStateRepo := repositories.NewWorkflowStateRepository()
 	ontologyQuestionRepo := repositories.NewOntologyQuestionRepository()
 	relationshipCandidateRepo := repositories.NewRelationshipCandidateRepository()
+	schemaEntityRepo := repositories.NewSchemaEntityRepository()
 
 	// Create connection manager with config-driven settings
 	connManagerCfg := datasource.ConnectionManagerConfig{
@@ -191,7 +192,7 @@ func main() {
 		ontologyChatRepo, ontologyRepo, knowledgeRepo,
 		schemaRepo, ontologyWorkflowRepo, workflowStateRepo, llmFactory, datasourceService, adapterFactory, logger)
 	relationshipWorkflowService := services.NewRelationshipWorkflowService(
-		ontologyWorkflowRepo, relationshipCandidateRepo, schemaRepo, workflowStateRepo, ontologyRepo,
+		ontologyWorkflowRepo, relationshipCandidateRepo, schemaRepo, workflowStateRepo, ontologyRepo, schemaEntityRepo,
 		datasourceService, adapterFactory, llmFactory, discoveryService, getTenantCtx, logger)
 
 	mux := http.NewServeMux()

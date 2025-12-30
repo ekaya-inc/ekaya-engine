@@ -83,6 +83,7 @@ type relationshipWorkflowService struct {
 	schemaRepo       repositories.SchemaRepository
 	stateRepo        repositories.WorkflowStateRepository
 	ontologyRepo     repositories.OntologyRepository
+	entityRepo       repositories.SchemaEntityRepository
 	dsSvc            DatasourceService
 	adapterFactory   datasource.DatasourceAdapterFactory
 	llmFactory       llm.LLMClientFactory
@@ -102,6 +103,7 @@ func NewRelationshipWorkflowService(
 	schemaRepo repositories.SchemaRepository,
 	stateRepo repositories.WorkflowStateRepository,
 	ontologyRepo repositories.OntologyRepository,
+	entityRepo repositories.SchemaEntityRepository,
 	dsSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
@@ -119,6 +121,7 @@ func NewRelationshipWorkflowService(
 		schemaRepo:       schemaRepo,
 		stateRepo:        stateRepo,
 		ontologyRepo:     ontologyRepo,
+		entityRepo:       entityRepo,
 		dsSvc:            dsSvc,
 		adapterFactory:   adapterFactory,
 		llmFactory:       llmFactory,
@@ -313,14 +316,14 @@ func (s *relationshipWorkflowService) StartDetection(ctx context.Context, projec
 	})
 
 	// Run workflow in background - HTTP request returns immediately
-	go s.runWorkflow(projectID, workflow.ID, datasourceID, queue)
+	go s.runWorkflow(projectID, workflow.ID, ontology.ID, datasourceID, queue)
 
 	return workflow, nil
 }
 
 // runWorkflow orchestrates the relationship detection phases.
 // Runs in a background goroutine - acquires its own DB connection.
-func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, datasourceID uuid.UUID, queue *workqueue.Queue) {
+func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, ontologyID, datasourceID uuid.UUID, queue *workqueue.Queue) {
 	// Clean up when done
 	defer s.activeQueues.Delete(workflowID)
 	defer s.stopTaskQueueWriter(workflowID)
@@ -405,10 +408,39 @@ func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, datasou
 		zap.Int("connected_components", len(components)),
 		zap.Int("island_tables", len(islands)))
 
-	// TODO(Phase 6): Pass candidates, excluded, components, islands to EntityDiscoveryTask
-	// These variables will be consumed when Phase 6 (Entity Discovery LLM) is implemented.
-	// For now, suppress unused variable warnings.
-	_, _, _, _ = candidates, excluded, components, islands
+	// Phase 6: Entity Discovery (LLM) - replaces old candidate-based analysis
+	s.logger.Info("Phase 6: Entity discovery with LLM",
+		zap.String("workflow_id", workflowID.String()))
+
+	if err := s.updateProgress(ctx, projectID, workflowID, "Discovering entities with LLM...", 15); err != nil {
+		s.logger.Error("Failed to update progress", zap.Error(err))
+	}
+
+	entityTask := NewEntityDiscoveryTask(
+		s.entityRepo,
+		s.schemaRepo,
+		s.llmFactory,
+		s.adapterFactory,
+		s.dsSvc,
+		s.getTenantCtx,
+		projectID,
+		workflowID,
+		ontologyID,
+		datasourceID,
+		candidates,
+		excluded,
+		components,
+		islands,
+		statsMap,
+		s.logger,
+	)
+	queue.Enqueue(entityTask)
+
+	if err := queue.Wait(ctx); err != nil {
+		s.logger.Error("Entity discovery failed", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("entity discovery: %v", err))
+		return
+	}
 
 	// Phase 1: Scan all columns in parallel
 	s.logger.Info("Phase 1: Scanning columns",

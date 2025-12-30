@@ -274,7 +274,7 @@ Change from counting `requiredPending` candidates to counting discovered entitie
 
 ---
 
-## Phase 6: Entity Discovery Task (LLM)
+## Phase 6: Entity Discovery Task (LLM) [x]
 
 **Goal:** Create LLM task that identifies entities from candidate columns.
 
@@ -318,9 +318,11 @@ Summary: 8 entities discovered, 32 total occurrences
 
 **Success Criteria:** Entities make semantic sense, roles are identified correctly, no attribute columns (email, password) appear.
 
-**Files to modify:**
-- `pkg/services/entity_discovery_task.go` (new)
-- `pkg/services/relationship_workflow.go` - Wire up task
+**Files modified:**
+- `pkg/services/entity_discovery_task.go` (new) ✅
+- `pkg/services/entity_discovery_task_test.go` (new) ✅
+- `pkg/services/relationship_workflow.go` - Wire up task ✅
+- `main.go` - Pass entityRepo to service ✅
 
 ---
 
