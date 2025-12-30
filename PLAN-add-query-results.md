@@ -65,7 +65,7 @@ cd ui && npm install @tanstack/react-table
 
 **Status:** Complete - dependency installed and lock file updated
 
-### 2. Create QueryResultsTable component
+### 2. Create QueryResultsTable component ✅ [x]
 
 **New file:** `ui/src/components/QueryResultsTable.tsx`
 
@@ -81,8 +81,10 @@ cd ui && npm install @tanstack/react-table
 - Column headers from `columns` array
 - Cell rendering with type-aware formatting (dates, numbers, nulls)
 - Horizontal scroll container for wide tables
-- Sticky first column (optional enhancement)
+- Sticky first column (implemented)
 - Copy cell value on click
+
+**Status:** Complete - component implemented with full test coverage (13 passing tests)
 
 ### 3. Update QueriesView.tsx
 
