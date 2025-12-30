@@ -113,6 +113,7 @@ func (tc *workflowTestContext) createTestWorkflow(ctx context.Context) *models.O
 		ProjectID:  tc.projectID,
 		OntologyID: tc.ontologyID,
 		State:      models.WorkflowStatePending,
+		Phase:      models.WorkflowPhaseOntology, // Default to ontology phase for existing tests
 		Progress: &models.WorkflowProgress{
 			CurrentPhase: models.WorkflowPhaseInitializing,
 			Current:      0,
@@ -373,5 +374,185 @@ func TestWorkflowRepository_ReleaseOwnership_AllowsReclaim(t *testing.T) {
 	}
 	if updated.OwnerID == nil || *updated.OwnerID != server2ID {
 		t.Errorf("expected owner to be %s, got %v", server2ID, updated.OwnerID)
+	}
+}
+
+// ============================================================================
+// Phase Tests
+// ============================================================================
+
+func TestWorkflowRepository_PhaseSupport(t *testing.T) {
+	tc := setupWorkflowTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create datasource for testing
+	datasourceID := uuid.New()
+	scope, err := tc.engineDB.DB.WithoutTenant(context.Background())
+	if err != nil {
+		t.Fatalf("failed to create scope: %v", err)
+	}
+	defer scope.Close()
+
+	_, err = scope.Conn.Exec(context.Background(), `
+		INSERT INTO engine_datasources (id, project_id, name, datasource_type, datasource_config)
+		VALUES ($1, $2, 'Test Datasource', 'postgres', 'encrypted_config')
+	`, datasourceID, tc.projectID)
+	if err != nil {
+		t.Fatalf("failed to create test datasource: %v", err)
+	}
+
+	// Create a relationships phase workflow
+	relWorkflow := &models.OntologyWorkflow{
+		ID:           uuid.New(),
+		ProjectID:    tc.projectID,
+		OntologyID:   tc.ontologyID,
+		State:        models.WorkflowStatePending,
+		Phase:        models.WorkflowPhaseRelationships,
+		DatasourceID: &datasourceID,
+		Progress: &models.WorkflowProgress{
+			CurrentPhase: "scanning",
+			Current:      0,
+			Total:        10,
+		},
+	}
+
+	err = tc.repo.Create(ctx, relWorkflow)
+	if err != nil {
+		t.Fatalf("failed to create relationships workflow: %v", err)
+	}
+
+	// Verify phase and datasource_id were set
+	retrieved, err := tc.repo.GetByID(ctx, relWorkflow.ID)
+	if err != nil {
+		t.Fatalf("failed to retrieve workflow: %v", err)
+	}
+
+	if retrieved.Phase != models.WorkflowPhaseRelationships {
+		t.Errorf("expected phase 'relationships', got '%s'", retrieved.Phase)
+	}
+
+	if retrieved.DatasourceID == nil {
+		t.Fatal("expected datasource_id to be set")
+	}
+
+	if *retrieved.DatasourceID != datasourceID {
+		t.Errorf("expected datasource_id %s, got %s", datasourceID, *retrieved.DatasourceID)
+	}
+
+	// Create an ontology phase workflow (no datasource)
+	ontWorkflow := &models.OntologyWorkflow{
+		ID:           uuid.New(),
+		ProjectID:    tc.projectID,
+		OntologyID:   tc.ontologyID,
+		State:        models.WorkflowStatePending,
+		Phase:        models.WorkflowPhaseOntology,
+		DatasourceID: nil,
+		Progress: &models.WorkflowProgress{
+			CurrentPhase: "analyzing",
+			Current:      0,
+			Total:        5,
+		},
+	}
+
+	err = tc.repo.Create(ctx, ontWorkflow)
+	if err != nil {
+		t.Fatalf("failed to create ontology workflow: %v", err)
+	}
+
+	// Verify ontology phase
+	ontRetrieved, err := tc.repo.GetByID(ctx, ontWorkflow.ID)
+	if err != nil {
+		t.Fatalf("failed to retrieve ontology workflow: %v", err)
+	}
+
+	if ontRetrieved.Phase != models.WorkflowPhaseOntology {
+		t.Errorf("expected phase 'ontology', got '%s'", ontRetrieved.Phase)
+	}
+
+	if ontRetrieved.DatasourceID != nil {
+		t.Errorf("expected datasource_id to be nil for ontology phase, got %s", *ontRetrieved.DatasourceID)
+	}
+}
+
+func TestWorkflowRepository_GetLatestByDatasourceAndPhase(t *testing.T) {
+	tc := setupWorkflowTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create datasource
+	datasourceID := uuid.New()
+	scope, err := tc.engineDB.DB.WithoutTenant(context.Background())
+	if err != nil {
+		t.Fatalf("failed to create scope: %v", err)
+	}
+	defer scope.Close()
+
+	_, err = scope.Conn.Exec(context.Background(), `
+		INSERT INTO engine_datasources (id, project_id, name, datasource_type, datasource_config)
+		VALUES ($1, $2, 'Test Datasource', 'postgres', 'encrypted_config')
+	`, datasourceID, tc.projectID)
+	if err != nil {
+		t.Fatalf("failed to create test datasource: %v", err)
+	}
+
+	// Create first relationships workflow
+	workflow1 := &models.OntologyWorkflow{
+		ID:           uuid.New(),
+		ProjectID:    tc.projectID,
+		OntologyID:   tc.ontologyID,
+		State:        models.WorkflowStateCompleted,
+		Phase:        models.WorkflowPhaseRelationships,
+		DatasourceID: &datasourceID,
+	}
+	err = tc.repo.Create(ctx, workflow1)
+	if err != nil {
+		t.Fatalf("failed to create first workflow: %v", err)
+	}
+
+	// Wait a moment to ensure different timestamps
+	time.Sleep(10 * time.Millisecond)
+
+	// Create second (newer) relationships workflow
+	workflow2 := &models.OntologyWorkflow{
+		ID:           uuid.New(),
+		ProjectID:    tc.projectID,
+		OntologyID:   tc.ontologyID,
+		State:        models.WorkflowStateRunning,
+		Phase:        models.WorkflowPhaseRelationships,
+		DatasourceID: &datasourceID,
+	}
+	err = tc.repo.Create(ctx, workflow2)
+	if err != nil {
+		t.Fatalf("failed to create second workflow: %v", err)
+	}
+
+	// Get latest by datasource and phase
+	latest, err := tc.repo.GetLatestByDatasourceAndPhase(ctx, datasourceID, models.WorkflowPhaseRelationships)
+	if err != nil {
+		t.Fatalf("failed to get latest workflow: %v", err)
+	}
+
+	if latest == nil {
+		t.Fatal("expected to find latest workflow")
+	}
+
+	// Should be the second workflow (most recent)
+	if latest.ID != workflow2.ID {
+		t.Errorf("expected latest workflow to be %s, got %s", workflow2.ID, latest.ID)
+	}
+
+	// Query for non-existent phase
+	notFound, err := tc.repo.GetLatestByDatasourceAndPhase(ctx, datasourceID, models.WorkflowPhaseOntology)
+	if err != nil {
+		t.Fatalf("failed to query non-existent phase: %v", err)
+	}
+
+	if notFound != nil {
+		t.Error("expected nil for non-existent phase")
 	}
 }

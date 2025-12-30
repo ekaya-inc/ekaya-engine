@@ -19,6 +19,7 @@ type OntologyWorkflowRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*models.OntologyWorkflow, error)
 	GetByOntology(ctx context.Context, ontologyID uuid.UUID) (*models.OntologyWorkflow, error)
 	GetLatestByProject(ctx context.Context, projectID uuid.UUID) (*models.OntologyWorkflow, error)
+	GetLatestByDatasourceAndPhase(ctx context.Context, datasourceID uuid.UUID, phase models.WorkflowPhaseType) (*models.OntologyWorkflow, error)
 	Update(ctx context.Context, workflow *models.OntologyWorkflow) error
 	UpdateState(ctx context.Context, id uuid.UUID, state models.WorkflowState, errorMsg string) error
 	UpdateProgress(ctx context.Context, id uuid.UUID, progress *models.WorkflowProgress) error
@@ -81,12 +82,14 @@ func (r *ontologyWorkflowRepository) Create(ctx context.Context, workflow *model
 	query := `
 		INSERT INTO engine_ontology_workflows (
 			id, project_id, ontology_id, state, progress, task_queue, config,
-			error_message, started_at, completed_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+			error_message, started_at, completed_at, phase, datasource_id,
+			created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
 
 	_, err = scope.Conn.Exec(ctx, query,
 		workflow.ID, workflow.ProjectID, workflow.OntologyID, workflow.State, progressJSON, taskQueueJSON, configJSON,
-		workflow.ErrorMessage, workflow.StartedAt, workflow.CompletedAt, workflow.CreatedAt, workflow.UpdatedAt,
+		workflow.ErrorMessage, workflow.StartedAt, workflow.CompletedAt, workflow.Phase, workflow.DatasourceID,
+		workflow.CreatedAt, workflow.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create workflow: %w", err)
@@ -103,8 +106,8 @@ func (r *ontologyWorkflowRepository) GetByID(ctx context.Context, id uuid.UUID) 
 
 	query := `
 		SELECT id, project_id, ontology_id, state, progress, task_queue, config,
-		       error_message, started_at, completed_at, created_at, updated_at,
-		       owner_id, last_heartbeat
+		       error_message, started_at, completed_at, phase, datasource_id,
+		       created_at, updated_at, owner_id, last_heartbeat
 		FROM engine_ontology_workflows
 		WHERE id = $1`
 
@@ -120,8 +123,8 @@ func (r *ontologyWorkflowRepository) GetByOntology(ctx context.Context, ontology
 
 	query := `
 		SELECT id, project_id, ontology_id, state, progress, task_queue, config,
-		       error_message, started_at, completed_at, created_at, updated_at,
-		       owner_id, last_heartbeat
+		       error_message, started_at, completed_at, phase, datasource_id,
+		       created_at, updated_at, owner_id, last_heartbeat
 		FROM engine_ontology_workflows
 		WHERE ontology_id = $1`
 
@@ -144,14 +147,40 @@ func (r *ontologyWorkflowRepository) GetLatestByProject(ctx context.Context, pro
 
 	query := `
 		SELECT id, project_id, ontology_id, state, progress, task_queue, config,
-		       error_message, started_at, completed_at, created_at, updated_at,
-		       owner_id, last_heartbeat
+		       error_message, started_at, completed_at, phase, datasource_id,
+		       created_at, updated_at, owner_id, last_heartbeat
 		FROM engine_ontology_workflows
 		WHERE project_id = $1
 		ORDER BY created_at DESC
 		LIMIT 1`
 
 	row := scope.Conn.QueryRow(ctx, query, projectID)
+	workflow, err := scanOntologyWorkflowRow(row)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil // No workflow found
+		}
+		return nil, err
+	}
+	return workflow, nil
+}
+
+func (r *ontologyWorkflowRepository) GetLatestByDatasourceAndPhase(ctx context.Context, datasourceID uuid.UUID, phase models.WorkflowPhaseType) (*models.OntologyWorkflow, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT id, project_id, ontology_id, state, progress, task_queue, config,
+		       error_message, started_at, completed_at, phase, datasource_id,
+		       created_at, updated_at, owner_id, last_heartbeat
+		FROM engine_ontology_workflows
+		WHERE datasource_id = $1 AND phase = $2
+		ORDER BY created_at DESC
+		LIMIT 1`
+
+	row := scope.Conn.QueryRow(ctx, query, datasourceID, phase)
 	workflow, err := scanOntologyWorkflowRow(row)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -203,12 +232,15 @@ func (r *ontologyWorkflowRepository) Update(ctx context.Context, workflow *model
 		    error_message = $6,
 		    started_at = $7,
 		    completed_at = $8,
-		    updated_at = $9
+		    phase = $9,
+		    datasource_id = $10,
+		    updated_at = $11
 		WHERE id = $1`
 
 	result, err := scope.Conn.Exec(ctx, query,
 		workflow.ID, workflow.State, progressJSON, taskQueueJSON, configJSON,
-		workflow.ErrorMessage, workflow.StartedAt, workflow.CompletedAt, workflow.UpdatedAt,
+		workflow.ErrorMessage, workflow.StartedAt, workflow.CompletedAt,
+		workflow.Phase, workflow.DatasourceID, workflow.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update workflow: %w", err)
@@ -357,8 +389,8 @@ func scanOntologyWorkflowRow(row pgx.Row) (*models.OntologyWorkflow, error) {
 
 	err := row.Scan(
 		&w.ID, &w.ProjectID, &w.OntologyID, &w.State, &progressJSON, &taskQueueJSON, &configJSON,
-		&w.ErrorMessage, &w.StartedAt, &w.CompletedAt, &w.CreatedAt, &w.UpdatedAt,
-		&w.OwnerID, &w.LastHeartbeat,
+		&w.ErrorMessage, &w.StartedAt, &w.CompletedAt, &w.Phase, &w.DatasourceID,
+		&w.CreatedAt, &w.UpdatedAt, &w.OwnerID, &w.LastHeartbeat,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {

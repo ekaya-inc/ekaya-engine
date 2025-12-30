@@ -161,6 +161,34 @@ func DefaultWorkflowConfig() *WorkflowConfig {
 }
 
 // ============================================================================
+// Workflow Phase
+// ============================================================================
+
+// WorkflowPhaseType represents the phase of the unified workflow.
+type WorkflowPhaseType string
+
+const (
+	WorkflowPhaseRelationships WorkflowPhaseType = "relationships"
+	WorkflowPhaseOntology      WorkflowPhaseType = "ontology"
+)
+
+// ValidWorkflowPhases contains all valid workflow phase values.
+var ValidWorkflowPhases = []WorkflowPhaseType{
+	WorkflowPhaseRelationships,
+	WorkflowPhaseOntology,
+}
+
+// IsValidWorkflowPhase checks if the given phase is valid.
+func IsValidWorkflowPhase(p WorkflowPhaseType) bool {
+	for _, v := range ValidWorkflowPhases {
+		if v == p {
+			return true
+		}
+	}
+	return false
+}
+
+// ============================================================================
 // Ontology Workflow Model
 // ============================================================================
 
@@ -178,6 +206,10 @@ type OntologyWorkflow struct {
 	CompletedAt  *time.Time        `json:"completed_at,omitempty"`
 	CreatedAt    time.Time         `json:"created_at"`
 	UpdatedAt    time.Time         `json:"updated_at"`
+
+	// Phase support for unified workflow
+	Phase        WorkflowPhaseType `json:"phase"`                   // relationships or ontology
+	DatasourceID *uuid.UUID        `json:"datasource_id,omitempty"` // For relationships phase; NULL for ontology phase
 
 	// Ownership fields for multi-server robustness
 	OwnerID       *uuid.UUID `json:"owner_id,omitempty"`       // Server instance that owns this workflow
