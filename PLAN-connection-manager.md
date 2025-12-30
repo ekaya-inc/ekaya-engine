@@ -981,13 +981,13 @@ queryService := services.NewQueryService(queryRepo, datasourceService, adapterFa
 - [x] Create `pkg/retry/retry_test.go` with unit tests
 
 ### Step 2: Create Log Sanitizer
-- [ ] Create `pkg/logging/sanitizer.go`
-- [ ] Implement `SanitizeConnectionString()` to redact passwords from connection strings
-- [ ] Implement `SanitizeError()` to redact passwords, JWT tokens, API keys from error messages
-- [ ] Implement `SanitizeQuery()` to truncate and sanitize SQL queries
-- [ ] Implement `TruncateString()` helper
-- [ ] Use compiled regex patterns for performance
-- [ ] Create `pkg/logging/sanitizer_test.go` with unit tests
+- [x] Create `pkg/logging/sanitizer.go`
+- [x] Implement `SanitizeConnectionString()` to redact passwords from connection strings
+- [x] Implement `SanitizeError()` to redact passwords, JWT tokens, API keys from error messages
+- [x] Implement `SanitizeQuery()` to truncate and sanitize SQL queries
+- [x] Implement `TruncateString()` helper
+- [x] Use compiled regex patterns for performance
+- [x] Create `pkg/logging/sanitizer_test.go` with unit tests
 
 ### Step 3: Create Connection Manager
 - [ ] Create `pkg/adapters/datasource/connection_manager.go`
