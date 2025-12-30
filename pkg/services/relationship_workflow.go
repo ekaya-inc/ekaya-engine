@@ -375,11 +375,40 @@ func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, datasou
 		s.logger.Error("Failed to update progress", zap.Error(err))
 	}
 
-	if err := s.filterEntityCandidates(ctx, projectID, workflowID, datasourceID, statsMap); err != nil {
+	candidates, excluded, err := s.filterEntityCandidates(ctx, projectID, workflowID, datasourceID, statsMap)
+	if err != nil {
 		s.logger.Error("Failed to filter entity candidates", zap.Error(err))
 		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("entity filtering: %v", err))
 		return
 	}
+
+	// Phase 0.75: Analyze graph connectivity
+	s.logger.Info("Phase 0.75: Analyzing graph connectivity",
+		zap.String("workflow_id", workflowID.String()))
+
+	if err := s.updateProgress(ctx, projectID, workflowID, "Analyzing graph connectivity...", 9); err != nil {
+		s.logger.Error("Failed to update progress", zap.Error(err))
+	}
+
+	components, islands, err := s.analyzeGraphConnectivity(ctx, projectID, workflowID, datasourceID)
+	if err != nil {
+		s.logger.Error("Failed to analyze graph connectivity", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("graph connectivity: %v", err))
+		return
+	}
+
+	// Log summary of data available for Phase 6 (Entity Discovery LLM)
+	s.logger.Info("Data collected for entity discovery",
+		zap.String("workflow_id", workflowID.String()),
+		zap.Int("candidate_columns", len(candidates)),
+		zap.Int("excluded_columns", len(excluded)),
+		zap.Int("connected_components", len(components)),
+		zap.Int("island_tables", len(islands)))
+
+	// TODO(Phase 6): Pass candidates, excluded, components, islands to EntityDiscoveryTask
+	// These variables will be consumed when Phase 6 (Entity Discovery LLM) is implemented.
+	// For now, suppress unused variable warnings.
+	_, _, _, _ = candidates, excluded, components, islands
 
 	// Phase 1: Scan all columns in parallel
 	s.logger.Info("Phase 1: Scanning columns",
@@ -618,27 +647,28 @@ func (s *relationshipWorkflowService) collectColumnStatistics(ctx context.Contex
 
 // filterEntityCandidates applies heuristics to filter columns and identify entity candidates.
 // Logs results showing candidates vs excluded columns with reasoning.
+// Returns candidates and excluded columns for use by subsequent phases.
 func (s *relationshipWorkflowService) filterEntityCandidates(
 	ctx context.Context,
 	projectID, workflowID, datasourceID uuid.UUID,
 	statsMap map[string]datasource.ColumnStats,
-) error {
+) ([]ColumnFilterResult, []ColumnFilterResult, error) {
 	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
 	if err != nil {
-		return fmt.Errorf("get tenant context: %w", err)
+		return nil, nil, fmt.Errorf("get tenant context: %w", err)
 	}
 	defer cleanup()
 
 	// Get all tables for this datasource
 	tables, err := s.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID)
 	if err != nil {
-		return fmt.Errorf("list tables: %w", err)
+		return nil, nil, fmt.Errorf("list tables: %w", err)
 	}
 
 	// Get all columns for this datasource
 	columns, err := s.schemaRepo.ListColumnsByDatasource(tenantCtx, projectID, datasourceID)
 	if err != nil {
-		return fmt.Errorf("list columns: %w", err)
+		return nil, nil, fmt.Errorf("list columns: %w", err)
 	}
 
 	// Build table lookup by UUID string
@@ -653,7 +683,73 @@ func (s *relationshipWorkflowService) filterEntityCandidates(
 	// Log results
 	LogFilterResults(candidates, excluded, s.logger)
 
-	return nil
+	return candidates, excluded, nil
+}
+
+// analyzeGraphConnectivity builds a graph from foreign key relationships
+// and identifies connected components using DFS. Logs results for UI visibility.
+// Returns connected components and island tables for use by subsequent phases.
+func (s *relationshipWorkflowService) analyzeGraphConnectivity(
+	ctx context.Context,
+	projectID, workflowID, datasourceID uuid.UUID,
+) ([]ConnectedComponent, []string, error) {
+	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get tenant context: %w", err)
+	}
+	defer cleanup()
+
+	// Get datasource to create adapter
+	ds, err := s.dsSvc.Get(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get datasource: %w", err)
+	}
+
+	// Create schema discoverer adapter
+	adapter, err := s.adapterFactory.NewSchemaDiscoverer(tenantCtx, ds.DatasourceType, ds.Config, projectID, datasourceID, "")
+	if err != nil {
+		return nil, nil, fmt.Errorf("create schema discoverer: %w", err)
+	}
+	defer adapter.Close()
+
+	// Check if datasource supports foreign keys
+	if !adapter.SupportsForeignKeys() {
+		s.logger.Info("Datasource does not support foreign keys, skipping graph analysis",
+			zap.String("workflow_id", workflowID.String()),
+			zap.String("datasource_type", string(ds.DatasourceType)))
+		// Return empty results rather than nil to indicate success with no FKs
+		return []ConnectedComponent{}, []string{}, nil
+	}
+
+	// Discover foreign keys
+	fks, err := adapter.DiscoverForeignKeys(tenantCtx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("discover foreign keys: %w", err)
+	}
+
+	// Build graph from foreign keys
+	graph := NewTableGraph()
+	for _, fk := range fks {
+		graph.AddForeignKey(fk)
+	}
+
+	// Get all tables and add them to the graph (to identify islands)
+	tables, err := s.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list tables: %w", err)
+	}
+
+	for _, table := range tables {
+		graph.AddTable(table.SchemaName, table.TableName)
+	}
+
+	// Find connected components
+	components, islands := graph.FindConnectedComponents(s.logger)
+
+	// Log connectivity results
+	LogConnectivity(len(fks), components, islands, s.logger)
+
+	return components, islands, nil
 }
 
 // enqueueColumnScans creates and enqueues column scan tasks for all columns.

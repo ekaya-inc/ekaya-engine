@@ -53,6 +53,8 @@ Summary: Collected stats for 156 columns across 21 tables
 - Exclude if: type is BOOLEAN, TIMESTAMP, DATE
 - Exclude if: name matches `*_at`, `*_date`, `is_*`, `has_*`, `*_status`, `*_type`, `*_flag`
 
+**Data Flow:** Returns `(candidates []ColumnFilterResult, excluded []ColumnFilterResult, error)` for use by Phase 6.
+
 **Test:** Click [Find Relationships], check server logs for:
 ```
 Column filtering results:
@@ -69,13 +71,13 @@ Summary: 47 candidate columns, 109 excluded columns
 
 **Success Criteria:** Candidates are reasonable entity references, excluded columns are attributes/enums.
 
-**Files to modify:**
-- `pkg/services/column_filter.go` (new) - Filtering logic
-- `pkg/services/relationship_workflow.go` - Call filter after stats
+**Files modified:**
+- `pkg/services/column_filter.go` - Filtering logic with `ColumnFilterResult` struct
+- `pkg/services/relationship_workflow.go` - `filterEntityCandidates()` returns data for Phase 6
 
 ---
 
-## Phase 3: Connected Components (Graph Analysis)
+## Phase 3: Connected Components (Graph Analysis) ✅
 
 **Goal:** Identify table islands using FK relationships. Pure Go, no SQL, no LLM.
 
@@ -83,6 +85,8 @@ Summary: 47 candidate columns, 109 excluded columns
 - Build adjacency graph from `DiscoverForeignKeys()` results
 - Run DFS/BFS to find connected components
 - Log component membership
+
+**Data Flow:** Returns `(components []ConnectedComponent, islands []string, error)` for use by Phase 6.
 
 **Test:** Click [Find Relationships], check server logs for:
 ```
@@ -99,9 +103,10 @@ Summary: 3 connected components, 8 island tables need bridging
 
 **Success Criteria:** Components correctly identified based on FK edges.
 
-**Files to modify:**
-- `pkg/services/graph.go` (new) - Connected components algorithm
-- `pkg/services/relationship_workflow.go` - Call after FK discovery
+**Files modified:**
+- `pkg/services/graph.go` - `TableGraph`, `ConnectedComponent` structs and DFS algorithm
+- `pkg/services/graph_test.go` - Unit tests for graph algorithms
+- `pkg/services/relationship_workflow.go` - `analyzeGraphConnectivity()` returns data for Phase 6
 
 ---
 
@@ -185,16 +190,107 @@ type SchemaEntityRepository interface {
 
 ---
 
+## Transition Strategy: Old → New Workflow
+
+### Current Code Structure (`runWorkflow` in `relationship_workflow.go`)
+
+The code currently has TWO workflow paths interleaved:
+
+```
+NEW ENTITY-BASED (PLAN Phases 1-3):
+├── Phase 0:    collectColumnStatistics()      → statsMap           [PLAN Phase 1] ✅
+├── Phase 0.5:  filterEntityCandidates()       → candidates, excluded [PLAN Phase 2] ✅
+├── Phase 0.75: analyzeGraphConnectivity()     → components, islands  [PLAN Phase 3] ✅
+│
+│   ← INSERT ENTITY DISCOVERY HERE (PLAN Phase 6)
+│
+OLD CANDIDATE-BASED (to be removed):
+├── Phase 1: enqueueColumnScans()              → workflow_state samples
+├── Phase 2: ValueMatchTask                    → relationship candidates
+├── Phase 3: NameInferenceTask                 → relationship candidates
+├── Phase 4: enqueueTestJoins()                → candidate cardinality
+└── Phase 5: AnalyzeRelationshipsTask (LLM)    → confirmed candidates
+```
+
+### Transition Instructions for Phase 6
+
+**Step 1: Create `EntityDiscoveryTask`** (new file)
+- Input: `candidates`, `excluded`, `components`, `islands`, `statsMap`
+- Output: Discovered entities persisted to `engine_schema_entities`
+
+**Step 2: Wire into `runWorkflow`**
+
+Replace the TODO placeholder:
+```go
+// TODO(Phase 6): Pass candidates, excluded, components, islands to EntityDiscoveryTask
+_, _, _, _ = candidates, excluded, components, islands
+```
+
+With:
+```go
+// Phase 6: Entity Discovery (LLM) - replaces old candidate-based analysis
+entityTask := NewEntityDiscoveryTask(
+    s.entityRepo,        // new repository from Phase 5
+    s.schemaRepo,
+    s.llmFactory,
+    s.getTenantCtx,
+    projectID,
+    workflowID,
+    datasourceID,
+    candidates,
+    excluded,
+    components,
+    islands,
+    statsMap,
+    s.logger,
+)
+queue.Enqueue(entityTask)
+
+if err := queue.Wait(ctx); err != nil {
+    s.logger.Error("Entity discovery failed", zap.Error(err))
+    s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("entity discovery: %v", err))
+    return
+}
+```
+
+**Step 3: Remove old phases** (after entity discovery works)
+
+Delete the old candidate-based code (code Phases 1-5):
+- `enqueueColumnScans()` call and wait
+- `ValueMatchTask` creation and wait
+- `NameInferenceTask` creation and wait
+- `enqueueTestJoins()` call and wait
+- `AnalyzeRelationshipsTask` creation and wait
+
+**Step 4: Update `finalizeWorkflow`**
+
+Change from counting `requiredPending` candidates to counting discovered entities.
+
+### Why This Order?
+
+1. Phases 4-5 (DB + Repository) must complete first — `EntityDiscoveryTask` needs to persist entities
+2. Phase 6 can run alongside old phases during development (both paths execute)
+3. Old phases are removed only after Phase 6 is verified working
+4. This allows incremental testing without breaking the existing workflow
+
+---
+
 ## Phase 6: Entity Discovery Task (LLM)
 
 **Goal:** Create LLM task that identifies entities from candidate columns.
 
-**Input:** Filtered candidate columns with stats, existing FKs, excluded columns (for context)
+**Input from earlier phases:**
+- `candidates []ColumnFilterResult` - Entity candidate columns (from Phase 2)
+- `excluded []ColumnFilterResult` - Excluded columns with reasons (from Phase 2)
+- `components []ConnectedComponent` - FK-connected table groups (from Phase 3)
+- `islands []string` - Tables with no FK connections (from Phase 3)
+- `statsMap map[string]ColumnStats` - Column statistics (from Phase 1)
 
 **Prompt design:**
 - Send schema summary: table names + candidate column names with stats
-- Send existing FKs
+- Send existing FKs (derived from components)
 - Send excluded columns list (context only, marked as excluded)
+- Send island tables (may need bridging relationships)
 - Ask: "Identify domain entities and their occurrences with roles"
 
 **Output:** JSON with entities, their primary location, and occurrences with roles
