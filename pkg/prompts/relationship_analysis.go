@@ -15,14 +15,14 @@ type TableContext struct {
 
 // ColumnContext provides column details for LLM analysis.
 type ColumnContext struct {
-	Name               string
-	DataType           string
-	IsNullable         bool
-	NullPercent        float64
-	IsPrimaryKey       bool
-	IsForeignKey       bool
-	ForeignKeyTarget   string // "table.column" if known FK
-	LooksLikeForeignKey bool  // Naming pattern suggests FK
+	Name                string
+	DataType            string
+	IsNullable          bool
+	NullPercent         float64
+	IsPrimaryKey        bool
+	IsForeignKey        bool
+	ForeignKeyTarget    string // "table.column" if known FK
+	LooksLikeForeignKey bool   // Naming pattern suggests FK
 }
 
 // CandidateContext provides candidate details for LLM analysis.

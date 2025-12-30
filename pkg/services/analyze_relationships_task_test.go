@@ -45,6 +45,14 @@ func (m *mockRelationshipCandidateRepo) GetByWorkflow(ctx context.Context, workf
 	return args.Get(0).([]*models.RelationshipCandidate), args.Error(1)
 }
 
+func (m *mockRelationshipCandidateRepo) GetByWorkflowWithNames(ctx context.Context, workflowID uuid.UUID) ([]*models.RelationshipCandidate, error) {
+	args := m.Called(ctx, workflowID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*models.RelationshipCandidate), args.Error(1)
+}
+
 func (m *mockRelationshipCandidateRepo) GetByWorkflowAndStatus(ctx context.Context, workflowID uuid.UUID, status models.RelationshipCandidateStatus) ([]*models.RelationshipCandidate, error) {
 	args := m.Called(ctx, workflowID, status)
 	if args.Get(0) == nil {

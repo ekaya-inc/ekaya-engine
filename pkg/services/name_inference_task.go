@@ -16,14 +16,14 @@ import (
 const (
 	// Confidence scores for name-based inference
 	// Per plan spec: 0.7-0.8 for name inference
-	ConfidenceTableIDPattern   = 0.8 // {table}_id → {table}.id (e.g., user_id → users.id)
-	ConfidenceColumnNameMatch  = 0.7 // column name matches table name (e.g., user → users.id)
+	ConfidenceTableIDPattern  = 0.8 // {table}_id → {table}.id (e.g., user_id → users.id)
+	ConfidenceColumnNameMatch = 0.7 // column name matches table name (e.g., user → users.id)
 )
 
 // NameInferenceTask detects relationships based on column naming patterns.
 // Supports:
-//  - {table}_id → {table}.id (e.g., user_id → users.id)
-//  - column name matches table name (singular/plural) (e.g., user → users.id)
+//   - {table}_id → {table}.id (e.g., user_id → users.id)
+//   - column name matches table name (singular/plural) (e.g., user → users.id)
 type NameInferenceTask struct {
 	workqueue.BaseTask
 	candidateRepo repositories.RelationshipCandidateRepository

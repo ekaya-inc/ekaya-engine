@@ -18,21 +18,21 @@ import (
 
 // nameInferenceTestContext holds test dependencies.
 type nameInferenceTestContext struct {
-	t             *testing.T
-	engineDB      *testhelpers.EngineDB
-	projectID     uuid.UUID
-	datasourceID  uuid.UUID
-	workflowID    uuid.UUID
-	ontologyID    uuid.UUID
-	usersTableID  uuid.UUID
-	ordersTableID uuid.UUID
-	companiesTableID uuid.UUID
-	userIDColID   uuid.UUID
-	orderUserIDID uuid.UUID
-	orderCompanyIDID uuid.UUID
+	t                 *testing.T
+	engineDB          *testhelpers.EngineDB
+	projectID         uuid.UUID
+	datasourceID      uuid.UUID
+	workflowID        uuid.UUID
+	ontologyID        uuid.UUID
+	usersTableID      uuid.UUID
+	ordersTableID     uuid.UUID
+	companiesTableID  uuid.UUID
+	userIDColID       uuid.UUID
+	orderUserIDID     uuid.UUID
+	orderCompanyIDID  uuid.UUID
 	orderCompanyColID uuid.UUID // column named "company" (not company_id)
-	candidateRepo repositories.RelationshipCandidateRepository
-	schemaRepo    repositories.SchemaRepository
+	candidateRepo     repositories.RelationshipCandidateRepository
+	schemaRepo        repositories.SchemaRepository
 }
 
 // setupNameInferenceTest initializes test context.
@@ -329,7 +329,7 @@ func TestSingularize(t *testing.T) {
 		{"men", "man"},
 		{"women", "woman"},
 		{"categories", "category"},
-		{"status", "status"}, // ends in 's' but shouldn't change
+		{"status", "status"},   // ends in 's' but shouldn't change
 		{"address", "address"}, // ends in 'ss', shouldn't change
 	}
 

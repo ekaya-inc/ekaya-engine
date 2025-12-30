@@ -26,13 +26,13 @@ const (
 // excludedDataTypes are data types that should not be considered for FK relationships.
 var excludedDataTypes = map[string]bool{
 	// Temporal types - not meaningful for FK relationships
-	"timestamp":    true,
-	"timestamptz":  true,
-	"date":         true,
-	"time":         true,
-	"timetz":       true,
-	"interval":     true,
-	"datetime":     true,
+	"timestamp":                   true,
+	"timestamptz":                 true,
+	"date":                        true,
+	"time":                        true,
+	"timetz":                      true,
+	"interval":                    true,
+	"datetime":                    true,
 	"timestamp with time zone":    true,
 	"timestamp without time zone": true,
 	"time with time zone":         true,
@@ -386,10 +386,10 @@ func (t *ValueMatchTask) computeMatchRate(source, target []string) float64 {
 // createCandidate creates a new relationship candidate.
 func (t *ValueMatchTask) createCandidate(ctx context.Context, source, target *columnScanInfo, matchRate float64) error {
 	candidate := &models.RelationshipCandidate{
-		WorkflowID:     t.workflowID,
-		DatasourceID:   t.datasourceID,
-		SourceColumnID: source.columnID,
-		TargetColumnID: target.columnID,
+		WorkflowID:      t.workflowID,
+		DatasourceID:    t.datasourceID,
+		SourceColumnID:  source.columnID,
+		TargetColumnID:  target.columnID,
 		DetectionMethod: models.DetectionMethodValueMatch,
 		Confidence:      matchRate, // Initial confidence is just the match rate
 		Status:          models.RelCandidateStatusPending,

@@ -167,7 +167,7 @@ type TableContext struct {
 
 // ColumnContext provides column details for LLM analysis.
 type ColumnContext struct {
-	Column         *models.SchemaColumn
+	Column              *models.SchemaColumn
 	LooksLikeForeignKey bool   // Naming pattern suggests FK (e.g., ends with _id)
 	RelatedTableName    string // Inferred from naming pattern
 }
@@ -320,13 +320,13 @@ func (t *AnalyzeRelationshipsTask) convertToPromptTables(tableContextMap TableCo
 			// For now, we'll leave this as false
 
 			promptColumns = append(promptColumns, prompts.ColumnContext{
-				Name:               col.ColumnName,
-				DataType:           col.DataType,
-				IsNullable:         col.IsNullable,
-				NullPercent:        0.0, // TODO: Get from workflow_state if available
-				IsPrimaryKey:       col.IsPrimaryKey,
-				IsForeignKey:       isForeignKey,
-				ForeignKeyTarget:   fkTarget,
+				Name:                col.ColumnName,
+				DataType:            col.DataType,
+				IsNullable:          col.IsNullable,
+				NullPercent:         0.0, // TODO: Get from workflow_state if available
+				IsPrimaryKey:        col.IsPrimaryKey,
+				IsForeignKey:        isForeignKey,
+				ForeignKeyTarget:    fkTarget,
 				LooksLikeForeignKey: colCtx.LooksLikeForeignKey,
 			})
 		}
@@ -368,7 +368,6 @@ func (t *AnalyzeRelationshipsTask) convertToPromptCandidates(candidates []*Candi
 
 	return promptCandidates
 }
-
 
 // ============================================================================
 // Output Parsing
@@ -557,23 +556,23 @@ func (t *AnalyzeRelationshipsTask) createInferredCandidates(
 
 		// Create new candidate
 		candidate := &models.RelationshipCandidate{
-			WorkflowID:       t.workflowID,
-			DatasourceID:     t.datasourceID,
-			SourceColumnID:   sourceCol.ID,
-			TargetColumnID:   targetCol.ID,
-			DetectionMethod:  models.DetectionMethodLLM,
-			Confidence:       rel.Confidence,
-			LLMReasoning:     &rel.Reasoning,
-			ValueMatchRate:   nil, // Not determined by value matching
-			NameSimilarity:   nil, // Not determined by name inference
-			Cardinality:      nil, // Not yet tested
-			JoinMatchRate:    nil,
-			OrphanRate:       nil,
-			TargetCoverage:   nil,
-			SourceRowCount:   nil,
-			TargetRowCount:   nil,
-			MatchedRows:      nil,
-			OrphanRows:       nil,
+			WorkflowID:      t.workflowID,
+			DatasourceID:    t.datasourceID,
+			SourceColumnID:  sourceCol.ID,
+			TargetColumnID:  targetCol.ID,
+			DetectionMethod: models.DetectionMethodLLM,
+			Confidence:      rel.Confidence,
+			LLMReasoning:    &rel.Reasoning,
+			ValueMatchRate:  nil, // Not determined by value matching
+			NameSimilarity:  nil, // Not determined by name inference
+			Cardinality:     nil, // Not yet tested
+			JoinMatchRate:   nil,
+			OrphanRate:      nil,
+			TargetCoverage:  nil,
+			SourceRowCount:  nil,
+			TargetRowCount:  nil,
+			MatchedRows:     nil,
+			OrphanRows:      nil,
 		}
 
 		// Apply status based on confidence
