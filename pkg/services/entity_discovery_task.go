@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/google/uuid"
@@ -110,16 +109,6 @@ func (t *EntityDiscoveryTask) Execute(ctx context.Context, enqueuer workqueue.Ta
 	prompt := t.buildPrompt(fks)
 	systemMessage := t.buildSystemMessage()
 
-	// DEBUG: Write prompt to file for review
-	debugDir := "/tmp/entity-discovery-debug"
-	os.MkdirAll(debugDir, 0755)
-	promptFile := fmt.Sprintf("%s/prompt-%s.txt", debugDir, t.workflowID.String())
-	promptContent := fmt.Sprintf("=== SYSTEM MESSAGE ===\n%s\n\n=== USER PROMPT ===\n%s", systemMessage, prompt)
-	os.WriteFile(promptFile, []byte(promptContent), 0644)
-	if t.logger != nil {
-		t.logger.Info("DEBUG: Wrote prompt to file", zap.String("file", promptFile))
-	}
-
 	// Call LLM
 	llmClient, err := t.llmFactory.CreateForProject(tenantCtx, t.projectID)
 	if err != nil {
@@ -142,15 +131,6 @@ func (t *EntityDiscoveryTask) Execute(ctx context.Context, enqueuer workqueue.Ta
 			zap.Int("prompt_tokens", result.PromptTokens),
 			zap.Int("completion_tokens", result.CompletionTokens),
 			zap.Int("total_tokens", result.TotalTokens))
-	}
-
-	// DEBUG: Write response to file for review
-	responseFile := fmt.Sprintf("%s/response-%s.txt", debugDir, t.workflowID.String())
-	responseContent := fmt.Sprintf("=== LLM RESPONSE ===\nPrompt Tokens: %d\nCompletion Tokens: %d\nTotal Tokens: %d\n\n=== CONTENT ===\n%s",
-		result.PromptTokens, result.CompletionTokens, result.TotalTokens, result.Content)
-	os.WriteFile(responseFile, []byte(responseContent), 0644)
-	if t.logger != nil {
-		t.logger.Info("DEBUG: Wrote response to file", zap.String("file", responseFile))
 	}
 
 	// Parse LLM output

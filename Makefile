@@ -186,6 +186,14 @@ run: ## Build website and run the server (no watch)
 	@echo "$(YELLOW)Starting ekaya-engine on port $(PORT)...$(NC)"
 	@PORT=$(PORT) go run -tags="$(BUILD_TAGS)" main.go
 
+debug: ## Build and run with LLM conversation logging enabled
+	@echo "$(YELLOW)Building UI...$(NC)"
+	@cd ui && if [ ! -f node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then echo "$(YELLOW)Installing UI dependencies...$(NC)" && npm install; fi
+	@cd ui && npm run build
+	@echo "$(GREEN)✓ UI built$(NC)"
+	@echo "$(YELLOW)Starting ekaya-engine in DEBUG mode on port $(PORT)...$(NC)"
+	@PORT=$(PORT) go run -tags="debug,$(BUILD_TAGS)" main.go
+
 dev-ui: ## Watch UI files and rebuild to dist/ for Go server
 	@echo "$(YELLOW)Watching UI files and rebuilding to ui/dist/...$(NC)"
 	@echo "Changes will be served by the Go server on http://localhost:3443"
