@@ -194,6 +194,7 @@ func main() {
 	relationshipWorkflowService := services.NewRelationshipWorkflowService(
 		ontologyWorkflowRepo, relationshipCandidateRepo, schemaRepo, workflowStateRepo, ontologyRepo, schemaEntityRepo,
 		datasourceService, adapterFactory, llmFactory, discoveryService, getTenantCtx, logger)
+	entityService := services.NewEntityService(schemaEntityRepo, ontologyRepo, logger)
 
 	mux := http.NewServeMux()
 
@@ -311,6 +312,10 @@ func main() {
 	relationshipWorkflowHandler := handlers.NewRelationshipWorkflowHandler(
 		relationshipWorkflowService, logger)
 	relationshipWorkflowHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register entity handler (protected)
+	entityHandler := handlers.NewEntityHandler(entityService, logger)
+	entityHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"

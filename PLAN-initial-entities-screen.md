@@ -1,5 +1,53 @@
 # Plan: Initial Entities Screen
 
+## Status
+
+| Step | Description | Status |
+|------|-------------|--------|
+| 1 | Database Migration | ✅ Complete |
+| 2 | Update Go Models | ✅ Complete |
+| 3 | Update Repository Layer | ✅ Complete |
+| 4 | Create Entity Service | ✅ Complete |
+| 5 | Create Entity Handler | ✅ Complete |
+| 6 | Wire Up Handler in main.go | ✅ Complete |
+| 7 | Add TypeScript Types | 🔲 Next |
+| 8 | Add API Methods to engineApi.ts | 🔲 Pending |
+| 9 | Create Entities Page Component | 🔲 Pending |
+| 10 | Add Route to App.tsx | 🔲 Pending |
+| 11 | Add Entities Tile to Dashboard | 🔲 Pending |
+| 12 | Update Existing Code References | 🔲 Pending |
+
+### Commits (Steps 1-6)
+```
+f7ed004 Rename entity tables to ontology namespace with soft delete support
+88fb70f Add EntityService for entity management operations
+d1299a1 Add entity handler with HTTP routes and integration test
+```
+
+### Files Created/Modified (Backend Complete)
+- `migrations/014_ontology_entities.up.sql` - Table renames, soft delete, aliases
+- `migrations/014_ontology_entities.down.sql` - Rollback
+- `pkg/models/schema_entity.go` - Added IsDeleted, DeletionReason, OntologyEntityAlias
+- `pkg/repositories/schema_entity_repository.go` - New table names, soft delete filtering, alias CRUD
+- `pkg/repositories/schema_entity_repository_test.go` - Tests for new methods
+- `pkg/services/entity_service.go` - Business logic layer
+- `pkg/handlers/entity_handler.go` - HTTP routes
+- `pkg/handlers/entity_integration_test.go` - Integration test for entity endpoints
+- `main.go` - Wiring
+
+### API Endpoints Available
+```
+GET    /api/projects/{pid}/entities              - List entities
+GET    /api/projects/{pid}/entities/{eid}        - Get entity details
+PUT    /api/projects/{pid}/entities/{eid}        - Update description
+DELETE /api/projects/{pid}/entities/{eid}        - Soft delete
+POST   /api/projects/{pid}/entities/{eid}/restore - Restore
+POST   /api/projects/{pid}/entities/{eid}/aliases - Add alias
+DELETE /api/projects/{pid}/entities/{eid}/aliases/{aid} - Remove alias
+```
+
+---
+
 ## Overview
 
 Create the foundation for an "Entities" screen in the ekaya-engine project. This is a LIMITED scope implementation that sets up the database schema, backend layers, and UI for displaying entities - without implementing the full entity discovery workflow.
@@ -16,11 +64,11 @@ Create the foundation for an "Entities" screen in the ekaya-engine project. This
 
 ---
 
-## Step 1: Database Migration - Rename and Extend Entity Tables
+## Step 1: Database Migration - Rename and Extend Entity Tables ✅
 
-**Files to create:**
-- `migrations/NNNN_ontology_entities.up.sql`
-- `migrations/NNNN_ontology_entities.down.sql`
+**Files created:**
+- `migrations/014_ontology_entities.up.sql`
+- `migrations/014_ontology_entities.down.sql`
 
 **Changes:**
 1. Rename `engine_schema_entities` -> `engine_ontology_entities`
@@ -44,9 +92,9 @@ Create the foundation for an "Entities" screen in the ekaya-engine project. This
 
 ---
 
-## Step 2: Update Go Models
+## Step 2: Update Go Models ✅
 
-**File to modify:** `pkg/models/schema_entity.go` (consider renaming to `ontology_entity.go`)
+**File modified:** `pkg/models/schema_entity.go`
 
 **Changes:**
 1. Add type alias for backward compatibility: `type SchemaEntity = OntologyEntity`
@@ -70,9 +118,9 @@ Create the foundation for an "Entities" screen in the ekaya-engine project. This
 
 ---
 
-## Step 3: Update Repository Layer
+## Step 3: Update Repository Layer ✅
 
-**File to modify:** `pkg/repositories/schema_entity_repository.go` (consider renaming)
+**File modified:** `pkg/repositories/schema_entity_repository.go`
 
 **Changes:**
 1. Update all SQL queries to reference `engine_ontology_entities` and `engine_ontology_entity_occurrences`
@@ -89,9 +137,9 @@ Create the foundation for an "Entities" screen in the ekaya-engine project. This
 
 ---
 
-## Step 4: Create Entity Service
+## Step 4: Create Entity Service ✅
 
-**File to create:** `pkg/services/entity_service.go`
+**File created:** `pkg/services/entity_service.go`
 
 **Service interface:**
 ```go
@@ -130,9 +178,9 @@ type EntityWithDetails struct {
 
 ---
 
-## Step 5: Create Entity Handler
+## Step 5: Create Entity Handler ✅
 
-**File to create:** `pkg/handlers/entity_handler.go`
+**File created:** `pkg/handlers/entity_handler.go`
 
 **Routes to implement:**
 ```
@@ -187,9 +235,9 @@ type AliasResponse struct {
 
 ---
 
-## Step 6: Wire Up Handler in main.go
+## Step 6: Wire Up Handler in main.go ✅
 
-**File to modify:** `main.go`
+**File modified:** `main.go`
 
 **Changes:**
 1. Create `entityService`:
