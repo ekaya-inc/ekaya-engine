@@ -187,8 +187,6 @@ export const EntityDiscoveryProgress = ({
 
   // Get phase-specific step states
   const isPhaseComplete = (threshold: number) => progressPercent >= threshold;
-  const isPhaseActive = (min: number, max: number) =>
-    progressPercent >= min && progressPercent < max && isWorkflowRunning;
 
   // Entity counts from status
   const entityCount = status?.entity_count ?? 0;
@@ -260,28 +258,27 @@ export const EntityDiscoveryProgress = ({
 
               {/* Discovery phases */}
               <div className="space-y-2">
-                {/* Phase 1: Collecting statistics */}
+                {/* Phase 1: Analyzing schema constraints (0-50%) */}
                 <div className="flex items-center gap-3 px-3 py-2 rounded">
                   {isPhaseComplete(50) ? (
                     <Check className="h-4 w-4 text-green-500" />
-                  ) : isPhaseActive(0, 50) ? (
+                  ) : isWorkflowRunning && progressPercent < 50 ? (
                     <Loader2 className="h-4 w-4 text-amber-500 animate-spin" />
                   ) : (
                     <Circle className="h-4 w-4 text-text-tertiary" />
                   )}
-                  <span className="text-sm text-text-primary">Collecting column statistics</span>
+                  <span className="text-sm text-text-primary">Analyzing schema constraints</span>
                 </div>
-
-                {/* Phase 2: Identifying entities */}
+                {/* Phase 2: Generating entity names (50-100%) */}
                 <div className="flex items-center gap-3 px-3 py-2 rounded">
                   {isPhaseComplete(100) ? (
                     <Check className="h-4 w-4 text-green-500" />
-                  ) : isPhaseActive(50, 100) ? (
+                  ) : isWorkflowRunning && progressPercent >= 50 ? (
                     <Loader2 className="h-4 w-4 text-amber-500 animate-spin" />
                   ) : (
                     <Circle className="h-4 w-4 text-text-tertiary" />
                   )}
-                  <span className="text-sm text-text-primary">Identifying entities</span>
+                  <span className="text-sm text-text-primary">Generating entity names and descriptions</span>
                 </div>
               </div>
 

@@ -320,40 +320,44 @@ func (s *entityDiscoveryService) runWorkflow(projectID, workflowID, ontologyID, 
 		}
 	}()
 
-	// Entity discovery: deterministic algorithm
-	// Find columns where COUNT(DISTINCT col) == row_count AND column is NOT NULL
-	// These are unique identifier columns that represent entities
+	// Entity discovery: DDL-based algorithm
+	// Uses is_primary_key and is_unique flags from engine_schema_columns
+	// instead of running expensive COUNT(DISTINCT) queries
 
 	ctx := context.Background()
 
-	// Phase 1: Collect column statistics for all tables
-	s.logger.Info("Collecting column statistics",
+	// Identify entities from DDL metadata (PK and unique constraints)
+	s.logger.Info("Identifying entities from DDL metadata",
 		zap.String("workflow_id", workflowID.String()))
 
-	if err := s.updateProgress(ctx, projectID, workflowID, "Collecting column statistics...", 10); err != nil {
+	if err := s.updateProgress(ctx, projectID, workflowID, "Analyzing schema constraints...", 20); err != nil {
 		s.logger.Error("Failed to update progress", zap.Error(err))
 	}
 
-	statsMap, err := s.collectColumnStatistics(ctx, projectID, workflowID, datasourceID)
+	entityCount, tables, columns, err := s.identifyEntitiesFromDDL(ctx, projectID, ontologyID, datasourceID)
 	if err != nil {
-		s.logger.Error("Failed to collect column statistics", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("column statistics: %v", err))
-		return
-	}
-
-	// Phase 2: Identify entities from unique columns
-	s.logger.Info("Identifying entities from unique columns",
-		zap.String("workflow_id", workflowID.String()))
-
-	if err := s.updateProgress(ctx, projectID, workflowID, "Identifying entities...", 50); err != nil {
-		s.logger.Error("Failed to update progress", zap.Error(err))
-	}
-
-	entityCount, err := s.identifyAndPersistEntities(ctx, projectID, ontologyID, datasourceID, statsMap)
-	if err != nil {
-		s.logger.Error("Failed to identify entities", zap.Error(err))
+		s.logger.Error("Failed to identify entities from DDL", zap.Error(err))
 		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("entity identification: %v", err))
 		return
+	}
+
+	// Enrich entities with LLM-generated names and descriptions
+	if err := s.updateProgress(ctx, projectID, workflowID, "Generating entity names and descriptions...", 60); err != nil {
+		s.logger.Error("Failed to update progress", zap.Error(err))
+	}
+
+	s.logger.Info("Starting LLM enrichment for entities",
+		zap.String("workflow_id", workflowID.String()),
+		zap.Int("entity_count", entityCount))
+
+	if err := s.enrichEntitiesWithLLM(ctx, projectID, ontologyID, datasourceID, tables, columns); err != nil {
+		// Log but don't fail - entities will have table names as fallback
+		s.logger.Error("Failed to enrich entities with LLM - entities will use table names as fallback",
+			zap.Error(err),
+			zap.String("workflow_id", workflowID.String()))
+	} else {
+		s.logger.Info("LLM enrichment completed successfully",
+			zap.String("workflow_id", workflowID.String()))
 	}
 
 	// Mark workflow as complete
@@ -368,271 +372,295 @@ func (s *entityDiscoveryService) runWorkflow(projectID, workflowID, ontologyID, 
 	s.finalizeWorkflow(projectID, workflowID)
 }
 
-// identifyAndPersistEntities finds columns where distinct count equals row count
-// and creates entity records for them.
-func (s *entityDiscoveryService) identifyAndPersistEntities(
+// entityCandidate represents a column that may represent an entity.
+type entityCandidate struct {
+	schemaName string
+	tableName  string
+	columnName string
+	confidence float64 // 1.0 for PK, 0.9 for unique+not null
+	reason     string  // "primary_key" or "unique_not_null"
+}
+
+// identifyEntitiesFromDDL finds entities using DDL metadata (is_primary_key, is_unique)
+// from engine_schema_columns instead of running expensive COUNT(DISTINCT) queries.
+// Returns the count and the tables/columns for LLM enrichment.
+func (s *entityDiscoveryService) identifyEntitiesFromDDL(
 	ctx context.Context,
 	projectID, ontologyID, datasourceID uuid.UUID,
-	statsMap map[string]datasource.ColumnStats,
-) (int, error) {
+) (int, []*models.SchemaTable, []*models.SchemaColumn, error) {
 	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
 	if err != nil {
-		return 0, fmt.Errorf("get tenant context: %w", err)
+		return 0, nil, nil, fmt.Errorf("get tenant context: %w", err)
 	}
 	defer cleanup()
 
-	// Get all columns for this datasource to check nullability
+	// Get all tables for this datasource
+	tables, err := s.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return 0, nil, nil, fmt.Errorf("list tables: %w", err)
+	}
+
+	// Build table lookup by ID
+	tableByID := make(map[uuid.UUID]*models.SchemaTable)
+	for _, t := range tables {
+		tableByID[t.ID] = t
+	}
+
+	// Get all columns for this datasource
 	columns, err := s.schemaRepo.ListColumnsByDatasource(tenantCtx, projectID, datasourceID)
 	if err != nil {
-		return 0, fmt.Errorf("list columns: %w", err)
+		return 0, nil, nil, fmt.Errorf("list columns: %w", err)
 	}
 
-	// Build lookup for column nullability: "schema.table.column" -> isNullable
-	columnNullable := make(map[string]bool)
+	// Find entity candidates from DDL metadata
+	// Priority: primary key (100% confidence) > unique+not null (90% confidence)
+	var candidates []entityCandidate
+
 	for _, col := range columns {
-		// Get table info to build full key
-		table, err := s.schemaRepo.GetTableByID(tenantCtx, projectID, col.SchemaTableID)
-		if err != nil {
-			s.logger.Error("Failed to get table for column",
-				zap.String("column_id", col.ID.String()),
-				zap.Error(err))
+		table, ok := tableByID[col.SchemaTableID]
+		if !ok {
 			continue
 		}
-		key := fmt.Sprintf("%s.%s.%s", table.SchemaName, table.TableName, col.ColumnName)
-		columnNullable[key] = col.IsNullable
+
+		// Primary key: 100% confidence
+		if col.IsPrimaryKey {
+			candidates = append(candidates, entityCandidate{
+				schemaName: table.SchemaName,
+				tableName:  table.TableName,
+				columnName: col.ColumnName,
+				confidence: 1.0,
+				reason:     "primary_key",
+			})
+			s.logger.Info("Found primary key column",
+				zap.String("column", fmt.Sprintf("%s.%s.%s", table.SchemaName, table.TableName, col.ColumnName)))
+			continue
+		}
+
+		// Unique + not nullable: 90% confidence
+		if col.IsUnique && !col.IsNullable {
+			candidates = append(candidates, entityCandidate{
+				schemaName: table.SchemaName,
+				tableName:  table.TableName,
+				columnName: col.ColumnName,
+				confidence: 0.9,
+				reason:     "unique_not_null",
+			})
+			s.logger.Info("Found unique non-nullable column",
+				zap.String("column", fmt.Sprintf("%s.%s.%s", table.SchemaName, table.TableName, col.ColumnName)),
+				zap.Float64("confidence", 0.9))
+		}
 	}
 
-	// Find columns where distinct count == row count AND not nullable
-	var entities []struct {
-		schemaName string
-		tableName  string
-		columnName string
-		rowCount   int64
+	// Group candidates by table to select the best one per table
+	// (prefer PK over unique+not null)
+	bestByTable := make(map[string]entityCandidate)
+	for _, c := range candidates {
+		tableKey := fmt.Sprintf("%s.%s", c.schemaName, c.tableName)
+		if existing, ok := bestByTable[tableKey]; !ok || c.confidence > existing.confidence {
+			bestByTable[tableKey] = c
+		}
 	}
 
-	for key, stats := range statsMap {
-		// Skip if no rows or distinct count doesn't match row count
-		if stats.RowCount == 0 || stats.DistinctCount != stats.RowCount {
-			continue
-		}
-
-		// Skip if column is nullable (can't be a reliable identifier)
-		if nullable, ok := columnNullable[key]; ok && nullable {
-			continue
-		}
-
-		// Parse key to get schema.table.column
-		parts := strings.SplitN(key, ".", 3)
-		if len(parts) != 3 {
-			continue
-		}
-
-		entities = append(entities, struct {
-			schemaName string
-			tableName  string
-			columnName string
-			rowCount   int64
-		}{
-			schemaName: parts[0],
-			tableName:  parts[1],
-			columnName: parts[2],
-			rowCount:   stats.RowCount,
-		})
-
-		s.logger.Info("Found unique identifier column",
-			zap.String("column", key),
-			zap.Int64("distinct_count", stats.DistinctCount),
-			zap.Int64("row_count", stats.RowCount))
-	}
-
-	// Create entity records
-	for _, e := range entities {
-		// Derive entity name from table name (e.g., "users" -> "user", "orders" -> "order")
-		entityName := deriveEntityName(e.tableName)
-
+	// Create entity records (one per table, using the best candidate)
+	// Use table name as temporary name - LLM will enrich with proper names later
+	entityCount := 0
+	for _, c := range bestByTable {
 		entity := &models.OntologyEntity{
 			ProjectID:     projectID,
 			OntologyID:    ontologyID,
-			Name:          entityName,
-			Description:   fmt.Sprintf("Entity identified from unique column %s.%s.%s", e.schemaName, e.tableName, e.columnName),
-			PrimarySchema: e.schemaName,
-			PrimaryTable:  e.tableName,
-			PrimaryColumn: e.columnName,
+			Name:          c.tableName, // Temporary - will be enriched by LLM
+			Description:   "",          // Will be filled by LLM
+			PrimarySchema: c.schemaName,
+			PrimaryTable:  c.tableName,
+			PrimaryColumn: c.columnName,
 		}
 
 		if err := s.entityRepo.Create(tenantCtx, entity); err != nil {
 			s.logger.Error("Failed to create entity",
-				zap.String("entity_name", entityName),
+				zap.String("table_name", c.tableName),
 				zap.Error(err))
-			return 0, fmt.Errorf("create entity %s: %w", entityName, err)
+			return 0, nil, nil, fmt.Errorf("create entity for table %s: %w", c.tableName, err)
 		}
 
-		s.logger.Info("Entity created",
+		// Create primary occurrence with confidence
+		occurrence := &models.OntologyEntityOccurrence{
+			EntityID:   entity.ID,
+			SchemaName: c.schemaName,
+			TableName:  c.tableName,
+			ColumnName: c.columnName,
+			Confidence: c.confidence,
+		}
+		if err := s.entityRepo.CreateOccurrence(tenantCtx, occurrence); err != nil {
+			s.logger.Error("Failed to create primary occurrence",
+				zap.String("table_name", c.tableName),
+				zap.Error(err))
+			// Don't fail the whole process for occurrence creation
+		}
+
+		s.logger.Info("Entity created (pending LLM enrichment)",
 			zap.String("entity_id", entity.ID.String()),
-			zap.String("entity_name", entity.Name),
-			zap.String("primary_location", fmt.Sprintf("%s.%s.%s", e.schemaName, e.tableName, e.columnName)))
+			zap.String("table_name", c.tableName),
+			zap.String("primary_location", fmt.Sprintf("%s.%s.%s", c.schemaName, c.tableName, c.columnName)),
+			zap.Float64("confidence", c.confidence),
+			zap.String("reason", c.reason))
+
+		entityCount++
 	}
 
-	return len(entities), nil
+	return entityCount, tables, columns, nil
 }
 
-// deriveEntityName converts a table name to an entity name.
-// e.g., "users" -> "user", "order_items" -> "order_item"
-func deriveEntityName(tableName string) string {
-	// Simple singularization: remove trailing 's' if present
-	name := tableName
-	if strings.HasSuffix(name, "ies") {
-		name = strings.TrimSuffix(name, "ies") + "y"
-	} else if strings.HasSuffix(name, "es") && !strings.HasSuffix(name, "ses") {
-		name = strings.TrimSuffix(name, "es")
-	} else if strings.HasSuffix(name, "s") && !strings.HasSuffix(name, "ss") {
-		name = strings.TrimSuffix(name, "s")
-	}
-	return name
+// entityEnrichment holds LLM-generated entity name and description.
+type entityEnrichment struct {
+	TableName   string `json:"table_name"`
+	EntityName  string `json:"entity_name"`
+	Description string `json:"description"`
 }
 
-// collectColumnStatistics gathers statistics for all columns across all tables.
-// Returns a map of "schema.table.column" -> ColumnStats for use by filtering.
-func (s *entityDiscoveryService) collectColumnStatistics(ctx context.Context, projectID, workflowID, datasourceID uuid.UUID) (map[string]datasource.ColumnStats, error) {
+// enrichEntitiesWithLLM uses an LLM to generate clean entity names and descriptions
+// based on the full schema context.
+func (s *entityDiscoveryService) enrichEntitiesWithLLM(
+	ctx context.Context,
+	projectID, ontologyID, datasourceID uuid.UUID,
+	tables []*models.SchemaTable,
+	columns []*models.SchemaColumn,
+) error {
 	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("get tenant context: %w", err)
+		return fmt.Errorf("get tenant context: %w", err)
 	}
 	defer cleanup()
 
-	// Get datasource to create adapter
-	ds, err := s.dsSvc.Get(tenantCtx, projectID, datasourceID)
+	// Get entities we just created
+	entities, err := s.entityRepo.GetByOntology(tenantCtx, ontologyID)
 	if err != nil {
-		return nil, fmt.Errorf("get datasource: %w", err)
+		return fmt.Errorf("get entities: %w", err)
 	}
 
-	// Create schema discoverer adapter
-	adapter, err := s.adapterFactory.NewSchemaDiscoverer(tenantCtx, ds.DatasourceType, ds.Config, projectID, datasourceID, "")
-	if err != nil {
-		return nil, fmt.Errorf("create schema discoverer: %w", err)
-	}
-	defer adapter.Close()
-
-	// Get all tables for this datasource
-	tables, err := s.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID)
-	if err != nil {
-		return nil, fmt.Errorf("list tables: %w", err)
+	if len(entities) == 0 {
+		return nil
 	}
 
-	// Get all columns for this datasource
-	columns, err := s.schemaRepo.ListColumnsByDatasource(tenantCtx, projectID, datasourceID)
-	if err != nil {
-		return nil, fmt.Errorf("list columns: %w", err)
-	}
-
-	// Build table lookup and group columns by table
+	// Build table -> columns map for context
+	tableColumns := make(map[string][]string)
 	tableByID := make(map[uuid.UUID]*models.SchemaTable)
-	columnsByTableID := make(map[uuid.UUID][]*models.SchemaColumn)
 	for _, t := range tables {
 		tableByID[t.ID] = t
-		columnsByTableID[t.ID] = make([]*models.SchemaColumn, 0)
 	}
-
 	for _, col := range columns {
-		columnsByTableID[col.SchemaTableID] = append(columnsByTableID[col.SchemaTableID], col)
+		if t, ok := tableByID[col.SchemaTableID]; ok {
+			key := fmt.Sprintf("%s.%s", t.SchemaName, t.TableName)
+			tableColumns[key] = append(tableColumns[key], col.ColumnName)
+		}
 	}
 
-	// Map to store stats by "schema.table.column" key
-	statsMap := make(map[string]datasource.ColumnStats)
-	totalColumns := 0
+	// Build the prompt
+	prompt := s.buildEntityEnrichmentPrompt(entities, tableColumns)
+	systemMsg := s.entityEnrichmentSystemMessage()
 
-	// Collect stats for each table
-	for _, table := range tables {
-		tableCols := columnsByTableID[table.ID]
-		if len(tableCols) == 0 {
-			continue
-		}
+	// Get LLM client - must use tenant context for config lookup
+	llmClient, err := s.llmFactory.CreateForProject(tenantCtx, projectID)
+	if err != nil {
+		return fmt.Errorf("create LLM client: %w", err)
+	}
 
-		// Get column names for this table
-		columnNames := make([]string, len(tableCols))
-		for i, col := range tableCols {
-			columnNames[i] = col.ColumnName
-		}
+	// Call LLM
+	result, err := llmClient.GenerateResponse(tenantCtx, prompt, systemMsg, 0.3, false)
+	if err != nil {
+		return fmt.Errorf("LLM call failed: %w", err)
+	}
 
-		// Call AnalyzeColumnStats for this table
-		stats, err := adapter.AnalyzeColumnStats(tenantCtx, table.SchemaName, table.TableName, columnNames)
-		if err != nil {
-			s.logger.Error("Failed to analyze column stats",
-				zap.String("table", fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)),
-				zap.Error(err))
-			return nil, fmt.Errorf("analyze column stats for %s.%s: %w", table.SchemaName, table.TableName, err)
-		}
+	// Parse response
+	enrichments, err := s.parseEntityEnrichmentResponse(result.Content)
+	if err != nil {
+		s.logger.Warn("Failed to parse entity enrichment response, keeping original names",
+			zap.Error(err))
+		return nil // Don't fail the workflow for enrichment parsing errors
+	}
 
-		// Log statistics for this table
-		s.logger.Info(fmt.Sprintf("Column statistics: %s.%s (%d columns)", table.SchemaName, table.TableName, len(stats)),
-			zap.String("workflow_id", workflowID.String()))
+	// Update entities with enriched names and descriptions
+	enrichmentByTable := make(map[string]entityEnrichment)
+	for _, e := range enrichments {
+		enrichmentByTable[e.TableName] = e
+	}
 
-		for _, stat := range stats {
-			percentage := 0.0
-			if stat.RowCount > 0 {
-				percentage = (float64(stat.DistinctCount) / float64(stat.RowCount)) * 100.0
+	for _, entity := range entities {
+		if enrichment, ok := enrichmentByTable[entity.PrimaryTable]; ok {
+			entity.Name = enrichment.EntityName
+			entity.Description = enrichment.Description
+			if err := s.entityRepo.Update(tenantCtx, entity); err != nil {
+				s.logger.Error("Failed to update entity with enrichment",
+					zap.String("entity_id", entity.ID.String()),
+					zap.Error(err))
+				// Continue with other entities
 			}
-
-			s.logger.Debug(fmt.Sprintf("  - %s: %d distinct / %d rows (%.1f%%)",
-				stat.ColumnName,
-				stat.DistinctCount,
-				stat.RowCount,
-				percentage))
-
-			// Store stats in map for filtering
-			statsKey := fmt.Sprintf("%s.%s.%s", table.SchemaName, table.TableName, stat.ColumnName)
-			statsMap[statsKey] = stat
 		}
-
-		totalColumns += len(stats)
 	}
 
-	// Log summary
-	s.logger.Info(fmt.Sprintf("Summary: Collected stats for %d columns across %d tables",
-		totalColumns,
-		len(tables)),
-		zap.String("workflow_id", workflowID.String()))
+	s.logger.Info("Enriched entities with LLM-generated names and descriptions",
+		zap.Int("entity_count", len(entities)),
+		zap.Int("enrichments_applied", len(enrichments)))
 
-	return statsMap, nil
+	return nil
 }
 
-// filterEntityCandidates applies heuristics to filter columns and identify entity candidates.
-func (s *entityDiscoveryService) filterEntityCandidates(
-	ctx context.Context,
-	projectID, workflowID, datasourceID uuid.UUID,
-	statsMap map[string]datasource.ColumnStats,
-) ([]ColumnFilterResult, []ColumnFilterResult, error) {
-	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
+func (s *entityDiscoveryService) entityEnrichmentSystemMessage() string {
+	return `You are a data modeling expert. Your task is to convert database table names into clean, human-readable entity names and provide brief descriptions of what each entity represents.
+
+Consider the full schema context to understand the domain and make informed guesses about each entity's purpose.`
+}
+
+func (s *entityDiscoveryService) buildEntityEnrichmentPrompt(
+	entities []*models.OntologyEntity,
+	tableColumns map[string][]string,
+) string {
+	var sb strings.Builder
+
+	sb.WriteString("# Schema Context\n\n")
+	sb.WriteString("Below are all the tables in this database with their columns. Use this context to understand what domain/industry this database serves.\n\n")
+
+	// List all tables with columns for context
+	for tableKey, cols := range tableColumns {
+		sb.WriteString(fmt.Sprintf("**%s**: %s\n", tableKey, strings.Join(cols, ", ")))
+	}
+
+	sb.WriteString("\n# Task\n\n")
+	sb.WriteString("For each table below, provide:\n")
+	sb.WriteString("1. **Entity Name**: A clean, singular, Title Case name (e.g., \"users\" → \"User\", \"billing_activities\" → \"Billing Activity\")\n")
+	sb.WriteString("2. **Description**: A brief (1-2 sentence) description of what this entity represents in the domain\n\n")
+
+	sb.WriteString("## Examples\n\n")
+	sb.WriteString("- `accounts` → **Account** - \"A user account that can access the platform and manage resources.\"\n")
+	sb.WriteString("- `billing_activities` → **Billing Activity** - \"A record of billing-related actions such as charges, refunds, or adjustments.\"\n")
+	sb.WriteString("- `new_host_bonus_statuses` → **New Host Bonus Status** - \"Tracks the status of promotional bonuses awarded to newly registered hosts.\"\n")
+	sb.WriteString("- `order_items` → **Order Item** - \"A line item within a customer order, representing a specific product and quantity.\"\n\n")
+
+	sb.WriteString("## Tables to Process\n\n")
+	for _, entity := range entities {
+		tableKey := fmt.Sprintf("%s.%s", entity.PrimarySchema, entity.PrimaryTable)
+		cols := tableColumns[tableKey]
+		sb.WriteString(fmt.Sprintf("- `%s` (columns: %s)\n", entity.PrimaryTable, strings.Join(cols, ", ")))
+	}
+
+	sb.WriteString("\n## Response Format\n\n")
+	sb.WriteString("Respond with a JSON array:\n")
+	sb.WriteString("```json\n")
+	sb.WriteString("[\n")
+	sb.WriteString("  {\"table_name\": \"accounts\", \"entity_name\": \"Account\", \"description\": \"A user account...\"},\n")
+	sb.WriteString("  ...\n")
+	sb.WriteString("]\n")
+	sb.WriteString("```\n")
+
+	return sb.String()
+}
+
+func (s *entityDiscoveryService) parseEntityEnrichmentResponse(content string) ([]entityEnrichment, error) {
+	// Use the generic ParseJSONResponse helper
+	enrichments, err := llm.ParseJSONResponse[[]entityEnrichment](content)
 	if err != nil {
-		return nil, nil, fmt.Errorf("get tenant context: %w", err)
+		return nil, fmt.Errorf("parse entity enrichment response: %w", err)
 	}
-	defer cleanup()
-
-	// Get all tables for this datasource
-	tables, err := s.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("list tables: %w", err)
-	}
-
-	// Get all columns for this datasource
-	columns, err := s.schemaRepo.ListColumnsByDatasource(tenantCtx, projectID, datasourceID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("list columns: %w", err)
-	}
-
-	// Build table lookup by UUID string
-	tableByID := make(map[string]*models.SchemaTable)
-	for _, t := range tables {
-		tableByID[t.ID.String()] = t
-	}
-
-	// Apply filtering heuristics
-	candidates, excluded := FilterEntityCandidates(columns, tableByID, statsMap, s.logger)
-
-	// Log results
-	LogFilterResults(candidates, excluded, s.logger)
-
-	return candidates, excluded, nil
+	return enrichments, nil
 }
 
 // analyzeGraphConnectivity builds a graph from foreign key relationships.
