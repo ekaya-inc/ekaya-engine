@@ -129,7 +129,7 @@ func (h *EntityHandler) List(w http.ResponseWriter, r *http.Request) {
 		Total:    len(entityResponses),
 	}
 
-	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }
@@ -165,7 +165,7 @@ func (h *EntityHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := h.toEntityDetailResponse(entity)
-	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }
@@ -219,7 +219,7 @@ func (h *EntityHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := h.toEntityDetailResponse(entity)
-	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }
@@ -250,7 +250,7 @@ func (h *EntityHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"}); err != nil {
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: map[string]string{"status": "deleted"}}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }
@@ -290,7 +290,7 @@ func (h *EntityHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := h.toEntityDetailResponse(entity)
-	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }
@@ -344,7 +344,7 @@ func (h *EntityHandler) AddAlias(w http.ResponseWriter, r *http.Request) {
 		Source: alias.Source,
 	}
 
-	if err := WriteJSON(w, http.StatusCreated, response); err != nil {
+	if err := WriteJSON(w, http.StatusCreated, ApiResponse{Success: true, Data: response}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }
@@ -376,7 +376,7 @@ func (h *EntityHandler) RemoveAlias(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"}); err != nil {
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: map[string]string{"status": "deleted"}}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }
