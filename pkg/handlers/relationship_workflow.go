@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -148,6 +149,19 @@ func (h *RelationshipWorkflowHandler) StartDetection(w http.ResponseWriter, r *h
 
 	workflow, err := h.workflowService.StartDetection(r.Context(), projectID, datasourceID)
 	if err != nil {
+		// Check for precondition errors (user needs to do something first)
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "no entities found") || strings.Contains(errMsg, "run entity discovery first") {
+			h.logger.Warn("Relationship detection precondition not met",
+				zap.String("project_id", projectID.String()),
+				zap.String("datasource_id", datasourceID.String()),
+				zap.Error(err))
+			if err := ErrorResponse(w, http.StatusBadRequest, "precondition_failed", err.Error()); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
+
 		h.logger.Error("Failed to start relationship detection",
 			zap.String("project_id", projectID.String()),
 			zap.String("datasource_id", datasourceID.String()),

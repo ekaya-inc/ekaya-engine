@@ -678,6 +678,12 @@ func (s *relationshipWorkflowService) collectColumnStatistics(ctx context.Contex
 		s.logger.Info(fmt.Sprintf("Column statistics: %s.%s (%d columns)", table.SchemaName, table.TableName, len(stats)),
 			zap.String("workflow_id", workflowID.String()))
 
+		// Build column name to ID lookup for this table
+		colNameToID := make(map[string]uuid.UUID)
+		for _, col := range tableCols {
+			colNameToID[col.ColumnName] = col.ID
+		}
+
 		for _, stat := range stats {
 			percentage := 0.0
 			if stat.RowCount > 0 {
@@ -693,6 +699,16 @@ func (s *relationshipWorkflowService) collectColumnStatistics(ctx context.Contex
 			// Store stats in map for filtering
 			statsKey := fmt.Sprintf("%s.%s.%s", table.SchemaName, table.TableName, stat.ColumnName)
 			statsMap[statsKey] = stat
+
+			// Persist stats to database for use by other services
+			if colID, ok := colNameToID[stat.ColumnName]; ok {
+				distinctCount := stat.DistinctCount
+				if err := s.schemaRepo.UpdateColumnStats(tenantCtx, colID, &distinctCount, nil, stat.MinLength, stat.MaxLength); err != nil {
+					s.logger.Warn("Failed to persist column stats",
+						zap.String("column", stat.ColumnName),
+						zap.Error(err))
+				}
+			}
 		}
 
 		totalColumns += len(stats)
