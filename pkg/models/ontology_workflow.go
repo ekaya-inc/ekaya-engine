@@ -170,12 +170,14 @@ type WorkflowPhaseType string
 const (
 	WorkflowPhaseRelationships WorkflowPhaseType = "relationships"
 	WorkflowPhaseOntology      WorkflowPhaseType = "ontology"
+	WorkflowPhaseEntities      WorkflowPhaseType = "entities"
 )
 
 // ValidWorkflowPhases contains all valid workflow phase values.
 var ValidWorkflowPhases = []WorkflowPhaseType{
 	WorkflowPhaseRelationships,
 	WorkflowPhaseOntology,
+	WorkflowPhaseEntities,
 }
 
 // IsValidWorkflowPhase checks if the given phase is valid.

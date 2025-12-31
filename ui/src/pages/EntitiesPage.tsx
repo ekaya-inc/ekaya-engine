@@ -4,11 +4,13 @@ import {
   ChevronDown,
   ChevronRight,
   MapPin,
+  Sparkles,
   Tag,
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
+import { EntityDiscoveryProgress } from "../components/EntityDiscoveryProgress";
 import { Button } from "../components/ui/Button";
 import {
   Card,
@@ -17,6 +19,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../components/ui/Card";
+import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext";
 import engineApi from "../services/engineApi";
 import type { EntityDetail } from "../types";
 
@@ -27,11 +30,15 @@ import type { EntityDetail } from "../types";
 const EntitiesPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
+  const { selectedDatasource } = useDatasourceConnection();
 
   // State for entities data
   const [entities, setEntities] = useState<EntityDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Discovery dialog state
+  const [discoveryOpen, setDiscoveryOpen] = useState(false);
 
   // Track which entities have expanded occurrences
   const [expandedEntities, setExpandedEntities] = useState<Set<string>>(new Set());
@@ -50,32 +57,42 @@ const EntitiesPage = () => {
   };
 
   // Fetch entities data
-  useEffect(() => {
+  const fetchEntities = useCallback(async (): Promise<void> => {
     if (!pid) return;
+    try {
+      setLoading(true);
+      setError(null);
 
-    async function fetchData(): Promise<void> {
-      try {
-        setLoading(true);
-        setError(null);
+      const response = await engineApi.listEntities(pid);
 
-        const response = await engineApi.listEntities(pid as string);
-
-        if (response.data) {
-          // Filter out deleted entities for display
-          const activeEntities = response.data.entities.filter(e => !e.is_deleted);
-          setEntities(activeEntities);
-        }
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Failed to fetch data";
-        console.error("Failed to fetch entities data:", errorMessage);
-        setError(errorMessage);
-      } finally {
-        setLoading(false);
+      if (response.data) {
+        // Filter out deleted entities for display
+        const activeEntities = response.data.entities.filter(e => !e.is_deleted);
+        setEntities(activeEntities);
       }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to fetch data";
+      console.error("Failed to fetch entities data:", errorMessage);
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
     }
-
-    fetchData();
   }, [pid]);
+
+  // Fetch on mount
+  useEffect(() => {
+    fetchEntities();
+  }, [fetchEntities]);
+
+  // Handler for "Discover Entities" button
+  const handleDiscoverEntities = (): void => {
+    setDiscoveryOpen(true);
+  };
+
+  // Handler for when discovery completes - refresh entities
+  const handleDiscoveryComplete = async (): Promise<void> => {
+    await fetchEntities();
+  };
 
   // Calculate totals
   const totalOccurrences = entities.reduce((sum, e) => sum + e.occurrence_count, 0);
@@ -154,8 +171,25 @@ const EntitiesPage = () => {
             <p className="text-sm text-muted-foreground mb-6">
               No domain entities have been discovered yet. Run entity discovery to identify domain concepts in your database schema.
             </p>
+            {selectedDatasource?.datasourceId && (
+              <Button onClick={handleDiscoverEntities}>
+                <Sparkles className="mr-2 h-4 w-4" />
+                Discover Entities
+              </Button>
+            )}
           </div>
         </div>
+
+        {/* Discovery dialog */}
+        {pid && selectedDatasource?.datasourceId && (
+          <EntityDiscoveryProgress
+            projectId={pid}
+            datasourceId={selectedDatasource.datasourceId}
+            isOpen={discoveryOpen}
+            onClose={() => setDiscoveryOpen(false)}
+            onComplete={handleDiscoveryComplete}
+          />
+        )}
       </div>
     );
   }
@@ -171,6 +205,12 @@ const EntitiesPage = () => {
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Dashboard
           </Button>
+          {selectedDatasource?.datasourceId && (
+            <Button variant="outline" onClick={handleDiscoverEntities}>
+              <Sparkles className="mr-2 h-4 w-4" />
+              Rediscover Entities
+            </Button>
+          )}
         </div>
         <h1 className="text-3xl font-bold text-text-primary">
           Entities
@@ -302,6 +342,17 @@ const EntitiesPage = () => {
           </div>
         </CardContent>
       </Card>
+
+      {/* Discovery dialog */}
+      {pid && selectedDatasource?.datasourceId && (
+        <EntityDiscoveryProgress
+          projectId={pid}
+          datasourceId={selectedDatasource.datasourceId}
+          isOpen={discoveryOpen}
+          onClose={() => setDiscoveryOpen(false)}
+          onComplete={handleDiscoveryComplete}
+        />
+      )}
     </div>
   );
 };

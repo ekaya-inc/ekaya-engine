@@ -195,6 +195,9 @@ func main() {
 		ontologyWorkflowRepo, relationshipCandidateRepo, schemaRepo, workflowStateRepo, ontologyRepo, schemaEntityRepo,
 		datasourceService, adapterFactory, llmFactory, discoveryService, getTenantCtx, logger)
 	entityService := services.NewEntityService(schemaEntityRepo, ontologyRepo, logger)
+	entityDiscoveryService := services.NewEntityDiscoveryService(
+		ontologyWorkflowRepo, schemaEntityRepo, schemaRepo, ontologyRepo,
+		datasourceService, adapterFactory, llmFactory, getTenantCtx, logger)
 
 	mux := http.NewServeMux()
 
@@ -316,6 +319,10 @@ func main() {
 	// Register entity handler (protected)
 	entityHandler := handlers.NewEntityHandler(entityService, logger)
 	entityHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register entity discovery handler (protected)
+	entityDiscoveryHandler := handlers.NewEntityDiscoveryHandler(entityDiscoveryService, logger)
+	entityDiscoveryHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"

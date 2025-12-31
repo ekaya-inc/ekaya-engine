@@ -566,6 +566,59 @@ func (m *rwsMockQueue) Cancel() {
 	m.cancelled = true
 }
 
+// rwsMockEntityRepository is a mock for SchemaEntityRepository.
+type rwsMockEntityRepository struct {
+	entities []*models.SchemaEntity
+	getErr   error
+}
+
+func (m *rwsMockEntityRepository) Create(ctx context.Context, entity *models.SchemaEntity) error {
+	return nil
+}
+func (m *rwsMockEntityRepository) GetByID(ctx context.Context, entityID uuid.UUID) (*models.SchemaEntity, error) {
+	return nil, nil
+}
+func (m *rwsMockEntityRepository) GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.SchemaEntity, error) {
+	return m.entities, m.getErr
+}
+func (m *rwsMockEntityRepository) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.SchemaEntity, error) {
+	return m.entities, m.getErr
+}
+func (m *rwsMockEntityRepository) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.SchemaEntity, error) {
+	return nil, nil
+}
+func (m *rwsMockEntityRepository) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+func (m *rwsMockEntityRepository) Update(ctx context.Context, entity *models.SchemaEntity) error {
+	return nil
+}
+func (m *rwsMockEntityRepository) SoftDelete(ctx context.Context, entityID uuid.UUID, reason string) error {
+	return nil
+}
+func (m *rwsMockEntityRepository) Restore(ctx context.Context, entityID uuid.UUID) error { return nil }
+func (m *rwsMockEntityRepository) CreateOccurrence(ctx context.Context, occ *models.SchemaEntityOccurrence) error {
+	return nil
+}
+func (m *rwsMockEntityRepository) GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.SchemaEntityOccurrence, error) {
+	return nil, nil
+}
+func (m *rwsMockEntityRepository) GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.SchemaEntityOccurrence, error) {
+	return nil, nil
+}
+func (m *rwsMockEntityRepository) GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.SchemaEntityOccurrence, error) {
+	return nil, nil
+}
+func (m *rwsMockEntityRepository) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {
+	return nil
+}
+func (m *rwsMockEntityRepository) GetAliasesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityAlias, error) {
+	return nil, nil
+}
+func (m *rwsMockEntityRepository) DeleteAlias(ctx context.Context, aliasID uuid.UUID) error {
+	return nil
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -577,6 +630,7 @@ func rwsGetTenantCtx() TenantContextFunc {
 }
 
 // newTestRelationshipWorkflowService creates a service with mocks for testing.
+// entityRepo is optional - if nil, a default mock with one entity will be used.
 func newTestRelationshipWorkflowService(
 	workflowRepo *rwsMockWorkflowRepository,
 	candidateRepo *rwsMockCandidateRepository,
@@ -587,12 +641,17 @@ func newTestRelationshipWorkflowService(
 	adapterFactory *rwsMockAdapterFactory,
 	llmFactory *rwsMockLLMFactory,
 ) *relationshipWorkflowService {
+	// Default entity repo with one entity (prerequisite check passes)
+	entityRepo := &rwsMockEntityRepository{
+		entities: []*models.SchemaEntity{{ID: uuid.New(), Name: "test_entity"}},
+	}
 	return &relationshipWorkflowService{
 		workflowRepo:     workflowRepo,
 		candidateRepo:    candidateRepo,
 		schemaRepo:       schemaRepo,
 		stateRepo:        stateRepo,
 		ontologyRepo:     ontologyRepo,
+		entityRepo:       entityRepo,
 		dsSvc:            dsSvc,
 		adapterFactory:   adapterFactory,
 		llmFactory:       llmFactory,

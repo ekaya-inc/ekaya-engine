@@ -17,6 +17,7 @@ import type {
   DeleteQueryResponse,
   DiscoveryResults,
   EntitiesListResponse,
+  EntityDiscoveryStatus,
   ExecuteQueryRequest,
   ExecuteQueryResponse,
   GetDatasourceResponse,
@@ -29,6 +30,7 @@ import type {
   RelationshipsResponse,
   SaveSelectionsResponse,
   SchemaRefreshResponse,
+  StartEntityDiscoveryResponse,
   TestConnectionRequest,
   TestConnectionResponse,
   TestQueryRequest,
@@ -491,6 +493,49 @@ class EngineApiService {
     projectId: string
   ): Promise<ApiResponse<EntitiesListResponse>> {
     return this.makeRequest<EntitiesListResponse>(`/${projectId}/entities`);
+  }
+
+  // --- Entity Discovery Methods ---
+
+  /**
+   * Start entity discovery workflow for a datasource
+   * POST /api/projects/{projectId}/datasources/{datasourceId}/entities/discover
+   */
+  async startEntityDiscovery(
+    projectId: string,
+    datasourceId: string
+  ): Promise<ApiResponse<StartEntityDiscoveryResponse>> {
+    return this.makeRequest<StartEntityDiscoveryResponse>(
+      `/${projectId}/datasources/${datasourceId}/entities/discover`,
+      { method: 'POST' }
+    );
+  }
+
+  /**
+   * Get entity discovery workflow status
+   * GET /api/projects/{projectId}/datasources/{datasourceId}/entities/status
+   */
+  async getEntityDiscoveryStatus(
+    projectId: string,
+    datasourceId: string
+  ): Promise<ApiResponse<EntityDiscoveryStatus>> {
+    return this.makeRequest<EntityDiscoveryStatus>(
+      `/${projectId}/datasources/${datasourceId}/entities/status`
+    );
+  }
+
+  /**
+   * Cancel entity discovery workflow
+   * POST /api/projects/{projectId}/datasources/{datasourceId}/entities/cancel
+   */
+  async cancelEntityDiscovery(
+    projectId: string,
+    datasourceId: string
+  ): Promise<ApiResponse<{ status: string }>> {
+    return this.makeRequest<{ status: string }>(
+      `/${projectId}/datasources/${datasourceId}/entities/cancel`,
+      { method: 'POST' }
+    );
   }
 
   // --- MCP Configuration Methods ---

@@ -161,6 +161,22 @@ func (s *relationshipWorkflowService) StartDetection(ctx context.Context, projec
 		return nil, fmt.Errorf("relationship detection already in progress for this datasource")
 	}
 
+	// Step 1.5: Check that entities exist (entity discovery must run first)
+	entities, err := s.entityRepo.GetByProject(ctx, projectID)
+	if err != nil {
+		s.logger.Error("Failed to check for existing entities",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return nil, fmt.Errorf("check existing entities: %w", err)
+	}
+	if len(entities) == 0 {
+		return nil, fmt.Errorf("no entities found - run entity discovery first")
+	}
+
+	s.logger.Info("Found existing entities for relationship detection",
+		zap.String("project_id", projectID.String()),
+		zap.Int("entity_count", len(entities)))
+
 	// Step 2: Get or create ontology for this project
 	// Reuse existing active ontology if one exists, otherwise create a new one
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
@@ -357,8 +373,10 @@ func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, ontolog
 		}
 	}()
 
-	// Task flow:
-	// 0. Collect column statistics (for all tables) - distinct counts, row counts, ratios
+	// Task flow (requires entities to exist from entity discovery workflow):
+	// 0. Collect column statistics - distinct counts, row counts, ratios
+	// 0.5. Filter entity candidates - identify columns likely to be entity IDs
+	// 0.75. Analyze graph connectivity - find connected components via FK
 	// 1. Scan columns (parallel) - populate workflow_state with sample values
 	// 2. Match values (single task) - create candidates from value overlap
 	// 3. Infer from names (single task) - create candidates from naming patterns
@@ -412,47 +430,16 @@ func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, ontolog
 		return
 	}
 
-	// Log summary of data available for Phase 6 (Entity Discovery LLM)
-	s.logger.Info("Data collected for entity discovery",
+	// Log summary of data collected (used for relationship analysis)
+	s.logger.Info("Data collected for relationship analysis",
 		zap.String("workflow_id", workflowID.String()),
 		zap.Int("candidate_columns", len(candidates)),
 		zap.Int("excluded_columns", len(excluded)),
 		zap.Int("connected_components", len(components)),
 		zap.Int("island_tables", len(islands)))
 
-	// Phase 6: Entity Discovery (LLM) - replaces old candidate-based analysis
-	s.logger.Info("Phase 6: Entity discovery with LLM",
-		zap.String("workflow_id", workflowID.String()))
-
-	if err := s.updateProgress(ctx, projectID, workflowID, "Discovering entities with LLM...", 15); err != nil {
-		s.logger.Error("Failed to update progress", zap.Error(err))
-	}
-
-	entityTask := NewEntityDiscoveryTask(
-		s.entityRepo,
-		s.schemaRepo,
-		s.llmFactory,
-		s.adapterFactory,
-		s.dsSvc,
-		s.getTenantCtx,
-		projectID,
-		workflowID,
-		ontologyID,
-		datasourceID,
-		candidates,
-		excluded,
-		components,
-		islands,
-		statsMap,
-		s.logger,
-	)
-	queue.Enqueue(entityTask)
-
-	if err := queue.Wait(ctx); err != nil {
-		s.logger.Error("Entity discovery failed", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("entity discovery: %v", err))
-		return
-	}
+	// Note: Entity discovery is now a separate workflow run from the Entities page.
+	// The prerequisite check in StartDetection ensures entities exist before we proceed.
 
 	// Phase 1: Scan all columns in parallel
 	s.logger.Info("Phase 1: Scanning columns",

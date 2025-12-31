@@ -1,5 +1,26 @@
 # Plan: Entity Discovery Workflow
 
+## Status: ✅ COMPLETED
+
+All implementation steps have been completed and `make check` passes.
+
+**Files Created:**
+- `pkg/services/entity_discovery_service.go` - Standalone workflow service
+- `pkg/handlers/entity_discovery_handler.go` - HTTP routes
+- `ui/src/types/entityDiscovery.ts` - TypeScript types
+- `ui/src/components/EntityDiscoveryProgress.tsx` - Progress modal
+
+**Files Modified:**
+- `pkg/models/ontology_workflow.go` - Added `WorkflowPhaseEntities` constant
+- `pkg/services/relationship_workflow.go` - Added prerequisite check for entities, removed Phase 6 (entity discovery) since it's now a standalone workflow
+- `pkg/services/relationship_workflow_test.go` - Added mock entity repository
+- `main.go` - Wired service and handler
+- `ui/src/services/engineApi.ts` - Added API methods
+- `ui/src/pages/EntitiesPage.tsx` - Added discover button and modal integration
+- `ui/src/types/index.ts` - Re-exported entity discovery types
+
+---
+
 ## Reference Files
 
 **Study these files before implementing:**
@@ -331,36 +352,36 @@ if len(entities) == 0 {
 
 ## Testing Checklist
 
-- [ ] Phase 0: Statistics collected for all selected tables
-- [ ] Phase 1: Entities created for tables with PK/unique columns
-- [ ] Phase 2: Occurrences found via FK, naming, and stats matching
-- [ ] Phase 3: LLM enrichment adds descriptions (when available)
-- [ ] Phase 4: Results persisted correctly
-- [ ] UI: Modal shows progress in real-time
-- [ ] UI: Entity list refreshes after completion
-- [ ] UI: Error states handled gracefully
-- [ ] Relationship workflow requires entities first
-- [ ] `make check` passes
+- [x] Phase 0: Statistics collected for all selected tables
+- [x] Phase 1: Entities created for tables with PK/unique columns
+- [x] Phase 2: Occurrences found via FK, naming, and stats matching
+- [x] Phase 3: LLM enrichment adds descriptions (when available)
+- [x] Phase 4: Results persisted correctly
+- [x] UI: Modal shows progress in real-time
+- [x] UI: Entity list refreshes after completion
+- [x] UI: Error states handled gracefully
+- [x] Relationship workflow requires entities first
+- [x] `make check` passes
 
 ---
 
 ## Implementation Order
 
-| Step | Description | Effort |
+| Step | Description | Status |
 |------|-------------|--------|
-| 1 | Create EntityDiscoveryService skeleton | Small |
-| 2 | Implement Phase 0-2 (deterministic) | Medium |
-| 3 | Implement Phase 3-4 (LLM + persist) | Medium |
-| 4 | Create handler + wire in main.go | Small |
-| 5-6 | TypeScript types + API methods | Small |
-| 7 | Create EntityDiscoveryProgress modal | Medium |
-| 8 | Update EntitiesPage with discover button | Small |
-| 9 | Update relationship workflow prerequisite | Small |
+| 1 | Create EntityDiscoveryService skeleton | ✅ Done |
+| 2 | Implement Phase 0-2 (deterministic) | ✅ Done |
+| 3 | Implement Phase 3-4 (LLM + persist) | ✅ Done |
+| 4 | Create handler + wire in main.go | ✅ Done |
+| 5-6 | TypeScript types + API methods | ✅ Done |
+| 7 | Create EntityDiscoveryProgress modal | ✅ Done |
+| 8 | Update EntitiesPage with discover button | ✅ Done |
+| 9 | Update relationship workflow prerequisite | ✅ Done |
 
-**Suggested batches:**
-- Backend: Steps 1-4 (service, phases, handler)
-- Frontend: Steps 5-8 (types, API, modal, page)
-- Integration: Step 9 (relationship prerequisite)
+**All batches completed:**
+- ✅ Backend: Steps 1-4 (service, phases, handler)
+- ✅ Frontend: Steps 5-8 (types, API, modal, page)
+- ✅ Integration: Step 9 (relationship prerequisite)
 
 ---
 
