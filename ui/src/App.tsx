@@ -9,6 +9,7 @@ import { DatasourceConnectionProvider } from './contexts/DatasourceConnectionCon
 import { ProjectProvider } from './contexts/ProjectContext';
 import { ToastProviderComponent } from './hooks/useToast';
 import DatasourcePage from './pages/DatasourcePage';
+import EntitiesPage from './pages/EntitiesPage';
 import HelpPage from './pages/HelpPage';
 import HomePage from './pages/HomePage';
 import MCPServerPage from './pages/MCPServerPage';
@@ -37,6 +38,7 @@ const App = (): JSX.Element => {
                   <Route path="datasource" element={<DatasourcePage />} />
                   <Route path="schema" element={<SchemaPage />} />
                   <Route path="relationships" element={<RelationshipsPage />} />
+                  <Route path="entities" element={<EntitiesPage />} />
                   <Route path="ontology" element={<OntologyPage />} />
                   <Route path="security" element={<SecurityPage />} />
                   <Route path="queries" element={<QueriesPage />} />

@@ -10,12 +10,12 @@
 | 4 | Create Entity Service | ✅ Complete |
 | 5 | Create Entity Handler | ✅ Complete |
 | 6 | Wire Up Handler in main.go | ✅ Complete |
-| 7 | Add TypeScript Types | 🔲 Next |
-| 8 | Add API Methods to engineApi.ts | 🔲 Pending |
-| 9 | Create Entities Page Component | 🔲 Pending |
-| 10 | Add Route to App.tsx | 🔲 Pending |
-| 11 | Add Entities Tile to Dashboard | 🔲 Pending |
-| 12 | Update Existing Code References | 🔲 Pending |
+| 7 | Add TypeScript Types | ✅ Complete |
+| 8 | Add API Methods to engineApi.ts | ✅ Complete |
+| 9 | Create Entities Page Component | ✅ Complete |
+| 10 | Add Route to App.tsx | ✅ Complete |
+| 11 | Add Entities Tile to Dashboard | ✅ Complete |
+| 12 | Update Existing Code References | ✅ Complete (no-op) |
 
 ### Commits (Steps 1-6)
 ```
