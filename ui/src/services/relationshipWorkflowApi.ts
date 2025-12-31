@@ -35,9 +35,10 @@ class RelationshipWorkflowApiService {
       const json = (await response.json()) as { data?: T } | T;
 
       if (!response.ok) {
-        const error = new Error(
-          `HTTP ${response.status}: ${response.statusText}`
-        ) as Error & { status?: number; data?: unknown };
+        // Extract error message from response body if available
+        const errorJson = json as { message?: string; error?: string };
+        const errorMessage = errorJson.message || errorJson.error || response.statusText;
+        const error = new Error(errorMessage) as Error & { status?: number; data?: unknown };
         error.status = response.status;
         error.data = json;
         throw error;

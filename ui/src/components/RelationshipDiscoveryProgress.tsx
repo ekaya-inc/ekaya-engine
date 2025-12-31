@@ -143,6 +143,13 @@ export const RelationshipDiscoveryProgress = ({
 
   // Handle Cancel
   const handleCancel = useCallback(async () => {
+    // If no workflow is running (e.g., start failed with error), just close the modal
+    if (!status || error) {
+      stopPolling();
+      onClose();
+      return;
+    }
+
     setIsCancelling(true);
     try {
       await relationshipWorkflowApi.cancel(projectId, datasourceId);
@@ -150,10 +157,13 @@ export const RelationshipDiscoveryProgress = ({
       onClose();
     } catch (err) {
       console.error('Failed to cancel workflow:', err);
+      // Still close on error - the workflow may not exist
+      stopPolling();
+      onClose();
     } finally {
       setIsCancelling(false);
     }
-  }, [projectId, datasourceId, stopPolling, onClose]);
+  }, [projectId, datasourceId, stopPolling, onClose, status, error]);
 
   // Handle Save
   const handleSave = useCallback(async () => {
@@ -171,12 +181,12 @@ export const RelationshipDiscoveryProgress = ({
     }
   }, [projectId, datasourceId, onComplete]);
 
-  // Start workflow when modal opens
+  // Start workflow when modal opens (only once per modal open)
   useEffect(() => {
-    if (isOpen && !workflowStarted && !status) {
+    if (isOpen && !workflowStarted && !status && saveResult === null) {
       startWorkflow();
     }
-  }, [isOpen, workflowStarted, status, startWorkflow]);
+  }, [isOpen, workflowStarted, status, startWorkflow, saveResult]);
 
   // Reset state when modal closes
   useEffect(() => {

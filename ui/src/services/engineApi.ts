@@ -205,16 +205,16 @@ class EngineApiService {
   }
 
   /**
-   * Get detailed relationships for a datasource
+   * Get entity relationships for a project
    * Returns comprehensive relationship information including type, cardinality, and approval status
-   * GET /api/projects/{projectId}/datasources/{datasourceId}/schema/relationships
+   * GET /api/projects/{projectId}/relationships
    */
   async getRelationships(
     projectId: string,
-    datasourceId: string
+    _datasourceId: string // kept for API compatibility, not used
   ): Promise<ApiResponse<RelationshipsResponse>> {
     return this.makeRequest<RelationshipsResponse>(
-      `/${projectId}/datasources/${datasourceId}/schema/relationships`
+      `/${projectId}/relationships`
     );
   }
 
