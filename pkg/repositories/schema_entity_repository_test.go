@@ -70,7 +70,7 @@ func (tc *schemaEntityTestContext) ensureTestProjectAndOntology() {
 	}
 }
 
-// cleanup removes test entities and occurrences.
+// cleanup removes test entities, occurrences, and aliases.
 func (tc *schemaEntityTestContext) cleanup() {
 	tc.t.Helper()
 	ctx := context.Background()
@@ -80,8 +80,8 @@ func (tc *schemaEntityTestContext) cleanup() {
 	}
 	defer scope.Close()
 
-	// Cascading delete will handle occurrences
-	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_schema_entities WHERE ontology_id = $1", tc.ontologyID)
+	// Cascading delete will handle occurrences and aliases
+	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontology_entities WHERE ontology_id = $1", tc.ontologyID)
 }
 
 // createTestContext returns a context with tenant scope.
@@ -723,5 +723,490 @@ func TestSchemaEntityRepository_NoTenantScope(t *testing.T) {
 	_, err = tc.repo.GetOccurrencesByTable(ctx, tc.ontologyID, "public", "test")
 	if err == nil {
 		t.Error("expected error for GetOccurrencesByTable without tenant scope")
+	}
+}
+
+// ============================================================================
+// Entity GetByID Tests
+// ============================================================================
+
+func TestSchemaEntityRepository_GetByID_Success(t *testing.T) {
+	tc := setupSchemaEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	retrieved, err := tc.repo.GetByID(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if retrieved == nil {
+		t.Fatal("expected entity to be found")
+	}
+	if retrieved.Name != "user" {
+		t.Errorf("expected name 'user', got %q", retrieved.Name)
+	}
+	if retrieved.IsDeleted {
+		t.Error("expected IsDeleted to be false for new entity")
+	}
+}
+
+func TestSchemaEntityRepository_GetByID_NotFound(t *testing.T) {
+	tc := setupSchemaEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	retrieved, err := tc.repo.GetByID(ctx, uuid.New())
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if retrieved != nil {
+		t.Error("expected nil for non-existent entity")
+	}
+}
+
+func TestSchemaEntityRepository_GetByID_ReturnsDeletedEntity(t *testing.T) {
+	tc := setupSchemaEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	// Soft delete the entity
+	err := tc.repo.SoftDelete(ctx, entity.ID, "test deletion")
+	if err != nil {
+		t.Fatalf("SoftDelete failed: %v", err)
+	}
+
+	// GetByID should still return deleted entities (for admin/restore purposes)
+	retrieved, err := tc.repo.GetByID(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if retrieved == nil {
+		t.Fatal("expected deleted entity to be found via GetByID")
+	}
+	if !retrieved.IsDeleted {
+		t.Error("expected IsDeleted to be true")
+	}
+}
+
+// ============================================================================
+// Entity Update Tests
+// ============================================================================
+
+func TestSchemaEntityRepository_Update_Success(t *testing.T) {
+	tc := setupSchemaEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+	originalUpdatedAt := entity.UpdatedAt
+
+	entity.Description = "Updated description"
+	entity.PrimaryTable = "app_users"
+
+	err := tc.repo.Update(ctx, entity)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	if entity.UpdatedAt.Equal(originalUpdatedAt) {
+		t.Error("expected UpdatedAt to be updated")
+	}
+
+	// Verify by fetching
+	retrieved, err := tc.repo.GetByID(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if retrieved.Description != "Updated description" {
+		t.Errorf("expected description 'Updated description', got %q", retrieved.Description)
+	}
+	if retrieved.PrimaryTable != "app_users" {
+		t.Errorf("expected primary_table 'app_users', got %q", retrieved.PrimaryTable)
+	}
+}
+
+// ============================================================================
+// Soft Delete Tests
+// ============================================================================
+
+func TestSchemaEntityRepository_SoftDelete_Success(t *testing.T) {
+	tc := setupSchemaEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	err := tc.repo.SoftDelete(ctx, entity.ID, "Not relevant to this domain")
+	if err != nil {
+		t.Fatalf("SoftDelete failed: %v", err)
+	}
+
+	// Verify entity is soft deleted
+	retrieved, err := tc.repo.GetByID(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if !retrieved.IsDeleted {
+		t.Error("expected IsDeleted to be true")
+	}
+	if retrieved.DeletionReason == nil || *retrieved.DeletionReason != "Not relevant to this domain" {
+		t.Errorf("expected deletion reason 'Not relevant to this domain', got %v", retrieved.DeletionReason)
+	}
+}
+
+func TestSchemaEntityRepository_SoftDelete_FilteredFromGetByOntology(t *testing.T) {
+	tc := setupSchemaEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	tc.createTestEntity(ctx, "user")
+	account := tc.createTestEntity(ctx, "account")
+	tc.createTestEntity(ctx, "order")
+
+	// Soft delete account
+	err := tc.repo.SoftDelete(ctx, account.ID, "test")
+	if err != nil {
+		t.Fatalf("SoftDelete failed: %v", err)
+	}
+
+	// GetByOntology should not return deleted entity
+	entities, err := tc.repo.GetByOntology(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("GetByOntology failed: %v", err)
+	}
+	if len(entities) != 2 {
+		t.Errorf("expected 2 entities (excluding deleted), got %d", len(entities))
+	}
+	for _, e := range entities {
+		if e.Name == "account" {
+			t.Error("deleted entity 'account' should not be returned")
+		}
+	}
+}
+
+func TestSchemaEntityRepository_SoftDelete_FilteredFromGetByName(t *testing.T) {
+	tc := setupSchemaEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	// Soft delete
+	err := tc.repo.SoftDelete(ctx, entity.ID, "test")
+	if err != nil {
+		t.Fatalf("SoftDelete failed: %v", err)
+	}
+
+	// GetByName should not find deleted entity
+	retrieved, err := tc.repo.GetByName(ctx, tc.ontologyID, "user")
+	if err != nil {
+		t.Fatalf("GetByName failed: %v", err)
+	}
+	if retrieved != nil {
+		t.Error("expected nil for soft-deleted entity via GetByName")
+	}
+}
+
+// ============================================================================
+// Restore Tests
+// ============================================================================
+
+func TestSchemaEntityRepository_Restore_Success(t *testing.T) {
+	tc := setupSchemaEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	// Soft delete
+	err := tc.repo.SoftDelete(ctx, entity.ID, "test deletion")
+	if err != nil {
+		t.Fatalf("SoftDelete failed: %v", err)
+	}
+
+	// Restore
+	err = tc.repo.Restore(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("Restore failed: %v", err)
+	}
+
+	// Verify entity is restored
+	retrieved, err := tc.repo.GetByID(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if retrieved.IsDeleted {
+		t.Error("expected IsDeleted to be false after restore")
+	}
+	if retrieved.DeletionReason != nil {
+		t.Error("expected DeletionReason to be nil after restore")
+	}
+
+	// Should be visible in GetByName again
+	byName, err := tc.repo.GetByName(ctx, tc.ontologyID, "user")
+	if err != nil {
+		t.Fatalf("GetByName failed: %v", err)
+	}
+	if byName == nil {
+		t.Error("expected restored entity to be findable via GetByName")
+	}
+}
+
+// ============================================================================
+// Alias CreateAlias Tests
+// ============================================================================
+
+func TestSchemaEntityRepository_CreateAlias_Success(t *testing.T) {
+	tc := setupSchemaEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	source := "user"
+	alias := &models.OntologyEntityAlias{
+		EntityID: entity.ID,
+		Alias:    "customer",
+		Source:   &source,
+	}
+
+	err := tc.repo.CreateAlias(ctx, alias)
+	if err != nil {
+		t.Fatalf("CreateAlias failed: %v", err)
+	}
+
+	if alias.ID == uuid.Nil {
+		t.Error("expected ID to be set")
+	}
+	if alias.CreatedAt.IsZero() {
+		t.Error("expected CreatedAt to be set")
+	}
+
+	// Verify by fetching
+	aliases, err := tc.repo.GetAliasesByEntity(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("GetAliasesByEntity failed: %v", err)
+	}
+	if len(aliases) != 1 {
+		t.Fatalf("expected 1 alias, got %d", len(aliases))
+	}
+	if aliases[0].Alias != "customer" {
+		t.Errorf("expected alias 'customer', got %q", aliases[0].Alias)
+	}
+	if aliases[0].Source == nil || *aliases[0].Source != "user" {
+		t.Errorf("expected source 'user', got %v", aliases[0].Source)
+	}
+}
+
+func TestSchemaEntityRepository_CreateAlias_DuplicateAlias(t *testing.T) {
+	tc := setupSchemaEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	alias1 := &models.OntologyEntityAlias{
+		EntityID: entity.ID,
+		Alias:    "customer",
+	}
+	err := tc.repo.CreateAlias(ctx, alias1)
+	if err != nil {
+		t.Fatalf("CreateAlias failed: %v", err)
+	}
+
+	// Try to create duplicate
+	alias2 := &models.OntologyEntityAlias{
+		EntityID: entity.ID,
+		Alias:    "customer",
+	}
+	err = tc.repo.CreateAlias(ctx, alias2)
+	if err == nil {
+		t.Error("expected error for duplicate alias")
+	}
+}
+
+func TestSchemaEntityRepository_CreateAlias_NullSource(t *testing.T) {
+	tc := setupSchemaEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	alias := &models.OntologyEntityAlias{
+		EntityID: entity.ID,
+		Alias:    "person",
+		Source:   nil,
+	}
+
+	err := tc.repo.CreateAlias(ctx, alias)
+	if err != nil {
+		t.Fatalf("CreateAlias failed: %v", err)
+	}
+
+	aliases, err := tc.repo.GetAliasesByEntity(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("GetAliasesByEntity failed: %v", err)
+	}
+	if len(aliases) != 1 {
+		t.Fatalf("expected 1 alias, got %d", len(aliases))
+	}
+	if aliases[0].Source != nil {
+		t.Errorf("expected nil source, got %v", aliases[0].Source)
+	}
+}
+
+// ============================================================================
+// Alias GetAliasesByEntity Tests
+// ============================================================================
+
+func TestSchemaEntityRepository_GetAliasesByEntity_Multiple(t *testing.T) {
+	tc := setupSchemaEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	// Create multiple aliases
+	aliases := []string{"customer", "member", "person"}
+	for _, a := range aliases {
+		err := tc.repo.CreateAlias(ctx, &models.OntologyEntityAlias{
+			EntityID: entity.ID,
+			Alias:    a,
+		})
+		if err != nil {
+			t.Fatalf("CreateAlias failed: %v", err)
+		}
+	}
+
+	retrieved, err := tc.repo.GetAliasesByEntity(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("GetAliasesByEntity failed: %v", err)
+	}
+	if len(retrieved) != 3 {
+		t.Fatalf("expected 3 aliases, got %d", len(retrieved))
+	}
+
+	// Should be sorted by alias
+	if retrieved[0].Alias != "customer" || retrieved[1].Alias != "member" || retrieved[2].Alias != "person" {
+		t.Errorf("expected aliases sorted (customer, member, person), got (%s, %s, %s)",
+			retrieved[0].Alias, retrieved[1].Alias, retrieved[2].Alias)
+	}
+}
+
+func TestSchemaEntityRepository_GetAliasesByEntity_Empty(t *testing.T) {
+	tc := setupSchemaEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	aliases, err := tc.repo.GetAliasesByEntity(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("GetAliasesByEntity failed: %v", err)
+	}
+	if len(aliases) != 0 {
+		t.Errorf("expected 0 aliases, got %d", len(aliases))
+	}
+}
+
+// ============================================================================
+// Alias DeleteAlias Tests
+// ============================================================================
+
+func TestSchemaEntityRepository_DeleteAlias_Success(t *testing.T) {
+	tc := setupSchemaEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	alias := &models.OntologyEntityAlias{
+		EntityID: entity.ID,
+		Alias:    "customer",
+	}
+	err := tc.repo.CreateAlias(ctx, alias)
+	if err != nil {
+		t.Fatalf("CreateAlias failed: %v", err)
+	}
+
+	// Delete the alias
+	err = tc.repo.DeleteAlias(ctx, alias.ID)
+	if err != nil {
+		t.Fatalf("DeleteAlias failed: %v", err)
+	}
+
+	// Verify alias is deleted
+	aliases, err := tc.repo.GetAliasesByEntity(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("GetAliasesByEntity failed: %v", err)
+	}
+	if len(aliases) != 0 {
+		t.Errorf("expected 0 aliases after delete, got %d", len(aliases))
+	}
+}
+
+func TestSchemaEntityRepository_DeleteAlias_CascadeOnEntityDelete(t *testing.T) {
+	tc := setupSchemaEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	alias := &models.OntologyEntityAlias{
+		EntityID: entity.ID,
+		Alias:    "customer",
+	}
+	err := tc.repo.CreateAlias(ctx, alias)
+	if err != nil {
+		t.Fatalf("CreateAlias failed: %v", err)
+	}
+
+	// Delete entity should cascade to aliases
+	err = tc.repo.DeleteByOntology(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("DeleteByOntology failed: %v", err)
+	}
+
+	// Verify aliases are deleted
+	aliases, err := tc.repo.GetAliasesByEntity(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("GetAliasesByEntity failed: %v", err)
+	}
+	if len(aliases) != 0 {
+		t.Errorf("expected 0 aliases after entity delete, got %d", len(aliases))
 	}
 }
