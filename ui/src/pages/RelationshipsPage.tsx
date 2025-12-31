@@ -346,7 +346,7 @@ const RelationshipsPage = () => {
           Relationship Manager
         </h1>
         <p className="mt-2 text-text-secondary">
-          View and manage relationships between tables in your datasource
+          View and Manage Relationships between Entities in your Ontology
         </p>
       </div>
 

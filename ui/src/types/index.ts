@@ -13,3 +13,5 @@ export * from './query';
 export * from './ai';
 export * from './mcp';
 export * from './relationshipWorkflow';
+export * from './entity';
+export * from './entityDiscovery';

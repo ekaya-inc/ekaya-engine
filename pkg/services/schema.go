@@ -59,10 +59,15 @@ type SchemaService interface {
 
 	// GetDatasourceSchemaForPrompt returns schema formatted for LLM context.
 	GetDatasourceSchemaForPrompt(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error)
+
+	// GetDatasourceSchemaWithEntities returns schema enriched with entity/role semantic information.
+	// This includes entity names and roles for columns that represent domain entities.
+	GetDatasourceSchemaWithEntities(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error)
 }
 
 type schemaService struct {
 	schemaRepo     repositories.SchemaRepository
+	entityRepo     repositories.OntologyEntityRepository
 	datasourceSvc  DatasourceService
 	adapterFactory datasource.DatasourceAdapterFactory
 	logger         *zap.Logger
@@ -71,12 +76,14 @@ type schemaService struct {
 // NewSchemaService creates a new schema service with dependencies.
 func NewSchemaService(
 	schemaRepo repositories.SchemaRepository,
+	entityRepo repositories.OntologyEntityRepository,
 	datasourceSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	logger *zap.Logger,
 ) SchemaService {
 	return &schemaService{
 		schemaRepo:     schemaRepo,
+		entityRepo:     entityRepo,
 		datasourceSvc:  datasourceSvc,
 		adapterFactory: adapterFactory,
 		logger:         logger,
@@ -866,6 +873,186 @@ func (s *schemaService) GetDatasourceSchemaForPrompt(ctx context.Context, projec
 			sb.WriteString(rel.TargetTableName)
 			sb.WriteString(".")
 			sb.WriteString(rel.TargetColumnName)
+			if rel.Cardinality != "" && rel.Cardinality != "unknown" {
+				sb.WriteString(" (")
+				sb.WriteString(rel.Cardinality)
+				sb.WriteString(")")
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	return sb.String(), nil
+}
+
+// GetDatasourceSchemaWithEntities returns schema enriched with entity/role semantic information.
+func (s *schemaService) GetDatasourceSchemaWithEntities(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error) {
+	// Get base schema
+	var schema *models.DatasourceSchema
+	var err error
+
+	if selectedOnly {
+		schema, err = s.GetSelectedDatasourceSchema(ctx, projectID, datasourceID)
+	} else {
+		schema, err = s.GetDatasourceSchema(ctx, projectID, datasourceID)
+	}
+	if err != nil {
+		return "", err
+	}
+
+	// Get entities and occurrences for the project (from active ontology)
+	entities, err := s.entityRepo.GetByProject(ctx, projectID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get entities: %w", err)
+	}
+
+	occurrences, err := s.entityRepo.GetAllOccurrencesByProject(ctx, projectID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get entity occurrences: %w", err)
+	}
+
+	// Build entity lookup maps
+	entityByID := make(map[uuid.UUID]*models.OntologyEntity)
+	for _, e := range entities {
+		entityByID[e.ID] = e
+	}
+
+	// Build occurrence lookup map: schema.table.column -> []occurrence
+	occurrencesByColumn := make(map[string][]*models.OntologyEntityOccurrence)
+	for _, occ := range occurrences {
+		key := fmt.Sprintf("%s.%s.%s", occ.SchemaName, occ.TableName, occ.ColumnName)
+		occurrencesByColumn[key] = append(occurrencesByColumn[key], occ)
+	}
+
+	// Build schema context with entity information
+	var sb strings.Builder
+	sb.WriteString("DATABASE SCHEMA WITH ENTITY SEMANTICS:\n")
+	sb.WriteString("=====================================\n\n")
+
+	// First, list all entities
+	if len(entities) > 0 {
+		sb.WriteString("DOMAIN ENTITIES:\n")
+		for _, entity := range entities {
+			sb.WriteString(fmt.Sprintf("  - %s: %s\n", entity.Name, entity.Description))
+			sb.WriteString(fmt.Sprintf("    Primary location: %s.%s.%s\n",
+				entity.PrimarySchema, entity.PrimaryTable, entity.PrimaryColumn))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Then list tables with entity annotations
+	for _, table := range schema.Tables {
+		sb.WriteString("\nTable: ")
+		sb.WriteString(table.SchemaName)
+		sb.WriteString(".")
+		sb.WriteString(table.TableName)
+		sb.WriteString("\n")
+
+		if table.Description != "" {
+			sb.WriteString("Description: ")
+			sb.WriteString(table.Description)
+			sb.WriteString("\n")
+		}
+
+		if table.RowCount > 0 {
+			sb.WriteString(fmt.Sprintf("Row count: %d\n", table.RowCount))
+		}
+
+		sb.WriteString("Columns:\n")
+		for _, col := range table.Columns {
+			sb.WriteString("  - ")
+			sb.WriteString(col.ColumnName)
+			sb.WriteString(": ")
+			sb.WriteString(col.DataType)
+
+			// Add column attributes
+			attrs := make([]string, 0)
+			if col.IsPrimaryKey {
+				attrs = append(attrs, "PRIMARY KEY")
+			}
+			if !col.IsNullable {
+				attrs = append(attrs, "NOT NULL")
+			}
+			if len(attrs) > 0 {
+				sb.WriteString(" [")
+				sb.WriteString(strings.Join(attrs, ", "))
+				sb.WriteString("]")
+			}
+
+			// Add entity/role information
+			columnKey := fmt.Sprintf("%s.%s.%s", table.SchemaName, table.TableName, col.ColumnName)
+			if occs, ok := occurrencesByColumn[columnKey]; ok {
+				sb.WriteString(" => ")
+				entityAnnotations := make([]string, 0, len(occs))
+				for _, occ := range occs {
+					if entity, found := entityByID[occ.EntityID]; found {
+						if occ.Role != nil && *occ.Role != "" {
+							entityAnnotations = append(entityAnnotations,
+								fmt.Sprintf("%s (role: %s)", entity.Name, *occ.Role))
+						} else {
+							entityAnnotations = append(entityAnnotations, entity.Name)
+						}
+					}
+				}
+				sb.WriteString(strings.Join(entityAnnotations, ", "))
+			}
+
+			sb.WriteString("\n")
+		}
+	}
+
+	// Add relationships with entity context
+	if len(schema.Relationships) > 0 {
+		sb.WriteString("\nRELATIONSHIPS (with entity context):\n")
+		for _, rel := range schema.Relationships {
+			sb.WriteString("  ")
+			sb.WriteString(rel.SourceTableName)
+			sb.WriteString(".")
+			sb.WriteString(rel.SourceColumnName)
+
+			// Add entity info for source
+			var sourceKey string
+			if idx := strings.Index(rel.SourceTableName, "."); idx != -1 {
+				sourceKey = fmt.Sprintf("%s.%s.%s", rel.SourceTableName[:idx],
+					rel.SourceTableName[idx+1:], rel.SourceColumnName)
+			} else {
+				sourceKey = fmt.Sprintf("public.%s.%s", rel.SourceTableName, rel.SourceColumnName)
+			}
+
+			if occs, ok := occurrencesByColumn[sourceKey]; ok && len(occs) > 0 {
+				if entity, found := entityByID[occs[0].EntityID]; found {
+					if occs[0].Role != nil && *occs[0].Role != "" {
+						sb.WriteString(fmt.Sprintf(" [%s as %s]", entity.Name, *occs[0].Role))
+					} else {
+						sb.WriteString(fmt.Sprintf(" [%s]", entity.Name))
+					}
+				}
+			}
+
+			sb.WriteString(" -> ")
+			sb.WriteString(rel.TargetTableName)
+			sb.WriteString(".")
+			sb.WriteString(rel.TargetColumnName)
+
+			// Add entity info for target
+			var targetKey string
+			if idx := strings.Index(rel.TargetTableName, "."); idx != -1 {
+				targetKey = fmt.Sprintf("%s.%s.%s", rel.TargetTableName[:idx],
+					rel.TargetTableName[idx+1:], rel.TargetColumnName)
+			} else {
+				targetKey = fmt.Sprintf("public.%s.%s", rel.TargetTableName, rel.TargetColumnName)
+			}
+
+			if occs, ok := occurrencesByColumn[targetKey]; ok && len(occs) > 0 {
+				if entity, found := entityByID[occs[0].EntityID]; found {
+					if occs[0].Role != nil && *occs[0].Role != "" {
+						sb.WriteString(fmt.Sprintf(" [%s as %s]", entity.Name, *occs[0].Role))
+					} else {
+						sb.WriteString(fmt.Sprintf(" [%s]", entity.Name))
+					}
+				}
+			}
+
 			if rel.Cardinality != "" && rel.Cardinality != "unknown" {
 				sb.WriteString(" (")
 				sb.WriteString(rel.Cardinality)

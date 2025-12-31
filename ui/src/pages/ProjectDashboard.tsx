@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
+  Boxes,
   Brain,
   Check,
   ChevronDown,
@@ -398,6 +399,13 @@ const ProjectDashboard = () => {
   ];
 
   const intelligenceTiles: Tile[] = [
+    {
+      title: 'Entities',
+      icon: Boxes,
+      path: `/projects/${pid}/entities`,
+      disabled: !isConnected || !hasSelectedTables, // Disabled if no datasource or no tables (entities are database-derived, not AI-derived)
+      color: 'green',
+    },
     {
       title: 'Relationships',
       icon: Network,

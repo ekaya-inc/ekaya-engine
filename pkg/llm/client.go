@@ -70,6 +70,9 @@ func (c *Client) GenerateResponse(
 		zap.Float64("temperature", temperature),
 		zap.Bool("thinking", thinking))
 
+	// Write request file before LLM call (debug builds only)
+	debugPrefix := debugWriteRequest(systemMessage, prompt, c.model)
+
 	start := time.Now()
 
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
@@ -100,6 +103,9 @@ func (c *Client) GenerateResponse(
 		zap.Int("prompt_tokens", resp.Usage.PromptTokens),
 		zap.Int("completion_tokens", resp.Usage.CompletionTokens),
 		zap.Duration("elapsed", elapsed))
+
+	// Write response file after LLM call (debug builds only)
+	debugWriteResponse(debugPrefix, content, elapsed.Milliseconds())
 
 	return &GenerateResponseResult{
 		Content:          content,

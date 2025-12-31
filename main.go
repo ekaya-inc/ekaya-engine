@@ -139,6 +139,8 @@ func main() {
 	workflowStateRepo := repositories.NewWorkflowStateRepository()
 	ontologyQuestionRepo := repositories.NewOntologyQuestionRepository()
 	relationshipCandidateRepo := repositories.NewRelationshipCandidateRepository()
+	ontologyEntityRepo := repositories.NewOntologyEntityRepository()
+	entityRelationshipRepo := repositories.NewEntityRelationshipRepository()
 
 	// Create connection manager with config-driven settings
 	connManagerCfg := datasource.ConnectionManagerConfig{
@@ -160,7 +162,7 @@ func main() {
 	projectService := services.NewProjectService(db, projectRepo, userRepo, redisClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, projectService, logger)
-	schemaService := services.NewSchemaService(schemaRepo, datasourceService, adapterFactory, logger)
+	schemaService := services.NewSchemaService(schemaRepo, ontologyEntityRepo, datasourceService, adapterFactory, logger)
 	discoveryService := services.NewRelationshipDiscoveryService(schemaRepo, datasourceService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
@@ -190,9 +192,15 @@ func main() {
 	ontologyChatService := services.NewOntologyChatService(
 		ontologyChatRepo, ontologyRepo, knowledgeRepo,
 		schemaRepo, ontologyWorkflowRepo, workflowStateRepo, llmFactory, datasourceService, adapterFactory, logger)
+	deterministicRelationshipService := services.NewDeterministicRelationshipService(
+		datasourceService, adapterFactory, ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo)
 	relationshipWorkflowService := services.NewRelationshipWorkflowService(
-		ontologyWorkflowRepo, relationshipCandidateRepo, schemaRepo, workflowStateRepo,
-		datasourceService, adapterFactory, llmFactory, discoveryService, getTenantCtx, logger)
+		ontologyWorkflowRepo, relationshipCandidateRepo, schemaRepo, workflowStateRepo, ontologyRepo, ontologyEntityRepo,
+		datasourceService, adapterFactory, llmFactory, discoveryService, deterministicRelationshipService, getTenantCtx, logger)
+	entityService := services.NewEntityService(ontologyEntityRepo, ontologyRepo, logger)
+	entityDiscoveryService := services.NewEntityDiscoveryService(
+		ontologyWorkflowRepo, ontologyEntityRepo, schemaRepo, ontologyRepo,
+		datasourceService, adapterFactory, llmFactory, getTenantCtx, logger)
 
 	mux := http.NewServeMux()
 
@@ -246,6 +254,16 @@ func main() {
 		Logger:           logger,
 	}
 	mcptools.RegisterApprovedQueriesTools(mcpServer.MCP(), queryToolDeps)
+
+	// Register schema tools for entity/role semantic context
+	schemaToolDeps := &mcptools.SchemaToolDeps{
+		DB:             db,
+		ProjectService: projectService,
+		SchemaService:  schemaService,
+		Logger:         logger,
+	}
+	mcptools.RegisterSchemaTools(mcpServer.MCP(), schemaToolDeps)
+
 	mcpHandler := handlers.NewMCPHandler(mcpServer, logger)
 	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, logger)
 	mcpHandler.RegisterRoutes(mux, mcpAuthMiddleware)
@@ -300,6 +318,19 @@ func main() {
 	relationshipWorkflowHandler := handlers.NewRelationshipWorkflowHandler(
 		relationshipWorkflowService, logger)
 	relationshipWorkflowHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register entity handler (protected)
+	entityHandler := handlers.NewEntityHandler(entityService, logger)
+	entityHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register entity discovery handler (protected)
+	entityDiscoveryHandler := handlers.NewEntityDiscoveryHandler(entityDiscoveryService, logger)
+	entityDiscoveryHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register entity relationship handler (protected)
+	entityRelationshipHandler := handlers.NewEntityRelationshipHandler(
+		deterministicRelationshipService, entityRelationshipRepo, logger)
+	entityRelationshipHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"

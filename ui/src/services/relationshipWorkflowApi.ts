@@ -8,6 +8,7 @@ import type {
   CancelWorkflowResponse,
   CandidateResponse,
   CandidatesResponse,
+  EntitiesResponse,
   RelationshipWorkflowStatusResponse,
   SaveRelationshipsResponse,
   StartDetectionResponse,
@@ -34,9 +35,10 @@ class RelationshipWorkflowApiService {
       const json = (await response.json()) as { data?: T } | T;
 
       if (!response.ok) {
-        const error = new Error(
-          `HTTP ${response.status}: ${response.statusText}`
-        ) as Error & { status?: number; data?: unknown };
+        // Extract error message from response body if available
+        const errorJson = json as { message?: string; error?: string };
+        const errorMessage = errorJson.message || errorJson.error || response.statusText;
+        const error = new Error(errorMessage) as Error & { status?: number; data?: unknown };
         error.status = response.status;
         error.data = json;
         throw error;
@@ -141,6 +143,19 @@ class RelationshipWorkflowApiService {
     return this.makeRequest<SaveRelationshipsResponse>(
       `/${projectId}/datasources/${datasourceId}/relationships/save`,
       { method: 'POST' }
+    );
+  }
+
+  /**
+   * Get discovered entities with their occurrences
+   * GET /api/projects/{pid}/datasources/{dsid}/relationships/entities
+   */
+  async getEntities(
+    projectId: string,
+    datasourceId: string
+  ): Promise<EntitiesResponse> {
+    return this.makeRequest<EntitiesResponse>(
+      `/${projectId}/datasources/${datasourceId}/relationships/entities`
     );
   }
 }

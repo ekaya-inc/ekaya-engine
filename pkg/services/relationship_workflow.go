@@ -18,10 +18,13 @@ import (
 
 // CandidateCounts holds counts of candidates by status.
 type CandidateCounts struct {
-	Confirmed   int
-	NeedsReview int
-	Rejected    int
-	CanSave     bool
+	Confirmed       int
+	NeedsReview     int
+	Rejected        int
+	EntityCount     int
+	OccurrenceCount int
+	IslandCount     int
+	CanSave         bool
 }
 
 // CandidatesGrouped holds candidates grouped by status.
@@ -29,6 +32,12 @@ type CandidatesGrouped struct {
 	Confirmed   []*models.RelationshipCandidate
 	NeedsReview []*models.RelationshipCandidate
 	Rejected    []*models.RelationshipCandidate
+}
+
+// EntityWithOccurrences represents a discovered entity with its occurrences.
+type EntityWithOccurrences struct {
+	Entity      *models.OntologyEntity
+	Occurrences []*models.OntologyEntityOccurrence
 }
 
 // RelationshipWorkflowService provides operations for relationship discovery workflow management.
@@ -47,6 +56,9 @@ type RelationshipWorkflowService interface {
 
 	// GetCandidatesGrouped returns candidates grouped by status for a datasource.
 	GetCandidatesGrouped(ctx context.Context, datasourceID uuid.UUID) (*CandidatesGrouped, error)
+
+	// GetEntitiesWithOccurrences returns discovered entities with their occurrences for a datasource.
+	GetEntitiesWithOccurrences(ctx context.Context, datasourceID uuid.UUID) ([]*EntityWithOccurrences, error)
 
 	// UpdateCandidateDecision updates a candidate's decision, verifying it belongs to the datasource.
 	UpdateCandidateDecision(ctx context.Context, datasourceID, candidateID uuid.UUID, decision string) (*models.RelationshipCandidate, error)
@@ -78,20 +90,23 @@ type relationshipHeartbeatInfo struct {
 }
 
 type relationshipWorkflowService struct {
-	workflowRepo     repositories.OntologyWorkflowRepository
-	candidateRepo    repositories.RelationshipCandidateRepository
-	schemaRepo       repositories.SchemaRepository
-	stateRepo        repositories.WorkflowStateRepository
-	dsSvc            DatasourceService
-	adapterFactory   datasource.DatasourceAdapterFactory
-	llmFactory       llm.LLMClientFactory
-	discoveryService RelationshipDiscoveryService
-	getTenantCtx     TenantContextFunc
-	logger           *zap.Logger
-	serverInstanceID uuid.UUID
-	activeQueues     sync.Map // workflowID -> *workqueue.Queue
-	taskQueueWriters sync.Map // workflowID -> *taskQueueWriter
-	heartbeatStop    sync.Map // workflowID -> *relationshipHeartbeatInfo
+	workflowRepo         repositories.OntologyWorkflowRepository
+	candidateRepo        repositories.RelationshipCandidateRepository
+	schemaRepo           repositories.SchemaRepository
+	stateRepo            repositories.WorkflowStateRepository
+	ontologyRepo         repositories.OntologyRepository
+	entityRepo           repositories.OntologyEntityRepository
+	dsSvc                DatasourceService
+	adapterFactory       datasource.DatasourceAdapterFactory
+	llmFactory           llm.LLMClientFactory
+	discoveryService     RelationshipDiscoveryService
+	deterministicService DeterministicRelationshipService
+	getTenantCtx         TenantContextFunc
+	logger               *zap.Logger
+	serverInstanceID     uuid.UUID
+	activeQueues         sync.Map // workflowID -> *workqueue.Queue
+	taskQueueWriters     sync.Map // workflowID -> *taskQueueWriter
+	heartbeatStop        sync.Map // workflowID -> *relationshipHeartbeatInfo
 }
 
 // NewRelationshipWorkflowService creates a new relationship workflow service.
@@ -100,10 +115,13 @@ func NewRelationshipWorkflowService(
 	candidateRepo repositories.RelationshipCandidateRepository,
 	schemaRepo repositories.SchemaRepository,
 	stateRepo repositories.WorkflowStateRepository,
+	ontologyRepo repositories.OntologyRepository,
+	entityRepo repositories.OntologyEntityRepository,
 	dsSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
 	discoveryService RelationshipDiscoveryService,
+	deterministicService DeterministicRelationshipService,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) RelationshipWorkflowService {
@@ -112,17 +130,20 @@ func NewRelationshipWorkflowService(
 	namedLogger.Info("Relationship workflow service initialized", zap.String("server_instance_id", serverID.String()))
 
 	return &relationshipWorkflowService{
-		workflowRepo:     workflowRepo,
-		candidateRepo:    candidateRepo,
-		schemaRepo:       schemaRepo,
-		stateRepo:        stateRepo,
-		dsSvc:            dsSvc,
-		adapterFactory:   adapterFactory,
-		llmFactory:       llmFactory,
-		discoveryService: discoveryService,
-		getTenantCtx:     getTenantCtx,
-		logger:           namedLogger,
-		serverInstanceID: serverID,
+		workflowRepo:         workflowRepo,
+		candidateRepo:        candidateRepo,
+		schemaRepo:           schemaRepo,
+		stateRepo:            stateRepo,
+		ontologyRepo:         ontologyRepo,
+		entityRepo:           entityRepo,
+		dsSvc:                dsSvc,
+		adapterFactory:       adapterFactory,
+		llmFactory:           llmFactory,
+		discoveryService:     discoveryService,
+		deterministicService: deterministicService,
+		getTenantCtx:         getTenantCtx,
+		logger:               namedLogger,
+		serverInstanceID:     serverID,
 	}
 }
 
@@ -143,27 +164,68 @@ func (s *relationshipWorkflowService) StartDetection(ctx context.Context, projec
 		return nil, fmt.Errorf("relationship detection already in progress for this datasource")
 	}
 
-	// Step 2: Create a temporary ontology for this workflow
-	// We need an ontology ID for the workflow, but this won't be the "real" ontology
-	// until the ontology phase runs later
-	ontology := &models.TieredOntology{
-		ID:              uuid.New(),
-		ProjectID:       projectID,
-		Version:         0, // Temporary version, will be replaced by actual ontology
-		IsActive:        false,
-		EntitySummaries: make(map[string]*models.EntitySummary),
-		ColumnDetails:   make(map[string][]models.ColumnDetail),
-		Metadata:        make(map[string]any),
-	}
-
-	// Create temporary ontology - this is just a placeholder for the workflow
-	// The actual ontology will be created during the ontology phase
-	ontologyRepo := repositories.NewOntologyRepository()
-	if err := ontologyRepo.Create(ctx, ontology); err != nil {
-		s.logger.Error("Failed to create temporary ontology",
+	// Step 1.5: Check that entities exist (entity discovery must run first)
+	entities, err := s.entityRepo.GetByProject(ctx, projectID)
+	if err != nil {
+		s.logger.Error("Failed to check for existing entities",
 			zap.String("project_id", projectID.String()),
 			zap.Error(err))
-		return nil, err
+		return nil, fmt.Errorf("check existing entities: %w", err)
+	}
+	if len(entities) == 0 {
+		return nil, fmt.Errorf("no entities found - run entity discovery first")
+	}
+
+	s.logger.Info("Found existing entities for relationship detection",
+		zap.String("project_id", projectID.String()),
+		zap.Int("entity_count", len(entities)))
+
+	// Step 2: Get or create ontology for this project
+	// Reuse existing active ontology if one exists, otherwise create a new one
+	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	if err != nil {
+		s.logger.Error("Failed to check for existing ontology",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return nil, fmt.Errorf("check existing ontology: %w", err)
+	}
+
+	if ontology == nil {
+		// No active ontology exists - create one
+		nextVersion, err := s.ontologyRepo.GetNextVersion(ctx, projectID)
+		if err != nil {
+			s.logger.Error("Failed to get next ontology version",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			return nil, fmt.Errorf("get next version: %w", err)
+		}
+
+		ontology = &models.TieredOntology{
+			ID:              uuid.New(),
+			ProjectID:       projectID,
+			Version:         nextVersion,
+			IsActive:        true,
+			EntitySummaries: make(map[string]*models.EntitySummary),
+			ColumnDetails:   make(map[string][]models.ColumnDetail),
+			Metadata:        make(map[string]any),
+		}
+
+		if err := s.ontologyRepo.Create(ctx, ontology); err != nil {
+			s.logger.Error("Failed to create ontology",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			return nil, fmt.Errorf("failed to create ontology: %w", err)
+		}
+
+		s.logger.Info("Created new ontology for relationship detection",
+			zap.String("project_id", projectID.String()),
+			zap.String("ontology_id", ontology.ID.String()),
+			zap.Int("version", nextVersion))
+	} else {
+		s.logger.Info("Reusing existing ontology for relationship detection",
+			zap.String("project_id", projectID.String()),
+			zap.String("ontology_id", ontology.ID.String()),
+			zap.Int("version", ontology.Version))
 	}
 
 	// Step 3: Create workflow for relationships phase
@@ -285,14 +347,14 @@ func (s *relationshipWorkflowService) StartDetection(ctx context.Context, projec
 	})
 
 	// Run workflow in background - HTTP request returns immediately
-	go s.runWorkflow(projectID, workflow.ID, datasourceID, queue)
+	go s.runWorkflow(projectID, workflow.ID, ontology.ID, datasourceID, queue)
 
 	return workflow, nil
 }
 
 // runWorkflow orchestrates the relationship detection phases.
 // Runs in a background goroutine - acquires its own DB connection.
-func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, datasourceID uuid.UUID, queue *workqueue.Queue) {
+func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, ontologyID, datasourceID uuid.UUID, queue *workqueue.Queue) {
 	// Clean up when done
 	defer s.activeQueues.Delete(workflowID)
 	defer s.stopTaskQueueWriter(workflowID)
@@ -314,7 +376,10 @@ func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, datasou
 		}
 	}()
 
-	// Task flow:
+	// Task flow (requires entities to exist from entity discovery workflow):
+	// 0. Collect column statistics - distinct counts, row counts, ratios
+	// 0.5. Filter entity candidates - identify columns likely to be entity IDs
+	// 0.75. Analyze graph connectivity - find connected components via FK
 	// 1. Scan columns (parallel) - populate workflow_state with sample values
 	// 2. Match values (single task) - create candidates from value overlap
 	// 3. Infer from names (single task) - create candidates from naming patterns
@@ -323,123 +388,207 @@ func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, datasou
 
 	ctx := context.Background()
 
-	// Phase 1: Scan all columns in parallel
-	s.logger.Info("Phase 1: Scanning columns",
+	// Phase 0: Collect column statistics for all tables
+	s.logger.Info("Phase 0: Collecting column statistics",
 		zap.String("workflow_id", workflowID.String()))
 
-	if err := s.updateProgress(ctx, projectID, workflowID, "Scanning columns...", 10); err != nil {
+	if err := s.updateProgress(ctx, projectID, workflowID, "Collecting column statistics...", 5); err != nil {
 		s.logger.Error("Failed to update progress", zap.Error(err))
 	}
 
-	if err := s.enqueueColumnScans(ctx, projectID, workflowID, datasourceID, queue); err != nil {
-		s.logger.Error("Failed to enqueue column scan tasks", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("column scan: %v", err))
+	statsMap, err := s.collectColumnStatistics(ctx, projectID, workflowID, datasourceID)
+	if err != nil {
+		s.logger.Error("Failed to collect column statistics", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("column statistics: %v", err))
 		return
 	}
 
-	// Wait for all column scans to complete
-	if err := queue.Wait(ctx); err != nil {
-		s.logger.Error("Column scan phase failed", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("column scan failed: %v", err))
-		return
-	}
-
-	// Phase 2: Match values (single task)
-	s.logger.Info("Phase 2: Matching values",
+	// Phase 0.5: Filter columns to identify entity candidates
+	s.logger.Info("Phase 0.5: Filtering entity candidates",
 		zap.String("workflow_id", workflowID.String()))
 
-	if err := s.updateProgress(ctx, projectID, workflowID, "Matching column values...", 30); err != nil {
+	if err := s.updateProgress(ctx, projectID, workflowID, "Filtering entity candidates...", 8); err != nil {
 		s.logger.Error("Failed to update progress", zap.Error(err))
 	}
 
-	valueMatchTask := NewValueMatchTask(
-		s.stateRepo,
-		s.candidateRepo,
-		s.schemaRepo,
-		s.getTenantCtx,
-		projectID,
-		workflowID,
-		datasourceID,
-		s.logger,
-	)
-	queue.Enqueue(valueMatchTask)
-
-	if err := queue.Wait(ctx); err != nil {
-		s.logger.Error("Value match phase failed", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("value match failed: %v", err))
+	candidates, excluded, err := s.filterEntityCandidates(ctx, projectID, workflowID, datasourceID, statsMap)
+	if err != nil {
+		s.logger.Error("Failed to filter entity candidates", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("entity filtering: %v", err))
 		return
 	}
 
-	// Phase 3: Infer from names (single task)
-	s.logger.Info("Phase 3: Inferring relationships from names",
+	// Phase 0.75: Analyze graph connectivity
+	s.logger.Info("Phase 0.75: Analyzing graph connectivity",
 		zap.String("workflow_id", workflowID.String()))
 
-	if err := s.updateProgress(ctx, projectID, workflowID, "Inferring relationships from naming patterns...", 50); err != nil {
+	if err := s.updateProgress(ctx, projectID, workflowID, "Analyzing graph connectivity...", 9); err != nil {
 		s.logger.Error("Failed to update progress", zap.Error(err))
 	}
 
-	nameInferenceTask := NewNameInferenceTask(
-		s.candidateRepo,
-		s.schemaRepo,
-		s.getTenantCtx,
-		projectID,
-		workflowID,
-		datasourceID,
-		s.logger,
-	)
-	queue.Enqueue(nameInferenceTask)
-
-	if err := queue.Wait(ctx); err != nil {
-		s.logger.Error("Name inference phase failed", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("name inference failed: %v", err))
+	components, islands, err := s.analyzeGraphConnectivity(ctx, projectID, workflowID, datasourceID)
+	if err != nil {
+		s.logger.Error("Failed to analyze graph connectivity", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("graph connectivity: %v", err))
 		return
 	}
 
-	// Phase 4: Test joins for all candidates (parallel)
-	s.logger.Info("Phase 4: Testing joins for candidates",
+	// Log summary of data collected (used for relationship analysis)
+	s.logger.Info("Data collected for relationship analysis",
+		zap.String("workflow_id", workflowID.String()),
+		zap.Int("candidate_columns", len(candidates)),
+		zap.Int("excluded_columns", len(excluded)),
+		zap.Int("connected_components", len(components)),
+		zap.Int("island_tables", len(islands)))
+
+	// Note: Entity discovery is now a separate workflow run from the Entities page.
+	// The prerequisite check in StartDetection ensures entities exist before we proceed.
+
+	// Phase 1: Discover FK relationships (deterministic - no LLM)
+	s.logger.Info("Phase 1: Discovering FK relationships",
 		zap.String("workflow_id", workflowID.String()))
 
-	if err := s.updateProgress(ctx, projectID, workflowID, "Testing SQL joins...", 60); err != nil {
+	if err := s.updateProgress(ctx, projectID, workflowID, "Discovering FK relationships...", 50); err != nil {
 		s.logger.Error("Failed to update progress", zap.Error(err))
 	}
 
-	if err := s.enqueueTestJoins(ctx, projectID, workflowID, datasourceID, queue); err != nil {
-		s.logger.Error("Failed to enqueue test join tasks", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("test join: %v", err))
+	// Get tenant-scoped context for FK discovery
+	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
+	if err != nil {
+		s.logger.Error("Failed to get tenant context for FK discovery", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("tenant context: %v", err))
+		return
+	}
+	fkResult, err := s.deterministicService.DiscoverRelationships(tenantCtx, projectID, datasourceID)
+	cleanup()
+	if err != nil {
+		s.logger.Error("Failed to discover FK relationships", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("fk discovery: %v", err))
 		return
 	}
 
-	if err := queue.Wait(ctx); err != nil {
-		s.logger.Error("Test join phase failed", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("test join failed: %v", err))
-		return
-	}
+	s.logger.Info("FK relationship discovery complete",
+		zap.String("workflow_id", workflowID.String()),
+		zap.Int("fk_relationships", fkResult.FKRelationships),
+		zap.Int("total_relationships", fkResult.TotalRelationships))
 
-	// Phase 5: LLM analysis (single task)
-	s.logger.Info("Phase 5: Analyzing relationships with LLM",
-		zap.String("workflow_id", workflowID.String()))
+	// TODO: Future phases for value-based and LLM-inferred relationships
+	// Commenting out for now to focus on FK-only discovery.
+	_ = queue // Suppress unused variable warning
 
-	if err := s.updateProgress(ctx, projectID, workflowID, "Analyzing relationships...", 80); err != nil {
-		s.logger.Error("Failed to update progress", zap.Error(err))
-	}
+	/*
+		// Phase 1: Scan all columns in parallel
+		s.logger.Info("Phase 1: Scanning columns",
+			zap.String("workflow_id", workflowID.String()))
 
-	analyzeTask := NewAnalyzeRelationshipsTask(
-		s.candidateRepo,
-		s.schemaRepo,
-		s.llmFactory,
-		s.getTenantCtx,
-		projectID,
-		workflowID,
-		datasourceID,
-		s.logger,
-	)
-	queue.Enqueue(analyzeTask)
+		if err := s.updateProgress(ctx, projectID, workflowID, "Scanning columns...", 10); err != nil {
+			s.logger.Error("Failed to update progress", zap.Error(err))
+		}
 
-	if err := queue.Wait(ctx); err != nil {
-		s.logger.Error("Analyze relationships phase failed", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("analyze relationships failed: %v", err))
-		return
-	}
+		if err := s.enqueueColumnScans(ctx, projectID, workflowID, datasourceID, queue); err != nil {
+			s.logger.Error("Failed to enqueue column scan tasks", zap.Error(err))
+			s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("column scan: %v", err))
+			return
+		}
+
+		// Wait for all column scans to complete
+		if err := queue.Wait(ctx); err != nil {
+			s.logger.Error("Column scan phase failed", zap.Error(err))
+			s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("column scan failed: %v", err))
+			return
+		}
+
+		// Phase 2: Match values (single task)
+		s.logger.Info("Phase 2: Matching values",
+			zap.String("workflow_id", workflowID.String()))
+
+		if err := s.updateProgress(ctx, projectID, workflowID, "Matching column values...", 30); err != nil {
+			s.logger.Error("Failed to update progress", zap.Error(err))
+		}
+
+		valueMatchTask := NewValueMatchTask(
+			s.stateRepo,
+			s.candidateRepo,
+			s.schemaRepo,
+			s.getTenantCtx,
+			projectID,
+			workflowID,
+			datasourceID,
+			s.logger,
+		)
+		queue.Enqueue(valueMatchTask)
+
+		if err := queue.Wait(ctx); err != nil {
+			s.logger.Error("Value match phase failed", zap.Error(err))
+			s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("value match failed: %v", err))
+			return
+		}
+
+		// Phase 3: Infer from names (single task)
+		s.logger.Info("Phase 3: Inferring relationships from names",
+			zap.String("workflow_id", workflowID.String()))
+
+		if err := s.updateProgress(ctx, projectID, workflowID, "Inferring relationships from naming patterns...", 50); err != nil {
+			s.logger.Error("Failed to update progress", zap.Error(err))
+		}
+
+		nameInferenceTask := NewNameInferenceTask(
+			s.candidateRepo,
+			s.schemaRepo,
+			s.getTenantCtx,
+			projectID,
+			workflowID,
+			datasourceID,
+			s.logger,
+		)
+		queue.Enqueue(nameInferenceTask)
+
+		if err := queue.Wait(ctx); err != nil {
+			s.logger.Error("Name inference phase failed", zap.Error(err))
+			s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("name inference failed: %v", err))
+			return
+		}
+
+		// Phase 4: Test joins for all candidates (parallel)
+		s.logger.Info("Phase 4: Testing joins for candidates",
+			zap.String("workflow_id", workflowID.String()))
+
+		if err := s.updateProgress(ctx, projectID, workflowID, "Testing SQL joins...", 60); err != nil {
+			s.logger.Error("Failed to update progress", zap.Error(err))
+		}
+
+		if err := s.enqueueTestJoins(ctx, projectID, workflowID, datasourceID, queue); err != nil {
+			s.logger.Error("Failed to enqueue test join tasks", zap.Error(err))
+			s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("test join: %v", err))
+			return
+		}
+
+		if err := queue.Wait(ctx); err != nil {
+			s.logger.Error("Test join phase failed", zap.Error(err))
+			s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("test join failed: %v", err))
+			return
+		}
+
+		// Phase 5: LLM analysis (parallel batch tasks grouped by target table)
+		s.logger.Info("Phase 5: Analyzing relationships with LLM (batched)",
+			zap.String("workflow_id", workflowID.String()))
+
+		if err := s.updateProgress(ctx, projectID, workflowID, "Analyzing relationships...", 80); err != nil {
+			s.logger.Error("Failed to update progress", zap.Error(err))
+		}
+
+		if err := s.enqueueAnalysisBatches(ctx, projectID, workflowID, datasourceID, queue); err != nil {
+			s.logger.Error("Failed to enqueue analysis batch tasks", zap.Error(err))
+			s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("analyze relationships: %v", err))
+			return
+		}
+
+		if err := queue.Wait(ctx); err != nil {
+			s.logger.Error("Analyze relationships phase failed", zap.Error(err))
+			s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("analyze relationships failed: %v", err))
+			return
+		}
+	*/
 
 	// Mark workflow as complete
 	s.logger.Info("All phases complete - finalizing workflow",
@@ -450,6 +599,235 @@ func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, datasou
 	}
 
 	s.finalizeWorkflow(projectID, workflowID)
+}
+
+// collectColumnStatistics gathers statistics for all columns across all tables.
+// Logs detailed statistics per column and a summary across all tables.
+// Returns a map of "schema.table.column" -> ColumnStats for use by filtering.
+func (s *relationshipWorkflowService) collectColumnStatistics(ctx context.Context, projectID, workflowID, datasourceID uuid.UUID) (map[string]datasource.ColumnStats, error) {
+	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("get tenant context: %w", err)
+	}
+	defer cleanup()
+
+	// Get datasource to create adapter
+	ds, err := s.dsSvc.Get(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("get datasource: %w", err)
+	}
+
+	// Create schema discoverer adapter
+	adapter, err := s.adapterFactory.NewSchemaDiscoverer(tenantCtx, ds.DatasourceType, ds.Config, projectID, datasourceID, "")
+	if err != nil {
+		return nil, fmt.Errorf("create schema discoverer: %w", err)
+	}
+	defer adapter.Close()
+
+	// Get all tables for this datasource
+	tables, err := s.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("list tables: %w", err)
+	}
+
+	// Get all columns for this datasource
+	columns, err := s.schemaRepo.ListColumnsByDatasource(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("list columns: %w", err)
+	}
+
+	// Build table lookup and group columns by table
+	tableByID := make(map[uuid.UUID]*models.SchemaTable)
+	columnsByTableID := make(map[uuid.UUID][]*models.SchemaColumn)
+	for _, t := range tables {
+		tableByID[t.ID] = t
+		columnsByTableID[t.ID] = make([]*models.SchemaColumn, 0)
+	}
+
+	for _, col := range columns {
+		columnsByTableID[col.SchemaTableID] = append(columnsByTableID[col.SchemaTableID], col)
+	}
+
+	// Map to store stats by "schema.table.column" key
+	statsMap := make(map[string]datasource.ColumnStats)
+	totalColumns := 0
+
+	// Collect stats for each table
+	for _, table := range tables {
+		tableCols := columnsByTableID[table.ID]
+		if len(tableCols) == 0 {
+			continue
+		}
+
+		// Get column names for this table
+		columnNames := make([]string, len(tableCols))
+		for i, col := range tableCols {
+			columnNames[i] = col.ColumnName
+		}
+
+		// Call AnalyzeColumnStats for this table
+		stats, err := adapter.AnalyzeColumnStats(tenantCtx, table.SchemaName, table.TableName, columnNames)
+		if err != nil {
+			s.logger.Error("Failed to analyze column stats",
+				zap.String("table", fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)),
+				zap.Error(err))
+			return nil, fmt.Errorf("analyze column stats for %s.%s: %w", table.SchemaName, table.TableName, err)
+		}
+
+		// Log detailed statistics for this table
+		s.logger.Info(fmt.Sprintf("Column statistics: %s.%s (%d columns)", table.SchemaName, table.TableName, len(stats)),
+			zap.String("workflow_id", workflowID.String()))
+
+		// Build column name to ID lookup for this table
+		colNameToID := make(map[string]uuid.UUID)
+		for _, col := range tableCols {
+			colNameToID[col.ColumnName] = col.ID
+		}
+
+		for _, stat := range stats {
+			percentage := 0.0
+			if stat.RowCount > 0 {
+				percentage = (float64(stat.DistinctCount) / float64(stat.RowCount)) * 100.0
+			}
+
+			s.logger.Info(fmt.Sprintf("  - %s: %d distinct / %d rows (%.1f%%)",
+				stat.ColumnName,
+				stat.DistinctCount,
+				stat.RowCount,
+				percentage))
+
+			// Store stats in map for filtering
+			statsKey := fmt.Sprintf("%s.%s.%s", table.SchemaName, table.TableName, stat.ColumnName)
+			statsMap[statsKey] = stat
+
+			// Persist stats to database for use by other services
+			if colID, ok := colNameToID[stat.ColumnName]; ok {
+				distinctCount := stat.DistinctCount
+				if err := s.schemaRepo.UpdateColumnStats(tenantCtx, colID, &distinctCount, nil, stat.MinLength, stat.MaxLength); err != nil {
+					s.logger.Warn("Failed to persist column stats",
+						zap.String("column", stat.ColumnName),
+						zap.Error(err))
+				}
+			}
+		}
+
+		totalColumns += len(stats)
+	}
+
+	// Log summary
+	s.logger.Info(fmt.Sprintf("Summary: Collected stats for %d columns across %d tables",
+		totalColumns,
+		len(tables)),
+		zap.String("workflow_id", workflowID.String()))
+
+	return statsMap, nil
+}
+
+// filterEntityCandidates applies heuristics to filter columns and identify entity candidates.
+// Logs results showing candidates vs excluded columns with reasoning.
+// Returns candidates and excluded columns for use by subsequent phases.
+func (s *relationshipWorkflowService) filterEntityCandidates(
+	ctx context.Context,
+	projectID, workflowID, datasourceID uuid.UUID,
+	statsMap map[string]datasource.ColumnStats,
+) ([]ColumnFilterResult, []ColumnFilterResult, error) {
+	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get tenant context: %w", err)
+	}
+	defer cleanup()
+
+	// Get all tables for this datasource
+	tables, err := s.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list tables: %w", err)
+	}
+
+	// Get all columns for this datasource
+	columns, err := s.schemaRepo.ListColumnsByDatasource(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list columns: %w", err)
+	}
+
+	// Build table lookup by UUID string
+	tableByID := make(map[string]*models.SchemaTable)
+	for _, t := range tables {
+		tableByID[t.ID.String()] = t
+	}
+
+	// Apply filtering heuristics
+	candidates, excluded := FilterEntityCandidates(columns, tableByID, statsMap, s.logger)
+
+	// Log results
+	LogFilterResults(candidates, excluded, s.logger)
+
+	return candidates, excluded, nil
+}
+
+// analyzeGraphConnectivity builds a graph from foreign key relationships
+// and identifies connected components using DFS. Logs results for UI visibility.
+// Returns connected components and island tables for use by subsequent phases.
+func (s *relationshipWorkflowService) analyzeGraphConnectivity(
+	ctx context.Context,
+	projectID, workflowID, datasourceID uuid.UUID,
+) ([]ConnectedComponent, []string, error) {
+	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get tenant context: %w", err)
+	}
+	defer cleanup()
+
+	// Get datasource to create adapter
+	ds, err := s.dsSvc.Get(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get datasource: %w", err)
+	}
+
+	// Create schema discoverer adapter
+	adapter, err := s.adapterFactory.NewSchemaDiscoverer(tenantCtx, ds.DatasourceType, ds.Config, projectID, datasourceID, "")
+	if err != nil {
+		return nil, nil, fmt.Errorf("create schema discoverer: %w", err)
+	}
+	defer adapter.Close()
+
+	// Check if datasource supports foreign keys
+	if !adapter.SupportsForeignKeys() {
+		s.logger.Info("Datasource does not support foreign keys, skipping graph analysis",
+			zap.String("workflow_id", workflowID.String()),
+			zap.String("datasource_type", string(ds.DatasourceType)))
+		// Return empty results rather than nil to indicate success with no FKs
+		return []ConnectedComponent{}, []string{}, nil
+	}
+
+	// Discover foreign keys
+	fks, err := adapter.DiscoverForeignKeys(tenantCtx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("discover foreign keys: %w", err)
+	}
+
+	// Build graph from foreign keys
+	graph := NewTableGraph()
+	for _, fk := range fks {
+		graph.AddForeignKey(fk)
+	}
+
+	// Get all tables and add them to the graph (to identify islands)
+	tables, err := s.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list tables: %w", err)
+	}
+
+	for _, table := range tables {
+		graph.AddTable(table.SchemaName, table.TableName)
+	}
+
+	// Find connected components
+	components, islands := graph.FindConnectedComponents(s.logger)
+
+	// Log connectivity results
+	LogConnectivity(len(fks), components, islands, s.logger)
+
+	return components, islands, nil
 }
 
 // enqueueColumnScans creates and enqueues column scan tasks for all columns.
@@ -541,6 +919,82 @@ func (s *relationshipWorkflowService) enqueueTestJoins(ctx context.Context, proj
 	s.logger.Info("Enqueued test join tasks",
 		zap.String("workflow_id", workflowID.String()),
 		zap.Int("count", len(candidates)))
+
+	return nil
+}
+
+// enqueueAnalysisBatches groups candidates by target table and enqueues parallel batch tasks.
+// This allows LLM analysis to run in parallel with smaller prompts per batch,
+// avoiding token limit issues that occur with a single monolithic request.
+func (s *relationshipWorkflowService) enqueueAnalysisBatches(ctx context.Context, projectID, workflowID, datasourceID uuid.UUID, queue *workqueue.Queue) error {
+	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("get tenant context: %w", err)
+	}
+	defer cleanup()
+
+	// Get all candidates for this workflow
+	candidates, err := s.candidateRepo.GetByWorkflow(tenantCtx, workflowID)
+	if err != nil {
+		return fmt.Errorf("get candidates: %w", err)
+	}
+
+	if len(candidates) == 0 {
+		s.logger.Info("No candidates to analyze",
+			zap.String("workflow_id", workflowID.String()))
+		return nil
+	}
+
+	// Group candidates by target table (the table being referenced by FKs)
+	// This creates logical batches since many FKs typically point to common parent tables
+	candidatesByTable := make(map[string][]*models.RelationshipCandidate)
+	for _, candidate := range candidates {
+		// Get target column to find its table
+		targetCol, err := s.schemaRepo.GetColumnByID(tenantCtx, projectID, candidate.TargetColumnID)
+		if err != nil {
+			s.logger.Warn("Failed to get target column",
+				zap.String("column_id", candidate.TargetColumnID.String()),
+				zap.Error(err))
+			continue
+		}
+
+		// Get table name
+		table, err := s.schemaRepo.GetTableByID(tenantCtx, projectID, targetCol.SchemaTableID)
+		if err != nil || table == nil {
+			s.logger.Warn("Failed to get target table",
+				zap.String("table_id", targetCol.SchemaTableID.String()),
+				zap.Error(err))
+			continue
+		}
+
+		tableName := table.TableName
+		candidatesByTable[tableName] = append(candidatesByTable[tableName], candidate)
+	}
+
+	// Enqueue a batch task for each target table group
+	batchCount := 0
+	for tableName, tableCandidates := range candidatesByTable {
+		batchName := fmt.Sprintf("%s (%d)", tableName, len(tableCandidates))
+		task := NewAnalyzeRelationshipsBatchTask(
+			s.candidateRepo,
+			s.schemaRepo,
+			s.llmFactory,
+			s.getTenantCtx,
+			projectID,
+			workflowID,
+			datasourceID,
+			batchName,
+			tableCandidates,
+			s.logger,
+		)
+		queue.Enqueue(task)
+		batchCount++
+	}
+
+	s.logger.Info("Enqueued analysis batch tasks",
+		zap.String("workflow_id", workflowID.String()),
+		zap.Int("batch_count", batchCount),
+		zap.Int("total_candidates", len(candidates)))
 
 	return nil
 }
@@ -718,6 +1172,25 @@ func (s *relationshipWorkflowService) GetStatusWithCounts(ctx context.Context, d
 		}
 	}
 
+	// Get entity counts
+	ontology, err := s.ontologyRepo.GetActive(ctx, workflow.ProjectID)
+	if err == nil && ontology != nil {
+		entities, err := s.entityRepo.GetByOntology(ctx, ontology.ID)
+		if err == nil {
+			counts.EntityCount = len(entities)
+			for _, entity := range entities {
+				occurrences, err := s.entityRepo.GetOccurrencesByEntity(ctx, entity.ID)
+				if err == nil {
+					counts.OccurrenceCount += len(occurrences)
+				}
+			}
+		}
+	}
+
+	// Island count would come from graph analysis - for now, set to 0
+	// This will be populated when graph connectivity data is stored
+	counts.IslandCount = 0
+
 	// Can save if workflow is complete and no pending candidates remain
 	counts.CanSave = workflow.State == models.WorkflowStateCompleted && counts.NeedsReview == 0
 
@@ -765,6 +1238,60 @@ func (s *relationshipWorkflowService) GetCandidatesGrouped(ctx context.Context, 
 	}
 
 	return grouped, nil
+}
+
+func (s *relationshipWorkflowService) GetEntitiesWithOccurrences(ctx context.Context, datasourceID uuid.UUID) ([]*EntityWithOccurrences, error) {
+	// Get latest workflow for this datasource
+	workflow, err := s.workflowRepo.GetLatestByDatasourceAndPhase(ctx, datasourceID, models.WorkflowPhaseRelationships)
+	if err != nil {
+		s.logger.Error("Failed to get workflow",
+			zap.String("datasource_id", datasourceID.String()),
+			zap.Error(err))
+		return nil, err
+	}
+	if workflow == nil {
+		return nil, fmt.Errorf("no relationship workflow found for datasource")
+	}
+
+	// Get the active ontology for this workflow
+	ontology, err := s.ontologyRepo.GetActive(ctx, workflow.ProjectID)
+	if err != nil {
+		s.logger.Error("Failed to get active ontology",
+			zap.String("workflow_id", workflow.ID.String()),
+			zap.Error(err))
+		return nil, err
+	}
+	if ontology == nil {
+		return nil, fmt.Errorf("no active ontology found for project")
+	}
+
+	// Get all entities for this ontology
+	entities, err := s.entityRepo.GetByOntology(ctx, ontology.ID)
+	if err != nil {
+		s.logger.Error("Failed to get entities",
+			zap.String("ontology_id", ontology.ID.String()),
+			zap.Error(err))
+		return nil, err
+	}
+
+	// Fetch occurrences for each entity
+	result := make([]*EntityWithOccurrences, 0, len(entities))
+	for _, entity := range entities {
+		occurrences, err := s.entityRepo.GetOccurrencesByEntity(ctx, entity.ID)
+		if err != nil {
+			s.logger.Error("Failed to get occurrences",
+				zap.String("entity_id", entity.ID.String()),
+				zap.Error(err))
+			return nil, err
+		}
+
+		result = append(result, &EntityWithOccurrences{
+			Entity:      entity,
+			Occurrences: occurrences,
+		})
+	}
+
+	return result, nil
 }
 
 func (s *relationshipWorkflowService) UpdateCandidateDecision(ctx context.Context, datasourceID, candidateID uuid.UUID, decision string) (*models.RelationshipCandidate, error) {

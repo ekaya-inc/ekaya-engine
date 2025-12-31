@@ -75,14 +75,23 @@ func setupParameterizedQueriesTest(t *testing.T) *parameterizedQueriesTestContex
 }
 
 // makeRequest creates an HTTP request with proper context (tenant scope + auth claims).
-func (tc *parameterizedQueriesTestContext) makeRequest(method, path string, body any) *http.Request {
-	tc.t.Helper()
+// Pass the current *testing.T (e.g., from a subtest) to ensure cleanup happens at the right time.
+func (tc *parameterizedQueriesTestContext) makeRequest(t *testing.T, method, path string, body any) *http.Request {
+	t.Helper()
+	req, _ := tc.makeRequestWithCleanup(t, method, path, body)
+	return req
+}
+
+// makeRequestWithCleanup creates an HTTP request and returns a cleanup function.
+// Use this in tests that make multiple sequential requests to avoid pool exhaustion.
+func (tc *parameterizedQueriesTestContext) makeRequestWithCleanup(t *testing.T, method, path string, body any) (*http.Request, func()) {
+	t.Helper()
 
 	var reqBody *bytes.Reader
 	if body != nil {
 		bodyBytes, err := json.Marshal(body)
 		if err != nil {
-			tc.t.Fatalf("Failed to marshal request body: %v", err)
+			t.Fatalf("Failed to marshal request body: %v", err)
 		}
 		reqBody = bytes.NewReader(bodyBytes)
 	} else {
@@ -95,7 +104,7 @@ func (tc *parameterizedQueriesTestContext) makeRequest(method, path string, body
 	ctx := req.Context()
 	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
 	if err != nil {
-		tc.t.Fatalf("Failed to create tenant scope: %v", err)
+		t.Fatalf("Failed to create tenant scope: %v", err)
 	}
 	ctx = database.SetTenantScope(ctx, scope)
 
@@ -109,11 +118,13 @@ func (tc *parameterizedQueriesTestContext) makeRequest(method, path string, body
 
 	req = req.WithContext(ctx)
 
-	tc.t.Cleanup(func() {
+	cleanup := func() {
 		scope.Close()
-	})
+	}
 
-	return req
+	t.Cleanup(cleanup)
+
+	return req, cleanup
 }
 
 // ensureTestProject creates the test project if it doesn't exist.
@@ -214,7 +225,7 @@ func TestCreateQueryWithParameters(t *testing.T) {
 			name: "create query with valid parameters",
 			request: CreateQueryRequest{
 				NaturalLanguagePrompt: "Get user by ID",
-				SQLQuery:              "SELECT id, name FROM users WHERE id = :user_id",
+				SQLQuery:              "SELECT id, username FROM users WHERE id = {{user_id}}",
 				IsEnabled:             true,
 				Parameters: []models.QueryParameter{
 					{Name: "user_id", Type: "integer", Description: "User ID", Required: true},
@@ -226,12 +237,12 @@ func TestCreateQueryWithParameters(t *testing.T) {
 		{
 			name: "create query with multiple parameters",
 			request: CreateQueryRequest{
-				NaturalLanguagePrompt: "Search users by email and status",
-				SQLQuery:              "SELECT id, name, email FROM users WHERE email LIKE :email AND status = :status",
+				NaturalLanguagePrompt: "Search users by username and availability",
+				SQLQuery:              "SELECT id, username, profile_url FROM users WHERE username LIKE {{username}} AND is_available = {{is_available}}",
 				IsEnabled:             true,
 				Parameters: []models.QueryParameter{
-					{Name: "email", Type: "string", Description: "Email pattern", Required: true},
-					{Name: "status", Type: "string", Description: "User status", Required: false, Default: "active"},
+					{Name: "username", Type: "string", Description: "Username pattern", Required: true},
+					{Name: "is_available", Type: "boolean", Description: "User availability", Required: false, Default: true},
 				},
 			},
 			expectStatus:  http.StatusCreated,
@@ -251,7 +262,7 @@ func TestCreateQueryWithParameters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := tc.makeRequest(http.MethodPost,
+			req := tc.makeRequest(t, http.MethodPost,
 				"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 				tt.request)
 			req.SetPathValue("pid", tc.projectID.String())
@@ -293,14 +304,14 @@ func TestExecuteQueryWithParameters(t *testing.T) {
 	// Create a parameterized query
 	createBody := CreateQueryRequest{
 		NaturalLanguagePrompt: "Get user by ID",
-		SQLQuery:              "SELECT id, name FROM users WHERE id = :user_id",
+		SQLQuery:              "SELECT id, username FROM users WHERE id = {{user_id}}",
 		IsEnabled:             true,
 		Parameters: []models.QueryParameter{
 			{Name: "user_id", Type: "integer", Description: "User ID", Required: true},
 		},
 	}
 
-	createReq := tc.makeRequest(http.MethodPost,
+	createReq := tc.makeRequest(t, http.MethodPost,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 		createBody)
 	createReq.SetPathValue("pid", tc.projectID.String())
@@ -326,7 +337,7 @@ func TestExecuteQueryWithParameters(t *testing.T) {
 	}{
 		{
 			name:          "execute with valid parameters",
-			parameters:    map[string]any{"user_id": 1},
+			parameters:    map[string]any{"user_id": 2}, // Note: test data starts at id=2
 			expectStatus:  http.StatusOK,
 			expectSuccess: true,
 			expectRows:    true,
@@ -347,7 +358,7 @@ func TestExecuteQueryWithParameters(t *testing.T) {
 		},
 		{
 			name:          "execute with type coercion (string to int)",
-			parameters:    map[string]any{"user_id": "1"},
+			parameters:    map[string]any{"user_id": "2"}, // Note: test data starts at id=2
 			expectStatus:  http.StatusOK,
 			expectSuccess: true,
 			expectRows:    true,
@@ -368,7 +379,7 @@ func TestExecuteQueryWithParameters(t *testing.T) {
 				Parameters: tt.parameters,
 			}
 
-			execReq := tc.makeRequest(http.MethodPost,
+			execReq := tc.makeRequest(t, http.MethodPost,
 				"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/"+queryID+"/execute",
 				execBody)
 			execReq.SetPathValue("pid", tc.projectID.String())
@@ -386,9 +397,11 @@ func TestExecuteQueryWithParameters(t *testing.T) {
 
 			assert.Equal(t, tt.expectSuccess, execResp.Success)
 
-			if tt.expectSuccess && tt.expectRows {
-				execData := execResp.Data.(map[string]any)
-				assert.Greater(t, int(execData["row_count"].(float64)), 0)
+			if tt.expectSuccess && tt.expectRows && execResp.Data != nil {
+				execData, ok := execResp.Data.(map[string]any)
+				if ok && execData != nil {
+					assert.Greater(t, int(execData["row_count"].(float64)), 0)
+				}
 			}
 		})
 	}
@@ -407,7 +420,7 @@ func TestExecuteQueryBackwardCompatibility(t *testing.T) {
 		IsEnabled:             true,
 	}
 
-	createReq := tc.makeRequest(http.MethodPost,
+	createReq := tc.makeRequest(t, http.MethodPost,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 		createBody)
 	createReq.SetPathValue("pid", tc.projectID.String())
@@ -426,7 +439,7 @@ func TestExecuteQueryBackwardCompatibility(t *testing.T) {
 
 	// Execute without parameters
 	execBody := ExecuteQueryRequest{Limit: 10}
-	execReq := tc.makeRequest(http.MethodPost,
+	execReq := tc.makeRequest(t, http.MethodPost,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/"+queryID+"/execute",
 		execBody)
 	execReq.SetPathValue("pid", tc.projectID.String())
@@ -462,7 +475,7 @@ func TestTestQueryWithParameters(t *testing.T) {
 		{
 			name: "test with valid parameters",
 			request: TestQueryRequest{
-				SQLQuery: "SELECT id, name FROM users WHERE id = :user_id",
+				SQLQuery: "SELECT id, username FROM users WHERE id = {{user_id}}",
 				Limit:    10,
 				ParameterDefinitions: []models.QueryParameter{
 					{Name: "user_id", Type: "integer", Required: true},
@@ -475,7 +488,7 @@ func TestTestQueryWithParameters(t *testing.T) {
 		{
 			name: "test with injection attempt",
 			request: TestQueryRequest{
-				SQLQuery: "SELECT id, name FROM users WHERE id = :user_id",
+				SQLQuery: "SELECT id, username FROM users WHERE id = {{user_id}}",
 				Limit:    10,
 				ParameterDefinitions: []models.QueryParameter{
 					{Name: "user_id", Type: "integer", Required: true},
@@ -488,7 +501,7 @@ func TestTestQueryWithParameters(t *testing.T) {
 		{
 			name: "test with missing required parameter",
 			request: TestQueryRequest{
-				SQLQuery: "SELECT id, name FROM users WHERE id = :user_id",
+				SQLQuery: "SELECT id, username FROM users WHERE id = {{user_id}}",
 				Limit:    10,
 				ParameterDefinitions: []models.QueryParameter{
 					{Name: "user_id", Type: "integer", Required: true},
@@ -510,10 +523,10 @@ func TestTestQueryWithParameters(t *testing.T) {
 		{
 			name: "test with parameter definition but no values",
 			request: TestQueryRequest{
-				SQLQuery: "SELECT id, name FROM users WHERE status = :status",
+				SQLQuery: "SELECT id, username FROM users WHERE is_available = {{is_available}}",
 				Limit:    10,
 				ParameterDefinitions: []models.QueryParameter{
-					{Name: "status", Type: "string", Required: false, Default: "active"},
+					{Name: "is_available", Type: "boolean", Required: false, Default: true},
 				},
 				ParameterValues: map[string]any{},
 			},
@@ -524,7 +537,7 @@ func TestTestQueryWithParameters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := tc.makeRequest(http.MethodPost,
+			req := tc.makeRequest(t, http.MethodPost,
 				"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/test",
 				tt.request)
 			req.SetPathValue("pid", tc.projectID.String())
@@ -558,10 +571,10 @@ func TestValidateParametersEndpoint(t *testing.T) {
 		{
 			name: "valid parameter definitions match SQL",
 			request: ValidateParametersRequest{
-				SQLQuery: "SELECT id, name FROM users WHERE id = :user_id AND status = :status",
+				SQLQuery: "SELECT id, username FROM users WHERE id = {{user_id}} AND is_available = {{is_available}}",
 				Parameters: []models.QueryParameter{
 					{Name: "user_id", Type: "integer", Required: true},
-					{Name: "status", Type: "string", Required: false, Default: "active"},
+					{Name: "is_available", Type: "boolean", Required: false, Default: true},
 				},
 			},
 			expectStatus: http.StatusOK,
@@ -570,7 +583,7 @@ func TestValidateParametersEndpoint(t *testing.T) {
 		{
 			name: "missing parameter in definitions",
 			request: ValidateParametersRequest{
-				SQLQuery: "SELECT id, name FROM users WHERE id = :user_id AND status = :status",
+				SQLQuery: "SELECT id, username FROM users WHERE id = {{user_id}} AND is_available = {{is_available}}",
 				Parameters: []models.QueryParameter{
 					{Name: "user_id", Type: "integer", Required: true},
 				},
@@ -581,7 +594,7 @@ func TestValidateParametersEndpoint(t *testing.T) {
 		{
 			name: "extra parameter not in SQL",
 			request: ValidateParametersRequest{
-				SQLQuery: "SELECT id, name FROM users WHERE id = :user_id",
+				SQLQuery: "SELECT id, username FROM users WHERE id = {{user_id}}",
 				Parameters: []models.QueryParameter{
 					{Name: "user_id", Type: "integer", Required: true},
 					{Name: "extra", Type: "string", Required: false},
@@ -612,7 +625,7 @@ func TestValidateParametersEndpoint(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := tc.makeRequest(http.MethodPost,
+			req := tc.makeRequest(t, http.MethodPost,
 				"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/validate-parameters",
 				tt.request)
 			req.SetPathValue("pid", tc.projectID.String())
@@ -648,15 +661,15 @@ func TestQueryResponseWithParameters(t *testing.T) {
 
 	// Create a parameterized query
 	createBody := CreateQueryRequest{
-		NaturalLanguagePrompt: "Search users by status",
-		SQLQuery:              "SELECT id, name FROM users WHERE status = :status",
+		NaturalLanguagePrompt: "Search users by availability",
+		SQLQuery:              "SELECT id, username FROM users WHERE is_available = {{is_available}}",
 		IsEnabled:             true,
 		Parameters: []models.QueryParameter{
-			{Name: "status", Type: "string", Description: "User status", Required: false, Default: "active"},
+			{Name: "is_available", Type: "boolean", Description: "User availability", Required: false, Default: true},
 		},
 	}
 
-	createReq := tc.makeRequest(http.MethodPost,
+	createReq := tc.makeRequest(t, http.MethodPost,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 		createBody)
 	createReq.SetPathValue("pid", tc.projectID.String())
@@ -674,7 +687,7 @@ func TestQueryResponseWithParameters(t *testing.T) {
 	queryID := createData["query_id"].(string)
 
 	// Get the query back
-	getReq := tc.makeRequest(http.MethodGet,
+	getReq := tc.makeRequest(t, http.MethodGet,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/"+queryID,
 		nil)
 	getReq.SetPathValue("pid", tc.projectID.String())
@@ -697,184 +710,199 @@ func TestQueryResponseWithParameters(t *testing.T) {
 	require.Len(t, params, 1)
 
 	param := params[0].(map[string]any)
-	assert.Equal(t, "status", param["name"])
-	assert.Equal(t, "string", param["type"])
-	assert.Equal(t, "User status", param["description"])
+	assert.Equal(t, "is_available", param["name"])
+	assert.Equal(t, "boolean", param["type"])
+	assert.Equal(t, "User availability", param["description"])
 	assert.Equal(t, false, param["required"])
-	assert.Equal(t, "active", param["default"])
+	assert.Equal(t, true, param["default"])
 }
 
 // TestEndToEndParameterizedQueryFlow tests the complete workflow.
+// Uses makeRequestWithCleanup to release connections after each step.
 func TestEndToEndParameterizedQueryFlow(t *testing.T) {
 	tc := setupParameterizedQueriesTest(t)
 	tc.ensureTestDatasource()
 	tc.cleanupQueries()
 
+	var queryID string
+
 	// Step 1: Validate parameters before creating
-	validateReq := ValidateParametersRequest{
-		SQLQuery: "SELECT id, name FROM users WHERE id > :min_id AND status = :status ORDER BY id LIMIT :limit",
-		Parameters: []models.QueryParameter{
-			{Name: "min_id", Type: "integer", Required: true},
-			{Name: "status", Type: "string", Required: false, Default: "active"},
-			{Name: "limit", Type: "integer", Required: false, Default: 10},
-		},
-	}
+	t.Run("validate", func(t *testing.T) {
+		validateReq := ValidateParametersRequest{
+			SQLQuery: "SELECT id, username FROM users WHERE id > {{min_id}} AND is_available = {{is_available}} ORDER BY id LIMIT {{limit}}",
+			Parameters: []models.QueryParameter{
+				{Name: "min_id", Type: "integer", Required: true},
+				{Name: "is_available", Type: "boolean", Required: false, Default: true},
+				{Name: "limit", Type: "integer", Required: false, Default: 10},
+			},
+		}
 
-	valReq := tc.makeRequest(http.MethodPost,
-		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/validate-parameters",
-		validateReq)
-	valReq.SetPathValue("pid", tc.projectID.String())
-	valReq.SetPathValue("did", tc.createdDsID.String())
+		valReq := tc.makeRequest(t, http.MethodPost,
+			"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/validate-parameters",
+			validateReq)
+		valReq.SetPathValue("pid", tc.projectID.String())
+		valReq.SetPathValue("did", tc.createdDsID.String())
 
-	valRec := httptest.NewRecorder()
-	tc.queriesHandler.ValidateParameters(valRec, valReq)
-	require.Equal(t, http.StatusOK, valRec.Code)
+		valRec := httptest.NewRecorder()
+		tc.queriesHandler.ValidateParameters(valRec, valReq)
+		require.Equal(t, http.StatusOK, valRec.Code)
 
-	var valResp ApiResponse
-	err := json.Unmarshal(valRec.Body.Bytes(), &valResp)
-	require.NoError(t, err)
+		var valResp ApiResponse
+		err := json.Unmarshal(valRec.Body.Bytes(), &valResp)
+		require.NoError(t, err)
 
-	valData := valResp.Data.(map[string]any)
-	assert.True(t, valData["valid"].(bool))
+		valData := valResp.Data.(map[string]any)
+		assert.True(t, valData["valid"].(bool))
+	})
 
 	// Step 2: Test the query with sample parameters
-	testBody := TestQueryRequest{
-		SQLQuery: "SELECT id, name FROM users WHERE id > :min_id AND status = :status ORDER BY id LIMIT :limit",
-		Limit:    100,
-		ParameterDefinitions: []models.QueryParameter{
-			{Name: "min_id", Type: "integer", Required: true},
-			{Name: "status", Type: "string", Required: false, Default: "active"},
-			{Name: "limit", Type: "integer", Required: false, Default: 10},
-		},
-		ParameterValues: map[string]any{
-			"min_id": 0,
-			"status": "active",
-			"limit":  5,
-		},
-	}
+	t.Run("test", func(t *testing.T) {
+		testBody := TestQueryRequest{
+			SQLQuery: "SELECT id, username FROM users WHERE id > {{min_id}} AND is_available = {{is_available}} ORDER BY id LIMIT {{limit}}",
+			Limit:    100,
+			ParameterDefinitions: []models.QueryParameter{
+				{Name: "min_id", Type: "integer", Required: true},
+				{Name: "is_available", Type: "boolean", Required: false, Default: true},
+				{Name: "limit", Type: "integer", Required: false, Default: 10},
+			},
+			ParameterValues: map[string]any{
+				"min_id":       0,
+				"is_available": true,
+				"limit":        5,
+			},
+		}
 
-	testReq := tc.makeRequest(http.MethodPost,
-		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/test",
-		testBody)
-	testReq.SetPathValue("pid", tc.projectID.String())
-	testReq.SetPathValue("did", tc.createdDsID.String())
+		testReq := tc.makeRequest(t, http.MethodPost,
+			"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/test",
+			testBody)
+		testReq.SetPathValue("pid", tc.projectID.String())
+		testReq.SetPathValue("did", tc.createdDsID.String())
 
-	testRec := httptest.NewRecorder()
-	tc.queriesHandler.Test(testRec, testReq)
-	require.Equal(t, http.StatusOK, testRec.Code)
+		testRec := httptest.NewRecorder()
+		tc.queriesHandler.Test(testRec, testReq)
+		require.Equal(t, http.StatusOK, testRec.Code)
 
-	var testResp ApiResponse
-	err = json.Unmarshal(testRec.Body.Bytes(), &testResp)
-	require.NoError(t, err)
-	assert.True(t, testResp.Success)
+		var testResp ApiResponse
+		err := json.Unmarshal(testRec.Body.Bytes(), &testResp)
+		require.NoError(t, err)
+		assert.True(t, testResp.Success)
+	})
 
 	// Step 3: Create the query
-	createBody := CreateQueryRequest{
-		NaturalLanguagePrompt: "Get users by minimum ID and status",
-		SQLQuery:              "SELECT id, name FROM users WHERE id > :min_id AND status = :status ORDER BY id LIMIT :limit",
-		IsEnabled:             true,
-		Parameters: []models.QueryParameter{
-			{Name: "min_id", Type: "integer", Description: "Minimum user ID", Required: true},
-			{Name: "status", Type: "string", Description: "User status", Required: false, Default: "active"},
-			{Name: "limit", Type: "integer", Description: "Max results", Required: false, Default: 10},
-		},
-	}
+	t.Run("create", func(t *testing.T) {
+		createBody := CreateQueryRequest{
+			NaturalLanguagePrompt: "Get users by minimum ID and availability",
+			SQLQuery:              "SELECT id, username FROM users WHERE id > {{min_id}} AND is_available = {{is_available}} ORDER BY id LIMIT {{limit}}",
+			IsEnabled:             true,
+			Parameters: []models.QueryParameter{
+				{Name: "min_id", Type: "integer", Description: "Minimum user ID", Required: true},
+				{Name: "is_available", Type: "boolean", Description: "User availability", Required: false, Default: true},
+				{Name: "limit", Type: "integer", Description: "Max results", Required: false, Default: 10},
+			},
+		}
 
-	createReq := tc.makeRequest(http.MethodPost,
-		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
-		createBody)
-	createReq.SetPathValue("pid", tc.projectID.String())
-	createReq.SetPathValue("did", tc.createdDsID.String())
+		createReq := tc.makeRequest(t, http.MethodPost,
+			"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
+			createBody)
+		createReq.SetPathValue("pid", tc.projectID.String())
+		createReq.SetPathValue("did", tc.createdDsID.String())
 
-	createRec := httptest.NewRecorder()
-	tc.queriesHandler.Create(createRec, createReq)
-	require.Equal(t, http.StatusCreated, createRec.Code)
+		createRec := httptest.NewRecorder()
+		tc.queriesHandler.Create(createRec, createReq)
+		require.Equal(t, http.StatusCreated, createRec.Code)
 
-	var createResp ApiResponse
-	err = json.Unmarshal(createRec.Body.Bytes(), &createResp)
-	require.NoError(t, err)
+		var createResp ApiResponse
+		err := json.Unmarshal(createRec.Body.Bytes(), &createResp)
+		require.NoError(t, err)
 
-	createData := createResp.Data.(map[string]any)
-	queryID := createData["query_id"].(string)
+		createData := createResp.Data.(map[string]any)
+		queryID = createData["query_id"].(string)
+	})
 
 	// Step 4: Execute with valid parameters
-	execBody := ExecuteQueryRequest{
-		Limit: 100,
-		Parameters: map[string]any{
-			"min_id": 0,
-			"status": "active",
-			"limit":  5,
-		},
-	}
+	t.Run("execute", func(t *testing.T) {
+		execBody := ExecuteQueryRequest{
+			Limit: 100,
+			Parameters: map[string]any{
+				"min_id":       0,
+				"is_available": true,
+				"limit":        5,
+			},
+		}
 
-	execReq := tc.makeRequest(http.MethodPost,
-		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/"+queryID+"/execute",
-		execBody)
-	execReq.SetPathValue("pid", tc.projectID.String())
-	execReq.SetPathValue("did", tc.createdDsID.String())
-	execReq.SetPathValue("qid", queryID)
+		execReq := tc.makeRequest(t, http.MethodPost,
+			"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/"+queryID+"/execute",
+			execBody)
+		execReq.SetPathValue("pid", tc.projectID.String())
+		execReq.SetPathValue("did", tc.createdDsID.String())
+		execReq.SetPathValue("qid", queryID)
 
-	execRec := httptest.NewRecorder()
-	tc.queriesHandler.Execute(execRec, execReq)
-	require.Equal(t, http.StatusOK, execRec.Code)
+		execRec := httptest.NewRecorder()
+		tc.queriesHandler.Execute(execRec, execReq)
+		require.Equal(t, http.StatusOK, execRec.Code)
 
-	var execResp ApiResponse
-	err = json.Unmarshal(execRec.Body.Bytes(), &execResp)
-	require.NoError(t, err)
-	assert.True(t, execResp.Success)
+		var execResp ApiResponse
+		err := json.Unmarshal(execRec.Body.Bytes(), &execResp)
+		require.NoError(t, err)
+		assert.True(t, execResp.Success)
 
-	execData := execResp.Data.(map[string]any)
-	rows := execData["rows"].([]any)
-	assert.LessOrEqual(t, len(rows), 5) // Should respect limit parameter
+		execData := execResp.Data.(map[string]any)
+		rows := execData["rows"].([]any)
+		assert.LessOrEqual(t, len(rows), 5) // Should respect limit parameter
+	})
 
 	// Step 5: Attempt injection
-	injectionBody := ExecuteQueryRequest{
-		Limit: 100,
-		Parameters: map[string]any{
-			"min_id": "0; DROP TABLE users--",
-			"status": "active",
-			"limit":  5,
-		},
-	}
+	t.Run("injection", func(t *testing.T) {
+		injectionBody := ExecuteQueryRequest{
+			Limit: 100,
+			Parameters: map[string]any{
+				"min_id":       "0; DROP TABLE users--",
+				"is_available": true,
+				"limit":        5,
+			},
+		}
 
-	injectionReq := tc.makeRequest(http.MethodPost,
-		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/"+queryID+"/execute",
-		injectionBody)
-	injectionReq.SetPathValue("pid", tc.projectID.String())
-	injectionReq.SetPathValue("did", tc.createdDsID.String())
-	injectionReq.SetPathValue("qid", queryID)
+		injectionReq := tc.makeRequest(t, http.MethodPost,
+			"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/"+queryID+"/execute",
+			injectionBody)
+		injectionReq.SetPathValue("pid", tc.projectID.String())
+		injectionReq.SetPathValue("did", tc.createdDsID.String())
+		injectionReq.SetPathValue("qid", queryID)
 
-	injectionRec := httptest.NewRecorder()
-	tc.queriesHandler.Execute(injectionRec, injectionReq)
+		injectionRec := httptest.NewRecorder()
+		tc.queriesHandler.Execute(injectionRec, injectionReq)
 
-	// Should fail with internal error (not succeed)
-	assert.Equal(t, http.StatusInternalServerError, injectionRec.Code)
+		// Should fail with internal error (not succeed)
+		assert.Equal(t, http.StatusInternalServerError, injectionRec.Code)
 
-	var injectionResp ApiResponse
-	err = json.Unmarshal(injectionRec.Body.Bytes(), &injectionResp)
-	require.NoError(t, err)
-	assert.False(t, injectionResp.Success)
+		var injectionResp ApiResponse
+		err := json.Unmarshal(injectionRec.Body.Bytes(), &injectionResp)
+		require.NoError(t, err)
+		assert.False(t, injectionResp.Success)
+	})
 
 	// Step 6: Verify query is in list with parameters
-	listReq := tc.makeRequest(http.MethodGet,
-		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
-		nil)
-	listReq.SetPathValue("pid", tc.projectID.String())
-	listReq.SetPathValue("did", tc.createdDsID.String())
+	t.Run("list", func(t *testing.T) {
+		listReq := tc.makeRequest(t, http.MethodGet,
+			"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
+			nil)
+		listReq.SetPathValue("pid", tc.projectID.String())
+		listReq.SetPathValue("did", tc.createdDsID.String())
 
-	listRec := httptest.NewRecorder()
-	tc.queriesHandler.List(listRec, listReq)
-	require.Equal(t, http.StatusOK, listRec.Code)
+		listRec := httptest.NewRecorder()
+		tc.queriesHandler.List(listRec, listReq)
+		require.Equal(t, http.StatusOK, listRec.Code)
 
-	var listResp ApiResponse
-	err = json.Unmarshal(listRec.Body.Bytes(), &listResp)
-	require.NoError(t, err)
+		var listResp ApiResponse
+		err := json.Unmarshal(listRec.Body.Bytes(), &listResp)
+		require.NoError(t, err)
 
-	listData := listResp.Data.(map[string]any)
-	queries := listData["queries"].([]any)
-	assert.Len(t, queries, 1)
+		listData := listResp.Data.(map[string]any)
+		queries := listData["queries"].([]any)
+		assert.Len(t, queries, 1)
 
-	query := queries[0].(map[string]any)
-	params := query["parameters"].([]any)
-	assert.Len(t, params, 3)
+		query := queries[0].(map[string]any)
+		params := query["parameters"].([]any)
+		assert.Len(t, params, 3)
+	})
 }

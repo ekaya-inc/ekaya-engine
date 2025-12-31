@@ -121,7 +121,7 @@ func (t *AnalyzeRelationshipsTask) Execute(ctx context.Context, enqueuer workque
 	if err != nil {
 		return fmt.Errorf("create LLM client: %w", err)
 	}
-	result, err := llmClient.GenerateResponse(tenantCtx, prompt, systemMessage, 0.2, true) // Low temperature, enable thinking
+	result, err := llmClient.GenerateResponse(tenantCtx, prompt, systemMessage, 0.2, false) // Low temperature, no thinking mode
 	if err != nil {
 		return fmt.Errorf("LLM analysis failed: %w", err)
 	}

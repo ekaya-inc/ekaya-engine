@@ -239,7 +239,7 @@ func (m *mockSchemaRepository) UpdateColumnSelection(ctx context.Context, projec
 	return nil
 }
 
-func (m *mockSchemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount *int64) error {
+func (m *mockSchemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error {
 	return nil
 }
 
@@ -487,7 +487,7 @@ func (m *mockSchemaAdapterFactory) NewQueryExecutor(ctx context.Context, dsType 
 // ============================================================================
 
 func newTestSchemaService(repo *mockSchemaRepository, dsSvc *mockDatasourceService, factory *mockSchemaAdapterFactory) SchemaService {
-	return NewSchemaService(repo, dsSvc, factory, zap.NewNop())
+	return NewSchemaService(repo, nil, dsSvc, factory, zap.NewNop())
 }
 
 // ============================================================================

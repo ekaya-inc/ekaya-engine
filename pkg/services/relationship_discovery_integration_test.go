@@ -33,7 +33,7 @@ func setupDiscoveryTest(t *testing.T) *discoveryTestContext {
 	repo := repositories.NewSchemaRepository()
 	logger := zap.NewNop()
 
-	service := NewSchemaService(repo, nil, nil, logger)
+	service := NewSchemaService(repo, nil, nil, nil, logger)
 
 	// Use fixed IDs for consistent testing
 	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000201")
@@ -598,7 +598,7 @@ func (tc *discoveryTestContext) createTestColumnWithStats(ctx context.Context, t
 	column := tc.createTestColumn(ctx, tableID, columnName, dataType, ordinal, isPrimaryKey)
 
 	// Update distinct count for cardinality checks
-	if err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, nil); err != nil {
+	if err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, nil, nil, nil); err != nil {
 		tc.t.Fatalf("Failed to update column stats: %v", err)
 	}
 

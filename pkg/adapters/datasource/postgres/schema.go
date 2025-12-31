@@ -229,19 +229,22 @@ func (d *SchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, t
 	for _, colName := range columnNames {
 		quotedCol := pgx.Identifier{colName}.Sanitize()
 
+		// Query includes length stats for text columns (used to detect uniform-length IDs like UUIDs)
 		query := fmt.Sprintf(`
 			SELECT
 				COUNT(*) as row_count,
 				COUNT(%s) as non_null_count,
-				COUNT(DISTINCT %s) as distinct_count
+				COUNT(DISTINCT %s) as distinct_count,
+				MIN(LENGTH(%s::text)) as min_length,
+				MAX(LENGTH(%s::text)) as max_length
 			FROM %s.%s
-		`, quotedCol, quotedCol, quotedSchema, quotedTable)
+		`, quotedCol, quotedCol, quotedCol, quotedCol, quotedSchema, quotedTable)
 
 		var s datasource.ColumnStats
 		s.ColumnName = colName
 
 		row := d.pool.QueryRow(ctx, query)
-		if err := row.Scan(&s.RowCount, &s.NonNullCount, &s.DistinctCount); err != nil {
+		if err := row.Scan(&s.RowCount, &s.NonNullCount, &s.DistinctCount, &s.MinLength, &s.MaxLength); err != nil {
 			return nil, fmt.Errorf("analyze column %s: %w", colName, err)
 		}
 
@@ -311,6 +314,7 @@ func (d *SchemaDiscoverer) AnalyzeJoin(ctx context.Context,
 	tgtTable := pgx.Identifier{targetTable}.Sanitize()
 	tgtCol := pgx.Identifier{targetColumn}.Sanitize()
 
+	// Cast columns to text to handle cross-type comparisons (e.g., text vs bigint)
 	query := fmt.Sprintf(`
 		WITH join_stats AS (
 			SELECT
@@ -318,12 +322,12 @@ func (d *SchemaDiscoverer) AnalyzeJoin(ctx context.Context,
 				COUNT(DISTINCT s.%s) as source_matched,
 				COUNT(DISTINCT t.%s) as target_matched
 			FROM %s.%s s
-			JOIN %s.%s t ON s.%s = t.%s
+			JOIN %s.%s t ON s.%s::text = t.%s::text
 		),
 		orphan_stats AS (
 			SELECT COUNT(*) as orphan_count
 			FROM %s.%s s
-			LEFT JOIN %s.%s t ON s.%s = t.%s
+			LEFT JOIN %s.%s t ON s.%s::text = t.%s::text
 			WHERE t.%s IS NULL AND s.%s IS NOT NULL
 		)
 		SELECT join_count, source_matched, target_matched, orphan_count

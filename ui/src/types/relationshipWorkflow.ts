@@ -14,6 +14,7 @@ export type RelationshipWorkflowPhase = 'relationships' | 'ontology';
 export type RelationshipWorkflowState = 'pending' | 'running' | 'paused' | 'awaiting_input' | 'completed' | 'failed';
 export type RelationshipCandidateStatus = 'pending' | 'accepted' | 'rejected';
 export type DetectionMethod = 'value_match' | 'name_inference' | 'llm' | 'hybrid';
+export type DiscoveryPhase = 'stats' | 'filtering' | 'graph' | 'entity_discovery' | 'complete';
 
 // ============================================================================
 // API Response Types
@@ -87,4 +88,41 @@ export interface SaveRelationshipsResponse {
  */
 export interface CancelWorkflowResponse {
   status: string;
+}
+
+// ============================================================================
+// Entity-Based Discovery Types
+// ============================================================================
+
+/**
+ * Single occurrence of an entity in the schema
+ */
+export interface EntityOccurrenceResponse {
+  id: string;
+  schema_name: string;
+  table_name: string;
+  column_name: string;
+  role: string | null;
+  confidence: number;
+}
+
+/**
+ * Discovered entity with its occurrences
+ */
+export interface EntityResponse {
+  id: string;
+  name: string;
+  description: string;
+  primary_schema: string;
+  primary_table: string;
+  primary_column: string;
+  occurrences: EntityOccurrenceResponse[];
+}
+
+/**
+ * Response from GET /api/projects/{pid}/datasources/{dsid}/relationships/entities
+ */
+export interface EntitiesResponse {
+  entities: EntityResponse[];
+  island_tables?: string[];
 }

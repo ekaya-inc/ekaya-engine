@@ -48,9 +48,9 @@ type OntologyWorkflowService interface {
 	// Called during server shutdown to release ownership so new servers can take over.
 	Shutdown(ctx context.Context) error
 
-	// GetSchemaEntityCount returns the total number of entities (1 global + tables + columns)
+	// GetOntologyEntityCount returns the total number of entities (1 global + tables + columns)
 	// that would be processed by an ontology extraction workflow.
-	GetSchemaEntityCount(ctx context.Context, projectID uuid.UUID) (int, error)
+	GetOntologyEntityCount(ctx context.Context, projectID uuid.UUID) (int, error)
 }
 
 // taskQueueUpdate holds data for a task queue database update.
@@ -1013,9 +1013,9 @@ func (s *ontologyWorkflowService) Shutdown(ctx context.Context) error {
 	}
 }
 
-// GetSchemaEntityCount returns the total number of entities (1 global + tables + columns)
+// GetOntologyEntityCount returns the total number of entities (1 global + tables + columns)
 // that would be processed by an ontology extraction workflow.
-func (s *ontologyWorkflowService) GetSchemaEntityCount(ctx context.Context, projectID uuid.UUID) (int, error) {
+func (s *ontologyWorkflowService) GetOntologyEntityCount(ctx context.Context, projectID uuid.UUID) (int, error) {
 	// Get datasources for this project to find the one to count entities from
 	datasources, err := s.dsSvc.List(ctx, projectID)
 	if err != nil {

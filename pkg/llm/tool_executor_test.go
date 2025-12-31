@@ -318,7 +318,7 @@ func (m *mockSchemaRepo) UpdateColumnSelection(ctx context.Context, projectID, c
 	return m.err
 }
 
-func (m *mockSchemaRepo) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount *int64) error {
+func (m *mockSchemaRepo) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error {
 	return m.err
 }
 

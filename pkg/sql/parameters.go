@@ -42,11 +42,11 @@ func ExtractParameters(sqlQuery string) []string {
 	return params
 }
 
-// ValidateParameterDefinitions checks that all template parameters used in the SQL
-// have corresponding parameter definitions.
+// ValidateParameterDefinitions checks that SQL parameters and definitions match exactly.
 //
 // Returns an error if:
 //   - A {{param}} placeholder is used in SQL but not defined in params
+//   - A parameter is defined but not used in SQL
 //
 // Example:
 //
@@ -59,15 +59,30 @@ func ExtractParameters(sqlQuery string) []string {
 //	// err != nil: "parameter {{min_total}} used in SQL but not defined"
 func ValidateParameterDefinitions(sqlQuery string, params []models.QueryParameter) error {
 	extracted := ExtractParameters(sqlQuery)
-	defined := make(map[string]bool)
 
-	for _, p := range params {
-		defined[p.Name] = true
+	// Build set of extracted parameter names
+	extractedSet := make(map[string]bool)
+	for _, name := range extracted {
+		extractedSet[name] = true
 	}
 
+	// Build set of defined parameter names
+	definedSet := make(map[string]bool)
+	for _, p := range params {
+		definedSet[p.Name] = true
+	}
+
+	// Check all SQL parameters are defined
 	for _, name := range extracted {
-		if !defined[name] {
+		if !definedSet[name] {
 			return fmt.Errorf("parameter {{%s}} used in SQL but not defined", name)
+		}
+	}
+
+	// Check all defined parameters are used in SQL
+	for _, p := range params {
+		if !extractedSet[p.Name] {
+			return fmt.Errorf("parameter '%s' is defined but not used in SQL", p.Name)
 		}
 	}
 

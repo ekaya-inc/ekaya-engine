@@ -180,13 +180,14 @@ func TestValidateParameterDefinitions(t *testing.T) {
 			errMsg:    "parameter {{min_total}} used in SQL but not defined", // Returns first missing param
 		},
 		{
-			name: "parameter defined but not used (OK)",
+			name: "parameter defined but not used",
 			sql:  "SELECT * FROM orders WHERE customer_id = {{customer_id}}",
 			params: []models.QueryParameter{
 				{Name: "customer_id", Type: "uuid", Required: true},
 				{Name: "unused_param", Type: "string", Required: false},
 			},
-			expectErr: false,
+			expectErr: true,
+			errMsg:    "parameter 'unused_param' is defined but not used in SQL",
 		},
 		{
 			name: "duplicate parameter in SQL, single definition (OK)",
@@ -197,12 +198,13 @@ func TestValidateParameterDefinitions(t *testing.T) {
 			expectErr: false,
 		},
 		{
-			name: "no parameters in SQL but has definitions (OK)",
+			name: "no parameters in SQL but has definitions",
 			sql:  "SELECT * FROM users",
 			params: []models.QueryParameter{
 				{Name: "filter", Type: "string", Required: false},
 			},
-			expectErr: false,
+			expectErr: true,
+			errMsg:    "parameter 'filter' is defined but not used in SQL",
 		},
 	}
 

@@ -35,7 +35,7 @@ func setupSchemaServiceTest(t *testing.T) *schemaServiceTestContext {
 	logger := zap.NewNop()
 
 	// Create service with nil dependencies (not needed for these tests)
-	service := NewSchemaService(repo, nil, nil, logger)
+	service := NewSchemaService(repo, nil, nil, nil, logger)
 
 	// Use fixed IDs for consistent testing (different from repository tests)
 	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000102")

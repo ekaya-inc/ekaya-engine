@@ -621,7 +621,7 @@ func TestSchemaRepository_UpsertColumn_ReactivateSoftDeleted(t *testing.T) {
 	// Set stats
 	distinctCount := int64(500)
 	nullCount := int64(10)
-	err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, &nullCount)
+	err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, &nullCount, nil, nil)
 	if err != nil {
 		t.Fatalf("UpdateColumnStats failed: %v", err)
 	}
@@ -772,7 +772,7 @@ func TestSchemaRepository_UpdateColumnStats(t *testing.T) {
 	distinctCount := int64(1500)
 	nullCount := int64(25)
 
-	err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, &nullCount)
+	err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, &nullCount, nil, nil)
 	if err != nil {
 		t.Fatalf("UpdateColumnStats failed: %v", err)
 	}
@@ -1267,7 +1267,7 @@ func TestSchemaRepository_NotFound(t *testing.T) {
 
 	// UpdateColumnStats with non-existent column
 	distinctCount := int64(100)
-	err = tc.repo.UpdateColumnStats(ctx, nonExistentID, &distinctCount, nil)
+	err = tc.repo.UpdateColumnStats(ctx, nonExistentID, &distinctCount, nil, nil, nil)
 	if err != apperrors.ErrNotFound {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
