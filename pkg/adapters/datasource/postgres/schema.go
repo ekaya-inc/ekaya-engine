@@ -229,19 +229,22 @@ func (d *SchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, t
 	for _, colName := range columnNames {
 		quotedCol := pgx.Identifier{colName}.Sanitize()
 
+		// Query includes length stats for text columns (used to detect uniform-length IDs like UUIDs)
 		query := fmt.Sprintf(`
 			SELECT
 				COUNT(*) as row_count,
 				COUNT(%s) as non_null_count,
-				COUNT(DISTINCT %s) as distinct_count
+				COUNT(DISTINCT %s) as distinct_count,
+				MIN(LENGTH(%s::text)) as min_length,
+				MAX(LENGTH(%s::text)) as max_length
 			FROM %s.%s
-		`, quotedCol, quotedCol, quotedSchema, quotedTable)
+		`, quotedCol, quotedCol, quotedCol, quotedCol, quotedSchema, quotedTable)
 
 		var s datasource.ColumnStats
 		s.ColumnName = colName
 
 		row := d.pool.QueryRow(ctx, query)
-		if err := row.Scan(&s.RowCount, &s.NonNullCount, &s.DistinctCount); err != nil {
+		if err := row.Scan(&s.RowCount, &s.NonNullCount, &s.DistinctCount, &s.MinLength, &s.MaxLength); err != nil {
 			return nil, fmt.Errorf("analyze column %s: %w", colName, err)
 		}
 

@@ -38,6 +38,8 @@ type SchemaColumn struct {
 	DefaultValue    *string        `json:"default_value,omitempty"`
 	DistinctCount   *int64         `json:"distinct_count,omitempty"`
 	NullCount       *int64         `json:"null_count,omitempty"`
+	MinLength       *int64         `json:"min_length,omitempty"` // For text columns: min string length
+	MaxLength       *int64         `json:"max_length,omitempty"` // For text columns: max string length
 	BusinessName    *string        `json:"business_name,omitempty"`
 	Description     *string        `json:"description,omitempty"`
 	Metadata        map[string]any `json:"metadata,omitempty"`

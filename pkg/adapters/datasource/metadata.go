@@ -35,6 +35,8 @@ type ColumnStats struct {
 	RowCount      int64
 	NonNullCount  int64
 	DistinctCount int64
+	MinLength     *int64 // For text columns: minimum string length (nil for non-text)
+	MaxLength     *int64 // For text columns: maximum string length (nil for non-text)
 }
 
 // ValueOverlapResult contains results from value overlap analysis.

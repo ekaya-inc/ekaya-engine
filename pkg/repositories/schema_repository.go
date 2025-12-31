@@ -42,7 +42,7 @@ type SchemaRepository interface {
 	UpsertColumn(ctx context.Context, column *models.SchemaColumn) error
 	SoftDeleteRemovedColumns(ctx context.Context, tableID uuid.UUID, activeColumnNames []string) (int64, error)
 	UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error
-	UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount *int64) error
+	UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error
 	UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error
 
 	// Relationships
@@ -389,7 +389,8 @@ func (r *schemaRepository) ListColumnsByTable(ctx context.Context, projectID, ta
 	query := `
 		SELECT id, project_id, schema_table_id, column_name, data_type,
 		       is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
-		       default_value, distinct_count, null_count, business_name, description, metadata,
+		       default_value, distinct_count, null_count, min_length, max_length,
+		       business_name, description, metadata,
 		       created_at, updated_at
 		FROM engine_schema_columns
 		WHERE project_id = $1 AND schema_table_id = $2 AND deleted_at IS NULL
@@ -425,7 +426,8 @@ func (r *schemaRepository) ListColumnsByDatasource(ctx context.Context, projectI
 	query := `
 		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
 		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
-		       c.default_value, c.distinct_count, c.null_count, c.business_name, c.description, c.metadata,
+		       c.default_value, c.distinct_count, c.null_count, c.min_length, c.max_length,
+		       c.business_name, c.description, c.metadata,
 		       c.created_at, c.updated_at
 		FROM engine_schema_columns c
 		JOIN engine_schema_tables t ON c.schema_table_id = t.id
@@ -463,7 +465,8 @@ func (r *schemaRepository) GetColumnByID(ctx context.Context, projectID, columnI
 	query := `
 		SELECT id, project_id, schema_table_id, column_name, data_type,
 		       is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
-		       default_value, distinct_count, null_count, business_name, description, metadata,
+		       default_value, distinct_count, null_count, min_length, max_length,
+		       business_name, description, metadata,
 		       created_at, updated_at
 		FROM engine_schema_columns
 		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
@@ -489,7 +492,8 @@ func (r *schemaRepository) GetColumnByName(ctx context.Context, tableID uuid.UUI
 	query := `
 		SELECT id, project_id, schema_table_id, column_name, data_type,
 		       is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
-		       default_value, distinct_count, null_count, business_name, description, metadata,
+		       default_value, distinct_count, null_count, min_length, max_length,
+		       business_name, description, metadata,
 		       created_at, updated_at
 		FROM engine_schema_columns
 		WHERE schema_table_id = $1 AND column_name = $2 AND deleted_at IS NULL`
@@ -666,7 +670,7 @@ func (r *schemaRepository) UpdateColumnSelection(ctx context.Context, projectID,
 	return nil
 }
 
-func (r *schemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount *int64) error {
+func (r *schemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return fmt.Errorf("no tenant scope in context")
@@ -674,10 +678,10 @@ func (r *schemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.
 
 	query := `
 		UPDATE engine_schema_columns
-		SET distinct_count = $2, null_count = $3, updated_at = NOW()
+		SET distinct_count = $2, null_count = $3, min_length = $4, max_length = $5, updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL`
 
-	result, err := scope.Conn.Exec(ctx, query, columnID, distinctCount, nullCount)
+	result, err := scope.Conn.Exec(ctx, query, columnID, distinctCount, nullCount, minLength, maxLength)
 	if err != nil {
 		return fmt.Errorf("failed to update column stats: %w", err)
 	}
@@ -1261,8 +1265,9 @@ func (r *schemaRepository) GetJoinableColumns(ctx context.Context, projectID, ta
 
 	query := `
 		SELECT id, project_id, schema_table_id, column_name, data_type,
-		       is_nullable, is_primary_key, is_selected, ordinal_position,
-		       distinct_count, null_count, business_name, description, metadata,
+		       is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
+		       distinct_count, null_count, min_length, max_length,
+		       business_name, description, metadata,
 		       created_at, updated_at,
 		       row_count, non_null_count, is_joinable, joinability_reason, stats_updated_at
 		FROM engine_schema_columns
@@ -1329,8 +1334,9 @@ func (r *schemaRepository) GetPrimaryKeyColumns(ctx context.Context, projectID, 
 
 	query := `
 		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
-		       c.is_nullable, c.is_primary_key, c.is_selected, c.ordinal_position,
-		       c.distinct_count, c.null_count, c.business_name, c.description, c.metadata,
+		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
+		       c.distinct_count, c.null_count, c.min_length, c.max_length,
+		       c.business_name, c.description, c.metadata,
 		       c.created_at, c.updated_at,
 		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at
 		FROM engine_schema_columns c
@@ -1435,8 +1441,9 @@ func (r *schemaRepository) GetNonPKColumnsByExactType(ctx context.Context, proje
 	// Includes column stats and table info for cardinality filtering.
 	query := `
 		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
-		       c.is_nullable, c.is_primary_key, c.is_selected, c.ordinal_position,
-		       c.distinct_count, c.null_count, c.business_name, c.description, c.metadata,
+		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
+		       c.distinct_count, c.null_count, c.min_length, c.max_length,
+		       c.business_name, c.description, c.metadata,
 		       c.created_at, c.updated_at,
 		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at
 		FROM engine_schema_columns c
@@ -1514,7 +1521,8 @@ func scanSchemaColumn(rows pgx.Rows) (*models.SchemaColumn, error) {
 	err := rows.Scan(
 		&c.ID, &c.ProjectID, &c.SchemaTableID, &c.ColumnName, &c.DataType,
 		&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
-		&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.BusinessName, &c.Description, &metadata,
+		&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
+		&c.BusinessName, &c.Description, &metadata,
 		&c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
@@ -1532,7 +1540,8 @@ func scanSchemaColumnRow(row pgx.Row) (*models.SchemaColumn, error) {
 	err := row.Scan(
 		&c.ID, &c.ProjectID, &c.SchemaTableID, &c.ColumnName, &c.DataType,
 		&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
-		&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.BusinessName, &c.Description, &metadata,
+		&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
+		&c.BusinessName, &c.Description, &metadata,
 		&c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
@@ -1615,8 +1624,9 @@ func scanSchemaColumnWithDiscovery(rows pgx.Rows) (*models.SchemaColumn, error) 
 	var metadata []byte
 	err := rows.Scan(
 		&c.ID, &c.ProjectID, &c.SchemaTableID, &c.ColumnName, &c.DataType,
-		&c.IsNullable, &c.IsPrimaryKey, &c.IsSelected, &c.OrdinalPosition,
-		&c.DistinctCount, &c.NullCount, &c.BusinessName, &c.Description, &metadata,
+		&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
+		&c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
+		&c.BusinessName, &c.Description, &metadata,
 		&c.CreatedAt, &c.UpdatedAt,
 		&c.RowCount, &c.NonNullCount, &c.IsJoinable, &c.JoinabilityReason, &c.StatsUpdatedAt,
 	)
