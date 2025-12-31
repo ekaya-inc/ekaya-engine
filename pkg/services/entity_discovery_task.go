@@ -118,7 +118,7 @@ func (t *EntityDiscoveryTask) Execute(ctx context.Context, enqueuer workqueue.Ta
 		return fmt.Errorf("LLM client is nil")
 	}
 
-	result, err := llmClient.GenerateResponse(tenantCtx, prompt, systemMessage, 0.3, true)
+	result, err := llmClient.GenerateResponse(tenantCtx, prompt, systemMessage, 0.3, false)
 	if err != nil {
 		return fmt.Errorf("LLM entity discovery failed: %w", err)
 	}
@@ -434,10 +434,17 @@ func (t *EntityDiscoveryTask) countTotalOccurrences(entities []DiscoveredEntity)
 	return total
 }
 
-// extractJSON extracts JSON from text that might be wrapped in markdown code blocks.
+// extractJSON extracts JSON from text that might be wrapped in markdown code blocks
+// or prefixed with LLM reasoning tags like <think>...</think>.
 func extractJSON(text string) string {
-	// Remove markdown code blocks if present
 	text = strings.TrimSpace(text)
+
+	// Remove <think>...</think> tags (LLM reasoning mode output)
+	if idx := strings.Index(text, "</think>"); idx != -1 {
+		text = strings.TrimSpace(text[idx+len("</think>"):])
+	}
+
+	// Remove markdown code blocks if present
 	if strings.HasPrefix(text, "```json") {
 		text = strings.TrimPrefix(text, "```json")
 		text = strings.TrimSuffix(text, "```")
