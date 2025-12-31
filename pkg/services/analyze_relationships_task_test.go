@@ -275,8 +275,8 @@ func (m *mockSchemaRepo) UpdateColumnSelection(ctx context.Context, projectID, c
 	return args.Error(0)
 }
 
-func (m *mockSchemaRepo) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount *int64) error {
-	args := m.Called(ctx, columnID, distinctCount, nullCount)
+func (m *mockSchemaRepo) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error {
+	args := m.Called(ctx, columnID, distinctCount, nullCount, minLength, maxLength)
 	return args.Error(0)
 }
 
