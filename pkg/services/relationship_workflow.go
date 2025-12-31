@@ -90,22 +90,23 @@ type relationshipHeartbeatInfo struct {
 }
 
 type relationshipWorkflowService struct {
-	workflowRepo     repositories.OntologyWorkflowRepository
-	candidateRepo    repositories.RelationshipCandidateRepository
-	schemaRepo       repositories.SchemaRepository
-	stateRepo        repositories.WorkflowStateRepository
-	ontologyRepo     repositories.OntologyRepository
-	entityRepo       repositories.OntologyEntityRepository
-	dsSvc            DatasourceService
-	adapterFactory   datasource.DatasourceAdapterFactory
-	llmFactory       llm.LLMClientFactory
-	discoveryService RelationshipDiscoveryService
-	getTenantCtx     TenantContextFunc
-	logger           *zap.Logger
-	serverInstanceID uuid.UUID
-	activeQueues     sync.Map // workflowID -> *workqueue.Queue
-	taskQueueWriters sync.Map // workflowID -> *taskQueueWriter
-	heartbeatStop    sync.Map // workflowID -> *relationshipHeartbeatInfo
+	workflowRepo         repositories.OntologyWorkflowRepository
+	candidateRepo        repositories.RelationshipCandidateRepository
+	schemaRepo           repositories.SchemaRepository
+	stateRepo            repositories.WorkflowStateRepository
+	ontologyRepo         repositories.OntologyRepository
+	entityRepo           repositories.OntologyEntityRepository
+	dsSvc                DatasourceService
+	adapterFactory       datasource.DatasourceAdapterFactory
+	llmFactory           llm.LLMClientFactory
+	discoveryService     RelationshipDiscoveryService
+	deterministicService DeterministicRelationshipService
+	getTenantCtx         TenantContextFunc
+	logger               *zap.Logger
+	serverInstanceID     uuid.UUID
+	activeQueues         sync.Map // workflowID -> *workqueue.Queue
+	taskQueueWriters     sync.Map // workflowID -> *taskQueueWriter
+	heartbeatStop        sync.Map // workflowID -> *relationshipHeartbeatInfo
 }
 
 // NewRelationshipWorkflowService creates a new relationship workflow service.
@@ -120,6 +121,7 @@ func NewRelationshipWorkflowService(
 	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
 	discoveryService RelationshipDiscoveryService,
+	deterministicService DeterministicRelationshipService,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) RelationshipWorkflowService {
@@ -128,19 +130,20 @@ func NewRelationshipWorkflowService(
 	namedLogger.Info("Relationship workflow service initialized", zap.String("server_instance_id", serverID.String()))
 
 	return &relationshipWorkflowService{
-		workflowRepo:     workflowRepo,
-		candidateRepo:    candidateRepo,
-		schemaRepo:       schemaRepo,
-		stateRepo:        stateRepo,
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		dsSvc:            dsSvc,
-		adapterFactory:   adapterFactory,
-		llmFactory:       llmFactory,
-		discoveryService: discoveryService,
-		getTenantCtx:     getTenantCtx,
-		logger:           namedLogger,
-		serverInstanceID: serverID,
+		workflowRepo:         workflowRepo,
+		candidateRepo:        candidateRepo,
+		schemaRepo:           schemaRepo,
+		stateRepo:            stateRepo,
+		ontologyRepo:         ontologyRepo,
+		entityRepo:           entityRepo,
+		dsSvc:                dsSvc,
+		adapterFactory:       adapterFactory,
+		llmFactory:           llmFactory,
+		discoveryService:     discoveryService,
+		deterministicService: deterministicService,
+		getTenantCtx:         getTenantCtx,
+		logger:               namedLogger,
+		serverInstanceID:     serverID,
 	}
 }
 
@@ -441,123 +444,151 @@ func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, ontolog
 	// Note: Entity discovery is now a separate workflow run from the Entities page.
 	// The prerequisite check in StartDetection ensures entities exist before we proceed.
 
-	// Phase 1: Scan all columns in parallel
-	s.logger.Info("Phase 1: Scanning columns",
+	// Phase 1: Discover FK relationships (deterministic - no LLM)
+	s.logger.Info("Phase 1: Discovering FK relationships",
 		zap.String("workflow_id", workflowID.String()))
 
-	if err := s.updateProgress(ctx, projectID, workflowID, "Scanning columns...", 10); err != nil {
+	if err := s.updateProgress(ctx, projectID, workflowID, "Discovering FK relationships...", 50); err != nil {
 		s.logger.Error("Failed to update progress", zap.Error(err))
 	}
 
-	if err := s.enqueueColumnScans(ctx, projectID, workflowID, datasourceID, queue); err != nil {
-		s.logger.Error("Failed to enqueue column scan tasks", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("column scan: %v", err))
+	// Get tenant-scoped context for FK discovery
+	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
+	if err != nil {
+		s.logger.Error("Failed to get tenant context for FK discovery", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("tenant context: %v", err))
+		return
+	}
+	fkResult, err := s.deterministicService.DiscoverRelationships(tenantCtx, projectID, datasourceID)
+	cleanup()
+	if err != nil {
+		s.logger.Error("Failed to discover FK relationships", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("fk discovery: %v", err))
 		return
 	}
 
-	// Wait for all column scans to complete
-	if err := queue.Wait(ctx); err != nil {
-		s.logger.Error("Column scan phase failed", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("column scan failed: %v", err))
-		return
-	}
+	s.logger.Info("FK relationship discovery complete",
+		zap.String("workflow_id", workflowID.String()),
+		zap.Int("fk_relationships", fkResult.FKRelationships),
+		zap.Int("total_relationships", fkResult.TotalRelationships))
 
-	// Phase 2: Match values (single task)
-	s.logger.Info("Phase 2: Matching values",
-		zap.String("workflow_id", workflowID.String()))
+	// TODO: Future phases for value-based and LLM-inferred relationships
+	// Commenting out for now to focus on FK-only discovery.
+	_ = queue // Suppress unused variable warning
 
-	if err := s.updateProgress(ctx, projectID, workflowID, "Matching column values...", 30); err != nil {
-		s.logger.Error("Failed to update progress", zap.Error(err))
-	}
+	/*
+		// Phase 1: Scan all columns in parallel
+		s.logger.Info("Phase 1: Scanning columns",
+			zap.String("workflow_id", workflowID.String()))
 
-	valueMatchTask := NewValueMatchTask(
-		s.stateRepo,
-		s.candidateRepo,
-		s.schemaRepo,
-		s.getTenantCtx,
-		projectID,
-		workflowID,
-		datasourceID,
-		s.logger,
-	)
-	queue.Enqueue(valueMatchTask)
+		if err := s.updateProgress(ctx, projectID, workflowID, "Scanning columns...", 10); err != nil {
+			s.logger.Error("Failed to update progress", zap.Error(err))
+		}
 
-	if err := queue.Wait(ctx); err != nil {
-		s.logger.Error("Value match phase failed", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("value match failed: %v", err))
-		return
-	}
+		if err := s.enqueueColumnScans(ctx, projectID, workflowID, datasourceID, queue); err != nil {
+			s.logger.Error("Failed to enqueue column scan tasks", zap.Error(err))
+			s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("column scan: %v", err))
+			return
+		}
 
-	// Phase 3: Infer from names (single task)
-	s.logger.Info("Phase 3: Inferring relationships from names",
-		zap.String("workflow_id", workflowID.String()))
+		// Wait for all column scans to complete
+		if err := queue.Wait(ctx); err != nil {
+			s.logger.Error("Column scan phase failed", zap.Error(err))
+			s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("column scan failed: %v", err))
+			return
+		}
 
-	if err := s.updateProgress(ctx, projectID, workflowID, "Inferring relationships from naming patterns...", 50); err != nil {
-		s.logger.Error("Failed to update progress", zap.Error(err))
-	}
+		// Phase 2: Match values (single task)
+		s.logger.Info("Phase 2: Matching values",
+			zap.String("workflow_id", workflowID.String()))
 
-	nameInferenceTask := NewNameInferenceTask(
-		s.candidateRepo,
-		s.schemaRepo,
-		s.getTenantCtx,
-		projectID,
-		workflowID,
-		datasourceID,
-		s.logger,
-	)
-	queue.Enqueue(nameInferenceTask)
+		if err := s.updateProgress(ctx, projectID, workflowID, "Matching column values...", 30); err != nil {
+			s.logger.Error("Failed to update progress", zap.Error(err))
+		}
 
-	if err := queue.Wait(ctx); err != nil {
-		s.logger.Error("Name inference phase failed", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("name inference failed: %v", err))
-		return
-	}
+		valueMatchTask := NewValueMatchTask(
+			s.stateRepo,
+			s.candidateRepo,
+			s.schemaRepo,
+			s.getTenantCtx,
+			projectID,
+			workflowID,
+			datasourceID,
+			s.logger,
+		)
+		queue.Enqueue(valueMatchTask)
 
-	// Phase 4: Test joins for all candidates (parallel)
-	s.logger.Info("Phase 4: Testing joins for candidates",
-		zap.String("workflow_id", workflowID.String()))
+		if err := queue.Wait(ctx); err != nil {
+			s.logger.Error("Value match phase failed", zap.Error(err))
+			s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("value match failed: %v", err))
+			return
+		}
 
-	if err := s.updateProgress(ctx, projectID, workflowID, "Testing SQL joins...", 60); err != nil {
-		s.logger.Error("Failed to update progress", zap.Error(err))
-	}
+		// Phase 3: Infer from names (single task)
+		s.logger.Info("Phase 3: Inferring relationships from names",
+			zap.String("workflow_id", workflowID.String()))
 
-	if err := s.enqueueTestJoins(ctx, projectID, workflowID, datasourceID, queue); err != nil {
-		s.logger.Error("Failed to enqueue test join tasks", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("test join: %v", err))
-		return
-	}
+		if err := s.updateProgress(ctx, projectID, workflowID, "Inferring relationships from naming patterns...", 50); err != nil {
+			s.logger.Error("Failed to update progress", zap.Error(err))
+		}
 
-	if err := queue.Wait(ctx); err != nil {
-		s.logger.Error("Test join phase failed", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("test join failed: %v", err))
-		return
-	}
+		nameInferenceTask := NewNameInferenceTask(
+			s.candidateRepo,
+			s.schemaRepo,
+			s.getTenantCtx,
+			projectID,
+			workflowID,
+			datasourceID,
+			s.logger,
+		)
+		queue.Enqueue(nameInferenceTask)
 
-	// Phase 5: LLM analysis (single task)
-	s.logger.Info("Phase 5: Analyzing relationships with LLM",
-		zap.String("workflow_id", workflowID.String()))
+		if err := queue.Wait(ctx); err != nil {
+			s.logger.Error("Name inference phase failed", zap.Error(err))
+			s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("name inference failed: %v", err))
+			return
+		}
 
-	if err := s.updateProgress(ctx, projectID, workflowID, "Analyzing relationships...", 80); err != nil {
-		s.logger.Error("Failed to update progress", zap.Error(err))
-	}
+		// Phase 4: Test joins for all candidates (parallel)
+		s.logger.Info("Phase 4: Testing joins for candidates",
+			zap.String("workflow_id", workflowID.String()))
 
-	analyzeTask := NewAnalyzeRelationshipsTask(
-		s.candidateRepo,
-		s.schemaRepo,
-		s.llmFactory,
-		s.getTenantCtx,
-		projectID,
-		workflowID,
-		datasourceID,
-		s.logger,
-	)
-	queue.Enqueue(analyzeTask)
+		if err := s.updateProgress(ctx, projectID, workflowID, "Testing SQL joins...", 60); err != nil {
+			s.logger.Error("Failed to update progress", zap.Error(err))
+		}
 
-	if err := queue.Wait(ctx); err != nil {
-		s.logger.Error("Analyze relationships phase failed", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("analyze relationships failed: %v", err))
-		return
-	}
+		if err := s.enqueueTestJoins(ctx, projectID, workflowID, datasourceID, queue); err != nil {
+			s.logger.Error("Failed to enqueue test join tasks", zap.Error(err))
+			s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("test join: %v", err))
+			return
+		}
+
+		if err := queue.Wait(ctx); err != nil {
+			s.logger.Error("Test join phase failed", zap.Error(err))
+			s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("test join failed: %v", err))
+			return
+		}
+
+		// Phase 5: LLM analysis (parallel batch tasks grouped by target table)
+		s.logger.Info("Phase 5: Analyzing relationships with LLM (batched)",
+			zap.String("workflow_id", workflowID.String()))
+
+		if err := s.updateProgress(ctx, projectID, workflowID, "Analyzing relationships...", 80); err != nil {
+			s.logger.Error("Failed to update progress", zap.Error(err))
+		}
+
+		if err := s.enqueueAnalysisBatches(ctx, projectID, workflowID, datasourceID, queue); err != nil {
+			s.logger.Error("Failed to enqueue analysis batch tasks", zap.Error(err))
+			s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("analyze relationships: %v", err))
+			return
+		}
+
+		if err := queue.Wait(ctx); err != nil {
+			s.logger.Error("Analyze relationships phase failed", zap.Error(err))
+			s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("analyze relationships failed: %v", err))
+			return
+		}
+	*/
 
 	// Mark workflow as complete
 	s.logger.Info("All phases complete - finalizing workflow",
@@ -872,6 +903,82 @@ func (s *relationshipWorkflowService) enqueueTestJoins(ctx context.Context, proj
 	s.logger.Info("Enqueued test join tasks",
 		zap.String("workflow_id", workflowID.String()),
 		zap.Int("count", len(candidates)))
+
+	return nil
+}
+
+// enqueueAnalysisBatches groups candidates by target table and enqueues parallel batch tasks.
+// This allows LLM analysis to run in parallel with smaller prompts per batch,
+// avoiding token limit issues that occur with a single monolithic request.
+func (s *relationshipWorkflowService) enqueueAnalysisBatches(ctx context.Context, projectID, workflowID, datasourceID uuid.UUID, queue *workqueue.Queue) error {
+	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("get tenant context: %w", err)
+	}
+	defer cleanup()
+
+	// Get all candidates for this workflow
+	candidates, err := s.candidateRepo.GetByWorkflow(tenantCtx, workflowID)
+	if err != nil {
+		return fmt.Errorf("get candidates: %w", err)
+	}
+
+	if len(candidates) == 0 {
+		s.logger.Info("No candidates to analyze",
+			zap.String("workflow_id", workflowID.String()))
+		return nil
+	}
+
+	// Group candidates by target table (the table being referenced by FKs)
+	// This creates logical batches since many FKs typically point to common parent tables
+	candidatesByTable := make(map[string][]*models.RelationshipCandidate)
+	for _, candidate := range candidates {
+		// Get target column to find its table
+		targetCol, err := s.schemaRepo.GetColumnByID(tenantCtx, projectID, candidate.TargetColumnID)
+		if err != nil {
+			s.logger.Warn("Failed to get target column",
+				zap.String("column_id", candidate.TargetColumnID.String()),
+				zap.Error(err))
+			continue
+		}
+
+		// Get table name
+		table, err := s.schemaRepo.GetTableByID(tenantCtx, projectID, targetCol.SchemaTableID)
+		if err != nil || table == nil {
+			s.logger.Warn("Failed to get target table",
+				zap.String("table_id", targetCol.SchemaTableID.String()),
+				zap.Error(err))
+			continue
+		}
+
+		tableName := table.TableName
+		candidatesByTable[tableName] = append(candidatesByTable[tableName], candidate)
+	}
+
+	// Enqueue a batch task for each target table group
+	batchCount := 0
+	for tableName, tableCandidates := range candidatesByTable {
+		batchName := fmt.Sprintf("%s (%d)", tableName, len(tableCandidates))
+		task := NewAnalyzeRelationshipsBatchTask(
+			s.candidateRepo,
+			s.schemaRepo,
+			s.llmFactory,
+			s.getTenantCtx,
+			projectID,
+			workflowID,
+			datasourceID,
+			batchName,
+			tableCandidates,
+			s.logger,
+		)
+		queue.Enqueue(task)
+		batchCount++
+	}
+
+	s.logger.Info("Enqueued analysis batch tasks",
+		zap.String("workflow_id", workflowID.String()),
+		zap.Int("batch_count", batchCount),
+		zap.Int("total_candidates", len(candidates)))
 
 	return nil
 }

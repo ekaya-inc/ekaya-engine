@@ -619,6 +619,26 @@ func (m *rwsMockEntityRepository) DeleteAlias(ctx context.Context, aliasID uuid.
 	return nil
 }
 
+// rwsMockDeterministicService is a mock for DeterministicRelationshipService.
+type rwsMockDeterministicService struct {
+	result *DiscoveryResult
+	err    error
+}
+
+func (m *rwsMockDeterministicService) DiscoverRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*DiscoveryResult, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.result != nil {
+		return m.result, nil
+	}
+	return &DiscoveryResult{
+		FKRelationships:       0,
+		InferredRelationships: 0,
+		TotalRelationships:    0,
+	}, nil
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -646,19 +666,20 @@ func newTestRelationshipWorkflowService(
 		entities: []*models.OntologyEntity{{ID: uuid.New(), Name: "test_entity"}},
 	}
 	return &relationshipWorkflowService{
-		workflowRepo:     workflowRepo,
-		candidateRepo:    candidateRepo,
-		schemaRepo:       schemaRepo,
-		stateRepo:        stateRepo,
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		dsSvc:            dsSvc,
-		adapterFactory:   adapterFactory,
-		llmFactory:       llmFactory,
-		discoveryService: &rwsMockDiscoveryService{},
-		getTenantCtx:     rwsGetTenantCtx(),
-		logger:           zap.NewNop(),
-		serverInstanceID: uuid.New(),
+		workflowRepo:         workflowRepo,
+		candidateRepo:        candidateRepo,
+		schemaRepo:           schemaRepo,
+		stateRepo:            stateRepo,
+		ontologyRepo:         ontologyRepo,
+		entityRepo:           entityRepo,
+		dsSvc:                dsSvc,
+		adapterFactory:       adapterFactory,
+		llmFactory:           llmFactory,
+		discoveryService:     &rwsMockDiscoveryService{},
+		deterministicService: &rwsMockDeterministicService{},
+		getTenantCtx:         rwsGetTenantCtx(),
+		logger:               zap.NewNop(),
+		serverInstanceID:     uuid.New(),
 	}
 }
 

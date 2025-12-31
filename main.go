@@ -140,6 +140,7 @@ func main() {
 	ontologyQuestionRepo := repositories.NewOntologyQuestionRepository()
 	relationshipCandidateRepo := repositories.NewRelationshipCandidateRepository()
 	ontologyEntityRepo := repositories.NewOntologyEntityRepository()
+	entityRelationshipRepo := repositories.NewEntityRelationshipRepository()
 
 	// Create connection manager with config-driven settings
 	connManagerCfg := datasource.ConnectionManagerConfig{
@@ -191,9 +192,11 @@ func main() {
 	ontologyChatService := services.NewOntologyChatService(
 		ontologyChatRepo, ontologyRepo, knowledgeRepo,
 		schemaRepo, ontologyWorkflowRepo, workflowStateRepo, llmFactory, datasourceService, adapterFactory, logger)
+	deterministicRelationshipService := services.NewDeterministicRelationshipService(
+		datasourceService, adapterFactory, ontologyRepo, ontologyEntityRepo, entityRelationshipRepo)
 	relationshipWorkflowService := services.NewRelationshipWorkflowService(
 		ontologyWorkflowRepo, relationshipCandidateRepo, schemaRepo, workflowStateRepo, ontologyRepo, ontologyEntityRepo,
-		datasourceService, adapterFactory, llmFactory, discoveryService, getTenantCtx, logger)
+		datasourceService, adapterFactory, llmFactory, discoveryService, deterministicRelationshipService, getTenantCtx, logger)
 	entityService := services.NewEntityService(ontologyEntityRepo, ontologyRepo, logger)
 	entityDiscoveryService := services.NewEntityDiscoveryService(
 		ontologyWorkflowRepo, ontologyEntityRepo, schemaRepo, ontologyRepo,
@@ -323,6 +326,11 @@ func main() {
 	// Register entity discovery handler (protected)
 	entityDiscoveryHandler := handlers.NewEntityDiscoveryHandler(entityDiscoveryService, logger)
 	entityDiscoveryHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register entity relationship handler (protected)
+	entityRelationshipHandler := handlers.NewEntityRelationshipHandler(
+		deterministicRelationshipService, entityRelationshipRepo, logger)
+	entityRelationshipHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"
