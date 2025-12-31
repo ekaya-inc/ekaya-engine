@@ -16,25 +16,31 @@ import (
 // ============================================================================
 
 // EntityRelationshipResponse represents a relationship between two entities.
+// Uses field names compatible with the UI's RelationshipDetail type.
 type EntityRelationshipResponse struct {
-	ID                 string  `json:"id"`
-	SourceEntityID     string  `json:"source_entity_id"`
-	TargetEntityID     string  `json:"target_entity_id"`
-	SourceColumnSchema string  `json:"source_column_schema"`
-	SourceColumnTable  string  `json:"source_column_table"`
-	SourceColumnName   string  `json:"source_column_name"`
-	TargetColumnSchema string  `json:"target_column_schema"`
-	TargetColumnTable  string  `json:"target_column_table"`
-	TargetColumnName   string  `json:"target_column_name"`
-	DetectionMethod    string  `json:"detection_method"`
-	Confidence         float64 `json:"confidence"`
-	Status             string  `json:"status"`
+	ID               string  `json:"id"`
+	SourceEntityID   string  `json:"source_entity_id,omitempty"`
+	TargetEntityID   string  `json:"target_entity_id,omitempty"`
+	SourceTableName  string  `json:"source_table_name"`
+	SourceColumnName string  `json:"source_column_name"`
+	SourceColumnType string  `json:"source_column_type,omitempty"`
+	TargetTableName  string  `json:"target_table_name"`
+	TargetColumnName string  `json:"target_column_name"`
+	TargetColumnType string  `json:"target_column_type,omitempty"`
+	RelationshipType string  `json:"relationship_type"` // "fk" or "inferred"
+	Cardinality      string  `json:"cardinality,omitempty"`
+	Confidence       float64 `json:"confidence"`
+	IsValidated      bool    `json:"is_validated"`
+	IsApproved       *bool   `json:"is_approved,omitempty"`
+	Status           string  `json:"status,omitempty"` // "confirmed" or "pending"
 }
 
 // EntityRelationshipListResponse for GET /relationships
 type EntityRelationshipListResponse struct {
 	Relationships []EntityRelationshipResponse `json:"relationships"`
-	Total         int                          `json:"total"`
+	TotalCount    int                          `json:"total_count"`
+	EmptyTables   []string                     `json:"empty_tables,omitempty"`
+	OrphanTables  []string                     `json:"orphan_tables,omitempty"`
 }
 
 // DiscoverEntityRelationshipsResponse for POST /datasources/{dsid}/relationships/discover
@@ -132,28 +138,41 @@ func (h *EntityRelationshipHandler) List(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Convert to response format
+	// Convert to response format compatible with UI's RelationshipDetail type
 	relResponses := make([]EntityRelationshipResponse, 0, len(relationships))
 	for _, rel := range relationships {
+		// Map detection_method to relationship_type
+		relType := "inferred"
+		if rel.DetectionMethod == "foreign_key" {
+			relType = "fk"
+		}
+
+		// Map status to is_approved
+		var isApproved *bool
+		if rel.Status == "confirmed" {
+			t := true
+			isApproved = &t
+		}
+
 		relResponses = append(relResponses, EntityRelationshipResponse{
-			ID:                 rel.ID.String(),
-			SourceEntityID:     rel.SourceEntityID.String(),
-			TargetEntityID:     rel.TargetEntityID.String(),
-			SourceColumnSchema: rel.SourceColumnSchema,
-			SourceColumnTable:  rel.SourceColumnTable,
-			SourceColumnName:   rel.SourceColumnName,
-			TargetColumnSchema: rel.TargetColumnSchema,
-			TargetColumnTable:  rel.TargetColumnTable,
-			TargetColumnName:   rel.TargetColumnName,
-			DetectionMethod:    rel.DetectionMethod,
-			Confidence:         rel.Confidence,
-			Status:             rel.Status,
+			ID:               rel.ID.String(),
+			SourceEntityID:   rel.SourceEntityID.String(),
+			TargetEntityID:   rel.TargetEntityID.String(),
+			SourceTableName:  rel.SourceColumnTable,
+			SourceColumnName: rel.SourceColumnName,
+			TargetTableName:  rel.TargetColumnTable,
+			TargetColumnName: rel.TargetColumnName,
+			RelationshipType: relType,
+			Confidence:       rel.Confidence,
+			IsValidated:      rel.Status == "confirmed",
+			IsApproved:       isApproved,
+			Status:           rel.Status,
 		})
 	}
 
 	response := EntityRelationshipListResponse{
 		Relationships: relResponses,
-		Total:         len(relResponses),
+		TotalCount:    len(relResponses),
 	}
 
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
