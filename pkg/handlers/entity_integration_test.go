@@ -21,6 +21,27 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
 )
 
+// parseAPIResponse extracts the Data field from an ApiResponse wrapper.
+// The handler wraps all responses in ApiResponse{Success: bool, Data: any}.
+func parseAPIResponse[T any](t *testing.T, body []byte) T {
+	t.Helper()
+	var wrapper struct {
+		Success bool            `json:"success"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(body, &wrapper); err != nil {
+		t.Fatalf("failed to parse ApiResponse wrapper: %v", err)
+	}
+	if !wrapper.Success {
+		t.Fatalf("expected success=true, got false. Body: %s", string(body))
+	}
+	var result T
+	if err := json.Unmarshal(wrapper.Data, &result); err != nil {
+		t.Fatalf("failed to parse Data field: %v", err)
+	}
+	return result
+}
+
 // entityTestContext holds all dependencies for entity integration tests.
 type entityTestContext struct {
 	t            *testing.T
@@ -191,10 +212,7 @@ func TestEntityIntegration_ListEmpty(t *testing.T) {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var resp EntityListResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
-	}
+	resp := parseAPIResponse[EntityListResponse](t, rec.Body.Bytes())
 
 	if resp.Total != 0 {
 		t.Errorf("expected 0 entities, got %d", resp.Total)
@@ -267,10 +285,7 @@ func TestEntityIntegration_CreateAndList(t *testing.T) {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var resp EntityListResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
-	}
+	resp := parseAPIResponse[EntityListResponse](t, rec.Body.Bytes())
 
 	if resp.Total != 1 {
 		t.Fatalf("expected 1 entity, got %d", resp.Total)
@@ -339,10 +354,7 @@ func TestEntityIntegration_GetByID(t *testing.T) {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var resp EntityDetailResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
-	}
+	resp := parseAPIResponse[EntityDetailResponse](t, rec.Body.Bytes())
 
 	if resp.ID != entity.ID.String() {
 		t.Errorf("expected ID %s, got %s", entity.ID.String(), resp.ID)
@@ -394,10 +406,7 @@ func TestEntityIntegration_SoftDeleteAndRestore(t *testing.T) {
 	listRec := tc.doRequest(http.MethodGet, "/api/projects/"+tc.projectID.String()+"/entities", nil,
 		tc.handler.List, map[string]string{"pid": tc.projectID.String()})
 
-	var listResp EntityListResponse
-	if err := json.Unmarshal(listRec.Body.Bytes(), &listResp); err != nil {
-		t.Fatalf("failed to parse list response: %v", err)
-	}
+	listResp := parseAPIResponse[EntityListResponse](t, listRec.Body.Bytes())
 	if listResp.Total != 0 {
 		t.Errorf("expected 0 entities after delete, got %d", listResp.Total)
 	}
@@ -410,10 +419,7 @@ func TestEntityIntegration_SoftDeleteAndRestore(t *testing.T) {
 		t.Fatalf("expected status 200 for get deleted, got %d", getRec.Code)
 	}
 
-	var getResp EntityDetailResponse
-	if err := json.Unmarshal(getRec.Body.Bytes(), &getResp); err != nil {
-		t.Fatalf("failed to parse get response: %v", err)
-	}
+	getResp := parseAPIResponse[EntityDetailResponse](t, getRec.Body.Bytes())
 	if !getResp.IsDeleted {
 		t.Error("expected is_deleted to be true")
 	}
@@ -429,10 +435,7 @@ func TestEntityIntegration_SoftDeleteAndRestore(t *testing.T) {
 		t.Fatalf("expected status 200 for restore, got %d: %s", restoreRec.Code, restoreRec.Body.String())
 	}
 
-	var restoreResp EntityDetailResponse
-	if err := json.Unmarshal(restoreRec.Body.Bytes(), &restoreResp); err != nil {
-		t.Fatalf("failed to parse restore response: %v", err)
-	}
+	restoreResp := parseAPIResponse[EntityDetailResponse](t, restoreRec.Body.Bytes())
 	if restoreResp.IsDeleted {
 		t.Error("expected is_deleted to be false after restore")
 	}
@@ -441,10 +444,7 @@ func TestEntityIntegration_SoftDeleteAndRestore(t *testing.T) {
 	listRec2 := tc.doRequest(http.MethodGet, "/api/projects/"+tc.projectID.String()+"/entities", nil,
 		tc.handler.List, map[string]string{"pid": tc.projectID.String()})
 
-	var listResp2 EntityListResponse
-	if err := json.Unmarshal(listRec2.Body.Bytes(), &listResp2); err != nil {
-		t.Fatalf("failed to parse list response: %v", err)
-	}
+	listResp2 := parseAPIResponse[EntityListResponse](t, listRec2.Body.Bytes())
 	if listResp2.Total != 1 {
 		t.Errorf("expected 1 entity after restore, got %d", listResp2.Total)
 	}
@@ -488,10 +488,7 @@ func TestEntityIntegration_AddAndRemoveAlias(t *testing.T) {
 		t.Fatalf("expected status 201 for add alias, got %d: %s", addRec.Code, addRec.Body.String())
 	}
 
-	var aliasResp EntityAliasResponse
-	if err := json.Unmarshal(addRec.Body.Bytes(), &aliasResp); err != nil {
-		t.Fatalf("failed to parse alias response: %v", err)
-	}
+	aliasResp := parseAPIResponse[EntityAliasResponse](t, addRec.Body.Bytes())
 	if aliasResp.Alias != "profile" {
 		t.Errorf("expected alias 'profile', got %q", aliasResp.Alias)
 	}
@@ -512,10 +509,7 @@ func TestEntityIntegration_AddAndRemoveAlias(t *testing.T) {
 	getRec := tc.doRequest(http.MethodGet, "/api/projects/"+tc.projectID.String()+"/entities/"+entity.ID.String(), nil,
 		tc.handler.Get, pathValues)
 
-	var getResp EntityDetailResponse
-	if err := json.Unmarshal(getRec.Body.Bytes(), &getResp); err != nil {
-		t.Fatalf("failed to parse get response: %v", err)
-	}
+	getResp := parseAPIResponse[EntityDetailResponse](t, getRec.Body.Bytes())
 	if len(getResp.Aliases) != 0 {
 		t.Errorf("expected 0 aliases after remove, got %d", len(getResp.Aliases))
 	}
