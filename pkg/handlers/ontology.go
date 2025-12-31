@@ -230,7 +230,7 @@ func (h *OntologyHandler) GetWorkflowStatus(w http.ResponseWriter, r *http.Reque
 		}
 
 		// Get total entity count from schema (1 global + tables + columns)
-		totalEntities, err := h.workflowService.GetSchemaEntityCount(r.Context(), projectID)
+		totalEntities, err := h.workflowService.GetOntologyEntityCount(r.Context(), projectID)
 		if err != nil {
 			h.logger.Warn("Failed to get schema entity count", zap.Error(err))
 			totalEntities = currentEntity // Fallback to current count

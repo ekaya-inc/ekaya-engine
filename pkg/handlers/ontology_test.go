@@ -20,12 +20,12 @@ import (
 // ============================================================================
 
 type mockOntologyWorkflowService struct {
-	startExtractionFunc  func(ctx context.Context, projectID uuid.UUID, config *models.WorkflowConfig) (*models.OntologyWorkflow, error)
-	lastConfig           *models.WorkflowConfig // Captures the config passed to StartExtraction
-	schemaEntityCount    int                    // Return value for GetSchemaEntityCount
-	schemaEntityCountErr error                  // Error return for GetSchemaEntityCount
-	workflow             *models.OntologyWorkflow
-	ontology             *models.TieredOntology
+	startExtractionFunc    func(ctx context.Context, projectID uuid.UUID, config *models.WorkflowConfig) (*models.OntologyWorkflow, error)
+	lastConfig             *models.WorkflowConfig // Captures the config passed to StartExtraction
+	ontologyEntityCount    int                    // Return value for GetOntologyEntityCount
+	ontologyEntityCountErr error                  // Error return for GetOntologyEntityCount
+	workflow               *models.OntologyWorkflow
+	ontology               *models.TieredOntology
 }
 
 func (m *mockOntologyWorkflowService) StartExtraction(ctx context.Context, projectID uuid.UUID, config *models.WorkflowConfig) (*models.OntologyWorkflow, error) {
@@ -77,8 +77,8 @@ func (m *mockOntologyWorkflowService) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (m *mockOntologyWorkflowService) GetSchemaEntityCount(ctx context.Context, projectID uuid.UUID) (int, error) {
-	return m.schemaEntityCount, m.schemaEntityCountErr
+func (m *mockOntologyWorkflowService) GetOntologyEntityCount(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return m.ontologyEntityCount, m.ontologyEntityCountErr
 }
 
 // ============================================================================
@@ -233,7 +233,7 @@ func TestGetWorkflowStatus_NoWorkflow_HasOntologyData(t *testing.T) {
 			"products": {TableName: "products"},
 		},
 	}
-	mockWorkflowService.schemaEntityCount = 100 // Total from schema
+	mockWorkflowService.ontologyEntityCount = 100 // Total from schema
 
 	req := createRequestWithProjectID("GET", "/api/projects/"+projectID.String()+"/ontology/workflow", nil, projectID)
 	rr := httptest.NewRecorder()
@@ -280,7 +280,7 @@ func TestGetWorkflowStatus_NoWorkflow_NoOntology(t *testing.T) {
 	// No workflow, no ontology
 	mockWorkflowService.workflow = nil
 	mockWorkflowService.ontology = nil
-	mockWorkflowService.schemaEntityCount = 50
+	mockWorkflowService.ontologyEntityCount = 50
 
 	req := createRequestWithProjectID("GET", "/api/projects/"+projectID.String()+"/ontology/workflow", nil, projectID)
 	rr := httptest.NewRecorder()
@@ -332,8 +332,8 @@ func TestGetWorkflowStatus_EntityCountFallback(t *testing.T) {
 		},
 	}
 	// Schema count fails (e.g., no datasource configured)
-	mockWorkflowService.schemaEntityCount = 0
-	mockWorkflowService.schemaEntityCountErr = fmt.Errorf("no datasource configured")
+	mockWorkflowService.ontologyEntityCount = 0
+	mockWorkflowService.ontologyEntityCountErr = fmt.Errorf("no datasource configured")
 
 	req := createRequestWithProjectID("GET", "/api/projects/"+projectID.String()+"/ontology/workflow", nil, projectID)
 	rr := httptest.NewRecorder()

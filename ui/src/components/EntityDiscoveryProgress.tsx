@@ -1,17 +1,14 @@
 /**
  * EntityDiscoveryProgress - Standalone entity discovery workflow dialog
  *
- * Shows a modal with:
- * - Discovery steps progress (left side)
- * - Discovered entities list (right side)
- * - Close/Cancel actions
+ * Shows a modal with discovery steps progress.
+ * When complete, user clicks "Done" to see entities on the main page.
  *
  * Uses polling to track workflow progress.
  */
 
 import {
   AlertCircle,
-  Brain,
   Check,
   Circle,
   Loader2,
@@ -21,7 +18,7 @@ import {
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 import engineApi from '../services/engineApi';
-import type { EntityDiscoveryStatus, EntityDetail } from '../types';
+import type { EntityDiscoveryStatus } from '../types';
 
 import { Button } from './ui/Button';
 import {
@@ -53,7 +50,6 @@ export const EntityDiscoveryProgress = ({
   // Workflow state
   const [workflowStarted, setWorkflowStarted] = useState(false);
   const [status, setStatus] = useState<EntityDiscoveryStatus | null>(null);
-  const [entities, setEntities] = useState<EntityDetail[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
 
@@ -65,7 +61,6 @@ export const EntityDiscoveryProgress = ({
   const isWorkflowRunning = status?.state === 'running' || status?.state === 'pending';
   const isWorkflowComplete = status?.state === 'completed';
   const isWorkflowFailed = status?.state === 'failed';
-  const hasEntities = entities.length > 0;
 
   // Stop polling
   const stopPolling = useCallback(() => {
@@ -75,8 +70,8 @@ export const EntityDiscoveryProgress = ({
     }
   }, []);
 
-  // Fetch status and entities
-  const fetchStatusAndEntities = useCallback(async () => {
+  // Fetch status
+  const fetchStatus = useCallback(async () => {
     if (!projectId || !datasourceId) return;
 
     try {
@@ -90,14 +85,6 @@ export const EntityDiscoveryProgress = ({
         // Stop polling when workflow completes or fails
         if (statusResponse.data.state === 'completed' || statusResponse.data.state === 'failed') {
           stopPolling();
-
-          // Fetch entities when complete
-          if (statusResponse.data.state === 'completed') {
-            const entitiesResponse = await engineApi.listEntities(projectId);
-            if (entitiesResponse.data) {
-              setEntities(entitiesResponse.data.entities);
-            }
-          }
         }
       }
     } catch (err) {
@@ -117,10 +104,10 @@ export const EntityDiscoveryProgress = ({
   const startPolling = useCallback(() => {
     stopPolling();
     // Fetch immediately
-    fetchStatusAndEntities();
+    fetchStatus();
     // Then poll
-    pollingRef.current = setInterval(fetchStatusAndEntities, POLL_INTERVAL_MS);
-  }, [fetchStatusAndEntities, stopPolling]);
+    pollingRef.current = setInterval(fetchStatus, POLL_INTERVAL_MS);
+  }, [fetchStatus, stopPolling]);
 
   // Start workflow
   const startWorkflow = useCallback(async () => {
@@ -169,7 +156,6 @@ export const EntityDiscoveryProgress = ({
       stopPolling();
       setWorkflowStarted(false);
       setStatus(null);
-      setEntities([]);
       setError(null);
     }
   }, [isOpen, stopPolling]);
@@ -178,12 +164,12 @@ export const EntityDiscoveryProgress = ({
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && isWorkflowRunning) {
-        fetchStatusAndEntities();
+        fetchStatus();
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [isWorkflowRunning, fetchStatusAndEntities]);
+  }, [isWorkflowRunning, fetchStatus]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -204,9 +190,13 @@ export const EntityDiscoveryProgress = ({
   const isPhaseActive = (min: number, max: number) =>
     progressPercent >= min && progressPercent < max && isWorkflowRunning;
 
+  // Entity counts from status
+  const entityCount = status?.entity_count ?? 0;
+  const occurrenceCount = status?.occurrence_count ?? 0;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <Card className="w-full max-w-4xl mx-4 max-h-[90vh] flex flex-col">
+      <Card className="w-full max-w-md mx-4 flex flex-col">
         {/* Header */}
         <CardHeader className="flex flex-row items-start justify-between space-y-0 border-b flex-shrink-0">
           <div>
@@ -225,7 +215,7 @@ export const EntityDiscoveryProgress = ({
             </CardTitle>
             <CardDescription>
               {isWorkflowRunning && (status?.progress?.message ?? 'Analyzing schema and detecting entities...')}
-              {isWorkflowComplete && `Discovered ${entities.length} entities`}
+              {isWorkflowComplete && `Discovered ${entityCount} entities`}
               {isWorkflowFailed && 'Workflow failed'}
               {error && !isWorkflowFailed && 'An error occurred'}
             </CardDescription>
@@ -243,10 +233,10 @@ export const EntityDiscoveryProgress = ({
         </CardHeader>
 
         {/* Main content */}
-        <CardContent className="flex-1 overflow-hidden p-0">
+        <CardContent className="p-4">
           {/* Error state */}
           {error && (
-            <div className="m-4 rounded-lg bg-red-50 dark:bg-red-950/20 p-4">
+            <div className="rounded-lg bg-red-50 dark:bg-red-950/20 p-4">
               <div className="flex items-center gap-2 text-red-700 dark:text-red-300 mb-2">
                 <AlertCircle className="h-4 w-4" />
                 <span className="font-medium">Error</span>
@@ -257,174 +247,81 @@ export const EntityDiscoveryProgress = ({
 
           {/* Main workflow content */}
           {!error && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 h-full">
-              {/* Left: Discovery Steps */}
-              <div className="border-r border-border-light p-4 overflow-y-auto">
-                <div className="space-y-4">
-                  {/* Header with progress */}
-                  <div>
-                    <h3 className="font-semibold text-text-primary">Discovery Steps</h3>
-                    {isWorkflowRunning && (
-                      <div className="mt-2 h-2 w-full bg-surface-secondary rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-amber-500 transition-all duration-500"
-                          style={{ width: `${progressPercent}%` }}
-                        />
-                      </div>
-                    )}
-                  </div>
+            <div className="space-y-4">
+              {/* Progress bar */}
+              {isWorkflowRunning && (
+                <div className="h-2 w-full bg-surface-secondary rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-amber-500 transition-all duration-500"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+              )}
 
-                  {/* Discovery phases */}
-                  <div className="space-y-2">
-                    {/* Phase 0: Collecting statistics */}
-                    <div className="flex items-center gap-3 px-3 py-2 rounded">
-                      {isPhaseComplete(20) ? (
-                        <Check className="h-4 w-4 text-green-500" />
-                      ) : isPhaseActive(0, 20) ? (
-                        <Loader2 className="h-4 w-4 text-amber-500 animate-spin" />
-                      ) : (
-                        <Circle className="h-4 w-4 text-text-tertiary" />
-                      )}
-                      <span className="text-sm text-text-primary">Collecting column statistics</span>
-                    </div>
-
-                    {/* Phase 0.5: Filtering candidates */}
-                    <div className="flex items-center gap-3 px-3 py-2 rounded">
-                      {isPhaseComplete(35) ? (
-                        <Check className="h-4 w-4 text-green-500" />
-                      ) : isPhaseActive(20, 35) ? (
-                        <Loader2 className="h-4 w-4 text-amber-500 animate-spin" />
-                      ) : (
-                        <Circle className="h-4 w-4 text-text-tertiary" />
-                      )}
-                      <span className="text-sm text-text-primary">Filtering entity candidates</span>
-                    </div>
-
-                    {/* Phase 0.75: Graph connectivity */}
-                    <div className="flex items-center gap-3 px-3 py-2 rounded">
-                      {isPhaseComplete(50) ? (
-                        <Check className="h-4 w-4 text-green-500" />
-                      ) : isPhaseActive(35, 50) ? (
-                        <Loader2 className="h-4 w-4 text-amber-500 animate-spin" />
-                      ) : (
-                        <Circle className="h-4 w-4 text-text-tertiary" />
-                      )}
-                      <span className="text-sm text-text-primary">Analyzing graph connectivity</span>
-                    </div>
-
-                    {/* Phase 1: LLM entity discovery */}
-                    <div className="flex items-center gap-3 px-3 py-2 rounded">
-                      {isPhaseComplete(100) ? (
-                        <Check className="h-4 w-4 text-green-500" />
-                      ) : isPhaseActive(50, 100) ? (
-                        <Brain className="h-4 w-4 text-purple-500 animate-pulse" />
-                      ) : (
-                        <Circle className="h-4 w-4 text-text-tertiary" />
-                      )}
-                      <span className="text-sm text-text-primary">Discovering entities (LLM)</span>
-                    </div>
-                  </div>
-
-                  {/* Entity count summary */}
-                  {(status?.entity_count ?? 0) > 0 && (
-                    <div className="mt-4 pt-4 border-t border-border-light">
-                      <div className="text-xs font-medium text-text-secondary mb-2">Summary:</div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <Boxes className="h-3 w-3 text-green-500" />
-                        <span className="text-text-secondary">
-                          {status?.entity_count ?? 0} entities, {status?.occurrence_count ?? 0} occurrences
-                        </span>
-                      </div>
-                    </div>
+              {/* Discovery phases */}
+              <div className="space-y-2">
+                {/* Phase 1: Collecting statistics */}
+                <div className="flex items-center gap-3 px-3 py-2 rounded">
+                  {isPhaseComplete(50) ? (
+                    <Check className="h-4 w-4 text-green-500" />
+                  ) : isPhaseActive(0, 50) ? (
+                    <Loader2 className="h-4 w-4 text-amber-500 animate-spin" />
+                  ) : (
+                    <Circle className="h-4 w-4 text-text-tertiary" />
                   )}
+                  <span className="text-sm text-text-primary">Collecting column statistics</span>
+                </div>
+
+                {/* Phase 2: Identifying entities */}
+                <div className="flex items-center gap-3 px-3 py-2 rounded">
+                  {isPhaseComplete(100) ? (
+                    <Check className="h-4 w-4 text-green-500" />
+                  ) : isPhaseActive(50, 100) ? (
+                    <Loader2 className="h-4 w-4 text-amber-500 animate-spin" />
+                  ) : (
+                    <Circle className="h-4 w-4 text-text-tertiary" />
+                  )}
+                  <span className="text-sm text-text-primary">Identifying entities</span>
                 </div>
               </div>
 
-              {/* Right: Discovered Entities */}
-              <div className="lg:col-span-2 p-4 overflow-y-auto">
-                <h3 className="font-semibold text-text-primary mb-4">
-                  Discovered Entities
-                </h3>
-
-                {/* Loading state */}
-                {isWorkflowRunning && entities.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-12 text-text-secondary">
-                    <Loader2 className="h-8 w-8 animate-spin mb-4" />
-                    <p className="text-sm">Discovering entities...</p>
+              {/* Entity count summary */}
+              {entityCount > 0 && (
+                <div className="pt-4 border-t border-border-light">
+                  <div className="flex items-center gap-2 text-sm">
+                    <Boxes className="h-4 w-4 text-green-500" />
+                    <span className="text-text-secondary">
+                      {entityCount} entities, {occurrenceCount} occurrences
+                    </span>
                   </div>
-                )}
-
-                {/* Empty state (workflow complete but no entities) */}
-                {isWorkflowComplete && entities.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-12 text-text-secondary">
-                    <Boxes className="h-12 w-12 mb-4" />
-                    <p className="text-sm">No entities discovered</p>
-                  </div>
-                )}
-
-                {/* Entity list */}
-                {entities.length > 0 && (
-                  <div className="space-y-3">
-                    {entities.map((entity) => (
-                      <div key={entity.id} className="border border-border-light rounded-lg p-3">
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <h4 className="font-medium text-text-primary">{entity.name}</h4>
-                            {entity.description && (
-                              <p className="text-sm text-text-secondary mt-1">{entity.description}</p>
-                            )}
-                            <p className="text-xs text-text-tertiary mt-1 font-mono">
-                              {entity.primary_schema}.{entity.primary_table}.{entity.primary_column}
-                            </p>
-                          </div>
-                          <span className="text-xs text-text-tertiary">
-                            {entity.occurrence_count} occurrence{entity.occurrence_count !== 1 ? 's' : ''}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
 
         {/* Footer */}
-        <div className="border-t border-border-light p-4 flex items-center justify-between flex-shrink-0">
-          {/* Entity summary */}
-          <div className="flex-1">
-            {hasEntities && isWorkflowComplete && (
-              <div className="text-sm text-text-secondary">
-                {entities.length} entities discovered with{' '}
-                {entities.reduce((sum, e) => sum + e.occurrence_count, 0)} total occurrences
-              </div>
-            )}
-          </div>
-
-          {/* Actions */}
-          <div className="flex gap-2">
-            {isWorkflowRunning ? (
-              <Button
-                variant="outline"
-                onClick={handleCancel}
-                disabled={isCancelling}
-              >
-                {isCancelling ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Cancelling...
-                  </>
-                ) : (
-                  'Cancel'
-                )}
-              </Button>
-            ) : (
-              <Button variant="default" onClick={handleClose}>
-                {isWorkflowComplete ? 'Done' : 'Close'}
-              </Button>
-            )}
-          </div>
+        <div className="border-t border-border-light p-4 flex justify-end">
+          {isWorkflowRunning ? (
+            <Button
+              variant="outline"
+              onClick={handleCancel}
+              disabled={isCancelling}
+            >
+              {isCancelling ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Cancelling...
+                </>
+              ) : (
+                'Cancel'
+              )}
+            </Button>
+          ) : (
+            <Button variant="default" onClick={handleClose}>
+              {isWorkflowComplete ? 'Done' : 'Close'}
+            </Button>
+          )}
         </div>
       </Card>
     </div>

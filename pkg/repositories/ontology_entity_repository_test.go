@@ -13,22 +13,22 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
 )
 
-// schemaEntityTestContext holds test dependencies for schema entity repository tests.
-type schemaEntityTestContext struct {
+// ontologyEntityTestContext holds test dependencies for ontology entity repository tests.
+type ontologyEntityTestContext struct {
 	t          *testing.T
 	engineDB   *testhelpers.EngineDB
-	repo       SchemaEntityRepository
+	repo       OntologyEntityRepository
 	projectID  uuid.UUID
 	ontologyID uuid.UUID
 }
 
-// setupSchemaEntityTest initializes the test context with shared testcontainer.
-func setupSchemaEntityTest(t *testing.T) *schemaEntityTestContext {
+// setupOntologyEntityTest initializes the test context with shared testcontainer.
+func setupOntologyEntityTest(t *testing.T) *ontologyEntityTestContext {
 	engineDB := testhelpers.GetEngineDB(t)
-	tc := &schemaEntityTestContext{
+	tc := &ontologyEntityTestContext{
 		t:          t,
 		engineDB:   engineDB,
-		repo:       NewSchemaEntityRepository(),
+		repo:       NewOntologyEntityRepository(),
 		projectID:  uuid.MustParse("00000000-0000-0000-0000-000000000050"),
 		ontologyID: uuid.MustParse("00000000-0000-0000-0000-000000000051"),
 	}
@@ -37,7 +37,7 @@ func setupSchemaEntityTest(t *testing.T) *schemaEntityTestContext {
 }
 
 // ensureTestProjectAndOntology creates the test project and ontology if they don't exist.
-func (tc *schemaEntityTestContext) ensureTestProjectAndOntology() {
+func (tc *ontologyEntityTestContext) ensureTestProjectAndOntology() {
 	tc.t.Helper()
 	ctx := context.Background()
 	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
@@ -51,7 +51,7 @@ func (tc *schemaEntityTestContext) ensureTestProjectAndOntology() {
 		INSERT INTO engine_projects (id, name, status)
 		VALUES ($1, $2, 'active')
 		ON CONFLICT (id) DO NOTHING
-	`, tc.projectID, "Schema Entity Test Project")
+	`, tc.projectID, "Ontology Entity Test Project")
 	if err != nil {
 		tc.t.Fatalf("failed to ensure test project: %v", err)
 	}
@@ -71,7 +71,7 @@ func (tc *schemaEntityTestContext) ensureTestProjectAndOntology() {
 }
 
 // cleanup removes test entities, occurrences, and aliases.
-func (tc *schemaEntityTestContext) cleanup() {
+func (tc *ontologyEntityTestContext) cleanup() {
 	tc.t.Helper()
 	ctx := context.Background()
 	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
@@ -85,7 +85,7 @@ func (tc *schemaEntityTestContext) cleanup() {
 }
 
 // createTestContext returns a context with tenant scope.
-func (tc *schemaEntityTestContext) createTestContext() (context.Context, func()) {
+func (tc *ontologyEntityTestContext) createTestContext() (context.Context, func()) {
 	tc.t.Helper()
 	ctx := context.Background()
 	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
@@ -97,9 +97,9 @@ func (tc *schemaEntityTestContext) createTestContext() (context.Context, func())
 }
 
 // createTestEntity creates a schema entity for testing.
-func (tc *schemaEntityTestContext) createTestEntity(ctx context.Context, name string) *models.SchemaEntity {
+func (tc *ontologyEntityTestContext) createTestEntity(ctx context.Context, name string) *models.OntologyEntity {
 	tc.t.Helper()
-	entity := &models.SchemaEntity{
+	entity := &models.OntologyEntity{
 		ProjectID:     tc.projectID,
 		OntologyID:    tc.ontologyID,
 		Name:          name,
@@ -119,14 +119,14 @@ func (tc *schemaEntityTestContext) createTestEntity(ctx context.Context, name st
 // Entity Create Tests
 // ============================================================================
 
-func TestSchemaEntityRepository_Create_Success(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_Create_Success(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
 
-	entity := &models.SchemaEntity{
+	entity := &models.OntologyEntity{
 		ProjectID:     tc.projectID,
 		OntologyID:    tc.ontologyID,
 		Name:          "user",
@@ -167,8 +167,8 @@ func TestSchemaEntityRepository_Create_Success(t *testing.T) {
 	}
 }
 
-func TestSchemaEntityRepository_Create_DuplicateName(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_Create_DuplicateName(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -177,7 +177,7 @@ func TestSchemaEntityRepository_Create_DuplicateName(t *testing.T) {
 	tc.createTestEntity(ctx, "account")
 
 	// Try to create another with same name
-	entity := &models.SchemaEntity{
+	entity := &models.OntologyEntity{
 		ProjectID:     tc.projectID,
 		OntologyID:    tc.ontologyID,
 		Name:          "account",
@@ -197,8 +197,8 @@ func TestSchemaEntityRepository_Create_DuplicateName(t *testing.T) {
 // Entity GetByOntology Tests
 // ============================================================================
 
-func TestSchemaEntityRepository_GetByOntology_Success(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_GetByOntology_Success(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -223,8 +223,8 @@ func TestSchemaEntityRepository_GetByOntology_Success(t *testing.T) {
 	}
 }
 
-func TestSchemaEntityRepository_GetByOntology_Empty(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_GetByOntology_Empty(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -243,8 +243,8 @@ func TestSchemaEntityRepository_GetByOntology_Empty(t *testing.T) {
 // Entity GetByName Tests
 // ============================================================================
 
-func TestSchemaEntityRepository_GetByName_Success(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_GetByName_Success(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -265,8 +265,8 @@ func TestSchemaEntityRepository_GetByName_Success(t *testing.T) {
 	}
 }
 
-func TestSchemaEntityRepository_GetByName_NotFound(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_GetByName_NotFound(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -287,8 +287,8 @@ func TestSchemaEntityRepository_GetByName_NotFound(t *testing.T) {
 // Entity DeleteByOntology Tests
 // ============================================================================
 
-func TestSchemaEntityRepository_DeleteByOntology_Success(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_DeleteByOntology_Success(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -315,8 +315,8 @@ func TestSchemaEntityRepository_DeleteByOntology_Success(t *testing.T) {
 // Occurrence CreateOccurrence Tests
 // ============================================================================
 
-func TestSchemaEntityRepository_CreateOccurrence_Success(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_CreateOccurrence_Success(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -325,7 +325,7 @@ func TestSchemaEntityRepository_CreateOccurrence_Success(t *testing.T) {
 	entity := tc.createTestEntity(ctx, "user")
 
 	role := "visitor"
-	occ := &models.SchemaEntityOccurrence{
+	occ := &models.OntologyEntityOccurrence{
 		EntityID:   entity.ID,
 		SchemaName: "public",
 		TableName:  "visits",
@@ -365,8 +365,8 @@ func TestSchemaEntityRepository_CreateOccurrence_Success(t *testing.T) {
 	}
 }
 
-func TestSchemaEntityRepository_CreateOccurrence_NullRole(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_CreateOccurrence_NullRole(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -374,7 +374,7 @@ func TestSchemaEntityRepository_CreateOccurrence_NullRole(t *testing.T) {
 
 	entity := tc.createTestEntity(ctx, "user")
 
-	occ := &models.SchemaEntityOccurrence{
+	occ := &models.OntologyEntityOccurrence{
 		EntityID:   entity.ID,
 		SchemaName: "public",
 		TableName:  "orders",
@@ -400,8 +400,8 @@ func TestSchemaEntityRepository_CreateOccurrence_NullRole(t *testing.T) {
 	}
 }
 
-func TestSchemaEntityRepository_CreateOccurrence_Duplicate(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_CreateOccurrence_Duplicate(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -409,7 +409,7 @@ func TestSchemaEntityRepository_CreateOccurrence_Duplicate(t *testing.T) {
 
 	entity := tc.createTestEntity(ctx, "user")
 
-	occ := &models.SchemaEntityOccurrence{
+	occ := &models.OntologyEntityOccurrence{
 		EntityID:   entity.ID,
 		SchemaName: "public",
 		TableName:  "orders",
@@ -422,8 +422,8 @@ func TestSchemaEntityRepository_CreateOccurrence_Duplicate(t *testing.T) {
 		t.Fatalf("CreateOccurrence failed: %v", err)
 	}
 
-	// Try to create duplicate
-	occ2 := &models.SchemaEntityOccurrence{
+	// Try to create duplicate - should be silently ignored (ON CONFLICT DO NOTHING)
+	occ2 := &models.OntologyEntityOccurrence{
 		EntityID:   entity.ID,
 		SchemaName: "public",
 		TableName:  "orders",
@@ -432,8 +432,17 @@ func TestSchemaEntityRepository_CreateOccurrence_Duplicate(t *testing.T) {
 	}
 
 	err = tc.repo.CreateOccurrence(ctx, occ2)
-	if err == nil {
-		t.Error("expected error for duplicate occurrence")
+	if err != nil {
+		t.Errorf("duplicate occurrence should be silently ignored, got error: %v", err)
+	}
+
+	// Verify only one occurrence exists (the duplicate was ignored)
+	occurrences, err := tc.repo.GetOccurrencesByEntity(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("GetOccurrencesByEntity failed: %v", err)
+	}
+	if len(occurrences) != 1 {
+		t.Errorf("expected 1 occurrence after duplicate insert, got %d", len(occurrences))
 	}
 }
 
@@ -441,8 +450,8 @@ func TestSchemaEntityRepository_CreateOccurrence_Duplicate(t *testing.T) {
 // Occurrence GetOccurrencesByEntity Tests
 // ============================================================================
 
-func TestSchemaEntityRepository_GetOccurrencesByEntity_Success(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_GetOccurrencesByEntity_Success(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -454,7 +463,7 @@ func TestSchemaEntityRepository_GetOccurrencesByEntity_Success(t *testing.T) {
 	host := "host"
 
 	// Create multiple occurrences
-	occurrences := []*models.SchemaEntityOccurrence{
+	occurrences := []*models.OntologyEntityOccurrence{
 		{
 			EntityID:   entity.ID,
 			SchemaName: "public",
@@ -501,8 +510,8 @@ func TestSchemaEntityRepository_GetOccurrencesByEntity_Success(t *testing.T) {
 	}
 }
 
-func TestSchemaEntityRepository_GetOccurrencesByEntity_Empty(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_GetOccurrencesByEntity_Empty(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -523,8 +532,8 @@ func TestSchemaEntityRepository_GetOccurrencesByEntity_Empty(t *testing.T) {
 // Occurrence GetOccurrencesByTable Tests
 // ============================================================================
 
-func TestSchemaEntityRepository_GetOccurrencesByTable_Success(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_GetOccurrencesByTable_Success(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -537,7 +546,7 @@ func TestSchemaEntityRepository_GetOccurrencesByTable_Success(t *testing.T) {
 	host := "host"
 
 	// Create occurrences for visits table
-	occurrences := []*models.SchemaEntityOccurrence{
+	occurrences := []*models.OntologyEntityOccurrence{
 		{
 			EntityID:   user.ID,
 			SchemaName: "public",
@@ -598,8 +607,8 @@ func TestSchemaEntityRepository_GetOccurrencesByTable_Success(t *testing.T) {
 	}
 }
 
-func TestSchemaEntityRepository_GetOccurrencesByTable_Empty(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_GetOccurrencesByTable_Empty(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -618,8 +627,8 @@ func TestSchemaEntityRepository_GetOccurrencesByTable_Empty(t *testing.T) {
 // Cascade Delete Tests
 // ============================================================================
 
-func TestSchemaEntityRepository_CascadeDelete_Occurrences(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_CascadeDelete_Occurrences(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -628,7 +637,7 @@ func TestSchemaEntityRepository_CascadeDelete_Occurrences(t *testing.T) {
 	entity := tc.createTestEntity(ctx, "user")
 
 	// Create occurrence
-	occ := &models.SchemaEntityOccurrence{
+	occ := &models.OntologyEntityOccurrence{
 		EntityID:   entity.ID,
 		SchemaName: "public",
 		TableName:  "orders",
@@ -660,13 +669,13 @@ func TestSchemaEntityRepository_CascadeDelete_Occurrences(t *testing.T) {
 // No Tenant Scope Tests (RLS Enforcement)
 // ============================================================================
 
-func TestSchemaEntityRepository_NoTenantScope(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_NoTenantScope(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx := context.Background() // No tenant scope
 
-	entity := &models.SchemaEntity{
+	entity := &models.OntologyEntity{
 		ProjectID:     tc.projectID,
 		OntologyID:    tc.ontologyID,
 		Name:          "user",
@@ -701,7 +710,7 @@ func TestSchemaEntityRepository_NoTenantScope(t *testing.T) {
 	}
 
 	// CreateOccurrence should fail
-	occ := &models.SchemaEntityOccurrence{
+	occ := &models.OntologyEntityOccurrence{
 		EntityID:   uuid.New(),
 		SchemaName: "public",
 		TableName:  "test",
@@ -730,8 +739,8 @@ func TestSchemaEntityRepository_NoTenantScope(t *testing.T) {
 // Entity GetByID Tests
 // ============================================================================
 
-func TestSchemaEntityRepository_GetByID_Success(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_GetByID_Success(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -754,8 +763,8 @@ func TestSchemaEntityRepository_GetByID_Success(t *testing.T) {
 	}
 }
 
-func TestSchemaEntityRepository_GetByID_NotFound(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_GetByID_NotFound(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -770,8 +779,8 @@ func TestSchemaEntityRepository_GetByID_NotFound(t *testing.T) {
 	}
 }
 
-func TestSchemaEntityRepository_GetByID_ReturnsDeletedEntity(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_GetByID_ReturnsDeletedEntity(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -802,8 +811,8 @@ func TestSchemaEntityRepository_GetByID_ReturnsDeletedEntity(t *testing.T) {
 // Entity Update Tests
 // ============================================================================
 
-func TestSchemaEntityRepository_Update_Success(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_Update_Success(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -841,8 +850,8 @@ func TestSchemaEntityRepository_Update_Success(t *testing.T) {
 // Soft Delete Tests
 // ============================================================================
 
-func TestSchemaEntityRepository_SoftDelete_Success(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_SoftDelete_Success(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -868,8 +877,8 @@ func TestSchemaEntityRepository_SoftDelete_Success(t *testing.T) {
 	}
 }
 
-func TestSchemaEntityRepository_SoftDelete_FilteredFromGetByOntology(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_SoftDelete_FilteredFromGetByOntology(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -900,8 +909,8 @@ func TestSchemaEntityRepository_SoftDelete_FilteredFromGetByOntology(t *testing.
 	}
 }
 
-func TestSchemaEntityRepository_SoftDelete_FilteredFromGetByName(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_SoftDelete_FilteredFromGetByName(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -929,8 +938,8 @@ func TestSchemaEntityRepository_SoftDelete_FilteredFromGetByName(t *testing.T) {
 // Restore Tests
 // ============================================================================
 
-func TestSchemaEntityRepository_Restore_Success(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_Restore_Success(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -976,8 +985,8 @@ func TestSchemaEntityRepository_Restore_Success(t *testing.T) {
 // Alias CreateAlias Tests
 // ============================================================================
 
-func TestSchemaEntityRepository_CreateAlias_Success(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_CreateAlias_Success(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -1020,8 +1029,8 @@ func TestSchemaEntityRepository_CreateAlias_Success(t *testing.T) {
 	}
 }
 
-func TestSchemaEntityRepository_CreateAlias_DuplicateAlias(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_CreateAlias_DuplicateAlias(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -1049,8 +1058,8 @@ func TestSchemaEntityRepository_CreateAlias_DuplicateAlias(t *testing.T) {
 	}
 }
 
-func TestSchemaEntityRepository_CreateAlias_NullSource(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_CreateAlias_NullSource(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -1085,8 +1094,8 @@ func TestSchemaEntityRepository_CreateAlias_NullSource(t *testing.T) {
 // Alias GetAliasesByEntity Tests
 // ============================================================================
 
-func TestSchemaEntityRepository_GetAliasesByEntity_Multiple(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_GetAliasesByEntity_Multiple(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -1121,8 +1130,8 @@ func TestSchemaEntityRepository_GetAliasesByEntity_Multiple(t *testing.T) {
 	}
 }
 
-func TestSchemaEntityRepository_GetAliasesByEntity_Empty(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_GetAliasesByEntity_Empty(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -1143,8 +1152,8 @@ func TestSchemaEntityRepository_GetAliasesByEntity_Empty(t *testing.T) {
 // Alias DeleteAlias Tests
 // ============================================================================
 
-func TestSchemaEntityRepository_DeleteAlias_Success(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_DeleteAlias_Success(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
@@ -1177,8 +1186,8 @@ func TestSchemaEntityRepository_DeleteAlias_Success(t *testing.T) {
 	}
 }
 
-func TestSchemaEntityRepository_DeleteAlias_CascadeOnEntityDelete(t *testing.T) {
-	tc := setupSchemaEntityTest(t)
+func TestOntologyEntityRepository_DeleteAlias_CascadeOnEntityDelete(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()

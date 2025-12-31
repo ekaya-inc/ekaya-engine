@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/google/uuid"
@@ -21,7 +22,7 @@ import (
 // as input and produces a structured list of entities with their occurrences and roles.
 type EntityDiscoveryTask struct {
 	workqueue.BaseTask
-	entityRepo     repositories.SchemaEntityRepository
+	entityRepo     repositories.OntologyEntityRepository
 	schemaRepo     repositories.SchemaRepository
 	llmFactory     llm.LLMClientFactory
 	adapterFactory datasource.DatasourceAdapterFactory
@@ -41,7 +42,7 @@ type EntityDiscoveryTask struct {
 
 // NewEntityDiscoveryTask creates a new entity discovery task.
 func NewEntityDiscoveryTask(
-	entityRepo repositories.SchemaEntityRepository,
+	entityRepo repositories.OntologyEntityRepository,
 	schemaRepo repositories.SchemaRepository,
 	llmFactory llm.LLMClientFactory,
 	adapterFactory datasource.DatasourceAdapterFactory,
@@ -109,6 +110,16 @@ func (t *EntityDiscoveryTask) Execute(ctx context.Context, enqueuer workqueue.Ta
 	prompt := t.buildPrompt(fks)
 	systemMessage := t.buildSystemMessage()
 
+	// DEBUG: Write prompt to file for review
+	debugDir := "/tmp/entity-discovery-debug"
+	os.MkdirAll(debugDir, 0755)
+	promptFile := fmt.Sprintf("%s/prompt-%s.txt", debugDir, t.workflowID.String())
+	promptContent := fmt.Sprintf("=== SYSTEM MESSAGE ===\n%s\n\n=== USER PROMPT ===\n%s", systemMessage, prompt)
+	os.WriteFile(promptFile, []byte(promptContent), 0644)
+	if t.logger != nil {
+		t.logger.Info("DEBUG: Wrote prompt to file", zap.String("file", promptFile))
+	}
+
 	// Call LLM
 	llmClient, err := t.llmFactory.CreateForProject(tenantCtx, t.projectID)
 	if err != nil {
@@ -131,6 +142,15 @@ func (t *EntityDiscoveryTask) Execute(ctx context.Context, enqueuer workqueue.Ta
 			zap.Int("prompt_tokens", result.PromptTokens),
 			zap.Int("completion_tokens", result.CompletionTokens),
 			zap.Int("total_tokens", result.TotalTokens))
+	}
+
+	// DEBUG: Write response to file for review
+	responseFile := fmt.Sprintf("%s/response-%s.txt", debugDir, t.workflowID.String())
+	responseContent := fmt.Sprintf("=== LLM RESPONSE ===\nPrompt Tokens: %d\nCompletion Tokens: %d\nTotal Tokens: %d\n\n=== CONTENT ===\n%s",
+		result.PromptTokens, result.CompletionTokens, result.TotalTokens, result.Content)
+	os.WriteFile(responseFile, []byte(responseContent), 0644)
+	if t.logger != nil {
+		t.logger.Info("DEBUG: Wrote response to file", zap.String("file", responseFile))
 	}
 
 	// Parse LLM output
@@ -363,7 +383,7 @@ func (t *EntityDiscoveryTask) parseEntityDiscoveryOutput(content string) (*Entit
 func (t *EntityDiscoveryTask) persistEntities(ctx context.Context, output *EntityDiscoveryOutput) error {
 	for _, discoveredEntity := range output.Entities {
 		// Create entity record
-		entity := &models.SchemaEntity{
+		entity := &models.OntologyEntity{
 			ProjectID:     t.projectID,
 			OntologyID:    t.ontologyID,
 			Name:          discoveredEntity.Name,
@@ -391,7 +411,7 @@ func (t *EntityDiscoveryTask) persistEntities(ctx context.Context, output *Entit
 
 		// Create occurrence records
 		for _, occ := range discoveredEntity.Occurrences {
-			occurrence := &models.SchemaEntityOccurrence{
+			occurrence := &models.OntologyEntityOccurrence{
 				EntityID:   entity.ID,
 				SchemaName: occ.SchemaName,
 				TableName:  occ.TableName,

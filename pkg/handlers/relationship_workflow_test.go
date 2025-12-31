@@ -93,7 +93,7 @@ func TestRelationshipWorkflowHandler_GetEntities_Success(t *testing.T) {
 			}
 			return []*services.EntityWithOccurrences{
 				{
-					Entity: &models.SchemaEntity{
+					Entity: &models.OntologyEntity{
 						ID:            entityID,
 						ProjectID:     projectID,
 						OntologyID:    uuid.New(),
@@ -103,7 +103,7 @@ func TestRelationshipWorkflowHandler_GetEntities_Success(t *testing.T) {
 						PrimaryTable:  "users",
 						PrimaryColumn: "id",
 					},
-					Occurrences: []*models.SchemaEntityOccurrence{
+					Occurrences: []*models.OntologyEntityOccurrence{
 						{
 							ID:         occurrenceID,
 							EntityID:   entityID,

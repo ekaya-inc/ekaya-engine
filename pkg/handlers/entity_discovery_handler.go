@@ -84,11 +84,12 @@ func (h *EntityDiscoveryHandler) StartDiscovery(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	response := StartEntityDiscoveryResponse{
+	data := StartEntityDiscoveryResponse{
 		WorkflowID: workflow.ID.String(),
 		Status:     string(workflow.State),
 	}
 
+	response := ApiResponse{Success: true, Data: data}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
@@ -126,7 +127,7 @@ func (h *EntityDiscoveryHandler) GetStatus(w http.ResponseWriter, r *http.Reques
 		occurrenceCount = counts.OccurrenceCount
 	}
 
-	response := EntityDiscoveryStatusResponse{
+	data := EntityDiscoveryStatusResponse{
 		WorkflowID:      workflow.ID.String(),
 		Phase:           string(workflow.Phase),
 		State:           string(workflow.State),
@@ -136,6 +137,7 @@ func (h *EntityDiscoveryHandler) GetStatus(w http.ResponseWriter, r *http.Reques
 		OccurrenceCount: occurrenceCount,
 	}
 
+	response := ApiResponse{Success: true, Data: data}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
@@ -176,7 +178,8 @@ func (h *EntityDiscoveryHandler) Cancel(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := WriteJSON(w, http.StatusOK, map[string]string{"status": "cancelled"}); err != nil {
+	response := ApiResponse{Success: true, Data: map[string]string{"status": "cancelled"}}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }

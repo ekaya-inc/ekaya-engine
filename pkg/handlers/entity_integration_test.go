@@ -27,7 +27,7 @@ type entityTestContext struct {
 	engineDB     *testhelpers.EngineDB
 	handler      *EntityHandler
 	service      services.EntityService
-	entityRepo   repositories.SchemaEntityRepository
+	entityRepo   repositories.OntologyEntityRepository
 	ontologyRepo repositories.OntologyRepository
 	projectID    uuid.UUID
 	ontologyID   uuid.UUID
@@ -40,7 +40,7 @@ func setupEntityTest(t *testing.T) *entityTestContext {
 	engineDB := testhelpers.GetEngineDB(t)
 
 	// Create repositories
-	entityRepo := repositories.NewSchemaEntityRepository()
+	entityRepo := repositories.NewOntologyEntityRepository()
 	ontologyRepo := repositories.NewOntologyRepository()
 
 	// Create service
@@ -218,7 +218,7 @@ func TestEntityIntegration_CreateAndList(t *testing.T) {
 	}
 	ctx = database.SetTenantScope(ctx, scope)
 
-	entity := &models.SchemaEntity{
+	entity := &models.OntologyEntity{
 		ProjectID:     tc.projectID,
 		OntologyID:    tc.ontologyID,
 		Name:          "user",
@@ -234,7 +234,7 @@ func TestEntityIntegration_CreateAndList(t *testing.T) {
 	}
 
 	// Add an occurrence
-	occurrence := &models.SchemaEntityOccurrence{
+	occurrence := &models.OntologyEntityOccurrence{
 		EntityID:   entity.ID,
 		SchemaName: "public",
 		TableName:  "users",
@@ -316,7 +316,7 @@ func TestEntityIntegration_GetByID(t *testing.T) {
 	}
 	ctx = database.SetTenantScope(ctx, scope)
 
-	entity := &models.SchemaEntity{
+	entity := &models.OntologyEntity{
 		ProjectID:     tc.projectID,
 		OntologyID:    tc.ontologyID,
 		Name:          "order",
@@ -365,7 +365,7 @@ func TestEntityIntegration_SoftDeleteAndRestore(t *testing.T) {
 	}
 	ctx = database.SetTenantScope(ctx, scope)
 
-	entity := &models.SchemaEntity{
+	entity := &models.OntologyEntity{
 		ProjectID:     tc.projectID,
 		OntologyID:    tc.ontologyID,
 		Name:          "product",
@@ -463,7 +463,7 @@ func TestEntityIntegration_AddAndRemoveAlias(t *testing.T) {
 	}
 	ctx = database.SetTenantScope(ctx, scope)
 
-	entity := &models.SchemaEntity{
+	entity := &models.OntologyEntity{
 		ProjectID:     tc.projectID,
 		OntologyID:    tc.ontologyID,
 		Name:          "account",

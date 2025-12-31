@@ -566,47 +566,47 @@ func (m *rwsMockQueue) Cancel() {
 	m.cancelled = true
 }
 
-// rwsMockEntityRepository is a mock for SchemaEntityRepository.
+// rwsMockEntityRepository is a mock for OntologyEntityRepository.
 type rwsMockEntityRepository struct {
-	entities []*models.SchemaEntity
+	entities []*models.OntologyEntity
 	getErr   error
 }
 
-func (m *rwsMockEntityRepository) Create(ctx context.Context, entity *models.SchemaEntity) error {
+func (m *rwsMockEntityRepository) Create(ctx context.Context, entity *models.OntologyEntity) error {
 	return nil
 }
-func (m *rwsMockEntityRepository) GetByID(ctx context.Context, entityID uuid.UUID) (*models.SchemaEntity, error) {
+func (m *rwsMockEntityRepository) GetByID(ctx context.Context, entityID uuid.UUID) (*models.OntologyEntity, error) {
 	return nil, nil
 }
-func (m *rwsMockEntityRepository) GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.SchemaEntity, error) {
+func (m *rwsMockEntityRepository) GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
 	return m.entities, m.getErr
 }
-func (m *rwsMockEntityRepository) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.SchemaEntity, error) {
+func (m *rwsMockEntityRepository) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
 	return m.entities, m.getErr
 }
-func (m *rwsMockEntityRepository) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.SchemaEntity, error) {
+func (m *rwsMockEntityRepository) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {
 	return nil, nil
 }
 func (m *rwsMockEntityRepository) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }
-func (m *rwsMockEntityRepository) Update(ctx context.Context, entity *models.SchemaEntity) error {
+func (m *rwsMockEntityRepository) Update(ctx context.Context, entity *models.OntologyEntity) error {
 	return nil
 }
 func (m *rwsMockEntityRepository) SoftDelete(ctx context.Context, entityID uuid.UUID, reason string) error {
 	return nil
 }
 func (m *rwsMockEntityRepository) Restore(ctx context.Context, entityID uuid.UUID) error { return nil }
-func (m *rwsMockEntityRepository) CreateOccurrence(ctx context.Context, occ *models.SchemaEntityOccurrence) error {
+func (m *rwsMockEntityRepository) CreateOccurrence(ctx context.Context, occ *models.OntologyEntityOccurrence) error {
 	return nil
 }
-func (m *rwsMockEntityRepository) GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.SchemaEntityOccurrence, error) {
+func (m *rwsMockEntityRepository) GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
 	return nil, nil
 }
-func (m *rwsMockEntityRepository) GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.SchemaEntityOccurrence, error) {
+func (m *rwsMockEntityRepository) GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.OntologyEntityOccurrence, error) {
 	return nil, nil
 }
-func (m *rwsMockEntityRepository) GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.SchemaEntityOccurrence, error) {
+func (m *rwsMockEntityRepository) GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
 	return nil, nil
 }
 func (m *rwsMockEntityRepository) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {
@@ -643,7 +643,7 @@ func newTestRelationshipWorkflowService(
 ) *relationshipWorkflowService {
 	// Default entity repo with one entity (prerequisite check passes)
 	entityRepo := &rwsMockEntityRepository{
-		entities: []*models.SchemaEntity{{ID: uuid.New(), Name: "test_entity"}},
+		entities: []*models.OntologyEntity{{ID: uuid.New(), Name: "test_entity"}},
 	}
 	return &relationshipWorkflowService{
 		workflowRepo:     workflowRepo,

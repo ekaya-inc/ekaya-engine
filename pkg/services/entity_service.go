@@ -46,14 +46,14 @@ type EntityService interface {
 }
 
 type entityService struct {
-	entityRepo   repositories.SchemaEntityRepository
+	entityRepo   repositories.OntologyEntityRepository
 	ontologyRepo repositories.OntologyRepository
 	logger       *zap.Logger
 }
 
 // NewEntityService creates a new EntityService.
 func NewEntityService(
-	entityRepo repositories.SchemaEntityRepository,
+	entityRepo repositories.OntologyEntityRepository,
 	ontologyRepo repositories.OntologyRepository,
 	logger *zap.Logger,
 ) EntityService {

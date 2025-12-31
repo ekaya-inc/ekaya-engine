@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,7 +50,7 @@ type entityHeartbeatInfo struct {
 
 type entityDiscoveryService struct {
 	workflowRepo   repositories.OntologyWorkflowRepository
-	entityRepo     repositories.SchemaEntityRepository
+	entityRepo     repositories.OntologyEntityRepository
 	schemaRepo     repositories.SchemaRepository
 	ontologyRepo   repositories.OntologyRepository
 	dsSvc          DatasourceService
@@ -80,7 +81,7 @@ type entityTaskQueueUpdate struct {
 // NewEntityDiscoveryService creates a new entity discovery service.
 func NewEntityDiscoveryService(
 	workflowRepo repositories.OntologyWorkflowRepository,
-	entityRepo repositories.SchemaEntityRepository,
+	entityRepo repositories.OntologyEntityRepository,
 	schemaRepo repositories.SchemaRepository,
 	ontologyRepo repositories.OntologyRepository,
 	dsSvc DatasourceService,
@@ -319,19 +320,17 @@ func (s *entityDiscoveryService) runWorkflow(projectID, workflowID, ontologyID, 
 		}
 	}()
 
-	// Entity discovery phases:
-	// 0. Collect column statistics (for all tables) - distinct counts, row counts, ratios
-	// 0.5. Filter entity candidates (deterministic)
-	// 0.75. Analyze graph connectivity (FK relationships)
-	// 1. Entity Discovery (LLM) - identify entities with descriptions and occurrences
+	// Entity discovery: deterministic algorithm
+	// Find columns where COUNT(DISTINCT col) == row_count AND column is NOT NULL
+	// These are unique identifier columns that represent entities
 
 	ctx := context.Background()
 
-	// Phase 0: Collect column statistics for all tables
-	s.logger.Info("Phase 0: Collecting column statistics",
+	// Phase 1: Collect column statistics for all tables
+	s.logger.Info("Collecting column statistics",
 		zap.String("workflow_id", workflowID.String()))
 
-	if err := s.updateProgress(ctx, projectID, workflowID, "Collecting column statistics...", 5); err != nil {
+	if err := s.updateProgress(ctx, projectID, workflowID, "Collecting column statistics...", 10); err != nil {
 		s.logger.Error("Failed to update progress", zap.Error(err))
 	}
 
@@ -342,87 +341,154 @@ func (s *entityDiscoveryService) runWorkflow(projectID, workflowID, ontologyID, 
 		return
 	}
 
-	// Phase 0.5: Filter columns to identify entity candidates
-	s.logger.Info("Phase 0.5: Filtering entity candidates",
+	// Phase 2: Identify entities from unique columns
+	s.logger.Info("Identifying entities from unique columns",
 		zap.String("workflow_id", workflowID.String()))
 
-	if err := s.updateProgress(ctx, projectID, workflowID, "Filtering entity candidates...", 20); err != nil {
+	if err := s.updateProgress(ctx, projectID, workflowID, "Identifying entities...", 50); err != nil {
 		s.logger.Error("Failed to update progress", zap.Error(err))
 	}
 
-	candidates, excluded, err := s.filterEntityCandidates(ctx, projectID, workflowID, datasourceID, statsMap)
+	entityCount, err := s.identifyAndPersistEntities(ctx, projectID, ontologyID, datasourceID, statsMap)
 	if err != nil {
-		s.logger.Error("Failed to filter entity candidates", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("entity filtering: %v", err))
-		return
-	}
-
-	// Phase 0.75: Analyze graph connectivity
-	s.logger.Info("Phase 0.75: Analyzing graph connectivity",
-		zap.String("workflow_id", workflowID.String()))
-
-	if err := s.updateProgress(ctx, projectID, workflowID, "Analyzing graph connectivity...", 35); err != nil {
-		s.logger.Error("Failed to update progress", zap.Error(err))
-	}
-
-	components, islands, err := s.analyzeGraphConnectivity(ctx, projectID, workflowID, datasourceID)
-	if err != nil {
-		s.logger.Error("Failed to analyze graph connectivity", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("graph connectivity: %v", err))
-		return
-	}
-
-	// Log summary of data available for Entity Discovery LLM
-	s.logger.Info("Data collected for entity discovery",
-		zap.String("workflow_id", workflowID.String()),
-		zap.Int("candidate_columns", len(candidates)),
-		zap.Int("excluded_columns", len(excluded)),
-		zap.Int("connected_components", len(components)),
-		zap.Int("island_tables", len(islands)))
-
-	// Phase 1: Entity Discovery (LLM)
-	s.logger.Info("Phase 1: Entity discovery with LLM",
-		zap.String("workflow_id", workflowID.String()))
-
-	if err := s.updateProgress(ctx, projectID, workflowID, "Discovering entities with LLM...", 50); err != nil {
-		s.logger.Error("Failed to update progress", zap.Error(err))
-	}
-
-	entityTask := NewEntityDiscoveryTask(
-		s.entityRepo,
-		s.schemaRepo,
-		s.llmFactory,
-		s.adapterFactory,
-		s.dsSvc,
-		s.getTenantCtx,
-		projectID,
-		workflowID,
-		ontologyID,
-		datasourceID,
-		candidates,
-		excluded,
-		components,
-		islands,
-		statsMap,
-		s.logger,
-	)
-	queue.Enqueue(entityTask)
-
-	if err := queue.Wait(ctx); err != nil {
-		s.logger.Error("Entity discovery failed", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("entity discovery: %v", err))
+		s.logger.Error("Failed to identify entities", zap.Error(err))
+		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("entity identification: %v", err))
 		return
 	}
 
 	// Mark workflow as complete
-	s.logger.Info("Entity discovery complete - finalizing workflow",
-		zap.String("workflow_id", workflowID.String()))
+	s.logger.Info("Entity discovery complete",
+		zap.String("workflow_id", workflowID.String()),
+		zap.Int("entities_discovered", entityCount))
 
 	if err := s.updateProgress(ctx, projectID, workflowID, "Complete", 100); err != nil {
 		s.logger.Error("Failed to update progress", zap.Error(err))
 	}
 
 	s.finalizeWorkflow(projectID, workflowID)
+}
+
+// identifyAndPersistEntities finds columns where distinct count equals row count
+// and creates entity records for them.
+func (s *entityDiscoveryService) identifyAndPersistEntities(
+	ctx context.Context,
+	projectID, ontologyID, datasourceID uuid.UUID,
+	statsMap map[string]datasource.ColumnStats,
+) (int, error) {
+	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
+	if err != nil {
+		return 0, fmt.Errorf("get tenant context: %w", err)
+	}
+	defer cleanup()
+
+	// Get all columns for this datasource to check nullability
+	columns, err := s.schemaRepo.ListColumnsByDatasource(tenantCtx, projectID, datasourceID)
+	if err != nil {
+		return 0, fmt.Errorf("list columns: %w", err)
+	}
+
+	// Build lookup for column nullability: "schema.table.column" -> isNullable
+	columnNullable := make(map[string]bool)
+	for _, col := range columns {
+		// Get table info to build full key
+		table, err := s.schemaRepo.GetTableByID(tenantCtx, projectID, col.SchemaTableID)
+		if err != nil {
+			s.logger.Error("Failed to get table for column",
+				zap.String("column_id", col.ID.String()),
+				zap.Error(err))
+			continue
+		}
+		key := fmt.Sprintf("%s.%s.%s", table.SchemaName, table.TableName, col.ColumnName)
+		columnNullable[key] = col.IsNullable
+	}
+
+	// Find columns where distinct count == row count AND not nullable
+	var entities []struct {
+		schemaName string
+		tableName  string
+		columnName string
+		rowCount   int64
+	}
+
+	for key, stats := range statsMap {
+		// Skip if no rows or distinct count doesn't match row count
+		if stats.RowCount == 0 || stats.DistinctCount != stats.RowCount {
+			continue
+		}
+
+		// Skip if column is nullable (can't be a reliable identifier)
+		if nullable, ok := columnNullable[key]; ok && nullable {
+			continue
+		}
+
+		// Parse key to get schema.table.column
+		parts := strings.SplitN(key, ".", 3)
+		if len(parts) != 3 {
+			continue
+		}
+
+		entities = append(entities, struct {
+			schemaName string
+			tableName  string
+			columnName string
+			rowCount   int64
+		}{
+			schemaName: parts[0],
+			tableName:  parts[1],
+			columnName: parts[2],
+			rowCount:   stats.RowCount,
+		})
+
+		s.logger.Info("Found unique identifier column",
+			zap.String("column", key),
+			zap.Int64("distinct_count", stats.DistinctCount),
+			zap.Int64("row_count", stats.RowCount))
+	}
+
+	// Create entity records
+	for _, e := range entities {
+		// Derive entity name from table name (e.g., "users" -> "user", "orders" -> "order")
+		entityName := deriveEntityName(e.tableName)
+
+		entity := &models.OntologyEntity{
+			ProjectID:     projectID,
+			OntologyID:    ontologyID,
+			Name:          entityName,
+			Description:   fmt.Sprintf("Entity identified from unique column %s.%s.%s", e.schemaName, e.tableName, e.columnName),
+			PrimarySchema: e.schemaName,
+			PrimaryTable:  e.tableName,
+			PrimaryColumn: e.columnName,
+		}
+
+		if err := s.entityRepo.Create(tenantCtx, entity); err != nil {
+			s.logger.Error("Failed to create entity",
+				zap.String("entity_name", entityName),
+				zap.Error(err))
+			return 0, fmt.Errorf("create entity %s: %w", entityName, err)
+		}
+
+		s.logger.Info("Entity created",
+			zap.String("entity_id", entity.ID.String()),
+			zap.String("entity_name", entity.Name),
+			zap.String("primary_location", fmt.Sprintf("%s.%s.%s", e.schemaName, e.tableName, e.columnName)))
+	}
+
+	return len(entities), nil
+}
+
+// deriveEntityName converts a table name to an entity name.
+// e.g., "users" -> "user", "order_items" -> "order_item"
+func deriveEntityName(tableName string) string {
+	// Simple singularization: remove trailing 's' if present
+	name := tableName
+	if strings.HasSuffix(name, "ies") {
+		name = strings.TrimSuffix(name, "ies") + "y"
+	} else if strings.HasSuffix(name, "es") && !strings.HasSuffix(name, "ses") {
+		name = strings.TrimSuffix(name, "es")
+	} else if strings.HasSuffix(name, "s") && !strings.HasSuffix(name, "ss") {
+		name = strings.TrimSuffix(name, "s")
+	}
+	return name
 }
 
 // collectColumnStatistics gathers statistics for all columns across all tables.

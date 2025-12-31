@@ -67,7 +67,7 @@ type SchemaService interface {
 
 type schemaService struct {
 	schemaRepo     repositories.SchemaRepository
-	entityRepo     repositories.SchemaEntityRepository
+	entityRepo     repositories.OntologyEntityRepository
 	datasourceSvc  DatasourceService
 	adapterFactory datasource.DatasourceAdapterFactory
 	logger         *zap.Logger
@@ -76,7 +76,7 @@ type schemaService struct {
 // NewSchemaService creates a new schema service with dependencies.
 func NewSchemaService(
 	schemaRepo repositories.SchemaRepository,
-	entityRepo repositories.SchemaEntityRepository,
+	entityRepo repositories.OntologyEntityRepository,
 	datasourceSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	logger *zap.Logger,
@@ -912,13 +912,13 @@ func (s *schemaService) GetDatasourceSchemaWithEntities(ctx context.Context, pro
 	}
 
 	// Build entity lookup maps
-	entityByID := make(map[uuid.UUID]*models.SchemaEntity)
+	entityByID := make(map[uuid.UUID]*models.OntologyEntity)
 	for _, e := range entities {
 		entityByID[e.ID] = e
 	}
 
 	// Build occurrence lookup map: schema.table.column -> []occurrence
-	occurrencesByColumn := make(map[string][]*models.SchemaEntityOccurrence)
+	occurrencesByColumn := make(map[string][]*models.OntologyEntityOccurrence)
 	for _, occ := range occurrences {
 		key := fmt.Sprintf("%s.%s.%s", occ.SchemaName, occ.TableName, occ.ColumnName)
 		occurrencesByColumn[key] = append(occurrencesByColumn[key], occ)

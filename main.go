@@ -139,7 +139,7 @@ func main() {
 	workflowStateRepo := repositories.NewWorkflowStateRepository()
 	ontologyQuestionRepo := repositories.NewOntologyQuestionRepository()
 	relationshipCandidateRepo := repositories.NewRelationshipCandidateRepository()
-	schemaEntityRepo := repositories.NewSchemaEntityRepository()
+	ontologyEntityRepo := repositories.NewOntologyEntityRepository()
 
 	// Create connection manager with config-driven settings
 	connManagerCfg := datasource.ConnectionManagerConfig{
@@ -161,7 +161,7 @@ func main() {
 	projectService := services.NewProjectService(db, projectRepo, userRepo, redisClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, projectService, logger)
-	schemaService := services.NewSchemaService(schemaRepo, schemaEntityRepo, datasourceService, adapterFactory, logger)
+	schemaService := services.NewSchemaService(schemaRepo, ontologyEntityRepo, datasourceService, adapterFactory, logger)
 	discoveryService := services.NewRelationshipDiscoveryService(schemaRepo, datasourceService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
@@ -192,11 +192,11 @@ func main() {
 		ontologyChatRepo, ontologyRepo, knowledgeRepo,
 		schemaRepo, ontologyWorkflowRepo, workflowStateRepo, llmFactory, datasourceService, adapterFactory, logger)
 	relationshipWorkflowService := services.NewRelationshipWorkflowService(
-		ontologyWorkflowRepo, relationshipCandidateRepo, schemaRepo, workflowStateRepo, ontologyRepo, schemaEntityRepo,
+		ontologyWorkflowRepo, relationshipCandidateRepo, schemaRepo, workflowStateRepo, ontologyRepo, ontologyEntityRepo,
 		datasourceService, adapterFactory, llmFactory, discoveryService, getTenantCtx, logger)
-	entityService := services.NewEntityService(schemaEntityRepo, ontologyRepo, logger)
+	entityService := services.NewEntityService(ontologyEntityRepo, ontologyRepo, logger)
 	entityDiscoveryService := services.NewEntityDiscoveryService(
-		ontologyWorkflowRepo, schemaEntityRepo, schemaRepo, ontologyRepo,
+		ontologyWorkflowRepo, ontologyEntityRepo, schemaRepo, ontologyRepo,
 		datasourceService, adapterFactory, llmFactory, getTenantCtx, logger)
 
 	mux := http.NewServeMux()

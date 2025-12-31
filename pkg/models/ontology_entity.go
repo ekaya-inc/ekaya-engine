@@ -6,10 +6,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// SchemaEntity represents a discovered domain entity (user, account, order, etc.)
+// OntologyEntity represents a discovered domain entity (user, account, order, etc.)
 // that appears in one or more tables/columns across the schema.
-// Note: Stored in engine_ontology_entities table (renamed from engine_schema_entities).
-type SchemaEntity struct {
+// Stored in engine_ontology_entities table.
+type OntologyEntity struct {
 	ID             uuid.UUID `json:"id"`
 	ProjectID      uuid.UUID `json:"project_id"`
 	OntologyID     uuid.UUID `json:"ontology_id"`
@@ -24,13 +24,10 @@ type SchemaEntity struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-// OntologyEntity is an alias for SchemaEntity for backward compatibility.
-type OntologyEntity = SchemaEntity
-
-// SchemaEntityOccurrence represents a single occurrence of an entity in a specific
+// OntologyEntityOccurrence represents a single occurrence of an entity in a specific
 // schema.table.column location, optionally with a semantic role (visitor, host, owner).
-// Note: Stored in engine_ontology_entity_occurrences table (renamed from engine_schema_entity_occurrences).
-type SchemaEntityOccurrence struct {
+// Stored in engine_ontology_entity_occurrences table.
+type OntologyEntityOccurrence struct {
 	ID         uuid.UUID `json:"id"`
 	EntityID   uuid.UUID `json:"entity_id"`
 	SchemaName string    `json:"schema_name"`
@@ -40,9 +37,6 @@ type SchemaEntityOccurrence struct {
 	Confidence float64   `json:"confidence"`     // 0.0 to 1.0, default 1.0
 	CreatedAt  time.Time `json:"created_at"`
 }
-
-// OntologyEntityOccurrence is an alias for SchemaEntityOccurrence for backward compatibility.
-type OntologyEntityOccurrence = SchemaEntityOccurrence
 
 // OntologyEntityAlias represents an alternative name for an entity.
 // Used for query matching (e.g., "customer" as alias for "user").

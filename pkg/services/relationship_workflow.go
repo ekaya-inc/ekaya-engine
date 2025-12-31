@@ -36,8 +36,8 @@ type CandidatesGrouped struct {
 
 // EntityWithOccurrences represents a discovered entity with its occurrences.
 type EntityWithOccurrences struct {
-	Entity      *models.SchemaEntity
-	Occurrences []*models.SchemaEntityOccurrence
+	Entity      *models.OntologyEntity
+	Occurrences []*models.OntologyEntityOccurrence
 }
 
 // RelationshipWorkflowService provides operations for relationship discovery workflow management.
@@ -95,7 +95,7 @@ type relationshipWorkflowService struct {
 	schemaRepo       repositories.SchemaRepository
 	stateRepo        repositories.WorkflowStateRepository
 	ontologyRepo     repositories.OntologyRepository
-	entityRepo       repositories.SchemaEntityRepository
+	entityRepo       repositories.OntologyEntityRepository
 	dsSvc            DatasourceService
 	adapterFactory   datasource.DatasourceAdapterFactory
 	llmFactory       llm.LLMClientFactory
@@ -115,7 +115,7 @@ func NewRelationshipWorkflowService(
 	schemaRepo repositories.SchemaRepository,
 	stateRepo repositories.WorkflowStateRepository,
 	ontologyRepo repositories.OntologyRepository,
-	entityRepo repositories.SchemaEntityRepository,
+	entityRepo repositories.OntologyEntityRepository,
 	dsSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,

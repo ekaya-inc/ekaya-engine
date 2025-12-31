@@ -12,26 +12,26 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
-// SchemaEntityRepository provides data access for schema entities and their occurrences.
-type SchemaEntityRepository interface {
+// OntologyEntityRepository provides data access for ontology entities and their occurrences.
+type OntologyEntityRepository interface {
 	// Entity operations
-	Create(ctx context.Context, entity *models.SchemaEntity) error
-	GetByID(ctx context.Context, entityID uuid.UUID) (*models.SchemaEntity, error)
-	GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.SchemaEntity, error)
-	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.SchemaEntity, error)
-	GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.SchemaEntity, error)
+	Create(ctx context.Context, entity *models.OntologyEntity) error
+	GetByID(ctx context.Context, entityID uuid.UUID) (*models.OntologyEntity, error)
+	GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error)
+	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error)
+	GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error)
 	DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error
-	Update(ctx context.Context, entity *models.SchemaEntity) error
+	Update(ctx context.Context, entity *models.OntologyEntity) error
 
 	// Soft delete operations
 	SoftDelete(ctx context.Context, entityID uuid.UUID, reason string) error
 	Restore(ctx context.Context, entityID uuid.UUID) error
 
 	// Occurrence operations
-	CreateOccurrence(ctx context.Context, occ *models.SchemaEntityOccurrence) error
-	GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.SchemaEntityOccurrence, error)
-	GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.SchemaEntityOccurrence, error)
-	GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.SchemaEntityOccurrence, error)
+	CreateOccurrence(ctx context.Context, occ *models.OntologyEntityOccurrence) error
+	GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error)
+	GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.OntologyEntityOccurrence, error)
+	GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntityOccurrence, error)
 
 	// Alias operations
 	CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error
@@ -39,20 +39,20 @@ type SchemaEntityRepository interface {
 	DeleteAlias(ctx context.Context, aliasID uuid.UUID) error
 }
 
-type schemaEntityRepository struct{}
+type ontologyEntityRepository struct{}
 
-// NewSchemaEntityRepository creates a new SchemaEntityRepository.
-func NewSchemaEntityRepository() SchemaEntityRepository {
-	return &schemaEntityRepository{}
+// NewOntologyEntityRepository creates a new OntologyEntityRepository.
+func NewOntologyEntityRepository() OntologyEntityRepository {
+	return &ontologyEntityRepository{}
 }
 
-var _ SchemaEntityRepository = (*schemaEntityRepository)(nil)
+var _ OntologyEntityRepository = (*ontologyEntityRepository)(nil)
 
 // ============================================================================
 // Entity Operations
 // ============================================================================
 
-func (r *schemaEntityRepository) Create(ctx context.Context, entity *models.SchemaEntity) error {
+func (r *ontologyEntityRepository) Create(ctx context.Context, entity *models.OntologyEntity) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return fmt.Errorf("no tenant scope in context")
@@ -79,13 +79,13 @@ func (r *schemaEntityRepository) Create(ctx context.Context, entity *models.Sche
 		entity.CreatedAt, entity.UpdatedAt,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to create schema entity: %w", err)
+		return fmt.Errorf("failed to create ontology entity: %w", err)
 	}
 
 	return nil
 }
 
-func (r *schemaEntityRepository) GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.SchemaEntity, error) {
+func (r *ontologyEntityRepository) GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
@@ -102,13 +102,13 @@ func (r *schemaEntityRepository) GetByOntology(ctx context.Context, ontologyID u
 
 	rows, err := scope.Conn.Query(ctx, query, ontologyID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query schema entities: %w", err)
+		return nil, fmt.Errorf("failed to query ontology entities: %w", err)
 	}
 	defer rows.Close()
 
-	var entities []*models.SchemaEntity
+	var entities []*models.OntologyEntity
 	for rows.Next() {
-		entity, err := scanSchemaEntity(rows)
+		entity, err := scanOntologyEntity(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -116,13 +116,13 @@ func (r *schemaEntityRepository) GetByOntology(ctx context.Context, ontologyID u
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating schema entities: %w", err)
+		return nil, fmt.Errorf("error iterating ontology entities: %w", err)
 	}
 
 	return entities, nil
 }
 
-func (r *schemaEntityRepository) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.SchemaEntity, error) {
+func (r *ontologyEntityRepository) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
@@ -140,13 +140,13 @@ func (r *schemaEntityRepository) GetByProject(ctx context.Context, projectID uui
 
 	rows, err := scope.Conn.Query(ctx, query, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query schema entities by project: %w", err)
+		return nil, fmt.Errorf("failed to query ontology entities by project: %w", err)
 	}
 	defer rows.Close()
 
-	var entities []*models.SchemaEntity
+	var entities []*models.OntologyEntity
 	for rows.Next() {
-		entity, err := scanSchemaEntity(rows)
+		entity, err := scanOntologyEntity(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -154,13 +154,13 @@ func (r *schemaEntityRepository) GetByProject(ctx context.Context, projectID uui
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating schema entities: %w", err)
+		return nil, fmt.Errorf("error iterating ontology entities: %w", err)
 	}
 
 	return entities, nil
 }
 
-func (r *schemaEntityRepository) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.SchemaEntity, error) {
+func (r *ontologyEntityRepository) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
@@ -175,7 +175,7 @@ func (r *schemaEntityRepository) GetByName(ctx context.Context, ontologyID uuid.
 		WHERE ontology_id = $1 AND name = $2 AND NOT is_deleted`
 
 	row := scope.Conn.QueryRow(ctx, query, ontologyID, name)
-	entity, err := scanSchemaEntity(row)
+	entity, err := scanOntologyEntity(row)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil // Entity not found
@@ -186,7 +186,7 @@ func (r *schemaEntityRepository) GetByName(ctx context.Context, ontologyID uuid.
 	return entity, nil
 }
 
-func (r *schemaEntityRepository) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+func (r *ontologyEntityRepository) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return fmt.Errorf("no tenant scope in context")
@@ -196,7 +196,7 @@ func (r *schemaEntityRepository) DeleteByOntology(ctx context.Context, ontologyI
 
 	_, err := scope.Conn.Exec(ctx, query, ontologyID)
 	if err != nil {
-		return fmt.Errorf("failed to delete schema entities: %w", err)
+		return fmt.Errorf("failed to delete ontology entities: %w", err)
 	}
 
 	return nil
@@ -206,7 +206,7 @@ func (r *schemaEntityRepository) DeleteByOntology(ctx context.Context, ontologyI
 // Occurrence Operations
 // ============================================================================
 
-func (r *schemaEntityRepository) CreateOccurrence(ctx context.Context, occ *models.SchemaEntityOccurrence) error {
+func (r *ontologyEntityRepository) CreateOccurrence(ctx context.Context, occ *models.OntologyEntityOccurrence) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return fmt.Errorf("no tenant scope in context")
@@ -221,19 +221,20 @@ func (r *schemaEntityRepository) CreateOccurrence(ctx context.Context, occ *mode
 	query := `
 		INSERT INTO engine_ontology_entity_occurrences (
 			id, entity_id, schema_name, table_name, column_name, role, confidence, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (entity_id, schema_name, table_name, column_name) DO NOTHING`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		occ.ID, occ.EntityID, occ.SchemaName, occ.TableName, occ.ColumnName, occ.Role, occ.Confidence, occ.CreatedAt,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to create schema entity occurrence: %w", err)
+		return fmt.Errorf("failed to create ontology entity occurrence: %w", err)
 	}
 
 	return nil
 }
 
-func (r *schemaEntityRepository) GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.SchemaEntityOccurrence, error) {
+func (r *ontologyEntityRepository) GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
@@ -251,9 +252,9 @@ func (r *schemaEntityRepository) GetOccurrencesByEntity(ctx context.Context, ent
 	}
 	defer rows.Close()
 
-	var occurrences []*models.SchemaEntityOccurrence
+	var occurrences []*models.OntologyEntityOccurrence
 	for rows.Next() {
-		occ, err := scanSchemaEntityOccurrence(rows)
+		occ, err := scanOntologyEntityOccurrence(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -267,7 +268,7 @@ func (r *schemaEntityRepository) GetOccurrencesByEntity(ctx context.Context, ent
 	return occurrences, nil
 }
 
-func (r *schemaEntityRepository) GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.SchemaEntityOccurrence, error) {
+func (r *ontologyEntityRepository) GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.OntologyEntityOccurrence, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
@@ -286,9 +287,9 @@ func (r *schemaEntityRepository) GetOccurrencesByTable(ctx context.Context, onto
 	}
 	defer rows.Close()
 
-	var occurrences []*models.SchemaEntityOccurrence
+	var occurrences []*models.OntologyEntityOccurrence
 	for rows.Next() {
-		occ, err := scanSchemaEntityOccurrence(rows)
+		occ, err := scanOntologyEntityOccurrence(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -302,7 +303,7 @@ func (r *schemaEntityRepository) GetOccurrencesByTable(ctx context.Context, onto
 	return occurrences, nil
 }
 
-func (r *schemaEntityRepository) GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.SchemaEntityOccurrence, error) {
+func (r *ontologyEntityRepository) GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
@@ -322,9 +323,9 @@ func (r *schemaEntityRepository) GetAllOccurrencesByProject(ctx context.Context,
 	}
 	defer rows.Close()
 
-	var occurrences []*models.SchemaEntityOccurrence
+	var occurrences []*models.OntologyEntityOccurrence
 	for rows.Next() {
-		occ, err := scanSchemaEntityOccurrence(rows)
+		occ, err := scanOntologyEntityOccurrence(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -342,7 +343,7 @@ func (r *schemaEntityRepository) GetAllOccurrencesByProject(ctx context.Context,
 // Entity CRUD Operations
 // ============================================================================
 
-func (r *schemaEntityRepository) GetByID(ctx context.Context, entityID uuid.UUID) (*models.SchemaEntity, error) {
+func (r *ontologyEntityRepository) GetByID(ctx context.Context, entityID uuid.UUID) (*models.OntologyEntity, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
@@ -357,7 +358,7 @@ func (r *schemaEntityRepository) GetByID(ctx context.Context, entityID uuid.UUID
 		WHERE id = $1`
 
 	row := scope.Conn.QueryRow(ctx, query, entityID)
-	entity, err := scanSchemaEntity(row)
+	entity, err := scanOntologyEntity(row)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
@@ -368,7 +369,7 @@ func (r *schemaEntityRepository) GetByID(ctx context.Context, entityID uuid.UUID
 	return entity, nil
 }
 
-func (r *schemaEntityRepository) Update(ctx context.Context, entity *models.SchemaEntity) error {
+func (r *ontologyEntityRepository) Update(ctx context.Context, entity *models.OntologyEntity) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return fmt.Errorf("no tenant scope in context")
@@ -399,7 +400,7 @@ func (r *schemaEntityRepository) Update(ctx context.Context, entity *models.Sche
 // Soft Delete Operations
 // ============================================================================
 
-func (r *schemaEntityRepository) SoftDelete(ctx context.Context, entityID uuid.UUID, reason string) error {
+func (r *ontologyEntityRepository) SoftDelete(ctx context.Context, entityID uuid.UUID, reason string) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return fmt.Errorf("no tenant scope in context")
@@ -418,7 +419,7 @@ func (r *schemaEntityRepository) SoftDelete(ctx context.Context, entityID uuid.U
 	return nil
 }
 
-func (r *schemaEntityRepository) Restore(ctx context.Context, entityID uuid.UUID) error {
+func (r *ontologyEntityRepository) Restore(ctx context.Context, entityID uuid.UUID) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return fmt.Errorf("no tenant scope in context")
@@ -441,7 +442,7 @@ func (r *schemaEntityRepository) Restore(ctx context.Context, entityID uuid.UUID
 // Alias Operations
 // ============================================================================
 
-func (r *schemaEntityRepository) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {
+func (r *ontologyEntityRepository) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return fmt.Errorf("no tenant scope in context")
@@ -467,7 +468,7 @@ func (r *schemaEntityRepository) CreateAlias(ctx context.Context, alias *models.
 	return nil
 }
 
-func (r *schemaEntityRepository) GetAliasesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityAlias, error) {
+func (r *ontologyEntityRepository) GetAliasesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityAlias, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
@@ -501,7 +502,7 @@ func (r *schemaEntityRepository) GetAliasesByEntity(ctx context.Context, entityI
 	return aliases, nil
 }
 
-func (r *schemaEntityRepository) DeleteAlias(ctx context.Context, aliasID uuid.UUID) error {
+func (r *ontologyEntityRepository) DeleteAlias(ctx context.Context, aliasID uuid.UUID) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return fmt.Errorf("no tenant scope in context")
@@ -521,8 +522,8 @@ func (r *schemaEntityRepository) DeleteAlias(ctx context.Context, aliasID uuid.U
 // Helper Functions - Scan
 // ============================================================================
 
-func scanSchemaEntity(row pgx.Row) (*models.SchemaEntity, error) {
-	var e models.SchemaEntity
+func scanOntologyEntity(row pgx.Row) (*models.OntologyEntity, error) {
+	var e models.OntologyEntity
 
 	err := row.Scan(
 		&e.ID, &e.ProjectID, &e.OntologyID, &e.Name, &e.Description,
@@ -534,14 +535,14 @@ func scanSchemaEntity(row pgx.Row) (*models.SchemaEntity, error) {
 		if err == pgx.ErrNoRows {
 			return nil, err
 		}
-		return nil, fmt.Errorf("failed to scan schema entity: %w", err)
+		return nil, fmt.Errorf("failed to scan ontology entity: %w", err)
 	}
 
 	return &e, nil
 }
 
-func scanSchemaEntityOccurrence(row pgx.Row) (*models.SchemaEntityOccurrence, error) {
-	var o models.SchemaEntityOccurrence
+func scanOntologyEntityOccurrence(row pgx.Row) (*models.OntologyEntityOccurrence, error) {
+	var o models.OntologyEntityOccurrence
 
 	err := row.Scan(
 		&o.ID, &o.EntityID, &o.SchemaName, &o.TableName, &o.ColumnName, &o.Role, &o.Confidence, &o.CreatedAt,
@@ -550,7 +551,7 @@ func scanSchemaEntityOccurrence(row pgx.Row) (*models.SchemaEntityOccurrence, er
 		if err == pgx.ErrNoRows {
 			return nil, err
 		}
-		return nil, fmt.Errorf("failed to scan schema entity occurrence: %w", err)
+		return nil, fmt.Errorf("failed to scan ontology entity occurrence: %w", err)
 	}
 
 	return &o, nil
