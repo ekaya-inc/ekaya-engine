@@ -25,6 +25,7 @@ func createTestTools() []mcp.Tool {
 		{Name: "sample"},
 		{Name: "execute"},
 		{Name: "validate"},
+		{Name: "get_schema"},
 		{Name: "list_approved_queries"},
 		{Name: "execute_approved_query"},
 	}
@@ -118,8 +119,8 @@ func TestNewToolFilter_DeveloperEnabledExecuteDisabled(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Should have health + all developer tools except execute
-	expectedTools := []string{"health", "echo", "query", "sample", "validate"}
+	// Should have health + all developer tools except execute + get_schema
+	expectedTools := []string{"health", "echo", "query", "sample", "validate", "get_schema"}
 	if len(filtered) != len(expectedTools) {
 		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
 	}
@@ -155,8 +156,8 @@ func TestNewToolFilter_AllEnabled(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Should have all developer tools but not approved_queries tools (no queries exist)
-	expectedCount := 6 // health + 5 developer tools, no approved_queries
+	// Should have all developer tools + get_schema but not approved_queries tools (no queries exist)
+	expectedCount := 7 // health + 5 developer tools + get_schema, no approved_queries
 	if len(filtered) != expectedCount {
 		t.Errorf("expected %d tools, got %d: %v", expectedCount, len(filtered), toolNames(filtered))
 	}
@@ -201,12 +202,15 @@ func TestFilterOutDeveloperTools(t *testing.T) {
 	tools := createTestTools()
 	filtered := filterOutDeveloperTools(tools, true)
 
-	// Should filter out all developer tools, keep health and approved_queries tools
-	if len(filtered) != 3 {
-		t.Errorf("expected 3 tools (health + 2 approved_queries), got %d: %v", len(filtered), toolNames(filtered))
+	// Should filter out all developer tools, keep health, get_schema and approved_queries tools
+	if len(filtered) != 4 {
+		t.Errorf("expected 4 tools (health + get_schema + 2 approved_queries), got %d: %v", len(filtered), toolNames(filtered))
 	}
 	if !containsTool(filtered, "health") {
 		t.Error("expected health tool to be present")
+	}
+	if !containsTool(filtered, "get_schema") {
+		t.Error("expected get_schema tool to be present")
 	}
 	if !containsTool(filtered, "list_approved_queries") {
 		t.Error("expected list_approved_queries tool to be present")
@@ -218,8 +222,8 @@ func TestFilterOutExecuteTool(t *testing.T) {
 	filtered := filterOutExecuteTool(tools)
 
 	// Should filter out only execute tool, keep all others
-	if len(filtered) != 7 {
-		t.Errorf("expected 7 tools (all except execute), got %d: %v", len(filtered), toolNames(filtered))
+	if len(filtered) != 8 {
+		t.Errorf("expected 8 tools (all except execute), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
 	if containsTool(filtered, "execute") {
@@ -437,8 +441,27 @@ func TestNewToolFilter_ApprovedQueriesEnabledWithQueries(t *testing.T) {
 	}
 
 	// All tools should be present
-	if len(filtered) != 8 {
-		t.Errorf("expected 8 tools (all), got %d: %v", len(filtered), toolNames(filtered))
+	if len(filtered) != 9 {
+		t.Errorf("expected 9 tools (all), got %d: %v", len(filtered), toolNames(filtered))
+	}
+}
+
+func TestFilterTools_SchemaToolsFilteredWhenDeveloperDisabled(t *testing.T) {
+	tools := createTestTools()
+
+	// Test all disabled - get_schema should be filtered
+	filtered := filterTools(tools, false, false, false)
+	if len(filtered) != 1 {
+		t.Errorf("expected 1 tool (health only), got %d: %v", len(filtered), toolNames(filtered))
+	}
+	if containsTool(filtered, "get_schema") {
+		t.Error("get_schema should be filtered when developer tools disabled")
+	}
+
+	// Test developer enabled - get_schema should be present
+	filtered = filterTools(tools, true, false, false)
+	if !containsTool(filtered, "get_schema") {
+		t.Error("get_schema should be present when developer tools enabled")
 	}
 }
 
@@ -453,8 +476,8 @@ func TestFilterTools(t *testing.T) {
 
 	// Test developer enabled, execute disabled, approved_queries disabled
 	filtered = filterTools(tools, true, false, false)
-	if len(filtered) != 5 {
-		t.Errorf("expected 5 tools (health + 4 dev tools), got %d: %v", len(filtered), toolNames(filtered))
+	if len(filtered) != 6 {
+		t.Errorf("expected 6 tools (health + 4 dev tools + get_schema), got %d: %v", len(filtered), toolNames(filtered))
 	}
 	if containsTool(filtered, "execute") {
 		t.Error("execute should be filtered when execute disabled")
@@ -462,13 +485,13 @@ func TestFilterTools(t *testing.T) {
 
 	// Test developer enabled, execute enabled, approved_queries disabled
 	filtered = filterTools(tools, true, true, false)
-	if len(filtered) != 6 {
-		t.Errorf("expected 6 tools (health + 5 dev tools), got %d: %v", len(filtered), toolNames(filtered))
+	if len(filtered) != 7 {
+		t.Errorf("expected 7 tools (health + 5 dev tools + get_schema), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
 	// Test all enabled
 	filtered = filterTools(tools, true, true, true)
-	if len(filtered) != 8 {
-		t.Errorf("expected 8 tools (all), got %d: %v", len(filtered), toolNames(filtered))
+	if len(filtered) != 9 {
+		t.Errorf("expected 9 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 }

@@ -160,6 +160,11 @@ func filterTools(tools []mcp.Tool, showDeveloper, showExecute, showApprovedQueri
 			}
 		}
 
+		// Check schema tools - tied to developer tools visibility
+		if SchemaToolNames[tool.Name] && !showDeveloper {
+			continue
+		}
+
 		// Check approved_queries tools
 		if approvedQueriesToolNames[tool.Name] && !showApprovedQueries {
 			continue
