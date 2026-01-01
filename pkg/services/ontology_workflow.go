@@ -438,11 +438,7 @@ func (s *ontologyWorkflowService) runWorkflow(projectID, workflowID uuid.UUID, q
 		s.logger,
 		queue,
 		s.workflowRepo,
-		s.schemaRepo,
 		s.ontologyRepo,
-		s.questionRepo,
-		s.dsSvc,
-		s.adapterFactory,
 		s.builder,
 		s, // OntologyWorkflowService
 		0, // Use DefaultPollInterval

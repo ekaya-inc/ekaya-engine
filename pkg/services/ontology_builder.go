@@ -21,22 +21,9 @@ const MaxTablesPerBatch = 20
 // OntologyBuilderService provides LLM-based ontology construction.
 type OntologyBuilderService interface {
 	// BuildTieredOntology orchestrates the complete tiered ontology construction.
+	// It builds the ontology from domain entities and relationships that were
+	// created in the Entities and Relationships phases.
 	BuildTieredOntology(ctx context.Context, projectID uuid.UUID, workflowID uuid.UUID) error
-
-	// BuildEntitySummaries generates Tier 1 entity summaries for tables.
-	BuildEntitySummaries(ctx context.Context, projectID uuid.UUID, tables []*models.SchemaTable) (map[string]*models.EntitySummary, error)
-
-	// BuildDomainSummary generates the Tier 0 domain summary from entity summaries.
-	BuildDomainSummary(ctx context.Context, projectID uuid.UUID, entities map[string]*models.EntitySummary) (*models.DomainSummary, error)
-
-	// AnalyzeEntity analyzes a single entity and may generate clarifying questions.
-	// Returns questions generated for this entity (may be empty).
-	// Questions with IsRequired=true indicate the entity cannot be completed without user input.
-	AnalyzeEntity(ctx context.Context, projectID uuid.UUID, workflowID uuid.UUID, tableName string) ([]*models.OntologyQuestion, error)
-
-	// GenerateQuestions generates clarifying questions based on schema analysis.
-	// Deprecated: Use AnalyzeEntity for per-entity question generation.
-	GenerateQuestions(ctx context.Context, projectID uuid.UUID, workflowID uuid.UUID) ([]*models.OntologyQuestion, error)
 
 	// ProcessAnswer processes a user's answer and returns any ontology updates.
 	ProcessAnswer(ctx context.Context, projectID uuid.UUID, question *models.OntologyQuestion, answer string) (*AnswerProcessingResult, error)
