@@ -639,6 +639,10 @@ func (m *rwsMockDeterministicService) DiscoverRelationships(ctx context.Context,
 	}, nil
 }
 
+func (m *rwsMockDeterministicService) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================

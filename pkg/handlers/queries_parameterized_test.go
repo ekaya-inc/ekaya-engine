@@ -266,7 +266,7 @@ func TestCreateQueryWithParameters(t *testing.T) {
 				"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 				tt.request)
 			req.SetPathValue("pid", tc.projectID.String())
-			req.SetPathValue("did", tc.createdDsID.String())
+			req.SetPathValue("dsid", tc.createdDsID.String())
 
 			rec := httptest.NewRecorder()
 			tc.queriesHandler.Create(rec, req)
@@ -315,7 +315,7 @@ func TestExecuteQueryWithParameters(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 		createBody)
 	createReq.SetPathValue("pid", tc.projectID.String())
-	createReq.SetPathValue("did", tc.createdDsID.String())
+	createReq.SetPathValue("dsid", tc.createdDsID.String())
 
 	createRec := httptest.NewRecorder()
 	tc.queriesHandler.Create(createRec, createReq)
@@ -383,7 +383,7 @@ func TestExecuteQueryWithParameters(t *testing.T) {
 				"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/"+queryID+"/execute",
 				execBody)
 			execReq.SetPathValue("pid", tc.projectID.String())
-			execReq.SetPathValue("did", tc.createdDsID.String())
+			execReq.SetPathValue("dsid", tc.createdDsID.String())
 			execReq.SetPathValue("qid", queryID)
 
 			execRec := httptest.NewRecorder()
@@ -424,7 +424,7 @@ func TestExecuteQueryBackwardCompatibility(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 		createBody)
 	createReq.SetPathValue("pid", tc.projectID.String())
-	createReq.SetPathValue("did", tc.createdDsID.String())
+	createReq.SetPathValue("dsid", tc.createdDsID.String())
 
 	createRec := httptest.NewRecorder()
 	tc.queriesHandler.Create(createRec, createReq)
@@ -443,7 +443,7 @@ func TestExecuteQueryBackwardCompatibility(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/"+queryID+"/execute",
 		execBody)
 	execReq.SetPathValue("pid", tc.projectID.String())
-	execReq.SetPathValue("did", tc.createdDsID.String())
+	execReq.SetPathValue("dsid", tc.createdDsID.String())
 	execReq.SetPathValue("qid", queryID)
 
 	execRec := httptest.NewRecorder()
@@ -541,7 +541,7 @@ func TestTestQueryWithParameters(t *testing.T) {
 				"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/test",
 				tt.request)
 			req.SetPathValue("pid", tc.projectID.String())
-			req.SetPathValue("did", tc.createdDsID.String())
+			req.SetPathValue("dsid", tc.createdDsID.String())
 
 			rec := httptest.NewRecorder()
 			tc.queriesHandler.Test(rec, req)
@@ -629,7 +629,7 @@ func TestValidateParametersEndpoint(t *testing.T) {
 				"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/validate-parameters",
 				tt.request)
 			req.SetPathValue("pid", tc.projectID.String())
-			req.SetPathValue("did", tc.createdDsID.String())
+			req.SetPathValue("dsid", tc.createdDsID.String())
 
 			rec := httptest.NewRecorder()
 			tc.queriesHandler.ValidateParameters(rec, req)
@@ -673,7 +673,7 @@ func TestQueryResponseWithParameters(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 		createBody)
 	createReq.SetPathValue("pid", tc.projectID.String())
-	createReq.SetPathValue("did", tc.createdDsID.String())
+	createReq.SetPathValue("dsid", tc.createdDsID.String())
 
 	createRec := httptest.NewRecorder()
 	tc.queriesHandler.Create(createRec, createReq)
@@ -691,7 +691,7 @@ func TestQueryResponseWithParameters(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/"+queryID,
 		nil)
 	getReq.SetPathValue("pid", tc.projectID.String())
-	getReq.SetPathValue("did", tc.createdDsID.String())
+	getReq.SetPathValue("dsid", tc.createdDsID.String())
 	getReq.SetPathValue("qid", queryID)
 
 	getRec := httptest.NewRecorder()
@@ -741,7 +741,7 @@ func TestEndToEndParameterizedQueryFlow(t *testing.T) {
 			"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/validate-parameters",
 			validateReq)
 		valReq.SetPathValue("pid", tc.projectID.String())
-		valReq.SetPathValue("did", tc.createdDsID.String())
+		valReq.SetPathValue("dsid", tc.createdDsID.String())
 
 		valRec := httptest.NewRecorder()
 		tc.queriesHandler.ValidateParameters(valRec, valReq)
@@ -776,7 +776,7 @@ func TestEndToEndParameterizedQueryFlow(t *testing.T) {
 			"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/test",
 			testBody)
 		testReq.SetPathValue("pid", tc.projectID.String())
-		testReq.SetPathValue("did", tc.createdDsID.String())
+		testReq.SetPathValue("dsid", tc.createdDsID.String())
 
 		testRec := httptest.NewRecorder()
 		tc.queriesHandler.Test(testRec, testReq)
@@ -805,7 +805,7 @@ func TestEndToEndParameterizedQueryFlow(t *testing.T) {
 			"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 			createBody)
 		createReq.SetPathValue("pid", tc.projectID.String())
-		createReq.SetPathValue("did", tc.createdDsID.String())
+		createReq.SetPathValue("dsid", tc.createdDsID.String())
 
 		createRec := httptest.NewRecorder()
 		tc.queriesHandler.Create(createRec, createReq)
@@ -834,7 +834,7 @@ func TestEndToEndParameterizedQueryFlow(t *testing.T) {
 			"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/"+queryID+"/execute",
 			execBody)
 		execReq.SetPathValue("pid", tc.projectID.String())
-		execReq.SetPathValue("did", tc.createdDsID.String())
+		execReq.SetPathValue("dsid", tc.createdDsID.String())
 		execReq.SetPathValue("qid", queryID)
 
 		execRec := httptest.NewRecorder()
@@ -866,7 +866,7 @@ func TestEndToEndParameterizedQueryFlow(t *testing.T) {
 			"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/"+queryID+"/execute",
 			injectionBody)
 		injectionReq.SetPathValue("pid", tc.projectID.String())
-		injectionReq.SetPathValue("did", tc.createdDsID.String())
+		injectionReq.SetPathValue("dsid", tc.createdDsID.String())
 		injectionReq.SetPathValue("qid", queryID)
 
 		injectionRec := httptest.NewRecorder()
@@ -887,7 +887,7 @@ func TestEndToEndParameterizedQueryFlow(t *testing.T) {
 			"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 			nil)
 		listReq.SetPathValue("pid", tc.projectID.String())
-		listReq.SetPathValue("did", tc.createdDsID.String())
+		listReq.SetPathValue("dsid", tc.createdDsID.String())
 
 		listRec := httptest.NewRecorder()
 		tc.queriesHandler.List(listRec, listReq)

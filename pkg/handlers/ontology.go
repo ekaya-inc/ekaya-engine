@@ -116,7 +116,7 @@ func (h *OntologyHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *aut
 
 // StartExtraction handles POST /api/projects/{pid}/ontology/extract
 func (h *OntologyHandler) StartExtraction(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -203,7 +203,7 @@ func (h *OntologyHandler) StartExtraction(w http.ResponseWriter, r *http.Request
 
 // GetWorkflowStatus handles GET /api/projects/{pid}/ontology/workflow
 func (h *OntologyHandler) GetWorkflowStatus(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -265,7 +265,7 @@ func (h *OntologyHandler) GetWorkflowStatus(w http.ResponseWriter, r *http.Reque
 
 // GetWorkflowByID handles GET /api/projects/{pid}/ontology/workflow/{wfid}
 func (h *OntologyHandler) GetWorkflowByID(w http.ResponseWriter, r *http.Request) {
-	_, ok := h.parseProjectID(w, r)
+	_, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -305,7 +305,7 @@ func (h *OntologyHandler) GetWorkflowByID(w http.ResponseWriter, r *http.Request
 
 // Cancel handles POST /api/projects/{pid}/ontology/cancel
 func (h *OntologyHandler) Cancel(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -346,7 +346,7 @@ func (h *OntologyHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 
 // DeleteOntology handles DELETE /api/projects/{pid}/ontology
 func (h *OntologyHandler) DeleteOntology(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -369,7 +369,7 @@ func (h *OntologyHandler) DeleteOntology(w http.ResponseWriter, r *http.Request)
 
 // GetResult handles GET /api/projects/{pid}/ontology/result
 func (h *OntologyHandler) GetResult(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -402,18 +402,6 @@ func (h *OntologyHandler) GetResult(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 // Helper Methods
 // ============================================================================
-
-func (h *OntologyHandler) parseProjectID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	pidStr := r.PathValue("pid")
-	projectID, err := uuid.Parse(pidStr)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_project_id", "Invalid project ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, false
-	}
-	return projectID, true
-}
 
 func (h *OntologyHandler) toWorkflowResponse(w *models.OntologyWorkflow) WorkflowStatusResponse {
 	// Derive current phase and progress fields with nil check

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
@@ -108,7 +107,7 @@ func (h *OntologyChatHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware 
 
 // Initialize handles POST /api/projects/{pid}/ontology/chat/initialize
 func (h *OntologyChatHandler) Initialize(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -139,7 +138,7 @@ func (h *OntologyChatHandler) Initialize(w http.ResponseWriter, r *http.Request)
 // SendMessage handles POST /api/projects/{pid}/ontology/chat/message
 // This endpoint uses Server-Sent Events (SSE) to stream the response.
 func (h *OntologyChatHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -208,7 +207,7 @@ func (h *OntologyChatHandler) SendMessage(w http.ResponseWriter, r *http.Request
 
 // GetHistory handles GET /api/projects/{pid}/ontology/chat/history
 func (h *OntologyChatHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -248,7 +247,7 @@ func (h *OntologyChatHandler) GetHistory(w http.ResponseWriter, r *http.Request)
 
 // ClearHistory handles DELETE /api/projects/{pid}/ontology/chat/history
 func (h *OntologyChatHandler) ClearHistory(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -271,7 +270,7 @@ func (h *OntologyChatHandler) ClearHistory(w http.ResponseWriter, r *http.Reques
 
 // GetKnowledge handles GET /api/projects/{pid}/ontology/knowledge
 func (h *OntologyChatHandler) GetKnowledge(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -315,18 +314,6 @@ func (h *OntologyChatHandler) GetKnowledge(w http.ResponseWriter, r *http.Reques
 // ============================================================================
 // Helper Methods
 // ============================================================================
-
-func (h *OntologyChatHandler) parseProjectID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	pidStr := r.PathValue("pid")
-	projectID, err := uuid.Parse(pidStr)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_project_id", "Invalid project ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, false
-	}
-	return projectID, true
-}
 
 func (h *OntologyChatHandler) toChatMessageResponse(m *models.ChatMessage) ChatMessageResponse {
 	return ChatMessageResponse{
