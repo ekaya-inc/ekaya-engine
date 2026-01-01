@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -12,6 +11,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/services/workflow"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services/workqueue"
 )
 
@@ -669,6 +669,10 @@ func newTestRelationshipWorkflowService(
 	entityRepo := &rwsMockEntityRepository{
 		entities: []*models.OntologyEntity{{ID: uuid.New(), Name: "test_entity"}},
 	}
+	logger := zap.NewNop()
+	getTenantCtx := rwsGetTenantCtx()
+	infra := workflow.NewWorkflowInfra(workflowRepo, workflow.TenantContextFunc(getTenantCtx), logger)
+
 	return &relationshipWorkflowService{
 		workflowRepo:         workflowRepo,
 		candidateRepo:        candidateRepo,
@@ -681,9 +685,9 @@ func newTestRelationshipWorkflowService(
 		llmFactory:           llmFactory,
 		discoveryService:     &rwsMockDiscoveryService{},
 		deterministicService: &rwsMockDeterministicService{},
-		getTenantCtx:         rwsGetTenantCtx(),
-		logger:               zap.NewNop(),
-		serverInstanceID:     uuid.New(),
+		getTenantCtx:         getTenantCtx,
+		logger:               logger,
+		infra:                infra,
 	}
 }
 
@@ -1648,95 +1652,6 @@ func TestRelationshipWorkflow_SaveRelationships_EmptyAccepted(t *testing.T) {
 	}
 	if savedCount != 0 {
 		t.Errorf("savedCount = %d, want 0", savedCount)
-	}
-}
-
-// ============================================================================
-// Tests for Heartbeat Start/Stop
-// ============================================================================
-
-func TestRelationshipWorkflow_Heartbeat_StartStop(t *testing.T) {
-	workflowID := uuid.New()
-	projectID := uuid.New()
-
-	workflowRepo := &rwsMockWorkflowRepository{}
-
-	svc := newTestRelationshipWorkflowService(
-		workflowRepo,
-		&rwsMockCandidateRepository{},
-		&rwsMockSchemaRepository{},
-		&rwsMockStateRepository{},
-		&rwsMockOntologyRepository{},
-		&rwsMockDatasourceService{},
-		&rwsMockAdapterFactory{},
-		&rwsMockLLMFactory{},
-	)
-
-	// Start heartbeat
-	svc.startHeartbeat(workflowID, projectID)
-
-	// Verify it's stored
-	if _, ok := svc.heartbeatStop.Load(workflowID); !ok {
-		t.Error("heartbeat info not stored")
-	}
-
-	// Stop heartbeat
-	svc.stopHeartbeat(workflowID)
-
-	// Give goroutine time to exit
-	time.Sleep(10 * time.Millisecond)
-
-	// Verify it's removed
-	if _, ok := svc.heartbeatStop.Load(workflowID); ok {
-		t.Error("heartbeat info should be removed after stop")
-	}
-}
-
-// ============================================================================
-// Tests for TaskQueueWriter
-// ============================================================================
-
-func TestRelationshipWorkflow_TaskQueueWriter_StartStop(t *testing.T) {
-	workflowID := uuid.New()
-
-	svc := newTestRelationshipWorkflowService(
-		&rwsMockWorkflowRepository{},
-		&rwsMockCandidateRepository{},
-		&rwsMockSchemaRepository{},
-		&rwsMockStateRepository{},
-		&rwsMockOntologyRepository{},
-		&rwsMockDatasourceService{},
-		&rwsMockAdapterFactory{},
-		&rwsMockLLMFactory{},
-	)
-
-	// Start writer
-	writer := svc.startTaskQueueWriter(workflowID)
-
-	// Verify it's stored
-	if _, ok := svc.taskQueueWriters.Load(workflowID); !ok {
-		t.Error("task queue writer not stored")
-	}
-
-	// Writer should have a valid channel
-	if writer.updates == nil {
-		t.Error("updates channel is nil")
-	}
-
-	// Stop writer
-	svc.stopTaskQueueWriter(workflowID)
-
-	// Wait for the writer to finish
-	select {
-	case <-writer.done:
-		// Success
-	case <-time.After(100 * time.Millisecond):
-		t.Error("writer did not stop in time")
-	}
-
-	// Verify it's removed
-	if _, ok := svc.taskQueueWriters.Load(workflowID); ok {
-		t.Error("task queue writer should be removed after stop")
 	}
 }
 

@@ -671,11 +671,11 @@ Create unit tests for:
 2. [x] Create `pkg/services/workflow/infra_test.go` with basic tests
 3. [x] Update `ontologyWorkflowService` (most stable, good test candidate)
 4. [x] Run `make check`
-5. Update `relationshipWorkflowService`
-6. Run `make check`
-7. Update `entityDiscoveryService`
-8. Run `make check`
-9. Remove any now-unused imports (including workflow_types.go after all services migrated)
+5. [x] Update `relationshipWorkflowService`
+6. [x] Run `make check`
+7. [ ] Update `entityDiscoveryService`
+8. [ ] Run `make check`
+9. [ ] Remove any now-unused imports (including workflow_types.go after all services migrated)
 
 ## Future Considerations
 
