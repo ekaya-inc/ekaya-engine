@@ -392,7 +392,7 @@ Check route registrations if any use different names and adjust `params.go` acco
 1. [x] Create `params.go` first
 2. Update handlers one at a time (run `go build ./...` after each)
    - [x] 2a. entity_handler.go - Remove 3 methods, update usages
-   - [ ] 2b. entity_relationship_handler.go - Remove 2 methods, update usages
+   - [x] 2b. entity_relationship_handler.go - Remove 2 methods, update usages
    - [ ] 2c. entity_discovery_handler.go - Remove 1 method, update usages
    - [ ] 2d. relationship_workflow.go - Remove 1 method, update usages
    - [ ] 2e. ontology.go - Remove 1 method, update usages

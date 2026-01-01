@@ -3,7 +3,6 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
@@ -83,12 +82,12 @@ func (h *EntityRelationshipHandler) RegisterRoutes(mux *http.ServeMux, authMiddl
 
 // Discover handles POST /api/projects/{pid}/datasources/{dsid}/relationships/discover
 func (h *EntityRelationshipHandler) Discover(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	datasourceID, ok := h.parseDatasourceID(w, r)
+	datasourceID, ok := ParseDatasourceID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -118,7 +117,7 @@ func (h *EntityRelationshipHandler) Discover(w http.ResponseWriter, r *http.Requ
 
 // List handles GET /api/projects/{pid}/relationships
 func (h *EntityRelationshipHandler) List(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -174,32 +173,4 @@ func (h *EntityRelationshipHandler) List(w http.ResponseWriter, r *http.Request)
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
-}
-
-// ============================================================================
-// Helper Methods
-// ============================================================================
-
-func (h *EntityRelationshipHandler) parseProjectID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	projectIDStr := r.PathValue("pid")
-	projectID, err := uuid.Parse(projectIDStr)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_project_id", "Invalid project ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, false
-	}
-	return projectID, true
-}
-
-func (h *EntityRelationshipHandler) parseDatasourceID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	datasourceIDStr := r.PathValue("dsid")
-	datasourceID, err := uuid.Parse(datasourceIDStr)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_datasource_id", "Invalid datasource ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, false
-	}
-	return datasourceID, true
 }
