@@ -389,6 +389,6 @@ Check route registrations if any use different names and adjust `params.go` acco
 
 ## Order of Operations
 
-1. Create `params.go` first
-2. Update handlers one at a time (run `go build ./...` after each)
-3. Run `make check` after all changes
+1. [x] Create `params.go` first
+2. [ ] Update handlers one at a time (run `go build ./...` after each)
+3. [ ] Run `make check` after all changes
