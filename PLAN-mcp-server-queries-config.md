@@ -9,6 +9,30 @@ Add a "Queries" configuration section to the MCP Server page that allows adminis
 
 ---
 
+## V1 Scope Clarification
+
+**For V1, the full ontology is ALWAYS exposed** regardless of whether suggestions are enabled:
+- Entity summaries, column details, enum values are all available
+- This enables the MCP client to understand the domain and explain queries
+- The `allow_suggestions` toggle only controls:
+  - Whether `suggest_query()` tool is available
+  - Whether SQL of pre-approved queries is shown (if OFF, only name/description/parameters)
+
+**Mode Matrix (V1):**
+
+| FORCE Mode | Suggestions | Ontology | Query SQL | suggest_query | Developer Tools |
+|------------|-------------|----------|-----------|---------------|-----------------|
+| OFF | OFF | ✅ Full | ❌ Hidden | ❌ | Depends on dev toggle |
+| OFF | ON | ✅ Full | ✅ Shown | ✅ | Depends on dev toggle |
+| ON | OFF | ✅ Full | ❌ Hidden | ❌ | ❌ Disabled |
+| ON | ON | ✅ Full | ✅ Shown | ✅ | ❌ Disabled |
+
+**Key Insight:** Hiding ontology doesn't add security - the MCP client can infer from query names. The real security is:
+1. FORCE mode limits to pre-approved queries only
+2. Database permissions are the ultimate enforcement
+
+---
+
 ## Part 1: UI Changes - MCP Server Page
 
 ### 1.0 Update MCP Server Logo
