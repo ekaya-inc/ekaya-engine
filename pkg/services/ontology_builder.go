@@ -295,14 +295,14 @@ func (s *ontologyBuilderService) buildEntitySummariesFromDomainEntities(
 
 		// Use entity name as key (this becomes the lookup key for the ontology)
 		summaries[entity.Name] = &models.EntitySummary{
-			TableName:     entity.PrimaryTable,    // Primary table where entity is defined
-			BusinessName:  entity.Name,            // Domain entity name
-			Description:   entity.Description,     // LLM-generated description
-			Domain:        "domain",               // Could be enhanced with domain classification
-			Synonyms:      []string{},             // Could be populated from aliases
-			KeyColumns:    keyColumns,             // Columns where this entity appears
-			ColumnCount:   len(occs),              // Number of occurrences
-			Relationships: related,                // Related entities
+			TableName:     entity.PrimaryTable, // Primary table where entity is defined
+			BusinessName:  entity.Name,         // Domain entity name
+			Description:   entity.Description,  // LLM-generated description
+			Domain:        "domain",            // Could be enhanced with domain classification
+			Synonyms:      []string{},          // Could be populated from aliases
+			KeyColumns:    keyColumns,          // Columns where this entity appears
+			ColumnCount:   len(occs),           // Number of occurrences
+			Relationships: related,             // Related entities
 		}
 	}
 

@@ -790,13 +790,13 @@ func (e *OntologyToolExecutor) createEntityRelationship(ctx context.Context, arg
 		zap.String("target_column", fmt.Sprintf("%s.%s", args.TargetTable, args.TargetColumn)))
 
 	response := map[string]any{
-		"success":        true,
+		"success":         true,
 		"relationship_id": relationship.ID.String(),
-		"source_entity":  args.SourceEntity,
-		"target_entity":  args.TargetEntity,
-		"source_column":  fmt.Sprintf("%s.%s", args.SourceTable, args.SourceColumn),
-		"target_column":  fmt.Sprintf("%s.%s", args.TargetTable, args.TargetColumn),
-		"message":        fmt.Sprintf("Created relationship: %s -> %s", args.SourceEntity, args.TargetEntity),
+		"source_entity":   args.SourceEntity,
+		"target_entity":   args.TargetEntity,
+		"source_column":   fmt.Sprintf("%s.%s", args.SourceTable, args.SourceColumn),
+		"target_column":   fmt.Sprintf("%s.%s", args.TargetTable, args.TargetColumn),
+		"message":         fmt.Sprintf("Created relationship: %s -> %s", args.SourceEntity, args.TargetEntity),
 	}
 
 	responseJSON, err := json.Marshal(response)
