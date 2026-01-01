@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -242,8 +243,10 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 
 		// Execute with parameters (includes injection detection)
 		execReq := &services.ExecuteQueryRequest{Limit: limit}
+		startTime := time.Now()
 		result, err := deps.QueryService.ExecuteWithParameters(
 			tenantCtx, projectID, queryID, params, execReq)
+		executionTimeMs := time.Since(startTime).Milliseconds()
 		if err != nil {
 			return nil, fmt.Errorf("query execution failed: %w", err)
 		}
@@ -256,19 +259,21 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		}
 
 		response := struct {
-			QueryName      string           `json:"query_name"`
-			ParametersUsed map[string]any   `json:"parameters_used"`
-			Columns        []string         `json:"columns"`
-			Rows           []map[string]any `json:"rows"`
-			RowCount       int              `json:"row_count"`
-			Truncated      bool             `json:"truncated"`
+			QueryName       string           `json:"query_name"`
+			ParametersUsed  map[string]any   `json:"parameters_used"`
+			Columns         []string         `json:"columns"`
+			Rows            []map[string]any `json:"rows"`
+			RowCount        int              `json:"row_count"`
+			Truncated       bool             `json:"truncated"`
+			ExecutionTimeMs int64            `json:"execution_time_ms"`
 		}{
-			QueryName:      query.NaturalLanguagePrompt,
-			ParametersUsed: params,
-			Columns:        result.Columns,
-			Rows:           rows,
-			RowCount:       len(rows),
-			Truncated:      truncated,
+			QueryName:       query.NaturalLanguagePrompt,
+			ParametersUsed:  params,
+			Columns:         result.Columns,
+			Rows:            rows,
+			RowCount:        len(rows),
+			Truncated:       truncated,
+			ExecutionTimeMs: executionTimeMs,
 		}
 
 		jsonResult, _ := json.Marshal(response)

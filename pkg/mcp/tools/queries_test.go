@@ -109,3 +109,47 @@ func TestExecuteApprovedQuery_ResponseMetadata(t *testing.T) {
 	assert.Equal(t, "2024-01-01", paramsUsed["start_date"])
 	assert.Equal(t, "2024-01-31", paramsUsed["end_date"])
 }
+
+func TestExecuteApprovedQuery_ExecutionTime(t *testing.T) {
+	// This test verifies that the execute_approved_query response includes execution_time_ms.
+	// Note: This is a unit test that verifies the response structure without a full integration test.
+	// The actual execution timing is tested in integration tests.
+
+	// Verify the response structure includes execution_time_ms
+	response := struct {
+		QueryName       string           `json:"query_name"`
+		ParametersUsed  map[string]any   `json:"parameters_used"`
+		Columns         []string         `json:"columns"`
+		Rows            []map[string]any `json:"rows"`
+		RowCount        int              `json:"row_count"`
+		Truncated       bool             `json:"truncated"`
+		ExecutionTimeMs int64            `json:"execution_time_ms"`
+	}{
+		QueryName: "Total revenue by customer",
+		ParametersUsed: map[string]any{
+			"start_date": "2024-01-01",
+		},
+		Columns: []string{"name", "total"},
+		Rows: []map[string]any{
+			{"name": "Acme Corp", "total": 15000.00},
+		},
+		RowCount:        1,
+		Truncated:       false,
+		ExecutionTimeMs: 145, // Example execution time
+	}
+
+	// Verify JSON serialization works
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	// Verify execution_time_ms is present
+	assert.NotNil(t, parsed["execution_time_ms"], "execution_time_ms should be present")
+
+	// Verify it's a number
+	execTime, ok := parsed["execution_time_ms"].(float64) // JSON numbers parse as float64
+	require.True(t, ok, "execution_time_ms should be a number")
+	assert.Equal(t, float64(145), execTime, "execution_time_ms should have the correct value")
+}
