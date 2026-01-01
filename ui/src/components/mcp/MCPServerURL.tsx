@@ -48,15 +48,20 @@ export default function MCPServerURL({ serverUrl, docsUrl }: MCPServerURLProps) 
         </div>
 
         {docsUrl && (
-          <a
-            href={docsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 text-sm text-brand-purple hover:underline"
-          >
-            <ExternalLink className="h-4 w-4" />
-            MCP Setup Instructions
-          </a>
+          <div className="space-y-3">
+            <a
+              href={docsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 text-sm text-brand-purple hover:underline"
+            >
+              <ExternalLink className="h-4 w-4" />
+              MCP Setup Instructions
+            </a>
+            <p className="text-sm text-text-secondary font-medium">
+              Note: Changes to configuration will take effect after restarting the MCP Client.
+            </p>
+          </div>
         )}
       </CardContent>
     </Card>

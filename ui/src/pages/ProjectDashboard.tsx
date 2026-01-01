@@ -14,6 +14,8 @@ import {
   Server,
   Shield,
 } from 'lucide-react';
+
+import MCPLogo from '../components/icons/MCPLogo';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -390,7 +392,7 @@ const ProjectDashboard = () => {
       color: 'green',
     },
     {
-      title: 'Queries',
+      title: 'Pre-Approved Queries',
       icon: Search,
       path: `/projects/${pid}/queries`,
       disabled: !isConnected, // Disabled if no datasource configured
@@ -521,6 +523,7 @@ const ProjectDashboard = () => {
   const renderApplicationTile = (tile: Tile) => {
     const Icon = tile.icon;
     const colorClasses = getColorClasses(tile.color);
+    const isMCPServerTile = tile.title === 'MCP Server';
 
     return (
       <Card
@@ -536,7 +539,11 @@ const ProjectDashboard = () => {
           <div
             className={`mb-6 flex h-24 w-24 items-center justify-center rounded-xl ${colorClasses}`}
           >
-            <Icon className="h-12 w-12" />
+            {isMCPServerTile ? (
+              <MCPLogo size={48} />
+            ) : (
+              <Icon className="h-12 w-12" />
+            )}
           </div>
           <CardTitle className="text-2xl">{tile.title}</CardTitle>
           {tile.disabled && (
@@ -566,7 +573,7 @@ const ProjectDashboard = () => {
       <section>
         <h1 className="text-2xl font-semibold mb-2">Data</h1>
         <p className="text-text-secondary mb-4">
-          Enable data access safely and securely. Choose the tables and fields that are exposed. Add pre-approved queries that your users can run.
+          Enable data access safely and securely. Choose the tables and columns that are exposed. Add Pre-Approved Queries that your users can run.
         </p>
         <div className="grid gap-6 md:grid-cols-3">
           {dataTiles.map(renderTile)}

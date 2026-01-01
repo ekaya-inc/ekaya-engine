@@ -1,4 +1,5 @@
 import { AlertTriangle } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 import type { SubOptionInfo } from '../../types';
 import { Card, CardContent } from '../ui/Card';
@@ -6,7 +7,7 @@ import { Switch } from '../ui/Switch';
 
 interface MCPToolGroupProps {
   name: string;
-  description: string;
+  description: ReactNode;
   warning?: string;
   enabled: boolean;
   onToggle: (enabled: boolean) => void;

@@ -79,7 +79,7 @@ var toolGroupMetadata = map[string]toolGroupDef{
 		SubOptions: map[string]subOptionMetadata{
 			"enableExecute": {
 				Name:    "Enable Execute",
-				Warning: "The MCP Client will have access with the credentials used to set up the Datasource -- this includes potentially destructive operations.",
+				Warning: "The MCP Client will have direct access to the Datasource using the supplied credentials -- this access includes potentially destructive operations. Back up the data before allowing AI to modify it.",
 			},
 		},
 	},
