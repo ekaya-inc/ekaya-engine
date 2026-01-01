@@ -390,5 +390,15 @@ Check route registrations if any use different names and adjust `params.go` acco
 ## Order of Operations
 
 1. [x] Create `params.go` first
-2. [ ] Update handlers one at a time (run `go build ./...` after each)
+2. Update handlers one at a time (run `go build ./...` after each)
+   - [x] 2a. entity_handler.go - Remove 3 methods, update usages
+   - [ ] 2b. entity_relationship_handler.go - Remove 2 methods, update usages
+   - [ ] 2c. entity_discovery_handler.go - Remove 1 method, update usages
+   - [ ] 2d. relationship_workflow.go - Remove 1 method, update usages
+   - [ ] 2e. ontology.go - Remove 1 method, update usages
+   - [ ] 2f. ontology_questions.go - Remove 2 methods, update usages
+   - [ ] 2g. ontology_chat.go - Remove 1 method, update usages
+   - [ ] 2h. schema.go - Remove 2 methods, update usages
+   - [ ] 2i. queries.go - Remove 2 methods, update usages
+   - [ ] 2j. mcp_config.go - Remove 1 method, update usages
 3. [ ] Run `make check` after all changes
