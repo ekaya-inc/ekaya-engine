@@ -20,12 +20,13 @@ const MCPServerPage = () => {
   const [config, setConfig] = useState<MCPConfigResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
-  const [queryCount, setQueryCount] = useState(0);
+  const [enabledQueryCount, setEnabledQueryCount] = useState(0);
 
-  // Queries config state (V1: stored locally, will be persisted in backend later)
-  const [forceMode, setForceMode] = useState(false);
-  const [allowSuggestions, setAllowSuggestions] = useState(true);
-  const [allowClientSuggestions, setAllowClientSuggestions] = useState(false);
+  // Read approved_queries config from backend
+  const approvedQueriesConfig = config?.toolGroups['approved_queries'];
+  const isApprovedQueriesEnabled = approvedQueriesConfig?.enabled ?? false;
+  const forceMode = approvedQueriesConfig?.subOptions?.['forceMode']?.enabled ?? false;
+  const allowClientSuggestions = approvedQueriesConfig?.subOptions?.['allowClientSuggestions']?.enabled ?? false;
 
   const fetchConfig = useCallback(async () => {
     if (!pid) return;
@@ -54,34 +55,111 @@ const MCPServerPage = () => {
     fetchConfig();
   }, [fetchConfig]);
 
-  // Fetch query count when datasource is available
+  // Fetch enabled query count when datasource is available
   useEffect(() => {
-    const fetchQueryCount = async () => {
+    const fetchEnabledQueryCount = async () => {
       if (!pid || !selectedDatasource?.datasourceId) return;
 
       try {
         const response = await engineApi.listQueries(pid, selectedDatasource.datasourceId);
         if (response.success && response.data) {
-          setQueryCount(response.data.queries.length);
+          const count = response.data.queries.filter(q => q.is_enabled).length;
+          setEnabledQueryCount(count);
         }
       } catch (error) {
-        console.error('Failed to fetch query count:', error);
+        console.error('Failed to fetch enabled query count:', error);
       }
     };
 
-    fetchQueryCount();
+    fetchEnabledQueryCount();
   }, [pid, selectedDatasource?.datasourceId]);
 
-  const handleToggleForceMode = async (enabled: boolean) => {
-    if (enabled && config?.toolGroups['developer']?.enabled) {
+  const handleToggleApprovedQueriesSubOption = async (subOptionName: string, enabled: boolean) => {
+    if (!pid || !config) return;
+
+    // Special handling for FORCE mode
+    if (subOptionName === 'forceMode' && enabled && config.toolGroups['developer']?.enabled) {
       // Auto-disable developer tools when enabling FORCE mode
       await handleToggleToolGroup('developer', false);
     }
-    setForceMode(enabled);
-    toast({
-      title: 'Success',
-      description: `FORCE Pre-Approved Queries ${enabled ? 'enabled' : 'disabled'}`,
-    });
+
+    try {
+      setUpdating(true);
+      const response = await engineApi.updateMCPConfig(pid, {
+        toolGroups: {
+          approved_queries: {
+            enabled: isApprovedQueriesEnabled,
+            ...(subOptionName === 'forceMode' ? { forceMode: enabled } : { forceMode }),
+            ...(subOptionName === 'allowClientSuggestions' ? { allowClientSuggestions: enabled } : { allowClientSuggestions }),
+          },
+        },
+      });
+
+      if (response.success && response.data) {
+        setConfig(response.data);
+        const subOptionInfo = approvedQueriesConfig?.subOptions?.[subOptionName];
+        toast({
+          title: 'Success',
+          description: `${subOptionInfo?.name ?? subOptionName} ${enabled ? 'enabled' : 'disabled'}`,
+        });
+      } else {
+        throw new Error(response.error ?? 'Failed to update configuration');
+      }
+    } catch (error) {
+      console.error('Failed to update MCP config:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to update configuration',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleToggleApprovedQueries = async (enabled: boolean) => {
+    if (!pid || !config) return;
+
+    if (!enabled && enabledQueryCount === 0) {
+      toast({
+        title: 'No enabled queries',
+        description: 'Create and enable Pre-Approved Queries first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      setUpdating(true);
+      const response = await engineApi.updateMCPConfig(pid, {
+        toolGroups: {
+          approved_queries: {
+            enabled,
+            forceMode,
+            allowClientSuggestions,
+          },
+        },
+      });
+
+      if (response.success && response.data) {
+        setConfig(response.data);
+        toast({
+          title: 'Success',
+          description: `Pre-Approved Queries ${enabled ? 'enabled' : 'disabled'}`,
+        });
+      } else {
+        throw new Error(response.error ?? 'Failed to update configuration');
+      }
+    } catch (error) {
+      console.error('Failed to update MCP config:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to update configuration',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdating(false);
+    }
   };
 
   const handleToggleDevTools = async (enabled: boolean) => {
@@ -213,49 +291,23 @@ const MCPServerPage = () => {
                 <MCPToolGroup
                   name="Pre-Approved Queries"
                   description={
-                    queryCount > 0
-                      ? "Enable access to Pre-Approved Queries. This is the safest way to enable AI access to the datasource."
-                      : <>No Pre-Approved Queries have been created. Click <Link to={`/projects/${pid}/queries`} className="text-brand-purple hover:underline">here</Link> to create some.</>
+                    enabledQueryCount > 0
+                      ? <>Enable access to Pre-Approved Queries. Click <Link to={`/projects/${pid}/queries`} className="text-brand-purple hover:underline">here</Link> to manage queries.</>
+                      : <>No enabled Pre-Approved Queries. Click <Link to={`/projects/${pid}/queries`} className="text-brand-purple hover:underline">here</Link> to create and enable queries.</>
                   }
-                  enabled={queryCount > 0 && allowSuggestions}
-                  onToggle={(enabled) => {
-                    if (queryCount === 0) {
-                      toast({
-                        title: 'No queries available',
-                        description: 'Create Pre-Approved Queries first.',
-                        variant: 'destructive',
-                      });
-                      return;
-                    }
-                    setAllowSuggestions(enabled);
-                  }}
-                  disabled={updating || queryCount === 0}
-                  {...(queryCount > 0 && allowSuggestions ? {
-                    subOptions: {
-                      forceMode: {
-                        enabled: forceMode,
-                        name: 'FORCE all access through Pre-Approved Queries',
-                        description: 'When enabled, MCP clients can only execute Pre-Approved Queries. This is the safest way to enable AI access to data.',
-                        warning: 'Enabling this will disable Developer Tools.',
-                      },
-                      allowClientSuggestions: {
-                        enabled: allowClientSuggestions,
-                        name: 'Allow MCP Client to suggest queries',
-                        description: 'Allow the MCP Client to suggest new queries that must be approved by an administrator. This will expose the Ontology and SQL of Pre-Approved Queries.',
-                      },
-                    },
-                    onSubOptionToggle: (subOptionName: string, enabled: boolean) => {
-                      if (subOptionName === 'forceMode') {
-                        handleToggleForceMode(enabled);
-                      } else if (subOptionName === 'allowClientSuggestions') {
-                        setAllowClientSuggestions(enabled);
-                      }
-                    },
+                  enabled={enabledQueryCount > 0 && isApprovedQueriesEnabled}
+                  onToggle={handleToggleApprovedQueries}
+                  disabled={updating || enabledQueryCount === 0}
+                  {...(enabledQueryCount > 0 && isApprovedQueriesEnabled && approvedQueriesConfig?.subOptions != null ? {
+                    subOptions: approvedQueriesConfig.subOptions,
+                    onSubOptionToggle: handleToggleApprovedQueriesSubOption,
                   } : {})}
                 />
 
-                {/* Developer Tools - Last */}
-                {Object.entries(config.toolGroups).map(([groupName, groupInfo]) => {
+                {/* Other Tool Groups (excluding approved_queries which is handled above) */}
+                {Object.entries(config.toolGroups)
+                  .filter(([groupName]) => groupName !== 'approved_queries')
+                  .map(([groupName, groupInfo]) => {
                   // Use custom handler for developer tools to enforce FORCE mode
                   const onToggle = groupName === 'developer'
                     ? handleToggleDevTools

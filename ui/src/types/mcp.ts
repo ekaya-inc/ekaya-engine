@@ -25,6 +25,9 @@ export interface MCPConfigResponse {
 export interface ToolGroupConfigUpdate {
   enabled: boolean;
   enableExecute?: boolean;
+  // approved_queries only
+  forceMode?: boolean;
+  allowClientSuggestions?: boolean;
 }
 
 export interface UpdateMCPConfigRequest {
