@@ -31,6 +31,7 @@ vi.mock('../../hooks/useSqlValidation', () => ({
   useSqlValidation: () => ({
     status: 'idle',
     error: null,
+    warnings: [],
     validate: vi.fn(),
     reset: vi.fn(),
   }),

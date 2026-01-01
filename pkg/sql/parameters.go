@@ -127,6 +127,7 @@ func ValidateParameterDefinitions(sqlQuery string, params []models.QueryParamete
 //	preparedSQL, orderedValues, err := SubstituteParameters(sql, paramDefs, suppliedValues)
 //	// preparedSQL == "SELECT * FROM transactions WHERE sender_id = $1 OR receiver_id = $1"
 //	// orderedValues == []any{"550e8400-e29b-41d4-a716-446655440000"}
+//
 // FindParametersInStringLiterals checks for {{param}} placeholders that appear
 // inside SQL string literals (single quotes). Parameters inside string literals
 // won't work as expected because PostgreSQL will treat $1 as literal text, not

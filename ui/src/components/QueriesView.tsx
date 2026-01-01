@@ -157,6 +157,29 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
     [schema]
   );
 
+  // Check if SQL has undefined parameters (used in SQL but not defined)
+  const hasUndefinedParams = useCallback(
+    (sql: string, params: QueryParameter[]): boolean => {
+      const regex = /\{\{([a-zA-Z_]\w*)\}\}/g;
+      const sqlParams = new Set<string>();
+      let match;
+      while ((match = regex.exec(sql)) !== null) {
+        const paramName = match[1];
+        if (paramName !== undefined) {
+          sqlParams.add(paramName);
+        }
+      }
+      const definedNames = new Set(params.map((p) => p.name));
+      for (const name of sqlParams) {
+        if (!definedNames.has(name)) {
+          return true;
+        }
+      }
+      return false;
+    },
+    []
+  );
+
   // Filter queries based on search
   const filteredQueries = queries.filter(
     (query) =>
@@ -538,9 +561,9 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
 
   return (
     <>
-      <div className="flex h-[calc(100vh-12rem)] gap-6">
+      <div className="flex gap-6">
         {/* Left Sidebar - Query List */}
-        <div className="w-80 flex flex-col">
+        <div className="w-80 flex flex-col h-[calc(100vh-12rem)] sticky top-4">
           <Card className="h-full flex flex-col">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between mb-2">
@@ -629,7 +652,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
 
         {/* Right Side - Query Editor/Viewer */}
         <div className="flex-1">
-          <Card className="h-full flex flex-col">
+          <Card className="flex flex-col">
             {isCreating ? (
               // Create New Query Form
               <>
@@ -648,7 +671,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     </Button>
                   </div>
                 </CardHeader>
-                <CardContent className="flex-1 overflow-y-auto space-y-4">
+                <CardContent className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-text-primary mb-2">
                       Natural Language Prompt{' '}
@@ -747,24 +770,6 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     </div>
                   )}
 
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="create-enabled"
-                      checked={newQuery.is_enabled}
-                      onChange={(e) =>
-                        setNewQuery({ ...newQuery, is_enabled: e.target.checked })
-                      }
-                      className="rounded border-border-light"
-                    />
-                    <label
-                      htmlFor="create-enabled"
-                      className="text-sm text-text-primary"
-                    >
-                      Enable query
-                    </label>
-                  </div>
-
                   <div className="flex justify-between gap-2 pt-4 border-t border-border-light">
                     <Button
                       variant="outline"
@@ -776,7 +781,11 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                           testParameterValues
                         )
                       }
-                      disabled={!newQuery.sql_query.trim() || isTesting}
+                      disabled={
+                        !newQuery.sql_query.trim() ||
+                        isTesting ||
+                        hasUndefinedParams(newQuery.sql_query, newQuery.parameters)
+                      }
                     >
                       {isTesting ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -801,7 +810,8 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                           !newQuery.natural_language_prompt.trim() ||
                           !newQuery.sql_query.trim() ||
                           !testPassed ||
-                          isSaving
+                          isSaving ||
+                          hasUndefinedParams(newQuery.sql_query, newQuery.parameters)
                         }
                       >
                         {isSaving ? (
@@ -840,7 +850,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     </Button>
                   </div>
                 </CardHeader>
-                <CardContent className="flex-1 overflow-y-auto space-y-4">
+                <CardContent className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-text-primary mb-2">
                       Natural Language Prompt{' '}
@@ -970,7 +980,11 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                           testParameterValues
                         )
                       }
-                      disabled={!editingState.sql_query.trim() || isTesting}
+                      disabled={
+                        !editingState.sql_query.trim() ||
+                        isTesting ||
+                        hasUndefinedParams(editingState.sql_query, editingState.parameters)
+                      }
                     >
                       {isTesting ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -996,7 +1010,8 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                           !editingState.natural_language_prompt.trim() ||
                           !editingState.sql_query.trim() ||
                           !editTestPassed ||
-                          isSaving
+                          isSaving ||
+                          hasUndefinedParams(editingState.sql_query, editingState.parameters)
                         }
                       >
                         {isSaving ? (
@@ -1073,7 +1088,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent className="flex-1 overflow-y-auto space-y-6">
+                <CardContent className="space-y-6">
                   {selectedQuery.additional_context && (
                     <div>
                       <div className="flex items-center gap-2 mb-2">

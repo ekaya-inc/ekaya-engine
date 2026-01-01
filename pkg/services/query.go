@@ -124,11 +124,10 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 		return nil, fmt.Errorf("failed to get datasource: %w", err)
 	}
 
-	// Validate parameters if provided
-	if len(req.Parameters) > 0 {
-		if err := s.ValidateParameterizedQuery(req.SQLQuery, req.Parameters); err != nil {
-			return nil, fmt.Errorf("parameter validation failed: %w", err)
-		}
+	// Validate that all {{param}} in SQL have corresponding parameter definitions
+	// This is required even if no parameters are defined (catches undefined params in SQL)
+	if err := s.ValidateParameterizedQuery(req.SQLQuery, req.Parameters); err != nil {
+		return nil, fmt.Errorf("parameter validation failed: %w", err)
 	}
 
 	// Ensure Parameters is never nil (database column has NOT NULL constraint)
@@ -222,6 +221,11 @@ func (s *queryService) Update(ctx context.Context, projectID, queryID uuid.UUID,
 		query.IsEnabled = *req.IsEnabled
 	}
 
+	// Validate that all {{param}} in SQL have corresponding parameter definitions
+	if err := s.ValidateParameterizedQuery(query.SQLQuery, query.Parameters); err != nil {
+		return nil, fmt.Errorf("parameter validation failed: %w", err)
+	}
+
 	if err := s.queryRepo.Update(ctx, query); err != nil {
 		return nil, fmt.Errorf("failed to update query: %w", err)
 	}
@@ -298,6 +302,11 @@ func (s *queryService) Execute(ctx context.Context, projectID, queryID uuid.UUID
 			return nil, apperrors.ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to get query: %w", err)
+	}
+
+	// If query has parameters, delegate to ExecuteWithParameters (defaults will apply)
+	if len(query.Parameters) > 0 {
+		return s.ExecuteWithParameters(ctx, projectID, queryID, map[string]any{}, req)
 	}
 
 	// Get datasource config
