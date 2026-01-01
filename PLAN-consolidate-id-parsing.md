@@ -401,4 +401,4 @@ Check route registrations if any use different names and adjust `params.go` acco
    - [x] 2h. schema.go - Remove 2 methods, update usages
    - [x] 2i. queries.go - Remove 2 methods, update usages
    - [x] 2j. mcp_config.go - Remove 1 method, update usages
-3. [ ] Run `make check` after all changes
+3. [x] Run `make check` after all changes
