@@ -137,8 +137,25 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 		config = models.DefaultWorkflowConfig()
 	}
 
-	// Step 0: Check if relationships phase has completed for this datasource (Milestone 3.3)
-	// The relationships phase must complete before ontology extraction can start.
+	// Step 0: Check prerequisites - BOTH entities AND relationships phases must complete
+	// Ontology is the "combination layer" that consumes data from both phases.
+
+	// Check entities phase
+	entitiesWorkflow, err := s.workflowRepo.GetLatestByDatasourceAndPhase(ctx, config.DatasourceID, models.WorkflowPhaseEntities)
+	if err != nil {
+		s.logger.Error("Failed to check entities workflow status",
+			zap.String("datasource_id", config.DatasourceID.String()),
+			zap.Error(err))
+		return nil, fmt.Errorf("check entities workflow: %w", err)
+	}
+	if entitiesWorkflow == nil {
+		return nil, fmt.Errorf("entities phase must complete before ontology extraction: no entity discovery workflow found for datasource")
+	}
+	if entitiesWorkflow.State != models.WorkflowStateCompleted {
+		return nil, fmt.Errorf("entities phase must complete before ontology extraction: current state is %s", entitiesWorkflow.State)
+	}
+
+	// Check relationships phase
 	relWorkflow, err := s.workflowRepo.GetLatestByDatasourceAndPhase(ctx, config.DatasourceID, models.WorkflowPhaseRelationships)
 	if err != nil {
 		s.logger.Error("Failed to check relationships workflow status",
@@ -153,8 +170,9 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 		return nil, fmt.Errorf("relationships phase must complete before ontology extraction: current state is %s", relWorkflow.State)
 	}
 
-	s.logger.Info("Relationships phase verified complete",
+	s.logger.Info("Prerequisites verified: entities and relationships phases complete",
 		zap.String("datasource_id", config.DatasourceID.String()),
+		zap.String("entities_workflow_id", entitiesWorkflow.ID.String()),
 		zap.String("rel_workflow_id", relWorkflow.ID.String()))
 
 	// Step 1: Get active ontology ID (needed for cleanup after deactivation).

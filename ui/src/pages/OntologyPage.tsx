@@ -3,7 +3,7 @@
  * Living document with work queue model
  */
 
-import { AlertTriangle, ArrowLeft, Brain, CheckCircle, Play, RefreshCw, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Brain, CheckCircle, Play, RefreshCw, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -12,13 +12,27 @@ import OntologyStatus from '../components/ontology/OntologyStatus';
 import QuestionPanel from '../components/ontology/QuestionPanel';
 import WorkQueue from '../components/ontology/WorkQueue';
 import { Button } from '../components/ui/Button';
+import { useDatasourceConnection } from '../contexts/DatasourceConnectionContext';
+import engineApi from '../services/engineApi';
 import ontologyApi from '../services/ontologyApi';
 import { ontologyService } from '../services/ontologyService';
+import relationshipWorkflowApi from '../services/relationshipWorkflowApi';
 import type { OntologyWorkflowStatus } from '../types';
+
+// Prerequisites status for ontology extraction
+interface PrerequisitesStatus {
+  entitiesComplete: boolean;
+  relationshipsComplete: boolean;
+  entityCount: number;
+  relationshipCount: number;
+  loading: boolean;
+  error: string | null;
+}
 
 const OntologyPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
+  const { selectedDatasource } = useDatasourceConnection();
 
   const [status, setStatus] = useState<OntologyWorkflowStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -29,6 +43,16 @@ const OntologyPage = () => {
   const [projectDescription, setProjectDescription] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+
+  // Prerequisites status for ontology extraction
+  const [prerequisites, setPrerequisites] = useState<PrerequisitesStatus>({
+    entitiesComplete: false,
+    relationshipsComplete: false,
+    entityCount: 0,
+    relationshipCount: 0,
+    loading: true,
+    error: null,
+  });
 
   // Initialize and subscribe to status updates
   useEffect(() => {
@@ -101,6 +125,66 @@ const OntologyPage = () => {
       ontologyService.stop();
     };
   }, [pid]);
+
+  // Check prerequisites (entities and relationships phases must be complete)
+  useEffect(() => {
+    let isMounted = true;
+
+    const checkPrerequisites = async () => {
+      if (!pid || !selectedDatasource) {
+        setPrerequisites(prev => ({ ...prev, loading: false }));
+        return;
+      }
+
+      const datasourceId = selectedDatasource.datasourceId;
+      if (!datasourceId) {
+        setPrerequisites(prev => ({ ...prev, loading: false }));
+        return;
+      }
+
+      try {
+        // Check entities status and relationships status in parallel
+        const [entitiesStatusResponse, relationshipsStatusResponse, entitiesListResponse] = await Promise.all([
+          engineApi.getEntityDiscoveryStatus(pid, datasourceId),
+          relationshipWorkflowApi.getStatus(pid, datasourceId),
+          engineApi.listEntities(pid),
+        ]);
+
+        if (!isMounted) return;
+
+        const entitiesStatus = entitiesStatusResponse.data;
+        const relationshipsStatus = relationshipsStatusResponse;
+        const entitiesList = entitiesListResponse.data;
+
+        setPrerequisites({
+          entitiesComplete: entitiesStatus?.state === 'completed',
+          relationshipsComplete: relationshipsStatus.state === 'completed',
+          entityCount: entitiesList?.entities?.filter(e => !e.is_deleted).length ?? 0,
+          relationshipCount: relationshipsStatus.confirmed_count ?? 0,
+          loading: false,
+          error: null,
+        });
+      } catch (e) {
+        if (!isMounted) return;
+        console.error('Failed to check prerequisites:', e);
+        // Not a fatal error - just assume prerequisites not met
+        setPrerequisites({
+          entitiesComplete: false,
+          relationshipsComplete: false,
+          entityCount: 0,
+          relationshipCount: 0,
+          loading: false,
+          error: null, // Don't show error - just show prerequisites needed
+        });
+      }
+    };
+
+    void checkPrerequisites();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [pid, selectedDatasource]);
 
   const handleStart = useCallback(async () => {
     setError(null);
@@ -394,13 +478,123 @@ const OntologyPage = () => {
             )}
           </div>
         </div>
+      ) : prerequisites.loading ? (
+        /* Loading prerequisites check */
+        <div className="rounded-lg border border-border-light bg-surface-primary shadow-sm p-12">
+          <div className="flex items-center justify-center">
+            <div className="text-text-secondary">Checking prerequisites...</div>
+          </div>
+        </div>
+      ) : !prerequisites.entitiesComplete || !prerequisites.relationshipsComplete ? (
+        /* Prerequisites not met - show guidance */
+        <div className="rounded-lg border border-amber-200 bg-amber-50 shadow-sm p-12">
+          <AlertTriangle className="h-16 w-16 text-amber-400 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-text-primary mb-2 text-center">
+            Prerequisites Required
+          </h2>
+          <p className="text-text-secondary max-w-3xl mx-auto mb-6 text-center">
+            Before building the ontology, complete these steps. The ontology combines your
+            schema, entities, and relationships into a unified business understanding.
+          </p>
+
+          <div className="max-w-lg mx-auto space-y-4">
+            {/* Entities prerequisite */}
+            <div className={`flex items-center gap-4 p-4 rounded-lg border ${
+              prerequisites.entitiesComplete
+                ? 'border-green-200 bg-green-50'
+                : 'border-gray-200 bg-white'
+            }`}>
+              <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
+                prerequisites.entitiesComplete
+                  ? 'bg-green-100 text-green-600'
+                  : 'bg-gray-100 text-gray-400'
+              }`}>
+                {prerequisites.entitiesComplete ? (
+                  <CheckCircle className="h-5 w-5" />
+                ) : (
+                  <span className="text-lg font-semibold">1</span>
+                )}
+              </div>
+              <div className="flex-1">
+                <p className={`font-medium ${
+                  prerequisites.entitiesComplete ? 'text-green-800' : 'text-text-primary'
+                }`}>
+                  {prerequisites.entitiesComplete
+                    ? `Entities discovered (${prerequisites.entityCount} entities)`
+                    : 'Discover entities'}
+                </p>
+                <p className="text-sm text-text-secondary">
+                  {prerequisites.entitiesComplete
+                    ? 'Domain entities have been identified in your schema'
+                    : 'Run entity discovery to identify domain concepts like User, Order, Product'}
+                </p>
+              </div>
+              {!prerequisites.entitiesComplete && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate(`/projects/${pid}/entities`)}
+                >
+                  Go to Entities
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              )}
+            </div>
+
+            {/* Relationships prerequisite */}
+            <div className={`flex items-center gap-4 p-4 rounded-lg border ${
+              prerequisites.relationshipsComplete
+                ? 'border-green-200 bg-green-50'
+                : 'border-gray-200 bg-white'
+            }`}>
+              <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
+                prerequisites.relationshipsComplete
+                  ? 'bg-green-100 text-green-600'
+                  : 'bg-gray-100 text-gray-400'
+              }`}>
+                {prerequisites.relationshipsComplete ? (
+                  <CheckCircle className="h-5 w-5" />
+                ) : (
+                  <span className="text-lg font-semibold">2</span>
+                )}
+              </div>
+              <div className="flex-1">
+                <p className={`font-medium ${
+                  prerequisites.relationshipsComplete ? 'text-green-800' : 'text-text-primary'
+                }`}>
+                  {prerequisites.relationshipsComplete
+                    ? `Relationships defined (${prerequisites.relationshipCount} relationships)`
+                    : 'Define relationships'}
+                </p>
+                <p className="text-sm text-text-secondary">
+                  {prerequisites.relationshipsComplete
+                    ? 'Table relationships have been detected and confirmed'
+                    : 'Run relationship detection to understand how tables connect'}
+                </p>
+              </div>
+              {!prerequisites.relationshipsComplete && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate(`/projects/${pid}/relationships`)}
+                >
+                  Go to Relationships
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
       ) : (
-        /* Empty state when idle */
+        /* Prerequisites met - Ready to extract ontology */
         <div className="rounded-lg border border-border-light bg-surface-primary shadow-sm p-12">
           <Brain className="h-16 w-16 text-purple-300 mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-text-primary mb-2 text-center">
-            Ready to Extract Ontology
+            Ready to Build Ontology
           </h2>
+          <p className="text-text-secondary max-w-3xl mx-auto mb-4 text-center">
+            Found: {prerequisites.entityCount} entities, {prerequisites.relationshipCount} relationships
+          </p>
           <p className="text-text-secondary max-w-3xl mx-auto mb-6 text-center">
             Before we analyze your schema, tell us about your application. Who uses it and what do
             they do with this data? This context helps us build a more accurate business ontology.
@@ -436,7 +630,7 @@ const OntologyPage = () => {
               className="bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Play className="mr-2 h-5 w-5" />
-              Start Extraction
+              Start Building Ontology
             </Button>
           </div>
         </div>
