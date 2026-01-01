@@ -177,6 +177,64 @@ func GetOntologyChatTools() []ToolDefinition {
 			},
 			[]string{},
 		),
+		NewToolDefinition(
+			"create_domain_entity",
+			"Create a new domain entity that represents a business concept spanning one or more tables",
+			map[string]ParameterProperty{
+				"name": {
+					Type:        "string",
+					Description: "The name of the domain entity (e.g., 'user', 'campaign', 'order')",
+				},
+				"description": {
+					Type:        "string",
+					Description: "A description of what this entity represents in business terms",
+				},
+				"primary_table": {
+					Type:        "string",
+					Description: "The main table where this entity is defined (e.g., 'users' for 'user' entity)",
+				},
+				"primary_column": {
+					Type:        "string",
+					Description: "The primary column that identifies this entity (e.g., 'id', 'user_id')",
+				},
+			},
+			[]string{"name", "description", "primary_table", "primary_column"},
+		),
+		NewToolDefinition(
+			"create_entity_relationship",
+			"Create a relationship between two domain entities based on how they connect in the data",
+			map[string]ParameterProperty{
+				"source_entity": {
+					Type:        "string",
+					Description: "The name of the source domain entity",
+				},
+				"target_entity": {
+					Type:        "string",
+					Description: "The name of the target domain entity",
+				},
+				"source_table": {
+					Type:        "string",
+					Description: "The table containing the source reference",
+				},
+				"source_column": {
+					Type:        "string",
+					Description: "The column that references the target entity",
+				},
+				"target_table": {
+					Type:        "string",
+					Description: "The table containing the target entity",
+				},
+				"target_column": {
+					Type:        "string",
+					Description: "The column being referenced (usually the primary key)",
+				},
+				"description": {
+					Type:        "string",
+					Description: "Optional description of the relationship (e.g., 'Users can place multiple orders')",
+				},
+			},
+			[]string{"source_entity", "target_entity", "source_table", "source_column", "target_table", "target_column"},
+		),
 	}
 }
 

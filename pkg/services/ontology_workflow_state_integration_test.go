@@ -59,7 +59,7 @@ func setupWorkflowStateTest(t *testing.T) *workflowStateTestContext {
 
 	// Create a minimal builder service (we won't actually use LLM)
 	builderService := NewOntologyBuilderService(
-		ontologyRepo, schemaRepo, workflowRepo, nil, stateRepo, nil, logger)
+		ontologyRepo, schemaRepo, workflowRepo, nil, stateRepo, nil, nil, nil, logger)
 
 	// Create workflow service with all dependencies
 	questionRepo := repositories.NewOntologyQuestionRepository()
@@ -169,12 +169,13 @@ func (tc *workflowStateTestContext) cleanup() {
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_schema_tables WHERE project_id = $1`, tc.projectID)
 }
 
-// ensureCompletedRelationshipWorkflow creates a completed relationship workflow
-// to satisfy the prerequisite for ontology extraction.
-func (tc *workflowStateTestContext) ensureCompletedRelationshipWorkflow(ctx context.Context) {
+// ensurePrerequisites sets up both entities and relationships workflows as complete
+// which are required prerequisites for ontology extraction.
+// Creates a single ontology shared by both prerequisite workflows.
+func (tc *workflowStateTestContext) ensurePrerequisites(ctx context.Context) {
 	tc.t.Helper()
 
-	// Create a temporary ontology for the workflow
+	// Create a single ontology for both prerequisite workflows
 	ontology := &models.TieredOntology{
 		ID:              uuid.New(),
 		ProjectID:       tc.projectID,
@@ -186,11 +187,31 @@ func (tc *workflowStateTestContext) ensureCompletedRelationshipWorkflow(ctx cont
 	}
 
 	if err := tc.ontologyRepo.Create(ctx, ontology); err != nil {
-		tc.t.Fatalf("Failed to create temporary ontology for relationship workflow: %v", err)
+		tc.t.Fatalf("Failed to create temporary ontology for prerequisites: %v", err)
+	}
+
+	// Create a completed entities workflow
+	entitiesWorkflow := &models.OntologyWorkflow{
+		ID:           uuid.New(),
+		ProjectID:    tc.projectID,
+		OntologyID:   ontology.ID,
+		State:        models.WorkflowStateCompleted,
+		Phase:        models.WorkflowPhaseEntities,
+		DatasourceID: &tc.dsID,
+		Progress: &models.WorkflowProgress{
+			Current: 100,
+			Total:   100,
+			Message: "Complete",
+		},
+		TaskQueue: []models.WorkflowTask{},
+	}
+
+	if err := tc.workflowRepo.Create(ctx, entitiesWorkflow); err != nil {
+		tc.t.Fatalf("Failed to create completed entities workflow: %v", err)
 	}
 
 	// Create a completed relationship workflow
-	workflow := &models.OntologyWorkflow{
+	relWorkflow := &models.OntologyWorkflow{
 		ID:           uuid.New(),
 		ProjectID:    tc.projectID,
 		OntologyID:   ontology.ID,
@@ -205,7 +226,7 @@ func (tc *workflowStateTestContext) ensureCompletedRelationshipWorkflow(ctx cont
 		TaskQueue: []models.WorkflowTask{},
 	}
 
-	if err := tc.workflowRepo.Create(ctx, workflow); err != nil {
+	if err := tc.workflowRepo.Create(ctx, relWorkflow); err != nil {
 		tc.t.Fatalf("Failed to create completed relationship workflow: %v", err)
 	}
 }
@@ -263,7 +284,7 @@ func TestStartExtraction_InitializesWorkflowState_Integration(t *testing.T) {
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
 
-	// Create test tables and columns
+	// Create test tables and columns (schema still exists, but workflow only tracks global entity)
 	usersTable := tc.createTestTable(ctx, "public", "users")
 	tc.createTestColumn(ctx, usersTable.ID, "id", "uuid", 1)
 	tc.createTestColumn(ctx, usersTable.ID, "email", "text", 2)
@@ -274,8 +295,8 @@ func TestStartExtraction_InitializesWorkflowState_Integration(t *testing.T) {
 	tc.createTestColumn(ctx, ordersTable.ID, "user_id", "uuid", 2)
 	tc.createTestColumn(ctx, ordersTable.ID, "total", "numeric", 3)
 
-	// Prerequisite: relationship workflow must complete before ontology extraction
-	tc.ensureCompletedRelationshipWorkflow(ctx)
+	// Prerequisites: both entities and relationships phases must complete before ontology extraction
+	tc.ensurePrerequisites(ctx)
 
 	// Start extraction
 	config := &models.WorkflowConfig{
@@ -296,13 +317,13 @@ func TestStartExtraction_InitializesWorkflowState_Integration(t *testing.T) {
 		t.Fatalf("ListByWorkflow failed: %v", err)
 	}
 
-	// Expected: 1 global + 2 tables + 6 columns = 9 entities
-	expectedCount := 1 + 2 + 6
+	// Simplified flow: only 1 global entity (no table/column entities)
+	expectedCount := 1
 	if len(states) != expectedCount {
-		t.Errorf("expected %d workflow entities, got %d", expectedCount, len(states))
+		t.Errorf("expected %d workflow entity (global only), got %d", expectedCount, len(states))
 	}
 
-	// Verify all entities have status='pending'
+	// Verify the global entity has status='pending'
 	for _, state := range states {
 		if state.Status != models.WorkflowEntityStatusPending {
 			t.Errorf("expected status 'pending' for entity %s:%s, got %s",
@@ -310,46 +331,15 @@ func TestStartExtraction_InitializesWorkflowState_Integration(t *testing.T) {
 		}
 	}
 
-	// Verify entity type counts
-	globalCount := 0
-	tableCount := 0
-	columnCount := 0
-	for _, state := range states {
-		switch state.EntityType {
-		case models.WorkflowEntityTypeGlobal:
-			globalCount++
-			if state.EntityKey != "" {
-				t.Errorf("expected empty entity_key for global, got %s", state.EntityKey)
-			}
-		case models.WorkflowEntityTypeTable:
-			tableCount++
-		case models.WorkflowEntityTypeColumn:
-			columnCount++
+	// Verify entity type is global
+	if len(states) > 0 {
+		state := states[0]
+		if state.EntityType != models.WorkflowEntityTypeGlobal {
+			t.Errorf("expected global entity type, got %s", state.EntityType)
 		}
-	}
-
-	if globalCount != 1 {
-		t.Errorf("expected 1 global entity, got %d", globalCount)
-	}
-	if tableCount != 2 {
-		t.Errorf("expected 2 table entities, got %d", tableCount)
-	}
-	if columnCount != 6 {
-		t.Errorf("expected 6 column entities, got %d", columnCount)
-	}
-
-	// Verify column entity key format (table.column)
-	columnKeyFound := false
-	for _, state := range states {
-		if state.EntityType == models.WorkflowEntityTypeColumn {
-			if state.EntityKey == "users.email" || state.EntityKey == "orders.total" {
-				columnKeyFound = true
-				break
-			}
+		if state.EntityKey != "" {
+			t.Errorf("expected empty entity_key for global, got %s", state.EntityKey)
 		}
-	}
-	if !columnKeyFound {
-		t.Error("expected to find column entity with key like 'users.email' or 'orders.total'")
 	}
 
 	// Cancel the workflow to clean up background goroutines
@@ -366,8 +356,8 @@ func TestStartExtraction_EmptyDatasource_Integration(t *testing.T) {
 
 	// Don't create any tables - datasource is empty
 
-	// Prerequisite: relationship workflow must complete before ontology extraction
-	tc.ensureCompletedRelationshipWorkflow(ctx)
+	// Prerequisites: both entities and relationships phases must complete before ontology extraction
+	tc.ensurePrerequisites(ctx)
 
 	// Start extraction
 	config := &models.WorkflowConfig{
@@ -385,7 +375,7 @@ func TestStartExtraction_EmptyDatasource_Integration(t *testing.T) {
 		t.Fatalf("ListByWorkflow failed: %v", err)
 	}
 
-	// Expected: 1 global only (no tables, no columns)
+	// Expected: 1 global only (simplified flow always creates just global entity)
 	if len(states) != 1 {
 		t.Errorf("expected 1 workflow entity (global only), got %d", len(states))
 	}
@@ -416,8 +406,8 @@ func TestStartExtraction_CleansUpPreviousOntologyWorkflowState_Integration(t *te
 	tc.createTestColumn(ctx, usersTable.ID, "id", "uuid", 1)
 	tc.createTestColumn(ctx, usersTable.ID, "email", "text", 2)
 
-	// Prerequisite: relationship workflow must complete before ontology extraction
-	tc.ensureCompletedRelationshipWorkflow(ctx)
+	// Prerequisites: both entities and relationships phases must complete before ontology extraction
+	tc.ensurePrerequisites(ctx)
 
 	config := &models.WorkflowConfig{
 		DatasourceID: tc.dsID,

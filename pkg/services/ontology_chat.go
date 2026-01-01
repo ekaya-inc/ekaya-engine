@@ -39,16 +39,18 @@ type OntologyChatService interface {
 }
 
 type ontologyChatService struct {
-	chatRepo          repositories.OntologyChatRepository
-	ontologyRepo      repositories.OntologyRepository
-	knowledgeRepo     repositories.KnowledgeRepository
-	schemaRepo        repositories.SchemaRepository
-	workflowRepo      repositories.OntologyWorkflowRepository
-	stateRepo         repositories.WorkflowStateRepository
-	llmFactory        llm.LLMClientFactory
-	datasourceService DatasourceService
-	adapterFactory    datasource.DatasourceAdapterFactory
-	logger            *zap.Logger
+	chatRepo           repositories.OntologyChatRepository
+	ontologyRepo       repositories.OntologyRepository
+	knowledgeRepo      repositories.KnowledgeRepository
+	schemaRepo         repositories.SchemaRepository
+	workflowRepo       repositories.OntologyWorkflowRepository
+	stateRepo          repositories.WorkflowStateRepository
+	ontologyEntityRepo repositories.OntologyEntityRepository
+	entityRelRepo      repositories.EntityRelationshipRepository
+	llmFactory         llm.LLMClientFactory
+	datasourceService  DatasourceService
+	adapterFactory     datasource.DatasourceAdapterFactory
+	logger             *zap.Logger
 }
 
 // NewOntologyChatService creates a new ontology chat service.
@@ -59,22 +61,26 @@ func NewOntologyChatService(
 	schemaRepo repositories.SchemaRepository,
 	workflowRepo repositories.OntologyWorkflowRepository,
 	stateRepo repositories.WorkflowStateRepository,
+	ontologyEntityRepo repositories.OntologyEntityRepository,
+	entityRelRepo repositories.EntityRelationshipRepository,
 	llmFactory llm.LLMClientFactory,
 	datasourceService DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	logger *zap.Logger,
 ) OntologyChatService {
 	return &ontologyChatService{
-		chatRepo:          chatRepo,
-		ontologyRepo:      ontologyRepo,
-		knowledgeRepo:     knowledgeRepo,
-		schemaRepo:        schemaRepo,
-		workflowRepo:      workflowRepo,
-		stateRepo:         stateRepo,
-		llmFactory:        llmFactory,
-		datasourceService: datasourceService,
-		adapterFactory:    adapterFactory,
-		logger:            logger.Named("ontology-chat"),
+		chatRepo:           chatRepo,
+		ontologyRepo:       ontologyRepo,
+		knowledgeRepo:      knowledgeRepo,
+		schemaRepo:         schemaRepo,
+		workflowRepo:       workflowRepo,
+		stateRepo:          stateRepo,
+		ontologyEntityRepo: ontologyEntityRepo,
+		entityRelRepo:      entityRelRepo,
+		llmFactory:         llmFactory,
+		datasourceService:  datasourceService,
+		adapterFactory:     adapterFactory,
+		logger:             logger.Named("ontology-chat"),
 	}
 }
 
@@ -227,15 +233,17 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 
 	// Create tool executor
 	toolExecutor := llm.NewOntologyToolExecutor(&llm.OntologyToolExecutorConfig{
-		ProjectID:     projectID,
-		DatasourceID:  workflow.Config.DatasourceID,
-		OntologyRepo:  s.ontologyRepo,
-		WorkflowRepo:  s.workflowRepo,
-		StateRepo:     s.stateRepo,
-		KnowledgeRepo: s.knowledgeRepo,
-		SchemaRepo:    s.schemaRepo,
-		QueryExecutor: queryExecutor,
-		Logger:        s.logger,
+		ProjectID:          projectID,
+		DatasourceID:       workflow.Config.DatasourceID,
+		OntologyRepo:       s.ontologyRepo,
+		WorkflowRepo:       s.workflowRepo,
+		StateRepo:          s.stateRepo,
+		KnowledgeRepo:      s.knowledgeRepo,
+		SchemaRepo:         s.schemaRepo,
+		OntologyEntityRepo: s.ontologyEntityRepo,
+		EntityRelRepo:      s.entityRelRepo,
+		QueryExecutor:      queryExecutor,
+		Logger:             s.logger,
 	})
 
 	// Create streaming client
@@ -481,6 +489,8 @@ Available tools:
 - store_knowledge: Store business facts and domain knowledge
 - answer_question: Mark ontology questions as answered
 - get_pending_questions: Retrieve pending questions about the schema
+- create_domain_entity: Create a new domain entity (e.g., 'campaign', 'subscription')
+- create_entity_relationship: Create a relationship between domain entities
 
 Guidelines:
 - Be helpful and conversational while staying focused on data understanding
