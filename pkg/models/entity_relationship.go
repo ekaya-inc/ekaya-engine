@@ -10,6 +10,7 @@ import (
 const (
 	DetectionMethodForeignKey = "foreign_key" // Discovered from database FK constraint
 	DetectionMethodPKMatch    = "pk_match"    // Inferred from PK type/cardinality matching
+	DetectionMethodManual     = "manual"      // Created by user through chat
 )
 
 // Relationship status values.

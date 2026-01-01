@@ -192,7 +192,9 @@ func main() {
 		convRepo, datasourceService, adapterFactory, ontologyBuilderService, getTenantCtx, logger)
 	ontologyChatService := services.NewOntologyChatService(
 		ontologyChatRepo, ontologyRepo, knowledgeRepo,
-		schemaRepo, ontologyWorkflowRepo, workflowStateRepo, llmFactory, datasourceService, adapterFactory, logger)
+		schemaRepo, ontologyWorkflowRepo, workflowStateRepo,
+		ontologyEntityRepo, entityRelationshipRepo,
+		llmFactory, datasourceService, adapterFactory, logger)
 	deterministicRelationshipService := services.NewDeterministicRelationshipService(
 		datasourceService, adapterFactory, ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo)
 	relationshipWorkflowService := services.NewRelationshipWorkflowService(
