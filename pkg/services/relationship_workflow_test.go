@@ -671,7 +671,7 @@ func newTestRelationshipWorkflowService(
 	}
 	logger := zap.NewNop()
 	getTenantCtx := rwsGetTenantCtx()
-	infra := workflow.NewWorkflowInfra(workflowRepo, workflow.TenantContextFunc(getTenantCtx), logger)
+	infra := workflow.NewWorkflowInfra(workflowRepo, getTenantCtx, logger)
 
 	return &relationshipWorkflowService{
 		workflowRepo:         workflowRepo,

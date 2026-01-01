@@ -117,7 +117,7 @@ func NewRelationshipWorkflowService(
 	logger *zap.Logger,
 ) RelationshipWorkflowService {
 	namedLogger := logger.Named("relationship-workflow")
-	infra := workflow.NewWorkflowInfra(workflowRepo, workflow.TenantContextFunc(getTenantCtx), namedLogger)
+	infra := workflow.NewWorkflowInfra(workflowRepo, getTenantCtx, namedLogger)
 
 	return &relationshipWorkflowService{
 		workflowRepo:         workflowRepo,

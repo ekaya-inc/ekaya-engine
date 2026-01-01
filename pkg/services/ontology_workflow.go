@@ -83,7 +83,7 @@ func NewOntologyWorkflowService(
 	logger *zap.Logger,
 ) OntologyWorkflowService {
 	namedLogger := logger.Named("ontology-workflow")
-	infra := workflow.NewWorkflowInfra(workflowRepo, workflow.TenantContextFunc(getTenantCtx), namedLogger)
+	infra := workflow.NewWorkflowInfra(workflowRepo, getTenantCtx, namedLogger)
 
 	return &ontologyWorkflowService{
 		workflowRepo:   workflowRepo,
