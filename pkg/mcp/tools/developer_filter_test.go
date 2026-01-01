@@ -495,3 +495,91 @@ func TestFilterTools(t *testing.T) {
 		t.Errorf("expected 9 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 }
+
+func TestNewToolFilter_ForceModeDisablesDeveloperTools(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Create config with ForceMode enabled on approved_queries
+	// Even with developer tools enabled, they should be forcibly disabled
+	setupTestConfigWithApprovedQueries(t, engineDB.DB, projectID,
+		&models.ToolGroupConfig{Enabled: true, EnableExecute: true},
+		&models.ToolGroupConfig{Enabled: true, ForceMode: true},
+	)
+
+	// Mock with queries
+	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
+	deps := &DeveloperToolDeps{
+		DB:               engineDB.DB,
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, &mockProjectService{defaultDatasourceID: uuid.New()}, "http://localhost", zap.NewNop()),
+		Logger:           zap.NewNop(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestTools()
+
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
+	filtered := filter(ctx, tools)
+
+	// With ForceMode ON, only approved_queries tools and health should be present
+	expectedTools := []string{"health", "list_approved_queries", "execute_approved_query"}
+	if len(filtered) != len(expectedTools) {
+		t.Errorf("expected %d tools with ForceMode, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
+	}
+
+	// Developer tools should be filtered out despite being enabled in config
+	if containsTool(filtered, "query") {
+		t.Error("developer tools should be filtered when ForceMode is enabled")
+	}
+	if containsTool(filtered, "execute") {
+		t.Error("execute tool should be filtered when ForceMode is enabled")
+	}
+	if containsTool(filtered, "get_schema") {
+		t.Error("schema tools should be filtered when ForceMode is enabled")
+	}
+
+	// Approved queries tools should be present
+	for _, name := range expectedTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present with ForceMode", name)
+		}
+	}
+}
+
+func TestNewToolFilter_ForceModeOffAllowsDeveloperTools(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Create config with ForceMode disabled (default)
+	setupTestConfigWithApprovedQueries(t, engineDB.DB, projectID,
+		&models.ToolGroupConfig{Enabled: true, EnableExecute: true},
+		&models.ToolGroupConfig{Enabled: true, ForceMode: false},
+	)
+
+	// Mock with queries
+	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
+	deps := &DeveloperToolDeps{
+		DB:               engineDB.DB,
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, &mockProjectService{defaultDatasourceID: uuid.New()}, "http://localhost", zap.NewNop()),
+		Logger:           zap.NewNop(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestTools()
+
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
+	filtered := filter(ctx, tools)
+
+	// With ForceMode OFF, all tools should be present
+	if len(filtered) != 9 {
+		t.Errorf("expected 9 tools (all) with ForceMode OFF, got %d: %v", len(filtered), toolNames(filtered))
+	}
+
+	// Developer tools should be present
+	if !containsTool(filtered, "query") {
+		t.Error("developer tools should be present when ForceMode is disabled")
+	}
+	if !containsTool(filtered, "execute") {
+		t.Error("execute tool should be present when ForceMode is disabled")
+	}
+}

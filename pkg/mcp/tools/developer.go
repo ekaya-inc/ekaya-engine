@@ -136,11 +136,28 @@ func NewToolFilter(deps *DeveloperToolDeps) func(ctx context.Context, tools []mc
 			showApprovedQueries = false
 		}
 
+		// Check if force mode is enabled (approved_queries only)
+		approvedQueriesConfig, err := deps.MCPConfigService.GetToolGroupConfig(tenantCtx, projectID, "approved_queries")
+		if err != nil {
+			deps.Logger.Error("Tool filter: failed to get approved_queries config",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+
+		forceMode := approvedQueriesConfig != nil && approvedQueriesConfig.ForceMode
+
+		// Force mode overrides developer tools
+		if forceMode {
+			showDeveloper = false
+			showExecute = false
+		}
+
 		deps.Logger.Debug("Tool filter: filtering based on config",
 			zap.String("project_id", projectID.String()),
 			zap.Bool("show_developer", showDeveloper),
 			zap.Bool("show_execute", showExecute),
-			zap.Bool("show_approved_queries", showApprovedQueries))
+			zap.Bool("show_approved_queries", showApprovedQueries),
+			zap.Bool("force_mode", forceMode))
 
 		return filterTools(tools, showDeveloper, showExecute, showApprovedQueries)
 	}

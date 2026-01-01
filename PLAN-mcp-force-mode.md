@@ -387,7 +387,7 @@ The existing `execute_approved_query` tool is mostly complete:
 - [x] Reference `SchemaToolNames` in `developer.go` (task 1.2)
 - [x] Add schema tool filtering to `filterTools()` in `pkg/mcp/tools/developer.go`
 - [x] Write tests for tool filtering with schema tools
-- [ ] Add Force Mode check to disable developer tools in `NewToolFilter()`
+- [x] Add Force Mode check to disable developer tools in `NewToolFilter()`
 
 ### Enhancements
 
