@@ -19,6 +19,10 @@ The project has full operational infrastructure but a minimal Go backend:
 - **Shell only:** `main.go` with just `/health`, `/ping`, and static file serving
 - **Empty scaffold:** `pkg/` directories ready for implementation
 
+## Critical: Server Management
+
+**NEVER kill or start the dev server from Claude Code.** The user runs `make dev-server` and `make dev-ui` in separate terminals. Do not use `pkill`, `nohup`, or any command that would start/stop/restart these servers. If changes require a server restart, inform the user to restart it manually.
+
 ## Development Commands
 
 ### Essential Commands
