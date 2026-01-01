@@ -12,6 +12,8 @@ import (
 
 // TenantContextFunc acquires a tenant-scoped database connection for background work.
 // Returns the scoped context, a cleanup function (MUST be called), and any error.
+// Note: This type is identical to workflow.TenantContextFunc and services.TenantContextFunc.
+// They are kept separate to avoid import cycles between llm ← workqueue ← workflow.
 type TenantContextFunc func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error)
 
 // ConversationRecorder records LLM conversations to the database.

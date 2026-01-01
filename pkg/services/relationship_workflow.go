@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +12,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
+	"github.com/ekaya-inc/ekaya-engine/pkg/services/workflow"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services/workqueue"
 )
 
@@ -83,12 +83,6 @@ type RelationshipWorkflowService interface {
 	Shutdown(ctx context.Context) error
 }
 
-// heartbeatInfo holds info needed for heartbeat goroutine
-type relationshipHeartbeatInfo struct {
-	projectID uuid.UUID
-	stop      chan struct{}
-}
-
 type relationshipWorkflowService struct {
 	workflowRepo         repositories.OntologyWorkflowRepository
 	candidateRepo        repositories.RelationshipCandidateRepository
@@ -103,10 +97,7 @@ type relationshipWorkflowService struct {
 	deterministicService DeterministicRelationshipService
 	getTenantCtx         TenantContextFunc
 	logger               *zap.Logger
-	serverInstanceID     uuid.UUID
-	activeQueues         sync.Map // workflowID -> *workqueue.Queue
-	taskQueueWriters     sync.Map // workflowID -> *taskQueueWriter
-	heartbeatStop        sync.Map // workflowID -> *relationshipHeartbeatInfo
+	infra                *workflow.WorkflowInfra
 }
 
 // NewRelationshipWorkflowService creates a new relationship workflow service.
@@ -125,9 +116,8 @@ func NewRelationshipWorkflowService(
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) RelationshipWorkflowService {
-	serverID := uuid.New()
 	namedLogger := logger.Named("relationship-workflow")
-	namedLogger.Info("Relationship workflow service initialized", zap.String("server_instance_id", serverID.String()))
+	infra := workflow.NewWorkflowInfra(workflowRepo, getTenantCtx, namedLogger)
 
 	return &relationshipWorkflowService{
 		workflowRepo:         workflowRepo,
@@ -143,7 +133,7 @@ func NewRelationshipWorkflowService(
 		deterministicService: deterministicService,
 		getTenantCtx:         getTenantCtx,
 		logger:               namedLogger,
-		serverInstanceID:     serverID,
+		infra:                infra,
 	}
 }
 
@@ -230,7 +220,7 @@ func (s *relationshipWorkflowService) StartDetection(ctx context.Context, projec
 
 	// Step 3: Create workflow for relationships phase
 	now := time.Now()
-	workflow := &models.OntologyWorkflow{
+	wf := &models.OntologyWorkflow{
 		ID:           uuid.New(),
 		ProjectID:    projectID,
 		OntologyID:   ontology.ID,
@@ -250,7 +240,7 @@ func (s *relationshipWorkflowService) StartDetection(ctx context.Context, projec
 		StartedAt: &now,
 	}
 
-	if err := s.workflowRepo.Create(ctx, workflow); err != nil {
+	if err := s.workflowRepo.Create(ctx, wf); err != nil {
 		s.logger.Error("Failed to create workflow",
 			zap.String("project_id", projectID.String()),
 			zap.String("datasource_id", datasourceID.String()),
@@ -259,53 +249,54 @@ func (s *relationshipWorkflowService) StartDetection(ctx context.Context, projec
 	}
 
 	// Step 4: Initialize workflow state for all columns (needed for scanning)
-	if err := s.initializeWorkflowEntities(ctx, projectID, workflow.ID, ontology.ID, datasourceID); err != nil {
+	if err := s.initializeWorkflowEntities(ctx, projectID, wf.ID, ontology.ID, datasourceID); err != nil {
 		s.logger.Error("Failed to initialize workflow entities",
-			zap.String("workflow_id", workflow.ID.String()),
+			zap.String("workflow_id", wf.ID.String()),
 			zap.Error(err))
 		return nil, err
 	}
 
 	// Step 5: Claim ownership and transition to running
-	claimed, err := s.workflowRepo.ClaimOwnership(ctx, workflow.ID, s.serverInstanceID)
+	claimed, err := s.workflowRepo.ClaimOwnership(ctx, wf.ID, s.infra.ServerInstanceID())
 	if err != nil {
 		s.logger.Error("Failed to claim workflow ownership",
-			zap.String("workflow_id", workflow.ID.String()),
+			zap.String("workflow_id", wf.ID.String()),
 			zap.Error(err))
 		return nil, fmt.Errorf("claim ownership: %w", err)
 	}
 	if !claimed {
 		s.logger.Error("Workflow already owned by another server",
-			zap.String("workflow_id", workflow.ID.String()))
+			zap.String("workflow_id", wf.ID.String()))
 		return nil, fmt.Errorf("workflow already owned by another server")
 	}
 
 	// Transition to running
-	workflow.State = models.WorkflowStateRunning
-	if err := s.workflowRepo.UpdateState(ctx, workflow.ID, models.WorkflowStateRunning, ""); err != nil {
+	wf.State = models.WorkflowStateRunning
+	if err := s.workflowRepo.UpdateState(ctx, wf.ID, models.WorkflowStateRunning, ""); err != nil {
 		s.logger.Error("Failed to start workflow",
-			zap.String("workflow_id", workflow.ID.String()),
+			zap.String("workflow_id", wf.ID.String()),
 			zap.Error(err))
 		return nil, err
 	}
 
 	// Start heartbeat goroutine to maintain ownership
-	s.startHeartbeat(workflow.ID, projectID)
+	s.infra.StartHeartbeat(wf.ID, projectID)
 
 	s.logger.Info("Relationship detection started",
 		zap.String("project_id", projectID.String()),
-		zap.String("workflow_id", workflow.ID.String()),
+		zap.String("workflow_id", wf.ID.String()),
 		zap.String("datasource_id", datasourceID.String()),
-		zap.String("server_instance_id", s.serverInstanceID.String()))
+		zap.String("server_instance_id", s.infra.ServerInstanceID().String()))
 
 	// Step 6: Create work queue and enqueue tasks
 	queue := workqueue.New(s.logger, workqueue.WithStrategy(workqueue.NewParallelLLMStrategy()))
-	s.activeQueues.Store(workflow.ID, queue)
+	s.infra.StoreQueue(wf.ID, queue)
 
 	// Start single writer goroutine for task queue updates
-	writer := s.startTaskQueueWriter(workflow.ID)
+	s.infra.StartTaskQueueWriter(wf.ID)
 
 	// Set up callback to sync task queue to database for UI visibility
+	workflowID := wf.ID // Capture for closure
 	queue.SetOnUpdate(func(snapshots []workqueue.TaskSnapshot) {
 		// Convert snapshots to models.WorkflowTask with status mapping
 		tasks := make([]models.WorkflowTask, len(snapshots))
@@ -334,31 +325,26 @@ func (s *relationshipWorkflowService) StartDetection(ctx context.Context, projec
 			}
 		}
 		// Send to single writer goroutine (non-blocking due to buffered channel)
-		select {
-		case writer.updates <- taskQueueUpdate{
-			projectID:  projectID,
-			workflowID: workflow.ID,
-			tasks:      tasks,
-		}:
-		default:
-			s.logger.Warn("Task queue update buffer full, dropping update",
-				zap.String("workflow_id", workflow.ID.String()))
-		}
+		s.infra.SendTaskQueueUpdate(workflow.TaskQueueUpdate{
+			ProjectID:  projectID,
+			WorkflowID: workflowID,
+			Tasks:      tasks,
+		})
 	})
 
 	// Run workflow in background - HTTP request returns immediately
-	go s.runWorkflow(projectID, workflow.ID, ontology.ID, datasourceID, queue)
+	go s.runWorkflow(projectID, wf.ID, ontology.ID, datasourceID, queue)
 
-	return workflow, nil
+	return wf, nil
 }
 
 // runWorkflow orchestrates the relationship detection phases.
 // Runs in a background goroutine - acquires its own DB connection.
 func (s *relationshipWorkflowService) runWorkflow(projectID, workflowID, ontologyID, datasourceID uuid.UUID, queue *workqueue.Queue) {
 	// Clean up when done
-	defer s.activeQueues.Delete(workflowID)
-	defer s.stopTaskQueueWriter(workflowID)
-	defer s.stopHeartbeat(workflowID)
+	defer s.infra.DeleteQueue(workflowID)
+	defer s.infra.StopTaskQueueWriter(workflowID)
+	defer s.infra.StopHeartbeat(workflowID)
 	defer func() {
 		// Release ownership so other servers can take over if needed
 		ctx, cleanup, err := s.getTenantCtx(context.Background(), projectID)
@@ -1108,13 +1094,11 @@ func (s *relationshipWorkflowService) GetByID(ctx context.Context, workflowID uu
 
 func (s *relationshipWorkflowService) Cancel(ctx context.Context, workflowID uuid.UUID) error {
 	// Cancel active queue if running (signals tasks to stop)
-	if queueVal, ok := s.activeQueues.Load(workflowID); ok {
-		if queue, ok := queueVal.(*workqueue.Queue); ok {
-			queue.Cancel()
-			s.logger.Info("Queue cancelled for workflow",
-				zap.String("workflow_id", workflowID.String()))
-		}
-		s.activeQueues.Delete(workflowID)
+	if queue, ok := s.infra.LoadQueue(workflowID); ok {
+		queue.Cancel()
+		s.logger.Info("Queue cancelled for workflow",
+			zap.String("workflow_id", workflowID.String()))
+		s.infra.DeleteQueue(workflowID)
 	}
 
 	// Delete all candidates for this workflow
@@ -1497,77 +1481,6 @@ func (s *relationshipWorkflowService) MarkFailed(ctx context.Context, workflowID
 	return nil
 }
 
-// startTaskQueueWriter creates and starts a single writer goroutine for a workflow.
-func (s *relationshipWorkflowService) startTaskQueueWriter(workflowID uuid.UUID) *taskQueueWriter {
-	writer := &taskQueueWriter{
-		updates: make(chan taskQueueUpdate, 100),
-		done:    make(chan struct{}),
-	}
-	s.taskQueueWriters.Store(workflowID, writer)
-	go s.runTaskQueueWriter(writer)
-	return writer
-}
-
-// stopTaskQueueWriter closes the channel and waits for the writer to finish.
-func (s *relationshipWorkflowService) stopTaskQueueWriter(workflowID uuid.UUID) {
-	if writerVal, ok := s.taskQueueWriters.LoadAndDelete(workflowID); ok {
-		writer := writerVal.(*taskQueueWriter)
-		close(writer.updates)
-		<-writer.done // Wait for writer to finish
-	}
-}
-
-// runTaskQueueWriter is the single writer goroutine that processes updates.
-func (s *relationshipWorkflowService) runTaskQueueWriter(writer *taskQueueWriter) {
-	defer close(writer.done)
-
-	for {
-		// Wait for at least one update
-		update, ok := <-writer.updates
-		if !ok {
-			return // Channel closed, exit
-		}
-
-		// Drain any additional pending updates, keeping only the latest
-		for {
-			select {
-			case newer, ok := <-writer.updates:
-				if !ok {
-					// Channel closed while draining - persist what we have and exit
-					s.persistTaskQueue(update.projectID, update.workflowID, update.tasks)
-					return
-				}
-				update = newer // Keep the newer update
-			default:
-				// No more pending updates, persist the latest
-				goto persist
-			}
-		}
-
-	persist:
-		s.persistTaskQueue(update.projectID, update.workflowID, update.tasks)
-	}
-}
-
-// persistTaskQueue saves the task queue to the database.
-func (s *relationshipWorkflowService) persistTaskQueue(projectID, workflowID uuid.UUID, tasks []models.WorkflowTask) {
-	// Acquire a fresh DB connection since this runs in a goroutine
-	ctx, cleanup, err := s.getTenantCtx(context.Background(), projectID)
-	if err != nil {
-		s.logger.Error("Failed to acquire DB connection for task queue update",
-			zap.String("workflow_id", workflowID.String()),
-			zap.Error(err))
-		return
-	}
-	defer cleanup()
-
-	if err := s.workflowRepo.UpdateTaskQueue(ctx, workflowID, tasks); err != nil {
-		s.logger.Error("Failed to persist task queue",
-			zap.String("workflow_id", workflowID.String()),
-			zap.Error(err))
-	}
-}
-
 // initializeWorkflowEntities creates workflow state rows for columns.
 // All entities start with status='pending'.
 func (s *relationshipWorkflowService) initializeWorkflowEntities(
@@ -1624,119 +1537,29 @@ func (s *relationshipWorkflowService) initializeWorkflowEntities(
 	return nil
 }
 
-// startHeartbeat launches a background goroutine that periodically updates
-// the workflow's last_heartbeat timestamp to maintain ownership.
-func (s *relationshipWorkflowService) startHeartbeat(workflowID, projectID uuid.UUID) {
-	stop := make(chan struct{})
-	info := &relationshipHeartbeatInfo{
-		projectID: projectID,
-		stop:      stop,
-	}
-	s.heartbeatStop.Store(workflowID, info)
+// Shutdown gracefully stops all active workflows owned by this server.
+func (s *relationshipWorkflowService) Shutdown(ctx context.Context) error {
+	s.logger.Info("Shutting down relationship workflow service",
+		zap.String("server_instance_id", s.infra.ServerInstanceID().String()))
 
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
+	return s.infra.Shutdown(ctx, func(workflowID, projectID uuid.UUID, queue *workqueue.Queue) {
+		s.logger.Info("Cancelling workflow for shutdown",
+			zap.String("workflow_id", workflowID.String()))
 
-		for {
-			select {
-			case <-stop:
-				s.logger.Debug("Heartbeat stopped",
-					zap.String("workflow_id", workflowID.String()))
-				return
-			case <-ticker.C:
-				ctx, cleanup, err := s.getTenantCtx(context.Background(), projectID)
-				if err != nil {
-					s.logger.Error("Failed to acquire DB connection for heartbeat",
+		// Cancel the queue (signals tasks to stop)
+		queue.Cancel()
+
+		// Release ownership if we have a project ID
+		if projectID != uuid.Nil {
+			tenantCtx, cleanup, err := s.getTenantCtx(context.Background(), projectID)
+			if err == nil {
+				if releaseErr := s.workflowRepo.ReleaseOwnership(tenantCtx, workflowID); releaseErr != nil {
+					s.logger.Error("Failed to release ownership during shutdown",
 						zap.String("workflow_id", workflowID.String()),
-						zap.Error(err))
-					continue
-				}
-				if err := s.workflowRepo.UpdateHeartbeat(ctx, workflowID, s.serverInstanceID); err != nil {
-					s.logger.Error("Failed to update heartbeat",
-						zap.String("workflow_id", workflowID.String()),
-						zap.Error(err))
+						zap.Error(releaseErr))
 				}
 				cleanup()
 			}
 		}
-	}()
-
-	s.logger.Debug("Heartbeat started",
-		zap.String("workflow_id", workflowID.String()),
-		zap.String("server_instance_id", s.serverInstanceID.String()))
-}
-
-// stopHeartbeat stops the heartbeat goroutine for a workflow.
-func (s *relationshipWorkflowService) stopHeartbeat(workflowID uuid.UUID) {
-	if infoVal, ok := s.heartbeatStop.LoadAndDelete(workflowID); ok {
-		info := infoVal.(*relationshipHeartbeatInfo)
-		close(info.stop)
-	}
-}
-
-// Shutdown gracefully stops all active workflows owned by this server.
-func (s *relationshipWorkflowService) Shutdown(ctx context.Context) error {
-	s.logger.Info("Shutting down relationship workflow service",
-		zap.String("server_instance_id", s.serverInstanceID.String()))
-
-	var wg sync.WaitGroup
-
-	// Cancel all active queues and release ownership
-	s.activeQueues.Range(func(key, value any) bool {
-		workflowID := key.(uuid.UUID)
-		queue := value.(*workqueue.Queue)
-
-		// Get project ID from heartbeat info if available
-		var projectID uuid.UUID
-		if infoVal, ok := s.heartbeatStop.Load(workflowID); ok {
-			info := infoVal.(*relationshipHeartbeatInfo)
-			projectID = info.projectID
-		}
-
-		wg.Add(1)
-		go func(wfID uuid.UUID, q *workqueue.Queue, pID uuid.UUID) {
-			defer wg.Done()
-
-			s.logger.Info("Cancelling workflow for shutdown",
-				zap.String("workflow_id", wfID.String()))
-
-			// Cancel the queue
-			q.Cancel()
-
-			// Stop heartbeat
-			s.stopHeartbeat(wfID)
-
-			// Release ownership if we have a project ID
-			if pID != uuid.Nil {
-				tenantCtx, cleanup, err := s.getTenantCtx(context.Background(), pID)
-				if err == nil {
-					if releaseErr := s.workflowRepo.ReleaseOwnership(tenantCtx, wfID); releaseErr != nil {
-						s.logger.Error("Failed to release ownership during shutdown",
-							zap.String("workflow_id", wfID.String()),
-							zap.Error(releaseErr))
-					}
-					cleanup()
-				}
-			}
-		}(workflowID, queue, projectID)
-
-		return true
 	})
-
-	// Wait for all cancellations with timeout
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		s.logger.Info("All relationship workflows cancelled successfully")
-		return nil
-	case <-ctx.Done():
-		s.logger.Warn("Shutdown timed out, some workflows may not have been cleaned up")
-		return ctx.Err()
-	}
 }
