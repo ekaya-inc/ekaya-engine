@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
@@ -43,7 +42,7 @@ func (h *MCPConfigHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *au
 
 // Get handles GET /api/projects/{pid}/mcp/config
 func (h *MCPConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -67,7 +66,7 @@ func (h *MCPConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // Update handles PATCH /api/projects/{pid}/mcp/config
 func (h *MCPConfigHandler) Update(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -106,17 +105,4 @@ func (h *MCPConfigHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
-}
-
-// parseProjectID extracts and validates the project ID from the path.
-func (h *MCPConfigHandler) parseProjectID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	pidStr := r.PathValue("pid")
-	projectID, err := uuid.Parse(pidStr)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_project_id", "Invalid project ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, false
-	}
-	return projectID, true
 }
