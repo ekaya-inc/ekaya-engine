@@ -81,6 +81,10 @@ func (m *mockQueryService) ListEnabled(ctx context.Context, projectID, datasourc
 	return m.enabledQueries, nil
 }
 
+func (m *mockQueryService) HasEnabledQueries(ctx context.Context, projectID, datasourceID uuid.UUID) (bool, error) {
+	return len(m.enabledQueries) > 0, nil
+}
+
 func (m *mockQueryService) SetEnabledStatus(ctx context.Context, projectID, queryID uuid.UUID, isEnabled bool) error {
 	return nil
 }

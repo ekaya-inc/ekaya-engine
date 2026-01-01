@@ -84,15 +84,16 @@ func RegisterDeveloperTools(s *server.MCPServer, deps *DeveloperToolDeps) {
 }
 
 // NewToolFilter creates a ToolFilterFunc that filters tools based on MCP configuration.
-// It filters out developer tools when the developer group is disabled, and filters out
-// the execute tool when EnableExecute is false.
+// It filters out developer tools when the developer group is disabled, filters out
+// the execute tool when EnableExecute is false, and filters out approved_queries tools
+// when the approved_queries group is disabled or no enabled queries exist.
 func NewToolFilter(deps *DeveloperToolDeps) func(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
 	return func(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
 		// Get claims from context
 		claims, ok := auth.GetClaims(ctx)
 		if !ok {
-			deps.Logger.Debug("Tool filter: no auth context, filtering developer tools")
-			return filterOutDeveloperTools(tools, true)
+			deps.Logger.Debug("Tool filter: no auth context, filtering all controlled tools")
+			return filterTools(tools, false, false, false)
 		}
 
 		projectID, err := uuid.Parse(claims.ProjectID)
@@ -100,7 +101,7 @@ func NewToolFilter(deps *DeveloperToolDeps) func(ctx context.Context, tools []mc
 			deps.Logger.Error("Tool filter: invalid project ID in claims",
 				zap.String("project_id", claims.ProjectID),
 				zap.Error(err))
-			return filterOutDeveloperTools(tools, true)
+			return filterTools(tools, false, false, false)
 		}
 
 		// Acquire tenant scope for database access
@@ -109,46 +110,64 @@ func NewToolFilter(deps *DeveloperToolDeps) func(ctx context.Context, tools []mc
 			deps.Logger.Error("Tool filter: failed to acquire tenant scope",
 				zap.String("project_id", projectID.String()),
 				zap.Error(err))
-			return filterOutDeveloperTools(tools, true)
+			return filterTools(tools, false, false, false)
 		}
 		defer scope.Close()
 
 		// Set tenant context for the config query
 		tenantCtx := database.SetTenantScope(ctx, scope)
 
-		// Get tool group config
-		config, err := deps.MCPConfigService.GetToolGroupConfig(tenantCtx, projectID, developerToolGroup)
+		// Check developer tools config
+		devConfig, err := deps.MCPConfigService.GetToolGroupConfig(tenantCtx, projectID, developerToolGroup)
 		if err != nil {
-			deps.Logger.Error("Tool filter: failed to get tool group config",
+			deps.Logger.Error("Tool filter: failed to get developer tool group config",
 				zap.String("project_id", projectID.String()),
 				zap.Error(err))
-			return filterOutDeveloperTools(tools, true)
+		}
+		showDeveloper := devConfig != nil && devConfig.Enabled
+		showExecute := showDeveloper && devConfig.EnableExecute
+
+		// Check approved_queries tools config
+		showApprovedQueries, err := deps.MCPConfigService.ShouldShowApprovedQueriesTools(tenantCtx, projectID)
+		if err != nil {
+			deps.Logger.Error("Tool filter: failed to check approved queries visibility",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			showApprovedQueries = false
 		}
 
-		// If no config or disabled, filter out all developer tools
-		if config == nil {
-			deps.Logger.Debug("Tool filter: no config found, filtering developer tools",
-				zap.String("project_id", projectID.String()))
-			return filterOutDeveloperTools(tools, true)
-		}
+		deps.Logger.Debug("Tool filter: filtering based on config",
+			zap.String("project_id", projectID.String()),
+			zap.Bool("show_developer", showDeveloper),
+			zap.Bool("show_execute", showExecute),
+			zap.Bool("show_approved_queries", showApprovedQueries))
 
-		if !config.Enabled {
-			deps.Logger.Debug("Tool filter: developer tools disabled",
-				zap.String("project_id", projectID.String()))
-			return filterOutDeveloperTools(tools, true)
-		}
-
-		// Developer tools enabled - check if execute should be filtered
-		if !config.EnableExecute {
-			deps.Logger.Debug("Tool filter: execute tool disabled",
-				zap.String("project_id", projectID.String()))
-			return filterOutExecuteTool(tools)
-		}
-
-		deps.Logger.Debug("Tool filter: all developer tools enabled",
-			zap.String("project_id", projectID.String()))
-		return tools
+		return filterTools(tools, showDeveloper, showExecute, showApprovedQueries)
 	}
+}
+
+// filterTools filters tools based on visibility flags for each tool group.
+func filterTools(tools []mcp.Tool, showDeveloper, showExecute, showApprovedQueries bool) []mcp.Tool {
+	filtered := make([]mcp.Tool, 0, len(tools))
+	for _, tool := range tools {
+		// Check developer tools
+		if developerToolNames[tool.Name] {
+			if !showDeveloper {
+				continue
+			}
+			if tool.Name == "execute" && !showExecute {
+				continue
+			}
+		}
+
+		// Check approved_queries tools
+		if approvedQueriesToolNames[tool.Name] && !showApprovedQueries {
+			continue
+		}
+
+		filtered = append(filtered, tool)
+	}
+	return filtered
 }
 
 // filterOutDeveloperTools removes all developer tools from the list.
