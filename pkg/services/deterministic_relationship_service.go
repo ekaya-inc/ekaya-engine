@@ -25,6 +25,9 @@ type DeterministicRelationshipService interface {
 	// DiscoverRelationships discovers relationships from FK constraints and PK-match
 	// inference for a datasource. Requires entities to exist before calling.
 	DiscoverRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*DiscoveryResult, error)
+
+	// GetByProject returns all entity relationships for a project.
+	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error)
 }
 
 type deterministicRelationshipService struct {
@@ -389,6 +392,10 @@ func (s *deterministicRelationshipService) DiscoverRelationships(ctx context.Con
 		InferredRelationships: inferredCount,
 		TotalRelationships:    fkCount + inferredCount,
 	}, nil
+}
+
+func (s *deterministicRelationshipService) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return s.relationshipRepo.GetByProject(ctx, projectID)
 }
 
 // pkMatchCandidate bundles a column with its table location info for PK-match discovery.

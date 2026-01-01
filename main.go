@@ -329,7 +329,7 @@ func main() {
 
 	// Register entity relationship handler (protected)
 	entityRelationshipHandler := handlers.NewEntityRelationshipHandler(
-		deterministicRelationshipService, entityRelationshipRepo, logger)
+		deterministicRelationshipService, logger)
 	entityRelationshipHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Serve static UI files from ui/dist with SPA routing
