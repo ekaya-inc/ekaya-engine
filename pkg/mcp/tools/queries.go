@@ -32,7 +32,7 @@ var approvedQueriesToolNames = map[string]bool{
 	"execute_approved_query": true,
 }
 
-// RegisterApprovedQueriesTools registers tools for executing pre-approved queries.
+// RegisterApprovedQueriesTools registers tools for executing Pre-Approved Queries.
 func RegisterApprovedQueriesTools(s *server.MCPServer, deps *QueryToolDeps) {
 	registerListApprovedQueriesTool(s, deps)
 	registerExecuteApprovedQueryTool(s, deps)

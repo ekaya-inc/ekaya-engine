@@ -39,7 +39,7 @@ const QueriesPage = () => {
             <div>
               <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
                 <Database className="h-8 w-8 text-blue-500" />
-                Query Management
+                Pre-Approved Queries
               </h1>
               <p className="mt-2 text-text-secondary">
                 Manage pre-approved natural language queries and their
@@ -85,7 +85,7 @@ const QueriesPage = () => {
           <div>
             <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
               <Database className="h-8 w-8 text-blue-500" />
-              Query Management
+              Pre-Approved Queries
             </h1>
             <p className="mt-2 text-text-secondary">
               Manage pre-approved natural language queries and their

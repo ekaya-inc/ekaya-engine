@@ -14,11 +14,10 @@ import {
   Server,
   Shield,
 } from 'lucide-react';
-
-import MCPLogo from '../components/icons/MCPLogo';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
+import MCPLogo from '../components/icons/MCPLogo';
 // TEMPORARY: Import commented out for MVP launch - Coming Soon UI replaces full panels
 // import ManagedAIOptionPanel from '../components/ManagedAIOptionPanel';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';

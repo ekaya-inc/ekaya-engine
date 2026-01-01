@@ -328,7 +328,7 @@ class EngineApiService {
     );
   }
 
-  // --- Query Management Methods ---
+  // --- Pre-Approved Queries Methods ---
 
   /**
    * List all queries for a datasource
