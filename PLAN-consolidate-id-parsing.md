@@ -358,17 +358,24 @@ Before implementing, verify that all handlers use consistent path parameter name
 
 Check route registrations if any use different names and adjust `params.go` accordingly.
 
-## Testing
+## Testing [x]
 
-1. Run `make check` to ensure everything compiles and passes
-2. All existing integration tests should pass with no changes
-3. The behavior should be identical - just the code organization is different
+1. Run `make check` to ensure everything compiles and passes ✓
+2. All existing integration tests should pass with no changes ✓
+3. The behavior should be identical - just the code organization is different ✓
+
+**Additional work completed:**
+- Added `pkg/handlers/params_test.go` with comprehensive unit tests
+- Added `pkg/handlers/ontology_chat_test.go` with unit tests
+- Standardized route path parameter names (`{dsid}` instead of `{did}`/`{dsId}`) for consistency
 
 ## Files Changed
 
 | File | Change |
 |------|--------|
 | `pkg/handlers/params.go` | **NEW** - Shared parsing functions |
+| `pkg/handlers/params_test.go` | **NEW** - Unit tests for shared parsing functions |
+| `pkg/handlers/ontology_chat_test.go` | **NEW** - Unit tests for OntologyChatHandler |
 | `pkg/handlers/entity_handler.go` | Remove 3 methods, update usages |
 | `pkg/handlers/entity_relationship_handler.go` | Remove 2 methods, update usages |
 | `pkg/handlers/entity_discovery_handler.go` | Remove 1 method, update usages |
@@ -376,8 +383,8 @@ Check route registrations if any use different names and adjust `params.go` acco
 | `pkg/handlers/ontology.go` | Remove 1 method, update usages |
 | `pkg/handlers/ontology_questions.go` | Remove 2 methods, update usages |
 | `pkg/handlers/ontology_chat.go` | Remove 1 method, update usages |
-| `pkg/handlers/schema.go` | Remove 2 methods, update usages |
-| `pkg/handlers/queries.go` | Remove 2 methods, update usages |
+| `pkg/handlers/schema.go` | Remove 2 methods, update usages, standardize route params |
+| `pkg/handlers/queries.go` | Remove 2 methods, update usages, standardize route params |
 | `pkg/handlers/mcp_config.go` | Remove 1 method, update usages |
 
 ## Estimated Scope
