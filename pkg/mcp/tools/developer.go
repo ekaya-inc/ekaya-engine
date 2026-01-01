@@ -17,7 +17,6 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
-	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
@@ -68,7 +67,6 @@ func truncateSQL(sql string, maxLen int) string {
 // developerToolNames lists all tools in the developer group.
 var developerToolNames = map[string]bool{
 	"echo":     true,
-	"schema":   true,
 	"query":    true,
 	"sample":   true,
 	"execute":  true,
@@ -79,7 +77,6 @@ var developerToolNames = map[string]bool{
 // These tools are only accessible when the developer tool group is enabled.
 func RegisterDeveloperTools(s *server.MCPServer, deps *DeveloperToolDeps) {
 	registerEchoTool(s, deps)
-	registerSchemaTool(s, deps)
 	registerQueryTool(s, deps)
 	registerSampleTool(s, deps)
 	registerExecuteTool(s, deps)
@@ -94,38 +91,62 @@ func NewToolFilter(deps *DeveloperToolDeps) func(ctx context.Context, tools []mc
 		// Get claims from context
 		claims, ok := auth.GetClaims(ctx)
 		if !ok {
-			// No auth context - filter out all developer tools
+			deps.Logger.Debug("Tool filter: no auth context, filtering developer tools")
 			return filterOutDeveloperTools(tools, true)
 		}
 
 		projectID, err := uuid.Parse(claims.ProjectID)
 		if err != nil {
-			deps.Logger.Error("Invalid project ID in claims",
+			deps.Logger.Error("Tool filter: invalid project ID in claims",
 				zap.String("project_id", claims.ProjectID),
 				zap.Error(err))
 			return filterOutDeveloperTools(tools, true)
 		}
 
-		// Get tool group config
-		config, err := deps.MCPConfigService.GetToolGroupConfig(ctx, projectID, developerToolGroup)
+		// Acquire tenant scope for database access
+		scope, err := deps.DB.WithTenant(ctx, projectID)
 		if err != nil {
-			deps.Logger.Error("Failed to get tool group config",
+			deps.Logger.Error("Tool filter: failed to acquire tenant scope",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			return filterOutDeveloperTools(tools, true)
+		}
+		defer scope.Close()
+
+		// Set tenant context for the config query
+		tenantCtx := database.SetTenantScope(ctx, scope)
+
+		// Get tool group config
+		config, err := deps.MCPConfigService.GetToolGroupConfig(tenantCtx, projectID, developerToolGroup)
+		if err != nil {
+			deps.Logger.Error("Tool filter: failed to get tool group config",
 				zap.String("project_id", projectID.String()),
 				zap.Error(err))
 			return filterOutDeveloperTools(tools, true)
 		}
 
 		// If no config or disabled, filter out all developer tools
-		if config == nil || !config.Enabled {
+		if config == nil {
+			deps.Logger.Debug("Tool filter: no config found, filtering developer tools",
+				zap.String("project_id", projectID.String()))
+			return filterOutDeveloperTools(tools, true)
+		}
+
+		if !config.Enabled {
+			deps.Logger.Debug("Tool filter: developer tools disabled",
+				zap.String("project_id", projectID.String()))
 			return filterOutDeveloperTools(tools, true)
 		}
 
 		// Developer tools enabled - check if execute should be filtered
 		if !config.EnableExecute {
+			deps.Logger.Debug("Tool filter: execute tool disabled",
+				zap.String("project_id", projectID.String()))
 			return filterOutExecuteTool(tools)
 		}
 
-		// All tools enabled
+		deps.Logger.Debug("Tool filter: all developer tools enabled",
+			zap.String("project_id", projectID.String()))
 		return tools
 	}
 }
@@ -279,155 +300,6 @@ func getDefaultDatasourceConfig(ctx context.Context, deps *DeveloperToolDeps, pr
 	}
 
 	return ds.DatasourceType, ds.Config, nil
-}
-
-// schemaColumnResult represents a column in the schema response.
-type schemaColumnResult struct {
-	Name       string  `json:"name"`
-	Type       string  `json:"type"`
-	Nullable   bool    `json:"nullable"`
-	PrimaryKey bool    `json:"primary_key"`
-	Unique     bool    `json:"unique"`
-	Default    *string `json:"default"`
-}
-
-// schemaTableResult represents a table in the schema response.
-type schemaTableResult struct {
-	Schema   string               `json:"schema"`
-	Name     string               `json:"name"`
-	RowCount int64                `json:"row_count"`
-	Columns  []schemaColumnResult `json:"columns"`
-}
-
-// schemaRelationshipResult represents a relationship in the schema response.
-type schemaRelationshipResult struct {
-	SourceTable  string `json:"source_table"`
-	SourceColumn string `json:"source_column"`
-	TargetTable  string `json:"target_table"`
-	TargetColumn string `json:"target_column"`
-	Cardinality  string `json:"cardinality"`
-}
-
-// schemaResult represents the full schema response.
-type schemaResult struct {
-	Dialect       string                     `json:"dialect"`
-	Tables        []schemaTableResult        `json:"tables"`
-	Relationships []schemaRelationshipResult `json:"relationships"`
-}
-
-// registerSchemaTool adds the schema tool for retrieving database schema.
-func registerSchemaTool(s *server.MCPServer, deps *DeveloperToolDeps) {
-	tool := mcp.NewTool(
-		"schema",
-		mcp.WithDescription("Get database schema with dialect. Returns tables, columns, and relationships."),
-		mcp.WithString(
-			"table",
-			mcp.Description("Filter to specific table (format: schema.table or just table)"),
-		),
-		mcp.WithReadOnlyHintAnnotation(true),
-		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithOpenWorldHintAnnotation(false),
-	)
-
-	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkDeveloperEnabled(ctx, deps)
-		if err != nil {
-			return nil, err
-		}
-		defer cleanup()
-
-		// Get optional table filter
-		tableFilter := getOptionalString(req, "table")
-
-		// Get default datasource ID
-		dsID, err := deps.ProjectService.GetDefaultDatasourceID(tenantCtx, projectID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get default datasource: %w", err)
-		}
-		if dsID == uuid.Nil {
-			return nil, fmt.Errorf("no default datasource configured for project")
-		}
-
-		// Get datasource for dialect
-		ds, err := deps.DatasourceService.Get(tenantCtx, projectID, dsID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get datasource: %w", err)
-		}
-
-		// Get schema from service
-		var schema *models.DatasourceSchema
-		if tableFilter != "" {
-			// Get specific table
-			table, err := deps.SchemaService.GetDatasourceTable(tenantCtx, projectID, dsID, tableFilter)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get table: %w", err)
-			}
-			// Wrap in schema for consistent response
-			schema = &models.DatasourceSchema{
-				ProjectID:    projectID,
-				DatasourceID: dsID,
-				Tables:       []*models.DatasourceTable{table},
-			}
-		} else {
-			schema, err = deps.SchemaService.GetDatasourceSchema(tenantCtx, projectID, dsID)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get schema: %w", err)
-			}
-		}
-
-		// Transform to response format
-		result := schemaResult{
-			Dialect: ds.DatasourceType,
-			Tables:  make([]schemaTableResult, len(schema.Tables)),
-		}
-
-		for i, t := range schema.Tables {
-			tableResult := schemaTableResult{
-				Schema:   t.SchemaName,
-				Name:     t.TableName,
-				RowCount: t.RowCount,
-				Columns:  make([]schemaColumnResult, len(t.Columns)),
-			}
-
-			for j, c := range t.Columns {
-				col := schemaColumnResult{
-					Name:       c.ColumnName,
-					Type:       c.DataType,
-					Nullable:   c.IsNullable,
-					PrimaryKey: c.IsPrimaryKey,
-					Unique:     c.IsUnique,
-				}
-				if c.DefaultValue != nil {
-					col.Default = c.DefaultValue
-				}
-				tableResult.Columns[j] = col
-			}
-
-			result.Tables[i] = tableResult
-		}
-
-		// Add relationships
-		if schema.Relationships != nil {
-			result.Relationships = make([]schemaRelationshipResult, len(schema.Relationships))
-			for i, r := range schema.Relationships {
-				result.Relationships[i] = schemaRelationshipResult{
-					SourceTable:  r.SourceTableName,
-					SourceColumn: r.SourceColumnName,
-					TargetTable:  r.TargetTableName,
-					TargetColumn: r.TargetColumnName,
-					Cardinality:  r.Cardinality,
-				}
-			}
-		}
-
-		jsonResult, err := json.Marshal(result)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal result: %w", err)
-		}
-
-		return mcp.NewToolResultText(string(jsonResult)), nil
-	})
 }
 
 // registerQueryTool adds the query tool for executing read-only SQL.

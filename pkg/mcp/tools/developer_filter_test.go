@@ -9,8 +9,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
+	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
 )
 
 // mockMCPConfigService implements services.MCPConfigService for testing.
@@ -49,7 +52,6 @@ func createTestTools() []mcp.Tool {
 	return []mcp.Tool{
 		{Name: "health"},
 		{Name: "echo"},
-		{Name: "schema"},
 		{Name: "query"},
 		{Name: "sample"},
 		{Name: "execute"},
@@ -77,10 +79,8 @@ func containsTool(tools []mcp.Tool, name string) bool {
 }
 
 func TestNewToolFilter_NoAuth(t *testing.T) {
+	// No DB needed - filter should return early without auth
 	deps := &DeveloperToolDeps{
-		MCPConfigService: &mockMCPConfigService{
-			config: &models.ToolGroupConfig{Enabled: true, EnableExecute: true},
-		},
 		Logger: zap.NewNop(),
 	}
 
@@ -100,18 +100,22 @@ func TestNewToolFilter_NoAuth(t *testing.T) {
 }
 
 func TestNewToolFilter_DeveloperDisabled(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Create config with developer tools disabled
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: false, EnableExecute: false})
+
 	deps := &DeveloperToolDeps{
-		MCPConfigService: &mockMCPConfigService{
-			config: &models.ToolGroupConfig{Enabled: false, EnableExecute: false},
-		},
-		Logger: zap.NewNop(),
+		DB:               engineDB.DB,
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), "http://localhost", zap.NewNop()),
+		Logger:           zap.NewNop(),
 	}
 
 	filter := NewToolFilter(deps)
 	tools := createTestTools()
 
 	// Developer tools disabled - should filter out all developer tools
-	projectID := uuid.New()
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
@@ -124,23 +128,27 @@ func TestNewToolFilter_DeveloperDisabled(t *testing.T) {
 }
 
 func TestNewToolFilter_DeveloperEnabledExecuteDisabled(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Create config with developer tools enabled but execute disabled
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, EnableExecute: false})
+
 	deps := &DeveloperToolDeps{
-		MCPConfigService: &mockMCPConfigService{
-			config: &models.ToolGroupConfig{Enabled: true, EnableExecute: false},
-		},
-		Logger: zap.NewNop(),
+		DB:               engineDB.DB,
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), "http://localhost", zap.NewNop()),
+		Logger:           zap.NewNop(),
 	}
 
 	filter := NewToolFilter(deps)
 	tools := createTestTools()
 
 	// Developer tools enabled, execute disabled - should filter out execute only
-	projectID := uuid.New()
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
 	// Should have health + all developer tools except execute
-	expectedTools := []string{"health", "echo", "schema", "query", "sample", "validate"}
+	expectedTools := []string{"health", "echo", "query", "sample", "validate"}
 	if len(filtered) != len(expectedTools) {
 		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
 	}
@@ -157,18 +165,22 @@ func TestNewToolFilter_DeveloperEnabledExecuteDisabled(t *testing.T) {
 }
 
 func TestNewToolFilter_AllEnabled(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Create config with all tools enabled
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, EnableExecute: true})
+
 	deps := &DeveloperToolDeps{
-		MCPConfigService: &mockMCPConfigService{
-			config: &models.ToolGroupConfig{Enabled: true, EnableExecute: true},
-		},
-		Logger: zap.NewNop(),
+		DB:               engineDB.DB,
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), "http://localhost", zap.NewNop()),
+		Logger:           zap.NewNop(),
 	}
 
 	filter := NewToolFilter(deps)
 	tools := createTestTools()
 
 	// All tools enabled
-	projectID := uuid.New()
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
@@ -183,18 +195,20 @@ func TestNewToolFilter_AllEnabled(t *testing.T) {
 }
 
 func TestNewToolFilter_NilConfig(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+	// Don't create any config - should use defaults (disabled)
+
 	deps := &DeveloperToolDeps{
-		MCPConfigService: &mockMCPConfigService{
-			config: nil, // No config = defaults (disabled)
-		},
-		Logger: zap.NewNop(),
+		DB:               engineDB.DB,
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), "http://localhost", zap.NewNop()),
+		Logger:           zap.NewNop(),
 	}
 
 	filter := NewToolFilter(deps)
 	tools := createTestTools()
 
 	// No config - should filter out all developer tools
-	projectID := uuid.New()
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
@@ -222,8 +236,8 @@ func TestFilterOutExecuteTool(t *testing.T) {
 	tools := createTestTools()
 	filtered := filterOutExecuteTool(tools)
 
-	if len(filtered) != 6 {
-		t.Errorf("expected 6 tools, got %d", len(filtered))
+	if len(filtered) != 5 {
+		t.Errorf("expected 5 tools, got %d", len(filtered))
 	}
 
 	if containsTool(filtered, "execute") {
@@ -231,9 +245,56 @@ func TestFilterOutExecuteTool(t *testing.T) {
 	}
 
 	// All other tools should be present
-	for _, name := range []string{"health", "echo", "schema", "query", "sample", "validate"} {
+	for _, name := range []string{"health", "echo", "query", "sample", "validate"} {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present", name)
 		}
 	}
+}
+
+// setupTestConfig creates a project and MCP config for testing.
+func setupTestConfig(t *testing.T, db *database.DB, projectID uuid.UUID, config *models.ToolGroupConfig) {
+	t.Helper()
+
+	ctx := context.Background()
+	scope, err := db.WithTenant(ctx, projectID)
+	if err != nil {
+		t.Fatalf("failed to get tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	tenantCtx := database.SetTenantScope(ctx, scope)
+
+	// Create project first (MCP config has FK to projects)
+	_, err = scope.Conn.Exec(tenantCtx, `
+		INSERT INTO engine_projects (id, name, created_at, updated_at)
+		VALUES ($1, 'Test Project', NOW(), NOW())
+		ON CONFLICT (id) DO NOTHING`, projectID)
+	if err != nil {
+		t.Fatalf("failed to create test project: %v", err)
+	}
+
+	mcpConfig := &models.MCPConfig{
+		ProjectID: projectID,
+		ToolGroups: map[string]*models.ToolGroupConfig{
+			"developer": config,
+		},
+	}
+
+	repo := repositories.NewMCPConfigRepository()
+	if err := repo.Upsert(tenantCtx, mcpConfig); err != nil {
+		t.Fatalf("failed to create test config: %v", err)
+	}
+
+	t.Cleanup(func() {
+		// Clean up after test
+		cleanupCtx := context.Background()
+		cleanupScope, err := db.WithTenant(cleanupCtx, projectID)
+		if err != nil {
+			return
+		}
+		defer cleanupScope.Close()
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_mcp_config WHERE project_id = $1", projectID)
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_projects WHERE id = $1", projectID)
+	})
 }
