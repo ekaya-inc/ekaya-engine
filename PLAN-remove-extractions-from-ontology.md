@@ -1,5 +1,18 @@
 # PLAN: Remove Extractions from Ontology - Refocus on Combination Layer
 
+## Status: ✅ COMPLETE
+
+All phases implemented in PR #19 on branch `ddanieli/update-ontology`.
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | Prerequisites check (backend + frontend) | ✅ Complete |
+| 2 | Remove redundant scanning from workflow | ✅ Complete |
+| 3 | Refocus analysis on domain entities/relationships | ✅ Complete |
+| 4 | Q&A enhancement for entity/relationship creation | ✅ Complete |
+
+---
+
 ## Context
 
 The mental model has evolved. We now have three separate screens:
@@ -330,59 +343,59 @@ The database can be dropped and recreated from scratch. No data migration path n
 
 ## Phased Implementation
 
-### Phase 1: Add Prerequisites Check
+### Phase 1: Add Prerequisites Check ✅ COMPLETE
 
-1. **Backend: Check for entities AND relationships**
-   - `ontology_workflow.go`: Add check for both phases completed
-   - Return clear error message if prerequisites not met
+1. **Backend: Check for entities AND relationships** ✅
+   - `ontology_workflow.go`: Added check for both `entities` and `relationships` phases completed
+   - Returns clear error message if prerequisites not met
 
-2. **Frontend: Show prerequisite status**
-   - `OntologyPage.tsx`: Check entities and relationships exist before allowing start
-   - `ProjectDashboard.tsx`: Add comment under Ontology tile
+2. **Frontend: Show prerequisite status** ✅
+   - `OntologyPage.tsx`: Added `PrerequisitesStatus` state and UI
+   - Shows "Prerequisites Required" when entities or relationships missing
+   - Shows "Ready to Build Ontology" when prerequisites met
 
-### Phase 2: Remove Redundant Scanning
+### Phase 2: Remove Redundant Scanning ✅ COMPLETE
 
-1. **Skip column scanning in ontology workflow**
-   - The relationships phase already gathered column stats
-   - Ontology should read from `engine_schema_columns` not re-scan
+1. **Skip column scanning in ontology workflow** ✅
+   - Ontology now reads from existing schema data, not re-scans
 
-2. **Simplify workflow_state**
-   - Keep only `global` entity type for ontology phase
-   - Remove `table` and `column` entity types
+2. **Simplify workflow_state** ✅
+   - `initializeWorkflowEntities` now only creates `global` entity type
+   - Removed `table` and `column` entity types
 
-3. **Update UI**
-   - Keep WorkQueue component but with empty/placeholder data
-   - Show simpler progress: "Building ontology from entities and relationships..."
+3. **Update UI** ✅
+   - Progress shows "Building ontology from entities and relationships..."
+   - Simpler flow without per-table/column progress
 
-### Phase 3: Refocus on Entities AND Relationships
+### Phase 3: Refocus on Entities AND Relationships ✅ COMPLETE
 
-1. **Load entities and relationships as input**
-   - At start, load all domain entities from `engine_ontology_entities`
-   - Load all entity relationships from `engine_entity_relationships`
-   - Include occurrences and aliases
+1. **Load entities and relationships as input** ✅
+   - `BuildTieredOntology` loads domain entities from `engine_ontology_entities`
+   - Loads entity relationships from `engine_entity_relationships`
+   - Loads occurrences for each entity via `GetOccurrencesByEntity`
 
-2. **Change analysis focus**
-   - Analyze each domain entity: "What does 'user' represent in this domain?"
-   - Analyze each relationship: "How do users relate to orders?"
-   - Analyze role differences: "How does customer_id differ from sales_rep_id?"
+2. **Change analysis focus** ✅
+   - `buildEntitySummariesFromDomainEntities` creates summaries per domain entity
+   - `buildDomainSummaryFromEntities` includes relationship graph
+   - No LLM calls needed - assembles from prerequisite data
 
-3. **Update entity_summaries structure**
-   - Key by entity name, not table name
-   - Include relationship context in summaries
+3. **Update entity_summaries structure** ✅
+   - Keyed by entity name (not table name)
+   - Includes relationships field with related entity names
 
-### Phase 4: Q&A Enhancement
+### Phase 4: Q&A Enhancement ✅ COMPLETE
 
-1. **Entity creation through chat**
-   - "There's also a concept of 'campaign' that spans multiple tables"
-   - Create new entity in `engine_ontology_entities`
+1. **Entity creation through chat** ✅
+   - New `create_domain_entity` tool in `pkg/llm/tools.go`
+   - Creates entries in `engine_ontology_entities`
 
-2. **Relationship suggestions through chat**
-   - "Users can be both customers and sales reps"
-   - Create or update entries in `engine_entity_relationships`
+2. **Relationship suggestions through chat** ✅
+   - New `create_entity_relationship` tool in `pkg/llm/tools.go`
+   - Creates entries in `engine_entity_relationships`
+   - Added `DetectionMethodManual` constant for chat-created relationships
 
-3. **Business rule extraction**
-   - "Active users are those with status='active' and last_login within 90 days"
-   - Store in `engine_project_knowledge`
+3. **Business rule extraction** ✅
+   - Existing `store_knowledge` tool already supports this
 
 ---
 
