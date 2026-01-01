@@ -164,11 +164,11 @@ After removing the repository from the handler:
 - `main.go` compiles successfully
 - `entityRelationshipRepo` still needed in main.go because `NewDeterministicRelationshipService` uses it
 
-## Testing
+## Testing [x]
 
-1. Run `make check` to ensure everything compiles and passes
-2. The existing integration tests in `pkg/handlers/entity_integration_test.go` should continue to pass
-3. Verify the `/api/projects/{pid}/relationships` endpoint still returns the same data
+1. Run `make check` to ensure everything compiles and passes ✓
+2. The existing integration tests in `pkg/handlers/entity_integration_test.go` should continue to pass ✓
+3. Verify the `/api/projects/{pid}/relationships` endpoint still returns the same data ✓
 
 ## Files Changed
 
