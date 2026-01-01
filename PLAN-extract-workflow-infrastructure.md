@@ -15,7 +15,7 @@ This results in ~400 lines of duplicated code across the three services.
 ### Heartbeat Pattern (identical across all 3)
 
 ```go
-// ontology_workflow.go:896-943
+// ontology_workflow.go:799-852
 func (s *ontologyWorkflowService) startHeartbeat(workflowID, projectID uuid.UUID) {
     stop := make(chan struct{})
     info := &heartbeatInfo{projectID: projectID, stop: stop}
@@ -34,14 +34,14 @@ func (s *ontologyWorkflowService) startHeartbeat(workflowID, projectID uuid.UUID
     }()
 }
 
-// relationship_workflow.go:1629-1676 - IDENTICAL
-// entity_discovery_service.go:867-910 - IDENTICAL
+// relationship_workflow.go:1629-1677 - IDENTICAL
+// entity_discovery_service.go:867-917 - IDENTICAL
 ```
 
 ### TaskQueueWriter Pattern (identical across all 3)
 
 ```go
-// ontology_workflow.go:64-67, 668-737
+// ontology_workflow.go:64-70, 681-750
 type taskQueueWriter struct {
     updates chan taskQueueUpdate
     done    chan struct{}
@@ -429,8 +429,7 @@ func (w *WorkflowInfra) Shutdown(ctx context.Context, shutdownFn ShutdownFunc) e
 
 #### 2a. Remove duplicated types
 
-Remove (lines 55-73):
-- `type taskQueueUpdate struct`
+Remove (lines 64-70):
 - `type taskQueueWriter struct`
 - `type heartbeatInfo struct`
 
@@ -540,13 +539,13 @@ queue.SetOnUpdate(func(snapshots []workqueue.TaskSnapshot) {
 
 #### 2f. Remove duplicated methods
 
-Remove (lines 668-743, 896-943):
-- `func (s *ontologyWorkflowService) startTaskQueueWriter(...)`
-- `func (s *ontologyWorkflowService) stopTaskQueueWriter(...)`
-- `func (s *ontologyWorkflowService) runTaskQueueWriter(...)`
-- `func (s *ontologyWorkflowService) persistTaskQueue(...)`
-- `func (s *ontologyWorkflowService) startHeartbeat(...)`
-- `func (s *ontologyWorkflowService) stopHeartbeat(...)`
+Remove (lines 681-797, 799-852):
+- `func (s *ontologyWorkflowService) startTaskQueueWriter(...)` (line 681)
+- `func (s *ontologyWorkflowService) stopTaskQueueWriter(...)` (line 692)
+- `func (s *ontologyWorkflowService) runTaskQueueWriter(...)` (line 702)
+- `func (s *ontologyWorkflowService) persistTaskQueue(...)` (line 734)
+- `func (s *ontologyWorkflowService) startHeartbeat(...)` (line 799)
+- `func (s *ontologyWorkflowService) stopHeartbeat(...)` (line 841)
 
 #### 2g. Update Shutdown method
 
@@ -586,12 +585,19 @@ func (s *ontologyWorkflowService) Shutdown(ctx context.Context) error {
 
 Apply the same pattern as Step 2:
 
-1. Remove duplicated types (`relationshipHeartbeatInfo`, `taskQueueWriter`, `taskQueueUpdate`)
-2. Add `infra *workflow.WorkflowInfra` field
-3. Update constructor to create infra
-4. Replace method calls with `s.infra.*`
-5. Remove duplicated methods (lines 1501-1676)
-6. Update Shutdown method
+1. Remove duplicated types (line 87: `relationshipHeartbeatInfo`, line 92: `taskQueueWriter`)
+2. Remove struct fields (lines 106-109: `serverInstanceID`, `activeQueues`, `taskQueueWriters`, `heartbeatStop`)
+3. Add `infra *workflow.WorkflowInfra` field
+4. Update constructor to create infra
+5. Replace method calls with `s.infra.*`
+6. Remove duplicated methods:
+   - `startTaskQueueWriter` (line 1501)
+   - `stopTaskQueueWriter` (line 1512)
+   - `runTaskQueueWriter` (line 1521)
+   - `persistTaskQueue` (line 1553)
+   - `startHeartbeat` (line 1629)
+   - `stopHeartbeat` (line 1671)
+7. Update Shutdown method (line 1679)
 
 ### Step 4: Update entityDiscoveryService
 
@@ -599,12 +605,19 @@ Apply the same pattern as Step 2:
 
 Apply the same pattern as Step 2:
 
-1. Remove duplicated types (`entityHeartbeatInfo`, `entityTaskQueueWriter`, `entityTaskQueueUpdate`)
-2. Add `infra *workflow.WorkflowInfra` field
-3. Update constructor to create infra
-4. Replace method calls with `s.infra.*`
-5. Remove duplicated methods (lines 795-910)
-6. Update Shutdown method
+1. Remove duplicated types (line 46: `entityHeartbeatInfo`, line 69: `entityTaskQueueWriter`)
+2. Remove struct fields (lines 62-65: `serverInstanceID`, `activeQueues`, `taskQueueWriters`, `heartbeatStop`)
+3. Add `infra *workflow.WorkflowInfra` field
+4. Update constructor to create infra
+5. Replace method calls with `s.infra.*`
+6. Remove duplicated methods:
+   - `startTaskQueueWriter` (line 795)
+   - `stopTaskQueueWriter` (line 806)
+   - `runTaskQueueWriter` (line 815)
+   - `persistTaskQueue` (line 847)
+   - `startHeartbeat` (line 867)
+   - `stopHeartbeat` (line 909)
+7. Update Shutdown method (line 982)
 
 ### Step 5: Update TenantContextFunc type
 
