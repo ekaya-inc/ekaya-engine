@@ -276,9 +276,8 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 		return nil, err
 	}
 
-	// Step 7: Initialize workflow state for all entities
-	// Pass the relationships workflow ID to reuse scan data (Milestone 3.4)
-	if err := s.initializeWorkflowEntities(ctx, projectID, workflow.ID, ontology.ID, config.DatasourceID, relWorkflow.ID); err != nil {
+	// Step 7: Initialize workflow state with global entity only
+	if err := s.initializeWorkflowEntities(ctx, projectID, workflow.ID, ontology.ID); err != nil {
 		s.logger.Error("Failed to initialize workflow entities",
 			zap.String("workflow_id", workflow.ID.String()),
 			zap.Error(err))
@@ -767,7 +766,7 @@ func (s *ontologyWorkflowService) persistTaskQueue(projectID, workflowID uuid.UU
 // 3. Immediately triggers BuildTieredOntologyTask since there are no table entities to process
 func (s *ontologyWorkflowService) initializeWorkflowEntities(
 	ctx context.Context,
-	projectID, workflowID, ontologyID, _, _ uuid.UUID, // datasourceID and relWorkflowID no longer needed
+	projectID, workflowID, ontologyID uuid.UUID,
 ) error {
 	// Only create the global entity
 	// The orchestrator will see no table entities and immediately trigger BuildTieredOntologyTask
@@ -921,36 +920,14 @@ func (s *ontologyWorkflowService) Shutdown(ctx context.Context) error {
 	}
 }
 
-// GetOntologyEntityCount returns the total number of entities (1 global + tables + columns)
-// that would be processed by an ontology extraction workflow.
-func (s *ontologyWorkflowService) GetOntologyEntityCount(ctx context.Context, projectID uuid.UUID) (int, error) {
-	// Get datasources for this project to find the one to count entities from
-	datasources, err := s.dsSvc.List(ctx, projectID)
-	if err != nil {
-		return 0, fmt.Errorf("list datasources: %w", err)
-	}
-
-	if len(datasources) == 0 {
-		return 0, fmt.Errorf("no datasource configured for project")
-	}
-
-	// Use the first datasource. Projects typically have one datasource, or the first
-	// is the primary one used for ontology extraction. A more robust approach would
-	// be to use the project's default_datasource_id, but that requires ProjectService.
-	datasourceID := datasources[0].ID
-
-	// Count tables
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
-	if err != nil {
-		return 0, fmt.Errorf("list tables: %w", err)
-	}
-
-	// Count columns
-	columns, err := s.schemaRepo.ListColumnsByDatasource(ctx, projectID, datasourceID)
-	if err != nil {
-		return 0, fmt.Errorf("list columns: %w", err)
-	}
-
-	// Total = 1 (global) + tables + columns
-	return 1 + len(tables) + len(columns), nil
+// GetOntologyEntityCount returns the total number of entities that would be
+// processed by an ontology extraction workflow.
+// Since the ontology now builds from domain entities (from the Entities phase)
+// and relationships (from the Relationships phase), we only have a single
+// global entity in the workflow state.
+func (s *ontologyWorkflowService) GetOntologyEntityCount(_ context.Context, _ uuid.UUID) (int, error) {
+	// The ontology workflow now only has a global entity.
+	// The actual work is done by BuildTieredOntology which processes
+	// domain entities and relationships from the prerequisite phases.
+	return 1, nil
 }

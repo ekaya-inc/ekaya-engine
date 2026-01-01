@@ -754,10 +754,15 @@ func (e *OntologyToolExecutor) createEntityRelationship(ctx context.Context, arg
 	}
 
 	// Create the relationship
+	var description *string
+	if args.Description != "" {
+		description = &args.Description
+	}
+
 	relationship := &models.EntityRelationship{
-		OntologyID:        ontology.ID,
-		SourceEntityID:    sourceEntity.ID,
-		TargetEntityID:    targetEntity.ID,
+		OntologyID:         ontology.ID,
+		SourceEntityID:     sourceEntity.ID,
+		TargetEntityID:     targetEntity.ID,
 		SourceColumnSchema: "public", // Default schema
 		SourceColumnTable:  args.SourceTable,
 		SourceColumnName:   args.SourceColumn,
@@ -767,6 +772,7 @@ func (e *OntologyToolExecutor) createEntityRelationship(ctx context.Context, arg
 		DetectionMethod:    models.DetectionMethodManual,
 		Confidence:         1.0, // User-created through chat
 		Status:             models.RelationshipStatusConfirmed,
+		Description:        description,
 	}
 
 	if err := e.entityRelRepo.Create(ctx, relationship); err != nil {
