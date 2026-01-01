@@ -3,7 +3,6 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
@@ -67,7 +66,7 @@ func (h *EntityDiscoveryHandler) RegisterRoutes(mux *http.ServeMux, authMiddlewa
 
 // StartDiscovery handles POST /api/projects/{pid}/datasources/{dsid}/entities/discover
 func (h *EntityDiscoveryHandler) StartDiscovery(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -97,7 +96,7 @@ func (h *EntityDiscoveryHandler) StartDiscovery(w http.ResponseWriter, r *http.R
 
 // GetStatus handles GET /api/projects/{pid}/datasources/{dsid}/entities/status
 func (h *EntityDiscoveryHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
-	_, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	_, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -145,7 +144,7 @@ func (h *EntityDiscoveryHandler) GetStatus(w http.ResponseWriter, r *http.Reques
 
 // Cancel handles POST /api/projects/{pid}/datasources/{dsid}/entities/cancel
 func (h *EntityDiscoveryHandler) Cancel(w http.ResponseWriter, r *http.Request) {
-	_, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	_, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -184,29 +183,3 @@ func (h *EntityDiscoveryHandler) Cancel(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// ============================================================================
-// Helper Methods
-// ============================================================================
-
-// parseProjectAndDatasourceIDs extracts and validates project and datasource IDs from the request path.
-func (h *EntityDiscoveryHandler) parseProjectAndDatasourceIDs(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUID, bool) {
-	projectIDStr := r.PathValue("pid")
-	projectID, err := uuid.Parse(projectIDStr)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_project_id", "Invalid project ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, uuid.Nil, false
-	}
-
-	datasourceIDStr := r.PathValue("dsid")
-	datasourceID, err := uuid.Parse(datasourceIDStr)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_datasource_id", "Invalid datasource ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, uuid.Nil, false
-	}
-
-	return projectID, datasourceID, true
-}
