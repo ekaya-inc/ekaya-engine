@@ -133,6 +133,7 @@ export interface ExecuteQueryResponse {
 export interface ValidateQueryResponse {
   valid: boolean;
   message?: string;
+  warnings?: string[];
 }
 
 /**

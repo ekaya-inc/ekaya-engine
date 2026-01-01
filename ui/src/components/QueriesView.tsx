@@ -15,6 +15,7 @@ import {
   FileText,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Copy,
   Search,
   Loader2,
@@ -699,9 +700,29 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                       schema={codeMirrorSchema}
                       validationStatus={getValidationStatus(createValidation.status)}
                       validationError={createValidation.error ?? undefined}
-                      placeholder="SELECT * FROM... Use {{param_name}} for parameters"
+                      placeholder="SELECT * FROM users WHERE status = {{status}} LIMIT {{limit}}"
                       minHeight="200px"
                     />
+                    {createValidation.warnings.length > 0 && (
+                      <div className="mt-2 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-amber-600 dark:text-amber-400">
+                              Warning
+                            </p>
+                            {createValidation.warnings.map((warning, index) => (
+                              <p
+                                key={index}
+                                className="text-xs text-amber-600/80 dark:text-amber-400/80 mt-1"
+                              >
+                                {warning}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <ParameterEditor
@@ -870,9 +891,29 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                       schema={codeMirrorSchema}
                       validationStatus={getValidationStatus(editValidation.status)}
                       validationError={editValidation.error ?? undefined}
-                      placeholder="SELECT * FROM... Use {{param_name}} for parameters"
+                      placeholder="SELECT * FROM users WHERE status = {{status}} LIMIT {{limit}}"
                       minHeight="200px"
                     />
+                    {editValidation.warnings.length > 0 && (
+                      <div className="mt-2 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-amber-600 dark:text-amber-400">
+                              Warning
+                            </p>
+                            {editValidation.warnings.map((warning, index) => (
+                              <p
+                                key={index}
+                                className="text-xs text-amber-600/80 dark:text-amber-400/80 mt-1"
+                              >
+                                {warning}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <ParameterEditor

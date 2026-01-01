@@ -4,11 +4,14 @@ import (
 	"context"
 	"testing"
 
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/audit"
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
@@ -283,3 +286,124 @@ func TestSecurityAuditorIntegration(t *testing.T) {
 // TestExecuteWithParameters_InjectionDetection would be an integration test
 // that creates a full service and tests injection detection, but that requires
 // database setup and is beyond the scope of unit tests.
+
+// TestValidate_ParameterDetection tests that Validate returns early with a custom message
+// when {{param}} placeholders are detected in the SQL.
+func TestValidate_ParameterDetection(t *testing.T) {
+	tests := []struct {
+		name            string
+		sqlQuery        string
+		expectSkipDB    bool // true = should skip DB validation and return early
+		expectedMessage string
+	}{
+		{
+			name:            "single parameter - skips DB validation",
+			sqlQuery:        "SELECT * FROM users WHERE status = {{status}}",
+			expectSkipDB:    true,
+			expectedMessage: "Parameters detected - full validation on Test Query",
+		},
+		{
+			name:            "multiple parameters - skips DB validation",
+			sqlQuery:        "SELECT * FROM users WHERE status = {{status}} LIMIT {{limit}} OFFSET {{offset}}",
+			expectSkipDB:    true,
+			expectedMessage: "Parameters detected - full validation on Test Query",
+		},
+		{
+			name:            "parameter in WHERE clause - skips DB validation",
+			sqlQuery:        "SELECT * FROM bookings WHERE host_id = {{host_id}} AND started_at > {{start_date}}",
+			expectSkipDB:    true,
+			expectedMessage: "Parameters detected - full validation on Test Query",
+		},
+		{
+			name:            "no parameters - would need DB validation",
+			sqlQuery:        "SELECT * FROM users WHERE status = 'active'",
+			expectSkipDB:    false,
+			expectedMessage: "", // Would be "SQL is valid" but requires DB
+		},
+		{
+			name:            "no parameters with limit - would need DB validation",
+			sqlQuery:        "SELECT * FROM users LIMIT 10",
+			expectSkipDB:    false,
+			expectedMessage: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// For tests that expect parameter detection (early return), we can test
+			// without mocking the datasource service. For tests without parameters,
+			// we'd need integration tests with a real DB.
+			if tt.expectSkipDB {
+				// Create minimal service - only needs logger for this code path
+				// The parameter check happens before any DB calls
+				svc := &queryService{
+					logger: zap.NewNop(),
+				}
+
+				// Create context with mock user claims
+				ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{
+					RegisteredClaims: jwt.RegisteredClaims{
+						Subject: "test-user-id",
+					},
+				})
+
+				// Call Validate - datasourceID and projectID don't matter for this test
+				// because we return early when parameters are detected
+				result, err := svc.Validate(ctx, uuid.New(), uuid.New(), tt.sqlQuery)
+
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				assert.True(t, result.Valid)
+				assert.Equal(t, tt.expectedMessage, result.Message)
+			}
+			// For non-parameter cases, skip - they require DB integration tests
+		})
+	}
+}
+
+// TestValidate_EmptySQL tests that Validate returns an error for empty SQL.
+func TestValidate_EmptySQL(t *testing.T) {
+	svc := &queryService{
+		logger: zap.NewNop(),
+	}
+
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject: "test-user-id",
+		},
+	})
+
+	tests := []struct {
+		name     string
+		sqlQuery string
+	}{
+		{name: "empty string", sqlQuery: ""},
+		{name: "whitespace only", sqlQuery: "   "},
+		{name: "newlines only", sqlQuery: "\n\n"},
+		{name: "tabs only", sqlQuery: "\t\t"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := svc.Validate(ctx, uuid.New(), uuid.New(), tt.sqlQuery)
+			require.Error(t, err)
+			assert.Nil(t, result)
+			assert.Contains(t, err.Error(), "SQL query is required")
+		})
+	}
+}
+
+// TestValidate_NoUserContext tests that Validate returns error when user ID is missing.
+func TestValidate_NoUserContext(t *testing.T) {
+	svc := &queryService{
+		logger: zap.NewNop(),
+	}
+
+	// Context without claims
+	ctx := context.Background()
+
+	result, err := svc.Validate(ctx, uuid.New(), uuid.New(), "SELECT 1")
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "user ID not found in context")
+}

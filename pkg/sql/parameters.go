@@ -127,6 +127,64 @@ func ValidateParameterDefinitions(sqlQuery string, params []models.QueryParamete
 //	preparedSQL, orderedValues, err := SubstituteParameters(sql, paramDefs, suppliedValues)
 //	// preparedSQL == "SELECT * FROM transactions WHERE sender_id = $1 OR receiver_id = $1"
 //	// orderedValues == []any{"550e8400-e29b-41d4-a716-446655440000"}
+// FindParametersInStringLiterals checks for {{param}} placeholders that appear
+// inside SQL string literals (single quotes). Parameters inside string literals
+// won't work as expected because PostgreSQL will treat $1 as literal text, not
+// as a parameter placeholder.
+//
+// Returns a list of parameter names that are incorrectly placed inside strings.
+//
+// Example:
+//
+//	sql := "SELECT 'Hello {{name}}' FROM users"
+//	problems := FindParametersInStringLiterals(sql)
+//	// problems == []string{"name"}
+//
+//	sql := "SELECT * FROM users WHERE name = {{name}}"
+//	problems := FindParametersInStringLiterals(sql)
+//	// problems == []string{} (empty - parameter is correctly placed)
+func FindParametersInStringLiterals(sqlQuery string) []string {
+	var problems []string
+	seen := make(map[string]bool)
+
+	// Track position within string literals
+	inString := false
+	stringStart := 0
+	i := 0
+
+	for i < len(sqlQuery) {
+		ch := sqlQuery[i]
+
+		if ch == '\'' {
+			if inString {
+				// Check for escaped quote ('')
+				if i+1 < len(sqlQuery) && sqlQuery[i+1] == '\'' {
+					i += 2 // Skip both quotes
+					continue
+				}
+				// End of string literal - check for parameters inside
+				stringContent := sqlQuery[stringStart+1 : i]
+				matches := parameterRegex.FindAllStringSubmatch(stringContent, -1)
+				for _, match := range matches {
+					name := match[1]
+					if !seen[name] {
+						seen[name] = true
+						problems = append(problems, name)
+					}
+				}
+				inString = false
+			} else {
+				// Start of string literal
+				inString = true
+				stringStart = i
+			}
+		}
+		i++
+	}
+
+	return problems
+}
+
 func SubstituteParameters(
 	sqlQuery string,
 	paramDefs []models.QueryParameter,
