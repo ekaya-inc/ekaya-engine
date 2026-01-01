@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
@@ -97,7 +96,7 @@ func (h *OntologyQuestionsHandler) RegisterRoutes(mux *http.ServeMux, authMiddle
 
 // List handles GET /api/projects/{pid}/ontology/questions
 func (h *OntologyQuestionsHandler) List(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -129,7 +128,7 @@ func (h *OntologyQuestionsHandler) List(w http.ResponseWriter, r *http.Request) 
 
 // GetNext handles GET /api/projects/{pid}/ontology/questions/next
 func (h *OntologyQuestionsHandler) GetNext(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -187,12 +186,12 @@ func (h *OntologyQuestionsHandler) GetNext(w http.ResponseWriter, r *http.Reques
 
 // Answer handles POST /api/projects/{pid}/ontology/questions/{qid}/answer
 func (h *OntologyQuestionsHandler) Answer(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	questionID, ok := h.parseQuestionID(w, r)
+	questionID, ok := ParseQuestionID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -265,12 +264,12 @@ func (h *OntologyQuestionsHandler) Answer(w http.ResponseWriter, r *http.Request
 
 // Skip handles POST /api/projects/{pid}/ontology/questions/{qid}/skip
 func (h *OntologyQuestionsHandler) Skip(w http.ResponseWriter, r *http.Request) {
-	_, ok := h.parseProjectID(w, r)
+	_, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	questionID, ok := h.parseQuestionID(w, r)
+	questionID, ok := ParseQuestionID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -293,12 +292,12 @@ func (h *OntologyQuestionsHandler) Skip(w http.ResponseWriter, r *http.Request) 
 
 // Delete handles DELETE /api/projects/{pid}/ontology/questions/{qid}
 func (h *OntologyQuestionsHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	_, ok := h.parseProjectID(w, r)
+	_, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	questionID, ok := h.parseQuestionID(w, r)
+	questionID, ok := ParseQuestionID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -322,30 +321,6 @@ func (h *OntologyQuestionsHandler) Delete(w http.ResponseWriter, r *http.Request
 // ============================================================================
 // Helper Methods
 // ============================================================================
-
-func (h *OntologyQuestionsHandler) parseProjectID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	pidStr := r.PathValue("pid")
-	projectID, err := uuid.Parse(pidStr)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_project_id", "Invalid project ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, false
-	}
-	return projectID, true
-}
-
-func (h *OntologyQuestionsHandler) parseQuestionID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	qidStr := r.PathValue("qid")
-	questionID, err := uuid.Parse(qidStr)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_question_id", "Invalid question ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, false
-	}
-	return questionID, true
-}
 
 func (h *OntologyQuestionsHandler) toQuestionResponse(q *models.OntologyQuestion) QuestionResponse {
 	resp := QuestionResponse{

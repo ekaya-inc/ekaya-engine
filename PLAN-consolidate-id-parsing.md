@@ -396,7 +396,7 @@ Check route registrations if any use different names and adjust `params.go` acco
    - [x] 2c. entity_discovery_handler.go - Remove 1 method, update usages
    - [x] 2d. relationship_workflow.go - Remove 1 method, update usages
    - [x] 2e. ontology.go - Remove 1 method, update usages
-   - [ ] 2f. ontology_questions.go - Remove 2 methods, update usages
+   - [x] 2f. ontology_questions.go - Remove 2 methods, update usages
    - [ ] 2g. ontology_chat.go - Remove 1 method, update usages
    - [ ] 2h. schema.go - Remove 2 methods, update usages
    - [ ] 2i. queries.go - Remove 2 methods, update usages
