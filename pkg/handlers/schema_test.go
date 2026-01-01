@@ -53,7 +53,7 @@ func TestSchemaHandler_GetSchema_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema", nil)
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 
 	claims := &auth.Claims{ProjectID: projectID.String()}
 	ctx := context.WithValue(req.Context(), auth.ClaimsKey, claims)
@@ -103,7 +103,7 @@ func TestSchemaHandler_GetSchema_InvalidProjectID(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/not-a-uuid/datasources/abc/schema", nil)
 	req.SetPathValue("pid", "not-a-uuid")
-	req.SetPathValue("dsId", uuid.New().String())
+	req.SetPathValue("dsid", uuid.New().String())
 
 	rec := httptest.NewRecorder()
 	handler.GetSchema(rec, req)
@@ -128,7 +128,7 @@ func TestSchemaHandler_GetSchema_InvalidDatasourceID(t *testing.T) {
 	projectID := uuid.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/not-a-uuid/schema", nil)
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", "not-a-uuid")
+	req.SetPathValue("dsid", "not-a-uuid")
 
 	rec := httptest.NewRecorder()
 	handler.GetSchema(rec, req)
@@ -162,7 +162,7 @@ func TestSchemaHandler_GetSelectedSchema_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/selected", nil)
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 
 	rec := httptest.NewRecorder()
 	handler.GetSelectedSchema(rec, req)
@@ -192,7 +192,7 @@ func TestSchemaHandler_GetSchemaPrompt_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/prompt", nil)
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 
 	rec := httptest.NewRecorder()
 	handler.GetSchemaPrompt(rec, req)
@@ -230,7 +230,7 @@ func TestSchemaHandler_RefreshSchema_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/refresh", nil)
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 
 	rec := httptest.NewRecorder()
 	handler.RefreshSchema(rec, req)
@@ -268,7 +268,7 @@ func TestSchemaHandler_GetTable_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/tables/public.users", nil)
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 	req.SetPathValue("tableName", "public.users")
 
 	rec := httptest.NewRecorder()
@@ -297,7 +297,7 @@ func TestSchemaHandler_GetTable_NotFound(t *testing.T) {
 	datasourceID := uuid.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/tables/nonexistent", nil)
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 	req.SetPathValue("tableName", "nonexistent")
 
 	rec := httptest.NewRecorder()
@@ -319,7 +319,7 @@ func TestSchemaHandler_UpdateTableMetadata_Success(t *testing.T) {
 	body := `{"business_name": "User Accounts", "description": "Contains all user data"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/tables/"+tableID.String()+"/metadata", bytes.NewBufferString(body))
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 	req.SetPathValue("tableId", tableID.String())
 
 	rec := httptest.NewRecorder()
@@ -341,7 +341,7 @@ func TestSchemaHandler_UpdateTableMetadata_NotFound(t *testing.T) {
 	body := `{"business_name": "Test"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/tables/"+tableID.String()+"/metadata", bytes.NewBufferString(body))
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 	req.SetPathValue("tableId", tableID.String())
 
 	rec := httptest.NewRecorder()
@@ -363,7 +363,7 @@ func TestSchemaHandler_UpdateColumnMetadata_Success(t *testing.T) {
 	body := `{"business_name": "Email Address"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/columns/"+columnID.String()+"/metadata", bytes.NewBufferString(body))
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 	req.SetPathValue("columnId", columnID.String())
 
 	rec := httptest.NewRecorder()
@@ -389,7 +389,7 @@ func TestSchemaHandler_SaveSelections_Success(t *testing.T) {
 		tableID.String(), tableID.String(), columnID1.String(), columnID2.String())
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/selections", bytes.NewBufferString(body))
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 
 	rec := httptest.NewRecorder()
 	handler.SaveSelections(rec, req)
@@ -408,7 +408,7 @@ func TestSchemaHandler_SaveSelections_InvalidBody(t *testing.T) {
 	body := `{invalid json}`
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/selections", bytes.NewBufferString(body))
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 
 	rec := httptest.NewRecorder()
 	handler.SaveSelections(rec, req)
@@ -428,7 +428,7 @@ func TestSchemaHandler_GetRelationships_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/relationships", nil)
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 
 	rec := httptest.NewRecorder()
 	handler.GetRelationships(rec, req)
@@ -486,7 +486,7 @@ func TestSchemaHandler_AddRelationship_Success(t *testing.T) {
 	body := `{"source_table": "public.orders", "source_column": "user_id", "target_table": "public.users", "target_column": "id"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/relationships", bytes.NewBufferString(body))
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 
 	rec := httptest.NewRecorder()
 	handler.AddRelationship(rec, req)
@@ -506,7 +506,7 @@ func TestSchemaHandler_AddRelationship_Conflict(t *testing.T) {
 	body := `{"source_table": "public.orders", "source_column": "user_id", "target_table": "public.users", "target_column": "id"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/relationships", bytes.NewBufferString(body))
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 
 	rec := httptest.NewRecorder()
 	handler.AddRelationship(rec, req)
@@ -525,7 +525,7 @@ func TestSchemaHandler_AddRelationship_MissingFields(t *testing.T) {
 	body := `{"source_table": "public.orders"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/relationships", bytes.NewBufferString(body))
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 
 	rec := httptest.NewRecorder()
 	handler.AddRelationship(rec, req)
@@ -545,7 +545,7 @@ func TestSchemaHandler_RemoveRelationship_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/relationships/"+relID.String(), nil)
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 	req.SetPathValue("relId", relID.String())
 
 	rec := httptest.NewRecorder()
@@ -566,7 +566,7 @@ func TestSchemaHandler_RemoveRelationship_NotFound(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/relationships/"+relID.String(), nil)
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 	req.SetPathValue("relId", relID.String())
 
 	rec := httptest.NewRecorder()
@@ -585,7 +585,7 @@ func TestSchemaHandler_RemoveRelationship_InvalidID(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema/relationships/not-a-uuid", nil)
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 	req.SetPathValue("relId", "not-a-uuid")
 
 	rec := httptest.NewRecorder()
@@ -605,7 +605,7 @@ func TestSchemaHandler_ServiceError(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources/"+datasourceID.String()+"/schema", nil)
 	req.SetPathValue("pid", projectID.String())
-	req.SetPathValue("dsId", datasourceID.String())
+	req.SetPathValue("dsid", datasourceID.String())
 
 	rec := httptest.NewRecorder()
 	handler.GetSchema(rec, req)
