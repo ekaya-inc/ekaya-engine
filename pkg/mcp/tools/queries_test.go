@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/server"
@@ -152,4 +153,192 @@ func TestExecuteApprovedQuery_ExecutionTime(t *testing.T) {
 	execTime, ok := parsed["execution_time_ms"].(float64) // JSON numbers parse as float64
 	require.True(t, ok, "execution_time_ms should be a number")
 	assert.Equal(t, float64(145), execTime, "execution_time_ms should have the correct value")
+}
+
+func TestEnhanceErrorWithContext(t *testing.T) {
+	tests := []struct {
+		name         string
+		err          error
+		queryName    string
+		wantContains []string
+	}{
+		{
+			name:      "nil error returns nil",
+			err:       nil,
+			queryName: "Test Query",
+			wantContains: []string{},
+		},
+		{
+			name:      "parameter validation error",
+			err:       fmt.Errorf("required parameter 'start_date' is missing"),
+			queryName: "Total revenue by customer",
+			wantContains: []string{
+				"parameter_validation",
+				"Total revenue by customer",
+				"required parameter 'start_date' is missing",
+			},
+		},
+		{
+			name:      "type validation error",
+			err:       fmt.Errorf("parameter 'limit': cannot convert 'abc' to integer"),
+			queryName: "Revenue report",
+			wantContains: []string{
+				"type_validation",
+				"Revenue report",
+				"cannot convert",
+			},
+		},
+		{
+			name:      "SQL injection error",
+			err:       fmt.Errorf("potential SQL injection detected in parameter 'user_id'"),
+			queryName: "User query",
+			wantContains: []string{
+				"security_violation",
+				"User query",
+				"SQL injection",
+			},
+		},
+		{
+			name:      "execution error",
+			err:       fmt.Errorf("failed to execute query: connection timeout"),
+			queryName: "Complex analytics",
+			wantContains: []string{
+				"execution_error",
+				"Complex analytics",
+				"execute",
+			},
+		},
+		{
+			name:      "unknown error type",
+			err:       fmt.Errorf("something went wrong"),
+			queryName: "Some query",
+			wantContains: []string{
+				"query_error",
+				"Some query",
+				"something went wrong",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := enhanceErrorWithContext(tt.err, tt.queryName)
+
+			if tt.err == nil {
+				assert.Nil(t, result, "enhanceErrorWithContext should return nil for nil input")
+				return
+			}
+
+			require.NotNil(t, result, "enhanceErrorWithContext should return an error")
+			errMsg := result.Error()
+
+			for _, want := range tt.wantContains {
+				assert.Contains(t, errMsg, want, "error message should contain %q", want)
+			}
+		})
+	}
+}
+
+func TestCategorizeError(t *testing.T) {
+	tests := []struct {
+		errMsg   string
+		expected string
+	}{
+		{
+			errMsg:   "required parameter 'date' is missing",
+			expected: "parameter_validation",
+		},
+		{
+			errMsg:   "unknown parameter 'foo' provided",
+			expected: "parameter_validation",
+		},
+		{
+			errMsg:   "cannot convert 'abc' to integer",
+			expected: "type_validation",
+		},
+		{
+			errMsg:   "invalid format for date parameter",
+			expected: "type_validation",
+		},
+		{
+			errMsg:   "potential SQL injection detected",
+			expected: "security_violation",
+		},
+		{
+			errMsg:   "SQL INJECTION attempt blocked",
+			expected: "security_violation",
+		},
+		{
+			errMsg:   "failed to execute query",
+			expected: "execution_error",
+		},
+		{
+			errMsg:   "query execution timed out",
+			expected: "execution_error",
+		},
+		{
+			errMsg:   "database connection lost",
+			expected: "query_error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.errMsg, func(t *testing.T) {
+			result := categorizeError(tt.errMsg)
+			assert.Equal(t, tt.expected, result, "categorizeError(%q) = %q, want %q", tt.errMsg, result, tt.expected)
+		})
+	}
+}
+
+func TestContainsAny(t *testing.T) {
+	tests := []struct {
+		name     string
+		s        string
+		substrs  []string
+		expected bool
+	}{
+		{
+			name:     "exact match",
+			s:        "parameter validation failed",
+			substrs:  []string{"parameter"},
+			expected: true,
+		},
+		{
+			name:     "case insensitive match",
+			s:        "Parameter Validation Failed",
+			substrs:  []string{"parameter"},
+			expected: true,
+		},
+		{
+			name:     "multiple substrings, first matches",
+			s:        "required field is missing",
+			substrs:  []string{"required", "optional"},
+			expected: true,
+		},
+		{
+			name:     "multiple substrings, second matches",
+			s:        "optional field provided",
+			substrs:  []string{"required", "optional"},
+			expected: true,
+		},
+		{
+			name:     "no match",
+			s:        "something else",
+			substrs:  []string{"parameter", "required"},
+			expected: false,
+		},
+		{
+			name:     "partial word match",
+			s:        "parameterized query",
+			substrs:  []string{"parameter"},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := containsAny(tt.s, tt.substrs)
+			assert.Equal(t, tt.expected, result, "containsAny(%q, %v) = %v, want %v", tt.s, tt.substrs, result, tt.expected)
+		})
+	}
 }

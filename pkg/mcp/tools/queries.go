@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -248,7 +249,8 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			tenantCtx, projectID, queryID, params, execReq)
 		executionTimeMs := time.Since(startTime).Milliseconds()
 		if err != nil {
-			return nil, fmt.Errorf("query execution failed: %w", err)
+			// Enhance error message with query context
+			return nil, enhanceErrorWithContext(err, query.NaturalLanguagePrompt)
 		}
 
 		// Format response
@@ -279,4 +281,55 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		jsonResult, _ := json.Marshal(response)
 		return mcp.NewToolResultText(string(jsonResult)), nil
 	})
+}
+
+// enhanceErrorWithContext wraps an error with query context and categorizes the error type.
+func enhanceErrorWithContext(err error, queryName string) error {
+	if err == nil {
+		return nil
+	}
+
+	errMsg := err.Error()
+	errorType := categorizeError(errMsg)
+
+	// Format: [error_type] query "Query Name": original error message
+	return fmt.Errorf("[%s] query %q: %w", errorType, queryName, err)
+}
+
+// categorizeError determines the error type based on error message content.
+// More specific checks come first to avoid false matches.
+func categorizeError(errMsg string) string {
+	// Check for SQL injection detection (most specific)
+	if containsAny(errMsg, []string{"injection", "SQL injection"}) {
+		return "security_violation"
+	}
+
+	// Check for type conversion errors (before general parameter check)
+	if containsAny(errMsg, []string{"cannot convert", "invalid format"}) {
+		return "type_validation"
+	}
+
+	// Check for parameter-related errors (validation, missing, unknown)
+	if containsAny(errMsg, []string{"required", "missing", "unknown parameter"}) {
+		return "parameter_validation"
+	}
+
+	// Check for execution errors
+	if containsAny(errMsg, []string{"execute", "execution", "query failed"}) {
+		return "execution_error"
+	}
+
+	// Default category
+	return "query_error"
+}
+
+// containsAny checks if a string contains any of the given substrings (case-insensitive).
+func containsAny(s string, substrs []string) bool {
+	lowerS := strings.ToLower(s)
+	for _, substr := range substrs {
+		if strings.Contains(lowerS, strings.ToLower(substr)) {
+			return true
+		}
+	}
+	return false
 }

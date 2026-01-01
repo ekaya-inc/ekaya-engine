@@ -393,7 +393,7 @@ The existing `execute_approved_query` tool is mostly complete:
 
 - [x] Add `query_name` and `parameters_used` to execute response (task 5.2.1)
 - [x] Add `execution_time_ms` to execute response (task 5.2.2)
-- [ ] Improve error messages with query context
+- [x] Improve error messages with query context (task 5.2.3)
 
 ### Future (Optional)
 
