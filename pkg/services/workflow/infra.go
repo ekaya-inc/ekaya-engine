@@ -277,10 +277,13 @@ func MapTaskStatus(status workqueue.TaskStatus) string {
 // It receives the workflow ID, project ID, and queue for service-specific cleanup.
 type ShutdownFunc func(workflowID, projectID uuid.UUID, queue *workqueue.Queue)
 
-// Shutdown gracefully stops all active workflows.
+// Shutdown gracefully stops all active workflows in parallel with timeout handling.
 // The provided shutdownFn is called for each active workflow to handle
 // service-specific shutdown logic (e.g., marking workflow as failed).
+// Returns ctx.Err() if the context times out before all workflows are cancelled.
 func (w *WorkflowInfra) Shutdown(ctx context.Context, shutdownFn ShutdownFunc) error {
+	var wg sync.WaitGroup
+
 	w.activeQueues.Range(func(key, value any) bool {
 		workflowID := key.(uuid.UUID)
 		queue := value.(*workqueue.Queue)
@@ -292,19 +295,37 @@ func (w *WorkflowInfra) Shutdown(ctx context.Context, shutdownFn ShutdownFunc) e
 			projectID = info.projectID
 		}
 
-		// Call service-specific shutdown logic
-		if shutdownFn != nil {
-			shutdownFn(workflowID, projectID, queue)
-		}
+		wg.Add(1)
+		go func(wfID uuid.UUID, q *workqueue.Queue, pID uuid.UUID) {
+			defer wg.Done()
 
-		// Stop infrastructure
-		w.StopTaskQueueWriter(workflowID)
-		w.StopHeartbeat(workflowID)
-		w.activeQueues.Delete(workflowID)
+			// Call service-specific shutdown logic
+			if shutdownFn != nil {
+				shutdownFn(wfID, pID, q)
+			}
+
+			// Stop infrastructure
+			w.StopTaskQueueWriter(wfID)
+			w.StopHeartbeat(wfID)
+			w.activeQueues.Delete(wfID)
+		}(workflowID, queue, projectID)
 
 		return true
 	})
 
-	w.logger.Info("Workflow infrastructure shutdown complete")
-	return nil
+	// Wait for all cancellations with timeout
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		w.logger.Info("Workflow infrastructure shutdown complete")
+		return nil
+	case <-ctx.Done():
+		w.logger.Warn("Shutdown timed out, some workflows may not have been cleaned up")
+		return ctx.Err()
+	}
 }

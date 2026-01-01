@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +11,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
+	"github.com/ekaya-inc/ekaya-engine/pkg/services/workflow"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services/workqueue"
 )
 
@@ -53,25 +53,6 @@ type OntologyWorkflowService interface {
 	GetOntologyEntityCount(ctx context.Context, projectID uuid.UUID) (int, error)
 }
 
-// taskQueueUpdate holds data for a task queue database update.
-type taskQueueUpdate struct {
-	projectID  uuid.UUID
-	workflowID uuid.UUID
-	tasks      []models.WorkflowTask
-}
-
-// taskQueueWriter manages serialized writes for a single workflow.
-type taskQueueWriter struct {
-	updates chan taskQueueUpdate
-	done    chan struct{}
-}
-
-// heartbeatInfo holds info needed for heartbeat goroutine
-type heartbeatInfo struct {
-	projectID uuid.UUID
-	stop      chan struct{}
-}
-
 type ontologyWorkflowService struct {
 	workflowRepo   repositories.OntologyWorkflowRepository
 	ontologyRepo   repositories.OntologyRepository
@@ -84,15 +65,7 @@ type ontologyWorkflowService struct {
 	builder        OntologyBuilderService
 	getTenantCtx   TenantContextFunc
 	logger         *zap.Logger
-
-	// activeQueues maps workflowID -> *workqueue.Queue for cancellation support
-	activeQueues sync.Map
-	// taskQueueWriters maps workflowID -> *taskQueueWriter for serialized DB writes
-	taskQueueWriters sync.Map
-
-	// Ownership fields for multi-server robustness
-	serverInstanceID uuid.UUID // Unique ID for this server instance
-	heartbeatStop    sync.Map  // workflowID -> *heartbeatInfo
+	infra          *workflow.WorkflowInfra
 }
 
 // NewOntologyWorkflowService creates a new ontology workflow service.
@@ -109,23 +82,22 @@ func NewOntologyWorkflowService(
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) OntologyWorkflowService {
-	serverID := uuid.New()
 	namedLogger := logger.Named("ontology-workflow")
-	namedLogger.Info("Workflow service initialized", zap.String("server_instance_id", serverID.String()))
+	infra := workflow.NewWorkflowInfra(workflowRepo, workflow.TenantContextFunc(getTenantCtx), namedLogger)
 
 	return &ontologyWorkflowService{
-		workflowRepo:     workflowRepo,
-		ontologyRepo:     ontologyRepo,
-		schemaRepo:       schemaRepo,
-		stateRepo:        stateRepo,
-		questionRepo:     questionRepo,
-		convRepo:         convRepo,
-		dsSvc:            dsSvc,
-		adapterFactory:   adapterFactory,
-		builder:          builder,
-		getTenantCtx:     getTenantCtx,
-		logger:           namedLogger,
-		serverInstanceID: serverID,
+		workflowRepo:   workflowRepo,
+		ontologyRepo:   ontologyRepo,
+		schemaRepo:     schemaRepo,
+		stateRepo:      stateRepo,
+		questionRepo:   questionRepo,
+		convRepo:       convRepo,
+		dsSvc:          dsSvc,
+		adapterFactory: adapterFactory,
+		builder:        builder,
+		getTenantCtx:   getTenantCtx,
+		logger:         namedLogger,
+		infra:          infra,
 	}
 }
 
@@ -251,7 +223,7 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 
 	// Step 6: Create new workflow linked to the ontology
 	now := time.Now()
-	workflow := &models.OntologyWorkflow{
+	wf := &models.OntologyWorkflow{
 		ID:         uuid.New(),
 		ProjectID:  projectID,
 		OntologyID: ontology.ID,
@@ -268,7 +240,7 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 		StartedAt: &now,
 	}
 
-	if err := s.workflowRepo.Create(ctx, workflow); err != nil {
+	if err := s.workflowRepo.Create(ctx, wf); err != nil {
 		s.logger.Error("Failed to create workflow",
 			zap.String("project_id", projectID.String()),
 			zap.String("ontology_id", ontology.ID.String()),
@@ -277,44 +249,44 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 	}
 
 	// Step 7: Initialize workflow state with global entity only
-	if err := s.initializeWorkflowEntities(ctx, projectID, workflow.ID, ontology.ID); err != nil {
+	if err := s.initializeWorkflowEntities(ctx, projectID, wf.ID, ontology.ID); err != nil {
 		s.logger.Error("Failed to initialize workflow entities",
-			zap.String("workflow_id", workflow.ID.String()),
+			zap.String("workflow_id", wf.ID.String()),
 			zap.Error(err))
 		return nil, err
 	}
 
 	// Claim ownership and transition to running
-	claimed, err := s.workflowRepo.ClaimOwnership(ctx, workflow.ID, s.serverInstanceID)
+	claimed, err := s.workflowRepo.ClaimOwnership(ctx, wf.ID, s.infra.ServerInstanceID())
 	if err != nil {
 		s.logger.Error("Failed to claim workflow ownership",
-			zap.String("workflow_id", workflow.ID.String()),
+			zap.String("workflow_id", wf.ID.String()),
 			zap.Error(err))
 		return nil, fmt.Errorf("claim ownership: %w", err)
 	}
 	if !claimed {
 		s.logger.Error("Workflow already owned by another server",
-			zap.String("workflow_id", workflow.ID.String()))
+			zap.String("workflow_id", wf.ID.String()))
 		return nil, fmt.Errorf("workflow already owned by another server")
 	}
 
 	// Transition to running
-	workflow.State = models.WorkflowStateRunning
-	if err := s.workflowRepo.UpdateState(ctx, workflow.ID, models.WorkflowStateRunning, ""); err != nil {
+	wf.State = models.WorkflowStateRunning
+	if err := s.workflowRepo.UpdateState(ctx, wf.ID, models.WorkflowStateRunning, ""); err != nil {
 		s.logger.Error("Failed to start workflow",
-			zap.String("workflow_id", workflow.ID.String()),
+			zap.String("workflow_id", wf.ID.String()),
 			zap.Error(err))
 		return nil, err
 	}
 
 	// Start heartbeat goroutine to maintain ownership
-	s.startHeartbeat(workflow.ID, projectID)
+	s.infra.StartHeartbeat(wf.ID, projectID)
 
 	s.logger.Info("Ontology extraction started",
 		zap.String("project_id", projectID.String()),
-		zap.String("workflow_id", workflow.ID.String()),
+		zap.String("workflow_id", wf.ID.String()),
 		zap.String("ontology_id", ontology.ID.String()),
-		zap.String("server_instance_id", s.serverInstanceID.String()),
+		zap.String("server_instance_id", s.infra.ServerInstanceID().String()),
 		zap.Int("ontology_version", nextVersion))
 
 	// Create work queue and enqueue the initialization task
@@ -324,13 +296,14 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 	// This allows efficient batching of LLM requests to the model provider.
 	// Default retry config: 24 retries with exponential backoff (2s initial, 30s max, ~10min total).
 	queue := workqueue.New(s.logger, workqueue.WithStrategy(workqueue.NewParallelLLMStrategy()))
-	s.activeQueues.Store(workflow.ID, queue)
+	s.infra.StoreQueue(wf.ID, queue)
 
 	// Start single writer goroutine for task queue updates.
 	// This prevents race conditions where multiple goroutines overwrite each other's updates.
-	writer := s.startTaskQueueWriter(workflow.ID)
+	s.infra.StartTaskQueueWriter(wf.ID)
 
 	// Set up callback to sync task queue to database for UI visibility
+	workflowID := wf.ID // Capture for closure
 	queue.SetOnUpdate(func(snapshots []workqueue.TaskSnapshot) {
 		// Convert snapshots to models.WorkflowTask with status mapping
 		tasks := make([]models.WorkflowTask, len(snapshots))
@@ -362,17 +335,11 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 			}
 		}
 		// Send to single writer goroutine (non-blocking due to buffered channel)
-		select {
-		case writer.updates <- taskQueueUpdate{
-			projectID:  projectID,
-			workflowID: workflow.ID,
-			tasks:      tasks,
-		}:
-		default:
-			// Buffer full - this shouldn't happen with buffer size 100
-			s.logger.Warn("Task queue update buffer full, dropping update",
-				zap.String("workflow_id", workflow.ID.String()))
-		}
+		s.infra.SendTaskQueueUpdate(workflow.TaskQueueUpdate{
+			ProjectID:  projectID,
+			WorkflowID: workflowID,
+			Tasks:      tasks,
+		})
 	})
 
 	initTask := NewInitializeOntologyTask(
@@ -385,25 +352,25 @@ func (s *ontologyWorkflowService) StartExtraction(ctx context.Context, projectID
 		s, // OntologyWorkflowService for progress updates
 		s.getTenantCtx,
 		projectID,
-		workflow.ID,
+		wf.ID,
 		config.DatasourceID,
 		config.ProjectDescription,
 	)
 	queue.Enqueue(initTask)
 
 	// Run workflow in background - HTTP request returns immediately
-	go s.runWorkflow(projectID, workflow.ID, queue)
+	go s.runWorkflow(projectID, wf.ID, queue)
 
-	return workflow, nil
+	return wf, nil
 }
 
 // runWorkflow waits for init task, then runs the orchestrator.
 // Runs in a background goroutine - acquires its own DB connection.
 func (s *ontologyWorkflowService) runWorkflow(projectID, workflowID uuid.UUID, queue *workqueue.Queue) {
 	// Clean up when done
-	defer s.activeQueues.Delete(workflowID)
-	defer s.stopTaskQueueWriter(workflowID) // Stop the writer and flush final state
-	defer s.stopHeartbeat(workflowID)       // Stop heartbeat goroutine
+	defer s.infra.DeleteQueue(workflowID)
+	defer s.infra.StopTaskQueueWriter(workflowID) // Stop the writer and flush final state
+	defer s.infra.StopHeartbeat(workflowID)       // Stop heartbeat goroutine
 	defer func() {
 		// Release ownership so other servers can take over if needed
 		ctx, cleanup, err := s.getTenantCtx(context.Background(), projectID)
@@ -573,13 +540,11 @@ func (s *ontologyWorkflowService) GetOntology(ctx context.Context, projectID uui
 
 func (s *ontologyWorkflowService) Cancel(ctx context.Context, workflowID uuid.UUID) error {
 	// Cancel active queue if running (signals tasks to stop)
-	if queueVal, ok := s.activeQueues.Load(workflowID); ok {
-		if queue, ok := queueVal.(*workqueue.Queue); ok {
-			queue.Cancel()
-			s.logger.Info("Queue cancelled for workflow",
-				zap.String("workflow_id", workflowID.String()))
-		}
-		s.activeQueues.Delete(workflowID)
+	if queue, ok := s.infra.LoadQueue(workflowID); ok {
+		queue.Cancel()
+		s.logger.Info("Queue cancelled for workflow",
+			zap.String("workflow_id", workflowID.String()))
+		s.infra.DeleteQueue(workflowID)
 	}
 
 	// Delete workflow record - cascades to questions and LLM conversations
@@ -598,21 +563,19 @@ func (s *ontologyWorkflowService) Cancel(ctx context.Context, workflowID uuid.UU
 
 func (s *ontologyWorkflowService) DeleteOntology(ctx context.Context, projectID uuid.UUID) error {
 	// Cancel any active workflow first
-	workflow, err := s.workflowRepo.GetLatestByProject(ctx, projectID)
+	wf, err := s.workflowRepo.GetLatestByProject(ctx, projectID)
 	if err != nil {
 		// Log but continue - we still want to delete ontologies even if workflow lookup fails
 		s.logger.Error("Failed to get latest workflow for delete",
 			zap.String("project_id", projectID.String()),
 			zap.Error(err))
 	}
-	if workflow != nil && !workflow.State.IsTerminal() {
-		if queueVal, ok := s.activeQueues.Load(workflow.ID); ok {
-			if queue, ok := queueVal.(*workqueue.Queue); ok {
-				queue.Cancel()
-			}
+	if wf != nil && !wf.State.IsTerminal() {
+		if queue, ok := s.infra.LoadQueue(wf.ID); ok {
+			queue.Cancel()
 		}
-		s.activeQueues.Delete(workflow.ID)
-		s.stopTaskQueueWriter(workflow.ID)
+		s.infra.DeleteQueue(wf.ID)
+		s.infra.StopTaskQueueWriter(wf.ID)
 	}
 
 	// Delete all ontologies for project (cascades to workflows, questions, and chat messages via FK)
@@ -676,79 +639,6 @@ func (s *ontologyWorkflowService) MarkFailed(ctx context.Context, workflowID uui
 	return nil
 }
 
-// startTaskQueueWriter creates and starts a single writer goroutine for a workflow.
-// All task queue updates are serialized through this writer to prevent race conditions.
-func (s *ontologyWorkflowService) startTaskQueueWriter(workflowID uuid.UUID) *taskQueueWriter {
-	writer := &taskQueueWriter{
-		updates: make(chan taskQueueUpdate, 100), // Buffer to avoid blocking the workqueue
-		done:    make(chan struct{}),
-	}
-	s.taskQueueWriters.Store(workflowID, writer)
-	go s.runTaskQueueWriter(writer)
-	return writer
-}
-
-// stopTaskQueueWriter closes the channel and waits for the writer to finish.
-func (s *ontologyWorkflowService) stopTaskQueueWriter(workflowID uuid.UUID) {
-	if writerVal, ok := s.taskQueueWriters.LoadAndDelete(workflowID); ok {
-		writer := writerVal.(*taskQueueWriter)
-		close(writer.updates)
-		<-writer.done // Wait for writer to finish
-	}
-}
-
-// runTaskQueueWriter is the single writer goroutine that processes updates.
-// It drains all pending updates and only persists the latest one (debounce).
-func (s *ontologyWorkflowService) runTaskQueueWriter(writer *taskQueueWriter) {
-	defer close(writer.done)
-
-	for {
-		// Wait for at least one update
-		update, ok := <-writer.updates
-		if !ok {
-			return // Channel closed, exit
-		}
-
-		// Drain any additional pending updates, keeping only the latest
-		for {
-			select {
-			case newer, ok := <-writer.updates:
-				if !ok {
-					// Channel closed while draining - persist what we have and exit
-					s.persistTaskQueue(update.projectID, update.workflowID, update.tasks)
-					return
-				}
-				update = newer // Keep the newer update
-			default:
-				// No more pending updates, persist the latest
-				goto persist
-			}
-		}
-
-	persist:
-		s.persistTaskQueue(update.projectID, update.workflowID, update.tasks)
-	}
-}
-
-// persistTaskQueue saves the task queue to the database.
-func (s *ontologyWorkflowService) persistTaskQueue(projectID, workflowID uuid.UUID, tasks []models.WorkflowTask) {
-	// Acquire a fresh DB connection since this runs in a goroutine
-	ctx, cleanup, err := s.getTenantCtx(context.Background(), projectID)
-	if err != nil {
-		s.logger.Error("Failed to acquire DB connection for task queue update",
-			zap.String("workflow_id", workflowID.String()),
-			zap.Error(err))
-		return
-	}
-	defer cleanup()
-
-	if err := s.workflowRepo.UpdateTaskQueue(ctx, workflowID, tasks); err != nil {
-		s.logger.Error("Failed to persist task queue",
-			zap.String("workflow_id", workflowID.String()),
-			zap.Error(err))
-	}
-}
-
 // ============================================================================
 // Workflow Entity State Initialization
 // ============================================================================
@@ -791,129 +681,35 @@ func (s *ontologyWorkflowService) initializeWorkflowEntities(
 }
 
 // ============================================================================
-// Heartbeat Management
-// ============================================================================
-
-// startHeartbeat launches a background goroutine that periodically updates
-// the workflow's last_heartbeat timestamp to maintain ownership.
-func (s *ontologyWorkflowService) startHeartbeat(workflowID, projectID uuid.UUID) {
-	stop := make(chan struct{})
-	info := &heartbeatInfo{
-		projectID: projectID,
-		stop:      stop,
-	}
-	s.heartbeatStop.Store(workflowID, info)
-
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-stop:
-				s.logger.Debug("Heartbeat stopped",
-					zap.String("workflow_id", workflowID.String()))
-				return
-			case <-ticker.C:
-				ctx, cleanup, err := s.getTenantCtx(context.Background(), projectID)
-				if err != nil {
-					s.logger.Error("Failed to acquire DB connection for heartbeat",
-						zap.String("workflow_id", workflowID.String()),
-						zap.Error(err))
-					continue
-				}
-				if err := s.workflowRepo.UpdateHeartbeat(ctx, workflowID, s.serverInstanceID); err != nil {
-					s.logger.Error("Failed to update heartbeat",
-						zap.String("workflow_id", workflowID.String()),
-						zap.Error(err))
-				}
-				cleanup()
-			}
-		}
-	}()
-
-	s.logger.Debug("Heartbeat started",
-		zap.String("workflow_id", workflowID.String()),
-		zap.String("server_instance_id", s.serverInstanceID.String()))
-}
-
-// stopHeartbeat stops the heartbeat goroutine for a workflow.
-func (s *ontologyWorkflowService) stopHeartbeat(workflowID uuid.UUID) {
-	if infoVal, ok := s.heartbeatStop.LoadAndDelete(workflowID); ok {
-		info := infoVal.(*heartbeatInfo)
-		close(info.stop)
-	}
-}
-
-// ============================================================================
 // Graceful Shutdown
 // ============================================================================
 
 // Shutdown gracefully stops all active workflows owned by this server.
 // Called during server shutdown to release ownership so new servers can take over.
 func (s *ontologyWorkflowService) Shutdown(ctx context.Context) error {
-	s.logger.Info("Shutting down workflow service",
-		zap.String("server_instance_id", s.serverInstanceID.String()))
+	s.logger.Info("Shutting down ontology workflow service",
+		zap.String("server_instance_id", s.infra.ServerInstanceID().String()))
 
-	var wg sync.WaitGroup
+	return s.infra.Shutdown(ctx, func(workflowID, projectID uuid.UUID, queue *workqueue.Queue) {
+		s.logger.Info("Cancelling workflow for shutdown",
+			zap.String("workflow_id", workflowID.String()))
 
-	// Cancel all active queues and release ownership
-	s.activeQueues.Range(func(key, value any) bool {
-		workflowID := key.(uuid.UUID)
-		queue := value.(*workqueue.Queue)
+		// Cancel the queue (signals tasks to stop)
+		queue.Cancel()
 
-		// Get project ID from heartbeat info if available
-		var projectID uuid.UUID
-		if infoVal, ok := s.heartbeatStop.Load(workflowID); ok {
-			info := infoVal.(*heartbeatInfo)
-			projectID = info.projectID
-		}
-
-		wg.Add(1)
-		go func(wfID uuid.UUID, q *workqueue.Queue, pID uuid.UUID) {
-			defer wg.Done()
-
-			s.logger.Info("Cancelling workflow for shutdown",
-				zap.String("workflow_id", wfID.String()))
-
-			// Cancel the queue (signals tasks to stop)
-			q.Cancel()
-
-			// Stop heartbeat
-			s.stopHeartbeat(wfID)
-
-			// Release ownership if we have a project ID
-			if pID != uuid.Nil {
-				tenantCtx, cleanup, err := s.getTenantCtx(context.Background(), pID)
-				if err == nil {
-					if releaseErr := s.workflowRepo.ReleaseOwnership(tenantCtx, wfID); releaseErr != nil {
-						s.logger.Error("Failed to release ownership during shutdown",
-							zap.String("workflow_id", wfID.String()),
-							zap.Error(releaseErr))
-					}
-					cleanup()
+		// Release ownership if we have a project ID
+		if projectID != uuid.Nil {
+			tenantCtx, cleanup, err := s.getTenantCtx(context.Background(), projectID)
+			if err == nil {
+				if releaseErr := s.workflowRepo.ReleaseOwnership(tenantCtx, workflowID); releaseErr != nil {
+					s.logger.Error("Failed to release ownership during shutdown",
+						zap.String("workflow_id", workflowID.String()),
+						zap.Error(releaseErr))
 				}
+				cleanup()
 			}
-		}(workflowID, queue, projectID)
-
-		return true
+		}
 	})
-
-	// Wait for all cancellations with timeout
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		s.logger.Info("All workflows cancelled successfully")
-		return nil
-	case <-ctx.Done():
-		s.logger.Warn("Shutdown timed out, some workflows may not have been cleaned up")
-		return ctx.Err()
-	}
 }
 
 // GetOntologyEntityCount returns the total number of entities that would be
