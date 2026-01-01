@@ -87,12 +87,13 @@ type listApprovedQueriesResult struct {
 }
 
 type approvedQueryInfo struct {
-	ID          string          `json:"id"`
-	Name        string          `json:"name"`        // natural_language_prompt
-	Description string          `json:"description"` // additional_context
-	SQL         string          `json:"sql"`         // The SQL template
-	Parameters  []parameterInfo `json:"parameters"`
-	Dialect     string          `json:"dialect"`
+	ID            string             `json:"id"`
+	Name          string             `json:"name"`          // natural_language_prompt
+	Description   string             `json:"description"`   // additional_context
+	SQL           string             `json:"sql"`           // The SQL template
+	Parameters    []parameterInfo    `json:"parameters"`
+	OutputColumns []outputColumnInfo `json:"output_columns,omitempty"`
+	Dialect       string             `json:"dialect"`
 }
 
 type parameterInfo struct {
@@ -101,6 +102,12 @@ type parameterInfo struct {
 	Description string `json:"description"`
 	Required    bool   `json:"required"`
 	Default     any    `json:"default,omitempty"`
+}
+
+type outputColumnInfo struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
 }
 
 // registerListApprovedQueriesTool - Lists all enabled parameterized queries with metadata.
@@ -153,18 +160,28 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 				}
 			}
 
+			outputCols := make([]outputColumnInfo, len(q.OutputColumns))
+			for j, oc := range q.OutputColumns {
+				outputCols[j] = outputColumnInfo{
+					Name:        oc.Name,
+					Type:        oc.Type,
+					Description: oc.Description,
+				}
+			}
+
 			desc := ""
 			if q.AdditionalContext != nil {
 				desc = *q.AdditionalContext
 			}
 
 			result.Queries[i] = approvedQueryInfo{
-				ID:          q.ID.String(),
-				Name:        q.NaturalLanguagePrompt,
-				Description: desc,
-				SQL:         q.SQLQuery,
-				Parameters:  params,
-				Dialect:     q.Dialect,
+				ID:            q.ID.String(),
+				Name:          q.NaturalLanguagePrompt,
+				Description:   desc,
+				SQL:           q.SQLQuery,
+				Parameters:    params,
+				OutputColumns: outputCols,
+				Dialect:       q.Dialect,
 			}
 		}
 

@@ -53,16 +53,18 @@ type CreateQueryRequest struct {
 	SQLQuery              string                  `json:"sql_query"`
 	IsEnabled             bool                    `json:"is_enabled"`
 	Parameters            []models.QueryParameter `json:"parameters,omitempty"`
+	OutputColumns         []models.OutputColumn   `json:"output_columns,omitempty"`
 }
 
 // UpdateQueryRequest contains fields for updating a query.
 // All fields are optional - only non-nil values are updated.
 // Note: Dialect cannot be updated - it's derived from datasource type.
 type UpdateQueryRequest struct {
-	NaturalLanguagePrompt *string `json:"natural_language_prompt,omitempty"`
-	AdditionalContext     *string `json:"additional_context,omitempty"`
-	SQLQuery              *string `json:"sql_query,omitempty"`
-	IsEnabled             *bool   `json:"is_enabled,omitempty"`
+	NaturalLanguagePrompt *string                `json:"natural_language_prompt,omitempty"`
+	AdditionalContext     *string                `json:"additional_context,omitempty"`
+	SQLQuery              *string                `json:"sql_query,omitempty"`
+	IsEnabled             *bool                  `json:"is_enabled,omitempty"`
+	OutputColumns         *[]models.OutputColumn `json:"output_columns,omitempty"`
 }
 
 // ExecuteQueryRequest contains options for executing a saved query.
@@ -138,6 +140,12 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 		params = []models.QueryParameter{}
 	}
 
+	// Ensure OutputColumns is never nil (database column has NOT NULL constraint)
+	outputCols := req.OutputColumns
+	if outputCols == nil {
+		outputCols = []models.OutputColumn{}
+	}
+
 	// Create query model with dialect derived from datasource type
 	query := &models.Query{
 		ProjectID:             projectID,
@@ -147,6 +155,7 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 		Dialect:               ds.DatasourceType, // Derived from datasource type
 		IsEnabled:             req.IsEnabled,
 		Parameters:            params,
+		OutputColumns:         outputCols,
 		UsageCount:            0,
 	}
 
@@ -221,6 +230,9 @@ func (s *queryService) Update(ctx context.Context, projectID, queryID uuid.UUID,
 	}
 	if req.IsEnabled != nil {
 		query.IsEnabled = *req.IsEnabled
+	}
+	if req.OutputColumns != nil {
+		query.OutputColumns = *req.OutputColumns
 	}
 
 	// Validate that all {{param}} in SQL have corresponding parameter definitions
