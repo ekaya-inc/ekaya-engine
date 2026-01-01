@@ -12,7 +12,6 @@ import {
   Network,
   Search,
   Server,
-  Shield,
 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -420,13 +419,6 @@ const ProjectDashboard = () => {
       path: `/projects/${pid}/ontology`,
       disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
       color: 'purple',
-    },
-    {
-      title: 'Security',
-      icon: Shield,
-      path: `/projects/${pid}/security`,
-      disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
-      color: 'gray',
     },
   ];
 
