@@ -487,7 +487,8 @@ func (o *Orchestrator) finalizeWorkflow(ctx context.Context, projectID, workflow
 
 // updateProgress updates workflow progress based on current entity states.
 func (o *Orchestrator) updateProgress(ctx context.Context, workflowID uuid.UUID, states []*models.WorkflowEntityState, items *WorkItems) {
-	// Count completed and total entities (global + tables + columns)
+	// In simplified flow, we only have the global entity
+	// Count completed and total entities
 	completed := 0
 	total := len(states)
 	for _, state := range states {
@@ -497,15 +498,17 @@ func (o *Orchestrator) updateProgress(ctx context.Context, workflowID uuid.UUID,
 	}
 
 	// Determine the current phase based on remaining work
-	phase := models.WorkflowPhaseScanning
-	if len(items.ScanTasks) == 0 && len(items.AnalyzeTasks) > 0 {
-		phase = models.WorkflowPhaseAnalyzing
-	} else if len(items.ScanTasks) == 0 && len(items.AnalyzeTasks) == 0 && completed == total && total > 0 {
+	// Simplified flow: no scanning phase, go straight to Tier1Building
+	phase := models.WorkflowPhaseTier1Building
+	if len(items.ScanTasks) == 0 && len(items.AnalyzeTasks) == 0 && completed == total && total > 0 {
 		phase = models.WorkflowPhaseTier1Building
 	}
 
-	// Build message - always use "entities" terminology
-	message := fmt.Sprintf("Analyzing %d/%d entities...", completed, total)
+	// Build message - simplified for global-only flow
+	message := "Building ontology from entities and relationships..."
+	if completed == total && total > 0 {
+		message = "Ontology build complete"
+	}
 
 	// Update progress (ignore errors - progress is non-critical)
 	_ = o.workflowSvc.UpdateProgress(ctx, workflowID, &models.WorkflowProgress{

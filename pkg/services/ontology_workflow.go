@@ -758,149 +758,39 @@ func (s *ontologyWorkflowService) persistTaskQueue(projectID, workflowID uuid.UU
 // Workflow Entity State Initialization
 // ============================================================================
 
-// initializeWorkflowEntities creates workflow state rows for all entities.
-// Creates one global entity, one entity per table, and one entity per column.
+// initializeWorkflowEntities creates workflow state rows for the ontology extraction.
+// Creates only a global entity - table/column scanning is handled by the relationships phase.
 //
-// If relWorkflowID is provided (non-nil), scan data from the relationships phase
-// will be copied to column entities, and both column and table entities will be
-// marked as "scanned" instead of "pending" (Milestone 3.4: skip scanning/reuse data).
+// The ontology workflow now:
+// 1. Requires entities AND relationships phases to be complete (checked in StartExtraction)
+// 2. Uses schema data and domain entities as input (no re-scanning)
+// 3. Immediately triggers BuildTieredOntologyTask since there are no table entities to process
 func (s *ontologyWorkflowService) initializeWorkflowEntities(
 	ctx context.Context,
-	projectID, workflowID, ontologyID, datasourceID, relWorkflowID uuid.UUID,
+	projectID, workflowID, ontologyID, _, _ uuid.UUID, // datasourceID and relWorkflowID no longer needed
 ) error {
-	// Get all tables for this datasource
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
-	if err != nil {
-		return fmt.Errorf("list tables: %w", err)
-	}
-
-	// Get all columns for this datasource
-	columns, err := s.schemaRepo.ListColumnsByDatasource(ctx, projectID, datasourceID)
-	if err != nil {
-		return fmt.Errorf("list columns: %w", err)
-	}
-
-	// Load scan data from relationships workflow (Milestone 3.4)
-	// This allows us to skip the scanning phase and reuse data
-	relScanData := make(map[string]*models.WorkflowStateData) // entityKey -> stateData
-	if relWorkflowID != uuid.Nil {
-		relStates, err := s.stateRepo.ListByWorkflow(ctx, relWorkflowID)
-		if err != nil {
-			s.logger.Warn("Failed to load relationships workflow state, will scan from scratch",
-				zap.String("rel_workflow_id", relWorkflowID.String()),
-				zap.Error(err))
-		} else {
-			for _, state := range relStates {
-				// Only copy column scan data (relationships workflow only has column entities)
-				if state.EntityType == models.WorkflowEntityTypeColumn && state.StateData != nil && state.StateData.Gathered != nil {
-					relScanData[state.EntityKey] = state.StateData
-				}
-			}
-			s.logger.Info("Loaded scan data from relationships workflow",
-				zap.String("rel_workflow_id", relWorkflowID.String()),
-				zap.Int("columns_with_scan_data", len(relScanData)))
-		}
-	}
-
-	// Build entity states slice
-	states := make([]*models.WorkflowEntityState, 0, 1+len(tables)+len(columns))
-
-	// 1. Global entity (always pending - no scan data to reuse)
-	states = append(states, &models.WorkflowEntityState{
-		ProjectID:  projectID,
-		OntologyID: ontologyID,
-		WorkflowID: workflowID,
-		EntityType: models.WorkflowEntityTypeGlobal,
-		EntityKey:  models.GlobalEntityKey(),
-		Status:     models.WorkflowEntityStatusPending,
-		StateData:  &models.WorkflowStateData{},
-	})
-
-	// Track tables that have all columns with scan data
-	tableHasAllColumnData := make(map[string]bool)
-	tableCols := make(map[string]int)
-
-	// Build table lookup and count columns per table
-	tableByID := make(map[uuid.UUID]*models.SchemaTable)
-	for _, table := range tables {
-		tableByID[table.ID] = table
-		tableHasAllColumnData[table.TableName] = true // Assume true, will be set false if any column lacks data
-	}
-	for _, col := range columns {
-		table := tableByID[col.SchemaTableID]
-		if table == nil {
-			continue
-		}
-		tableCols[table.TableName]++
-		entityKey := models.ColumnEntityKey(table.TableName, col.ColumnName)
-		if _, hasScanData := relScanData[entityKey]; !hasScanData {
-			tableHasAllColumnData[table.TableName] = false
-		}
-	}
-
-	// 2. Table entities
-	// If all columns for a table have scan data, mark table as "scanned" (skip scanning phase)
-	tablesWithScanData := 0
-	for _, table := range tables {
-		status := models.WorkflowEntityStatusPending
-		if len(relScanData) > 0 && tableHasAllColumnData[table.TableName] && tableCols[table.TableName] > 0 {
-			status = models.WorkflowEntityStatusScanned
-			tablesWithScanData++
-		}
-		states = append(states, &models.WorkflowEntityState{
+	// Only create the global entity
+	// The orchestrator will see no table entities and immediately trigger BuildTieredOntologyTask
+	states := []*models.WorkflowEntityState{
+		{
 			ProjectID:  projectID,
 			OntologyID: ontologyID,
 			WorkflowID: workflowID,
-			EntityType: models.WorkflowEntityTypeTable,
-			EntityKey:  models.TableEntityKey(table.TableName),
-			Status:     status,
+			EntityType: models.WorkflowEntityTypeGlobal,
+			EntityKey:  models.GlobalEntityKey(),
+			Status:     models.WorkflowEntityStatusPending,
 			StateData:  &models.WorkflowStateData{},
-		})
+		},
 	}
 
-	// 3. Column entities
-	// Copy scan data from relationships workflow if available
-	columnsWithScanData := 0
-	for _, col := range columns {
-		table := tableByID[col.SchemaTableID]
-		if table == nil {
-			continue // Skip orphaned columns
-		}
-		entityKey := models.ColumnEntityKey(table.TableName, col.ColumnName)
-
-		status := models.WorkflowEntityStatusPending
-		stateData := &models.WorkflowStateData{}
-
-		// Copy scan data from relationships workflow if available
-		if scanData, hasScanData := relScanData[entityKey]; hasScanData {
-			status = models.WorkflowEntityStatusScanned
-			stateData = scanData
-			columnsWithScanData++
-		}
-
-		states = append(states, &models.WorkflowEntityState{
-			ProjectID:  projectID,
-			OntologyID: ontologyID,
-			WorkflowID: workflowID,
-			EntityType: models.WorkflowEntityTypeColumn,
-			EntityKey:  entityKey,
-			Status:     status,
-			StateData:  stateData,
-		})
-	}
-
-	// Batch create all entities
+	// Create the global entity
 	if err := s.stateRepo.CreateBatch(ctx, states); err != nil {
 		return fmt.Errorf("create workflow entities: %w", err)
 	}
 
-	s.logger.Info("Initialized workflow entities",
+	s.logger.Info("Initialized workflow with global entity only",
 		zap.String("workflow_id", workflowID.String()),
-		zap.Int("total_entities", len(states)),
-		zap.Int("tables", len(tables)),
-		zap.Int("columns", len(columns)),
-		zap.Int("tables_with_scan_data", tablesWithScanData),
-		zap.Int("columns_with_scan_data", columnsWithScanData))
+		zap.String("ontology_id", ontologyID.String()))
 
 	return nil
 }

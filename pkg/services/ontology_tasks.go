@@ -121,8 +121,8 @@ func NewInitializeOntologyTask(
 }
 
 // Execute implements workqueue.Task.
-// This task loads tables from schema, updates workflow progress, and optionally
-// enqueues the project description task. The orchestrator handles scanning/analyzing.
+// This task initializes the ontology workflow and optionally enqueues the project description task.
+// The orchestrator will immediately trigger BuildTieredOntologyTask since there are no table entities.
 func (t *InitializeOntologyTask) Execute(ctx context.Context, enqueuer workqueue.TaskEnqueuer) error {
 	tenantCtx, cleanup, err := t.getTenantCtx(ctx, t.projectID)
 	if err != nil {
@@ -130,43 +130,17 @@ func (t *InitializeOntologyTask) Execute(ctx context.Context, enqueuer workqueue
 	}
 	defer cleanup()
 
-	// Load tables from schema
-	tables, err := t.schemaRepo.ListTablesByDatasource(tenantCtx, t.projectID, t.datasourceID)
-	if err != nil {
-		return fmt.Errorf("load tables: %w", err)
-	}
-	tableCount := len(tables)
-
-	// Load all columns and group by table name
-	allColumns, err := t.schemaRepo.ListColumnsByDatasource(tenantCtx, t.projectID, t.datasourceID)
-	if err != nil {
-		return fmt.Errorf("load columns: %w", err)
-	}
-
-	// Build map of table ID -> column names
-	tableIDToColumns := make(map[string][]string)
-	for _, col := range allColumns {
-		tableIDToColumns[col.SchemaTableID.String()] = append(tableIDToColumns[col.SchemaTableID.String()], col.ColumnName)
-	}
-
-	// Count total columns
-	columnCount := len(allColumns)
-
-	// Scanning phase entities = tables + columns (no global entity)
-	scanningEntities := tableCount + columnCount
-
-	// Update progress for Scanning phase
+	// Update progress - ontology now builds from entities and relationships
 	_ = t.workflowService.UpdateProgress(tenantCtx, t.workflowID, &models.WorkflowProgress{
-		CurrentPhase: models.WorkflowPhaseScanning,
-		Message:      fmt.Sprintf("Scanning %d tables, %d columns...", tableCount, columnCount),
+		CurrentPhase: models.WorkflowPhaseTier1Building,
+		Message:      "Building ontology from entities and relationships...",
 		Current:      0,
-		Total:        scanningEntities,
+		Total:        1, // Single global entity
 	})
 
 	// Enqueue UnderstandProjectDescriptionTask if description provided (LLM task)
 	// This runs before the orchestrator takes over, processing the user's description
 	if t.description != "" {
-		totalEntities := 1 + tableCount + columnCount // For description task progress
 		descTask := NewUnderstandProjectDescriptionTask(
 			t.builder,
 			t.workflowService,
@@ -174,13 +148,12 @@ func (t *InitializeOntologyTask) Execute(ctx context.Context, enqueuer workqueue
 			t.projectID,
 			t.workflowID,
 			t.description,
-			totalEntities,
+			1, // Single global entity
 		)
 		enqueuer.Enqueue(descTask)
 	}
 
-	// NOTE: Task chaining removed in chunk 5.
-	// The orchestrator will detect pending entities and enqueue scan/analyze tasks.
+	// The orchestrator will see no table entities and immediately trigger BuildTieredOntologyTask
 
 	return nil
 }
@@ -233,7 +206,7 @@ func (t *UnderstandProjectDescriptionTask) Execute(ctx context.Context, enqueuer
 		CurrentPhase: models.WorkflowPhaseDescriptionProcessing,
 		Message:      "Analyzing your project description...",
 		Current:      0,
-		Total:        t.tableCount,
+		Total:        1, // Single global entity
 	})
 
 	// Process description with LLM
@@ -243,12 +216,12 @@ func (t *UnderstandProjectDescriptionTask) Execute(ctx context.Context, enqueuer
 		// ProcessProjectDescription stores results in metadata even on partial failure
 	}
 
-	// Update progress - transition to scanning phase
+	// Update progress - transition to building phase (no scanning in simplified flow)
 	_ = t.workflowService.UpdateProgress(tenantCtx, t.workflowID, &models.WorkflowProgress{
-		CurrentPhase: models.WorkflowPhaseScanning,
-		Message:      "Scanning database tables...",
+		CurrentPhase: models.WorkflowPhaseTier1Building,
+		Message:      "Building ontology from entities and relationships...",
 		Current:      0,
-		Total:        t.tableCount,
+		Total:        1, // Single global entity
 	})
 
 	return nil
