@@ -619,11 +619,16 @@ Apply the same pattern as Step 2:
    - `stopHeartbeat` (line 909)
 7. Update Shutdown method (line 982)
 
-### Step 5: Update TenantContextFunc type
+### Step 5: Update TenantContextFunc type ✅ COMPLETE ✅
 
-Move `TenantContextFunc` type definition to the workflow package since it's now used there.
+The `TenantContextFunc` type is now defined in multiple packages to avoid import cycles:
+- `pkg/services/workflow/infra.go` - Canonical definition for workflow infrastructure
+- `pkg/services/ontology_tasks.go` - Type alias (`type TenantContextFunc = workflow.TenantContextFunc`) for backwards compatibility
+- `pkg/llm/conversation_recorder.go` - Separate identical type definition (cannot import workflow due to `llm → workqueue → workflow` cycle)
 
-Check where it's currently defined and update imports as needed.
+The `NewTenantContextFunc` factory in `services` returns `workflow.TenantContextFunc` directly.
+Type conversions between `services.TenantContextFunc` and `workflow.TenantContextFunc` are no longer needed
+since they are now type aliases. However, `llm.TenantContextFunc` still requires explicit conversion.
 
 ### Step 6: Add tests for workflow infrastructure
 
