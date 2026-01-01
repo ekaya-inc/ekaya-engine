@@ -7,7 +7,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
-	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
@@ -57,19 +56,16 @@ type DiscoverEntityRelationshipsResponse struct {
 // EntityRelationshipHandler handles entity relationship HTTP requests.
 type EntityRelationshipHandler struct {
 	relationshipService services.DeterministicRelationshipService
-	relationshipRepo    repositories.EntityRelationshipRepository
 	logger              *zap.Logger
 }
 
 // NewEntityRelationshipHandler creates a new entity relationship handler.
 func NewEntityRelationshipHandler(
 	relationshipService services.DeterministicRelationshipService,
-	relationshipRepo repositories.EntityRelationshipRepository,
 	logger *zap.Logger,
 ) *EntityRelationshipHandler {
 	return &EntityRelationshipHandler{
 		relationshipService: relationshipService,
-		relationshipRepo:    relationshipRepo,
 		logger:              logger,
 	}
 }
@@ -127,7 +123,7 @@ func (h *EntityRelationshipHandler) List(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	relationships, err := h.relationshipRepo.GetByProject(r.Context(), projectID)
+	relationships, err := h.relationshipService.GetByProject(r.Context(), projectID)
 	if err != nil {
 		h.logger.Error("Failed to list relationships",
 			zap.String("project_id", projectID.String()),
