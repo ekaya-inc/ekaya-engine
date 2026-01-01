@@ -182,4 +182,3 @@ func (h *EntityDiscoveryHandler) Cancel(w http.ResponseWriter, r *http.Request) 
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }
-
