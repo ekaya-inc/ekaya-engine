@@ -400,7 +400,8 @@ The existing `execute_approved_query` tool is mostly complete:
 
 - [x] Add `output_columns` to Query model (future-1) ✓ COMPLETE
 - [x] Database migration for output_columns field (future-1) ✓ COMPLETE
-- [ ] Add `constraints` to Query model
+- [x] Add `constraints` to Query model (future-2) ✓ COMPLETE
+- [x] Database migration for constraints field (future-2) ✓ COMPLETE
 - [ ] Update admin UI to capture new fields
 - [ ] Parse SELECT columns from SQL as fallback
 

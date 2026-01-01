@@ -93,6 +93,7 @@ type approvedQueryInfo struct {
 	SQL           string             `json:"sql"`           // The SQL template
 	Parameters    []parameterInfo    `json:"parameters"`
 	OutputColumns []outputColumnInfo `json:"output_columns,omitempty"`
+	Constraints   string             `json:"constraints,omitempty"` // Limitations and assumptions
 	Dialect       string             `json:"dialect"`
 }
 
@@ -174,6 +175,11 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 				desc = *q.AdditionalContext
 			}
 
+			constraints := ""
+			if q.Constraints != nil {
+				constraints = *q.Constraints
+			}
+
 			result.Queries[i] = approvedQueryInfo{
 				ID:            q.ID.String(),
 				Name:          q.NaturalLanguagePrompt,
@@ -181,6 +187,7 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 				SQL:           q.SQLQuery,
 				Parameters:    params,
 				OutputColumns: outputCols,
+				Constraints:   constraints,
 				Dialect:       q.Dialect,
 			}
 		}

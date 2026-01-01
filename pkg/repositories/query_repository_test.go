@@ -140,7 +140,8 @@ func (tc *queryTestContext) createTestQuery(ctx context.Context, prompt, sqlQuer
 		Dialect:               "postgres",
 		IsEnabled:             true,
 		UsageCount:            0,
-		Parameters:            []models.QueryParameter{}, // Initialize empty parameters
+		Parameters:            []models.QueryParameter{},   // Initialize empty parameters
+		OutputColumns:         []models.OutputColumn{},      // Initialize empty output columns
 	}
 
 	if err := tc.repo.Create(ctx, query); err != nil {
@@ -170,6 +171,7 @@ func TestQueryRepository_Create(t *testing.T) {
 		IsEnabled:             true,
 		UsageCount:            0,
 		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
 	}
 
 	err := tc.repo.Create(ctx, query)
@@ -230,6 +232,7 @@ func TestQueryRepository_Create_WithAdditionalContext(t *testing.T) {
 		Dialect:               "postgres",
 		IsEnabled:             true,
 		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
 	}
 
 	err := tc.repo.Create(ctx, query)
@@ -379,6 +382,7 @@ func TestQueryRepository_Update_NotFound(t *testing.T) {
 		Dialect:               "postgres",
 		IsEnabled:             true,
 		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
 	}
 
 	err := tc.repo.Update(ctx, query)
@@ -636,6 +640,7 @@ func TestQueryRepository_NoTenantScope(t *testing.T) {
 		Dialect:               "postgres",
 		IsEnabled:             true,
 		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
 	}
 
 	err := tc.repo.Create(ctx, query)
@@ -786,6 +791,7 @@ func TestQueryRepository_Create_WithParameters(t *testing.T) {
 				Default:     "pending",
 			},
 		},
+		OutputColumns: []models.OutputColumn{},
 	}
 
 	err := tc.repo.Create(ctx, query)
@@ -852,6 +858,7 @@ func TestQueryRepository_Create_WithoutParameters(t *testing.T) {
 		Dialect:               "postgres",
 		IsEnabled:             true,
 		Parameters:            []models.QueryParameter{}, // Empty parameters
+		OutputColumns:         []models.OutputColumn{},
 	}
 
 	err := tc.repo.Create(ctx, query)
@@ -940,6 +947,7 @@ func TestQueryRepository_Update_RemoveParameters(t *testing.T) {
 				Default:     nil,
 			},
 		},
+		OutputColumns: []models.OutputColumn{},
 	}
 
 	err := tc.repo.Create(ctx, query)
@@ -998,6 +1006,7 @@ func TestQueryRepository_ListByDatasource_WithParameters(t *testing.T) {
 				Default:     nil,
 			},
 		},
+		OutputColumns: []models.OutputColumn{},
 	}
 
 	err := tc.repo.Create(ctx, query)
@@ -1060,6 +1069,7 @@ func TestQueryRepository_ListEnabled_WithParameters(t *testing.T) {
 				Default:     nil,
 			},
 		},
+		OutputColumns: []models.OutputColumn{},
 	}
 
 	err := tc.repo.Create(ctx, query)
@@ -1126,6 +1136,7 @@ func TestQueryRepository_Parameters_WithVariousTypes(t *testing.T) {
 				Default:     []interface{}{"a", "b", "c"},
 			},
 		},
+		OutputColumns: []models.OutputColumn{},
 	}
 
 	err := tc.repo.Create(ctx, query)
@@ -1169,5 +1180,104 @@ func TestQueryRepository_Parameters_WithVariousTypes(t *testing.T) {
 		} else if len(arr) != 3 {
 			t.Errorf("expected array length 3, got %d", len(arr))
 		}
+	}
+}
+
+func TestQueryRepository_OutputColumnsAndConstraints(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	additionalContext := "Returns total revenue by customer"
+	constraints := "Only includes completed orders. Excludes refunded amounts."
+
+	query := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Total revenue by customer",
+		AdditionalContext:     &additionalContext,
+		SQLQuery:              "SELECT u.name, SUM(o.total_amount) as revenue FROM users u JOIN orders o ON u.id = o.user_id WHERE o.status = 'completed' GROUP BY u.name",
+		Dialect:               "postgres",
+		IsEnabled:             true,
+		UsageCount:            0,
+		Parameters:            []models.QueryParameter{},
+		OutputColumns: []models.OutputColumn{
+			{
+				Name:        "name",
+				Type:        "string",
+				Description: "Customer name",
+			},
+			{
+				Name:        "revenue",
+				Type:        "decimal",
+				Description: "Total revenue from completed orders",
+			},
+		},
+		Constraints: &constraints,
+	}
+
+	err := tc.repo.Create(ctx, query)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Retrieve and verify output_columns and constraints
+	retrieved, err := tc.repo.GetByID(ctx, tc.projectID, query.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+
+	// Verify output_columns
+	if len(retrieved.OutputColumns) != 2 {
+		t.Fatalf("expected 2 output columns, got %d", len(retrieved.OutputColumns))
+	}
+
+	if retrieved.OutputColumns[0].Name != "name" {
+		t.Errorf("expected first column name 'name', got %s", retrieved.OutputColumns[0].Name)
+	}
+	if retrieved.OutputColumns[0].Type != "string" {
+		t.Errorf("expected first column type 'string', got %s", retrieved.OutputColumns[0].Type)
+	}
+	if retrieved.OutputColumns[0].Description != "Customer name" {
+		t.Errorf("expected first column description 'Customer name', got %s", retrieved.OutputColumns[0].Description)
+	}
+
+	if retrieved.OutputColumns[1].Name != "revenue" {
+		t.Errorf("expected second column name 'revenue', got %s", retrieved.OutputColumns[1].Name)
+	}
+	if retrieved.OutputColumns[1].Type != "decimal" {
+		t.Errorf("expected second column type 'decimal', got %s", retrieved.OutputColumns[1].Type)
+	}
+
+	// Verify constraints
+	if retrieved.Constraints == nil {
+		t.Fatal("expected constraints to be set, got nil")
+	}
+	if *retrieved.Constraints != constraints {
+		t.Errorf("expected constraints '%s', got '%s'", constraints, *retrieved.Constraints)
+	}
+
+	// Test update with new constraints
+	newConstraints := "Updated: Only includes orders from last 12 months"
+	retrieved.Constraints = &newConstraints
+
+	err = tc.repo.Update(ctx, retrieved)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	// Verify update persisted
+	updated, err := tc.repo.GetByID(ctx, tc.projectID, query.ID)
+	if err != nil {
+		t.Fatalf("GetByID after update failed: %v", err)
+	}
+
+	if updated.Constraints == nil {
+		t.Fatal("expected updated constraints to be set, got nil")
+	}
+	if *updated.Constraints != newConstraints {
+		t.Errorf("expected updated constraints '%s', got '%s'", newConstraints, *updated.Constraints)
 	}
 }

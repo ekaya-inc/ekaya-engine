@@ -34,6 +34,7 @@ type Query struct {
 	IsEnabled             bool             `json:"is_enabled"`
 	Parameters            []QueryParameter `json:"parameters,omitempty"`
 	OutputColumns         []OutputColumn   `json:"output_columns,omitempty"`
+	Constraints           *string          `json:"constraints,omitempty"`
 	UsageCount            int              `json:"usage_count"`
 	LastUsedAt            *time.Time       `json:"last_used_at,omitempty"`
 	CreatedAt             time.Time        `json:"created_at"`
