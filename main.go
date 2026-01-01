@@ -175,7 +175,8 @@ func main() {
 	knowledgeService := services.NewKnowledgeService(knowledgeRepo, logger)
 	ontologyBuilderService := services.NewOntologyBuilderService(
 		ontologyRepo, schemaRepo, ontologyWorkflowRepo,
-		knowledgeRepo, workflowStateRepo, llmFactory, logger)
+		knowledgeRepo, workflowStateRepo, ontologyEntityRepo, entityRelationshipRepo,
+		llmFactory, logger)
 	ontologyQuestionService := services.NewOntologyQuestionService(
 		ontologyQuestionRepo, ontologyRepo, knowledgeRepo,
 		ontologyBuilderService, logger)

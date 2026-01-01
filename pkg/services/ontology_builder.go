@@ -85,13 +85,15 @@ type DescriptionProcessingResult struct {
 }
 
 type ontologyBuilderService struct {
-	ontologyRepo      repositories.OntologyRepository
-	schemaRepo        repositories.SchemaRepository
-	workflowRepo      repositories.OntologyWorkflowRepository
-	knowledgeRepo     repositories.KnowledgeRepository
-	workflowStateRepo repositories.WorkflowStateRepository
-	llmFactory        llm.LLMClientFactory
-	logger            *zap.Logger
+	ontologyRepo       repositories.OntologyRepository
+	schemaRepo         repositories.SchemaRepository
+	workflowRepo       repositories.OntologyWorkflowRepository
+	knowledgeRepo      repositories.KnowledgeRepository
+	workflowStateRepo  repositories.WorkflowStateRepository
+	ontologyEntityRepo repositories.OntologyEntityRepository
+	entityRelRepo      repositories.EntityRelationshipRepository
+	llmFactory         llm.LLMClientFactory
+	logger             *zap.Logger
 }
 
 // NewOntologyBuilderService creates a new ontology builder service.
@@ -101,17 +103,21 @@ func NewOntologyBuilderService(
 	workflowRepo repositories.OntologyWorkflowRepository,
 	knowledgeRepo repositories.KnowledgeRepository,
 	workflowStateRepo repositories.WorkflowStateRepository,
+	ontologyEntityRepo repositories.OntologyEntityRepository,
+	entityRelRepo repositories.EntityRelationshipRepository,
 	llmFactory llm.LLMClientFactory,
 	logger *zap.Logger,
 ) OntologyBuilderService {
 	return &ontologyBuilderService{
-		ontologyRepo:      ontologyRepo,
-		schemaRepo:        schemaRepo,
-		workflowRepo:      workflowRepo,
-		knowledgeRepo:     knowledgeRepo,
-		workflowStateRepo: workflowStateRepo,
-		llmFactory:        llmFactory,
-		logger:            logger.Named("ontology-builder"),
+		ontologyRepo:       ontologyRepo,
+		schemaRepo:         schemaRepo,
+		workflowRepo:       workflowRepo,
+		knowledgeRepo:      knowledgeRepo,
+		workflowStateRepo:  workflowStateRepo,
+		ontologyEntityRepo: ontologyEntityRepo,
+		entityRelRepo:      entityRelRepo,
+		llmFactory:         llmFactory,
+		logger:             logger.Named("ontology-builder"),
 	}
 }
 
@@ -127,7 +133,7 @@ func (s *ontologyBuilderService) BuildTieredOntology(ctx context.Context, projec
 	// Add workflow context for conversation recording
 	ctx = llm.WithWorkflowID(ctx, workflowID)
 
-	s.logger.Info("Starting tiered ontology build",
+	s.logger.Info("Starting tiered ontology build from domain entities",
 		zap.String("project_id", projectID.String()),
 		zap.String("workflow_id", workflowID.String()))
 
@@ -140,7 +146,7 @@ func (s *ontologyBuilderService) BuildTieredOntology(ctx context.Context, projec
 		return fmt.Errorf("no active ontology found")
 	}
 
-	// Get workflow to find datasource and description
+	// Get workflow to find datasource
 	workflow, err := s.workflowRepo.GetByID(ctx, workflowID)
 	if err != nil {
 		return fmt.Errorf("failed to get workflow: %w", err)
@@ -149,60 +155,50 @@ func (s *ontologyBuilderService) BuildTieredOntology(ctx context.Context, projec
 		return fmt.Errorf("workflow has no config")
 	}
 
-	// Load domain context from ontology metadata (set by InitializeOntologyTask)
-	var domainContext *models.DomainContext
-	if ontology.Metadata != nil {
-		if dc, ok := ontology.Metadata["domain_context"]; ok {
-			if dcMap, ok := dc.(map[string]any); ok {
-				domainContext = &models.DomainContext{
-					KeyTerminology: make(map[string]string),
-				}
-				if summary, ok := dcMap["summary"].(string); ok {
-					domainContext.Summary = summary
-				}
-				if domains, ok := dcMap["primary_domains"].([]any); ok {
-					for _, d := range domains {
-						if ds, ok := d.(string); ok {
-							domainContext.PrimaryDomains = append(domainContext.PrimaryDomains, ds)
-						}
-					}
-				}
-				if terms, ok := dcMap["key_terminology"].(map[string]any); ok {
-					for k, v := range terms {
-						if vs, ok := v.(string); ok {
-							domainContext.KeyTerminology[k] = vs
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Load schema tables
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, workflow.Config.DatasourceID)
+	// Load domain entities from the Entities phase
+	domainEntities, err := s.ontologyEntityRepo.GetByOntology(ctx, ontology.ID)
 	if err != nil {
-		return fmt.Errorf("failed to list tables: %w", err)
+		return fmt.Errorf("failed to load domain entities: %w", err)
 	}
-	tableCount := len(tables)
 
-	s.logger.Info("Loaded schema tables",
-		zap.Int("table_count", tableCount))
+	// Load entity relationships from the Relationships phase
+	entityRelationships, err := s.entityRelRepo.GetByOntology(ctx, ontology.ID)
+	if err != nil {
+		return fmt.Errorf("failed to load entity relationships: %w", err)
+	}
 
-	// Update workflow progress with table count
+	entityCount := len(domainEntities)
+	relationshipCount := len(entityRelationships)
+
+	s.logger.Info("Loaded domain entities and relationships",
+		zap.Int("entity_count", entityCount),
+		zap.Int("relationship_count", relationshipCount))
+
+	// Update workflow progress
 	if err := s.workflowRepo.UpdateProgress(ctx, workflowID, &models.WorkflowProgress{
 		CurrentPhase: models.WorkflowPhaseTier1Building,
-		Message:      fmt.Sprintf("Building entity summaries for %d tables...", tableCount),
+		Message:      fmt.Sprintf("Building ontology from %d entities and %d relationships...", entityCount, relationshipCount),
 		Current:      0,
-		Total:        tableCount,
+		Total:        entityCount,
 	}); err != nil {
 		s.logger.Error("Failed to update progress", zap.Error(err))
 	}
 
-	// Build Tier 1: Entity summaries (with domain context)
-	entitySummaries, err := s.buildEntitySummariesWithContext(ctx, projectID, tables, domainContext)
-	if err != nil {
-		return fmt.Errorf("failed to build entity summaries: %w", err)
+	// Load occurrences for each entity to understand where they appear
+	entityOccurrences := make(map[uuid.UUID][]*models.OntologyEntityOccurrence)
+	for _, entity := range domainEntities {
+		occurrences, err := s.ontologyEntityRepo.GetOccurrencesByEntity(ctx, entity.ID)
+		if err != nil {
+			s.logger.Warn("Failed to load occurrences for entity",
+				zap.String("entity_name", entity.Name),
+				zap.Error(err))
+			continue
+		}
+		entityOccurrences[entity.ID] = occurrences
 	}
+
+	// Build entity summaries from domain entities (not tables)
+	entitySummaries := s.buildEntitySummariesFromDomainEntities(domainEntities, entityOccurrences, entityRelationships)
 
 	// Save entity summaries
 	if err := s.ontologyRepo.UpdateEntitySummaries(ctx, projectID, entitySummaries); err != nil {
@@ -213,17 +209,14 @@ func (s *ontologyBuilderService) BuildTieredOntology(ctx context.Context, projec
 	if err := s.workflowRepo.UpdateProgress(ctx, workflowID, &models.WorkflowProgress{
 		CurrentPhase: models.WorkflowPhaseTier0Building,
 		Message:      "Building domain summary...",
-		Current:      tableCount,
-		Total:        tableCount,
+		Current:      entityCount,
+		Total:        entityCount,
 	}); err != nil {
 		s.logger.Error("Failed to update progress", zap.Error(err))
 	}
 
-	// Build Tier 0: Domain summary (with domain context)
-	domainSummary, err := s.buildDomainSummaryWithContext(ctx, projectID, entitySummaries, domainContext)
-	if err != nil {
-		return fmt.Errorf("failed to build domain summary: %w", err)
-	}
+	// Build domain summary from domain entities
+	domainSummary := s.buildDomainSummaryFromEntities(domainEntities, entityRelationships, entitySummaries)
 
 	// Save domain summary
 	if err := s.ontologyRepo.UpdateDomainSummary(ctx, projectID, domainSummary); err != nil {
@@ -233,9 +226,9 @@ func (s *ontologyBuilderService) BuildTieredOntology(ctx context.Context, projec
 	// Update progress - ontology is now ready
 	if err := s.workflowRepo.UpdateProgress(ctx, workflowID, &models.WorkflowProgress{
 		CurrentPhase:  models.WorkflowPhaseCompleting,
-		Message:       "Ontology ready, generating questions...",
-		Current:       tableCount,
-		Total:         tableCount,
+		Message:       "Ontology complete",
+		Current:       entityCount,
+		Total:         entityCount,
 		OntologyReady: true,
 	}); err != nil {
 		s.logger.Error("Failed to update progress", zap.Error(err))
@@ -245,6 +238,7 @@ func (s *ontologyBuilderService) BuildTieredOntology(ctx context.Context, projec
 		zap.String("project_id", projectID.String()),
 		zap.String("workflow_id", workflowID.String()),
 		zap.Int("entities", len(entitySummaries)),
+		zap.Int("relationships", relationshipCount),
 		zap.Int("domains", len(domainSummary.Domains)),
 		zap.Duration("elapsed", time.Since(startTime)))
 
@@ -260,6 +254,139 @@ func (s *ontologyBuilderService) BuildTieredOntology(ctx context.Context, projec
 	}
 
 	return nil
+}
+
+// buildEntitySummariesFromDomainEntities creates entity summaries from domain entities
+// discovered in the Entities phase, rather than from database tables.
+func (s *ontologyBuilderService) buildEntitySummariesFromDomainEntities(
+	entities []*models.OntologyEntity,
+	occurrences map[uuid.UUID][]*models.OntologyEntityOccurrence,
+	relationships []*models.EntityRelationship,
+) map[string]*models.EntitySummary {
+	summaries := make(map[string]*models.EntitySummary)
+
+	// Build a lookup for entity ID to name
+	entityByID := make(map[uuid.UUID]*models.OntologyEntity)
+	for _, entity := range entities {
+		entityByID[entity.ID] = entity
+	}
+
+	// Build relationship map: entity ID -> related entity names
+	relatedEntities := make(map[uuid.UUID][]string)
+	for _, rel := range relationships {
+		if rel.Status == models.RelationshipStatusRejected {
+			continue // Skip rejected relationships
+		}
+		if sourceEntity, ok := entityByID[rel.SourceEntityID]; ok {
+			if targetEntity, ok := entityByID[rel.TargetEntityID]; ok {
+				relatedEntities[sourceEntity.ID] = append(relatedEntities[sourceEntity.ID], targetEntity.Name)
+				relatedEntities[targetEntity.ID] = append(relatedEntities[targetEntity.ID], sourceEntity.Name)
+			}
+		}
+	}
+
+	for _, entity := range entities {
+		occs := occurrences[entity.ID]
+
+		// Collect tables where this entity appears
+		tableSet := make(map[string]bool)
+		var keyColumns []models.KeyColumn
+		for _, occ := range occs {
+			tableSet[occ.TableName] = true
+			// Add the column as a key column with its role
+			kc := models.KeyColumn{
+				Name: occ.ColumnName,
+			}
+			if occ.Role != nil && *occ.Role != "" {
+				kc.Synonyms = []string{*occ.Role}
+			}
+			keyColumns = append(keyColumns, kc)
+		}
+
+		// Build list of related entity names
+		related := uniqueStrings(relatedEntities[entity.ID])
+
+		// Use entity name as key (this becomes the lookup key for the ontology)
+		summaries[entity.Name] = &models.EntitySummary{
+			TableName:     entity.PrimaryTable,    // Primary table where entity is defined
+			BusinessName:  entity.Name,            // Domain entity name
+			Description:   entity.Description,     // LLM-generated description
+			Domain:        "domain",               // Could be enhanced with domain classification
+			Synonyms:      []string{},             // Could be populated from aliases
+			KeyColumns:    keyColumns,             // Columns where this entity appears
+			ColumnCount:   len(occs),              // Number of occurrences
+			Relationships: related,                // Related entities
+		}
+	}
+
+	return summaries
+}
+
+// buildDomainSummaryFromEntities creates a domain summary from domain entities and their relationships.
+func (s *ontologyBuilderService) buildDomainSummaryFromEntities(
+	entities []*models.OntologyEntity,
+	relationships []*models.EntityRelationship,
+	entitySummaries map[string]*models.EntitySummary,
+) *models.DomainSummary {
+	// Build relationship graph
+	entityByID := make(map[uuid.UUID]*models.OntologyEntity)
+	for _, entity := range entities {
+		entityByID[entity.ID] = entity
+	}
+
+	var relationshipGraph []models.RelationshipEdge
+	for _, rel := range relationships {
+		if rel.Status == models.RelationshipStatusRejected {
+			continue
+		}
+		sourceEntity := entityByID[rel.SourceEntityID]
+		targetEntity := entityByID[rel.TargetEntityID]
+		if sourceEntity != nil && targetEntity != nil {
+			relationshipGraph = append(relationshipGraph, models.RelationshipEdge{
+				From: sourceEntity.Name,
+				To:   targetEntity.Name,
+			})
+		}
+	}
+
+	// Collect unique domains from entity summaries
+	domainSet := make(map[string]bool)
+	for _, summary := range entitySummaries {
+		if summary.Domain != "" {
+			domainSet[summary.Domain] = true
+		}
+	}
+	var domains []string
+	for d := range domainSet {
+		domains = append(domains, d)
+	}
+
+	// Build description from entities
+	entityNames := make([]string, 0, len(entities))
+	for _, entity := range entities {
+		entityNames = append(entityNames, entity.Name)
+	}
+
+	description := fmt.Sprintf("Domain model with %d entities: %s",
+		len(entities), strings.Join(entityNames, ", "))
+
+	// Generate sample questions based on entities and relationships
+	var sampleQuestions []string
+	if len(entities) > 0 {
+		sampleQuestions = append(sampleQuestions,
+			fmt.Sprintf("How many %s records are there?", entities[0].Name))
+	}
+	if len(relationships) > 0 && len(entities) >= 2 {
+		sampleQuestions = append(sampleQuestions,
+			fmt.Sprintf("How are %s and %s related?", entities[0].Name, entities[1].Name))
+	}
+
+	return &models.DomainSummary{
+		Description:       description,
+		Domains:           domains,
+		SampleQuestions:   sampleQuestions,
+		RelationshipGraph: relationshipGraph,
+	}
 }
 
 // loadTablesWithColumns loads tables and attaches their columns in a single batch query.

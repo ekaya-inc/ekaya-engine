@@ -59,7 +59,7 @@ func setupWorkflowStateTest(t *testing.T) *workflowStateTestContext {
 
 	// Create a minimal builder service (we won't actually use LLM)
 	builderService := NewOntologyBuilderService(
-		ontologyRepo, schemaRepo, workflowRepo, nil, stateRepo, nil, logger)
+		ontologyRepo, schemaRepo, workflowRepo, nil, stateRepo, nil, nil, nil, logger)
 
 	// Create workflow service with all dependencies
 	questionRepo := repositories.NewOntologyQuestionRepository()
