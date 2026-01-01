@@ -680,7 +680,7 @@ Create unit tests for:
 6. [x] Run `make check`
 7. [x] Update `entityDiscoveryService`
 8. [x] Run `make check`
-9. [ ] Remove any now-unused imports (including workflow_types.go after all services migrated)
+9. [x] Remove any now-unused imports (including workflow_types.go after all services migrated)
 
 ## Future Considerations
 
