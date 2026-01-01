@@ -583,3 +583,140 @@ func TestNewToolFilter_ForceModeOffAllowsDeveloperTools(t *testing.T) {
 		t.Error("execute tool should be present when ForceMode is disabled")
 	}
 }
+
+// Test Mode 2 from Appendix: Pre-Approved ON, Developer OFF
+// Expected: health, list_approved_queries, execute_approved_query
+func TestNewToolFilter_ApprovedQueriesOn_DeveloperOff(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Pre-Approved ON, Developer OFF
+	setupTestConfigWithApprovedQueries(t, engineDB.DB, projectID,
+		&models.ToolGroupConfig{Enabled: false, EnableExecute: false},
+		&models.ToolGroupConfig{Enabled: true, ForceMode: false},
+	)
+
+	// Mock with queries
+	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
+	deps := &DeveloperToolDeps{
+		DB:               engineDB.DB,
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, &mockProjectService{defaultDatasourceID: uuid.New()}, "http://localhost", zap.NewNop()),
+		Logger:           zap.NewNop(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestTools()
+
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
+	filtered := filter(ctx, tools)
+
+	// Expected: health, list_approved_queries, execute_approved_query
+	expectedTools := []string{"health", "list_approved_queries", "execute_approved_query"}
+	if len(filtered) != len(expectedTools) {
+		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
+	}
+
+	for _, name := range expectedTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present", name)
+		}
+	}
+
+	// Developer tools should be filtered out
+	if containsTool(filtered, "query") {
+		t.Error("developer tool 'query' should be filtered when developer disabled")
+	}
+	if containsTool(filtered, "get_schema") {
+		t.Error("schema tool 'get_schema' should be filtered when developer disabled")
+	}
+}
+
+// Test Mode 3 from Appendix: Pre-Approved ON, Developer ON (Execute OFF)
+// Expected: health, list_approved_queries, execute_approved_query, get_schema, query, sample, validate, echo
+func TestNewToolFilter_ApprovedQueriesOn_DeveloperOn_ExecuteOff(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Pre-Approved ON, Developer ON, Execute OFF
+	setupTestConfigWithApprovedQueries(t, engineDB.DB, projectID,
+		&models.ToolGroupConfig{Enabled: true, EnableExecute: false},
+		&models.ToolGroupConfig{Enabled: true, ForceMode: false},
+	)
+
+	// Mock with queries
+	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
+	deps := &DeveloperToolDeps{
+		DB:               engineDB.DB,
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, &mockProjectService{defaultDatasourceID: uuid.New()}, "http://localhost", zap.NewNop()),
+		Logger:           zap.NewNop(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestTools()
+
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
+	filtered := filter(ctx, tools)
+
+	// Expected: health, list_approved_queries, execute_approved_query, get_schema, query, sample, validate, echo (8 tools)
+	expectedTools := []string{"health", "list_approved_queries", "execute_approved_query", "get_schema", "query", "sample", "validate", "echo"}
+	if len(filtered) != len(expectedTools) {
+		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
+	}
+
+	for _, name := range expectedTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present", name)
+		}
+	}
+
+	// Execute should be filtered out
+	if containsTool(filtered, "execute") {
+		t.Error("execute tool should be filtered when execute disabled")
+	}
+}
+
+// Test Mode 5 from Appendix: Pre-Approved OFF, Developer ON
+// Expected: health, get_schema, query, sample, validate, echo
+func TestNewToolFilter_ApprovedQueriesOff_DeveloperOn(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Pre-Approved OFF (not in config), Developer ON, Execute OFF
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, EnableExecute: false})
+
+	deps := &DeveloperToolDeps{
+		DB:               engineDB.DB,
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, "http://localhost", zap.NewNop()),
+		Logger:           zap.NewNop(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestTools()
+
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
+	filtered := filter(ctx, tools)
+
+	// Expected: health, get_schema, query, sample, validate, echo (6 tools)
+	expectedTools := []string{"health", "get_schema", "query", "sample", "validate", "echo"}
+	if len(filtered) != len(expectedTools) {
+		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
+	}
+
+	for _, name := range expectedTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present", name)
+		}
+	}
+
+	// Approved queries tools should be filtered out
+	if containsTool(filtered, "list_approved_queries") {
+		t.Error("list_approved_queries should be filtered when approved_queries disabled")
+	}
+	if containsTool(filtered, "execute_approved_query") {
+		t.Error("execute_approved_query should be filtered when approved_queries disabled")
+	}
+	// Execute should be filtered out
+	if containsTool(filtered, "execute") {
+		t.Error("execute tool should be filtered when execute disabled")
+	}
+}
