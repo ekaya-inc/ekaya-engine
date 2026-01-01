@@ -466,6 +466,10 @@ func (m *mockQueryRepository) IncrementUsageCount(ctx context.Context, queryID u
 	return nil
 }
 
+func (m *mockQueryRepository) HasEnabledQueries(ctx context.Context, projectID, datasourceID uuid.UUID) (bool, error) {
+	return false, nil
+}
+
 // mockDatasourceSvc implements DatasourceService for testing.
 type mockDatasourceSvc struct {
 	datasource *models.Datasource

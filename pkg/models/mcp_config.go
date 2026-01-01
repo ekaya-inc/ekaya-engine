@@ -10,6 +10,12 @@ import (
 type ToolGroupConfig struct {
 	Enabled       bool `json:"enabled"`
 	EnableExecute bool `json:"enableExecute"`
+	// ForceMode (approved_queries only): When enabled, only Pre-Approved Queries can be used.
+	// This disables developer tools for safety.
+	ForceMode bool `json:"forceMode,omitempty"`
+	// AllowClientSuggestions (approved_queries only): When enabled, MCP clients can suggest new queries
+	// that must be approved by an administrator. This exposes the Ontology and SQL of Pre-Approved Queries.
+	AllowClientSuggestions bool `json:"allowClientSuggestions,omitempty"`
 }
 
 // MCPConfig represents the MCP server configuration for a project.

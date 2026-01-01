@@ -166,7 +166,7 @@ func main() {
 	discoveryService := services.NewRelationshipDiscoveryService(schemaRepo, datasourceService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
-	mcpConfigService := services.NewMCPConfigService(mcpConfigRepo, cfg.BaseURL, logger)
+	mcpConfigService := services.NewMCPConfigService(mcpConfigRepo, queryService, projectService, cfg.BaseURL, logger)
 
 	// LLM factory for creating clients per project configuration
 	llmFactory := llm.NewClientFactory(aiConfigService, logger)

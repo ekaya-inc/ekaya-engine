@@ -31,6 +31,8 @@ type QueryService interface {
 
 	// Filtering
 	ListEnabled(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.Query, error)
+	// HasEnabledQueries efficiently checks if any enabled queries exist (uses LIMIT 1).
+	HasEnabledQueries(ctx context.Context, projectID, datasourceID uuid.UUID) (bool, error)
 
 	// Status Management
 	SetEnabledStatus(ctx context.Context, projectID, queryID uuid.UUID, isEnabled bool) error
@@ -268,6 +270,11 @@ func (s *queryService) ListEnabled(ctx context.Context, projectID, datasourceID 
 		return nil, fmt.Errorf("failed to list enabled queries: %w", err)
 	}
 	return queries, nil
+}
+
+// HasEnabledQueries efficiently checks if any enabled queries exist.
+func (s *queryService) HasEnabledQueries(ctx context.Context, projectID, datasourceID uuid.UUID) (bool, error) {
+	return s.queryRepo.HasEnabledQueries(ctx, projectID, datasourceID)
 }
 
 // SetEnabledStatus updates the enabled status of a query.
