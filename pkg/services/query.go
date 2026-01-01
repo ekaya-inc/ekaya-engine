@@ -31,6 +31,8 @@ type QueryService interface {
 
 	// Filtering
 	ListEnabled(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.Query, error)
+	// HasEnabledQueries efficiently checks if any enabled queries exist (uses LIMIT 1).
+	HasEnabledQueries(ctx context.Context, projectID, datasourceID uuid.UUID) (bool, error)
 
 	// Status Management
 	SetEnabledStatus(ctx context.Context, projectID, queryID uuid.UUID, isEnabled bool) error
@@ -39,7 +41,7 @@ type QueryService interface {
 	Execute(ctx context.Context, projectID, queryID uuid.UUID, req *ExecuteQueryRequest) (*datasource.QueryExecutionResult, error)
 	ExecuteWithParameters(ctx context.Context, projectID, queryID uuid.UUID, params map[string]any, req *ExecuteQueryRequest) (*datasource.QueryExecutionResult, error)
 	Test(ctx context.Context, projectID, datasourceID uuid.UUID, req *TestQueryRequest) (*datasource.QueryExecutionResult, error)
-	Validate(ctx context.Context, projectID, datasourceID uuid.UUID, sqlQuery string) error
+	Validate(ctx context.Context, projectID, datasourceID uuid.UUID, sqlQuery string) (*ValidationResult, error)
 	ValidateParameterizedQuery(sqlQuery string, params []models.QueryParameter) error
 }
 
@@ -124,11 +126,10 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 		return nil, fmt.Errorf("failed to get datasource: %w", err)
 	}
 
-	// Validate parameters if provided
-	if len(req.Parameters) > 0 {
-		if err := s.ValidateParameterizedQuery(req.SQLQuery, req.Parameters); err != nil {
-			return nil, fmt.Errorf("parameter validation failed: %w", err)
-		}
+	// Validate that all {{param}} in SQL have corresponding parameter definitions
+	// This is required even if no parameters are defined (catches undefined params in SQL)
+	if err := s.ValidateParameterizedQuery(req.SQLQuery, req.Parameters); err != nil {
+		return nil, fmt.Errorf("parameter validation failed: %w", err)
 	}
 
 	// Ensure Parameters is never nil (database column has NOT NULL constraint)
@@ -222,6 +223,11 @@ func (s *queryService) Update(ctx context.Context, projectID, queryID uuid.UUID,
 		query.IsEnabled = *req.IsEnabled
 	}
 
+	// Validate that all {{param}} in SQL have corresponding parameter definitions
+	if err := s.ValidateParameterizedQuery(query.SQLQuery, query.Parameters); err != nil {
+		return nil, fmt.Errorf("parameter validation failed: %w", err)
+	}
+
 	if err := s.queryRepo.Update(ctx, query); err != nil {
 		return nil, fmt.Errorf("failed to update query: %w", err)
 	}
@@ -266,6 +272,11 @@ func (s *queryService) ListEnabled(ctx context.Context, projectID, datasourceID 
 	return queries, nil
 }
 
+// HasEnabledQueries efficiently checks if any enabled queries exist.
+func (s *queryService) HasEnabledQueries(ctx context.Context, projectID, datasourceID uuid.UUID) (bool, error) {
+	return s.queryRepo.HasEnabledQueries(ctx, projectID, datasourceID)
+}
+
 // SetEnabledStatus updates the enabled status of a query.
 func (s *queryService) SetEnabledStatus(ctx context.Context, projectID, queryID uuid.UUID, isEnabled bool) error {
 	if err := s.queryRepo.UpdateEnabledStatus(ctx, projectID, queryID, isEnabled); err != nil {
@@ -298,6 +309,11 @@ func (s *queryService) Execute(ctx context.Context, projectID, queryID uuid.UUID
 			return nil, apperrors.ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to get query: %w", err)
+	}
+
+	// If query has parameters, delegate to ExecuteWithParameters (defaults will apply)
+	if len(query.Parameters) > 0 {
+		return s.ExecuteWithParameters(ctx, projectID, queryID, map[string]any{}, req)
 	}
 
 	// Get datasource config
@@ -420,45 +436,64 @@ func (s *queryService) Test(ctx context.Context, projectID, datasourceID uuid.UU
 	return result, nil
 }
 
+// ValidationResult contains the result of SQL validation.
+type ValidationResult struct {
+	Valid   bool
+	Message string
+}
+
 // Validate checks if a SQL query is syntactically valid.
-func (s *queryService) Validate(ctx context.Context, projectID, datasourceID uuid.UUID, sqlQuery string) error {
+// Returns a ValidationResult with valid=true and a custom message if parameters are detected.
+func (s *queryService) Validate(ctx context.Context, projectID, datasourceID uuid.UUID, sqlQuery string) (*ValidationResult, error) {
 	// Extract userID from context (JWT claims)
 	userID, err := auth.RequireUserIDFromContext(ctx)
 	if err != nil {
-		return fmt.Errorf("user ID not found in context: %w", err)
+		return nil, fmt.Errorf("user ID not found in context: %w", err)
 	}
 
 	// Validate input
 	if strings.TrimSpace(sqlQuery) == "" {
-		return fmt.Errorf("SQL query is required")
+		return nil, fmt.Errorf("SQL query is required")
 	}
 
 	// Validate and normalize SQL query
 	validationResult := sqlvalidator.ValidateAndNormalize(sqlQuery)
 	if validationResult.Error != nil {
-		return validationResult.Error
+		return nil, validationResult.Error
 	}
 	sqlQuery = validationResult.NormalizedSQL
+
+	// Check for {{param}} placeholders - skip DB validation if present
+	params := sqlpkg.ExtractParameters(sqlQuery)
+	if len(params) > 0 {
+		return &ValidationResult{
+			Valid:   true,
+			Message: "Parameters detected - full validation on Test Query",
+		}, nil
+	}
 
 	// Get datasource config
 	ds, err := s.datasourceSvc.Get(ctx, projectID, datasourceID)
 	if err != nil {
-		return fmt.Errorf("failed to get datasource: %w", err)
+		return nil, fmt.Errorf("failed to get datasource: %w", err)
 	}
 
 	// Create query executor with identity parameters for connection pooling
 	executor, err := s.adapterFactory.NewQueryExecutor(ctx, ds.DatasourceType, ds.Config, projectID, datasourceID, userID)
 	if err != nil {
-		return fmt.Errorf("failed to create query executor: %w", err)
+		return nil, fmt.Errorf("failed to create query executor: %w", err)
 	}
 	defer executor.Close()
 
 	// Validate query
 	if err := executor.ValidateQuery(ctx, sqlQuery); err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return &ValidationResult{
+		Valid:   true,
+		Message: "SQL is valid",
+	}, nil
 }
 
 // ExecuteWithParameters runs a parameterized query with supplied values.

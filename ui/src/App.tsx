@@ -19,7 +19,6 @@ import ProjectDashboard from './pages/ProjectDashboard';
 import QueriesPage from './pages/QueriesPage';
 import RelationshipsPage from './pages/RelationshipsPage';
 import SchemaPage from './pages/SchemaPage';
-import SecurityPage from './pages/SecurityPage';
 import SettingsPage from './pages/SettingsPage';
 
 const App = (): JSX.Element => {
@@ -40,7 +39,6 @@ const App = (): JSX.Element => {
                   <Route path="relationships" element={<RelationshipsPage />} />
                   <Route path="entities" element={<EntitiesPage />} />
                   <Route path="ontology" element={<OntologyPage />} />
-                  <Route path="security" element={<SecurityPage />} />
                   <Route path="queries" element={<QueriesPage />} />
                   <Route path="mcp-server" element={<MCPServerPage />} />
                   <Route path="settings" element={<SettingsPage />} />

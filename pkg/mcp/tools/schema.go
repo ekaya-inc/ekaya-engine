@@ -27,7 +27,7 @@ const schemaToolGroup = "schema"
 
 // schemaToolNames lists all tools in the schema group.
 var schemaToolNames = map[string]bool{
-	"get_schema_context": true,
+	"get_schema": true,
 }
 
 // RegisterSchemaTools registers tools for schema context with entity semantics.
@@ -38,7 +38,7 @@ func RegisterSchemaTools(s *server.MCPServer, deps *SchemaToolDeps) {
 // registerGetSchemaContextTool exposes database schema with entity/role annotations for text2sql.
 func registerGetSchemaContextTool(s *server.MCPServer, deps *SchemaToolDeps) {
 	tool := mcp.NewTool(
-		"get_schema_context",
+		"get_schema",
 		mcp.WithDescription(
 			"Get database schema with entity/role semantic information for intelligent query generation. "+
 				"This includes entity names (user, account, order) and roles (visitor, host, owner) for columns that represent domain entities. "+

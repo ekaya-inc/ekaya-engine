@@ -13,77 +13,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
-	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
-
-// mockProjectService implements services.ProjectService for testing.
-type mockProjectService struct {
-	defaultDatasourceID    uuid.UUID
-	defaultDatasourceError error
-}
-
-func (m *mockProjectService) Provision(ctx context.Context, projectID uuid.UUID, name string, params map[string]interface{}) (*services.ProvisionResult, error) {
-	return nil, nil
-}
-
-func (m *mockProjectService) ProvisionFromClaims(ctx context.Context, claims *auth.Claims) (*services.ProvisionResult, error) {
-	return nil, nil
-}
-
-func (m *mockProjectService) GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error) {
-	return nil, nil
-}
-
-func (m *mockProjectService) GetByIDWithoutTenant(ctx context.Context, id uuid.UUID) (*models.Project, error) {
-	return nil, nil
-}
-
-func (m *mockProjectService) Delete(ctx context.Context, id uuid.UUID) error {
-	return nil
-}
-
-func (m *mockProjectService) GetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error) {
-	return m.defaultDatasourceID, m.defaultDatasourceError
-}
-
-func (m *mockProjectService) SetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID, datasourceID uuid.UUID) error {
-	return nil
-}
-
-// mockDatasourceService implements services.DatasourceService for testing.
-type mockDatasourceService struct {
-	datasource      *models.Datasource
-	getError        error
-	connectionError error
-}
-
-func (m *mockDatasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType string, config map[string]any) (*models.Datasource, error) {
-	return nil, nil
-}
-
-func (m *mockDatasourceService) Get(ctx context.Context, projectID, id uuid.UUID) (*models.Datasource, error) {
-	return m.datasource, m.getError
-}
-
-func (m *mockDatasourceService) GetByName(ctx context.Context, projectID uuid.UUID, name string) (*models.Datasource, error) {
-	return nil, nil
-}
-
-func (m *mockDatasourceService) List(ctx context.Context, projectID uuid.UUID) ([]*models.Datasource, error) {
-	return nil, nil
-}
-
-func (m *mockDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType string, config map[string]any) error {
-	return nil
-}
-
-func (m *mockDatasourceService) Delete(ctx context.Context, id uuid.UUID) error {
-	return nil
-}
-
-func (m *mockDatasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any) error {
-	return m.connectionError
-}
 
 // withClaims adds auth claims to the context.
 func withClaims(ctx context.Context, projectID string) context.Context {

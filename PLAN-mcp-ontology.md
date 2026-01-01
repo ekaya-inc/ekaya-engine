@@ -14,8 +14,7 @@ The existing MCP server provides:
 
 | Tool | Purpose | Limitation |
 |------|---------|------------|
-| `schema` | Raw schema (tables, columns, types) | No business context, no semantics |
-| `get_schema_context` | Schema with entity/role annotations | Prompt-formatted string, not structured for programmatic use |
+| `get_schema` | Schema with entity/role annotations | Prompt-formatted string, not structured for programmatic use |
 | `list_approved_queries` | Pre-approved queries | Pre-written SQL only, not generative |
 
 **Gap:** No tools for semantic understanding, entity resolution, join path discovery, or column meaning lookup.

@@ -429,3 +429,91 @@ func TestSubstituteParameters_ParameterOrdering(t *testing.T) {
 		t.Errorf("values mismatch:\ngot:  %#v\nwant: %#v", resultValues, expectedValues)
 	}
 }
+
+func TestFindParametersInStringLiterals(t *testing.T) {
+	tests := []struct {
+		name     string
+		sql      string
+		expected []string
+	}{
+		{
+			name:     "no parameters",
+			sql:      "SELECT * FROM users",
+			expected: nil,
+		},
+		{
+			name:     "parameter outside string - OK",
+			sql:      "SELECT * FROM users WHERE name = {{name}}",
+			expected: nil,
+		},
+		{
+			name:     "parameter inside string literal - problematic",
+			sql:      "SELECT 'Hello {{name}}' FROM users",
+			expected: []string{"name"},
+		},
+		{
+			name:     "parameter in greeting string",
+			sql:      "SELECT 'hi {{name}}' FROM users",
+			expected: []string{"name"},
+		},
+		{
+			name:     "parameter both inside and outside string",
+			sql:      "SELECT 'Hello {{name}}' FROM users WHERE id = {{user_id}}",
+			expected: []string{"name"},
+		},
+		{
+			name:     "multiple parameters inside string",
+			sql:      "SELECT '{{greeting}} {{name}}!' FROM users",
+			expected: []string{"greeting", "name"},
+		},
+		{
+			name:     "parameter in WHERE clause string literal",
+			sql:      "SELECT * FROM logs WHERE message LIKE '%{{search}}%'",
+			expected: []string{"search"},
+		},
+		{
+			name:     "escaped single quotes - parameter still detected",
+			sql:      "SELECT 'It''s {{name}}''s turn' FROM users",
+			expected: []string{"name"},
+		},
+		{
+			name:     "empty string literal - no parameters",
+			sql:      "SELECT '' FROM users WHERE id = {{user_id}}",
+			expected: nil,
+		},
+		{
+			name:     "multiple string literals, one with parameter",
+			sql:      "SELECT 'static' AS label, 'Hello {{name}}' AS greeting FROM users",
+			expected: []string{"name"},
+		},
+		{
+			name:     "parameter in concatenation - OK (outside quotes)",
+			sql:      "SELECT 'Hello ' || {{name}} FROM users",
+			expected: nil,
+		},
+		{
+			name:     "complex query with mixed usage",
+			sql:      "SELECT 'Status: {{status}}' AS label FROM orders WHERE status = {{status}} AND total > {{min_total}}",
+			expected: []string{"status"},
+		},
+		{
+			name:     "same parameter inside string appears once in result",
+			sql:      "SELECT '{{name}} says hello to {{name}}' FROM users",
+			expected: []string{"name"},
+		},
+		{
+			name:     "LIMIT and OFFSET outside strings - OK",
+			sql:      "SELECT * FROM users LIMIT {{limit}} OFFSET {{offset}}",
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FindParametersInStringLiterals(tt.sql)
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("got %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}

@@ -107,7 +107,12 @@ export const ParameterEditor = ({
     const updated = [...parameters];
     const existingParam = updated[index];
     if (existingParam !== undefined) {
-      updated[index] = { ...existingParam, [field]: value };
+      const updatedParam = { ...existingParam, [field]: value };
+      // Clear default value when parameter becomes required
+      if (field === 'required' && value === true) {
+        updatedParam.default = null;
+      }
+      updated[index] = updatedParam;
       onChange(updated);
     }
   };
@@ -249,7 +254,10 @@ export const ParameterEditor = ({
                         ))}
                       </select>
                     </div>
-                    <div className="flex items-center gap-1">
+                    <label
+                      className="flex items-center gap-1 cursor-pointer"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <input
                         type="checkbox"
                         checked={param.required}
@@ -260,13 +268,12 @@ export const ParameterEditor = ({
                             e.target.checked
                           )
                         }
-                        onClick={(e) => e.stopPropagation()}
                         className="rounded border-border-medium"
                       />
                       <span className="text-xs text-text-secondary">
                         Required
                       </span>
-                    </div>
+                    </label>
                   </div>
                   <Button
                     type="button"
@@ -302,25 +309,25 @@ export const ParameterEditor = ({
                         className="h-8 text-xs"
                       />
                     </div>
-                    <div>
-                      <label className="block text-xs text-text-secondary mb-1">
-                        Default Value (optional)
-                      </label>
-                      <Input
-                        value={param.default?.toString() ?? ''}
-                        onChange={(e) =>
-                          handleUpdateParameter(
-                            index,
-                            'default',
-                            e.target.value || null
-                          )
-                        }
-                        placeholder={
-                          param.required ? 'No default (required)' : 'Default value'
-                        }
-                        className="h-8 text-xs"
-                      />
-                    </div>
+                    {!param.required && (
+                      <div>
+                        <label className="block text-xs text-text-secondary mb-1">
+                          Default Value (optional)
+                        </label>
+                        <Input
+                          value={param.default?.toString() ?? ''}
+                          onChange={(e) =>
+                            handleUpdateParameter(
+                              index,
+                              'default',
+                              e.target.value || null
+                            )
+                          }
+                          placeholder="Default value"
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

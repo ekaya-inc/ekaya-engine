@@ -19,6 +19,10 @@ The project has full operational infrastructure but a minimal Go backend:
 - **Shell only:** `main.go` with just `/health`, `/ping`, and static file serving
 - **Empty scaffold:** `pkg/` directories ready for implementation
 
+## Critical: Server Management
+
+**NEVER kill or start the dev server from Claude Code.** The user runs `make dev-server` and `make dev-ui` in separate terminals. Do not use `pkill`, `nohup`, or any command that would start/stop/restart these servers. If changes require a server restart, inform the user to restart it manually.
+
 ## Development Commands
 
 ### Essential Commands
@@ -280,6 +284,40 @@ FROM engine_ontologies WHERE is_active = true;
 3. **Stuck workflows** - Check for `needs_input` status blocking completion
 4. **Task failures** - Check `last_error` in `engine_workflow_state`
 5. **Token limit errors** - Large tables may exceed LLM context limits
+
+## Manual Testing: MCP Server
+
+ekaya-engine exposes an MCP (Model Context Protocol) server. Claude Code can act as the MCP client for testing.
+
+### Connecting Claude Code as MCP Client
+
+The MCP server URL is project-specific: `http://localhost:3443/mcp/{project-id}`
+
+Configure in Claude Code's MCP settings or use `/mcp` to connect.
+
+### Architecture Notes
+
+- **Stateless mode** - The server uses `WithStateLess(true)`, meaning no persistent sessions
+- **Tool filtering** - Tools are registered once and filtered per-request based on project config (`pkg/mcp/tools/developer.go:NewToolFilter`)
+- **No change notifications** - Because of stateless mode, the server cannot push `tools/list_changed` notifications. If you toggle tools in the UI, you must reconnect (`/mcp`) to see changes.
+
+### Available Tools
+
+Tools are controlled via the UI at `/projects/{pid}/mcp-server`:
+
+| Tool | Description | Requires |
+|------|-------------|----------|
+| `health` | Server health check | Always available |
+| `get_schema` | Database schema with semantic annotations | Developer Tools enabled |
+| `list_approved_queries` | List pre-approved SQL queries | Developer Tools enabled |
+| `execute_approved_query` | Run a pre-approved query by ID | Developer Tools enabled |
+
+### Key Files
+
+- `pkg/mcp/server.go` - MCP server wrapper
+- `pkg/mcp/tools/` - Tool implementations
+- `pkg/handlers/mcp_handler.go` - HTTP handler for MCP endpoint
+- `pkg/handlers/mcp_config.go` - Tool configuration API
 
 ## GitHub Actions & Pull Request Merging
 

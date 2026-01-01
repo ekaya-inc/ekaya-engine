@@ -18,6 +18,7 @@ interface UseSqlValidationOptions {
 interface UseSqlValidationResult {
   status: ValidationStatus;
   error: string | null;
+  warnings: string[];
   validate: (sql: string) => void;
   reset: () => void;
 }
@@ -35,6 +36,7 @@ export function useSqlValidation({
 }: UseSqlValidationOptions): UseSqlValidationResult {
   const [status, setStatus] = useState<ValidationStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   // Use refs to track the latest values and avoid stale closures
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -52,6 +54,7 @@ export function useSqlValidation({
 
     setStatus('idle');
     setError(null);
+    setWarnings([]);
     lastSqlRef.current = '';
   }, []);
 
@@ -85,11 +88,13 @@ export function useSqlValidation({
       // Clear stale validation state immediately when SQL changes
       setStatus('idle');
       setError(null);
+      setWarnings([]);
 
       // Set debounced validation
       timeoutRef.current = setTimeout(async () => {
         setStatus('validating');
         setError(null);
+        setWarnings([]);
 
         try {
           const response = await engineApi.validateQuery(projectId, datasourceId, {
@@ -105,13 +110,16 @@ export function useSqlValidation({
             if (response.data.valid) {
               setStatus('valid');
               setError(null);
+              setWarnings(response.data.warnings ?? []);
             } else {
               setStatus('invalid');
               setError(response.data.message ?? 'SQL validation failed');
+              setWarnings([]);
             }
           } else {
             setStatus('invalid');
             setError(response.error ?? 'Validation failed');
+            setWarnings([]);
           }
         } catch (err) {
           // Check if this response is still for the current SQL (race condition guard)
@@ -139,6 +147,7 @@ export function useSqlValidation({
   return {
     status,
     error,
+    warnings,
     validate,
     reset,
   };

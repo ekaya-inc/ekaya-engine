@@ -84,8 +84,9 @@ type ValidateQueryRequest struct {
 
 // ValidateQueryResponse for validation results.
 type ValidateQueryResponse struct {
-	Valid   bool   `json:"valid"`
-	Message string `json:"message,omitempty"`
+	Valid    bool     `json:"valid"`
+	Message  string   `json:"message,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // ValidateParametersRequest for POST validate-parameters body.
@@ -528,7 +529,7 @@ func (h *QueriesHandler) Validate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.queryService.Validate(r.Context(), projectID, datasourceID, req.SQLQuery)
+	result, err := h.queryService.Validate(r.Context(), projectID, datasourceID, req.SQLQuery)
 	if err != nil {
 		// Validation failure returns success=false with message
 		data := ValidateQueryResponse{
@@ -542,9 +543,19 @@ func (h *QueriesHandler) Validate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check for parameters inside string literals (common mistake)
+	var warnings []string
+	paramsInStrings := sqlvalidator.FindParametersInStringLiterals(req.SQLQuery)
+	if len(paramsInStrings) > 0 {
+		for _, param := range paramsInStrings {
+			warnings = append(warnings, "Parameter {{"+param+"}} is inside a string literal and won't be substituted correctly. Use concatenation instead: 'text ' || {{"+param+"}}")
+		}
+	}
+
 	data := ValidateQueryResponse{
-		Valid:   true,
-		Message: "SQL is valid",
+		Valid:    result.Valid,
+		Message:  result.Message,
+		Warnings: warnings,
 	}
 
 	response := ApiResponse{Success: true, Data: data}
