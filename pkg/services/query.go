@@ -54,6 +54,7 @@ type CreateQueryRequest struct {
 	IsEnabled             bool                    `json:"is_enabled"`
 	Parameters            []models.QueryParameter `json:"parameters,omitempty"`
 	OutputColumns         []models.OutputColumn   `json:"output_columns,omitempty"`
+	Constraints           string                  `json:"constraints,omitempty"`
 }
 
 // UpdateQueryRequest contains fields for updating a query.
@@ -65,6 +66,7 @@ type UpdateQueryRequest struct {
 	SQLQuery              *string                `json:"sql_query,omitempty"`
 	IsEnabled             *bool                  `json:"is_enabled,omitempty"`
 	OutputColumns         *[]models.OutputColumn `json:"output_columns,omitempty"`
+	Constraints           *string                `json:"constraints,omitempty"`
 }
 
 // ExecuteQueryRequest contains options for executing a saved query.
@@ -163,6 +165,10 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 		query.AdditionalContext = &req.AdditionalContext
 	}
 
+	if req.Constraints != "" {
+		query.Constraints = &req.Constraints
+	}
+
 	if err := s.queryRepo.Create(ctx, query); err != nil {
 		return nil, fmt.Errorf("failed to create query: %w", err)
 	}
@@ -233,6 +239,9 @@ func (s *queryService) Update(ctx context.Context, projectID, queryID uuid.UUID,
 	}
 	if req.OutputColumns != nil {
 		query.OutputColumns = *req.OutputColumns
+	}
+	if req.Constraints != nil {
+		query.Constraints = req.Constraints
 	}
 
 	// Validate that all {{param}} in SQL have corresponding parameter definitions
