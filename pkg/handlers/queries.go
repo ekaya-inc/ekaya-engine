@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
@@ -124,7 +123,7 @@ func NewQueriesHandler(queryService services.QueryService, logger *zap.Logger) *
 // RegisterRoutes registers the queries handler's routes on the given mux.
 func (h *QueriesHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.Middleware, tenantMiddleware TenantMiddleware) {
 	// All query routes are scoped to project and datasource
-	base := "/api/projects/{pid}/datasources/{did}/queries"
+	base := "/api/projects/{pid}/datasources/{dsid}/queries"
 
 	// CRUD endpoints
 	mux.HandleFunc("GET "+base,
@@ -153,9 +152,9 @@ func (h *QueriesHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.ListEnabled)))
 }
 
-// List handles GET /api/projects/{pid}/datasources/{did}/queries
+// List handles GET /api/projects/{pid}/datasources/{dsid}/queries
 func (h *QueriesHandler) List(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := h.parseProjectAndDatasource(w, r)
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -185,9 +184,9 @@ func (h *QueriesHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Create handles POST /api/projects/{pid}/datasources/{did}/queries
+// Create handles POST /api/projects/{pid}/datasources/{dsid}/queries
 func (h *QueriesHandler) Create(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := h.parseProjectAndDatasource(w, r)
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -246,14 +245,14 @@ func (h *QueriesHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Get handles GET /api/projects/{pid}/datasources/{did}/queries/{qid}
+// Get handles GET /api/projects/{pid}/datasources/{dsid}/queries/{qid}
 func (h *QueriesHandler) Get(w http.ResponseWriter, r *http.Request) {
-	projectID, _, ok := h.parseProjectAndDatasource(w, r)
+	projectID, _, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	queryID, ok := h.parseQueryID(w, r)
+	queryID, ok := ParseQueryID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -282,14 +281,14 @@ func (h *QueriesHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Update handles PUT /api/projects/{pid}/datasources/{did}/queries/{qid}
+// Update handles PUT /api/projects/{pid}/datasources/{dsid}/queries/{qid}
 func (h *QueriesHandler) Update(w http.ResponseWriter, r *http.Request) {
-	projectID, _, ok := h.parseProjectAndDatasource(w, r)
+	projectID, _, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	queryID, ok := h.parseQueryID(w, r)
+	queryID, ok := ParseQueryID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -339,14 +338,14 @@ func (h *QueriesHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Delete handles DELETE /api/projects/{pid}/datasources/{did}/queries/{qid}
+// Delete handles DELETE /api/projects/{pid}/datasources/{dsid}/queries/{qid}
 func (h *QueriesHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	projectID, _, ok := h.parseProjectAndDatasource(w, r)
+	projectID, _, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	queryID, ok := h.parseQueryID(w, r)
+	queryID, ok := ParseQueryID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -378,14 +377,14 @@ func (h *QueriesHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Execute handles POST /api/projects/{pid}/datasources/{did}/queries/{qid}/execute
+// Execute handles POST /api/projects/{pid}/datasources/{dsid}/queries/{qid}/execute
 func (h *QueriesHandler) Execute(w http.ResponseWriter, r *http.Request) {
-	projectID, _, ok := h.parseProjectAndDatasource(w, r)
+	projectID, _, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	queryID, ok := h.parseQueryID(w, r)
+	queryID, ok := ParseQueryID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -435,9 +434,9 @@ func (h *QueriesHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Test handles POST /api/projects/{pid}/datasources/{did}/queries/test
+// Test handles POST /api/projects/{pid}/datasources/{dsid}/queries/test
 func (h *QueriesHandler) Test(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := h.parseProjectAndDatasource(w, r)
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -507,9 +506,9 @@ func (h *QueriesHandler) Test(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Validate handles POST /api/projects/{pid}/datasources/{did}/queries/validate
+// Validate handles POST /api/projects/{pid}/datasources/{dsid}/queries/validate
 func (h *QueriesHandler) Validate(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := h.parseProjectAndDatasource(w, r)
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -554,9 +553,9 @@ func (h *QueriesHandler) Validate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ValidateParameters handles POST /api/projects/{pid}/datasources/{did}/queries/validate-parameters
+// ValidateParameters handles POST /api/projects/{pid}/datasources/{dsid}/queries/validate-parameters
 func (h *QueriesHandler) ValidateParameters(w http.ResponseWriter, r *http.Request) {
-	_, _, ok := h.parseProjectAndDatasource(w, r)
+	_, _, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -601,9 +600,9 @@ func (h *QueriesHandler) ValidateParameters(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-// ListEnabled handles GET /api/projects/{pid}/datasources/{did}/queries/enabled
+// ListEnabled handles GET /api/projects/{pid}/datasources/{dsid}/queries/enabled
 func (h *QueriesHandler) ListEnabled(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := h.parseProjectAndDatasource(w, r)
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -631,42 +630,6 @@ func (h *QueriesHandler) ListEnabled(w http.ResponseWriter, r *http.Request) {
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
-}
-
-// Helper methods
-
-func (h *QueriesHandler) parseProjectAndDatasource(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUID, bool) {
-	pidStr := r.PathValue("pid")
-	projectID, err := uuid.Parse(pidStr)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_project_id", "Invalid project ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, uuid.Nil, false
-	}
-
-	didStr := r.PathValue("did")
-	datasourceID, err := uuid.Parse(didStr)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_datasource_id", "Invalid datasource ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, uuid.Nil, false
-	}
-
-	return projectID, datasourceID, true
-}
-
-func (h *QueriesHandler) parseQueryID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	qidStr := r.PathValue("qid")
-	queryID, err := uuid.Parse(qidStr)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_query_id", "Invalid query ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, false
-	}
-	return queryID, true
 }
 
 func (h *QueriesHandler) toQueryResponse(q *models.Query) QueryResponse {

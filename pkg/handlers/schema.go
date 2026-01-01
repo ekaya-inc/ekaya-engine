@@ -190,48 +190,48 @@ func NewSchemaHandlerWithDiscovery(schemaService services.SchemaService, discove
 // RegisterRoutes registers the schema handler's routes on the given mux.
 func (h *SchemaHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.Middleware, tenantMiddleware TenantMiddleware) {
 	// Schema operations
-	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsId}/schema",
+	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsid}/schema",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetSchema)))
-	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsId}/schema/selected",
+	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsid}/schema/selected",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetSelectedSchema)))
-	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsId}/schema/prompt",
+	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsid}/schema/prompt",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetSchemaPrompt)))
-	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsId}/schema/refresh",
+	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/refresh",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.RefreshSchema)))
 
 	// Table operations
-	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsId}/schema/tables/{tableName}",
+	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsid}/schema/tables/{tableName}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetTable)))
-	mux.HandleFunc("PUT /api/projects/{pid}/datasources/{dsId}/schema/tables/{tableId}/metadata",
+	mux.HandleFunc("PUT /api/projects/{pid}/datasources/{dsid}/schema/tables/{tableId}/metadata",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.UpdateTableMetadata)))
 
 	// Column operations
-	mux.HandleFunc("PUT /api/projects/{pid}/datasources/{dsId}/schema/columns/{columnId}/metadata",
+	mux.HandleFunc("PUT /api/projects/{pid}/datasources/{dsid}/schema/columns/{columnId}/metadata",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.UpdateColumnMetadata)))
 
 	// Selection operations
-	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsId}/schema/selections",
+	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/selections",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.SaveSelections)))
 
 	// Relationship operations
-	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsId}/schema/relationships",
+	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsid}/schema/relationships",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetRelationships)))
-	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsId}/schema/relationships",
+	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/relationships",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.AddRelationship)))
-	mux.HandleFunc("DELETE /api/projects/{pid}/datasources/{dsId}/schema/relationships/{relId}",
+	mux.HandleFunc("DELETE /api/projects/{pid}/datasources/{dsid}/schema/relationships/{relId}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.RemoveRelationship)))
 
 	// Relationship discovery operations
-	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsId}/schema/relationships/discover",
+	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/relationships/discover",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.DiscoverRelationships)))
-	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsId}/schema/relationships/candidates",
+	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsid}/schema/relationships/candidates",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetRelationshipCandidates)))
 }
 
-// GetSchema handles GET /api/projects/{pid}/datasources/{dsId}/schema
+// GetSchema handles GET /api/projects/{pid}/datasources/{dsid}/schema
 // Returns the complete schema for a datasource.
 func (h *SchemaHandler) GetSchema(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -255,10 +255,10 @@ func (h *SchemaHandler) GetSchema(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// GetSelectedSchema handles GET /api/projects/{pid}/datasources/{dsId}/schema/selected
+// GetSelectedSchema handles GET /api/projects/{pid}/datasources/{dsid}/schema/selected
 // Returns only the selected tables and columns.
 func (h *SchemaHandler) GetSelectedSchema(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -282,10 +282,10 @@ func (h *SchemaHandler) GetSelectedSchema(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// GetSchemaPrompt handles GET /api/projects/{pid}/datasources/{dsId}/schema/prompt
+// GetSchemaPrompt handles GET /api/projects/{pid}/datasources/{dsid}/schema/prompt
 // Returns the schema formatted for LLM context.
 func (h *SchemaHandler) GetSchemaPrompt(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -315,10 +315,10 @@ func (h *SchemaHandler) GetSchemaPrompt(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// RefreshSchema handles POST /api/projects/{pid}/datasources/{dsId}/schema/refresh
+// RefreshSchema handles POST /api/projects/{pid}/datasources/{dsid}/schema/refresh
 // Syncs tables, columns, and relationships from the datasource.
 func (h *SchemaHandler) RefreshSchema(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -349,10 +349,10 @@ func (h *SchemaHandler) RefreshSchema(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// GetTable handles GET /api/projects/{pid}/datasources/{dsId}/schema/tables/{tableName}
+// GetTable handles GET /api/projects/{pid}/datasources/{dsid}/schema/tables/{tableName}
 // Returns a single table with its columns.
 func (h *SchemaHandler) GetTable(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -392,10 +392,10 @@ func (h *SchemaHandler) GetTable(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// UpdateTableMetadata handles PUT /api/projects/{pid}/datasources/{dsId}/schema/tables/{tableId}/metadata
+// UpdateTableMetadata handles PUT /api/projects/{pid}/datasources/{dsid}/schema/tables/{tableId}/metadata
 // Updates the business_name and/or description for a table.
 func (h *SchemaHandler) UpdateTableMetadata(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -439,10 +439,10 @@ func (h *SchemaHandler) UpdateTableMetadata(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-// UpdateColumnMetadata handles PUT /api/projects/{pid}/datasources/{dsId}/schema/columns/{columnId}/metadata
+// UpdateColumnMetadata handles PUT /api/projects/{pid}/datasources/{dsid}/schema/columns/{columnId}/metadata
 // Updates the business_name and/or description for a column.
 func (h *SchemaHandler) UpdateColumnMetadata(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -486,10 +486,10 @@ func (h *SchemaHandler) UpdateColumnMetadata(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-// SaveSelections handles POST /api/projects/{pid}/datasources/{dsId}/schema/selections
+// SaveSelections handles POST /api/projects/{pid}/datasources/{dsid}/schema/selections
 // Bulk updates is_selected flags for tables and columns.
 func (h *SchemaHandler) SaveSelections(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -519,10 +519,10 @@ func (h *SchemaHandler) SaveSelections(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// GetRelationships handles GET /api/projects/{pid}/datasources/{dsId}/schema/relationships
+// GetRelationships handles GET /api/projects/{pid}/datasources/{dsid}/schema/relationships
 // Returns all relationships for a datasource with enriched data and table analysis.
 func (h *SchemaHandler) GetRelationships(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -557,10 +557,10 @@ func (h *SchemaHandler) GetRelationships(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// AddRelationship handles POST /api/projects/{pid}/datasources/{dsId}/schema/relationships
+// AddRelationship handles POST /api/projects/{pid}/datasources/{dsid}/schema/relationships
 // Creates a user-defined relationship between two columns.
 func (h *SchemaHandler) AddRelationship(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -612,10 +612,10 @@ func (h *SchemaHandler) AddRelationship(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// RemoveRelationship handles DELETE /api/projects/{pid}/datasources/{dsId}/schema/relationships/{relId}
+// RemoveRelationship handles DELETE /api/projects/{pid}/datasources/{dsid}/schema/relationships/{relId}
 // Marks a relationship as removed (is_approved=false).
 func (h *SchemaHandler) RemoveRelationship(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -651,10 +651,10 @@ func (h *SchemaHandler) RemoveRelationship(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-// DiscoverRelationships handles POST /api/projects/{pid}/datasources/{dsId}/schema/relationships/discover
+// DiscoverRelationships handles POST /api/projects/{pid}/datasources/{dsid}/schema/relationships/discover
 // Runs automated relationship discovery to infer relationships from data.
 func (h *SchemaHandler) DiscoverRelationships(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -695,10 +695,10 @@ func (h *SchemaHandler) DiscoverRelationships(w http.ResponseWriter, r *http.Req
 	}
 }
 
-// GetRelationshipCandidates handles GET /api/projects/{pid}/datasources/{dsId}/schema/relationships/candidates
+// GetRelationshipCandidates handles GET /api/projects/{pid}/datasources/{dsid}/schema/relationships/candidates
 // Returns all relationship candidates including rejected ones with summary statistics.
 func (h *SchemaHandler) GetRelationshipCandidates(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -744,38 +744,6 @@ func (h *SchemaHandler) GetRelationshipCandidates(w http.ResponseWriter, r *http
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
-}
-
-// --- Helper Methods ---
-
-// parseProjectID extracts and validates the project ID from the request path.
-func (h *SchemaHandler) parseProjectID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	projectID, err := uuid.Parse(r.PathValue("pid"))
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_project_id", "Invalid project ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, false
-	}
-	return projectID, true
-}
-
-// parseProjectAndDatasourceIDs extracts and validates both project and datasource IDs.
-func (h *SchemaHandler) parseProjectAndDatasourceIDs(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUID, bool) {
-	projectID, ok := h.parseProjectID(w, r)
-	if !ok {
-		return uuid.Nil, uuid.Nil, false
-	}
-
-	datasourceID, err := uuid.Parse(r.PathValue("dsId"))
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_datasource_id", "Invalid datasource ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, uuid.Nil, false
-	}
-
-	return projectID, datasourceID, true
 }
 
 // --- Model to Response Converters ---

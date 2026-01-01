@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
@@ -102,7 +101,7 @@ func (h *EntityHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.
 
 // List handles GET /api/projects/{pid}/entities
 func (h *EntityHandler) List(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.parseProjectID(w, r)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -136,12 +135,12 @@ func (h *EntityHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Get handles GET /api/projects/{pid}/entities/{eid}
 func (h *EntityHandler) Get(w http.ResponseWriter, r *http.Request) {
-	_, ok := h.parseProjectID(w, r)
+	_, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	entityID, ok := h.parseEntityID(w, r)
+	entityID, ok := ParseEntityID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -172,12 +171,12 @@ func (h *EntityHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // Update handles PUT /api/projects/{pid}/entities/{eid}
 func (h *EntityHandler) Update(w http.ResponseWriter, r *http.Request) {
-	_, ok := h.parseProjectID(w, r)
+	_, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	entityID, ok := h.parseEntityID(w, r)
+	entityID, ok := ParseEntityID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -226,12 +225,12 @@ func (h *EntityHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE /api/projects/{pid}/entities/{eid}
 func (h *EntityHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	_, ok := h.parseProjectID(w, r)
+	_, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	entityID, ok := h.parseEntityID(w, r)
+	entityID, ok := ParseEntityID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -257,12 +256,12 @@ func (h *EntityHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 // Restore handles POST /api/projects/{pid}/entities/{eid}/restore
 func (h *EntityHandler) Restore(w http.ResponseWriter, r *http.Request) {
-	_, ok := h.parseProjectID(w, r)
+	_, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	entityID, ok := h.parseEntityID(w, r)
+	entityID, ok := ParseEntityID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -297,12 +296,12 @@ func (h *EntityHandler) Restore(w http.ResponseWriter, r *http.Request) {
 
 // AddAlias handles POST /api/projects/{pid}/entities/{eid}/aliases
 func (h *EntityHandler) AddAlias(w http.ResponseWriter, r *http.Request) {
-	_, ok := h.parseProjectID(w, r)
+	_, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	entityID, ok := h.parseEntityID(w, r)
+	entityID, ok := ParseEntityID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -351,17 +350,17 @@ func (h *EntityHandler) AddAlias(w http.ResponseWriter, r *http.Request) {
 
 // RemoveAlias handles DELETE /api/projects/{pid}/entities/{eid}/aliases/{aid}
 func (h *EntityHandler) RemoveAlias(w http.ResponseWriter, r *http.Request) {
-	_, ok := h.parseProjectID(w, r)
+	_, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	_, ok = h.parseEntityID(w, r)
+	_, ok = ParseEntityID(w, r, h.logger)
 	if !ok {
 		return
 	}
 
-	aliasID, ok := h.parseAliasID(w, r)
+	aliasID, ok := ParseAliasID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -379,46 +378,6 @@ func (h *EntityHandler) RemoveAlias(w http.ResponseWriter, r *http.Request) {
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: map[string]string{"status": "deleted"}}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
-}
-
-// ============================================================================
-// Helper Methods
-// ============================================================================
-
-func (h *EntityHandler) parseProjectID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	projectIDStr := r.PathValue("pid")
-	projectID, err := uuid.Parse(projectIDStr)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_project_id", "Invalid project ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, false
-	}
-	return projectID, true
-}
-
-func (h *EntityHandler) parseEntityID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	entityIDStr := r.PathValue("eid")
-	entityID, err := uuid.Parse(entityIDStr)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_entity_id", "Invalid entity ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, false
-	}
-	return entityID, true
-}
-
-func (h *EntityHandler) parseAliasID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	aliasIDStr := r.PathValue("aid")
-	aliasID, err := uuid.Parse(aliasIDStr)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_alias_id", "Invalid alias ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, false
-	}
-	return aliasID, true
 }
 
 func (h *EntityHandler) toEntityDetailResponse(e *services.EntityWithDetails) EntityDetailResponse {

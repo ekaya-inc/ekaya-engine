@@ -142,7 +142,7 @@ func (h *RelationshipWorkflowHandler) RegisterRoutes(mux *http.ServeMux, authMid
 
 // StartDetection handles POST /api/projects/{pid}/datasources/{dsid}/relationships/detect
 func (h *RelationshipWorkflowHandler) StartDetection(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -184,7 +184,7 @@ func (h *RelationshipWorkflowHandler) StartDetection(w http.ResponseWriter, r *h
 
 // GetStatus handles GET /api/projects/{pid}/datasources/{dsid}/relationships/status
 func (h *RelationshipWorkflowHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
-	_, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	_, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -229,7 +229,7 @@ func (h *RelationshipWorkflowHandler) GetStatus(w http.ResponseWriter, r *http.R
 
 // GetCandidates handles GET /api/projects/{pid}/datasources/{dsid}/relationships/candidates
 func (h *RelationshipWorkflowHandler) GetCandidates(w http.ResponseWriter, r *http.Request) {
-	_, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	_, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -274,7 +274,7 @@ func (h *RelationshipWorkflowHandler) GetCandidates(w http.ResponseWriter, r *ht
 
 // GetEntities handles GET /api/projects/{pid}/datasources/{dsid}/relationships/entities
 func (h *RelationshipWorkflowHandler) GetEntities(w http.ResponseWriter, r *http.Request) {
-	_, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	_, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -327,7 +327,7 @@ func (h *RelationshipWorkflowHandler) GetEntities(w http.ResponseWriter, r *http
 
 // UpdateCandidate handles PUT /api/projects/{pid}/datasources/{dsid}/relationships/candidates/{cid}
 func (h *RelationshipWorkflowHandler) UpdateCandidate(w http.ResponseWriter, r *http.Request) {
-	_, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	_, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -384,7 +384,7 @@ func (h *RelationshipWorkflowHandler) UpdateCandidate(w http.ResponseWriter, r *
 
 // Cancel handles POST /api/projects/{pid}/datasources/{dsid}/relationships/cancel
 func (h *RelationshipWorkflowHandler) Cancel(w http.ResponseWriter, r *http.Request) {
-	_, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	_, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -424,7 +424,7 @@ func (h *RelationshipWorkflowHandler) Cancel(w http.ResponseWriter, r *http.Requ
 
 // Save handles POST /api/projects/{pid}/datasources/{dsid}/relationships/save
 func (h *RelationshipWorkflowHandler) Save(w http.ResponseWriter, r *http.Request) {
-	_, datasourceID, ok := h.parseProjectAndDatasourceIDs(w, r)
+	_, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -478,29 +478,6 @@ func (h *RelationshipWorkflowHandler) Save(w http.ResponseWriter, r *http.Reques
 // ============================================================================
 // Helper Methods
 // ============================================================================
-
-// parseProjectAndDatasourceIDs extracts and validates project and datasource IDs from the request path.
-func (h *RelationshipWorkflowHandler) parseProjectAndDatasourceIDs(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUID, bool) {
-	projectIDStr := r.PathValue("pid")
-	projectID, err := uuid.Parse(projectIDStr)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_project_id", "Invalid project ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, uuid.Nil, false
-	}
-
-	datasourceIDStr := r.PathValue("dsid")
-	datasourceID, err := uuid.Parse(datasourceIDStr)
-	if err != nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_datasource_id", "Invalid datasource ID format"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return uuid.Nil, uuid.Nil, false
-	}
-
-	return projectID, datasourceID, true
-}
 
 // toCandidateResponse converts a model to a response type.
 func (h *RelationshipWorkflowHandler) toCandidateResponse(c *models.RelationshipCandidate) CandidateResponse {

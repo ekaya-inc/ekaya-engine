@@ -228,7 +228,7 @@ func TestQueriesIntegration_CreateAndTestSimpleQuery(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/test",
 		testBody)
 	testReq.SetPathValue("pid", tc.projectID.String())
-	testReq.SetPathValue("did", tc.createdDsID.String())
+	testReq.SetPathValue("dsid", tc.createdDsID.String())
 
 	testRec := httptest.NewRecorder()
 	tc.queriesHandler.Test(testRec, testReq)
@@ -267,7 +267,7 @@ func TestQueriesIntegration_CreateAndTestSimpleQuery(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 		createBody)
 	createReq.SetPathValue("pid", tc.projectID.String())
-	createReq.SetPathValue("did", tc.createdDsID.String())
+	createReq.SetPathValue("dsid", tc.createdDsID.String())
 
 	createRec := httptest.NewRecorder()
 	tc.queriesHandler.Create(createRec, createReq)
@@ -325,7 +325,7 @@ func TestQueriesIntegration_ExecuteSavedQuery(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 		createBody)
 	createReq.SetPathValue("pid", tc.projectID.String())
-	createReq.SetPathValue("did", tc.createdDsID.String())
+	createReq.SetPathValue("dsid", tc.createdDsID.String())
 
 	createRec := httptest.NewRecorder()
 	tc.queriesHandler.Create(createRec, createReq)
@@ -349,7 +349,7 @@ func TestQueriesIntegration_ExecuteSavedQuery(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/"+queryID+"/execute",
 		execBody)
 	execReq.SetPathValue("pid", tc.projectID.String())
-	execReq.SetPathValue("did", tc.createdDsID.String())
+	execReq.SetPathValue("dsid", tc.createdDsID.String())
 	execReq.SetPathValue("qid", queryID)
 
 	execRec := httptest.NewRecorder()
@@ -405,7 +405,7 @@ func TestQueriesIntegration_ValidateQuery(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/validate",
 		validBody)
 	validReq.SetPathValue("pid", tc.projectID.String())
-	validReq.SetPathValue("did", tc.createdDsID.String())
+	validReq.SetPathValue("dsid", tc.createdDsID.String())
 
 	validRec := httptest.NewRecorder()
 	tc.queriesHandler.Validate(validRec, validReq)
@@ -433,7 +433,7 @@ func TestQueriesIntegration_ValidateQuery(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/validate",
 		invalidBody)
 	invalidReq.SetPathValue("pid", tc.projectID.String())
-	invalidReq.SetPathValue("did", tc.createdDsID.String())
+	invalidReq.SetPathValue("dsid", tc.createdDsID.String())
 
 	invalidRec := httptest.NewRecorder()
 	tc.queriesHandler.Validate(invalidRec, invalidReq)
@@ -472,7 +472,7 @@ func TestQueriesIntegration_QueryAgainstTestData(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/test",
 		testBody)
 	testReq.SetPathValue("pid", tc.projectID.String())
-	testReq.SetPathValue("did", tc.createdDsID.String())
+	testReq.SetPathValue("dsid", tc.createdDsID.String())
 
 	testRec := httptest.NewRecorder()
 	tc.queriesHandler.Test(testRec, testReq)
@@ -520,7 +520,7 @@ func TestQueriesIntegration_TrailingSemicolonNormalization(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/test",
 		testBody)
 	testReq.SetPathValue("pid", tc.projectID.String())
-	testReq.SetPathValue("did", tc.createdDsID.String())
+	testReq.SetPathValue("dsid", tc.createdDsID.String())
 
 	testRec := httptest.NewRecorder()
 	tc.queriesHandler.Test(testRec, testReq)
@@ -549,7 +549,7 @@ func TestQueriesIntegration_TrailingSemicolonNormalization(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 		createBody)
 	createReq.SetPathValue("pid", tc.projectID.String())
-	createReq.SetPathValue("did", tc.createdDsID.String())
+	createReq.SetPathValue("dsid", tc.createdDsID.String())
 
 	createRec := httptest.NewRecorder()
 	tc.queriesHandler.Create(createRec, createReq)
@@ -586,7 +586,7 @@ func TestQueriesIntegration_RejectMultipleStatements(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/test",
 		testBody)
 	testReq.SetPathValue("pid", tc.projectID.String())
-	testReq.SetPathValue("did", tc.createdDsID.String())
+	testReq.SetPathValue("dsid", tc.createdDsID.String())
 
 	testRec := httptest.NewRecorder()
 	tc.queriesHandler.Test(testRec, testReq)
@@ -620,7 +620,7 @@ func TestQueriesIntegration_RejectMultipleStatements(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 		createBody)
 	createReq.SetPathValue("pid", tc.projectID.String())
-	createReq.SetPathValue("did", tc.createdDsID.String())
+	createReq.SetPathValue("dsid", tc.createdDsID.String())
 
 	createRec := httptest.NewRecorder()
 	tc.queriesHandler.Create(createRec, createReq)
@@ -638,7 +638,7 @@ func TestQueriesIntegration_RejectMultipleStatements(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/validate",
 		validateBody)
 	validateReq.SetPathValue("pid", tc.projectID.String())
-	validateReq.SetPathValue("did", tc.createdDsID.String())
+	validateReq.SetPathValue("dsid", tc.createdDsID.String())
 
 	validateRec := httptest.NewRecorder()
 	tc.queriesHandler.Validate(validateRec, validateReq)
@@ -676,7 +676,7 @@ func TestQueriesIntegration_ListQueries(t *testing.T) {
 			"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 			q)
 		req.SetPathValue("pid", tc.projectID.String())
-		req.SetPathValue("did", tc.createdDsID.String())
+		req.SetPathValue("dsid", tc.createdDsID.String())
 
 		rec := httptest.NewRecorder()
 		tc.queriesHandler.Create(rec, req)
@@ -691,7 +691,7 @@ func TestQueriesIntegration_ListQueries(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 		nil)
 	listReq.SetPathValue("pid", tc.projectID.String())
-	listReq.SetPathValue("did", tc.createdDsID.String())
+	listReq.SetPathValue("dsid", tc.createdDsID.String())
 
 	listRec := httptest.NewRecorder()
 	tc.queriesHandler.List(listRec, listReq)
@@ -717,7 +717,7 @@ func TestQueriesIntegration_ListQueries(t *testing.T) {
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/enabled",
 		nil)
 	enabledReq.SetPathValue("pid", tc.projectID.String())
-	enabledReq.SetPathValue("did", tc.createdDsID.String())
+	enabledReq.SetPathValue("dsid", tc.createdDsID.String())
 
 	enabledRec := httptest.NewRecorder()
 	tc.queriesHandler.ListEnabled(enabledRec, enabledReq)
