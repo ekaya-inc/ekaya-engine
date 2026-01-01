@@ -391,7 +391,7 @@ The existing `execute_approved_query` tool is mostly complete:
 
 ### Enhancements
 
-- [ ] Add `query_name` and `parameters_used` to execute response
+- [x] Add `query_name` and `parameters_used` to execute response (task 5.2.1)
 - [ ] Add `execution_time_ms` to execute response
 - [ ] Improve error messages with query context
 

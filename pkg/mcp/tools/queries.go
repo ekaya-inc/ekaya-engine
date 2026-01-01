@@ -234,6 +234,12 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			limit = 1000
 		}
 
+		// Get query metadata before execution
+		query, err := deps.QueryService.Get(tenantCtx, projectID, queryID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get query metadata: %w", err)
+		}
+
 		// Execute with parameters (includes injection detection)
 		execReq := &services.ExecuteQueryRequest{Limit: limit}
 		result, err := deps.QueryService.ExecuteWithParameters(
@@ -250,15 +256,19 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		}
 
 		response := struct {
-			Columns   []string         `json:"columns"`
-			Rows      []map[string]any `json:"rows"`
-			RowCount  int              `json:"row_count"`
-			Truncated bool             `json:"truncated"`
+			QueryName      string           `json:"query_name"`
+			ParametersUsed map[string]any   `json:"parameters_used"`
+			Columns        []string         `json:"columns"`
+			Rows           []map[string]any `json:"rows"`
+			RowCount       int              `json:"row_count"`
+			Truncated      bool             `json:"truncated"`
 		}{
-			Columns:   result.Columns,
-			Rows:      rows,
-			RowCount:  len(rows),
-			Truncated: truncated,
+			QueryName:      query.NaturalLanguagePrompt,
+			ParametersUsed: params,
+			Columns:        result.Columns,
+			Rows:           rows,
+			RowCount:       len(rows),
+			Truncated:      truncated,
 		}
 
 		jsonResult, _ := json.Marshal(response)

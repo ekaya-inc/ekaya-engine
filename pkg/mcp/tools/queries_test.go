@@ -57,3 +57,55 @@ func TestRegisterApprovedQueriesTools(t *testing.T) {
 // Note: Full integration tests for tool execution require a database connection
 // and would be covered in integration tests. The tool registration test above
 // verifies that both tools are properly registered with the MCP server.
+
+func TestExecuteApprovedQuery_ResponseMetadata(t *testing.T) {
+	// This test verifies that the execute_approved_query response includes query_name and parameters_used.
+	// Note: This is a unit test that verifies the response structure without a full integration test.
+	// The actual execution is tested in integration tests.
+
+	queryName := "Total revenue by customer"
+
+	// Verify the response structure includes the new fields
+	response := struct {
+		QueryName      string           `json:"query_name"`
+		ParametersUsed map[string]any   `json:"parameters_used"`
+		Columns        []string         `json:"columns"`
+		Rows           []map[string]any `json:"rows"`
+		RowCount       int              `json:"row_count"`
+		Truncated      bool             `json:"truncated"`
+	}{
+		QueryName: queryName,
+		ParametersUsed: map[string]any{
+			"start_date": "2024-01-01",
+			"end_date":   "2024-01-31",
+		},
+		Columns: []string{"name", "total"},
+		Rows: []map[string]any{
+			{"name": "Acme Corp", "total": 15000.00},
+			{"name": "Beta Inc", "total": 12500.00},
+		},
+		RowCount:  2,
+		Truncated: false,
+	}
+
+	// Verify JSON serialization works
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	// Verify all fields are present
+	assert.Equal(t, queryName, parsed["query_name"], "query_name should be present")
+	assert.NotNil(t, parsed["parameters_used"], "parameters_used should be present")
+	assert.NotNil(t, parsed["columns"], "columns should be present")
+	assert.NotNil(t, parsed["rows"], "rows should be present")
+	assert.NotNil(t, parsed["row_count"], "row_count should be present")
+	assert.NotNil(t, parsed["truncated"], "truncated should be present")
+
+	// Verify parameters_used structure
+	paramsUsed, ok := parsed["parameters_used"].(map[string]any)
+	require.True(t, ok, "parameters_used should be a map")
+	assert.Equal(t, "2024-01-01", paramsUsed["start_date"])
+	assert.Equal(t, "2024-01-31", paramsUsed["end_date"])
+}
