@@ -197,9 +197,11 @@ func main() {
 		llmFactory, datasourceService, adapterFactory, logger)
 	deterministicRelationshipService := services.NewDeterministicRelationshipService(
 		datasourceService, adapterFactory, ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo)
+	ontologyFinalizationService := services.NewOntologyFinalizationService(
+		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, llmFactory, getTenantCtx, logger)
 	relationshipWorkflowService := services.NewRelationshipWorkflowService(
 		ontologyWorkflowRepo, relationshipCandidateRepo, schemaRepo, workflowStateRepo, ontologyRepo, ontologyEntityRepo,
-		datasourceService, adapterFactory, llmFactory, discoveryService, deterministicRelationshipService, getTenantCtx, logger)
+		datasourceService, adapterFactory, llmFactory, discoveryService, deterministicRelationshipService, ontologyFinalizationService, getTenantCtx, logger)
 	entityService := services.NewEntityService(ontologyEntityRepo, ontologyRepo, logger)
 	entityDiscoveryService := services.NewEntityDiscoveryService(
 		ontologyWorkflowRepo, ontologyEntityRepo, schemaRepo, ontologyRepo,

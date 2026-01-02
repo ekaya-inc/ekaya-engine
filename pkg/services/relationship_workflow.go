@@ -95,6 +95,7 @@ type relationshipWorkflowService struct {
 	llmFactory           llm.LLMClientFactory
 	discoveryService     RelationshipDiscoveryService
 	deterministicService DeterministicRelationshipService
+	finalizationSvc      OntologyFinalizationService
 	getTenantCtx         TenantContextFunc
 	logger               *zap.Logger
 	infra                *workflow.WorkflowInfra
@@ -113,6 +114,7 @@ func NewRelationshipWorkflowService(
 	llmFactory llm.LLMClientFactory,
 	discoveryService RelationshipDiscoveryService,
 	deterministicService DeterministicRelationshipService,
+	finalizationSvc OntologyFinalizationService,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) RelationshipWorkflowService {
@@ -131,6 +133,7 @@ func NewRelationshipWorkflowService(
 		llmFactory:           llmFactory,
 		discoveryService:     discoveryService,
 		deterministicService: deterministicService,
+		finalizationSvc:      finalizationSvc,
 		getTenantCtx:         getTenantCtx,
 		logger:               namedLogger,
 		infra:                infra,
@@ -1050,6 +1053,17 @@ func (s *relationshipWorkflowService) finalizeWorkflow(projectID, workflowID uui
 	s.logger.Info("Relationship workflow completed successfully",
 		zap.String("workflow_id", workflowID.String()),
 		zap.Int("required_pending", requiredPending))
+
+	// Auto-trigger ontology finalization to generate domain summary
+	if s.finalizationSvc != nil {
+		if err := s.finalizationSvc.Finalize(ctx, projectID); err != nil {
+			s.logger.Error("Failed to finalize ontology",
+				zap.String("workflow_id", workflowID.String()),
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			// Non-blocking - workflow still marked complete
+		}
+	}
 }
 
 // markWorkflowFailed updates workflow state to failed.
