@@ -681,11 +681,11 @@ func TestOntologyContextService_Integration_GetColumnsContext(t *testing.T) {
 		}
 	}
 	require.NotNil(t, totalAmountCol, "total_amount column should be present")
-	// Semantic fields (Description, SemanticType, Role, Synonyms) are empty until Phase 4 (Column Workflow)
-	assert.Equal(t, "", totalAmountCol.Description)
-	assert.Equal(t, "", totalAmountCol.SemanticType)
-	assert.Equal(t, "", totalAmountCol.Role)
-	assert.Nil(t, totalAmountCol.Synonyms)
+	// Semantic fields are populated from column_details (Phase 4 Column Workflow)
+	assert.Equal(t, "Total order value", totalAmountCol.Description)
+	assert.Equal(t, "currency", totalAmountCol.SemanticType)
+	assert.Equal(t, "measure", totalAmountCol.Role)
+	assert.Equal(t, []string{"revenue", "order_total"}, totalAmountCol.Synonyms)
 
 	// Find user_id column to verify FK detection
 	var userIDCol *models.ColumnDetail

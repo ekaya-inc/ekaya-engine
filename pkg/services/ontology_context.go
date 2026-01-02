@@ -378,13 +378,25 @@ func (s *ontologyContextService) GetColumnsContext(ctx context.Context, projectI
 		return nil, fmt.Errorf("too many tables requested: maximum %d tables allowed for columns depth, got %d", MaxColumnsDepthTables, len(tableNames))
 	}
 
-	// Get active ontology (only for checking it exists)
+	// Get active ontology (also contains enriched column_details)
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get active ontology: %w", err)
 	}
 	if ontology == nil {
 		return nil, fmt.Errorf("no active ontology found")
+	}
+
+	// Build enriched column lookup from ontology.ColumnDetails
+	// Key: tableName -> columnName -> ColumnDetail
+	enrichedColumns := make(map[string]map[string]models.ColumnDetail)
+	if ontology.ColumnDetails != nil {
+		for tableName, cols := range ontology.ColumnDetails {
+			enrichedColumns[tableName] = make(map[string]models.ColumnDetail)
+			for _, col := range cols {
+				enrichedColumns[tableName][col.Name] = col
+			}
+		}
 	}
 
 	// Get entities for business names/descriptions
@@ -433,10 +445,12 @@ func (s *ontologyContextService) GetColumnsContext(ctx context.Context, projectI
 		}
 
 		schemaColumns := columnsByTable[tableName]
+		tableEnriched := enrichedColumns[tableName] // nil if not enriched
 
-		// Build column details from schema columns
+		// Build column details by merging enriched data with schema
 		columnDetails := make([]models.ColumnDetail, 0, len(schemaColumns))
 		for _, col := range schemaColumns {
+			// Get current FK info from relationships (source of truth)
 			tableFKInfo := fkInfo[tableName]
 			foreignTable := ""
 			isForeignKey := false
@@ -447,17 +461,22 @@ func (s *ontologyContextService) GetColumnsContext(ctx context.Context, projectI
 				}
 			}
 
-			columnDetails = append(columnDetails, models.ColumnDetail{
-				Name:         col.ColumnName,
-				Description:  "", // Populated by Column Workflow (Phase 4)
-				Synonyms:     nil,
-				SemanticType: "", // Populated by Column Workflow (Phase 4)
-				Role:         "", // Populated by Column Workflow (Phase 4)
-				EnumValues:   nil,
-				IsPrimaryKey: col.IsPrimaryKey,
-				IsForeignKey: isForeignKey,
-				ForeignTable: foreignTable,
-			})
+			// Check if we have enriched data for this column
+			if enriched, ok := tableEnriched[col.ColumnName]; ok {
+				// Use enriched data + overlay current schema PK/FK info
+				enriched.IsPrimaryKey = col.IsPrimaryKey
+				enriched.IsForeignKey = isForeignKey
+				enriched.ForeignTable = foreignTable
+				columnDetails = append(columnDetails, enriched)
+			} else {
+				// Fall back to schema-only (no enrichment yet)
+				columnDetails = append(columnDetails, models.ColumnDetail{
+					Name:         col.ColumnName,
+					IsPrimaryKey: col.IsPrimaryKey,
+					IsForeignKey: isForeignKey,
+					ForeignTable: foreignTable,
+				})
+			}
 		}
 
 		tables[tableName] = models.TableDetail{
