@@ -403,7 +403,7 @@ The existing `execute_approved_query` tool is mostly complete:
 - [x] Add `constraints` to Query model (future-2) ✓ COMPLETE
 - [x] Database migration for constraints field (future-2) ✓ COMPLETE
 - [x] Update admin UI to capture new fields (future-3) ✓ COMPLETE
-- [ ] Parse SELECT columns from SQL as fallback
+- [x] Parse SELECT columns from SQL as fallback (future-4) ✓ COMPLETE
 
 ---
 

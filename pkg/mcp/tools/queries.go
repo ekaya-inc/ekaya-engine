@@ -15,6 +15,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
+	sqlpkg "github.com/ekaya-inc/ekaya-engine/pkg/sql"
 )
 
 // QueryToolDeps contains dependencies for approved queries tools.
@@ -161,12 +162,30 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 				}
 			}
 
-			outputCols := make([]outputColumnInfo, len(q.OutputColumns))
-			for j, oc := range q.OutputColumns {
-				outputCols[j] = outputColumnInfo{
-					Name:        oc.Name,
-					Type:        oc.Type,
-					Description: oc.Description,
+			// Use manually specified output_columns if available
+			// Otherwise, parse from SQL SELECT clause as fallback
+			var outputCols []outputColumnInfo
+			if len(q.OutputColumns) > 0 {
+				outputCols = make([]outputColumnInfo, len(q.OutputColumns))
+				for j, oc := range q.OutputColumns {
+					outputCols[j] = outputColumnInfo{
+						Name:        oc.Name,
+						Type:        oc.Type,
+						Description: oc.Description,
+					}
+				}
+			} else {
+				// Fallback: parse column names from SQL
+				parsedCols, err := sqlpkg.ParseSelectColumns(q.SQLQuery)
+				if err == nil && len(parsedCols) > 0 {
+					outputCols = make([]outputColumnInfo, len(parsedCols))
+					for j, pc := range parsedCols {
+						outputCols[j] = outputColumnInfo{
+							Name:        pc.Name,
+							Type:        "", // Type unknown from SQL parsing
+							Description: "", // Description unknown from SQL parsing
+						}
+					}
 				}
 			}
 
