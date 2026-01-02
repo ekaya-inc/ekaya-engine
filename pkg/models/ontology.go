@@ -91,7 +91,8 @@ type ColumnDetail struct {
 	Description  string      `json:"description,omitempty"`
 	Synonyms     []string    `json:"synonyms,omitempty"`
 	SemanticType string      `json:"semantic_type,omitempty"`
-	Role         string      `json:"role,omitempty"` // dimension, measure, identifier, attribute
+	Role         string      `json:"role,omitempty"`    // dimension, measure, identifier, attribute
+	FKRole       string      `json:"fk_role,omitempty"` // payer, payee, host, visitor, etc.
 	EnumValues   []EnumValue `json:"enum_values,omitempty"`
 	IsPrimaryKey bool        `json:"is_primary_key"`
 	IsForeignKey bool        `json:"is_foreign_key"`
