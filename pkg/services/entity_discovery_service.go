@@ -482,11 +482,20 @@ func (s *entityDiscoveryService) identifyEntitiesFromDDL(
 	return entityCount, tables, columns, nil
 }
 
-// entityEnrichment holds LLM-generated entity name and description.
+// entityEnrichment holds LLM-generated entity name, description, and additional metadata.
+// keyColumnEnrichment holds LLM-generated metadata for a key column.
+type keyColumnEnrichment struct {
+	Name     string   `json:"name"`
+	Synonyms []string `json:"synonyms,omitempty"`
+}
+
 type entityEnrichment struct {
-	TableName   string `json:"table_name"`
-	EntityName  string `json:"entity_name"`
-	Description string `json:"description"`
+	TableName        string                `json:"table_name"`
+	EntityName       string                `json:"entity_name"`
+	Description      string                `json:"description"`
+	Domain           string                `json:"domain"`
+	KeyColumns       []keyColumnEnrichment `json:"key_columns"`
+	AlternativeNames []string              `json:"alternative_names"`
 }
 
 // enrichEntitiesWithLLM uses an LLM to generate clean entity names and descriptions
@@ -550,7 +559,7 @@ func (s *entityDiscoveryService) enrichEntitiesWithLLM(
 		return nil // Don't fail the workflow for enrichment parsing errors
 	}
 
-	// Update entities with enriched names and descriptions
+	// Update entities with enriched names, descriptions, and new fields
 	enrichmentByTable := make(map[string]entityEnrichment)
 	for _, e := range enrichments {
 		enrichmentByTable[e.TableName] = e
@@ -560,16 +569,51 @@ func (s *entityDiscoveryService) enrichEntitiesWithLLM(
 		if enrichment, ok := enrichmentByTable[entity.PrimaryTable]; ok {
 			entity.Name = enrichment.EntityName
 			entity.Description = enrichment.Description
+			entity.Domain = enrichment.Domain
 			if err := s.entityRepo.Update(tenantCtx, entity); err != nil {
 				s.logger.Error("Failed to update entity with enrichment",
 					zap.String("entity_id", entity.ID.String()),
 					zap.Error(err))
 				// Continue with other entities
+				continue
+			}
+
+			// Create key columns with synonyms
+			for _, kc := range enrichment.KeyColumns {
+				keyCol := &models.OntologyEntityKeyColumn{
+					EntityID:   entity.ID,
+					ColumnName: kc.Name,
+					Synonyms:   kc.Synonyms,
+				}
+				if err := s.entityRepo.CreateKeyColumn(tenantCtx, keyCol); err != nil {
+					s.logger.Error("Failed to create key column",
+						zap.String("entity_id", entity.ID.String()),
+						zap.String("column_name", kc.Name),
+						zap.Error(err))
+					// Continue with other key columns
+				}
+			}
+
+			// Create aliases (alternative names)
+			discoverySource := "discovery"
+			for _, altName := range enrichment.AlternativeNames {
+				alias := &models.OntologyEntityAlias{
+					EntityID: entity.ID,
+					Alias:    altName,
+					Source:   &discoverySource,
+				}
+				if err := s.entityRepo.CreateAlias(tenantCtx, alias); err != nil {
+					s.logger.Error("Failed to create entity alias",
+						zap.String("entity_id", entity.ID.String()),
+						zap.String("alias", altName),
+						zap.Error(err))
+					// Continue with other aliases
+				}
 			}
 		}
 	}
 
-	s.logger.Info("Enriched entities with LLM-generated names and descriptions",
+	s.logger.Info("Enriched entities with LLM-generated metadata",
 		zap.Int("entity_count", len(entities)),
 		zap.Int("enrichments_applied", len(enrichments)))
 
@@ -577,7 +621,7 @@ func (s *entityDiscoveryService) enrichEntitiesWithLLM(
 }
 
 func (s *entityDiscoveryService) entityEnrichmentSystemMessage() string {
-	return `You are a data modeling expert. Your task is to convert database table names into clean, human-readable entity names and provide brief descriptions of what each entity represents.
+	return `You are a data modeling expert. Your task is to convert database table names into clean, human-readable entity names, provide brief descriptions, identify the business domain, key business columns, and alternative names users might use.
 
 Consider the full schema context to understand the domain and make informed guesses about each entity's purpose.`
 }
@@ -599,13 +643,15 @@ func (s *entityDiscoveryService) buildEntityEnrichmentPrompt(
 	sb.WriteString("\n# Task\n\n")
 	sb.WriteString("For each table below, provide:\n")
 	sb.WriteString("1. **Entity Name**: A clean, singular, Title Case name (e.g., \"users\" → \"User\", \"billing_activities\" → \"Billing Activity\")\n")
-	sb.WriteString("2. **Description**: A brief (1-2 sentence) description of what this entity represents in the domain\n\n")
+	sb.WriteString("2. **Description**: A brief (1-2 sentence) description of what this entity represents in the domain\n")
+	sb.WriteString("3. **Domain**: A short, lowercase business domain (e.g., \"billing\", \"hospitality\", \"logistics\", \"customer\", \"analytics\")\n")
+	sb.WriteString("4. **Key Columns**: 2-3 important business columns that users typically query on (exclude id, created_at, updated_at). For each column, include synonyms users might use.\n")
+	sb.WriteString("5. **Alternative Names**: Synonyms or alternative names users might use to refer to this entity\n\n")
 
 	sb.WriteString("## Examples\n\n")
-	sb.WriteString("- `accounts` → **Account** - \"A user account that can access the platform and manage resources.\"\n")
-	sb.WriteString("- `billing_activities` → **Billing Activity** - \"A record of billing-related actions such as charges, refunds, or adjustments.\"\n")
-	sb.WriteString("- `new_host_bonus_statuses` → **New Host Bonus Status** - \"Tracks the status of promotional bonuses awarded to newly registered hosts.\"\n")
-	sb.WriteString("- `order_items` → **Order Item** - \"A line item within a customer order, representing a specific product and quantity.\"\n\n")
+	sb.WriteString("- `accounts` → **Account** - domain: \"customer\", key_columns: [{name: \"email\", synonyms: [\"e-mail\", \"mail\"]}, {name: \"name\", synonyms: [\"username\", \"full_name\"]}], alternative_names: [\"user\", \"member\"]\n")
+	sb.WriteString("- `billing_activities` → **Billing Activity** - domain: \"billing\", key_columns: [{name: \"amount\", synonyms: [\"total\", \"price\"]}, {name: \"status\", synonyms: [\"state\"]}], alternative_names: [\"charge\", \"transaction\"]\n")
+	sb.WriteString("- `reservations` → **Reservation** - domain: \"hospitality\", key_columns: [{name: \"check_in_date\", synonyms: [\"arrival\", \"start_date\"]}, {name: \"status\", synonyms: [\"state\"]}], alternative_names: [\"booking\", \"stay\"]\n\n")
 
 	sb.WriteString("## Tables to Process\n\n")
 	for _, entity := range entities {
@@ -618,7 +664,14 @@ func (s *entityDiscoveryService) buildEntityEnrichmentPrompt(
 	sb.WriteString("Respond with a JSON array:\n")
 	sb.WriteString("```json\n")
 	sb.WriteString("[\n")
-	sb.WriteString("  {\"table_name\": \"accounts\", \"entity_name\": \"Account\", \"description\": \"A user account...\"},\n")
+	sb.WriteString("  {\n")
+	sb.WriteString("    \"table_name\": \"accounts\",\n")
+	sb.WriteString("    \"entity_name\": \"Account\",\n")
+	sb.WriteString("    \"description\": \"A user account that can access the platform.\",\n")
+	sb.WriteString("    \"domain\": \"customer\",\n")
+	sb.WriteString("    \"key_columns\": [{\"name\": \"email\", \"synonyms\": [\"e-mail\", \"mail\"]}, {\"name\": \"name\", \"synonyms\": [\"username\"]}],\n")
+	sb.WriteString("    \"alternative_names\": [\"user\", \"member\"]\n")
+	sb.WriteString("  },\n")
 	sb.WriteString("  ...\n")
 	sb.WriteString("]\n")
 	sb.WriteString("```\n")
