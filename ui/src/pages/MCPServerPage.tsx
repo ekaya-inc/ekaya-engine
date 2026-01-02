@@ -6,10 +6,29 @@ import MCPLogo from '../components/icons/MCPLogo';
 import MCPServerURL from '../components/mcp/MCPServerURL';
 import MCPToolGroup from '../components/mcp/MCPToolGroup';
 import { Button } from '../components/ui/Button';
+import {
+  TOOL_GROUP_IDS,
+  TOOL_GROUP_METADATA,
+} from '../constants/mcpToolMetadata';
 import { useDatasourceConnection } from '../contexts/DatasourceConnectionContext';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
-import type { MCPConfigResponse } from '../types';
+import type { MCPConfigResponse, SubOptionInfo, ToolGroupState } from '../types';
+
+// Helper to get sub-option enabled state from flat ToolGroupState
+const getSubOptionEnabled = (state: ToolGroupState | undefined, subOptionName: string): boolean => {
+  if (!state) return false;
+  switch (subOptionName) {
+    case 'enableExecute':
+      return state.enableExecute ?? false;
+    case 'forceMode':
+      return state.forceMode ?? false;
+    case 'allowClientSuggestions':
+      return state.allowClientSuggestions ?? false;
+    default:
+      return false;
+  }
+};
 
 const MCPServerPage = () => {
   const navigate = useNavigate();
@@ -23,11 +42,14 @@ const MCPServerPage = () => {
   const [enabledQueryCount, setEnabledQueryCount] = useState(0);
   const [secureAdhocEnabled, setSecureAdhocEnabled] = useState(false);
 
-  // Read approved_queries config from backend
-  const approvedQueriesConfig = config?.toolGroups['approved_queries'];
-  const isApprovedQueriesEnabled = approvedQueriesConfig?.enabled ?? false;
-  const forceMode = approvedQueriesConfig?.subOptions?.['forceMode']?.enabled ?? false;
-  const allowClientSuggestions = approvedQueriesConfig?.subOptions?.['allowClientSuggestions']?.enabled ?? false;
+  // Read approved_queries config from backend (now flat state structure)
+  const approvedQueriesState = config?.toolGroups[TOOL_GROUP_IDS.APPROVED_QUERIES];
+  const isApprovedQueriesEnabled = approvedQueriesState?.enabled ?? false;
+  const forceMode = approvedQueriesState?.forceMode ?? false;
+  const allowClientSuggestions = approvedQueriesState?.allowClientSuggestions ?? false;
+
+  // Get metadata for approved_queries
+  const approvedQueriesMetadata = TOOL_GROUP_METADATA[TOOL_GROUP_IDS.APPROVED_QUERIES];
 
   const fetchConfig = useCallback(async () => {
     if (!pid) return;
@@ -89,16 +111,16 @@ const MCPServerPage = () => {
     }
 
     // Special handling for FORCE mode
-    if (subOptionName === 'forceMode' && enabled && config.toolGroups['developer']?.enabled) {
+    if (subOptionName === 'forceMode' && enabled && config.toolGroups[TOOL_GROUP_IDS.DEVELOPER]?.enabled) {
       // Auto-disable developer tools when enabling FORCE mode
-      await handleToggleToolGroup('developer', false);
+      await handleToggleToolGroup(TOOL_GROUP_IDS.DEVELOPER, false);
     }
 
     try {
       setUpdating(true);
       const response = await engineApi.updateMCPConfig(pid, {
         toolGroups: {
-          approved_queries: {
+          [TOOL_GROUP_IDS.APPROVED_QUERIES]: {
             enabled: isApprovedQueriesEnabled,
             ...(subOptionName === 'forceMode' ? { forceMode: enabled } : { forceMode }),
             ...(subOptionName === 'allowClientSuggestions' ? { allowClientSuggestions: enabled } : { allowClientSuggestions }),
@@ -108,10 +130,11 @@ const MCPServerPage = () => {
 
       if (response.success && response.data) {
         setConfig(response.data);
-        const subOptionInfo = approvedQueriesConfig?.subOptions?.[subOptionName];
+        // Get sub-option name from frontend metadata
+        const subOptionMeta = approvedQueriesMetadata?.subOptions?.[subOptionName];
         toast({
           title: 'Success',
-          description: `${subOptionInfo?.name ?? subOptionName} ${enabled ? 'enabled' : 'disabled'}`,
+          description: `${subOptionMeta?.name ?? subOptionName} ${enabled ? 'enabled' : 'disabled'}`,
         });
       } else {
         throw new Error(response.error ?? 'Failed to update configuration');
@@ -144,7 +167,7 @@ const MCPServerPage = () => {
       setUpdating(true);
       const response = await engineApi.updateMCPConfig(pid, {
         toolGroups: {
-          approved_queries: {
+          [TOOL_GROUP_IDS.APPROVED_QUERIES]: {
             enabled,
             forceMode,
             allowClientSuggestions,
@@ -182,15 +205,16 @@ const MCPServerPage = () => {
       });
       return;
     }
-    await handleToggleToolGroup('developer', enabled);
+    await handleToggleToolGroup(TOOL_GROUP_IDS.DEVELOPER, enabled);
   };
 
   const handleToggleToolGroup = async (groupName: string, enabled: boolean) => {
     if (!pid || !config) return;
 
-    const groupInfo = config.toolGroups[groupName];
+    const groupState = config.toolGroups[groupName];
+    const metadata = TOOL_GROUP_METADATA[groupName];
     // Preserve existing sub-option values when toggling the main switch
-    const enableExecute = groupInfo?.subOptions?.['enableExecute']?.enabled ?? false;
+    const enableExecute = groupState?.enableExecute ?? false;
 
     try {
       setUpdating(true);
@@ -204,7 +228,7 @@ const MCPServerPage = () => {
         setConfig(response.data);
         toast({
           title: 'Success',
-          description: `${groupInfo?.name ?? groupName} ${enabled ? 'enabled' : 'disabled'}`,
+          description: `${metadata?.name ?? groupName} ${enabled ? 'enabled' : 'disabled'}`,
         });
       } else {
         throw new Error(response.error ?? 'Failed to update configuration');
@@ -224,15 +248,16 @@ const MCPServerPage = () => {
   const handleToggleSubOption = async (groupName: string, subOptionName: string, enabled: boolean) => {
     if (!pid || !config) return;
 
-    const groupInfo = config.toolGroups[groupName];
-    const subOptionInfo = groupInfo?.subOptions?.[subOptionName];
+    const groupState = config.toolGroups[groupName];
+    const metadata = TOOL_GROUP_METADATA[groupName];
+    const subOptionMeta = metadata?.subOptions?.[subOptionName];
 
     try {
       setUpdating(true);
       const response = await engineApi.updateMCPConfig(pid, {
         toolGroups: {
           [groupName]: {
-            enabled: groupInfo?.enabled ?? false,
+            enabled: groupState?.enabled ?? false,
             ...(subOptionName === 'enableExecute' ? { enableExecute: enabled } : {}),
           },
         },
@@ -242,7 +267,7 @@ const MCPServerPage = () => {
         setConfig(response.data);
         toast({
           title: 'Success',
-          description: `${subOptionInfo?.name ?? subOptionName} ${enabled ? 'enabled' : 'disabled'}`,
+          description: `${subOptionMeta?.name ?? subOptionName} ${enabled ? 'enabled' : 'disabled'}`,
         });
       } else {
         throw new Error(response.error ?? 'Failed to update configuration');
@@ -257,6 +282,41 @@ const MCPServerPage = () => {
     } finally {
       setUpdating(false);
     }
+  };
+
+  // Build sub-options for approved_queries by merging state with frontend metadata
+  const buildApprovedQueriesSubOptions = (): Record<string, SubOptionInfo> | undefined => {
+    if (!approvedQueriesMetadata?.subOptions) return undefined;
+
+    const subOptions: Record<string, SubOptionInfo> = {
+      // UI-only option (not persisted to backend)
+      secureAdhocRequests: {
+        enabled: secureAdhocEnabled,
+        name: 'Secure Ad-Hoc Requests [Recommended]',
+        description: secureAdhocEnabled ? (
+          <>
+            Examine the SQL generated by the MCP Client to prevent injection attacks and detect potential data leakage. This requires Ekaya&apos;s Security models.
+            <p className="mt-2 text-center">
+              Contact <a href="mailto:sales@ekaya.ai?subject=Add Security Models to my installation" className="text-brand-purple hover:underline">sales@ekaya.ai</a> to discuss embedding secure, dedicated models so data never leaves your data boundary.
+            </p>
+          </>
+        ) : (
+          'Examine the SQL generated by the MCP Client to prevent injection attacks and detect potential data leakage. This requires Ekaya\'s Security models.'
+        ),
+      },
+    };
+
+    // Add backend-persisted sub-options from metadata
+    for (const [subName, subMeta] of Object.entries(approvedQueriesMetadata.subOptions)) {
+      subOptions[subName] = {
+        enabled: getSubOptionEnabled(approvedQueriesState, subName),
+        name: subMeta.name,
+        description: subMeta.description,
+        warning: subMeta.warning,
+      };
+    }
+
+    return subOptions;
   };
 
   if (loading) {
@@ -310,49 +370,54 @@ const MCPServerPage = () => {
                   onToggle={handleToggleApprovedQueries}
                   disabled={updating || enabledQueryCount === 0}
                   {...(enabledQueryCount > 0 && isApprovedQueriesEnabled ? {
-                    subOptions: {
-                      secureAdhocRequests: {
-                        enabled: secureAdhocEnabled,
-                        name: 'Secure Ad-Hoc Requests [Recommended]',
-                        description: secureAdhocEnabled ? (
-                          <>
-                            Examine the SQL generated by the MCP Client to prevent injection attacks and detect potential data leakage. This requires Ekaya&apos;s Security models.
-                            <p className="mt-2 text-center">
-                              Contact <a href="mailto:sales@ekaya.ai?subject=Add Security Models to my installation" className="text-brand-purple hover:underline">sales@ekaya.ai</a> to discuss embedding secure, dedicated models so data never leaves your data boundary.
-                            </p>
-                          </>
-                        ) : (
-                          'Examine the SQL generated by the MCP Client to prevent injection attacks and detect potential data leakage. This requires Ekaya\'s Security models.'
-                        ),
-                      },
-                      ...(approvedQueriesConfig?.subOptions ?? {}),
-                    },
+                    subOptions: buildApprovedQueriesSubOptions(),
                     onSubOptionToggle: handleToggleApprovedQueriesSubOption,
                   } : {})}
                 />
 
                 {/* Other Tool Groups (excluding approved_queries which is handled above) */}
                 {Object.entries(config.toolGroups)
-                  .filter(([groupName]) => groupName !== 'approved_queries')
-                  .map(([groupName, groupInfo]) => {
-                  // Use custom handler for developer tools to enforce FORCE mode
-                  const onToggle = groupName === 'developer'
-                    ? handleToggleDevTools
-                    : (enabled: boolean) => handleToggleToolGroup(groupName, enabled);
+                  .filter(([groupName]) => groupName !== TOOL_GROUP_IDS.APPROVED_QUERIES)
+                  .map(([groupName, groupState]) => {
+                    // Get metadata for this tool group
+                    const metadata = TOOL_GROUP_METADATA[groupName];
+                    if (!metadata) {
+                      console.warn(`Unknown tool group: ${groupName}`);
+                      return null;
+                    }
 
-                  const props = {
-                    name: groupInfo.name,
-                    description: groupInfo.description,
-                    enabled: groupInfo.enabled,
-                    onToggle,
-                    disabled: updating,
-                    ...(groupInfo.warning != null ? { warning: groupInfo.warning } : {}),
-                    ...(groupInfo.subOptions != null ? { subOptions: groupInfo.subOptions } : {}),
-                    onSubOptionToggle: (subOptionName: string, enabled: boolean) =>
-                      handleToggleSubOption(groupName, subOptionName, enabled),
-                  };
-                  return <MCPToolGroup key={groupName} {...props} />;
-                })}
+                    // Use custom handler for developer tools to enforce FORCE mode
+                    const onToggle = groupName === TOOL_GROUP_IDS.DEVELOPER
+                      ? handleToggleDevTools
+                      : (enabled: boolean) => handleToggleToolGroup(groupName, enabled);
+
+                    // Build sub-options by merging state with metadata
+                    let subOptions: Record<string, SubOptionInfo> | undefined;
+                    if (metadata.subOptions) {
+                      subOptions = {};
+                      for (const [subName, subMeta] of Object.entries(metadata.subOptions)) {
+                        subOptions[subName] = {
+                          enabled: getSubOptionEnabled(groupState, subName),
+                          name: subMeta.name,
+                          description: subMeta.description,
+                          warning: subMeta.warning,
+                        };
+                      }
+                    }
+
+                    const props = {
+                      name: metadata.name,
+                      description: metadata.description,
+                      enabled: groupState.enabled,
+                      onToggle,
+                      disabled: updating,
+                      ...(metadata.warning != null ? { warning: metadata.warning } : {}),
+                      ...(subOptions != null ? { subOptions } : {}),
+                      onSubOptionToggle: (subOptionName: string, enabled: boolean) =>
+                        handleToggleSubOption(groupName, subOptionName, enabled),
+                    };
+                    return <MCPToolGroup key={groupName} {...props} />;
+                  })}
               </div>
             </div>
           </>

@@ -14,27 +14,18 @@ import (
 // ToolGroupApprovedQueries is the identifier for the pre-approved queries tool group.
 const ToolGroupApprovedQueries = "approved_queries"
 
-// SubOptionInfo contains metadata about a sub-option within a tool group.
-type SubOptionInfo struct {
-	Enabled     bool   `json:"enabled"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Warning     string `json:"warning,omitempty"`
-}
-
-// ToolGroupInfo contains static metadata about a tool group for API responses.
-type ToolGroupInfo struct {
-	Enabled     bool                      `json:"enabled"`
-	Name        string                    `json:"name"`
-	Description string                    `json:"description"`
-	Warning     string                    `json:"warning,omitempty"`
-	SubOptions  map[string]*SubOptionInfo `json:"subOptions,omitempty"`
+// validToolGroups defines the known tool group identifiers for validation.
+// UI metadata (names, descriptions, warnings) is defined in the frontend.
+var validToolGroups = map[string]bool{
+	"developer":              true,
+	ToolGroupApprovedQueries: true,
 }
 
 // MCPConfigResponse is the API response format for MCP configuration.
+// Returns only configuration state; UI strings are defined in the frontend.
 type MCPConfigResponse struct {
-	ServerURL  string                    `json:"serverUrl"`
-	ToolGroups map[string]*ToolGroupInfo `json:"toolGroups"`
+	ServerURL  string                             `json:"serverUrl"`
+	ToolGroups map[string]*models.ToolGroupConfig `json:"toolGroups"`
 }
 
 // UpdateMCPConfigRequest is the API request format for updating MCP configuration.
@@ -60,51 +51,6 @@ type MCPConfigService interface {
 	// ShouldShowApprovedQueriesTools determines if approved queries tools should appear.
 	// Returns true only if the approved_queries tool group is enabled AND there are enabled queries.
 	ShouldShowApprovedQueriesTools(ctx context.Context, projectID uuid.UUID) (bool, error)
-}
-
-// subOptionMetadata contains static information about sub-options within tool groups.
-type subOptionMetadata struct {
-	Name        string
-	Description string
-	Warning     string
-}
-
-// toolGroupDef contains static metadata about a tool group.
-type toolGroupDef struct {
-	Name        string
-	Description string
-	Warning     string
-	SubOptions  map[string]subOptionMetadata
-}
-
-// Tool group metadata - static information about each tool group.
-var toolGroupMetadata = map[string]toolGroupDef{
-	"developer": {
-		Name:        "Developer Tools",
-		Description: "Enable raw access to the Datasource and Schema. This is intended for developers building applications or data engineers building ETL pipelines.",
-		Warning:     "This setting is NOT recommended for business end users doing analytics.",
-		SubOptions: map[string]subOptionMetadata{
-			"enableExecute": {
-				Name:    "Enable Execute",
-				Warning: "The MCP Client will have direct access to the Datasource using the supplied credentials -- this access includes potentially destructive operations. Back up the data before allowing AI to modify it.",
-			},
-		},
-	},
-	ToolGroupApprovedQueries: {
-		Name:        "Pre-Approved Queries",
-		Description: "Enable pre-approved SQL queries that can be executed by the MCP client. Queries must be created and enabled in the Pre-Approved Queries section.",
-		SubOptions: map[string]subOptionMetadata{
-			"forceMode": {
-				Name:        "FORCE all access through Pre-Approved Queries",
-				Description: "When enabled, MCP clients can only execute Pre-Approved Queries. This is the safest way to enable AI access to data but it is also the least flexible. Enable this option if you want restricted scope access to set UI features, reports or processes.",
-				Warning:     "Enabling this will disable Developer Tools.",
-			},
-			"allowClientSuggestions": {
-				Name:        "Allow MCP Client to suggest Queries for the Pre-Approved List",
-				Description: "Allow the MCP Client to suggest new Queries to be added to the Pre-Approved list after your review.",
-			},
-		},
-	},
 }
 
 type mcpConfigService struct {
@@ -160,7 +106,7 @@ func (s *mcpConfigService) Update(ctx context.Context, projectID uuid.UUID, req 
 
 	// Merge updates - only update known tool groups
 	for groupName, groupConfig := range req.ToolGroups {
-		if _, known := toolGroupMetadata[groupName]; known {
+		if validToolGroups[groupName] {
 			if config.ToolGroups == nil {
 				config.ToolGroups = make(map[string]*models.ToolGroupConfig)
 			}
@@ -254,8 +200,9 @@ func (s *mcpConfigService) hasEnabledQueries(ctx context.Context, projectID uuid
 }
 
 // buildResponse creates the API response format from the model.
+// Returns only configuration state; UI metadata is defined in the frontend.
 func (s *mcpConfigService) buildResponse(ctx context.Context, projectID uuid.UUID, config *models.MCPConfig) *MCPConfigResponse {
-	toolGroups := make(map[string]*ToolGroupInfo)
+	toolGroups := make(map[string]*models.ToolGroupConfig)
 
 	// Check if approved_queries should actually be enabled (requires enabled queries)
 	approvedQueriesActive, err := s.hasEnabledQueries(ctx, projectID)
@@ -267,51 +214,25 @@ func (s *mcpConfigService) buildResponse(ctx context.Context, projectID uuid.UUI
 		approvedQueriesActive = false
 	}
 
-	for groupName, metadata := range toolGroupMetadata {
-		enabled := false
-		var groupConfig *models.ToolGroupConfig
+	// Include all valid tool groups in response
+	for groupName := range validToolGroups {
+		groupConfig := &models.ToolGroupConfig{}
 		if gc, ok := config.ToolGroups[groupName]; ok {
-			groupConfig = gc
-			enabled = groupConfig.Enabled
+			// Copy the config to avoid mutating the original
+			groupConfig = &models.ToolGroupConfig{
+				Enabled:                gc.Enabled,
+				EnableExecute:          gc.EnableExecute,
+				ForceMode:              gc.ForceMode,
+				AllowClientSuggestions: gc.AllowClientSuggestions,
+			}
 		}
 
 		// Override approved_queries: only show as enabled if there are enabled queries
 		if groupName == ToolGroupApprovedQueries && !approvedQueriesActive {
-			enabled = false
+			groupConfig.Enabled = false
 		}
 
-		info := &ToolGroupInfo{
-			Enabled:     enabled,
-			Name:        metadata.Name,
-			Description: metadata.Description,
-			Warning:     metadata.Warning,
-		}
-
-		// Build sub-options if any exist
-		if len(metadata.SubOptions) > 0 {
-			info.SubOptions = make(map[string]*SubOptionInfo)
-			for subName, subMeta := range metadata.SubOptions {
-				subEnabled := false
-				if groupConfig != nil {
-					switch subName {
-					case "enableExecute":
-						subEnabled = groupConfig.EnableExecute
-					case "forceMode":
-						subEnabled = groupConfig.ForceMode
-					case "allowClientSuggestions":
-						subEnabled = groupConfig.AllowClientSuggestions
-					}
-				}
-				info.SubOptions[subName] = &SubOptionInfo{
-					Enabled:     subEnabled,
-					Name:        subMeta.Name,
-					Description: subMeta.Description,
-					Warning:     subMeta.Warning,
-				}
-			}
-		}
-
-		toolGroups[groupName] = info
+		toolGroups[groupName] = groupConfig
 	}
 
 	return &MCPConfigResponse{

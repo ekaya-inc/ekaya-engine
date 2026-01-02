@@ -8,12 +8,12 @@ import { Switch } from '../ui/Switch';
 interface MCPToolGroupProps {
   name: string;
   description: ReactNode;
-  warning?: string;
+  warning?: string | undefined;
   enabled: boolean;
   onToggle: (enabled: boolean) => void;
-  disabled?: boolean;
-  subOptions?: Record<string, SubOptionInfo>;
-  onSubOptionToggle?: (subOptionName: string, enabled: boolean) => void;
+  disabled?: boolean | undefined;
+  subOptions?: Record<string, SubOptionInfo> | undefined;
+  onSubOptionToggle?: ((subOptionName: string, enabled: boolean) => void) | undefined;
 }
 
 export default function MCPToolGroup({
