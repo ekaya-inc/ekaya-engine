@@ -263,7 +263,7 @@ if ontologyToolNames[tool.Name] && !showApprovedQueries {
 - Added dedicated test `TestFilterTools_OntologyToolsFilteredWithApprovedQueries`
 - All tests pass successfully
 
-### Step 2: Create Ontology Tool Dependencies
+### [x] Step 2: Create Ontology Tool Dependencies ✅ COMPLETE
 
 Create a new deps struct for ontology tools.
 
@@ -281,6 +281,14 @@ type OntologyToolDeps struct {
     Logger           *zap.Logger
 }
 ```
+
+**Implementation Notes:**
+- Created `pkg/mcp/tools/ontology.go` with `OntologyToolDeps` struct
+- Struct follows same pattern as `DeveloperToolDeps` in developer.go
+- All dependencies are interface types for testability
+- Created comprehensive tests in `pkg/mcp/tools/ontology_test.go`
+- Tests verify struct fields and initialization
+- All tests pass successfully
 
 ### Step 3: Implement `get_ontology` Tool Handler
 
