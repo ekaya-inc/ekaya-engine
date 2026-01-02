@@ -120,6 +120,10 @@ type QueryExecutor interface {
 	// Returns nil if valid, error with details if invalid.
 	ValidateQuery(ctx context.Context, sqlQuery string) error
 
+	// QuoteIdentifier safely quotes a SQL identifier (table, column, schema name)
+	// to prevent SQL injection. Each adapter implements dialect-specific quoting.
+	QuoteIdentifier(name string) string
+
 	// Close releases any resources held by the executor.
 	Close() error
 }
@@ -132,9 +136,15 @@ type ExecuteResult struct {
 	RowsAffected int64            `json:"rows_affected"`
 }
 
+// ColumnInfo describes a result column with database-agnostic type information.
+type ColumnInfo struct {
+	Name string `json:"name"`
+	Type string `json:"type"` // Database type name (e.g., "TEXT", "INT4", "VARCHAR")
+}
+
 // QueryExecutionResult holds the results from executing a query.
 type QueryExecutionResult struct {
-	Columns  []string         `json:"columns"`
+	Columns  []ColumnInfo     `json:"columns"`
 	Rows     []map[string]any `json:"rows"`
 	RowCount int              `json:"row_count"`
 }
