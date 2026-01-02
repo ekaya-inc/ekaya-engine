@@ -290,7 +290,7 @@ type OntologyToolDeps struct {
 - Tests verify struct fields and initialization
 - All tests pass successfully
 
-### Step 3: Implement `get_ontology` Tool Handler
+### [x] Step 3: Implement `get_ontology` Tool Handler ✅ COMPLETE
 
 Create the tool registration and handler logic.
 
@@ -303,6 +303,21 @@ Create the tool registration and handler logic.
 3. Parse optional `include_relationships` (default true)
 4. Based on depth, call appropriate service method
 5. Return structured JSON response
+
+**Implementation Notes:**
+- Created `RegisterOntologyTools()` function to register `get_ontology` tool
+- Implemented full tool handler with depth parameter parsing and validation
+- Added support for optional `tables` filter (array of strings)
+- Added `include_relationships` parameter (default: true)
+- Tool properly annotated as read-only, idempotent, non-destructive
+- Comprehensive tests added in `ontology_test.go`:
+  - Test tool registration
+  - Test parameter validation (required depth)
+  - Test depth value validation (domain/entities/tables/columns)
+  - Test tables filter parsing
+  - Test include_relationships parameter
+- All tests pass successfully
+- Handler returns placeholder "not implemented" response for now (will be implemented in Step 4)
 
 ### Step 4: Create Ontology Context Service
 
