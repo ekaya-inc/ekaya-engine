@@ -47,7 +47,7 @@ export default function MCPToolGroup({
               </div>
             )}
             {enabled && subOptions && Object.entries(subOptions).map(([subName, subOption]) => (
-              <div key={subName} className="mt-4 border-t border-border-light pt-4">
+              <div key={subName} className="mt-4 ml-6 border-t border-border-light pt-4">
                 <div className="flex items-center gap-3">
                   <Switch
                     checked={subOption.enabled}
@@ -57,7 +57,7 @@ export default function MCPToolGroup({
                   <span className="text-sm font-medium text-text-primary">{subOption.name}</span>
                 </div>
                 {subOption.description && (
-                  <p className="mt-1 text-sm text-text-secondary">{subOption.description}</p>
+                  <p className="mt-1 ml-11 text-sm text-text-secondary">{subOption.description}</p>
                 )}
                 {subOption.warning && (
                   <div className="mt-2 flex items-start gap-2 rounded-md bg-red-50 p-3 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">

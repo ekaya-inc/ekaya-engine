@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 /**
  * MCP Configuration Types
  */
@@ -5,8 +7,9 @@
 export interface SubOptionInfo {
   enabled: boolean;
   name: string;
-  description?: string;
+  description?: ReactNode;
   warning?: string;
+  recommended?: boolean;
 }
 
 export interface ToolGroupInfo {
