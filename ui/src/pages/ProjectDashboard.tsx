@@ -647,8 +647,9 @@ const ProjectDashboard = () => {
                     <div className="relative">
                       <button
                         type="button"
-                        onClick={() => setIsProviderDropdownOpen(!isProviderDropdownOpen)}
-                        className={`w-full rounded-lg border bg-surface-primary px-3 py-2 text-sm text-text-primary text-left flex items-center justify-between focus:ring-1 focus:outline-none ${getInputErrorClass('llm', 'endpoint') || 'border-border-light focus:border-brand-purple focus:ring-brand-purple'}`}
+                        onClick={() => !activeAIConfig && setIsProviderDropdownOpen(!isProviderDropdownOpen)}
+                        disabled={activeAIConfig === 'byok'}
+                        className={`w-full rounded-lg border bg-surface-primary px-3 py-2 text-sm text-text-primary text-left flex items-center justify-between focus:ring-1 focus:outline-none ${activeAIConfig === 'byok' ? 'opacity-60 cursor-not-allowed' : ''} ${getInputErrorClass('llm', 'endpoint') || 'border-border-light focus:border-brand-purple focus:ring-brand-purple'}`}
                       >
                         <span>{selectedProvider}</span>
                         <ChevronDown className={`h-4 w-4 text-text-tertiary transition-transform ${isProviderDropdownOpen ? 'rotate-180' : ''}`} />
@@ -682,7 +683,8 @@ const ProjectDashboard = () => {
                         placeholder={selectedProvider === 'Azure OpenAI' ? 'https://your-resource.openai.azure.com' : 'https://your-endpoint.com/v1'}
                         value={aiConfig.llmBaseUrl}
                         onChange={(e) => updateAiConfig('llmBaseUrl', e.target.value)}
-                        className={`w-full mt-2 rounded-lg border bg-surface-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/50 focus:ring-1 focus:outline-none ${getInputErrorClass('llm', 'endpoint') || 'border-border-light focus:border-brand-purple focus:ring-brand-purple'}`}
+                        disabled={activeAIConfig === 'byok'}
+                        className={`w-full mt-2 rounded-lg border bg-surface-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/50 focus:ring-1 focus:outline-none ${activeAIConfig === 'byok' ? 'opacity-60 cursor-not-allowed' : ''} ${getInputErrorClass('llm', 'endpoint') || 'border-border-light focus:border-brand-purple focus:ring-brand-purple'}`}
                       />
                     )}
                     {selectedProvider === 'Azure OpenAI' && (
@@ -701,7 +703,8 @@ const ProjectDashboard = () => {
                       placeholder="sk-..."
                       value={aiConfig.llmApiKey}
                       onChange={(e) => updateAiConfig('llmApiKey', e.target.value)}
-                      className={`w-full rounded-lg border bg-surface-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/50 focus:ring-1 focus:outline-none ${getInputErrorClass('llm', 'auth') || 'border-border-light focus:border-brand-purple focus:ring-brand-purple'}`}
+                      disabled={activeAIConfig === 'byok'}
+                      className={`w-full rounded-lg border bg-surface-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/50 focus:ring-1 focus:outline-none ${activeAIConfig === 'byok' ? 'opacity-60 cursor-not-allowed' : ''} ${getInputErrorClass('llm', 'auth') || 'border-border-light focus:border-brand-purple focus:ring-brand-purple'}`}
                     />
                     <p className="mt-1 text-xs text-text-tertiary">
                       Not required for local endpoints (Ollama, vLLM)
@@ -717,7 +720,8 @@ const ProjectDashboard = () => {
                       placeholder="gpt-4o, claude-sonnet-4-5, llama3.1"
                       value={aiConfig.llmModel}
                       onChange={(e) => updateAiConfig('llmModel', e.target.value)}
-                      className={`w-full rounded-lg border bg-surface-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/50 focus:ring-1 focus:outline-none ${getInputErrorClass('llm', 'model') || 'border-border-light focus:border-brand-purple focus:ring-brand-purple'}`}
+                      disabled={activeAIConfig === 'byok'}
+                      className={`w-full rounded-lg border bg-surface-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/50 focus:ring-1 focus:outline-none ${activeAIConfig === 'byok' ? 'opacity-60 cursor-not-allowed' : ''} ${getInputErrorClass('llm', 'model') || 'border-border-light focus:border-brand-purple focus:ring-brand-purple'}`}
                     />
                   </div>
                 </div>
