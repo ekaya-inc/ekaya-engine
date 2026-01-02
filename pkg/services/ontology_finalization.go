@@ -24,6 +24,7 @@ type ontologyFinalizationService struct {
 	ontologyRepo     repositories.OntologyRepository
 	entityRepo       repositories.OntologyEntityRepository
 	relationshipRepo repositories.EntityRelationshipRepository
+	schemaRepo       repositories.SchemaRepository
 	llmFactory       llm.LLMClientFactory
 	getTenantCtx     TenantContextFunc
 	logger           *zap.Logger
@@ -34,6 +35,7 @@ func NewOntologyFinalizationService(
 	ontologyRepo repositories.OntologyRepository,
 	entityRepo repositories.OntologyEntityRepository,
 	relationshipRepo repositories.EntityRelationshipRepository,
+	schemaRepo repositories.SchemaRepository,
 	llmFactory llm.LLMClientFactory,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
@@ -42,6 +44,7 @@ func NewOntologyFinalizationService(
 		ontologyRepo:     ontologyRepo,
 		entityRepo:       entityRepo,
 		relationshipRepo: relationshipRepo,
+		schemaRepo:       schemaRepo,
 		llmFactory:       llmFactory,
 		getTenantCtx:     getTenantCtx,
 		logger:           logger.Named("ontology-finalization"),
@@ -85,10 +88,18 @@ func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uu
 		return fmt.Errorf("generate domain description: %w", err)
 	}
 
+	// Discover project conventions (soft delete, currency, audit columns)
+	conventions, err := s.discoverConventions(ctx, projectID, entities)
+	if err != nil {
+		s.logger.Debug("Failed to discover conventions, continuing without", zap.Error(err))
+		// Non-fatal - continue without conventions
+	}
+
 	// Save to domain_summary JSONB
 	domainSummary := &models.DomainSummary{
 		Description: description,
 		Domains:     primaryDomains,
+		Conventions: conventions,
 		// RelationshipGraph: nil - redundant, GetDomainContext builds from normalized tables
 		// SampleQuestions: nil - not generating per user decision
 	}
@@ -226,4 +237,257 @@ func (s *ontologyFinalizationService) parseDomainDescriptionResponse(content str
 		return nil, fmt.Errorf("parse domain description JSON: %w", err)
 	}
 	return &parsed, nil
+}
+
+// ============================================================================
+// Convention Discovery
+// ============================================================================
+
+// conventionThreshold is the minimum fraction of tables that must have a pattern
+// for it to be considered a project-wide convention.
+const conventionThreshold = 0.5
+
+// discoverConventions analyzes schema columns to detect project-wide conventions.
+func (s *ontologyFinalizationService) discoverConventions(
+	ctx context.Context,
+	projectID uuid.UUID,
+	entities []*models.OntologyEntity,
+) (*models.ProjectConventions, error) {
+	if len(entities) == 0 {
+		return nil, nil
+	}
+
+	// Get table names from entities
+	tableNames := make([]string, 0, len(entities))
+	for _, e := range entities {
+		tableNames = append(tableNames, e.PrimaryTable)
+	}
+
+	// Get all columns for these tables
+	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames)
+	if err != nil {
+		return nil, fmt.Errorf("get columns by tables: %w", err)
+	}
+
+	totalTables := len(tableNames)
+	conventions := &models.ProjectConventions{}
+
+	// Detect soft delete convention
+	conventions.SoftDelete = s.detectSoftDelete(columnsByTable, totalTables)
+
+	// Detect currency convention
+	conventions.Currency = s.detectCurrency(columnsByTable)
+
+	// Detect audit columns
+	conventions.AuditColumns = s.detectAuditColumns(columnsByTable, totalTables)
+
+	// Return nil if no conventions found
+	if conventions.SoftDelete == nil && conventions.Currency == nil && len(conventions.AuditColumns) == 0 {
+		return nil, nil
+	}
+
+	return conventions, nil
+}
+
+// detectSoftDelete looks for soft-delete patterns across tables.
+// Supports: deleted_at (timestamp), is_deleted (boolean), deleted (boolean)
+func (s *ontologyFinalizationService) detectSoftDelete(
+	columnsByTable map[string][]*models.SchemaColumn,
+	totalTables int,
+) *models.SoftDeleteConvention {
+	if totalTables == 0 {
+		return nil
+	}
+
+	// Track counts for each soft-delete pattern
+	type softDeletePattern struct {
+		column     string
+		columnType string
+		filter     string
+	}
+
+	patterns := []softDeletePattern{
+		{"deleted_at", "timestamp", "deleted_at IS NULL"},
+		{"is_deleted", "boolean", "is_deleted = false"},
+		{"deleted", "boolean", "deleted = false"},
+	}
+
+	patternCounts := make(map[string]int)
+
+	for _, columns := range columnsByTable {
+		for _, col := range columns {
+			colNameLower := strings.ToLower(col.ColumnName)
+			dataTypeLower := strings.ToLower(col.DataType)
+
+			for _, pattern := range patterns {
+				if colNameLower == pattern.column {
+					// Validate type matches expected pattern
+					if pattern.columnType == "timestamp" {
+						if strings.Contains(dataTypeLower, "timestamp") && col.IsNullable {
+							patternCounts[pattern.column]++
+							break
+						}
+					} else if pattern.columnType == "boolean" {
+						if dataTypeLower == "boolean" || dataTypeLower == "bool" {
+							patternCounts[pattern.column]++
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Find the most common pattern that meets threshold
+	var bestPattern *softDeletePattern
+	var bestCount int
+
+	for _, pattern := range patterns {
+		count := patternCounts[pattern.column]
+		coverage := float64(count) / float64(totalTables)
+		if coverage >= conventionThreshold && count > bestCount {
+			p := pattern // copy
+			bestPattern = &p
+			bestCount = count
+		}
+	}
+
+	if bestPattern == nil {
+		return nil
+	}
+
+	return &models.SoftDeleteConvention{
+		Enabled:    true,
+		Column:     bestPattern.column,
+		ColumnType: bestPattern.columnType,
+		Filter:     bestPattern.filter,
+		Coverage:   float64(bestCount) / float64(totalTables),
+	}
+}
+
+// detectCurrency looks for currency column patterns and determines format.
+func (s *ontologyFinalizationService) detectCurrency(
+	columnsByTable map[string][]*models.SchemaColumn,
+) *models.CurrencyConvention {
+	// Currency column patterns to detect
+	currencyPatterns := []string{"_amount", "_price", "_cost", "_total", "_fee"}
+
+	var integerCount, decimalCount int
+	matchedPatterns := make(map[string]struct{})
+
+	for _, columns := range columnsByTable {
+		for _, col := range columns {
+			colNameLower := strings.ToLower(col.ColumnName)
+			dataTypeLower := strings.ToLower(col.DataType)
+
+			for _, pattern := range currencyPatterns {
+				if strings.HasSuffix(colNameLower, pattern) {
+					matchedPatterns[pattern] = struct{}{}
+
+					// Check data type
+					if isIntegerType(dataTypeLower) {
+						integerCount++
+					} else if isDecimalType(dataTypeLower) {
+						decimalCount++
+					}
+					break
+				}
+			}
+		}
+	}
+
+	// Need at least some currency columns to report a convention
+	if integerCount+decimalCount < 2 {
+		return nil
+	}
+
+	// Build matched patterns list
+	patterns := make([]string, 0, len(matchedPatterns))
+	for pattern := range matchedPatterns {
+		patterns = append(patterns, "*"+pattern)
+	}
+	sort.Strings(patterns)
+
+	// Determine format based on dominant type
+	var format, transform string
+	if integerCount >= decimalCount {
+		format = "cents"
+		transform = "divide_by_100"
+	} else {
+		format = "dollars"
+		transform = "none"
+	}
+
+	return &models.CurrencyConvention{
+		DefaultCurrency: "USD", // Default assumption
+		Format:          format,
+		ColumnPatterns:  patterns,
+		Transform:       transform,
+	}
+}
+
+// detectAuditColumns looks for common audit columns across tables.
+func (s *ontologyFinalizationService) detectAuditColumns(
+	columnsByTable map[string][]*models.SchemaColumn,
+	totalTables int,
+) []models.AuditColumnInfo {
+	if totalTables == 0 {
+		return nil
+	}
+
+	// Audit columns to detect
+	auditColumnNames := []string{"created_at", "updated_at", "deleted_at", "created_by", "updated_by"}
+
+	columnCounts := make(map[string]int)
+
+	for _, columns := range columnsByTable {
+		// Track which audit columns this table has (avoid counting duplicates)
+		tableHas := make(map[string]bool)
+		for _, col := range columns {
+			colNameLower := strings.ToLower(col.ColumnName)
+			for _, auditCol := range auditColumnNames {
+				if colNameLower == auditCol && !tableHas[auditCol] {
+					columnCounts[auditCol]++
+					tableHas[auditCol] = true
+				}
+			}
+		}
+	}
+
+	// Build result with coverage info, only include columns meeting threshold
+	var result []models.AuditColumnInfo
+	for _, auditCol := range auditColumnNames {
+		count := columnCounts[auditCol]
+		coverage := float64(count) / float64(totalTables)
+		if coverage >= conventionThreshold {
+			result = append(result, models.AuditColumnInfo{
+				Column:   auditCol,
+				Coverage: coverage,
+			})
+		}
+	}
+
+	return result
+}
+
+// isIntegerType returns true if the data type represents an integer.
+func isIntegerType(dataType string) bool {
+	intTypes := []string{"int", "integer", "bigint", "smallint", "tinyint", "int2", "int4", "int8"}
+	for _, t := range intTypes {
+		if strings.Contains(dataType, t) {
+			return true
+		}
+	}
+	return false
+}
+
+// isDecimalType returns true if the data type represents a decimal/numeric.
+func isDecimalType(dataType string) bool {
+	decimalTypes := []string{"decimal", "numeric", "money", "real", "double", "float"}
+	for _, t := range decimalTypes {
+		if strings.Contains(dataType, t) {
+			return true
+		}
+	}
+	return false
 }

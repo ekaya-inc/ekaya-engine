@@ -108,10 +108,11 @@ func (s *ontologyContextService) GetDomainContext(ctx context.Context, projectID
 		ColumnCount: columnCount,
 	}
 
-	// Use domain summary if available (populated by future Ontology Finalization)
+	// Use domain summary if available (populated by Ontology Finalization)
 	if ontology.DomainSummary != nil {
 		domainInfo.Description = ontology.DomainSummary.Description
 		domainInfo.PrimaryDomains = ontology.DomainSummary.Domains
+		domainInfo.Conventions = ontology.DomainSummary.Conventions
 	}
 
 	// Build entity briefs
