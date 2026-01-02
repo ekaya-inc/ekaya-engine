@@ -192,6 +192,12 @@ func (s *ontologyContextService) GetEntitiesContext(ctx context.Context, project
 		entityAliasesMap[entityID] = synonyms
 	}
 
+	// Get all key columns in one query (avoids N+1)
+	allKeyColumns, err := s.entityRepo.GetAllKeyColumnsByProject(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get entity key columns: %w", err)
+	}
+
 	// Build occurrence map by entity ID
 	occurrencesByEntityID := make(map[uuid.UUID][]models.EntityOccurrence)
 	for _, occ := range occurrences {
@@ -205,16 +211,14 @@ func (s *ontologyContextService) GetEntitiesContext(ctx context.Context, project
 	// Build entity details map
 	entityDetails := make(map[string]models.EntityDetail)
 	for _, entity := range entities {
-		// Get key columns from entity summary if available
+		// Get key columns from normalized table
 		var keyColumns []models.KeyColumnInfo
-		if ontology.EntitySummaries != nil {
-			if summary, ok := ontology.EntitySummaries[entity.PrimaryTable]; ok && summary != nil {
-				for _, kc := range summary.KeyColumns {
-					keyColumns = append(keyColumns, models.KeyColumnInfo{
-						Name:     kc.Name,
-						Synonyms: kc.Synonyms,
-					})
-				}
+		if kcs, ok := allKeyColumns[entity.ID]; ok {
+			for _, kc := range kcs {
+				keyColumns = append(keyColumns, models.KeyColumnInfo{
+					Name:     kc.ColumnName,
+					Synonyms: kc.Synonyms,
+				})
 			}
 		}
 
@@ -347,7 +351,7 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 			Schema:        entity.PrimarySchema,
 			BusinessName:  entity.Name,
 			Description:   entity.Description,
-			Domain:        "", // Will be populated after Phase 2 (entity domain categorization)
+			Domain:        entity.Domain,
 			RowCount:      rowCount,
 			ColumnCount:   len(schemaColumns),
 			Synonyms:      entityAliasesMap[entity.ID],
