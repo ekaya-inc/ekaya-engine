@@ -8,7 +8,27 @@ Implement the "FORCE all access through Pre-Approved Queries" mode where MCP cli
 
 ---
 
-## Current State
+## Current Status
+
+**All planned work is COMPLETE.** This plan is now in maintenance-only mode.
+
+**Recent Completion (2026-01-02):**
+- UI renamed "Pre-Approved Queries" → "Business User Tools" (backend still uses `approved_queries` internally)
+- Added "Secure Ad-Hoc Requests [Recommended]" toggle (UI-only, shows contact sales message)
+- Implemented sub-option visual indentation (ml-6) to show hierarchy
+- Fully implemented `output_columns` field with auto-parsing from SQL
+- Fully implemented `constraints` field in Query model
+- Query execution now returns structured `ColumnInfo{Name, Type}` instead of just column name strings
+
+**Key Completions:**
+- Tool filtering (schema tools, Force Mode) ✓
+- Rich query metadata (`output_columns`, `constraints`) ✓
+- Enhanced execution responses (query_name, parameters_used, execution_time_ms) ✓
+- Comprehensive test coverage ✓
+
+---
+
+## Previous State (Archived)
 
 ### What Exists
 
@@ -381,40 +401,58 @@ The existing `execute_approved_query` tool is mostly complete:
 
 ## Implementation Checklist
 
-### Bug Fixes (Do First)
+### Bug Fixes (Do First) - ALL COMPLETE
 
-- [x] Export `SchemaToolNames` in `pkg/mcp/tools/schema.go`
-- [x] Reference `SchemaToolNames` in `developer.go` (task 1.2)
-- [x] Add schema tool filtering to `filterTools()` in `pkg/mcp/tools/developer.go`
-- [x] Write tests for tool filtering with schema tools
-- [x] Add Force Mode check to disable developer tools in `NewToolFilter()`
+- [x] Export `SchemaToolNames` in `pkg/mcp/tools/schema.go` ✓
+- [x] Reference `SchemaToolNames` in `developer.go` (task 1.2) ✓
+- [x] Add schema tool filtering to `filterTools()` in `pkg/mcp/tools/developer.go` ✓
+- [x] Write tests for tool filtering with schema tools ✓
+- [x] Add Force Mode check to disable developer tools in `NewToolFilter()` ✓
 - [x] Add Force Mode test cases to developer_filter_test.go (test-2) ✓
 
-### Enhancements
+### Enhancements - ALL COMPLETE
 
-- [x] Add `query_name` and `parameters_used` to execute response (task 5.2.1)
-- [x] Add `execution_time_ms` to execute response (task 5.2.2)
-- [x] Improve error messages with query context (task 5.2.3)
+- [x] Add `query_name` and `parameters_used` to execute response (task 5.2.1) ✓
+- [x] Add `execution_time_ms` to execute response (task 5.2.2) ✓
+- [x] Improve error messages with query context (task 5.2.3) ✓
 
-### Future (Optional)
+### Future Enhancements - ALL COMPLETE
 
-- [x] Add `output_columns` to Query model (future-1) ✓ COMPLETE
-- [x] Database migration for output_columns field (future-1) ✓ COMPLETE
-- [x] Add `constraints` to Query model (future-2) ✓ COMPLETE
-- [x] Database migration for constraints field (future-2) ✓ COMPLETE
-- [x] Update admin UI to capture new fields (future-3) ✓ COMPLETE
-- [x] Parse SELECT columns from SQL as fallback (future-4) ✓ COMPLETE
+- [x] Add `output_columns` to Query model (future-1) ✓
+- [x] Database migration for output_columns field (future-1) ✓
+- [x] Add `constraints` to Query model (future-2) ✓
+- [x] Database migration for constraints field (future-2) ✓
+- [x] Update admin UI to capture new fields (future-3) ✓
+- [x] Parse SELECT columns from SQL as fallback (future-4) ✓
+- [x] Structured ColumnInfo with Name and Type fields (2026-01-02) ✓
+- [x] UI rename to "Business User Tools" (2026-01-02) ✓
+- [x] Secure Ad-Hoc Requests toggle (UI-only placeholder) (2026-01-02) ✓
+- [x] Sub-option visual indentation (2026-01-02) ✓
 
 ---
 
 ## File Changes Summary
 
-| File | Change |
-|------|--------|
-| `pkg/mcp/tools/schema.go` | Export `SchemaToolNames` |
-| `pkg/mcp/tools/developer.go` | Add schema filtering, Force Mode check |
-| `pkg/mcp/tools/queries.go` | Enhance execute response |
-| `pkg/mcp/tools/developer_filter_test.go` | Add Force Mode test cases |
+### Backend Files Modified
+
+| File | Changes |
+|------|---------|
+| `pkg/mcp/tools/schema.go` | Export `SchemaToolNames` ✓ |
+| `pkg/mcp/tools/developer.go` | Add schema filtering, Force Mode check ✓ |
+| `pkg/mcp/tools/queries.go` | Enhanced execute response, output_columns, ColumnInfo struct ✓ |
+| `pkg/mcp/tools/queries_test.go` | Tests for output_columns parsing ✓ |
+| `pkg/mcp/tools/developer_filter_test.go` | Force Mode test cases ✓ |
+| `pkg/models/query.go` | Added OutputColumn, Constraint types ✓ |
+| `pkg/services/mcp_config.go` | Updated description text for UI ✓ |
+| `pkg/adapters/datasource/postgres/query_executor.go` | ColumnInfo struct with Name and Type ✓ |
+
+### Frontend Files Modified
+
+| File | Changes |
+|------|---------|
+| `ui/src/pages/MCPServerPage.tsx` | Renamed to "Business User Tools", Secure Ad-Hoc Requests toggle ✓ |
+| `ui/src/components/mcp/MCPToolGroup.tsx` | Sub-option indentation (ml-6) ✓ |
+| `ui/src/types/mcp.ts` | ReactNode type for description field ✓ |
 
 ---
 
