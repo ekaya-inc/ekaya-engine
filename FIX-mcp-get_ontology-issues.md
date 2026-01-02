@@ -1,7 +1,7 @@
 # MCP get_ontology - Complete Implementation Plan
 
 Investigation date: 2026-01-02
-**Last updated:** 2026-01-02 (Phase 2 complete)
+**Last updated:** 2026-01-02 (Phase 3 complete)
 
 ## Status
 
@@ -9,23 +9,21 @@ Investigation date: 2026-01-02
 |-------|--------|----------------|-------|
 | Phase 1: Service Layer | ✅ **COMPLETE** | 2026-01-02 | Reads from normalized tables |
 | Phase 2: Entity Extraction | ✅ **COMPLETE** | 2026-01-02 | Domain, key columns (with synonyms), aliases |
-| Phase 3: Ontology Finalization | ⏸️ Planned | - | Domain description via LLM |
+| Phase 3: Ontology Finalization | ✅ **COMPLETE** | 2026-01-02 | Domain description via LLM, auto-triggered |
 | Phase 4: Column Workflow | ⏸️ Deferred | - | Column-level semantics |
 
 ---
 
-## What Works Now (After Phase 1 + 2)
+## What Works Now (After Phase 1 + 2 + 3)
 
 | Depth | Data Returned | Source |
 |-------|---------------|--------|
-| `domain` | Entity count, column count, relationship graph | Normalized tables |
+| `domain` | Entity count, column count, relationship graph, **description**, **primary domains** | Normalized tables + DomainSummary |
 | `entities` | Names, descriptions, occurrences, aliases, **key columns with synonyms** | Normalized tables |
 | `tables` | Business names, descriptions, columns, relationships, aliases, **domain** | Normalized tables |
 | `columns` | Structural metadata (name, type, PK, FK) | Normalized tables |
 
 **What's Still Missing:**
-- ⏸️ Domain-level description (requires Phase 3: Ontology Finalization)
-- ⏸️ Primary domains aggregation in `domain` depth (requires Phase 3)
 - ⏸️ Column semantic fields (requires Phase 4: Column Workflow - deferred)
 
 ---
@@ -131,120 +129,149 @@ Updated `enrichEntitiesWithLLM()` to:
 
 ---
 
-## Phase 3: Ontology Finalization (NEXT)
+## Phase 3 Accomplishments ✅
 
 **Goal:** Generate domain-level summary after Entity and Relationship extraction complete.
 
-### Existing Infrastructure (No Changes Needed)
-- `models.DomainSummary` struct - `pkg/models/ontology.go:15`
-- `ontologyRepo.UpdateDomainSummary()` - `pkg/repositories/ontology_repository.go:153`
-- `GetDomainContext` reads from `ontology.DomainSummary` - `pkg/services/ontology_context.go:112-114`
-- Reference patterns in `pkg/services/ontology_builder.go` (see `buildDomainSummaryFromEntities`)
+### New Service
+**File:** `pkg/services/ontology_finalization.go`
 
-### What Phase 3 Will Add
-
-| Data | Where Used | Implementation |
-|------|------------|----------------|
-| Domain description | `domain` depth response | LLM-generated 2-3 sentence summary |
-| Primary domains list | `domain` depth response | Aggregated unique domains from entities |
-
-### Implementation Steps
-
-1. **Create Ontology Finalization Service**
-   - New file: `pkg/services/ontology_finalization.go`
-   - Interface: `OntologyFinalizationService` with `Finalize(ctx, projectID)` method
-
-2. **Implement Finalization Logic**
-   ```go
-   func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uuid.UUID) error {
-       // 1. Get all entities (with their domains now populated from Phase 2)
-       entities, _ := s.entityRepo.GetByProject(ctx, projectID)
-
-       // 2. Get all relationships
-       relationships, _ := s.relationshipRepo.GetByProject(ctx, projectID)
-
-       // 3. Aggregate primary domains from entity.Domain fields
-       primaryDomains := s.aggregateUniqueDomains(entities)
-
-       // 4. Generate domain description via LLM
-       domainDescription := s.generateDomainDescription(ctx, entities, relationships)
-
-       // 5. Save to domain_summary JSONB
-       domainSummary := &models.DomainSummary{
-           Description:       domainDescription,
-           Domains:           primaryDomains,
-           RelationshipGraph: s.buildRelationshipGraph(relationships, entities),
-       }
-
-       return s.ontologyRepo.UpdateDomainSummary(ctx, projectID, domainSummary)
-   }
-   ```
-
-3. **LLM Prompt for Domain Description**
-   ```
-   You are analyzing a database schema. Based on the following entities and their relationships,
-   provide a 2-3 sentence business description of what this database represents.
-
-   Entities:
-   {{range .Entities}}
-   - {{.Name}} ({{.Domain}}): {{.Description}}
-   {{end}}
-
-   Key Relationships:
-   {{range .Relationships}}
-   - {{.SourceEntity}} → {{.TargetEntity}} ({{.Description}})
-   {{end}}
-
-   Provide a concise business summary:
-   ```
-
-4. **Trigger Options**
-   - **Option A (Recommended):** Automatic after relationship extraction completes
-   - **Option B:** Manual API endpoint `POST /api/projects/{id}/ontology/finalize`
-
-5. **Update GetDomainContext**
-   - Currently reads from `ontology.DomainSummary.Description` (which is NULL)
-   - After Phase 3, this will be populated
-
-6. **Wire Dependencies in main.go**
-
-### Files to Create/Modify
-- NEW: `pkg/services/ontology_finalization.go` - Finalization service
-- MODIFY: `pkg/services/relationship_workflow.go` (if auto-trigger) OR
-- NEW: `pkg/handlers/ontology_handler.go` (if manual endpoint)
-- MODIFY: `main.go` - Wire dependencies
-
-### Tests to Add
 ```go
-func TestOntologyFinalization_GeneratesDomainDescription(t *testing.T)
-func TestOntologyFinalization_AggregatesDomains(t *testing.T)
-func TestOntologyFinalization_BuildsRelationshipGraph(t *testing.T)
+type OntologyFinalizationService interface {
+    Finalize(ctx context.Context, projectID uuid.UUID) error
+}
 ```
+
+Key implementation details:
+- Auto-triggered from `relationshipWorkflowService.finalizeWorkflow()` after workflow completes
+- Generates domain description via LLM (2-3 sentence summary)
+- Aggregates primary domains from entity.Domain fields (sorted alphabetically for deterministic output)
+- Stores in `engine_ontologies.domain_summary` JSONB column
+- Debug logging for skipped relationships with missing entity names
+
+### Integration
+**File:** `pkg/services/relationship_workflow.go`
+- Added `finalizationSvc OntologyFinalizationService` to service struct
+- Auto-triggers `finalizationSvc.Finalize()` in `finalizeWorkflow()` after workflow completes
+- Non-blocking: workflow still marked complete even if finalization fails
+
+### Wiring
+**File:** `main.go`
+- Creates `ontologyFinalizationService` with required dependencies
+- Passes to `NewRelationshipWorkflowService()` constructor
+
+### Tests
+**File:** `pkg/services/ontology_finalization_test.go`
+- `TestOntologyFinalization_AggregatesDomains` - Verifies unique domain extraction
+- `TestOntologyFinalization_GeneratesDomainDescription` - Mocks LLM, verifies storage
+- `TestOntologyFinalization_SkipsIfNoEntities` - Empty project case
+- `TestOntologyFinalization_HandlesEmptyDomains` - Graceful handling
+- `TestOntologyFinalization_HandlesRelationshipDisplay` - Relationship formatting
+- `TestOntologyFinalization_LLMFailure` - Verifies error propagation when LLM fails
+
+### LLM Prompt
+- System: "You are a data modeling expert..."
+- Prompt includes entities (name, domain, description) and relationships
+- Response format: `{"description": "2-3 sentence business summary"}`
+- Temperature: 0.3 (analytical task)
 
 ---
 
 ## Phase 4: Column Workflow (Deferred)
 
-**Goal:** Generate semantic column information. This is expensive (LLM call per column) and can be deferred.
+**Goal:** Generate semantic column information via LLM.
 
 **Defer until:**
-- Phases 1-3 are complete and tested
 - User feedback indicates `columns` depth semantic data is needed
-- Performance/cost tradeoffs are understood
+- Performance/cost tradeoffs are understood (expensive: LLM call per table)
 
-### Scope
-| Field | Source | Cost |
-|-------|--------|------|
-| Column description | LLM per column | High |
-| Column synonyms | LLM per column | High |
-| Column semantic type | LLM per column | High |
-| Column role | LLM per column | High |
-| Enum values | Data sampling + LLM | High |
+### What's Missing in `columns` Depth
+
+Currently `GetColumnsContext` returns only structural metadata from `engine_schema_columns`:
+
+| Field | Current | Phase 4 Would Add |
+|-------|---------|-------------------|
+| Name | ✅ | - |
+| Type | ✅ | - |
+| Is Primary Key | ✅ | - |
+| Is Foreign Key | ✅ | - |
+| Description | ❌ | LLM-generated description |
+| Synonyms | ❌ | Alternative names for column |
+| Semantic Type | ❌ | e.g., "email", "phone", "currency" |
+| Role | ❌ | e.g., "identifier", "timestamp", "status" |
+| Enum Values | ❌ | For status/type columns |
+
+### Existing Infrastructure
+
+**Model exists:** `models.ColumnDetail` in `pkg/models/ontology.go`
+```go
+type ColumnDetail struct {
+    Name         string   `json:"name"`
+    Type         string   `json:"type"`
+    Description  string   `json:"description"`
+    Synonyms     []string `json:"synonyms,omitempty"`
+    SemanticType string   `json:"semantic_type,omitempty"`
+    Role         string   `json:"role,omitempty"`
+    EnumValues   []string `json:"enum_values,omitempty"`
+    IsPrimaryKey bool     `json:"is_primary_key"`
+    IsForeignKey bool     `json:"is_foreign_key"`
+}
+```
+
+**Storage:** `engine_ontologies.column_details` JSONB column (currently empty)
+
+**Repository method exists:** `ontologyRepo.UpdateColumnDetails(ctx, projectID, tableName, columns)`
 
 ### Implementation Approach
-- Batch columns by table (reduce LLM calls)
-- Use workflow state (`engine_workflow_state`) to track progress
-- Store in `column_details` JSONB column or normalized table
+
+1. **Create Column Enrichment Service**
+   - New file: `pkg/services/column_enrichment.go`
+   - Batch columns by table to reduce LLM calls
+   - One LLM call per table, not per column
+
+2. **LLM Prompt Pattern** (similar to entity enrichment)
+   ```
+   Table: orders
+   Columns: id, user_id, status, total_amount, created_at, ...
+
+   For each column, provide:
+   - Description (1 sentence)
+   - Synonyms (alternative names users might use)
+   - Semantic type (email, phone, currency, date, status, identifier, etc.)
+   - Role (primary_key, foreign_key, timestamp, status, amount, etc.)
+   - Enum values (if applicable, e.g., status: ["pending", "completed", "cancelled"])
+   ```
+
+3. **Trigger Options**
+   - **Option A:** Manual endpoint `POST /api/projects/{id}/ontology/enrich-columns`
+   - **Option B:** Auto-trigger after entity extraction (expensive)
+   - **Option C:** On-demand per table when `columns` depth requested
+
+4. **Progress Tracking**
+   - Use `engine_workflow_state` table (existing)
+   - Track per-table completion status
+
+### Cost Considerations
+
+| Tables | Estimated LLM Calls | Tokens (approx) |
+|--------|---------------------|-----------------|
+| 10 | 10 | ~5,000 |
+| 50 | 50 | ~25,000 |
+| 100 | 100 | ~50,000 |
+
+Consider:
+- Caching results (columns rarely change)
+- Incremental enrichment (only new tables)
+- User-triggered vs automatic
+
+### Files to Create/Modify
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `pkg/services/column_enrichment.go` | NEW | Column enrichment service |
+| `pkg/services/ontology_context.go` | MODIFY | Read from column_details JSONB |
+| `pkg/handlers/ontology_handler.go` | MODIFY | Add endpoint if manual trigger |
+| `main.go` | MODIFY | Wire new service |
 
 ---
 
@@ -277,6 +304,12 @@ func TestOntologyFinalization_BuildsRelationshipGraph(t *testing.T)
 | `GetColumnCountByProject` | ✅ |
 | `GetColumnsByTables` | ✅ |
 
+### OntologyRepository (`pkg/repositories/ontology_repository.go`)
+| Method | Status | Notes |
+|--------|--------|-------|
+| `UpdateDomainSummary` | ✅ | Used by Phase 3 finalization |
+| `UpdateColumnDetails` | ✅ | Ready for Phase 4 |
+
 ---
 
 ## Important Notes for Future Sessions
@@ -287,6 +320,17 @@ func TestOntologyFinalization_BuildsRelationshipGraph(t *testing.T)
 
 3. **Key columns stored in normalized table with synonyms:** Key columns are stored in `engine_ontology_entity_key_columns` with per-column synonyms in JSONB. The LLM generates synonyms for each key column during entity extraction.
 
-4. **Test mocks updated:** Both `ontology_context_test.go` and `relationship_workflow_test.go` have updated mocks with the new repository methods. Any new tests should follow these patterns.
+4. **Phase 3 auto-triggers:** Ontology finalization runs automatically after relationship workflow completes. It's non-blocking - workflow still marked complete even if finalization fails.
 
-5. **All checks pass:** `make check` passes including format, lint, typecheck, and all tests.
+5. **Test mocks updated:** `ontology_context_test.go`, `relationship_workflow_test.go`, and `ontology_finalization_test.go` have updated mocks. Any new tests should follow these patterns.
+
+6. **All checks pass:** `make check` passes including format, lint, typecheck, and all tests.
+
+7. **To test Phase 3 manually:** Clear ontology tables for a project, then run entity + relationship extraction. Finalization should auto-trigger and populate `domain_summary`.
+
+```sql
+-- Clear ontology data for a project
+DELETE FROM engine_ontology_workflows WHERE project_id = '<project-id>';
+DELETE FROM engine_ontologies WHERE project_id = '<project-id>';
+DELETE FROM engine_workflow_state WHERE project_id = '<project-id>';
+```
