@@ -621,6 +621,15 @@ func (m *rwsMockEntityRepository) DeleteAlias(ctx context.Context, aliasID uuid.
 func (m *rwsMockEntityRepository) GetAllAliasesByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityAlias, error) {
 	return make(map[uuid.UUID][]*models.OntologyEntityAlias), nil
 }
+func (m *rwsMockEntityRepository) CreateKeyColumn(ctx context.Context, keyColumn *models.OntologyEntityKeyColumn) error {
+	return nil
+}
+func (m *rwsMockEntityRepository) GetKeyColumnsByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityKeyColumn, error) {
+	return nil, nil
+}
+func (m *rwsMockEntityRepository) GetAllKeyColumnsByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityKeyColumn, error) {
+	return make(map[uuid.UUID][]*models.OntologyEntityKeyColumn), nil
+}
 
 // rwsMockDeterministicService is a mock for DeterministicRelationshipService.
 type rwsMockDeterministicService struct {

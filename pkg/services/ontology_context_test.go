@@ -81,6 +81,7 @@ type mockOntologyEntityRepository struct {
 	entities          []*models.OntologyEntity
 	occurrences       []*models.OntologyEntityOccurrence
 	aliases           map[uuid.UUID][]*models.OntologyEntityAlias
+	keyColumns        map[uuid.UUID][]*models.OntologyEntityKeyColumn
 	getByProjectErr   error
 	getOccurrencesErr error
 	getAliasesErr     error
@@ -170,6 +171,21 @@ func (m *mockOntologyEntityRepository) GetAllAliasesByProject(ctx context.Contex
 		return m.aliases, nil
 	}
 	return make(map[uuid.UUID][]*models.OntologyEntityAlias), nil
+}
+
+func (m *mockOntologyEntityRepository) CreateKeyColumn(ctx context.Context, keyColumn *models.OntologyEntityKeyColumn) error {
+	return nil
+}
+
+func (m *mockOntologyEntityRepository) GetKeyColumnsByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityKeyColumn, error) {
+	return nil, nil
+}
+
+func (m *mockOntologyEntityRepository) GetAllKeyColumnsByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityKeyColumn, error) {
+	if m.keyColumns != nil {
+		return m.keyColumns, nil
+	}
+	return make(map[uuid.UUID][]*models.OntologyEntityKeyColumn), nil
 }
 
 // mockEntityRelationshipRepository is a mock for EntityRelationshipRepository.
@@ -432,11 +448,19 @@ func TestGetEntitiesContext(t *testing.T) {
 		},
 	}
 
+	keyColumns := map[uuid.UUID][]*models.OntologyEntityKeyColumn{
+		entityID1: {
+			{ID: uuid.New(), EntityID: entityID1, ColumnName: "id", Synonyms: []string{"user_id"}},
+			{ID: uuid.New(), EntityID: entityID1, ColumnName: "email", Synonyms: []string{"email_address"}},
+		},
+	}
+
 	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
 	entityRepo := &mockOntologyEntityRepository{
 		entities:    entities,
 		occurrences: occurrences,
 		aliases:     aliases,
+		keyColumns:  keyColumns,
 	}
 	relationshipRepo := &mockEntityRelationshipRepository{}
 	schemaRepo := &mockSchemaRepository{}

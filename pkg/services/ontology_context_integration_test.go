@@ -368,6 +368,21 @@ func (tc *ontologyContextTestContext) createTestOntology(ctx context.Context) uu
 	})
 	require.NoError(tc.t, err)
 
+	// Create key columns for entities
+	err = tc.entityRepo.CreateKeyColumn(ctx, &models.OntologyEntityKeyColumn{
+		EntityID:   userEntityID,
+		ColumnName: "email",
+		Synonyms:   []string{"email_address", "e-mail"},
+	})
+	require.NoError(tc.t, err)
+
+	err = tc.entityRepo.CreateKeyColumn(ctx, &models.OntologyEntityKeyColumn{
+		EntityID:   userEntityID,
+		ColumnName: "name",
+		Synonyms:   []string{"username", "full_name"},
+	})
+	require.NoError(tc.t, err)
+
 	// Create schema tables and columns for column count
 	usersTableID := uuid.New()
 	ordersTableID := uuid.New()
