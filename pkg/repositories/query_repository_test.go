@@ -140,8 +140,8 @@ func (tc *queryTestContext) createTestQuery(ctx context.Context, prompt, sqlQuer
 		Dialect:               "postgres",
 		IsEnabled:             true,
 		UsageCount:            0,
-		Parameters:            []models.QueryParameter{},   // Initialize empty parameters
-		OutputColumns:         []models.OutputColumn{},      // Initialize empty output columns
+		Parameters:            []models.QueryParameter{}, // Initialize empty parameters
+		OutputColumns:         []models.OutputColumn{},   // Initialize empty output columns
 	}
 
 	if err := tc.repo.Create(ctx, query); err != nil {

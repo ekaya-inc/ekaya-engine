@@ -89,9 +89,9 @@ type listApprovedQueriesResult struct {
 
 type approvedQueryInfo struct {
 	ID            string             `json:"id"`
-	Name          string             `json:"name"`          // natural_language_prompt
-	Description   string             `json:"description"`   // additional_context
-	SQL           string             `json:"sql"`           // The SQL template
+	Name          string             `json:"name"`        // natural_language_prompt
+	Description   string             `json:"description"` // additional_context
+	SQL           string             `json:"sql"`         // The SQL template
 	Parameters    []parameterInfo    `json:"parameters"`
 	OutputColumns []outputColumnInfo `json:"output_columns,omitempty"`
 	Constraints   string             `json:"constraints,omitempty"` // Limitations and assumptions

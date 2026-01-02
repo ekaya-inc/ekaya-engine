@@ -165,9 +165,9 @@ func TestEnhanceErrorWithContext(t *testing.T) {
 		wantContains []string
 	}{
 		{
-			name:      "nil error returns nil",
-			err:       nil,
-			queryName: "Test Query",
+			name:         "nil error returns nil",
+			err:          nil,
+			queryName:    "Test Query",
 			wantContains: []string{},
 		},
 		{
