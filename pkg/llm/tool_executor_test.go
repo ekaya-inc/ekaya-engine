@@ -390,6 +390,14 @@ func (m *mockSchemaRepo) GetNonPKColumnsByExactType(ctx context.Context, project
 	return nil, m.err
 }
 
+func (m *mockSchemaRepo) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
+	return make(map[string][]*models.SchemaColumn), m.err
+}
+
+func (m *mockSchemaRepo) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return len(m.columns), m.err
+}
+
 type mockQueryExecutor struct {
 	result *datasource.QueryExecutionResult
 	err    error

@@ -17,6 +17,7 @@ type EntityRelationshipRepository interface {
 	Create(ctx context.Context, rel *models.EntityRelationship) error
 	GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error)
 	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error)
+	GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error)
 	DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error
 }
 
@@ -120,6 +121,49 @@ func (r *entityRelationshipRepository) GetByProject(ctx context.Context, project
 	rows, err := scope.Conn.Query(ctx, query, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query entity relationships by project: %w", err)
+	}
+	defer rows.Close()
+
+	var relationships []*models.EntityRelationship
+	for rows.Next() {
+		rel, err := scanEntityRelationship(rows)
+		if err != nil {
+			return nil, err
+		}
+		relationships = append(relationships, rel)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating entity relationships: %w", err)
+	}
+
+	return relationships, nil
+}
+
+func (r *entityRelationshipRepository) GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	if len(tableNames) == 0 {
+		return []*models.EntityRelationship{}, nil
+	}
+
+	query := `
+		SELECT r.id, r.ontology_id, r.source_entity_id, r.target_entity_id,
+		       r.source_column_schema, r.source_column_table, r.source_column_name,
+		       r.target_column_schema, r.target_column_table, r.target_column_name,
+		       r.detection_method, r.confidence, r.status, r.description, r.created_at
+		FROM engine_entity_relationships r
+		JOIN engine_ontologies o ON r.ontology_id = o.id
+		WHERE o.project_id = $1 AND o.is_active = true
+		  AND (r.source_column_table = ANY($2) OR r.target_column_table = ANY($2))
+		ORDER BY r.source_column_table, r.source_column_name`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID, tableNames)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query entity relationships by tables: %w", err)
 	}
 	defer rows.Close()
 

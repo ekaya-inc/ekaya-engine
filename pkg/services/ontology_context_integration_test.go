@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -25,14 +26,48 @@ var (
 
 // ontologyContextTestContext holds all dependencies for ontology context integration tests.
 type ontologyContextTestContext struct {
-	t            *testing.T
-	engineDB     *testhelpers.EngineDB
-	service      OntologyContextService
-	ontologyRepo repositories.OntologyRepository
-	entityRepo   repositories.OntologyEntityRepository
-	schemaRepo   repositories.SchemaRepository
-	projectID    uuid.UUID
-	dsID         uuid.UUID
+	t                *testing.T
+	engineDB         *testhelpers.EngineDB
+	service          OntologyContextService
+	ontologyRepo     repositories.OntologyRepository
+	entityRepo       repositories.OntologyEntityRepository
+	relationshipRepo repositories.EntityRelationshipRepository
+	schemaRepo       repositories.SchemaRepository
+	projectID        uuid.UUID
+	dsID             uuid.UUID
+}
+
+// mockProjectServiceForIntegration implements ProjectService for integration tests.
+type mockProjectServiceForIntegration struct {
+	dsID uuid.UUID
+}
+
+func (m *mockProjectServiceForIntegration) Provision(ctx context.Context, projectID uuid.UUID, name string, params map[string]interface{}) (*ProvisionResult, error) {
+	return nil, nil
+}
+
+func (m *mockProjectServiceForIntegration) ProvisionFromClaims(ctx context.Context, claims *auth.Claims) (*ProvisionResult, error) {
+	return nil, nil
+}
+
+func (m *mockProjectServiceForIntegration) GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error) {
+	return nil, nil
+}
+
+func (m *mockProjectServiceForIntegration) GetByIDWithoutTenant(ctx context.Context, id uuid.UUID) (*models.Project, error) {
+	return nil, nil
+}
+
+func (m *mockProjectServiceForIntegration) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (m *mockProjectServiceForIntegration) GetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error) {
+	return m.dsID, nil
+}
+
+func (m *mockProjectServiceForIntegration) SetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID, datasourceID uuid.UUID) error {
+	return nil
 }
 
 // setupOntologyContextTest creates a test context with real database.
@@ -42,20 +77,23 @@ func setupOntologyContextTest(t *testing.T) *ontologyContextTestContext {
 	engineDB := testhelpers.GetEngineDB(t)
 	ontologyRepo := repositories.NewOntologyRepository()
 	entityRepo := repositories.NewOntologyEntityRepository()
+	relationshipRepo := repositories.NewEntityRelationshipRepository()
 	schemaRepo := repositories.NewSchemaRepository()
+	projectService := &mockProjectServiceForIntegration{dsID: ontologyContextTestDSID}
 	logger := zap.NewNop()
 
-	service := NewOntologyContextService(ontologyRepo, entityRepo, schemaRepo, logger)
+	service := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, logger)
 
 	tc := &ontologyContextTestContext{
-		t:            t,
-		engineDB:     engineDB,
-		service:      service,
-		ontologyRepo: ontologyRepo,
-		entityRepo:   entityRepo,
-		schemaRepo:   schemaRepo,
-		projectID:    ontologyContextTestProjectID,
-		dsID:         ontologyContextTestDSID,
+		t:                t,
+		engineDB:         engineDB,
+		service:          service,
+		ontologyRepo:     ontologyRepo,
+		entityRepo:       entityRepo,
+		relationshipRepo: relationshipRepo,
+		schemaRepo:       schemaRepo,
+		projectID:        ontologyContextTestProjectID,
+		dsID:             ontologyContextTestDSID,
 	}
 
 	// Ensure project exists
@@ -81,7 +119,7 @@ func (tc *ontologyContextTestContext) createTestContext() (context.Context, func
 	}
 }
 
-// ensureTestProject creates the test project if it doesn't exist.
+// ensureTestProject creates the test project and datasource if they don't exist.
 func (tc *ontologyContextTestContext) ensureTestProject() {
 	tc.t.Helper()
 
@@ -100,6 +138,16 @@ func (tc *ontologyContextTestContext) ensureTestProject() {
 	if err != nil {
 		tc.t.Fatalf("Failed to ensure test project: %v", err)
 	}
+
+	// Create test datasource for schema tables
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_datasources (id, project_id, name, datasource_type, datasource_config, created_at, updated_at)
+		VALUES ($1, $2, 'Test Datasource', 'postgres', '{}', NOW(), NOW())
+		ON CONFLICT (id) DO NOTHING
+	`, tc.dsID, tc.projectID)
+	if err != nil {
+		tc.t.Fatalf("Failed to ensure test datasource: %v", err)
+	}
 }
 
 // cleanup removes all ontology data for the test project.
@@ -114,10 +162,13 @@ func (tc *ontologyContextTestContext) cleanup() {
 	defer scope.Close()
 
 	// Delete in reverse order of dependencies
+	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_entity_relationships WHERE ontology_id IN (SELECT id FROM engine_ontologies WHERE project_id = $1)`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontology_entity_aliases WHERE entity_id IN (SELECT id FROM engine_ontology_entities WHERE project_id = $1)`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontology_entity_occurrences WHERE entity_id IN (SELECT id FROM engine_ontology_entities WHERE project_id = $1)`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontology_entities WHERE project_id = $1`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontologies WHERE project_id = $1`, tc.projectID)
+	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_schema_columns WHERE schema_table_id IN (SELECT id FROM engine_schema_tables WHERE project_id = $1)`, tc.projectID)
+	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_schema_tables WHERE project_id = $1`, tc.projectID)
 }
 
 // createTestOntology creates a complete ontology with entities, occurrences, and aliases.
@@ -317,6 +368,102 @@ func (tc *ontologyContextTestContext) createTestOntology(ctx context.Context) uu
 	})
 	require.NoError(tc.t, err)
 
+	// Create schema tables and columns for column count
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+
+	err = tc.schemaRepo.UpsertTable(ctx, &models.SchemaTable{
+		ID:           usersTableID,
+		ProjectID:    tc.projectID,
+		DatasourceID: tc.dsID,
+		SchemaName:   "public",
+		TableName:    "users",
+		IsSelected:   true,
+	})
+	require.NoError(tc.t, err)
+
+	err = tc.schemaRepo.UpsertTable(ctx, &models.SchemaTable{
+		ID:           ordersTableID,
+		ProjectID:    tc.projectID,
+		DatasourceID: tc.dsID,
+		SchemaName:   "public",
+		TableName:    "orders",
+		IsSelected:   true,
+	})
+	require.NoError(tc.t, err)
+
+	// Create columns for users table (3 columns)
+	for _, colName := range []string{"id", "email", "status"} {
+		isPK := colName == "id"
+		err = tc.schemaRepo.UpsertColumn(ctx, &models.SchemaColumn{
+			ID:            uuid.New(),
+			ProjectID:     tc.projectID,
+			SchemaTableID: usersTableID,
+			ColumnName:    colName,
+			DataType:      "text",
+			IsPrimaryKey:  isPK,
+			IsSelected:    true,
+		})
+		require.NoError(tc.t, err)
+	}
+
+	// Create columns for orders table (4 columns)
+	for _, colName := range []string{"id", "user_id", "total_amount", "status"} {
+		isPK := colName == "id"
+		err = tc.schemaRepo.UpsertColumn(ctx, &models.SchemaColumn{
+			ID:            uuid.New(),
+			ProjectID:     tc.projectID,
+			SchemaTableID: ordersTableID,
+			ColumnName:    colName,
+			DataType:      "text",
+			IsPrimaryKey:  isPK,
+			IsSelected:    true,
+		})
+		require.NoError(tc.t, err)
+	}
+
+	// Create entity relationships
+	// Note: Source is the FK column, Target is the referenced PK column
+	// orders.user_id (FK) -> users.id (PK)
+	userPlacesOrderDesc := "user places order"
+	err = tc.relationshipRepo.Create(ctx, &models.EntityRelationship{
+		ID:                 uuid.New(),
+		OntologyID:         ontologyID,
+		SourceEntityID:     userEntityID,
+		TargetEntityID:     orderEntityID,
+		SourceColumnSchema: "public",
+		SourceColumnTable:  "orders",
+		SourceColumnName:   "user_id",
+		TargetColumnSchema: "public",
+		TargetColumnTable:  "users",
+		TargetColumnName:   "id",
+		DetectionMethod:    "foreign_key",
+		Confidence:         1.0,
+		Status:             "confirmed",
+		Description:        &userPlacesOrderDesc,
+	})
+	require.NoError(tc.t, err)
+
+	// Second relationship for testing (order->user with different semantics)
+	orderContainsProductDesc := "order contains product"
+	err = tc.relationshipRepo.Create(ctx, &models.EntityRelationship{
+		ID:                 uuid.New(),
+		OntologyID:         ontologyID,
+		SourceEntityID:     orderEntityID,
+		TargetEntityID:     userEntityID,
+		SourceColumnSchema: "public",
+		SourceColumnTable:  "orders",
+		SourceColumnName:   "id",
+		TargetColumnSchema: "public",
+		TargetColumnTable:  "users",
+		TargetColumnName:   "id",
+		DetectionMethod:    "pk_match",
+		Confidence:         0.8,
+		Status:             "confirmed",
+		Description:        &orderContainsProductDesc,
+	})
+	require.NoError(tc.t, err)
+
 	return ontologyID
 }
 
@@ -363,10 +510,17 @@ func TestOntologyContextService_Integration_GetDomainContext(t *testing.T) {
 	assert.Equal(t, "users", userEntity.PrimaryTable)
 	assert.Equal(t, 2, userEntity.OccurrenceCount) // id in users, user_id in orders
 
-	// Verify relationships
+	// Verify relationships - check for presence without order dependency
 	assert.Len(t, result.Relationships, 2)
-	assert.Equal(t, "user", result.Relationships[0].From)
-	assert.Equal(t, "order", result.Relationships[0].To)
+	hasUserToOrderRel := false
+	for _, rel := range result.Relationships {
+		if rel.From == "user" && rel.To == "order" {
+			hasUserToOrderRel = true
+			assert.Equal(t, "user places order", rel.Label)
+			break
+		}
+	}
+	assert.True(t, hasUserToOrderRel, "Should have user->order relationship")
 }
 
 func TestOntologyContextService_Integration_GetEntitiesContext(t *testing.T) {
@@ -439,12 +593,15 @@ func TestOntologyContextService_Integration_GetTablesContext(t *testing.T) {
 
 	usersTable, ok := result.Tables["users"]
 	require.True(t, ok, "Users table should be present")
-	assert.Equal(t, "Users", usersTable.BusinessName)
-	assert.Equal(t, "Platform users and customers", usersTable.Description)
-	assert.Equal(t, "customer", usersTable.Domain)
+	// BusinessName comes from entity.Name, Description from entity.Description (normalized tables)
+	assert.Equal(t, "user", usersTable.BusinessName)
+	assert.Equal(t, "Platform user", usersTable.Description)
+	// Domain is empty until Phase 2 (entity domain categorization)
+	assert.Equal(t, "", usersTable.Domain)
 	assert.Equal(t, 3, usersTable.ColumnCount)
-	assert.Contains(t, usersTable.Synonyms, "customers")
-	assert.Contains(t, usersTable.Synonyms, "accounts")
+	// Synonyms come from entity aliases (normalized table)
+	assert.Contains(t, usersTable.Synonyms, "customer")
+	assert.Contains(t, usersTable.Synonyms, "account")
 
 	// Check columns overview
 	assert.Len(t, usersTable.Columns, 3)
@@ -493,13 +650,14 @@ func TestOntologyContextService_Integration_GetColumnsContext(t *testing.T) {
 
 	ordersTable, ok := result.Tables["orders"]
 	require.True(t, ok, "Orders table should be present")
-	assert.Equal(t, "Orders", ordersTable.BusinessName)
-	assert.Equal(t, "Customer purchase orders", ordersTable.Description)
+	// BusinessName comes from entity.Name, Description from entity.Description (normalized tables)
+	assert.Equal(t, "order", ordersTable.BusinessName)
+	assert.Equal(t, "Customer order", ordersTable.Description)
 
-	// Check full column details
+	// Check column count - structural data from schema_columns
 	assert.Len(t, ordersTable.Columns, 4)
 
-	// Find total_amount column
+	// Find total_amount column - only structural fields populated in Phase 1
 	var totalAmountCol *models.ColumnDetail
 	for i := range ordersTable.Columns {
 		if ordersTable.Columns[i].Name == "total_amount" {
@@ -508,23 +666,24 @@ func TestOntologyContextService_Integration_GetColumnsContext(t *testing.T) {
 		}
 	}
 	require.NotNil(t, totalAmountCol, "total_amount column should be present")
-	assert.Equal(t, "Total order value", totalAmountCol.Description)
-	assert.Equal(t, "currency", totalAmountCol.SemanticType)
-	assert.Equal(t, "measure", totalAmountCol.Role)
-	assert.Contains(t, totalAmountCol.Synonyms, "revenue")
-	assert.Contains(t, totalAmountCol.Synonyms, "order_total")
+	// Semantic fields (Description, SemanticType, Role, Synonyms) are empty until Phase 4 (Column Workflow)
+	assert.Equal(t, "", totalAmountCol.Description)
+	assert.Equal(t, "", totalAmountCol.SemanticType)
+	assert.Equal(t, "", totalAmountCol.Role)
+	assert.Nil(t, totalAmountCol.Synonyms)
 
-	// Find status column with enum values
-	var statusCol *models.ColumnDetail
+	// Find user_id column to verify FK detection
+	var userIDCol *models.ColumnDetail
 	for i := range ordersTable.Columns {
-		if ordersTable.Columns[i].Name == "status" {
-			statusCol = &ordersTable.Columns[i]
+		if ordersTable.Columns[i].Name == "user_id" {
+			userIDCol = &ordersTable.Columns[i]
 			break
 		}
 	}
-	require.NotNil(t, statusCol, "status column should be present")
-	assert.Len(t, statusCol.EnumValues, 3)
-	assert.Equal(t, "pending", statusCol.EnumValues[0].Value)
+	require.NotNil(t, userIDCol, "user_id column should be present")
+	// FK info comes from entity_relationships
+	assert.True(t, userIDCol.IsForeignKey)
+	assert.Equal(t, "users", userIDCol.ForeignTable)
 }
 
 func TestOntologyContextService_Integration_NoOntology(t *testing.T) {

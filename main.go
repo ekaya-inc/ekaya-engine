@@ -204,7 +204,8 @@ func main() {
 	entityDiscoveryService := services.NewEntityDiscoveryService(
 		ontologyWorkflowRepo, ontologyEntityRepo, schemaRepo, ontologyRepo,
 		datasourceService, adapterFactory, llmFactory, getTenantCtx, logger)
-	ontologyContextService := services.NewOntologyContextService(ontologyRepo, ontologyEntityRepo, schemaRepo, logger)
+	ontologyContextService := services.NewOntologyContextService(
+		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, projectService, logger)
 
 	mux := http.NewServeMux()
 

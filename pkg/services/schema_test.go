@@ -355,6 +355,14 @@ func (m *mockSchemaRepository) GetNonPKColumnsByExactType(ctx context.Context, p
 	return nil, nil
 }
 
+func (m *mockSchemaRepository) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
+	return make(map[string][]*models.SchemaColumn), nil
+}
+
+func (m *mockSchemaRepository) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return len(m.columns), nil
+}
+
 // mockDatasourceService is a mock for DatasourceService.
 type mockDatasourceService struct {
 	datasource *models.Datasource

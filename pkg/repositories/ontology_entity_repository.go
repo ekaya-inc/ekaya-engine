@@ -36,6 +36,7 @@ type OntologyEntityRepository interface {
 	// Alias operations
 	CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error
 	GetAliasesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityAlias, error)
+	GetAllAliasesByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityAlias, error)
 	DeleteAlias(ctx context.Context, aliasID uuid.UUID) error
 }
 
@@ -516,6 +517,42 @@ func (r *ontologyEntityRepository) DeleteAlias(ctx context.Context, aliasID uuid
 	}
 
 	return nil
+}
+
+func (r *ontologyEntityRepository) GetAllAliasesByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityAlias, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT a.id, a.entity_id, a.alias, a.source, a.created_at
+		FROM engine_ontology_entity_aliases a
+		JOIN engine_ontology_entities e ON a.entity_id = e.id
+		JOIN engine_ontologies o ON e.ontology_id = o.id
+		WHERE e.project_id = $1 AND o.is_active = true AND NOT e.is_deleted
+		ORDER BY a.entity_id, a.alias`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query all entity aliases by project: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[uuid.UUID][]*models.OntologyEntityAlias)
+	for rows.Next() {
+		alias, err := scanOntologyEntityAlias(rows)
+		if err != nil {
+			return nil, err
+		}
+		result[alias.EntityID] = append(result[alias.EntityID], alias)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating entity aliases: %w", err)
+	}
+
+	return result, nil
 }
 
 // ============================================================================

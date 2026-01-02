@@ -37,6 +37,8 @@ type SchemaRepository interface {
 	// Columns
 	ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error)
 	ListColumnsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error)
+	GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error)
+	GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error)
 	GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error)
 	GetColumnByName(ctx context.Context, tableID uuid.UUID, columnName string) (*models.SchemaColumn, error)
 	UpsertColumn(ctx context.Context, column *models.SchemaColumn) error
@@ -454,6 +456,88 @@ func (r *schemaRepository) ListColumnsByDatasource(ctx context.Context, projectI
 	}
 
 	return columns, nil
+}
+
+func (r *schemaRepository) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	if len(tableNames) == 0 {
+		return make(map[string][]*models.SchemaColumn), nil
+	}
+
+	query := `
+		SELECT c.id, c.project_id, c.schema_table_id, c.column_name, c.data_type,
+		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
+		       c.default_value, c.distinct_count, c.null_count, c.min_length, c.max_length,
+		       c.business_name, c.description, c.metadata,
+		       c.created_at, c.updated_at,
+		       t.table_name
+		FROM engine_schema_columns c
+		JOIN engine_schema_tables t ON c.schema_table_id = t.id
+		WHERE c.project_id = $1
+		  AND t.table_name = ANY($2)
+		  AND c.deleted_at IS NULL
+		  AND t.deleted_at IS NULL
+		ORDER BY t.table_name, c.ordinal_position`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID, tableNames)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get columns by tables: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string][]*models.SchemaColumn)
+	for rows.Next() {
+		var c models.SchemaColumn
+		var metadata []byte
+		var tableName string
+		err := rows.Scan(
+			&c.ID, &c.ProjectID, &c.SchemaTableID, &c.ColumnName, &c.DataType,
+			&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
+			&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
+			&c.BusinessName, &c.Description, &metadata,
+			&c.CreatedAt, &c.UpdatedAt,
+			&tableName,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan column: %w", err)
+		}
+		if err := json.Unmarshal(metadata, &c.Metadata); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+		}
+		result[tableName] = append(result[tableName], &c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating columns: %w", err)
+	}
+
+	return result, nil
+}
+
+func (r *schemaRepository) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return 0, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT COUNT(*)
+		FROM engine_schema_columns c
+		JOIN engine_schema_tables t ON c.schema_table_id = t.id
+		WHERE c.project_id = $1
+		  AND c.deleted_at IS NULL
+		  AND t.deleted_at IS NULL`
+
+	var count int
+	err := scope.Conn.QueryRow(ctx, query, projectID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get column count: %w", err)
+	}
+
+	return count, nil
 }
 
 func (r *schemaRepository) GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error) {
