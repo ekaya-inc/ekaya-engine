@@ -36,6 +36,15 @@ export interface QueryParameter {
 }
 
 /**
+ * Output column definition describing a column returned by the query
+ */
+export interface OutputColumn {
+  name: string;
+  type: string;
+  description: string;
+}
+
+/**
  * Maps datasource types to CodeMirror SQL dialects
  */
 export const datasourceTypeToDialect: Record<DatasourceType, SqlDialect> = {
@@ -67,6 +76,8 @@ export interface Query {
   created_at: string;
   updated_at: string;
   parameters: QueryParameter[];
+  output_columns?: OutputColumn[];
+  constraints?: string | null;
 }
 
 /**
@@ -79,6 +90,8 @@ export interface CreateQueryRequest {
   sql_query: string;
   is_enabled: boolean;
   parameters?: QueryParameter[];
+  output_columns?: OutputColumn[];
+  constraints?: string;
 }
 
 /**
@@ -91,6 +104,8 @@ export interface UpdateQueryRequest {
   additional_context?: string | undefined;
   sql_query?: string;
   is_enabled?: boolean;
+  output_columns?: OutputColumn[];
+  constraints?: string;
 }
 
 /**

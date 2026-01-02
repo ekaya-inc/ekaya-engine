@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
@@ -70,11 +71,14 @@ func (e *QueryExecutor) ExecuteQuery(ctx context.Context, sqlQuery string, limit
 	}
 	defer rows.Close()
 
-	// Get column names
+	// Get column names and types
 	fieldDescs := rows.FieldDescriptions()
-	columns := make([]string, len(fieldDescs))
+	columns := make([]datasource.ColumnInfo, len(fieldDescs))
 	for i, fd := range fieldDescs {
-		columns[i] = string(fd.Name)
+		columns[i] = datasource.ColumnInfo{
+			Name: string(fd.Name),
+			Type: pgTypeNameFromOID(fd.DataTypeOID),
+		}
 	}
 
 	// Collect rows
@@ -87,7 +91,7 @@ func (e *QueryExecutor) ExecuteQuery(ctx context.Context, sqlQuery string, limit
 
 		rowMap := make(map[string]any)
 		for i, col := range columns {
-			rowMap[col] = values[i]
+			rowMap[col.Name] = values[i]
 		}
 		resultRows = append(resultRows, rowMap)
 	}
@@ -120,11 +124,14 @@ func (e *QueryExecutor) ExecuteQueryWithParams(ctx context.Context, sqlQuery str
 	}
 	defer rows.Close()
 
-	// Get column names
+	// Get column names and types
 	fieldDescs := rows.FieldDescriptions()
-	columns := make([]string, len(fieldDescs))
+	columns := make([]datasource.ColumnInfo, len(fieldDescs))
 	for i, fd := range fieldDescs {
-		columns[i] = string(fd.Name)
+		columns[i] = datasource.ColumnInfo{
+			Name: string(fd.Name),
+			Type: pgTypeNameFromOID(fd.DataTypeOID),
+		}
 	}
 
 	// Collect rows
@@ -137,7 +144,7 @@ func (e *QueryExecutor) ExecuteQueryWithParams(ctx context.Context, sqlQuery str
 
 		rowMap := make(map[string]any)
 		for i, col := range columns {
-			rowMap[col] = values[i]
+			rowMap[col.Name] = values[i]
 		}
 		resultRows = append(resultRows, rowMap)
 	}
@@ -223,6 +230,90 @@ func (e *QueryExecutor) Close() error {
 	}
 	// If using connection manager, don't close the pool - it's managed by TTL
 	return nil
+}
+
+// QuoteIdentifier safely quotes a SQL identifier to prevent SQL injection.
+// Uses PostgreSQL's standard double-quote quoting.
+func (e *QueryExecutor) QuoteIdentifier(name string) string {
+	return pgx.Identifier{name}.Sanitize()
+}
+
+// pgTypeNameFromOID maps PostgreSQL type OIDs to human-readable type names.
+// This covers the most common types; unknown types return "UNKNOWN".
+func pgTypeNameFromOID(oid uint32) string {
+	switch oid {
+	case 16:
+		return "BOOL"
+	case 17:
+		return "BYTEA"
+	case 18:
+		return "CHAR"
+	case 20:
+		return "INT8"
+	case 21:
+		return "INT2"
+	case 23:
+		return "INT4"
+	case 25:
+		return "TEXT"
+	case 26:
+		return "OID"
+	case 114:
+		return "JSON"
+	case 142:
+		return "XML"
+	case 700:
+		return "FLOAT4"
+	case 701:
+		return "FLOAT8"
+	case 790:
+		return "MONEY"
+	case 1042:
+		return "BPCHAR"
+	case 1043:
+		return "VARCHAR"
+	case 1082:
+		return "DATE"
+	case 1083:
+		return "TIME"
+	case 1114:
+		return "TIMESTAMP"
+	case 1184:
+		return "TIMESTAMPTZ"
+	case 1186:
+		return "INTERVAL"
+	case 1266:
+		return "TIMETZ"
+	case 1700:
+		return "NUMERIC"
+	case 2950:
+		return "UUID"
+	case 3802:
+		return "JSONB"
+	// Array types
+	case 1000:
+		return "BOOL[]"
+	case 1005:
+		return "INT2[]"
+	case 1007:
+		return "INT4[]"
+	case 1016:
+		return "INT8[]"
+	case 1009:
+		return "TEXT[]"
+	case 1015:
+		return "VARCHAR[]"
+	case 1021:
+		return "FLOAT4[]"
+	case 1022:
+		return "FLOAT8[]"
+	case 2951:
+		return "UUID[]"
+	case 3807:
+		return "JSONB[]"
+	default:
+		return "UNKNOWN"
+	}
 }
 
 // Ensure QueryExecutor implements datasource.QueryExecutor at compile time.

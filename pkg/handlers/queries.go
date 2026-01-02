@@ -26,6 +26,8 @@ type QueryResponse struct {
 	Dialect               string                  `json:"dialect"`
 	IsEnabled             bool                    `json:"is_enabled"`
 	Parameters            []models.QueryParameter `json:"parameters,omitempty"`
+	OutputColumns         []models.OutputColumn   `json:"output_columns,omitempty"`
+	Constraints           *string                 `json:"constraints,omitempty"`
 	UsageCount            int                     `json:"usage_count"`
 	LastUsedAt            *string                 `json:"last_used_at,omitempty"`
 	CreatedAt             string                  `json:"created_at"`
@@ -45,15 +47,19 @@ type CreateQueryRequest struct {
 	SQLQuery              string                  `json:"sql_query"`
 	IsEnabled             bool                    `json:"is_enabled"`
 	Parameters            []models.QueryParameter `json:"parameters,omitempty"`
+	OutputColumns         []models.OutputColumn   `json:"output_columns,omitempty"`
+	Constraints           string                  `json:"constraints,omitempty"`
 }
 
 // UpdateQueryRequest for PUT body (all fields optional).
 // Note: Dialect cannot be updated - it's derived from datasource type.
 type UpdateQueryRequest struct {
-	NaturalLanguagePrompt *string `json:"natural_language_prompt,omitempty"`
-	AdditionalContext     *string `json:"additional_context,omitempty"`
-	SQLQuery              *string `json:"sql_query,omitempty"`
-	IsEnabled             *bool   `json:"is_enabled,omitempty"`
+	NaturalLanguagePrompt *string                `json:"natural_language_prompt,omitempty"`
+	AdditionalContext     *string                `json:"additional_context,omitempty"`
+	SQLQuery              *string                `json:"sql_query,omitempty"`
+	IsEnabled             *bool                  `json:"is_enabled,omitempty"`
+	OutputColumns         *[]models.OutputColumn `json:"output_columns,omitempty"`
+	Constraints           *string                `json:"constraints,omitempty"`
 }
 
 // ExecuteQueryRequest for POST execute body.
@@ -62,9 +68,15 @@ type ExecuteQueryRequest struct {
 	Parameters map[string]any `json:"parameters,omitempty"`
 }
 
+// ColumnInfo describes a result column with type information.
+type ColumnInfo struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
 // ExecuteQueryResponse for query execution results.
 type ExecuteQueryResponse struct {
-	Columns  []string         `json:"columns"`
+	Columns  []ColumnInfo     `json:"columns"`
 	Rows     []map[string]any `json:"rows"`
 	RowCount int              `json:"row_count"`
 }
@@ -220,6 +232,8 @@ func (h *QueriesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		SQLQuery:              req.SQLQuery,
 		IsEnabled:             req.IsEnabled,
 		Parameters:            req.Parameters,
+		OutputColumns:         req.OutputColumns,
+		Constraints:           req.Constraints,
 	}
 
 	query, err := h.queryService.Create(r.Context(), projectID, datasourceID, serviceReq)
@@ -307,6 +321,8 @@ func (h *QueriesHandler) Update(w http.ResponseWriter, r *http.Request) {
 		AdditionalContext:     req.AdditionalContext,
 		SQLQuery:              req.SQLQuery,
 		IsEnabled:             req.IsEnabled,
+		OutputColumns:         req.OutputColumns,
+		Constraints:           req.Constraints,
 	}
 
 	query, err := h.queryService.Update(r.Context(), projectID, queryID, serviceReq)
@@ -423,8 +439,14 @@ func (h *QueriesHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Convert datasource.ColumnInfo to handler's ColumnInfo
+	columns := make([]ColumnInfo, len(result.Columns))
+	for i, col := range result.Columns {
+		columns[i] = ColumnInfo{Name: col.Name, Type: col.Type}
+	}
+
 	data := ExecuteQueryResponse{
-		Columns:  result.Columns,
+		Columns:  columns,
 		Rows:     result.Rows,
 		RowCount: result.RowCount,
 	}
@@ -480,7 +502,7 @@ func (h *QueriesHandler) Test(w http.ResponseWriter, r *http.Request) {
 			zap.Error(err))
 
 		data := ExecuteQueryResponse{
-			Columns:  []string{},
+			Columns:  []ColumnInfo{},
 			Rows:     []map[string]any{},
 			RowCount: 0,
 		}
@@ -495,8 +517,14 @@ func (h *QueriesHandler) Test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Convert datasource.ColumnInfo to handler's ColumnInfo
+	columns := make([]ColumnInfo, len(result.Columns))
+	for i, col := range result.Columns {
+		columns[i] = ColumnInfo{Name: col.Name, Type: col.Type}
+	}
+
 	data := ExecuteQueryResponse{
-		Columns:  result.Columns,
+		Columns:  columns,
 		Rows:     result.Rows,
 		RowCount: result.RowCount,
 	}
@@ -654,6 +682,8 @@ func (h *QueriesHandler) toQueryResponse(q *models.Query) QueryResponse {
 		Dialect:               q.Dialect,
 		IsEnabled:             q.IsEnabled,
 		Parameters:            q.Parameters,
+		OutputColumns:         q.OutputColumns,
+		Constraints:           q.Constraints,
 		UsageCount:            q.UsageCount,
 		CreatedAt:             q.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:             q.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),

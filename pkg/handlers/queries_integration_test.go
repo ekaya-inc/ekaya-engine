@@ -20,6 +20,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
@@ -261,6 +262,7 @@ func TestQueriesIntegration_CreateAndTestSimpleQuery(t *testing.T) {
 		NaturalLanguagePrompt: "Return the number 1",
 		SQLQuery:              "SELECT 1 AS result",
 		IsEnabled:             true,
+		OutputColumns:         []models.OutputColumn{{Name: "result", Type: "INT4"}},
 	}
 
 	createReq := tc.makeRequest(http.MethodPost,
@@ -319,6 +321,7 @@ func TestQueriesIntegration_ExecuteSavedQuery(t *testing.T) {
 		NaturalLanguagePrompt: "Add two numbers",
 		SQLQuery:              "SELECT 1 + 1 AS sum",
 		IsEnabled:             true,
+		OutputColumns:         []models.OutputColumn{{Name: "sum", Type: "INT4"}},
 	}
 
 	createReq := tc.makeRequest(http.MethodPost,
@@ -376,8 +379,13 @@ func TestQueriesIntegration_ExecuteSavedQuery(t *testing.T) {
 	}
 
 	columns := execData["columns"].([]any)
-	if len(columns) != 1 || columns[0] != "sum" {
-		t.Errorf("Expected columns ['sum'], got %v", columns)
+	if len(columns) != 1 {
+		t.Errorf("Expected 1 column, got %v", columns)
+	} else {
+		col := columns[0].(map[string]any)
+		if col["name"] != "sum" {
+			t.Errorf("Expected column name 'sum', got %v", col["name"])
+		}
 	}
 
 	rows := execData["rows"].([]any)
@@ -543,6 +551,7 @@ func TestQueriesIntegration_TrailingSemicolonNormalization(t *testing.T) {
 		NaturalLanguagePrompt: "Return the number 1",
 		SQLQuery:              "SELECT 1 AS result;", // Note the trailing semicolon
 		IsEnabled:             true,
+		OutputColumns:         []models.OutputColumn{{Name: "result", Type: "INT4"}},
 	}
 
 	createReq := tc.makeRequest(http.MethodPost,
@@ -614,6 +623,7 @@ func TestQueriesIntegration_RejectMultipleStatements(t *testing.T) {
 		NaturalLanguagePrompt: "Bad query",
 		SQLQuery:              "SELECT 1; DROP TABLE users",
 		IsEnabled:             true,
+		OutputColumns:         []models.OutputColumn{{Name: "col", Type: "INT4"}},
 	}
 
 	createReq := tc.makeRequest(http.MethodPost,
@@ -666,9 +676,9 @@ func TestQueriesIntegration_ListQueries(t *testing.T) {
 
 	// Create a few queries
 	queries := []CreateQueryRequest{
-		{NaturalLanguagePrompt: "Query 1", SQLQuery: "SELECT 1", IsEnabled: true},
-		{NaturalLanguagePrompt: "Query 2", SQLQuery: "SELECT 2", IsEnabled: true},
-		{NaturalLanguagePrompt: "Query 3", SQLQuery: "SELECT 3", IsEnabled: false},
+		{NaturalLanguagePrompt: "Query 1", SQLQuery: "SELECT 1", IsEnabled: true, OutputColumns: []models.OutputColumn{{Name: "col", Type: "INT4"}}},
+		{NaturalLanguagePrompt: "Query 2", SQLQuery: "SELECT 2", IsEnabled: true, OutputColumns: []models.OutputColumn{{Name: "col", Type: "INT4"}}},
+		{NaturalLanguagePrompt: "Query 3", SQLQuery: "SELECT 3", IsEnabled: false, OutputColumns: []models.OutputColumn{{Name: "col", Type: "INT4"}}},
 	}
 
 	for _, q := range queries {

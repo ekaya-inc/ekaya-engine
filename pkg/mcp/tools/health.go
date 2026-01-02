@@ -45,7 +45,7 @@ func RegisterHealthTool(s *server.MCPServer, version string, deps *HealthToolDep
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithOpenWorldHintAnnotation(true), // true because it checks external datasource
+		mcp.WithOpenWorldHintAnnotation(false),
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

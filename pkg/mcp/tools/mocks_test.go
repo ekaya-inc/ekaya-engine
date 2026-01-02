@@ -52,8 +52,10 @@ func (m *mockMCPConfigService) ShouldShowApprovedQueriesTools(ctx context.Contex
 
 // mockQueryService implements services.QueryService for testing.
 type mockQueryService struct {
+	query          *models.Query
 	enabledQueries []*models.Query
 	executeResult  *datasource.QueryExecutionResult
+	execResult     *datasource.QueryExecutionResult
 	executeError   error
 }
 
@@ -62,6 +64,9 @@ func (m *mockQueryService) Create(ctx context.Context, projectID, datasourceID u
 }
 
 func (m *mockQueryService) Get(ctx context.Context, projectID, queryID uuid.UUID) (*models.Query, error) {
+	if m.query != nil {
+		return m.query, nil
+	}
 	return nil, nil
 }
 
@@ -94,6 +99,9 @@ func (m *mockQueryService) Execute(ctx context.Context, projectID, queryID uuid.
 }
 
 func (m *mockQueryService) ExecuteWithParameters(ctx context.Context, projectID, queryID uuid.UUID, params map[string]any, req *services.ExecuteQueryRequest) (*datasource.QueryExecutionResult, error) {
+	if m.execResult != nil {
+		return m.execResult, m.executeError
+	}
 	return m.executeResult, m.executeError
 }
 

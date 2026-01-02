@@ -96,12 +96,12 @@ var toolGroupMetadata = map[string]toolGroupDef{
 		SubOptions: map[string]subOptionMetadata{
 			"forceMode": {
 				Name:        "FORCE all access through Pre-Approved Queries",
-				Description: "When enabled, MCP clients can only execute Pre-Approved Queries. This is the safest way to enable AI access to data.",
+				Description: "When enabled, MCP clients can only execute Pre-Approved Queries. This is the safest way to enable AI access to data but it is also the least flexible. Enable this option if you want restricted scope access to set UI features, reports or processes.",
 				Warning:     "Enabling this will disable Developer Tools.",
 			},
 			"allowClientSuggestions": {
-				Name:        "Allow MCP Client to suggest queries",
-				Description: "Allow the MCP Client to suggest new queries that must be approved by an administrator. This will expose the Ontology and SQL of Pre-Approved Queries.",
+				Name:        "Allow MCP Client to suggest Queries for the Pre-Approved List",
+				Description: "Allow the MCP Client to suggest new Queries to be added to the Pre-Approved list after your review.",
 			},
 		},
 	},

@@ -98,6 +98,10 @@ func (m *mockQueryExecutor) Close() error {
 	return nil
 }
 
+func (m *mockQueryExecutor) QuoteIdentifier(name string) string {
+	return `"` + name + `"`
+}
+
 func TestFactoryPassesConnectionManager(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	cfg := ConnectionManagerConfig{

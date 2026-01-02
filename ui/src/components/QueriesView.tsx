@@ -26,10 +26,11 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSqlValidation, type ValidationStatus } from '../hooks/useSqlValidation';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
-import type { DatasourceSchema, Query, SqlDialect, CreateQueryRequest, QueryParameter, ExecuteQueryResponse } from '../types';
+import type { DatasourceSchema, Query, SqlDialect, CreateQueryRequest, UpdateQueryRequest, QueryParameter, OutputColumn, ExecuteQueryResponse } from '../types';
 import { toCodeMirrorSchema } from '../utils/schemaUtils';
 
 import { DeleteQueryDialog } from './DeleteQueryDialog';
+import { OutputColumnEditor } from './OutputColumnEditor';
 import { ParameterEditor } from './ParameterEditor';
 import { ParameterInputForm } from './ParameterInputForm';
 import { QueryResultsTable } from './QueryResultsTable';
@@ -56,6 +57,8 @@ interface EditingState {
   sql_query: string;
   is_enabled: boolean;
   parameters: QueryParameter[];
+  output_columns: OutputColumn[];
+  constraints: string;
 }
 
 const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => {
@@ -81,6 +84,8 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
     sql_query: '',
     is_enabled: true,
     parameters: [],
+    output_columns: [],
+    constraints: '',
   });
 
   // Form state for editing
@@ -199,6 +204,8 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
       sql_query: '',
       is_enabled: true,
       parameters: [],
+      output_columns: [],
+      constraints: '',
     });
     setTestPassed(false);
     setTestParameterValues({});
@@ -296,6 +303,14 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         request.parameters = newQuery.parameters;
       }
 
+      if (newQuery.output_columns.length > 0) {
+        request.output_columns = newQuery.output_columns;
+      }
+
+      if (newQuery.constraints.trim()) {
+        request.constraints = newQuery.constraints.trim();
+      }
+
       const response = await engineApi.createQuery(projectId, datasourceId, request);
 
       if (response.success && response.data) {
@@ -337,6 +352,8 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
       sql_query: query.sql_query,
       is_enabled: query.is_enabled,
       parameters: query.parameters ?? [],
+      output_columns: query.output_columns ?? [],
+      constraints: query.constraints ?? '',
     });
     setQueryResults(null);
     editValidation.reset();
@@ -360,16 +377,29 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
     setIsSaving(true);
 
     try {
+      const updateRequest: UpdateQueryRequest = {
+        natural_language_prompt: editingState.natural_language_prompt.trim(),
+        sql_query: editingState.sql_query.trim(),
+        is_enabled: editingState.is_enabled,
+      };
+
+      if (editingState.additional_context.trim()) {
+        updateRequest.additional_context = editingState.additional_context.trim();
+      }
+
+      if (editingState.output_columns.length > 0) {
+        updateRequest.output_columns = editingState.output_columns;
+      }
+
+      if (editingState.constraints.trim()) {
+        updateRequest.constraints = editingState.constraints.trim();
+      }
+
       const response = await engineApi.updateQuery(
         projectId,
         datasourceId,
         editingQueryId,
-        {
-          natural_language_prompt: editingState.natural_language_prompt.trim(),
-          additional_context: editingState.additional_context.trim() || undefined,
-          sql_query: editingState.sql_query.trim(),
-          is_enabled: editingState.is_enabled,
-        }
+        updateRequest
       );
 
       if (response.success && response.data) {
@@ -770,6 +800,30 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     </div>
                   )}
 
+                  <OutputColumnEditor
+                    outputColumns={newQuery.output_columns}
+                    onChange={(output_columns) =>
+                      setNewQuery({ ...newQuery, output_columns })
+                    }
+                  />
+
+                  <div>
+                    <label className="block text-sm font-medium text-text-primary mb-2">
+                      Constraints
+                    </label>
+                    <textarea
+                      value={newQuery.constraints}
+                      onChange={(e) =>
+                        setNewQuery({
+                          ...newQuery,
+                          constraints: e.target.value,
+                        })
+                      }
+                      placeholder="Describe limitations and assumptions (e.g., 'Only includes completed orders', 'Excludes refunded amounts')..."
+                      className="w-full h-24 px-3 py-2 border border-border-light rounded-lg bg-surface-primary text-text-primary focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+
                   <div className="flex justify-between gap-2 pt-4 border-t border-border-light">
                     <Button
                       variant="outline"
@@ -947,6 +1001,30 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                       />
                     </div>
                   )}
+
+                  <OutputColumnEditor
+                    outputColumns={editingState.output_columns}
+                    onChange={(output_columns) =>
+                      setEditingState({ ...editingState, output_columns })
+                    }
+                  />
+
+                  <div>
+                    <label className="block text-sm font-medium text-text-primary mb-2">
+                      Constraints
+                    </label>
+                    <textarea
+                      value={editingState.constraints}
+                      onChange={(e) =>
+                        setEditingState({
+                          ...editingState,
+                          constraints: e.target.value,
+                        })
+                      }
+                      placeholder="Describe limitations and assumptions (e.g., 'Only includes completed orders', 'Excludes refunded amounts')..."
+                      className="w-full h-24 px-3 py-2 border border-border-light rounded-lg bg-surface-primary text-text-primary focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
 
                   <div className="flex items-center gap-2">
                     <input

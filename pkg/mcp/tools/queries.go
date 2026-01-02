@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -85,12 +87,14 @@ type listApprovedQueriesResult struct {
 }
 
 type approvedQueryInfo struct {
-	ID          string          `json:"id"`
-	Name        string          `json:"name"`        // natural_language_prompt
-	Description string          `json:"description"` // additional_context
-	SQL         string          `json:"sql"`         // The SQL template
-	Parameters  []parameterInfo `json:"parameters"`
-	Dialect     string          `json:"dialect"`
+	ID            string             `json:"id"`
+	Name          string             `json:"name"`        // natural_language_prompt
+	Description   string             `json:"description"` // additional_context
+	SQL           string             `json:"sql"`         // The SQL template
+	Parameters    []parameterInfo    `json:"parameters"`
+	OutputColumns []outputColumnInfo `json:"output_columns,omitempty"`
+	Constraints   string             `json:"constraints,omitempty"` // Limitations and assumptions
+	Dialect       string             `json:"dialect"`
 }
 
 type parameterInfo struct {
@@ -99,6 +103,12 @@ type parameterInfo struct {
 	Description string `json:"description"`
 	Required    bool   `json:"required"`
 	Default     any    `json:"default,omitempty"`
+}
+
+type outputColumnInfo struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
 }
 
 // registerListApprovedQueriesTool - Lists all enabled parameterized queries with metadata.
@@ -151,18 +161,39 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 				}
 			}
 
+			// Use manually specified output_columns if available
+			// Output columns come from query execution results, not SQL parsing
+			var outputCols []outputColumnInfo
+			if len(q.OutputColumns) > 0 {
+				outputCols = make([]outputColumnInfo, len(q.OutputColumns))
+				for j, oc := range q.OutputColumns {
+					outputCols[j] = outputColumnInfo{
+						Name:        oc.Name,
+						Type:        oc.Type,
+						Description: oc.Description,
+					}
+				}
+			}
+
 			desc := ""
 			if q.AdditionalContext != nil {
 				desc = *q.AdditionalContext
 			}
 
+			constraints := ""
+			if q.Constraints != nil {
+				constraints = *q.Constraints
+			}
+
 			result.Queries[i] = approvedQueryInfo{
-				ID:          q.ID.String(),
-				Name:        q.NaturalLanguagePrompt,
-				Description: desc,
-				SQL:         q.SQLQuery,
-				Parameters:  params,
-				Dialect:     q.Dialect,
+				ID:            q.ID.String(),
+				Name:          q.NaturalLanguagePrompt,
+				Description:   desc,
+				SQL:           q.SQLQuery,
+				Parameters:    params,
+				OutputColumns: outputCols,
+				Constraints:   constraints,
+				Dialect:       q.Dialect,
 			}
 		}
 
@@ -234,12 +265,21 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			limit = 1000
 		}
 
+		// Get query metadata before execution
+		query, err := deps.QueryService.Get(tenantCtx, projectID, queryID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get query metadata: %w", err)
+		}
+
 		// Execute with parameters (includes injection detection)
 		execReq := &services.ExecuteQueryRequest{Limit: limit}
+		startTime := time.Now()
 		result, err := deps.QueryService.ExecuteWithParameters(
 			tenantCtx, projectID, queryID, params, execReq)
+		executionTimeMs := time.Since(startTime).Milliseconds()
 		if err != nil {
-			return nil, fmt.Errorf("query execution failed: %w", err)
+			// Enhance error message with query context
+			return nil, enhanceErrorWithContext(err, query.NaturalLanguagePrompt)
 		}
 
 		// Format response
@@ -249,19 +289,86 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			rows = rows[:limit]
 		}
 
+		// Convert column info for response
+		type columnInfo struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+		}
+		columns := make([]columnInfo, len(result.Columns))
+		for i, col := range result.Columns {
+			columns[i] = columnInfo{Name: col.Name, Type: col.Type}
+		}
+
 		response := struct {
-			Columns   []string         `json:"columns"`
-			Rows      []map[string]any `json:"rows"`
-			RowCount  int              `json:"row_count"`
-			Truncated bool             `json:"truncated"`
+			QueryName       string           `json:"query_name"`
+			ParametersUsed  map[string]any   `json:"parameters_used"`
+			Columns         []columnInfo     `json:"columns"`
+			Rows            []map[string]any `json:"rows"`
+			RowCount        int              `json:"row_count"`
+			Truncated       bool             `json:"truncated"`
+			ExecutionTimeMs int64            `json:"execution_time_ms"`
 		}{
-			Columns:   result.Columns,
-			Rows:      rows,
-			RowCount:  len(rows),
-			Truncated: truncated,
+			QueryName:       query.NaturalLanguagePrompt,
+			ParametersUsed:  params,
+			Columns:         columns,
+			Rows:            rows,
+			RowCount:        len(rows),
+			Truncated:       truncated,
+			ExecutionTimeMs: executionTimeMs,
 		}
 
 		jsonResult, _ := json.Marshal(response)
 		return mcp.NewToolResultText(string(jsonResult)), nil
 	})
+}
+
+// enhanceErrorWithContext wraps an error with query context and categorizes the error type.
+func enhanceErrorWithContext(err error, queryName string) error {
+	if err == nil {
+		return nil
+	}
+
+	errMsg := err.Error()
+	errorType := categorizeError(errMsg)
+
+	// Format: [error_type] query "Query Name": original error message
+	return fmt.Errorf("[%s] query %q: %w", errorType, queryName, err)
+}
+
+// categorizeError determines the error type based on error message content.
+// More specific checks come first to avoid false matches.
+func categorizeError(errMsg string) string {
+	// Check for SQL injection detection (most specific)
+	if containsAny(errMsg, []string{"injection", "SQL injection"}) {
+		return "security_violation"
+	}
+
+	// Check for type conversion errors (before general parameter check)
+	if containsAny(errMsg, []string{"cannot convert", "invalid format"}) {
+		return "type_validation"
+	}
+
+	// Check for parameter-related errors (validation, missing, unknown)
+	if containsAny(errMsg, []string{"required", "missing", "unknown parameter"}) {
+		return "parameter_validation"
+	}
+
+	// Check for execution errors
+	if containsAny(errMsg, []string{"execute", "execution", "query failed"}) {
+		return "execution_error"
+	}
+
+	// Default category
+	return "query_error"
+}
+
+// containsAny checks if a string contains any of the given substrings (case-insensitive).
+func containsAny(s string, substrs []string) bool {
+	lowerS := strings.ToLower(s)
+	for _, substr := range substrs {
+		if strings.Contains(lowerS, strings.ToLower(substr)) {
+			return true
+		}
+	}
+	return false
 }

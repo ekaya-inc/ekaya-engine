@@ -25,8 +25,8 @@ type SchemaToolDeps struct {
 
 const schemaToolGroup = "schema"
 
-// schemaToolNames lists all tools in the schema group.
-var schemaToolNames = map[string]bool{
+// SchemaToolNames lists all tools in the schema group.
+var SchemaToolNames = map[string]bool{
 	"get_schema": true,
 }
 

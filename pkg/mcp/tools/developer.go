@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
@@ -136,11 +135,28 @@ func NewToolFilter(deps *DeveloperToolDeps) func(ctx context.Context, tools []mc
 			showApprovedQueries = false
 		}
 
+		// Check if force mode is enabled (approved_queries only)
+		approvedQueriesConfig, err := deps.MCPConfigService.GetToolGroupConfig(tenantCtx, projectID, "approved_queries")
+		if err != nil {
+			deps.Logger.Error("Tool filter: failed to get approved_queries config",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+
+		forceMode := approvedQueriesConfig != nil && approvedQueriesConfig.ForceMode
+
+		// Force mode overrides developer tools
+		if forceMode {
+			showDeveloper = false
+			showExecute = false
+		}
+
 		deps.Logger.Debug("Tool filter: filtering based on config",
 			zap.String("project_id", projectID.String()),
 			zap.Bool("show_developer", showDeveloper),
 			zap.Bool("show_execute", showExecute),
-			zap.Bool("show_approved_queries", showApprovedQueries))
+			zap.Bool("show_approved_queries", showApprovedQueries),
+			zap.Bool("force_mode", forceMode))
 
 		return filterTools(tools, showDeveloper, showExecute, showApprovedQueries)
 	}
@@ -158,6 +174,11 @@ func filterTools(tools []mcp.Tool, showDeveloper, showExecute, showApprovedQueri
 			if tool.Name == "execute" && !showExecute {
 				continue
 			}
+		}
+
+		// Check schema tools - tied to developer tools visibility
+		if SchemaToolNames[tool.Name] && !showDeveloper {
+			continue
 		}
 
 		// Check approved_queries tools
@@ -398,13 +419,19 @@ func registerQueryTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 			rows = rows[:limit]
 		}
 
+		// Extract column names from ColumnInfo for response
+		columnNames := make([]string, len(queryResult.Columns))
+		for i, col := range queryResult.Columns {
+			columnNames[i] = col.Name
+		}
+
 		result := struct {
 			Columns   []string         `json:"columns"`
 			Rows      []map[string]any `json:"rows"`
 			RowCount  int              `json:"row_count"`
 			Truncated bool             `json:"truncated"`
 		}{
-			Columns:   queryResult.Columns,
+			Columns:   columnNames,
 			Rows:      rows,
 			RowCount:  len(rows),
 			Truncated: truncated,
@@ -472,11 +499,6 @@ func registerSampleTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 			limit = 10
 		}
 
-		// Build query with properly sanitized identifiers to prevent SQL injection
-		quotedSchema := pgx.Identifier{schemaName}.Sanitize()
-		quotedTable := pgx.Identifier{tableName}.Sanitize()
-		sql := fmt.Sprintf(`SELECT * FROM %s.%s LIMIT %d`, quotedSchema, quotedTable, limit)
-
 		// Get datasource config and create executor
 		dsType, dsConfig, err := getDefaultDatasourceConfig(tenantCtx, deps, projectID)
 		if err != nil {
@@ -490,10 +512,22 @@ func registerSampleTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 		}
 		defer executor.Close()
 
+		// Build query with properly sanitized identifiers to prevent SQL injection
+		// Use adapter's QuoteIdentifier for database-agnostic quoting
+		quotedSchema := executor.QuoteIdentifier(schemaName)
+		quotedTable := executor.QuoteIdentifier(tableName)
+		sql := fmt.Sprintf(`SELECT * FROM %s.%s LIMIT %d`, quotedSchema, quotedTable, limit)
+
 		// Execute query
 		queryResult, err := executor.ExecuteQuery(tenantCtx, sql, 0)
 		if err != nil {
 			return nil, fmt.Errorf("sample query failed: %w", err)
+		}
+
+		// Extract column names from ColumnInfo for response
+		columnNames := make([]string, len(queryResult.Columns))
+		for i, col := range queryResult.Columns {
+			columnNames[i] = col.Name
 		}
 
 		result := struct {
@@ -502,7 +536,7 @@ func registerSampleTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 			RowCount  int              `json:"row_count"`
 			Truncated bool             `json:"truncated"`
 		}{
-			Columns:   queryResult.Columns,
+			Columns:   columnNames,
 			Rows:      queryResult.Rows,
 			RowCount:  queryResult.RowCount,
 			Truncated: false,

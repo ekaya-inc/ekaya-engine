@@ -53,16 +53,20 @@ type CreateQueryRequest struct {
 	SQLQuery              string                  `json:"sql_query"`
 	IsEnabled             bool                    `json:"is_enabled"`
 	Parameters            []models.QueryParameter `json:"parameters,omitempty"`
+	OutputColumns         []models.OutputColumn   `json:"output_columns,omitempty"`
+	Constraints           string                  `json:"constraints,omitempty"`
 }
 
 // UpdateQueryRequest contains fields for updating a query.
 // All fields are optional - only non-nil values are updated.
 // Note: Dialect cannot be updated - it's derived from datasource type.
 type UpdateQueryRequest struct {
-	NaturalLanguagePrompt *string `json:"natural_language_prompt,omitempty"`
-	AdditionalContext     *string `json:"additional_context,omitempty"`
-	SQLQuery              *string `json:"sql_query,omitempty"`
-	IsEnabled             *bool   `json:"is_enabled,omitempty"`
+	NaturalLanguagePrompt *string                `json:"natural_language_prompt,omitempty"`
+	AdditionalContext     *string                `json:"additional_context,omitempty"`
+	SQLQuery              *string                `json:"sql_query,omitempty"`
+	IsEnabled             *bool                  `json:"is_enabled,omitempty"`
+	OutputColumns         *[]models.OutputColumn `json:"output_columns,omitempty"`
+	Constraints           *string                `json:"constraints,omitempty"`
 }
 
 // ExecuteQueryRequest contains options for executing a saved query.
@@ -132,11 +136,19 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 		return nil, fmt.Errorf("parameter validation failed: %w", err)
 	}
 
+	// Require output_columns - must be populated from test execution
+	if len(req.OutputColumns) == 0 {
+		return nil, fmt.Errorf("output_columns required: test query before saving to capture result columns")
+	}
+
 	// Ensure Parameters is never nil (database column has NOT NULL constraint)
 	params := req.Parameters
 	if params == nil {
 		params = []models.QueryParameter{}
 	}
+
+	// OutputColumns already validated as non-empty above
+	outputCols := req.OutputColumns
 
 	// Create query model with dialect derived from datasource type
 	query := &models.Query{
@@ -147,11 +159,16 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 		Dialect:               ds.DatasourceType, // Derived from datasource type
 		IsEnabled:             req.IsEnabled,
 		Parameters:            params,
+		OutputColumns:         outputCols,
 		UsageCount:            0,
 	}
 
 	if req.AdditionalContext != "" {
 		query.AdditionalContext = &req.AdditionalContext
+	}
+
+	if req.Constraints != "" {
+		query.Constraints = &req.Constraints
 	}
 
 	if err := s.queryRepo.Create(ctx, query); err != nil {
@@ -209,6 +226,13 @@ func (s *queryService) Update(ctx context.Context, projectID, queryID uuid.UUID,
 		req.SQLQuery = &normalized
 	}
 
+	// If SQL is being updated, require new output_columns from test execution
+	if req.SQLQuery != nil && *req.SQLQuery != query.SQLQuery {
+		if req.OutputColumns == nil || len(*req.OutputColumns) == 0 {
+			return nil, fmt.Errorf("output_columns required when updating SQL: test query before saving to capture result columns")
+		}
+	}
+
 	// Apply updates (dialect is not updatable - derived from datasource type)
 	if req.NaturalLanguagePrompt != nil {
 		query.NaturalLanguagePrompt = *req.NaturalLanguagePrompt
@@ -221,6 +245,12 @@ func (s *queryService) Update(ctx context.Context, projectID, queryID uuid.UUID,
 	}
 	if req.IsEnabled != nil {
 		query.IsEnabled = *req.IsEnabled
+	}
+	if req.OutputColumns != nil {
+		query.OutputColumns = *req.OutputColumns
+	}
+	if req.Constraints != nil {
+		query.Constraints = req.Constraints
 	}
 
 	// Validate that all {{param}} in SQL have corresponding parameter definitions

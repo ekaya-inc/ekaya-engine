@@ -592,6 +592,7 @@ func TestCreate_RejectsUndefinedParameters(t *testing.T) {
 				NaturalLanguagePrompt: "Test query",
 				SQLQuery:              tt.sqlQuery,
 				Parameters:            tt.params,
+				OutputColumns:         []models.OutputColumn{{Name: "col1", Type: "TEXT"}}, // Required for save
 			}
 
 			query, err := svc.Create(context.Background(), uuid.New(), uuid.New(), req)
@@ -637,7 +638,8 @@ func TestUpdate_RejectsUndefinedParameters(t *testing.T) {
 				},
 			},
 			updateReq: &UpdateQueryRequest{
-				SQLQuery: strPtr("SELECT * FROM users WHERE status = {{status}}"),
+				SQLQuery:      strPtr("SELECT * FROM users WHERE status = {{status}}"),
+				OutputColumns: &[]models.OutputColumn{{Name: "id", Type: "INT4"}}, // Required when updating SQL
 			},
 			expectError: false,
 		},
@@ -652,7 +654,8 @@ func TestUpdate_RejectsUndefinedParameters(t *testing.T) {
 				Parameters:            []models.QueryParameter{},
 			},
 			updateReq: &UpdateQueryRequest{
-				SQLQuery: strPtr("SELECT * FROM users WHERE status = {{status}}"),
+				SQLQuery:      strPtr("SELECT * FROM users WHERE status = {{status}}"),
+				OutputColumns: &[]models.OutputColumn{{Name: "id", Type: "INT4"}}, // Required when updating SQL
 			},
 			expectError:   true,
 			errorContains: "parameter {{status}} used in SQL but not defined",

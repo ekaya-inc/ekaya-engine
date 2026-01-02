@@ -230,6 +230,7 @@ func TestCreateQueryWithParameters(t *testing.T) {
 				Parameters: []models.QueryParameter{
 					{Name: "user_id", Type: "integer", Description: "User ID", Required: true},
 				},
+				OutputColumns: []models.OutputColumn{{Name: "id", Type: "INT4"}, {Name: "username", Type: "TEXT"}},
 			},
 			expectStatus:  http.StatusCreated,
 			expectSuccess: true,
@@ -244,6 +245,7 @@ func TestCreateQueryWithParameters(t *testing.T) {
 					{Name: "username", Type: "string", Description: "Username pattern", Required: true},
 					{Name: "is_available", Type: "boolean", Description: "User availability", Required: false, Default: true},
 				},
+				OutputColumns: []models.OutputColumn{{Name: "id", Type: "INT4"}, {Name: "username", Type: "TEXT"}, {Name: "profile_url", Type: "TEXT"}},
 			},
 			expectStatus:  http.StatusCreated,
 			expectSuccess: true,
@@ -254,6 +256,7 @@ func TestCreateQueryWithParameters(t *testing.T) {
 				NaturalLanguagePrompt: "Count all users",
 				SQLQuery:              "SELECT COUNT(*) as count FROM users",
 				IsEnabled:             true,
+				OutputColumns:         []models.OutputColumn{{Name: "count", Type: "INT8"}},
 			},
 			expectStatus:  http.StatusCreated,
 			expectSuccess: true,
@@ -309,6 +312,7 @@ func TestExecuteQueryWithParameters(t *testing.T) {
 		Parameters: []models.QueryParameter{
 			{Name: "user_id", Type: "integer", Description: "User ID", Required: true},
 		},
+		OutputColumns: []models.OutputColumn{{Name: "id", Type: "INT4"}, {Name: "username", Type: "TEXT"}},
 	}
 
 	createReq := tc.makeRequest(t, http.MethodPost,
@@ -418,6 +422,7 @@ func TestExecuteQueryBackwardCompatibility(t *testing.T) {
 		NaturalLanguagePrompt: "Count all users",
 		SQLQuery:              "SELECT COUNT(*) as count FROM users",
 		IsEnabled:             true,
+		OutputColumns:         []models.OutputColumn{{Name: "count", Type: "INT8"}},
 	}
 
 	createReq := tc.makeRequest(t, http.MethodPost,
@@ -667,6 +672,7 @@ func TestQueryResponseWithParameters(t *testing.T) {
 		Parameters: []models.QueryParameter{
 			{Name: "is_available", Type: "boolean", Description: "User availability", Required: false, Default: true},
 		},
+		OutputColumns: []models.OutputColumn{{Name: "id", Type: "INT4"}, {Name: "username", Type: "TEXT"}},
 	}
 
 	createReq := tc.makeRequest(t, http.MethodPost,
@@ -799,6 +805,7 @@ func TestEndToEndParameterizedQueryFlow(t *testing.T) {
 				{Name: "is_available", Type: "boolean", Description: "User availability", Required: false, Default: true},
 				{Name: "limit", Type: "integer", Description: "Max results", Required: false, Default: 10},
 			},
+			OutputColumns: []models.OutputColumn{{Name: "id", Type: "INT4"}, {Name: "username", Type: "TEXT"}},
 		}
 
 		createReq := tc.makeRequest(t, http.MethodPost,
