@@ -16,10 +16,11 @@ type OntologyDomainContext struct {
 
 // DomainInfo provides high-level business context about the database.
 type DomainInfo struct {
-	Description    string   `json:"description"`
-	PrimaryDomains []string `json:"primary_domains"`
-	TableCount     int      `json:"table_count"`
-	ColumnCount    int      `json:"column_count"`
+	Description    string              `json:"description"`
+	PrimaryDomains []string            `json:"primary_domains"`
+	TableCount     int                 `json:"table_count"`
+	ColumnCount    int                 `json:"column_count"`
+	Conventions    *ProjectConventions `json:"conventions,omitempty"`
 }
 
 // EntityBrief provides a concise entity summary for domain-level view.

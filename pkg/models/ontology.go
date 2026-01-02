@@ -13,10 +13,11 @@ import (
 // DomainSummary represents the top-level business context (~500 tokens).
 // Provides high-level understanding without detailed column information.
 type DomainSummary struct {
-	Description       string             `json:"description"`
-	Domains           []string           `json:"domains"`
-	RelationshipGraph []RelationshipEdge `json:"relationship_graph,omitempty"`
-	SampleQuestions   []string           `json:"sample_questions,omitempty"`
+	Description       string              `json:"description"`
+	Domains           []string            `json:"domains"`
+	Conventions       *ProjectConventions `json:"conventions,omitempty"`
+	RelationshipGraph []RelationshipEdge  `json:"relationship_graph,omitempty"`
+	SampleQuestions   []string            `json:"sample_questions,omitempty"`
 }
 
 // RelationshipEdge represents a connection between entities in the domain graph.
@@ -25,6 +26,37 @@ type RelationshipEdge struct {
 	To          string `json:"to"`
 	Label       string `json:"label,omitempty"`
 	Cardinality string `json:"cardinality,omitempty"`
+}
+
+// ProjectConventions captures database-wide patterns that affect all queries.
+// Only patterns appearing in >50% of tables are reported as conventions.
+type ProjectConventions struct {
+	SoftDelete   *SoftDeleteConvention `json:"soft_delete,omitempty"`
+	Currency     *CurrencyConvention   `json:"currency,omitempty"`
+	AuditColumns []AuditColumnInfo     `json:"audit_columns,omitempty"`
+}
+
+// SoftDeleteConvention describes how soft-deleted records are identified.
+type SoftDeleteConvention struct {
+	Enabled    bool    `json:"enabled"`
+	Column     string  `json:"column"`
+	ColumnType string  `json:"column_type"` // "timestamp" or "boolean"
+	Filter     string  `json:"filter"`      // SQL fragment: "deleted_at IS NULL" or "is_deleted = false"
+	Coverage   float64 `json:"coverage"`    // 0.0-1.0, percentage of tables with this column
+}
+
+// CurrencyConvention describes how monetary values are stored.
+type CurrencyConvention struct {
+	DefaultCurrency string   `json:"default_currency"` // e.g., "USD"
+	Format          string   `json:"format"`           // "cents" or "dollars"
+	ColumnPatterns  []string `json:"column_patterns"`  // e.g., ["*_amount", "*_price", "*_cost"]
+	Transform       string   `json:"transform"`        // "divide_by_100" or "none"
+}
+
+// AuditColumnInfo describes an audit column and how widely it's used.
+type AuditColumnInfo struct {
+	Column   string  `json:"column"`
+	Coverage float64 `json:"coverage"` // 0.0-1.0, percentage of tables with this column
 }
 
 // ============================================================================
