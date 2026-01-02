@@ -1,397 +1,66 @@
 # MCP get_ontology - Complete Implementation Plan
 
 Investigation date: 2026-01-02
+**Last updated:** 2026-01-02 (Phase 2 complete)
 
-## Executive Summary
+## Status
 
-The `get_ontology` MCP tool returns incomplete data because:
-1. The service reads from JSONB columns that were never populated
-2. Rich data exists in normalized tables but isn't being used
-3. Some data requires additions to Entity Extraction workflow
-4. Column-level semantics require a separate (deferred) Column workflow
-
-This plan details how to make `get_ontology` fully functional by:
-- Modifying the service to read from normalized tables
-- Adding missing fields to Entity Extraction
-- Creating an Ontology Finalization step
-- Deferring expensive column-level semantic extraction
+| Phase | Status | Date Completed | Notes |
+|-------|--------|----------------|-------|
+| Phase 1: Service Layer | ✅ **COMPLETE** | 2026-01-02 | Reads from normalized tables |
+| Phase 2: Entity Extraction | ✅ **COMPLETE** | 2026-01-02 | Domain, key columns (with synonyms), aliases |
+| Phase 3: Ontology Finalization | ⏸️ Planned | - | Domain description via LLM |
+| Phase 4: Column Workflow | ⏸️ Deferred | - | Column-level semantics |
 
 ---
 
-## Current Data Inventory
+## What Works Now (After Phase 1 + 2)
 
-### What We Have (Normalized Tables)
+| Depth | Data Returned | Source |
+|-------|---------------|--------|
+| `domain` | Entity count, column count, relationship graph | Normalized tables |
+| `entities` | Names, descriptions, occurrences, aliases, **key columns with synonyms** | Normalized tables |
+| `tables` | Business names, descriptions, columns, relationships, aliases, **domain** | Normalized tables |
+| `columns` | Structural metadata (name, type, PK, FK) | Normalized tables |
 
-| Table | Data | Count | Quality |
-|-------|------|-------|---------|
-| `engine_ontology_entities` | Entity name, description, primary_table | 38 | Rich LLM-generated descriptions |
-| `engine_ontology_entity_occurrences` | Where entities appear (table/column) | 38 | Complete |
-| `engine_ontology_entity_aliases` | Entity synonyms | 0 | Structure exists, not populated |
-| `engine_entity_relationships` | Entity-to-entity relationships | 34 | FK + PK-match methods |
-| `engine_schema_tables` | Table metadata (row_count, schema) | 38 per datasource | Structural only |
-| `engine_schema_columns` | Column metadata (type, is_pk, is_joinable) | ~150 per datasource | Structural only |
-| `engine_schema_relationships` | FK constraints | varies | Complete |
-
-### What We Don't Have
-
-| Data | Needed For | Solution |
-|------|------------|----------|
-| Entity domain categorization | `tables` depth | Add to Entity Extraction |
-| Entity key columns | `entities`/`tables` depth | Add to Entity Extraction |
-| Entity synonyms | `entities`/`tables` depth | Populate during Entity Extraction |
-| Domain description | `domain` depth | Ontology Finalization (LLM) |
-| Primary domains list | `domain` depth | Aggregate from entity domains |
-| Column descriptions | `columns` depth | Deferred - Column Workflow |
-| Column semantic types/roles | `columns` depth | Deferred - Column Workflow |
-
-### JSONB Columns (Currently Empty)
-
-| Column | Status | Decision |
-|--------|--------|----------|
-| `domain_summary` | NULL | Keep - populate during Ontology Finalization |
-| `entity_summaries` | `{}` | Keep - optional denormalization cache |
-| `column_details` | `{}` | Keep - populate during Column Workflow |
+**What's Still Missing:**
+- ⏸️ Domain-level description (requires Phase 3: Ontology Finalization)
+- ⏸️ Primary domains aggregation in `domain` depth (requires Phase 3)
+- ⏸️ Column semantic fields (requires Phase 4: Column Workflow - deferred)
 
 ---
 
-## Current Code State
+## Phase 1 Accomplishments ✅
 
-### Service: OntologyContextService
+**Problem Solved:** MCP `get_ontology` tool was returning empty data because service read from unpopulated JSONB columns.
 
-**File:** `pkg/services/ontology_context.go`
+**Solution:** Modified service to read from existing normalized tables.
 
-**Current struct:**
-```go
-type ontologyContextService struct {
-    ontologyRepo repositories.OntologyRepository
-    entityRepo   repositories.OntologyEntityRepository
-    schemaRepo   repositories.SchemaRepository
-    logger       *zap.Logger
-}
-```
+**Key Changes:**
+- `GetDomainContext`: Reads from `engine_ontology_entities`, `engine_entity_relationships`, `engine_schema_columns`
+- `GetEntitiesContext`: Batch-fetches aliases via `GetAllAliasesByProject` (fixes N+1 query)
+- `GetTablesContext`: Reads from normalized entity and schema tables
+- `GetColumnsContext`: Returns structural metadata from `engine_schema_columns`
 
-**Required struct (after Phase 1):**
-```go
-type ontologyContextService struct {
-    ontologyRepo     repositories.OntologyRepository
-    entityRepo       repositories.OntologyEntityRepository
-    relationshipRepo repositories.EntityRelationshipRepository  // NEW
-    schemaRepo       repositories.SchemaRepository
-    projectService   services.ProjectService                    // NEW - for GetDefaultDatasourceID
-    logger           *zap.Logger
-}
-```
-
-### Repository Methods - What Exists vs Needed
-
-**EntityRelationshipRepository** (`pkg/repositories/entity_relationship_repository.go`):
-| Method | Status |
-|--------|--------|
-| `GetByProject(ctx, projectID)` | ✓ EXISTS |
-| `GetByTables(ctx, projectID, tableNames)` | ✗ NEEDS ADDING |
-
-**SchemaRepository** (`pkg/repositories/schema_repository.go`):
-| Method | Status | Notes |
-|--------|--------|-------|
-| `ListTablesByDatasource(ctx, projectID, datasourceID)` | ✓ EXISTS | Need datasourceID |
-| `ListColumnsByTable(ctx, projectID, tableID)` | ✓ EXISTS | Per-table |
-| `ListColumnsByDatasource(ctx, projectID, datasourceID)` | ✓ EXISTS | All columns |
-| `GetColumnsByTables(ctx, projectID, tableNames)` | ✗ NEEDS ADDING | Convenience method |
-| `GetColumnCountByProject(ctx, projectID)` | ✗ NEEDS ADDING | Or derive from existing |
-
-**Note:** Existing methods require `datasourceID`. Use `ProjectService.GetDefaultDatasourceID(ctx, projectID)` to get it. The service will also need `projectService services.ProjectService` as a dependency.
-
-**OntologyEntityRepository** (`pkg/repositories/ontology_entity_repository.go`):
-| Method | Status |
-|--------|--------|
-| `GetByProject(ctx, projectID)` | ✓ EXISTS |
-| `GetAliasesByEntity(ctx, entityID)` | ✓ EXISTS |
-| `GetAllOccurrencesByProject(ctx, projectID)` | ✓ EXISTS |
-
-### Dependency Injection
-
-**File:** `main.go`
-
-The `entityRelationshipRepo` is already created at line 143:
-```go
-entityRelationshipRepo := repositories.NewEntityRelationshipRepository()
-```
-
-The `OntologyContextService` is created at line 207:
-```go
-ontologyContextService := services.NewOntologyContextService(ontologyRepo, ontologyEntityRepo, schemaRepo, logger)
-```
-
-**To add relationshipRepo:**
-1. Update struct in `pkg/services/ontology_context.go`
-2. Update `NewOntologyContextService` constructor signature
-3. Update line 207 in `main.go` to pass `entityRelationshipRepo`
-
-### Test Patterns
-
-**Unit tests:** Use mocks (see `pkg/services/ontology_context_test.go` for mock patterns)
-**Integration tests:** Use `testhelpers.GetEngineDB(t)` for database access
-
-### Database Access Patterns
-
-- All queries must use tenant-scoped context via `database.SetTenantScope(ctx, scope)`
-- Get tenant scope via `db.WithTenant(ctx, projectID)`
-- Always `defer scope.Close()` after acquiring
+**Files Modified:**
+- `pkg/services/ontology_context.go` - Service implementation
+- `pkg/repositories/ontology_entity_repository.go` - Added `GetAllAliasesByProject`
+- `pkg/repositories/entity_relationship_repository.go` - Added `GetByProject`, `GetByTables`
+- `pkg/repositories/schema_repository.go` - Added `GetColumnCountByProject`, `GetColumnsByTables`
 
 ---
 
-## Implementation Plan
+## Phase 2 Accomplishments ✅
 
-### Phase 1: Service Layer - Read from Normalized Tables
+**Goal:** Add domain categorization, key columns, and aliases during entity extraction.
 
-**Goal:** Make `get_ontology` work with existing data by reading from normalized tables instead of empty JSONB.
-
-#### 1.1 Update GetDomainContext
-
-**File:** `pkg/services/ontology_context.go`
-
-**Current behavior:** Reads `DomainInfo` from `ontology.DomainSummary` (NULL) and counts from JSONB columns.
-
-**Changes:**
-```go
-func (s *ontologyContextService) GetDomainContext(ctx context.Context, projectID uuid.UUID) (*models.OntologyDomainContext, error) {
-    // Get entities from normalized table (already doing this)
-    entities, err := s.entityRepo.GetByProject(ctx, projectID)
-
-    // Get relationships from engine_entity_relationships (NEW)
-    relationships, err := s.relationshipRepo.GetByProject(ctx, projectID)
-
-    // Calculate counts from actual data (NEW)
-    tableCount := len(entities)
-    columnCount := s.schemaRepo.GetColumnCountByProject(ctx, projectID)
-
-    // Build relationship graph from normalized data (NEW)
-    relationshipEdges := transformRelationshipsToEdges(relationships, entities)
-
-    // Domain description - use placeholder until Ontology Finalization exists
-    domainDescription := ""
-    if ontology.DomainSummary != nil {
-        domainDescription = ontology.DomainSummary.Description
-    }
-
-    return &models.OntologyDomainContext{
-        Domain: DomainInfo{
-            Description:    domainDescription,
-            PrimaryDomains: aggregateDomainsFromEntities(entities), // NEW
-            TableCount:     tableCount,
-            ColumnCount:    columnCount,
-        },
-        Entities:      entityBriefs,
-        Relationships: relationshipEdges,
-    }, nil
-}
-```
-
-**New helper functions needed:**
-- `transformRelationshipsToEdges(relationships, entities)` - converts `engine_entity_relationships` to `[]RelationshipEdge`
-- `aggregateDomainsFromEntities(entities)` - collects unique domains (returns empty until Phase 2)
-
-#### 1.2 Update GetTablesContext
-
-**File:** `pkg/services/ontology_context.go`
-
-**Current behavior:** Reads from `ontology.EntitySummaries` (empty `{}`), returns empty.
-
-**Changes:**
-```go
-func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID uuid.UUID, tableNames []string) (*models.OntologyTablesContext, error) {
-    // Get entities for table info (NEW - replaces JSONB read)
-    entities, err := s.entityRepo.GetByProject(ctx, projectID)
-    entityByTable := indexEntitiesByTable(entities)
-
-    // Get schema tables for structural metadata (NEW)
-    schemaTables, err := s.schemaRepo.GetTablesByProject(ctx, projectID, tableNames)
-
-    // Get schema columns for column overview (NEW)
-    schemaColumns, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames)
-
-    // Get relationships for this table (NEW)
-    relationships, err := s.relationshipRepo.GetByTables(ctx, projectID, tableNames)
-
-    tables := make(map[string]models.TableSummary)
-    for _, schemaTable := range schemaTables {
-        entity := entityByTable[schemaTable.TableName]
-        columns := schemaColumns[schemaTable.TableName]
-
-        tables[schemaTable.TableName] = models.TableSummary{
-            Schema:       schemaTable.SchemaName,
-            BusinessName: entity.Name,                    // Use entity name
-            Description:  entity.Description,             // From engine_ontology_entities
-            Domain:       "",                             // Empty until Phase 2
-            RowCount:     schemaTable.RowCount,
-            ColumnCount:  len(columns),
-            Synonyms:     getEntityAliases(entity.ID),    // From engine_ontology_entity_aliases
-            Columns:      buildColumnOverview(columns),   // From engine_schema_columns
-            Relationships: buildTableRelationships(relationships, schemaTable.TableName),
-        }
-    }
-
-    return &models.OntologyTablesContext{Tables: tables}, nil
-}
-```
-
-**New helper functions needed:**
-- `indexEntitiesByTable(entities)` - creates map[tableName]entity
-- `buildColumnOverview(schemaColumns)` - converts schema columns to `[]ColumnOverview`
-- `buildTableRelationships(relationships, tableName)` - filters relationships for table
-
-#### 1.3 Update GetColumnsContext
-
-**File:** `pkg/services/ontology_context.go`
-
-**Current behavior:** Reads from `ontology.ColumnDetails` (empty `{}`), returns empty.
-
-**Changes:**
-```go
-func (s *ontologyContextService) GetColumnsContext(ctx context.Context, projectID uuid.UUID, tableNames []string) (*models.OntologyColumnsContext, error) {
-    // Validation (keep existing)
-    if len(tableNames) == 0 {
-        return nil, fmt.Errorf("table names required for columns depth")
-    }
-
-    // Get entities for table info (NEW)
-    entities, err := s.entityRepo.GetByProject(ctx, projectID)
-    entityByTable := indexEntitiesByTable(entities)
-
-    // Get schema columns with full detail (NEW)
-    schemaColumns, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames)
-
-    // Get relationships to determine FK info (NEW)
-    relationships, err := s.relationshipRepo.GetByTables(ctx, projectID, tableNames)
-    fkInfo := buildFKInfo(relationships)
-
-    tables := make(map[string]models.TableDetail)
-    for _, tableName := range tableNames {
-        entity := entityByTable[tableName]
-        columns := schemaColumns[tableName]
-
-        columnDetails := make([]models.ColumnDetail, 0, len(columns))
-        for _, col := range columns {
-            columnDetails = append(columnDetails, models.ColumnDetail{
-                Name:         col.ColumnName,
-                Description:  col.Description,              // Empty until Column Workflow
-                Synonyms:     nil,                          // Empty until Column Workflow
-                SemanticType: "",                           // Empty until Column Workflow
-                Role:         "",                           // Empty until Column Workflow
-                EnumValues:   nil,                          // Empty until Column Workflow
-                IsPrimaryKey: col.IsPrimaryKey,
-                IsForeignKey: fkInfo[tableName][col.ColumnName] != nil,
-                ForeignTable: getForeignTable(fkInfo, tableName, col.ColumnName),
-            })
-        }
-
-        tables[tableName] = models.TableDetail{
-            Schema:       "public",
-            BusinessName: entity.Name,
-            Description:  entity.Description,
-            Columns:      columnDetails,
-        }
-    }
-
-    return &models.OntologyColumnsContext{Tables: tables}, nil
-}
-```
-
-#### 1.4 Add Repository Methods
-
-**File:** `pkg/repositories/entity_relationship_repository.go`
-
-```go
-// GetByProject returns all relationships for a project's active ontology.
-GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error)
-
-// GetByTables returns relationships involving specific tables.
-GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error)
-```
-
-**File:** `pkg/repositories/schema_repository.go`
-
-```go
-// GetColumnCountByProject returns total column count for selected tables.
-GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error)
-
-// GetColumnsByTables returns columns grouped by table name.
-GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error)
-```
-
-#### 1.5 Tests for Phase 1
-
-**File:** `pkg/services/ontology_context_integration_test.go`
-
-```go
-func TestGetDomainContext_ReturnsRelationshipsFromNormalizedTable(t *testing.T) {
-    // Setup: project with entities and relationships in normalized tables
-    // Assert: relationships are returned even when domain_summary JSONB is NULL
-}
-
-func TestGetTablesContext_ReturnsDataFromNormalizedTables(t *testing.T) {
-    // Setup: project with entities in engine_ontology_entities
-    // Assert: tables are returned even when entity_summaries JSONB is empty
-}
-
-func TestGetColumnsContext_ReturnsStructuralData(t *testing.T) {
-    // Setup: project with schema_columns data
-    // Assert: column structural data (name, type, is_pk) is returned
-    // Assert: semantic fields are empty (description, role, etc.)
-}
-
-func TestGetDomainContext_CalculatesCountsFromNormalizedData(t *testing.T) {
-    // Assert: TableCount equals entity count
-    // Assert: ColumnCount equals schema_columns count
-}
-```
-
----
-
-### Phase 2: Entity Extraction Additions
-
-**Goal:** Add missing fields during Entity Extraction so `tables` depth has complete data.
-
-#### 2.1 Add Domain Categorization
-
-**When:** During entity extraction LLM call
-
-**Prompt addition:**
-```
-For each entity, categorize it into one of these business domains:
-- billing, customer, marketing, operations, product, sales, analytics, hr, inventory, unknown
-
-Return as: "domain": "billing"
-```
-
-**Schema changes:**
+### Database Migration
+**File:** `migrations/022_entity_extraction_fields.up.sql`
 ```sql
-ALTER TABLE engine_ontology_entities ADD COLUMN domain VARCHAR(50);
-```
+-- Add domain column to entities
+ALTER TABLE engine_ontology_entities ADD COLUMN domain VARCHAR(100);
 
-**Model changes:**
-```go
-// pkg/models/ontology_entity.go
-type OntologyEntity struct {
-    // ... existing fields
-    Domain string `json:"domain"` // NEW: business domain categorization
-}
-```
-
-#### 2.2 Add Key Columns Identification
-
-**When:** During entity extraction LLM call
-
-**Prompt addition:**
-```
-Identify 2-3 key business columns for this entity (not id/timestamps).
-These are columns that business users would query on.
-
-Return as: "key_columns": [{"name": "email", "synonyms": ["email_address"]}]
-```
-
-**Schema changes:**
-```sql
+-- Create key columns table
 CREATE TABLE engine_ontology_entity_key_columns (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     entity_id UUID NOT NULL REFERENCES engine_ontology_entities(id) ON DELETE CASCADE,
@@ -400,147 +69,170 @@ CREATE TABLE engine_ontology_entity_key_columns (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE(entity_id, column_name)
 );
+CREATE INDEX idx_entity_key_columns_entity_id ON engine_ontology_entity_key_columns(entity_id);
 ```
 
-#### 2.3 Populate Entity Aliases
+### Model Updates
+**File:** `pkg/models/ontology_entity.go`
+- Added `Domain string` field to `OntologyEntity` struct
+- Added `OntologyEntityKeyColumn` struct with `ID`, `EntityID`, `ColumnName`, `Synonyms`, `CreatedAt`
 
-**When:** During entity extraction LLM call
+### Repository Updates
+**File:** `pkg/repositories/ontology_entity_repository.go`
+- All SELECT queries updated to include `domain` column
+- `scanOntologyEntity` updated to handle nullable `domain`
+- Added methods:
+  - `CreateKeyColumn(ctx, keyColumn)` - Creates a key column record
+  - `GetKeyColumnsByEntity(ctx, entityID)` - Gets key columns for one entity
+  - `GetAllKeyColumnsByProject(ctx, projectID)` - Batch fetch all key columns (avoids N+1)
 
-**Prompt addition:**
-```
-List alternative names/synonyms for this entity.
-Example: "User" might have synonyms ["customer", "account", "member"]
+### LLM Prompt Updates
+**File:** `pkg/services/entity_discovery_service.go`
 
-Return as: "synonyms": ["customer", "account"]
-```
-
-**Note:** Table `engine_ontology_entity_aliases` already exists, just need to populate it.
-
-#### 2.4 Tests for Phase 2
-
+Extended structs for key column synonyms:
 ```go
-func TestEntityExtraction_PopulatesDomain(t *testing.T) {
-    // After entity extraction, entity.Domain should be set
+type keyColumnEnrichment struct {
+    Name     string   `json:"name"`
+    Synonyms []string `json:"synonyms,omitempty"`
 }
 
-func TestEntityExtraction_PopulatesKeyColumns(t *testing.T) {
-    // After entity extraction, key columns should exist
-}
-
-func TestEntityExtraction_PopulatesAliases(t *testing.T) {
-    // After entity extraction, aliases should exist
+type entityEnrichment struct {
+    TableName        string                `json:"table_name"`
+    EntityName       string                `json:"entity_name"`
+    Description      string                `json:"description"`
+    Domain           string                `json:"domain"`
+    KeyColumns       []keyColumnEnrichment `json:"key_columns"`
+    AlternativeNames []string              `json:"alternative_names"`
 }
 ```
+
+Extended `buildEntityEnrichmentPrompt()` to request:
+1. Entity Name (existing)
+2. Description (existing)
+3. Domain - free-form business domain (e.g., "billing", "hospitality", "logistics")
+4. Key Columns - 2-3 important business columns with synonyms per column
+5. Alternative Names - synonyms users might use for the entity
+
+Updated `enrichEntitiesWithLLM()` to:
+1. Set `entity.Domain` from LLM response
+2. Create key column records via `entityRepo.CreateKeyColumn()` **with synonyms**
+3. Create alias records via `entityRepo.CreateAlias()` with `source="discovery"`
+
+### Service Layer Updates
+**File:** `pkg/services/ontology_context.go`
+
+- `GetTablesContext`: Changed `Domain: ""` to `Domain: entity.Domain`
+- `GetEntitiesContext`: Added call to `GetAllKeyColumnsByProject()` and converts to `KeyColumnInfo` in response
+
+### Test Updates
+**Files:** `pkg/services/ontology_context_test.go`, `pkg/services/relationship_workflow_test.go`
+- Added mock implementations for new repository methods
+- Updated `mockOntologyEntityRepository` with `keyColumns` field
 
 ---
 
-### Phase 3: Ontology Finalization
+## Phase 3: Ontology Finalization (NEXT)
 
 **Goal:** Generate domain-level summary after Entity and Relationship extraction complete.
 
-#### 3.1 Create Ontology Finalization Service
+### Existing Infrastructure (No Changes Needed)
+- `models.DomainSummary` struct - `pkg/models/ontology.go:15`
+- `ontologyRepo.UpdateDomainSummary()` - `pkg/repositories/ontology_repository.go:153`
+- `GetDomainContext` reads from `ontology.DomainSummary` - `pkg/services/ontology_context.go:112-114`
+- Reference patterns in `pkg/services/ontology_builder.go` (see `buildDomainSummaryFromEntities`)
 
-**File:** `pkg/services/ontology_finalization.go`
+### What Phase 3 Will Add
 
+| Data | Where Used | Implementation |
+|------|------------|----------------|
+| Domain description | `domain` depth response | LLM-generated 2-3 sentence summary |
+| Primary domains list | `domain` depth response | Aggregated unique domains from entities |
+
+### Implementation Steps
+
+1. **Create Ontology Finalization Service**
+   - New file: `pkg/services/ontology_finalization.go`
+   - Interface: `OntologyFinalizationService` with `Finalize(ctx, projectID)` method
+
+2. **Implement Finalization Logic**
+   ```go
+   func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uuid.UUID) error {
+       // 1. Get all entities (with their domains now populated from Phase 2)
+       entities, _ := s.entityRepo.GetByProject(ctx, projectID)
+
+       // 2. Get all relationships
+       relationships, _ := s.relationshipRepo.GetByProject(ctx, projectID)
+
+       // 3. Aggregate primary domains from entity.Domain fields
+       primaryDomains := s.aggregateUniqueDomains(entities)
+
+       // 4. Generate domain description via LLM
+       domainDescription := s.generateDomainDescription(ctx, entities, relationships)
+
+       // 5. Save to domain_summary JSONB
+       domainSummary := &models.DomainSummary{
+           Description:       domainDescription,
+           Domains:           primaryDomains,
+           RelationshipGraph: s.buildRelationshipGraph(relationships, entities),
+       }
+
+       return s.ontologyRepo.UpdateDomainSummary(ctx, projectID, domainSummary)
+   }
+   ```
+
+3. **LLM Prompt for Domain Description**
+   ```
+   You are analyzing a database schema. Based on the following entities and their relationships,
+   provide a 2-3 sentence business description of what this database represents.
+
+   Entities:
+   {{range .Entities}}
+   - {{.Name}} ({{.Domain}}): {{.Description}}
+   {{end}}
+
+   Key Relationships:
+   {{range .Relationships}}
+   - {{.SourceEntity}} → {{.TargetEntity}} ({{.Description}})
+   {{end}}
+
+   Provide a concise business summary:
+   ```
+
+4. **Trigger Options**
+   - **Option A (Recommended):** Automatic after relationship extraction completes
+   - **Option B:** Manual API endpoint `POST /api/projects/{id}/ontology/finalize`
+
+5. **Update GetDomainContext**
+   - Currently reads from `ontology.DomainSummary.Description` (which is NULL)
+   - After Phase 3, this will be populated
+
+6. **Wire Dependencies in main.go**
+
+### Files to Create/Modify
+- NEW: `pkg/services/ontology_finalization.go` - Finalization service
+- MODIFY: `pkg/services/relationship_workflow.go` (if auto-trigger) OR
+- NEW: `pkg/handlers/ontology_handler.go` (if manual endpoint)
+- MODIFY: `main.go` - Wire dependencies
+
+### Tests to Add
 ```go
-type OntologyFinalizationService interface {
-    // Finalize generates domain-level summary after extractions complete.
-    Finalize(ctx context.Context, projectID uuid.UUID) error
-}
-
-func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uuid.UUID) error {
-    // 1. Get all entities
-    entities, _ := s.entityRepo.GetByProject(ctx, projectID)
-
-    // 2. Get all relationships
-    relationships, _ := s.relationshipRepo.GetByProject(ctx, projectID)
-
-    // 3. Generate domain description via LLM
-    domainDescription := s.generateDomainDescription(ctx, entities, relationships)
-
-    // 4. Aggregate primary domains from entities
-    primaryDomains := s.aggregateDomains(entities)
-
-    // 5. Build relationship graph
-    relationshipGraph := s.buildRelationshipGraph(relationships, entities)
-
-    // 6. Save to domain_summary JSONB
-    domainSummary := &models.DomainSummary{
-        Description:       domainDescription,
-        Domains:           primaryDomains,
-        RelationshipGraph: relationshipGraph,
-    }
-
-    return s.ontologyRepo.UpdateDomainSummary(ctx, projectID, domainSummary)
-}
-```
-
-#### 3.2 LLM Prompt for Domain Description
-
-```
-You are analyzing a database schema. Based on the following entities and their relationships,
-provide a 2-3 sentence business description of what this database represents.
-
-Entities:
-{{range .Entities}}
-- {{.Name}}: {{.Description}}
-{{end}}
-
-Key Relationships:
-{{range .Relationships}}
-- {{.SourceEntity}} → {{.TargetEntity}} ({{.Description}})
-{{end}}
-
-Provide a concise business summary:
-```
-
-#### 3.3 Trigger Finalization
-
-**Option A:** Automatic after relationship extraction completes
-```go
-// In relationship_workflow.go after SaveRelationships
-func (s *relationshipWorkflowService) SaveRelationships(...) (int, error) {
-    // ... existing save logic
-
-    // Trigger ontology finalization
-    if err := s.finalizationService.Finalize(ctx, projectID); err != nil {
-        s.logger.Error("Ontology finalization failed", zap.Error(err))
-        // Non-fatal - don't fail the workflow
-    }
-
-    return count, nil
-}
-```
-
-**Option B:** Manual API endpoint
-```go
-// POST /api/projects/{id}/ontology/finalize
-```
-
-#### 3.4 Tests for Phase 3
-
-```go
-func TestOntologyFinalization_GeneratesDomainDescription(t *testing.T) {
-    // After finalization, domain_summary.description should be populated
-}
-
-func TestOntologyFinalization_AggregatesDomains(t *testing.T) {
-    // After finalization, domain_summary.domains should contain unique domains
-}
-
-func TestOntologyFinalization_BuildsRelationshipGraph(t *testing.T) {
-    // After finalization, domain_summary.relationship_graph should have edges
-}
+func TestOntologyFinalization_GeneratesDomainDescription(t *testing.T)
+func TestOntologyFinalization_AggregatesDomains(t *testing.T)
+func TestOntologyFinalization_BuildsRelationshipGraph(t *testing.T)
 ```
 
 ---
 
-### Phase 4: Column Workflow (Deferred)
+## Phase 4: Column Workflow (Deferred)
 
 **Goal:** Generate semantic column information. This is expensive (LLM call per column) and can be deferred.
 
-#### 4.1 Scope
+**Defer until:**
+- Phases 1-3 are complete and tested
+- User feedback indicates `columns` depth semantic data is needed
+- Performance/cost tradeoffs are understood
 
+### Scope
 | Field | Source | Cost |
 |-------|--------|------|
 | Column description | LLM per column | High |
@@ -549,73 +241,52 @@ func TestOntologyFinalization_BuildsRelationshipGraph(t *testing.T) {
 | Column role | LLM per column | High |
 | Enum values | Data sampling + LLM | High |
 
-#### 4.2 Implementation Approach
-
+### Implementation Approach
 - Batch columns by table (reduce LLM calls)
 - Use workflow state (`engine_workflow_state`) to track progress
-- Store in `column_details` JSONB column
-- Optional: Store in normalized table for flexibility
-
-#### 4.3 Priority
-
-**Defer until:**
-- Phases 1-3 are complete and tested
-- User feedback indicates `columns` depth is needed
-- Performance/cost tradeoffs are understood
+- Store in `column_details` JSONB column or normalized table
 
 ---
 
-## Summary: What Each Phase Delivers
+## Current Repository Method Summary
 
-| Depth | After Phase 1 | After Phase 2 | After Phase 3 | After Phase 4 |
-|-------|---------------|---------------|---------------|---------------|
-| `domain` | Entities ✓, Relationships ✓, Counts ✓ | + PrimaryDomains | + Description | - |
-| `entities` | All fields ✓ | + KeyColumns, Synonyms | - | - |
-| `tables` | BusinessName ✓, Description ✓, Columns (structural) ✓ | + Domain, Synonyms | - | - |
-| `columns` | Structural only (name, type, PK, FK) | - | - | + Semantic fields |
+### OntologyEntityRepository (`pkg/repositories/ontology_entity_repository.go`)
+| Method | Status | Notes |
+|--------|--------|-------|
+| `Create` | ✅ | Includes `domain` |
+| `Update` | ✅ | Includes `domain` |
+| `GetByProject` | ✅ | Includes `domain` |
+| `GetByOntology` | ✅ | Includes `domain` |
+| `GetByID` | ✅ | Includes `domain` |
+| `GetByName` | ✅ | Includes `domain` |
+| `GetAllAliasesByProject` | ✅ | Batch fetch, fixes N+1 |
+| `CreateAlias` | ✅ | Used for alternative names |
+| `CreateKeyColumn` | ✅ | **NEW in Phase 2** |
+| `GetKeyColumnsByEntity` | ✅ | **NEW in Phase 2** |
+| `GetAllKeyColumnsByProject` | ✅ | **NEW in Phase 2** - Batch fetch |
 
----
+### EntityRelationshipRepository (`pkg/repositories/entity_relationship_repository.go`)
+| Method | Status |
+|--------|--------|
+| `GetByProject` | ✅ |
+| `GetByTables` | ✅ |
 
-## Migration Path
-
-### Step 1: Phase 1 (Service Layer)
-- No schema changes
-- No workflow changes
-- Just read from existing normalized tables
-- **Immediate improvement:** `domain`, `entities`, `tables` depths return data
-
-### Step 2: Phase 2 (Entity Extraction)
-- Schema migration for `domain` column
-- New table for key columns
-- Prompt changes for entity extraction
-- **Requires:** Re-run entity extraction for existing projects
-
-### Step 3: Phase 3 (Ontology Finalization)
-- New service
-- Trigger after relationship extraction
-- **One-time:** Run finalization for existing projects
-
-### Step 4: Phase 4 (Column Workflow)
-- New workflow
-- **Optional:** Only if `columns` depth semantic data is needed
+### SchemaRepository (`pkg/repositories/schema_repository.go`)
+| Method | Status |
+|--------|--------|
+| `GetColumnCountByProject` | ✅ |
+| `GetColumnsByTables` | ✅ |
 
 ---
 
-## Testing Strategy
+## Important Notes for Future Sessions
 
-### Unit Tests
-- Mock repositories, verify service transforms data correctly
-- Test edge cases (empty data, missing relationships)
+1. **Existing projects need re-extraction:** Entity extraction must be re-run for existing projects to populate `domain`, key columns, and aliases. The migration only adds the columns - it doesn't populate data.
 
-### Integration Tests
-- Test full flow: normalized tables → service → response
-- Verify data consistency
+2. **Domain is free-form:** We chose free-form domain classification (not a fixed enum) to allow domain-specific terminology like "hospitality", "fintech", etc.
 
-### End-to-End Tests
-- Call MCP tool, verify response structure
-- Test with real project data
+3. **Key columns stored in normalized table with synonyms:** Key columns are stored in `engine_ontology_entity_key_columns` with per-column synonyms in JSONB. The LLM generates synonyms for each key column during entity extraction.
 
-### Test Data Requirements
-- Project with populated `engine_ontology_entities`
-- Project with populated `engine_entity_relationships`
-- Project with populated `engine_schema_tables` and `engine_schema_columns`
+4. **Test mocks updated:** Both `ontology_context_test.go` and `relationship_workflow_test.go` have updated mocks with the new repository methods. Any new tests should follow these patterns.
+
+5. **All checks pass:** `make check` passes including format, lint, typecheck, and all tests.
