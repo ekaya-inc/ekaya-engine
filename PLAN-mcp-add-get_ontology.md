@@ -359,7 +359,7 @@ type OntologyContextService interface {
 - Renamed `EntityRelationship` to `OntologyEntityRelationship` to avoid conflict with existing type
 - TODO items noted in code for future enhancements (entity relationships from schema)
 
-### [x] Step 5: Add Response Models ✅ COMPLETE
+### [x] Step 5: Add Response Models ✅ COMPLETE - Task completed and reviewed
 
 Define structured response types.
 
@@ -375,6 +375,7 @@ Define structured response types.
 - All models follow the JSON structure specified in the plan
 - Models support optional fields with `omitempty` tags
 - Renamed `EntityRelationship` to `OntologyEntityRelationship` to avoid conflict with existing database model
+- **Review completed:** Models properly documented, follow Go conventions, and integrate well with service layer
 
 ```go
 type OntologyDomainContext struct {
@@ -385,7 +386,7 @@ type OntologyDomainContext struct {
 
 type OntologyEntitiesContext struct {
     Entities      map[string]EntityDetail `json:"entities"`
-    Relationships []EntityRelationship    `json:"relationships,omitempty"`
+    Relationships []OntologyEntityRelationship    `json:"relationships,omitempty"`
 }
 
 type OntologyTablesContext struct {
