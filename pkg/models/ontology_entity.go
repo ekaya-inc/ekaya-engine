@@ -15,6 +15,7 @@ type OntologyEntity struct {
 	OntologyID     uuid.UUID `json:"ontology_id"`
 	Name           string    `json:"name"`           // e.g., "user", "account", "order"
 	Description    string    `json:"description"`    // LLM explanation of the entity
+	Domain         string    `json:"domain"`         // Business domain (e.g., "billing", "hospitality")
 	PrimarySchema  string    `json:"primary_schema"` // Schema where entity is primarily defined
 	PrimaryTable   string    `json:"primary_table"`  // Table where entity is primarily defined
 	PrimaryColumn  string    `json:"primary_column"` // Column where entity is primarily defined
@@ -46,4 +47,15 @@ type OntologyEntityAlias struct {
 	Alias     string    `json:"alias"`
 	Source    *string   `json:"source,omitempty"` // 'discovery', 'user', 'query'
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// OntologyEntityKeyColumn represents an important business column for an entity.
+// These are columns that business users typically query on (not id/timestamps).
+// Stored in engine_ontology_entity_key_columns table.
+type OntologyEntityKeyColumn struct {
+	ID         uuid.UUID `json:"id"`
+	EntityID   uuid.UUID `json:"entity_id"`
+	ColumnName string    `json:"column_name"`
+	Synonyms   []string  `json:"synonyms,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }

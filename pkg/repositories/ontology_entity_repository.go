@@ -38,6 +38,11 @@ type OntologyEntityRepository interface {
 	GetAliasesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityAlias, error)
 	GetAllAliasesByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityAlias, error)
 	DeleteAlias(ctx context.Context, aliasID uuid.UUID) error
+
+	// Key column operations
+	CreateKeyColumn(ctx context.Context, keyColumn *models.OntologyEntityKeyColumn) error
+	GetKeyColumnsByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityKeyColumn, error)
+	GetAllKeyColumnsByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityKeyColumn, error)
 }
 
 type ontologyEntityRepository struct{}
@@ -69,13 +74,13 @@ func (r *ontologyEntityRepository) Create(ctx context.Context, entity *models.On
 
 	query := `
 		INSERT INTO engine_ontology_entities (
-			id, project_id, ontology_id, name, description,
+			id, project_id, ontology_id, name, description, domain,
 			primary_schema, primary_table, primary_column,
 			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
 
 	_, err := scope.Conn.Exec(ctx, query,
-		entity.ID, entity.ProjectID, entity.OntologyID, entity.Name, entity.Description,
+		entity.ID, entity.ProjectID, entity.OntologyID, entity.Name, entity.Description, entity.Domain,
 		entity.PrimarySchema, entity.PrimaryTable, entity.PrimaryColumn,
 		entity.CreatedAt, entity.UpdatedAt,
 	)
@@ -93,7 +98,7 @@ func (r *ontologyEntityRepository) GetByOntology(ctx context.Context, ontologyID
 	}
 
 	query := `
-		SELECT id, project_id, ontology_id, name, description,
+		SELECT id, project_id, ontology_id, name, description, domain,
 		       primary_schema, primary_table, primary_column,
 		       is_deleted, deletion_reason,
 		       created_at, updated_at
@@ -130,7 +135,7 @@ func (r *ontologyEntityRepository) GetByProject(ctx context.Context, projectID u
 	}
 
 	query := `
-		SELECT e.id, e.project_id, e.ontology_id, e.name, e.description,
+		SELECT e.id, e.project_id, e.ontology_id, e.name, e.description, e.domain,
 		       e.primary_schema, e.primary_table, e.primary_column,
 		       e.is_deleted, e.deletion_reason,
 		       e.created_at, e.updated_at
@@ -168,7 +173,7 @@ func (r *ontologyEntityRepository) GetByName(ctx context.Context, ontologyID uui
 	}
 
 	query := `
-		SELECT id, project_id, ontology_id, name, description,
+		SELECT id, project_id, ontology_id, name, description, domain,
 		       primary_schema, primary_table, primary_column,
 		       is_deleted, deletion_reason,
 		       created_at, updated_at
@@ -351,7 +356,7 @@ func (r *ontologyEntityRepository) GetByID(ctx context.Context, entityID uuid.UU
 	}
 
 	query := `
-		SELECT id, project_id, ontology_id, name, description,
+		SELECT id, project_id, ontology_id, name, description, domain,
 		       primary_schema, primary_table, primary_column,
 		       is_deleted, deletion_reason,
 		       created_at, updated_at
@@ -380,13 +385,13 @@ func (r *ontologyEntityRepository) Update(ctx context.Context, entity *models.On
 
 	query := `
 		UPDATE engine_ontology_entities
-		SET name = $2, description = $3,
-		    primary_schema = $4, primary_table = $5, primary_column = $6,
-		    updated_at = $7
+		SET name = $2, description = $3, domain = $4,
+		    primary_schema = $5, primary_table = $6, primary_column = $7,
+		    updated_at = $8
 		WHERE id = $1`
 
 	_, err := scope.Conn.Exec(ctx, query,
-		entity.ID, entity.Name, entity.Description,
+		entity.ID, entity.Name, entity.Description, entity.Domain,
 		entity.PrimarySchema, entity.PrimaryTable, entity.PrimaryColumn,
 		entity.UpdatedAt,
 	)
@@ -561,9 +566,10 @@ func (r *ontologyEntityRepository) GetAllAliasesByProject(ctx context.Context, p
 
 func scanOntologyEntity(row pgx.Row) (*models.OntologyEntity, error) {
 	var e models.OntologyEntity
+	var domain *string // domain can be NULL in database
 
 	err := row.Scan(
-		&e.ID, &e.ProjectID, &e.OntologyID, &e.Name, &e.Description,
+		&e.ID, &e.ProjectID, &e.OntologyID, &e.Name, &e.Description, &domain,
 		&e.PrimarySchema, &e.PrimaryTable, &e.PrimaryColumn,
 		&e.IsDeleted, &e.DeletionReason,
 		&e.CreatedAt, &e.UpdatedAt,
@@ -573,6 +579,10 @@ func scanOntologyEntity(row pgx.Row) (*models.OntologyEntity, error) {
 			return nil, err
 		}
 		return nil, fmt.Errorf("failed to scan ontology entity: %w", err)
+	}
+
+	if domain != nil {
+		e.Domain = *domain
 	}
 
 	return &e, nil
@@ -608,4 +618,121 @@ func scanOntologyEntityAlias(row pgx.Row) (*models.OntologyEntityAlias, error) {
 	}
 
 	return &a, nil
+}
+
+// ============================================================================
+// Key Column Operations
+// ============================================================================
+
+func (r *ontologyEntityRepository) CreateKeyColumn(ctx context.Context, keyColumn *models.OntologyEntityKeyColumn) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	keyColumn.CreatedAt = time.Now()
+
+	if keyColumn.ID == uuid.Nil {
+		keyColumn.ID = uuid.New()
+	}
+
+	query := `
+		INSERT INTO engine_ontology_entity_key_columns (id, entity_id, column_name, synonyms, created_at)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (entity_id, column_name) DO NOTHING`
+
+	_, err := scope.Conn.Exec(ctx, query,
+		keyColumn.ID, keyColumn.EntityID, keyColumn.ColumnName, keyColumn.Synonyms, keyColumn.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create entity key column: %w", err)
+	}
+
+	return nil
+}
+
+func (r *ontologyEntityRepository) GetKeyColumnsByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityKeyColumn, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT id, entity_id, column_name, synonyms, created_at
+		FROM engine_ontology_entity_key_columns
+		WHERE entity_id = $1
+		ORDER BY column_name`
+
+	rows, err := scope.Conn.Query(ctx, query, entityID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query entity key columns: %w", err)
+	}
+	defer rows.Close()
+
+	var keyColumns []*models.OntologyEntityKeyColumn
+	for rows.Next() {
+		kc, err := scanOntologyEntityKeyColumn(rows)
+		if err != nil {
+			return nil, err
+		}
+		keyColumns = append(keyColumns, kc)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating entity key columns: %w", err)
+	}
+
+	return keyColumns, nil
+}
+
+func (r *ontologyEntityRepository) GetAllKeyColumnsByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityKeyColumn, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT k.id, k.entity_id, k.column_name, k.synonyms, k.created_at
+		FROM engine_ontology_entity_key_columns k
+		JOIN engine_ontology_entities e ON k.entity_id = e.id
+		JOIN engine_ontologies o ON e.ontology_id = o.id
+		WHERE e.project_id = $1 AND o.is_active = true AND NOT e.is_deleted
+		ORDER BY k.entity_id, k.column_name`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query all entity key columns by project: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[uuid.UUID][]*models.OntologyEntityKeyColumn)
+	for rows.Next() {
+		kc, err := scanOntologyEntityKeyColumn(rows)
+		if err != nil {
+			return nil, err
+		}
+		result[kc.EntityID] = append(result[kc.EntityID], kc)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating entity key columns: %w", err)
+	}
+
+	return result, nil
+}
+
+func scanOntologyEntityKeyColumn(row pgx.Row) (*models.OntologyEntityKeyColumn, error) {
+	var kc models.OntologyEntityKeyColumn
+
+	err := row.Scan(
+		&kc.ID, &kc.EntityID, &kc.ColumnName, &kc.Synonyms, &kc.CreatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, err
+		}
+		return nil, fmt.Errorf("failed to scan entity key column: %w", err)
+	}
+
+	return &kc, nil
 }
