@@ -28,6 +28,7 @@ func createTestTools() []mcp.Tool {
 		{Name: "get_schema"},
 		{Name: "list_approved_queries"},
 		{Name: "execute_approved_query"},
+		{Name: "get_ontology"},
 	}
 }
 
@@ -202,9 +203,9 @@ func TestFilterOutDeveloperTools(t *testing.T) {
 	tools := createTestTools()
 	filtered := filterOutDeveloperTools(tools, true)
 
-	// Should filter out all developer tools, keep health, get_schema and approved_queries tools
-	if len(filtered) != 4 {
-		t.Errorf("expected 4 tools (health + get_schema + 2 approved_queries), got %d: %v", len(filtered), toolNames(filtered))
+	// Should filter out all developer tools, keep health, get_schema, approved_queries tools, and ontology tools
+	if len(filtered) != 5 {
+		t.Errorf("expected 5 tools (health + get_schema + 2 approved_queries + 1 ontology), got %d: %v", len(filtered), toolNames(filtered))
 	}
 	if !containsTool(filtered, "health") {
 		t.Error("expected health tool to be present")
@@ -215,6 +216,9 @@ func TestFilterOutDeveloperTools(t *testing.T) {
 	if !containsTool(filtered, "list_approved_queries") {
 		t.Error("expected list_approved_queries tool to be present")
 	}
+	if !containsTool(filtered, "get_ontology") {
+		t.Error("expected get_ontology tool to be present")
+	}
 }
 
 func TestFilterOutExecuteTool(t *testing.T) {
@@ -222,8 +226,8 @@ func TestFilterOutExecuteTool(t *testing.T) {
 	filtered := filterOutExecuteTool(tools)
 
 	// Should filter out only execute tool, keep all others
-	if len(filtered) != 8 {
-		t.Errorf("expected 8 tools (all except execute), got %d: %v", len(filtered), toolNames(filtered))
+	if len(filtered) != 9 {
+		t.Errorf("expected 9 tools (all except execute), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
 	if containsTool(filtered, "execute") {
@@ -241,6 +245,10 @@ func TestFilterOutExecuteTool(t *testing.T) {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present", name)
 		}
+	}
+	// Ontology tools should also be present
+	if !containsTool(filtered, "get_ontology") {
+		t.Error("expected get_ontology tool to be present")
 	}
 }
 
@@ -439,10 +447,13 @@ func TestNewToolFilter_ApprovedQueriesEnabledWithQueries(t *testing.T) {
 	if !containsTool(filtered, "execute_approved_query") {
 		t.Error("expected execute_approved_query to be present when queries exist")
 	}
+	if !containsTool(filtered, "get_ontology") {
+		t.Error("expected get_ontology to be present when approved queries enabled")
+	}
 
 	// All tools should be present
-	if len(filtered) != 9 {
-		t.Errorf("expected 9 tools (all), got %d: %v", len(filtered), toolNames(filtered))
+	if len(filtered) != 10 {
+		t.Errorf("expected 10 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 }
 
@@ -491,8 +502,8 @@ func TestFilterTools(t *testing.T) {
 
 	// Test all enabled
 	filtered = filterTools(tools, true, true, true)
-	if len(filtered) != 9 {
-		t.Errorf("expected 9 tools (all), got %d: %v", len(filtered), toolNames(filtered))
+	if len(filtered) != 10 {
+		t.Errorf("expected 10 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 }
 
@@ -521,8 +532,8 @@ func TestNewToolFilter_ForceModeDisablesDeveloperTools(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// With ForceMode ON, only approved_queries tools and health should be present
-	expectedTools := []string{"health", "list_approved_queries", "execute_approved_query"}
+	// With ForceMode ON, only approved_queries tools, ontology tools and health should be present
+	expectedTools := []string{"health", "list_approved_queries", "execute_approved_query", "get_ontology"}
 	if len(filtered) != len(expectedTools) {
 		t.Errorf("expected %d tools with ForceMode, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
 	}
@@ -538,7 +549,7 @@ func TestNewToolFilter_ForceModeDisablesDeveloperTools(t *testing.T) {
 		t.Error("schema tools should be filtered when ForceMode is enabled")
 	}
 
-	// Approved queries tools should be present
+	// Approved queries tools and ontology tools should be present
 	for _, name := range expectedTools {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present with ForceMode", name)
@@ -571,8 +582,8 @@ func TestNewToolFilter_ForceModeOffAllowsDeveloperTools(t *testing.T) {
 	filtered := filter(ctx, tools)
 
 	// With ForceMode OFF, all tools should be present
-	if len(filtered) != 9 {
-		t.Errorf("expected 9 tools (all) with ForceMode OFF, got %d: %v", len(filtered), toolNames(filtered))
+	if len(filtered) != 10 {
+		t.Errorf("expected 10 tools (all) with ForceMode OFF, got %d: %v", len(filtered), toolNames(filtered))
 	}
 
 	// Developer tools should be present
@@ -610,8 +621,8 @@ func TestNewToolFilter_ApprovedQueriesOn_DeveloperOff(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Expected: health, list_approved_queries, execute_approved_query
-	expectedTools := []string{"health", "list_approved_queries", "execute_approved_query"}
+	// Expected: health, list_approved_queries, execute_approved_query, get_ontology
+	expectedTools := []string{"health", "list_approved_queries", "execute_approved_query", "get_ontology"}
 	if len(filtered) != len(expectedTools) {
 		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
 	}
@@ -657,8 +668,8 @@ func TestNewToolFilter_ApprovedQueriesOn_DeveloperOn_ExecuteOff(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Expected: health, list_approved_queries, execute_approved_query, get_schema, query, sample, validate, echo (8 tools)
-	expectedTools := []string{"health", "list_approved_queries", "execute_approved_query", "get_schema", "query", "sample", "validate", "echo"}
+	// Expected: health, list_approved_queries, execute_approved_query, get_ontology, get_schema, query, sample, validate, echo (9 tools)
+	expectedTools := []string{"health", "list_approved_queries", "execute_approved_query", "get_ontology", "get_schema", "query", "sample", "validate", "echo"}
 	if len(filtered) != len(expectedTools) {
 		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
 	}
@@ -715,8 +726,38 @@ func TestNewToolFilter_ApprovedQueriesOff_DeveloperOn(t *testing.T) {
 	if containsTool(filtered, "execute_approved_query") {
 		t.Error("execute_approved_query should be filtered when approved_queries disabled")
 	}
+	// Ontology tools should be filtered out (tied to approved_queries visibility)
+	if containsTool(filtered, "get_ontology") {
+		t.Error("get_ontology should be filtered when approved_queries disabled")
+	}
 	// Execute should be filtered out
 	if containsTool(filtered, "execute") {
 		t.Error("execute tool should be filtered when execute disabled")
+	}
+}
+
+// Test ontology tools filtering behavior
+func TestFilterTools_OntologyToolsFilteredWithApprovedQueries(t *testing.T) {
+	tools := createTestTools()
+
+	// Test ontology tools filtered when approved_queries disabled
+	filtered := filterTools(tools, false, false, false)
+	if containsTool(filtered, "get_ontology") {
+		t.Error("get_ontology should be filtered when approved_queries disabled")
+	}
+
+	// Test ontology tools present when approved_queries enabled
+	filtered = filterTools(tools, false, false, true)
+	if !containsTool(filtered, "get_ontology") {
+		t.Error("get_ontology should be present when approved_queries enabled")
+	}
+
+	// Test ontology tools present with approved_queries even when developer tools disabled
+	filtered = filterTools(tools, false, false, true)
+	if containsTool(filtered, "query") {
+		t.Error("developer tools should be filtered when developer disabled")
+	}
+	if !containsTool(filtered, "get_ontology") {
+		t.Error("get_ontology should be present when approved_queries enabled, regardless of developer tools")
 	}
 }

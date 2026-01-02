@@ -72,6 +72,11 @@ var developerToolNames = map[string]bool{
 	"validate": true,
 }
 
+// ontologyToolNames lists all ontology tools (grouped with approved_queries visibility).
+var ontologyToolNames = map[string]bool{
+	"get_ontology": true,
+}
+
 // RegisterDeveloperTools registers the developer tool group tools.
 // These tools are only accessible when the developer tool group is enabled.
 func RegisterDeveloperTools(s *server.MCPServer, deps *DeveloperToolDeps) {
@@ -183,6 +188,11 @@ func filterTools(tools []mcp.Tool, showDeveloper, showExecute, showApprovedQueri
 
 		// Check approved_queries tools
 		if approvedQueriesToolNames[tool.Name] && !showApprovedQueries {
+			continue
+		}
+
+		// Check ontology tools - tied to approved_queries visibility
+		if ontologyToolNames[tool.Name] && !showApprovedQueries {
 			continue
 		}
 
