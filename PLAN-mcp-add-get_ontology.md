@@ -416,7 +416,7 @@ Wire up the tool registration.
 - Build succeeds without errors
 - **Review completed:** Tool properly integrated with service layer and follows established patterns
 
-### Step 7: Handle Missing Ontology Gracefully
+### [x] Step 7: Handle Missing Ontology Gracefully ✅ COMPLETE - Task completed and reviewed
 
 When ontology hasn't been extracted yet, return minimal response.
 
@@ -429,6 +429,15 @@ When ontology hasn't been extracted yet, return minimal response.
   "entities": []
 }
 ```
+
+**Implementation Notes:**
+- Missing ontology handling implemented in `pkg/mcp/tools/ontology.go` at lines 170-181
+- Tool handler checks if `ontology == nil` after fetching from repository
+- Returns structured JSON response with `has_ontology: false` flag
+- Provides helpful message directing users to `get_schema` for raw schema information
+- Includes null/empty data fields as specified
+- Service layer tests in `pkg/services/ontology_context_test.go` verify error handling
+- `TestGetDomainContext_NoActiveOntology` test passes successfully
 
 ---
 
