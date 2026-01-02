@@ -319,12 +319,14 @@ Create the tool registration and handler logic.
 - All tests pass successfully
 - Handler returns placeholder "not implemented" response for now (will be implemented in Step 4)
 
-### Step 4: Create Ontology Context Service
+### [x] Step 4: Create Ontology Context Service ✅ COMPLETE
 
 Service layer to assemble ontology responses from multiple repositories.
 
 **Files:**
 - `pkg/services/ontology_context.go` (new file)
+- `pkg/services/ontology_context_test.go` (new file)
+- `pkg/models/ontology_context.go` (new file - Step 5 completed alongside)
 
 **Interface:**
 ```go
@@ -343,12 +345,36 @@ type OntologyContextService interface {
 }
 ```
 
-### Step 5: Add Response Models
+**Implementation Notes:**
+- Created `OntologyContextService` interface with all four depth methods
+- Implemented service using `ontologyRepo`, `entityRepo`, and `schemaRepo`
+- All methods handle missing ontology gracefully with clear error messages
+- `GetDomainContext`: Assembles domain info from ontology with entity briefs and occurrence counts
+- `GetEntitiesContext`: Returns detailed entity information with aliases, key columns, and occurrences
+- `GetTablesContext`: Returns table summaries with column overview, supports optional filtering
+- `GetColumnsContext`: Returns full column details including enum values, requires table filter
+- Created comprehensive test suite with 8 test cases covering all methods
+- All tests pass successfully
+- Response models created in `pkg/models/ontology_context.go` (Step 5)
+- Renamed `EntityRelationship` to `OntologyEntityRelationship` to avoid conflict with existing type
+- TODO items noted in code for future enhancements (entity relationships from schema)
+
+### [x] Step 5: Add Response Models ✅ COMPLETE
 
 Define structured response types.
 
 **Files:**
-- `pkg/models/ontology_context.go` (new file)
+- `pkg/models/ontology_context.go` (created alongside Step 4)
+
+**Implementation Notes:**
+- Created all response models for the four depth levels:
+  - `OntologyDomainContext` with `DomainInfo`, `EntityBrief`, and `RelationshipEdge`
+  - `OntologyEntitiesContext` with `EntityDetail`, `KeyColumnInfo`, `EntityOccurrence`, and `OntologyEntityRelationship`
+  - `OntologyTablesContext` with `TableSummary`, `ColumnOverview`, and `TableRelationship`
+  - `OntologyColumnsContext` with `TableDetail` (reuses existing `ColumnDetail` from ontology.go)
+- All models follow the JSON structure specified in the plan
+- Models support optional fields with `omitempty` tags
+- Renamed `EntityRelationship` to `OntologyEntityRelationship` to avoid conflict with existing database model
 
 ```go
 type OntologyDomainContext struct {
