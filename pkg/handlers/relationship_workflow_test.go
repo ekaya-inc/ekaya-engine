@@ -79,6 +79,10 @@ func (m *mockRelationshipWorkflowService) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+func (m *mockRelationshipWorkflowService) SetColumnEnrichmentService(svc services.ColumnEnrichmentService) {
+	// No-op for tests
+}
+
 func TestRelationshipWorkflowHandler_GetEntities_Success(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()

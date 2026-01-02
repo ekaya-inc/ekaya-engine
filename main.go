@@ -208,6 +208,12 @@ func main() {
 		datasourceService, adapterFactory, llmFactory, getTenantCtx, logger)
 	ontologyContextService := services.NewOntologyContextService(
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, projectService, logger)
+	columnEnrichmentService := services.NewColumnEnrichmentService(
+		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo,
+		datasourceService, adapterFactory, llmFactory, getTenantCtx, logger)
+
+	// Wire column enrichment to relationship workflow for auto-trigger after extraction
+	relationshipWorkflowService.SetColumnEnrichmentService(columnEnrichmentService)
 
 	mux := http.NewServeMux()
 
@@ -326,6 +332,7 @@ func main() {
 
 	// Register ontology handlers (protected)
 	ontologyHandler := handlers.NewOntologyHandler(ontologyWorkflowService, projectService, logger)
+	ontologyHandler.SetEnrichmentService(columnEnrichmentService)
 	ontologyHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	ontologyQuestionsHandler := handlers.NewOntologyQuestionsHandler(ontologyQuestionService, logger)

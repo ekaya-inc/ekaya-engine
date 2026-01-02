@@ -81,6 +81,9 @@ type RelationshipWorkflowService interface {
 
 	// Shutdown gracefully stops all active workflows owned by this server.
 	Shutdown(ctx context.Context) error
+
+	// SetColumnEnrichmentService sets the column enrichment service (optional).
+	SetColumnEnrichmentService(svc ColumnEnrichmentService)
 }
 
 type relationshipWorkflowService struct {
@@ -96,6 +99,7 @@ type relationshipWorkflowService struct {
 	discoveryService     RelationshipDiscoveryService
 	deterministicService DeterministicRelationshipService
 	finalizationSvc      OntologyFinalizationService
+	columnEnrichmentSvc  ColumnEnrichmentService
 	getTenantCtx         TenantContextFunc
 	logger               *zap.Logger
 	infra                *workflow.WorkflowInfra
@@ -141,6 +145,12 @@ func NewRelationshipWorkflowService(
 }
 
 var _ RelationshipWorkflowService = (*relationshipWorkflowService)(nil)
+
+// SetColumnEnrichmentService sets the column enrichment service (optional).
+// Called after construction to avoid circular dependencies.
+func (s *relationshipWorkflowService) SetColumnEnrichmentService(svc ColumnEnrichmentService) {
+	s.columnEnrichmentSvc = svc
+}
 
 func (s *relationshipWorkflowService) StartDetection(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.OntologyWorkflow, error) {
 	// Step 1: Check for existing workflow for this datasource in relationships phase
@@ -1043,6 +1053,43 @@ func (s *relationshipWorkflowService) finalizeWorkflow(projectID, workflowID uui
 			zap.Error(updateErr))
 	}
 
+	// Auto-trigger ontology finalization to generate domain summary
+	// NOTE: Run BEFORE marking workflow complete so UI waits for enrichment
+	if s.finalizationSvc != nil {
+		if err := s.finalizationSvc.Finalize(ctx, projectID); err != nil {
+			s.logger.Error("Failed to finalize ontology",
+				zap.String("workflow_id", workflowID.String()),
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			// Non-blocking - continue to column enrichment
+		}
+	}
+
+	// Auto-trigger column enrichment to generate semantic metadata
+	// NOTE: Run BEFORE marking workflow complete so UI waits for enrichment
+	if s.columnEnrichmentSvc != nil {
+		s.logger.Info("Starting column enrichment",
+			zap.String("workflow_id", workflowID.String()),
+			zap.String("project_id", projectID.String()))
+
+		result, err := s.columnEnrichmentSvc.EnrichProject(ctx, projectID, nil)
+		if err != nil {
+			s.logger.Error("Failed to enrich columns",
+				zap.String("workflow_id", workflowID.String()),
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			// Non-blocking - continue to mark workflow complete
+		} else {
+			s.logger.Info("Column enrichment complete",
+				zap.String("workflow_id", workflowID.String()),
+				zap.Int("tables_enriched", len(result.TablesEnriched)),
+				zap.Int("tables_failed", len(result.TablesFailed)),
+				zap.Int64("duration_ms", result.DurationMs))
+		}
+	}
+
+	// Mark workflow complete AFTER all enrichment tasks finish
+	// This ensures the UI waits for finalization and column enrichment
 	if updateErr := s.workflowRepo.UpdateState(ctx, workflowID, models.WorkflowStateCompleted, ""); updateErr != nil {
 		s.logger.Error("Failed to mark workflow as completed",
 			zap.String("workflow_id", workflowID.String()),
@@ -1053,17 +1100,6 @@ func (s *relationshipWorkflowService) finalizeWorkflow(projectID, workflowID uui
 	s.logger.Info("Relationship workflow completed successfully",
 		zap.String("workflow_id", workflowID.String()),
 		zap.Int("required_pending", requiredPending))
-
-	// Auto-trigger ontology finalization to generate domain summary
-	if s.finalizationSvc != nil {
-		if err := s.finalizationSvc.Finalize(ctx, projectID); err != nil {
-			s.logger.Error("Failed to finalize ontology",
-				zap.String("workflow_id", workflowID.String()),
-				zap.String("project_id", projectID.String()),
-				zap.Error(err))
-			// Non-blocking - workflow still marked complete
-		}
-	}
 }
 
 // markWorkflowFailed updates workflow state to failed.

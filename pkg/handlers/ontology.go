@@ -69,15 +69,28 @@ type OntologyResponse struct {
 	CreatedAt       string                           `json:"created_at"`
 }
 
+// EnrichColumnsRequest for POST /ontology/enrich-columns
+type EnrichColumnsRequest struct {
+	Tables []string `json:"tables,omitempty"` // Optional: specific tables to enrich
+}
+
+// EnrichColumnsResponse for POST /ontology/enrich-columns
+type EnrichColumnsResponse struct {
+	TablesEnriched []string          `json:"tables_enriched"`
+	TablesFailed   map[string]string `json:"tables_failed,omitempty"`
+	DurationMs     int64             `json:"duration_ms"`
+}
+
 // ============================================================================
 // Handler
 // ============================================================================
 
 // OntologyHandler handles ontology workflow HTTP requests.
 type OntologyHandler struct {
-	workflowService services.OntologyWorkflowService
-	projectService  services.ProjectService
-	logger          *zap.Logger
+	workflowService   services.OntologyWorkflowService
+	projectService    services.ProjectService
+	enrichmentService services.ColumnEnrichmentService
+	logger            *zap.Logger
 }
 
 // NewOntologyHandler creates a new ontology handler.
@@ -91,6 +104,11 @@ func NewOntologyHandler(
 		projectService:  projectService,
 		logger:          logger,
 	}
+}
+
+// SetEnrichmentService sets the column enrichment service (optional).
+func (h *OntologyHandler) SetEnrichmentService(svc services.ColumnEnrichmentService) {
+	h.enrichmentService = svc
 }
 
 // RegisterRoutes registers the ontology handler's routes on the given mux.
@@ -112,6 +130,10 @@ func (h *OntologyHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *aut
 	// Ontology results
 	mux.HandleFunc("GET "+base+"/result",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetResult)))
+
+	// Column enrichment
+	mux.HandleFunc("POST "+base+"/enrich-columns",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.EnrichColumns)))
 }
 
 // StartExtraction handles POST /api/projects/{pid}/ontology/extract
@@ -394,6 +416,51 @@ func (h *OntologyHandler) GetResult(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := ApiResponse{Success: true, Data: h.toOntologyResponse(ontology)}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// EnrichColumns handles POST /api/projects/{pid}/ontology/enrich-columns
+// Generates semantic metadata for columns (descriptions, semantic types, enum values, FK roles).
+func (h *OntologyHandler) EnrichColumns(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	if h.enrichmentService == nil {
+		if err := ErrorResponse(w, http.StatusInternalServerError, "service_not_configured",
+			"Column enrichment service is not configured"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	var req EnrichColumnsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	result, err := h.enrichmentService.EnrichProject(r.Context(), projectID, req.Tables)
+	if err != nil {
+		h.logger.Error("Failed to enrich columns",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "enrichment_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	response := ApiResponse{Success: true, Data: EnrichColumnsResponse{
+		TablesEnriched: result.TablesEnriched,
+		TablesFailed:   result.TablesFailed,
+		DurationMs:     result.DurationMs,
+	}}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
