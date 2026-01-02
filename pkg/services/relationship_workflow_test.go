@@ -697,6 +697,7 @@ func newTestRelationshipWorkflowService(
 		llmFactory:           llmFactory,
 		discoveryService:     &rwsMockDiscoveryService{},
 		deterministicService: &rwsMockDeterministicService{},
+		finalizationSvc:      nil, // Optional - can be nil for tests that don't need finalization
 		getTenantCtx:         getTenantCtx,
 		logger:               logger,
 		infra:                infra,
