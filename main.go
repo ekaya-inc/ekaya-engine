@@ -204,6 +204,7 @@ func main() {
 	entityDiscoveryService := services.NewEntityDiscoveryService(
 		ontologyWorkflowRepo, ontologyEntityRepo, schemaRepo, ontologyRepo,
 		datasourceService, adapterFactory, llmFactory, getTenantCtx, logger)
+	ontologyContextService := services.NewOntologyContextService(ontologyRepo, ontologyEntityRepo, schemaRepo, logger)
 
 	mux := http.NewServeMux()
 
@@ -266,6 +267,19 @@ func main() {
 		Logger:         logger,
 	}
 	mcptools.RegisterSchemaTools(mcpServer.MCP(), schemaToolDeps)
+
+	// Register ontology tools for progressive semantic disclosure
+	ontologyToolDeps := &mcptools.OntologyToolDeps{
+		DB:                      db,
+		MCPConfigService:        mcpConfigService,
+		ProjectService:          projectService,
+		OntologyContextService:  ontologyContextService,
+		OntologyRepo:            ontologyRepo,
+		EntityRepo:              ontologyEntityRepo,
+		SchemaRepo:              schemaRepo,
+		Logger:                  logger,
+	}
+	mcptools.RegisterOntologyTools(mcpServer.MCP(), ontologyToolDeps)
 
 	mcpHandler := handlers.NewMCPHandler(mcpServer, logger)
 	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, logger)

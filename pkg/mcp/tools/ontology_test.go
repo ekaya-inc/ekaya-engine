@@ -27,6 +27,7 @@ func TestOntologyToolDeps_Structure(t *testing.T) {
 	assert.Nil(t, deps.DB, "DB field should be nil by default")
 	assert.Nil(t, deps.MCPConfigService, "MCPConfigService field should be nil by default")
 	assert.Nil(t, deps.ProjectService, "ProjectService field should be nil by default")
+	assert.Nil(t, deps.OntologyContextService, "OntologyContextService field should be nil by default")
 	assert.Nil(t, deps.OntologyRepo, "OntologyRepo field should be nil by default")
 	assert.Nil(t, deps.EntityRepo, "EntityRepo field should be nil by default")
 	assert.Nil(t, deps.SchemaRepo, "SchemaRepo field should be nil by default")
@@ -39,6 +40,7 @@ func TestOntologyToolDeps_Initialization(t *testing.T) {
 	var db *database.DB
 	var mcpConfigService services.MCPConfigService
 	var projectService services.ProjectService
+	var ontologyContextService services.OntologyContextService
 	var ontologyRepo repositories.OntologyRepository
 	var entityRepo repositories.OntologyEntityRepository
 	var schemaRepo repositories.SchemaRepository
@@ -46,13 +48,14 @@ func TestOntologyToolDeps_Initialization(t *testing.T) {
 
 	// Verify struct can be initialized with all dependencies
 	deps := &OntologyToolDeps{
-		DB:               db,
-		MCPConfigService: mcpConfigService,
-		ProjectService:   projectService,
-		OntologyRepo:     ontologyRepo,
-		EntityRepo:       entityRepo,
-		SchemaRepo:       schemaRepo,
-		Logger:           logger,
+		DB:                     db,
+		MCPConfigService:       mcpConfigService,
+		ProjectService:         projectService,
+		OntologyContextService: ontologyContextService,
+		OntologyRepo:           ontologyRepo,
+		EntityRepo:             entityRepo,
+		SchemaRepo:             schemaRepo,
+		Logger:                 logger,
 	}
 
 	assert.NotNil(t, deps, "OntologyToolDeps should be initialized")

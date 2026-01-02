@@ -398,13 +398,23 @@ type OntologyColumnsContext struct {
 }
 ```
 
-### Step 6: Register Tool in MCP Server
+### [x] Step 6: Register Tool in MCP Server ✅ COMPLETE - Task completed and reviewed
 
 Wire up the tool registration.
 
 **Files:**
-- `pkg/mcp/server.go` - Call `RegisterOntologyTools()`
-- `pkg/handlers/mcp_handler.go` - Add deps to handler setup
+- `pkg/mcp/tools/ontology.go` - Added `OntologyContextService` to `OntologyToolDeps` struct
+- `main.go` - Created `OntologyContextService` instance and registered ontology tools
+- `pkg/mcp/tools/ontology_test.go` - Updated tests to include new field
+
+**Implementation Notes:**
+- Added `OntologyContextService` field to `OntologyToolDeps` struct at line 25
+- Created `ontologyContextService` instance in main.go at line 207
+- Registered ontology tools after schema tools in main.go at lines 271-282
+- Updated test assertions to verify new field in `OntologyToolDeps`
+- All tests pass successfully
+- Build succeeds without errors
+- **Review completed:** Tool properly integrated with service layer and follows established patterns
 
 ### Step 7: Handle Missing Ontology Gracefully
 

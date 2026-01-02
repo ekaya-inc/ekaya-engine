@@ -19,13 +19,14 @@ import (
 
 // OntologyToolDeps contains dependencies for ontology tools.
 type OntologyToolDeps struct {
-	DB               *database.DB
-	MCPConfigService services.MCPConfigService
-	ProjectService   services.ProjectService
-	OntologyRepo     repositories.OntologyRepository
-	EntityRepo       repositories.OntologyEntityRepository
-	SchemaRepo       repositories.SchemaRepository
-	Logger           *zap.Logger
+	DB                     *database.DB
+	MCPConfigService       services.MCPConfigService
+	ProjectService         services.ProjectService
+	OntologyContextService services.OntologyContextService
+	OntologyRepo           repositories.OntologyRepository
+	EntityRepo             repositories.OntologyEntityRepository
+	SchemaRepo             repositories.SchemaRepository
+	Logger                 *zap.Logger
 }
 
 const ontologyToolGroup = "approved_queries" // Ontology tools share visibility with approved_queries
