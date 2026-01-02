@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
@@ -129,9 +128,9 @@ func (e *OntologyToolExecutor) queryColumnValues(ctx context.Context, arguments 
 	}
 
 	// Build and execute the query
-	// Use pgx.Identifier to safely quote identifiers and prevent SQL injection
-	quotedTable := pgx.Identifier{args.TableName}.Sanitize()
-	quotedCol := pgx.Identifier{args.ColumnName}.Sanitize()
+	// Use adapter's QuoteIdentifier for database-agnostic quoting
+	quotedTable := e.queryExecutor.QuoteIdentifier(args.TableName)
+	quotedCol := e.queryExecutor.QuoteIdentifier(args.ColumnName)
 	query := fmt.Sprintf(
 		`SELECT DISTINCT %s FROM %s WHERE %s IS NOT NULL LIMIT %d`,
 		quotedCol, quotedTable, quotedCol, limit,

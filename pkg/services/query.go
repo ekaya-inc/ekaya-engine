@@ -136,17 +136,19 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 		return nil, fmt.Errorf("parameter validation failed: %w", err)
 	}
 
+	// Require output_columns - must be populated from test execution
+	if len(req.OutputColumns) == 0 {
+		return nil, fmt.Errorf("output_columns required: test query before saving to capture result columns")
+	}
+
 	// Ensure Parameters is never nil (database column has NOT NULL constraint)
 	params := req.Parameters
 	if params == nil {
 		params = []models.QueryParameter{}
 	}
 
-	// Ensure OutputColumns is never nil (database column has NOT NULL constraint)
+	// OutputColumns already validated as non-empty above
 	outputCols := req.OutputColumns
-	if outputCols == nil {
-		outputCols = []models.OutputColumn{}
-	}
 
 	// Create query model with dialect derived from datasource type
 	query := &models.Query{
@@ -222,6 +224,13 @@ func (s *queryService) Update(ctx context.Context, projectID, queryID uuid.UUID,
 		}
 		normalized := validationResult.NormalizedSQL
 		req.SQLQuery = &normalized
+	}
+
+	// If SQL is being updated, require new output_columns from test execution
+	if req.SQLQuery != nil && *req.SQLQuery != query.SQLQuery {
+		if req.OutputColumns == nil || len(*req.OutputColumns) == 0 {
+			return nil, fmt.Errorf("output_columns required when updating SQL: test query before saving to capture result columns")
+		}
 	}
 
 	// Apply updates (dialect is not updatable - derived from datasource type)

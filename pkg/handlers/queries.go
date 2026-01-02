@@ -68,9 +68,15 @@ type ExecuteQueryRequest struct {
 	Parameters map[string]any `json:"parameters,omitempty"`
 }
 
+// ColumnInfo describes a result column with type information.
+type ColumnInfo struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
 // ExecuteQueryResponse for query execution results.
 type ExecuteQueryResponse struct {
-	Columns  []string         `json:"columns"`
+	Columns  []ColumnInfo     `json:"columns"`
 	Rows     []map[string]any `json:"rows"`
 	RowCount int              `json:"row_count"`
 }
@@ -433,8 +439,14 @@ func (h *QueriesHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Convert datasource.ColumnInfo to handler's ColumnInfo
+	columns := make([]ColumnInfo, len(result.Columns))
+	for i, col := range result.Columns {
+		columns[i] = ColumnInfo{Name: col.Name, Type: col.Type}
+	}
+
 	data := ExecuteQueryResponse{
-		Columns:  result.Columns,
+		Columns:  columns,
 		Rows:     result.Rows,
 		RowCount: result.RowCount,
 	}
@@ -490,7 +502,7 @@ func (h *QueriesHandler) Test(w http.ResponseWriter, r *http.Request) {
 			zap.Error(err))
 
 		data := ExecuteQueryResponse{
-			Columns:  []string{},
+			Columns:  []ColumnInfo{},
 			Rows:     []map[string]any{},
 			RowCount: 0,
 		}
@@ -505,8 +517,14 @@ func (h *QueriesHandler) Test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Convert datasource.ColumnInfo to handler's ColumnInfo
+	columns := make([]ColumnInfo, len(result.Columns))
+	for i, col := range result.Columns {
+		columns[i] = ColumnInfo{Name: col.Name, Type: col.Type}
+	}
+
 	data := ExecuteQueryResponse{
-		Columns:  result.Columns,
+		Columns:  columns,
 		Rows:     result.Rows,
 		RowCount: result.RowCount,
 	}
