@@ -270,14 +270,14 @@ func main() {
 
 	// Register ontology tools for progressive semantic disclosure
 	ontologyToolDeps := &mcptools.OntologyToolDeps{
-		DB:                      db,
-		MCPConfigService:        mcpConfigService,
-		ProjectService:          projectService,
-		OntologyContextService:  ontologyContextService,
-		OntologyRepo:            ontologyRepo,
-		EntityRepo:              ontologyEntityRepo,
-		SchemaRepo:              schemaRepo,
-		Logger:                  logger,
+		DB:                     db,
+		MCPConfigService:       mcpConfigService,
+		ProjectService:         projectService,
+		OntologyContextService: ontologyContextService,
+		OntologyRepo:           ontologyRepo,
+		EntityRepo:             ontologyEntityRepo,
+		SchemaRepo:             schemaRepo,
+		Logger:                 logger,
 	}
 	mcptools.RegisterOntologyTools(mcpServer.MCP(), ontologyToolDeps)
 

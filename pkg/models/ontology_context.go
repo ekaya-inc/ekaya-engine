@@ -16,10 +16,10 @@ type OntologyDomainContext struct {
 
 // DomainInfo provides high-level business context about the database.
 type DomainInfo struct {
-	Description  string   `json:"description"`
+	Description    string   `json:"description"`
 	PrimaryDomains []string `json:"primary_domains"`
-	TableCount   int      `json:"table_count"`
-	ColumnCount  int      `json:"column_count"`
+	TableCount     int      `json:"table_count"`
+	ColumnCount    int      `json:"column_count"`
 }
 
 // EntityBrief provides a concise entity summary for domain-level view.
@@ -39,11 +39,11 @@ type OntologyEntitiesContext struct {
 
 // EntityDetail provides full entity information including occurrences.
 type EntityDetail struct {
-	PrimaryTable string              `json:"primary_table"`
-	Description  string              `json:"description"`
-	Synonyms     []string            `json:"synonyms,omitempty"`
-	KeyColumns   []KeyColumnInfo     `json:"key_columns,omitempty"`
-	Occurrences  []EntityOccurrence  `json:"occurrences"`
+	PrimaryTable string             `json:"primary_table"`
+	Description  string             `json:"description"`
+	Synonyms     []string           `json:"synonyms,omitempty"`
+	KeyColumns   []KeyColumnInfo    `json:"key_columns,omitempty"`
+	Occurrences  []EntityOccurrence `json:"occurrences"`
 }
 
 // KeyColumnInfo represents a key column in entity detail view.
@@ -77,26 +77,26 @@ type OntologyTablesContext struct {
 
 // TableSummary provides table-level information with column overview.
 type TableSummary struct {
-	Schema        string            `json:"schema"`
-	BusinessName  string            `json:"business_name"`
-	Description   string            `json:"description"`
-	Domain        string            `json:"domain"`
-	RowCount      int64             `json:"row_count"`
-	ColumnCount   int               `json:"column_count"`
-	Synonyms      []string          `json:"synonyms,omitempty"`
-	Columns       []ColumnOverview  `json:"columns"`
+	Schema        string              `json:"schema"`
+	BusinessName  string              `json:"business_name"`
+	Description   string              `json:"description"`
+	Domain        string              `json:"domain"`
+	RowCount      int64               `json:"row_count"`
+	ColumnCount   int                 `json:"column_count"`
+	Synonyms      []string            `json:"synonyms,omitempty"`
+	Columns       []ColumnOverview    `json:"columns"`
 	Relationships []TableRelationship `json:"relationships,omitempty"`
 }
 
 // ColumnOverview provides basic column information for table summary.
 type ColumnOverview struct {
-	Name         string  `json:"name"`
-	Type         string  `json:"type"`
-	Role         string  `json:"role"`
-	IsPrimaryKey bool    `json:"is_primary_key"`
-	Entity       *string `json:"entity,omitempty"`
-	EntityRole   *string `json:"entity_role,omitempty"`
-	HasEnumValues bool   `json:"has_enum_values"`
+	Name          string  `json:"name"`
+	Type          string  `json:"type"`
+	Role          string  `json:"role"`
+	IsPrimaryKey  bool    `json:"is_primary_key"`
+	Entity        *string `json:"entity,omitempty"`
+	EntityRole    *string `json:"entity_role,omitempty"`
+	HasEnumValues bool    `json:"has_enum_values"`
 }
 
 // TableRelationship represents a relationship at table level.

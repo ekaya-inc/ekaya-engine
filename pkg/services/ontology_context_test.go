@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -76,9 +77,9 @@ func (m *mockOntologyRepository) WriteCleanOntology(ctx context.Context, project
 }
 
 type mockOntologyEntityRepository struct {
-	entities       []*models.OntologyEntity
-	occurrences    []*models.OntologyEntityOccurrence
-	aliases        map[uuid.UUID][]*models.OntologyEntityAlias
+	entities          []*models.OntologyEntity
+	occurrences       []*models.OntologyEntityOccurrence
+	aliases           map[uuid.UUID][]*models.OntologyEntityAlias
 	getByProjectErr   error
 	getOccurrencesErr error
 	getAliasesErr     error
@@ -579,4 +580,28 @@ func TestGetColumnsContext_MissingTable(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Len(t, result.Tables, 0)
+}
+
+func TestGetColumnsContext_TooManyTables(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+
+	ontologyRepo := &mockOntologyRepository{}
+	entityRepo := &mockOntologyEntityRepository{}
+	schemaRepo := &mockSchemaRepository{}
+
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, schemaRepo, zap.NewNop())
+
+	// Create list of tables exceeding the limit
+	tables := make([]string, MaxColumnsDepthTables+1)
+	for i := range tables {
+		tables[i] = fmt.Sprintf("table_%d", i)
+	}
+
+	result, err := svc.GetColumnsContext(ctx, projectID, tables)
+
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "too many tables requested")
+	assert.Contains(t, err.Error(), fmt.Sprintf("maximum %d tables allowed", MaxColumnsDepthTables))
 }

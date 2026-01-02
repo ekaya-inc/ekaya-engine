@@ -244,14 +244,14 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 
 		// Build table summary
 		tables[tableName] = models.TableSummary{
-			Schema:       "public", // Default, should be enriched from schema_tables
-			BusinessName: entitySummary.BusinessName,
-			Description:  entitySummary.Description,
-			Domain:       entitySummary.Domain,
-			RowCount:     0, // Should be enriched from schema_tables
-			ColumnCount:  entitySummary.ColumnCount,
-			Synonyms:     entitySummary.Synonyms,
-			Columns:      columns,
+			Schema:        "public", // Default, should be enriched from schema_tables
+			BusinessName:  entitySummary.BusinessName,
+			Description:   entitySummary.Description,
+			Domain:        entitySummary.Domain,
+			RowCount:      0, // Should be enriched from schema_tables
+			ColumnCount:   entitySummary.ColumnCount,
+			Synonyms:      entitySummary.Synonyms,
+			Columns:       columns,
 			Relationships: []models.TableRelationship{}, // TODO: derive from schema relationships
 		}
 	}
@@ -261,10 +261,16 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 	}, nil
 }
 
+// MaxColumnsDepthTables is the maximum number of tables allowed for columns depth.
+const MaxColumnsDepthTables = 10
+
 // GetColumnsContext returns full column details for specified tables.
 func (s *ontologyContextService) GetColumnsContext(ctx context.Context, projectID uuid.UUID, tableNames []string) (*models.OntologyColumnsContext, error) {
 	if len(tableNames) == 0 {
 		return nil, fmt.Errorf("table names required for columns depth")
+	}
+	if len(tableNames) > MaxColumnsDepthTables {
+		return nil, fmt.Errorf("too many tables requested: maximum %d tables allowed for columns depth, got %d", MaxColumnsDepthTables, len(tableNames))
 	}
 
 	// Get active ontology

@@ -148,10 +148,10 @@ func registerGetOntologyTool(s *server.MCPServer, deps *OntologyToolDeps) {
 
 		// Validate depth value
 		validDepths := map[string]bool{
-			"domain":  true,
+			"domain":   true,
 			"entities": true,
-			"tables":  true,
-			"columns": true,
+			"tables":   true,
+			"columns":  true,
 		}
 		if !validDepths[depth] {
 			return nil, fmt.Errorf("invalid depth: must be one of 'domain', 'entities', 'tables', 'columns'")
@@ -184,13 +184,13 @@ func registerGetOntologyTool(s *server.MCPServer, deps *OntologyToolDeps) {
 		var result any
 		switch depth {
 		case "domain":
-			result, err = handleDomainDepth(tenantCtx, deps, ontology, includeRelationships)
+			result, err = handleDomainDepth(tenantCtx, deps, projectID, includeRelationships)
 		case "entities":
-			result, err = handleEntitiesDepth(tenantCtx, deps, ontology, includeRelationships)
+			result, err = handleEntitiesDepth(tenantCtx, deps, projectID, includeRelationships)
 		case "tables":
-			result, err = handleTablesDepth(tenantCtx, deps, ontology, tables, includeRelationships)
+			result, err = handleTablesDepth(tenantCtx, deps, projectID, tables, includeRelationships)
 		case "columns":
-			result, err = handleColumnsDepth(tenantCtx, deps, ontology, tables)
+			result, err = handleColumnsDepth(tenantCtx, deps, projectID, tables)
 		default:
 			return nil, fmt.Errorf("unexpected depth value: %s", depth)
 		}
@@ -209,33 +209,51 @@ func registerGetOntologyTool(s *server.MCPServer, deps *OntologyToolDeps) {
 }
 
 // handleDomainDepth returns high-level domain context.
-func handleDomainDepth(ctx context.Context, deps *OntologyToolDeps, ontology any, includeRelationships bool) (any, error) {
-	// TODO: Implement domain depth handler (will be implemented in subsequent steps)
-	return map[string]any{
-		"message": "Domain depth handler not yet implemented",
-	}, nil
+func handleDomainDepth(ctx context.Context, deps *OntologyToolDeps, projectID uuid.UUID, includeRelationships bool) (any, error) {
+	result, err := deps.OntologyContextService.GetDomainContext(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get domain context: %w", err)
+	}
+
+	// Filter relationships if requested
+	if !includeRelationships {
+		result.Relationships = nil
+	}
+
+	return result, nil
 }
 
 // handleEntitiesDepth returns entity summaries with occurrences.
-func handleEntitiesDepth(ctx context.Context, deps *OntologyToolDeps, ontology any, includeRelationships bool) (any, error) {
-	// TODO: Implement entities depth handler (will be implemented in subsequent steps)
-	return map[string]any{
-		"message": "Entities depth handler not yet implemented",
-	}, nil
+func handleEntitiesDepth(ctx context.Context, deps *OntologyToolDeps, projectID uuid.UUID, includeRelationships bool) (any, error) {
+	result, err := deps.OntologyContextService.GetEntitiesContext(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get entities context: %w", err)
+	}
+
+	// Filter relationships if requested
+	if !includeRelationships {
+		result.Relationships = nil
+	}
+
+	return result, nil
 }
 
 // handleTablesDepth returns table-level summaries with column overview.
-func handleTablesDepth(ctx context.Context, deps *OntologyToolDeps, ontology any, tables []string, includeRelationships bool) (any, error) {
-	// TODO: Implement tables depth handler (will be implemented in subsequent steps)
-	return map[string]any{
-		"message": "Tables depth handler not yet implemented",
-	}, nil
+func handleTablesDepth(ctx context.Context, deps *OntologyToolDeps, projectID uuid.UUID, tables []string, includeRelationships bool) (any, error) {
+	result, err := deps.OntologyContextService.GetTablesContext(ctx, projectID, tables)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tables context: %w", err)
+	}
+
+	return result, nil
 }
 
 // handleColumnsDepth returns full column details for specified tables.
-func handleColumnsDepth(ctx context.Context, deps *OntologyToolDeps, ontology any, tables []string) (any, error) {
-	// TODO: Implement columns depth handler (will be implemented in subsequent steps)
-	return map[string]any{
-		"message": "Columns depth handler not yet implemented",
-	}, nil
+func handleColumnsDepth(ctx context.Context, deps *OntologyToolDeps, projectID uuid.UUID, tables []string) (any, error) {
+	result, err := deps.OntologyContextService.GetColumnsContext(ctx, projectID, tables)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get columns context: %w", err)
+	}
+
+	return result, nil
 }

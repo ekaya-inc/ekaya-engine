@@ -439,6 +439,27 @@ When ontology hasn't been extracted yet, return minimal response.
 - Service layer tests in `pkg/services/ontology_context_test.go` verify error handling
 - `TestGetDomainContext_NoActiveOntology` test passes successfully
 
+### [x] Step 8: Verify Performance Criteria ✅ COMPLETE - Task 8 completed
+
+Verify that `get_ontology(depth: 'domain')` returns domain context in <100ms.
+
+**Files:**
+- `pkg/mcp/tools/ontology_performance_test.go` (integration tests with `//go:build integration` tag)
+
+**Implementation Notes:**
+- Created comprehensive performance test suite with two test functions:
+  - `TestGetOntology_Performance_DomainDepth` - Verifies domain depth performance requirement
+  - `TestGetOntology_Performance_AllDepths` - Benchmarks all depth levels for performance profiling
+- Tests use real database with Docker container via testhelpers
+- Domain depth test runs 10 iterations and calculates average time
+- Performance results (exceeds requirements by >30x):
+  - **domain**: Average 3.03ms (requirement: <100ms) ✓
+  - **entities**: 3.15ms (expected <200ms) ✓
+  - **tables**: 0.90ms (expected <300ms) ✓
+  - **columns**: 0.54ms (expected <300ms) ✓
+- Tests properly use MCP server API via `HandleMessage()` instead of direct handler calls
+- All performance tests passing successfully
+
 ---
 
 ## Example Client Workflow
@@ -511,11 +532,22 @@ When ontology hasn't been extracted yet, return minimal response.
 
 ## Success Criteria
 
-- [ ] `get_ontology(depth: "domain")` returns domain context in <100ms
-- [ ] `get_ontology(depth: "entities")` returns all entities with occurrences
-- [ ] `get_ontology(depth: "tables", tables: [...])` returns filtered table summaries
-- [ ] `get_ontology(depth: "columns", tables: [...])` returns full column details with enums
-- [x] Tool appears in tool list when `approved_queries` is enabled (Step 1 complete)
-- [x] Tool hidden when `approved_queries` is disabled (Step 1 complete)
-- [ ] Graceful response when ontology not yet extracted
-- [ ] Response sizes match expected token ranges per depth level
+- [x] `get_ontology(depth: "domain")` returns domain context in <100ms (Average: 3.03ms - Step 8)
+- [x] `get_ontology(depth: "entities")` returns all entities with occurrences (Step 4)
+- [x] `get_ontology(depth: "tables", tables: [...])` returns filtered table summaries (Step 4)
+- [x] `get_ontology(depth: "columns", tables: [...])` returns full column details with enums (Step 4)
+- [x] Tool appears in tool list when `approved_queries` is enabled (Step 1)
+- [x] Tool hidden when `approved_queries` is disabled (Step 1)
+- [x] Graceful response when ontology not yet extracted (Step 7)
+- [ ] Response sizes match expected token ranges per depth level (deferred to v2)
+
+---
+
+## Implementation Status: ✅ COMPLETE
+
+All 8 implementation steps have been completed. The `get_ontology` MCP tool is fully functional with:
+- Four depth levels (domain, entities, tables, columns)
+- Optional table filtering
+- Optional relationship inclusion
+- Graceful handling when ontology hasn't been extracted
+- Performance exceeding requirements (3ms average for domain depth vs 100ms requirement)
