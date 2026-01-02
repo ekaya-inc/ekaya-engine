@@ -13,7 +13,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
-	sqlpkg "github.com/ekaya-inc/ekaya-engine/pkg/sql"
 )
 
 func TestRegisterApprovedQueriesTools(t *testing.T) {
@@ -345,121 +344,68 @@ func TestContainsAny(t *testing.T) {
 	}
 }
 
-func TestListApprovedQueries_OutputColumnsFallback(t *testing.T) {
-	// Test that output_columns are parsed from SQL when not manually specified
-	tests := []struct {
-		name           string
-		query          *models.Query
-		expectedCols   []string
-		expectFallback bool
-	}{
-		{
-			name: "manually specified output_columns",
-			query: &models.Query{
-				ID:                    uuid.New(),
-				NaturalLanguagePrompt: "Get customer revenue",
-				SQLQuery:              "SELECT u.name, SUM(o.amount) AS total FROM users u JOIN orders o GROUP BY u.name",
-				OutputColumns: []models.OutputColumn{
-					{Name: "customer_name", Type: "string", Description: "Full customer name"},
-					{Name: "revenue", Type: "decimal", Description: "Total revenue from customer"},
-				},
-			},
-			expectedCols:   []string{"customer_name", "revenue"},
-			expectFallback: false,
-		},
-		{
-			name: "fallback to SQL parsing - simple query",
-			query: &models.Query{
-				ID:                    uuid.New(),
-				NaturalLanguagePrompt: "Get all users",
-				SQLQuery:              "SELECT id, name, email FROM users",
-				OutputColumns:         []models.OutputColumn{}, // Empty - should fallback
-			},
-			expectedCols:   []string{"id", "name", "email"},
-			expectFallback: true,
-		},
-		{
-			name: "fallback to SQL parsing - with aliases",
-			query: &models.Query{
-				ID:                    uuid.New(),
-				NaturalLanguagePrompt: "Customer revenue report",
-				SQLQuery:              "SELECT u.name AS customer_name, SUM(o.amount) AS total_revenue FROM users u JOIN orders o GROUP BY u.name",
-				OutputColumns:         []models.OutputColumn{}, // Empty - should fallback
-			},
-			expectedCols:   []string{"customer_name", "total_revenue"},
-			expectFallback: true,
-		},
-		{
-			name: "fallback to SQL parsing - aggregate functions",
-			query: &models.Query{
-				ID:                    uuid.New(),
-				NaturalLanguagePrompt: "Order statistics",
-				SQLQuery:              "SELECT COUNT(*) AS order_count, AVG(total) AS avg_total FROM orders",
-				OutputColumns:         []models.OutputColumn{}, // Empty - should fallback
-			},
-			expectedCols:   []string{"order_count", "avg_total"},
-			expectFallback: true,
+func TestListApprovedQueries_OutputColumns(t *testing.T) {
+	// Test that manually specified output_columns are returned correctly
+	// Note: SQL parsing fallback was removed - output columns come from query execution results
+	query := &models.Query{
+		ID:                    uuid.New(),
+		NaturalLanguagePrompt: "Get customer revenue",
+		SQLQuery:              "SELECT u.name, SUM(o.amount) AS total FROM users u JOIN orders o GROUP BY u.name",
+		OutputColumns: []models.OutputColumn{
+			{Name: "customer_name", Type: "string", Description: "Full customer name"},
+			{Name: "revenue", Type: "decimal", Description: "Total revenue from customer"},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Create the approved query info structure manually
-			// (simulating what happens in the list_approved_queries handler)
-			var outputCols []outputColumnInfo
-
-			if len(tt.query.OutputColumns) > 0 {
-				// Use manually specified
-				outputCols = make([]outputColumnInfo, len(tt.query.OutputColumns))
-				for j, oc := range tt.query.OutputColumns {
-					outputCols[j] = outputColumnInfo{
-						Name:        oc.Name,
-						Type:        oc.Type,
-						Description: oc.Description,
-					}
-				}
-			} else {
-				// Fallback to SQL parsing
-				parsedCols, err := sqlpkg.ParseSelectColumns(tt.query.SQLQuery)
-				require.NoError(t, err, "SQL parsing should not fail")
-
-				if len(parsedCols) > 0 {
-					outputCols = make([]outputColumnInfo, len(parsedCols))
-					for j, pc := range parsedCols {
-						outputCols[j] = outputColumnInfo{
-							Name:        pc.Name,
-							Type:        "",
-							Description: "",
-						}
-					}
-				}
+	// Simulate what happens in the list_approved_queries handler
+	var outputCols []outputColumnInfo
+	if len(query.OutputColumns) > 0 {
+		outputCols = make([]outputColumnInfo, len(query.OutputColumns))
+		for j, oc := range query.OutputColumns {
+			outputCols[j] = outputColumnInfo{
+				Name:        oc.Name,
+				Type:        oc.Type,
+				Description: oc.Description,
 			}
-
-			// Verify column count
-			assert.Equal(t, len(tt.expectedCols), len(outputCols),
-				"output column count should match expected")
-
-			// Verify column names
-			for i, expectedName := range tt.expectedCols {
-				if i < len(outputCols) {
-					assert.Equal(t, expectedName, outputCols[i].Name,
-						"column %d name should match", i)
-
-					if tt.expectFallback {
-						// Fallback columns should have empty type and description
-						assert.Empty(t, outputCols[i].Type,
-							"fallback column should have empty type")
-						assert.Empty(t, outputCols[i].Description,
-							"fallback column should have empty description")
-					} else {
-						// Manually specified columns should have type and description
-						assert.NotEmpty(t, outputCols[i].Type,
-							"manual column should have type")
-						assert.NotEmpty(t, outputCols[i].Description,
-							"manual column should have description")
-					}
-				}
-			}
-		})
+		}
 	}
+
+	// Verify column count
+	require.Equal(t, 2, len(outputCols), "should have 2 output columns")
+
+	// Verify first column
+	assert.Equal(t, "customer_name", outputCols[0].Name)
+	assert.Equal(t, "string", outputCols[0].Type)
+	assert.Equal(t, "Full customer name", outputCols[0].Description)
+
+	// Verify second column
+	assert.Equal(t, "revenue", outputCols[1].Name)
+	assert.Equal(t, "decimal", outputCols[1].Type)
+	assert.Equal(t, "Total revenue from customer", outputCols[1].Description)
+}
+
+func TestListApprovedQueries_EmptyOutputColumns(t *testing.T) {
+	// Test that empty output_columns returns empty (no fallback parsing)
+	query := &models.Query{
+		ID:                    uuid.New(),
+		NaturalLanguagePrompt: "Get all users",
+		SQLQuery:              "SELECT id, name, email FROM users",
+		OutputColumns:         []models.OutputColumn{}, // Empty - no output columns specified
+	}
+
+	// Simulate what happens in the list_approved_queries handler
+	var outputCols []outputColumnInfo
+	if len(query.OutputColumns) > 0 {
+		outputCols = make([]outputColumnInfo, len(query.OutputColumns))
+		for j, oc := range query.OutputColumns {
+			outputCols[j] = outputColumnInfo{
+				Name:        oc.Name,
+				Type:        oc.Type,
+				Description: oc.Description,
+			}
+		}
+	}
+
+	// Verify empty output columns (no fallback parsing)
+	assert.Empty(t, outputCols, "should have no output columns when not specified")
 }

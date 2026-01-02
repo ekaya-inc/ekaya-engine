@@ -411,6 +411,10 @@ func (m *mockQueryExecutor) Execute(ctx context.Context, sqlStatement string) (*
 	return nil, m.err
 }
 
+func (m *mockQueryExecutor) QuoteIdentifier(name string) string {
+	return `"` + name + `"`
+}
+
 func (m *mockQueryExecutor) Close() error {
 	return nil
 }
@@ -711,7 +715,7 @@ func TestOntologyToolExecutor_QueryColumnValues(t *testing.T) {
 
 	queryExecutor := &mockQueryExecutor{
 		result: &datasource.QueryExecutionResult{
-			Columns:  []string{"status"},
+			Columns:  []datasource.ColumnInfo{{Name: "status", Type: "TEXT"}},
 			Rows:     []map[string]any{{"status": "pending"}, {"status": "shipped"}, {"status": "delivered"}},
 			RowCount: 3,
 		},

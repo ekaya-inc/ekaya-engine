@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -546,6 +547,113 @@ func TestBuildConnectionString_SSLModeOptions(t *testing.T) {
 			connStr := buildConnectionString(cfg)
 			assert.True(t, strings.HasSuffix(connStr, "?sslmode="+mode),
 				"should end with ?sslmode="+mode)
+		})
+	}
+}
+
+// TestQuoteIdentifier_SQLInjectionPrevention tests that pgx.Identifier.Sanitize()
+// (which QueryExecutor.QuoteIdentifier uses) properly escapes malicious input.
+func TestQuoteIdentifier_SQLInjectionPrevention(t *testing.T) {
+	// quoteIdentifier mimics what QueryExecutor.QuoteIdentifier does
+	quoteIdentifier := func(name string) string {
+		return pgx.Identifier{name}.Sanitize()
+	}
+
+	tests := []struct {
+		name     string
+		input    string
+		property string
+	}{
+		{
+			name:     "basic injection attempt",
+			input:    `table"; DROP TABLE users; --`,
+			property: "should escape double quotes to prevent injection",
+		},
+		{
+			name:     "single quote injection",
+			input:    `table'; DROP TABLE users; --`,
+			property: "should handle single quotes safely",
+		},
+		{
+			name:     "backtick injection (MySQL style)",
+			input:    "`table`; DROP TABLE users; --",
+			property: "should handle backticks safely",
+		},
+		{
+			name:     "newline injection",
+			input:    "table\n; DROP TABLE users; --",
+			property: "should handle newlines safely",
+		},
+		{
+			name:     "null byte injection",
+			input:    "table\x00; DROP TABLE users",
+			property: "should handle null bytes safely",
+		},
+		{
+			name:     "unicode injection",
+			input:    "täble\"; DROP TABLE users; --",
+			property: "should handle unicode safely",
+		},
+		{
+			name:     "double quote escape attempt",
+			input:    `table""`,
+			property: "should properly escape existing double quotes",
+		},
+		{
+			name:     "complex injection attempt",
+			input:    `" OR "1"="1`,
+			property: "should escape OR-based injection",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := quoteIdentifier(tt.input)
+
+			// Result should be wrapped in double quotes
+			assert.True(t, strings.HasPrefix(result, `"`), "should start with double quote")
+			assert.True(t, strings.HasSuffix(result, `"`), "should end with double quote")
+
+			// The result should NOT contain unescaped double quotes in the middle
+			// pgx.Identifier escapes internal " as ""
+			inner := result[1 : len(result)-1]
+			for i := 0; i < len(inner)-1; i++ {
+				if inner[i] == '"' {
+					// If there's a quote, the next char must also be a quote (escaped)
+					assert.Equal(t, byte('"'), inner[i+1],
+						"internal double quotes should be escaped as \"\"")
+					i++ // Skip the escape character
+				}
+			}
+
+			// Log the result for visibility
+			t.Logf("Input: %q -> Output: %s", tt.input, result)
+		})
+	}
+}
+
+// TestQuoteIdentifier_ValidIdentifiers tests that valid identifiers are properly quoted.
+func TestQuoteIdentifier_ValidIdentifiers(t *testing.T) {
+	// quoteIdentifier mimics what QueryExecutor.QuoteIdentifier does
+	quoteIdentifier := func(name string) string {
+		return pgx.Identifier{name}.Sanitize()
+	}
+
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"users", `"users"`},
+		{"user_table", `"user_table"`},
+		{"UserTable", `"UserTable"`},
+		{"table123", `"table123"`},
+		{"_private", `"_private"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := quoteIdentifier(tt.input)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }

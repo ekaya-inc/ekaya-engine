@@ -80,11 +80,11 @@ func TestQueryExecutor_ExecuteQuery_Simple(t *testing.T) {
 	if len(result.Columns) != 2 {
 		t.Errorf("expected 2 columns, got %d", len(result.Columns))
 	}
-	if result.Columns[0] != "num" {
-		t.Errorf("expected first column 'num', got %q", result.Columns[0])
+	if result.Columns[0].Name != "num" {
+		t.Errorf("expected first column 'num', got %q", result.Columns[0].Name)
 	}
-	if result.Columns[1] != "greeting" {
-		t.Errorf("expected second column 'greeting', got %q", result.Columns[1])
+	if result.Columns[1].Name != "greeting" {
+		t.Errorf("expected second column 'greeting', got %q", result.Columns[1].Name)
 	}
 
 	if result.RowCount != 1 {
@@ -616,11 +616,11 @@ func TestQueryExecutor_ExecuteQueryWithParams_Simple(t *testing.T) {
 	if len(result.Columns) != 2 {
 		t.Errorf("expected 2 columns, got %d", len(result.Columns))
 	}
-	if result.Columns[0] != "num" {
-		t.Errorf("expected first column 'num', got %q", result.Columns[0])
+	if result.Columns[0].Name != "num" {
+		t.Errorf("expected first column 'num', got %q", result.Columns[0].Name)
 	}
-	if result.Columns[1] != "greeting" {
-		t.Errorf("expected second column 'greeting', got %q", result.Columns[1])
+	if result.Columns[1].Name != "greeting" {
+		t.Errorf("expected second column 'greeting', got %q", result.Columns[1].Name)
 	}
 
 	if result.RowCount != 1 {
