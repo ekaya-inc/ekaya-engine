@@ -15,7 +15,6 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
-	sqlpkg "github.com/ekaya-inc/ekaya-engine/pkg/sql"
 )
 
 // QueryToolDeps contains dependencies for approved queries tools.
@@ -163,7 +162,7 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 			}
 
 			// Use manually specified output_columns if available
-			// Otherwise, parse from SQL SELECT clause as fallback
+			// Output columns come from query execution results, not SQL parsing
 			var outputCols []outputColumnInfo
 			if len(q.OutputColumns) > 0 {
 				outputCols = make([]outputColumnInfo, len(q.OutputColumns))
@@ -172,19 +171,6 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 						Name:        oc.Name,
 						Type:        oc.Type,
 						Description: oc.Description,
-					}
-				}
-			} else {
-				// Fallback: parse column names from SQL
-				parsedCols, err := sqlpkg.ParseSelectColumns(q.SQLQuery)
-				if err == nil && len(parsedCols) > 0 {
-					outputCols = make([]outputColumnInfo, len(parsedCols))
-					for j, pc := range parsedCols {
-						outputCols[j] = outputColumnInfo{
-							Name:        pc.Name,
-							Type:        "", // Type unknown from SQL parsing
-							Description: "", // Description unknown from SQL parsing
-						}
 					}
 				}
 			}
@@ -303,10 +289,20 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			rows = rows[:limit]
 		}
 
+		// Convert column info for response
+		type columnInfo struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+		}
+		columns := make([]columnInfo, len(result.Columns))
+		for i, col := range result.Columns {
+			columns[i] = columnInfo{Name: col.Name, Type: col.Type}
+		}
+
 		response := struct {
 			QueryName       string           `json:"query_name"`
 			ParametersUsed  map[string]any   `json:"parameters_used"`
-			Columns         []string         `json:"columns"`
+			Columns         []columnInfo     `json:"columns"`
 			Rows            []map[string]any `json:"rows"`
 			RowCount        int              `json:"row_count"`
 			Truncated       bool             `json:"truncated"`
@@ -314,7 +310,7 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		}{
 			QueryName:       query.NaturalLanguagePrompt,
 			ParametersUsed:  params,
-			Columns:         result.Columns,
+			Columns:         columns,
 			Rows:            rows,
 			RowCount:        len(rows),
 			Truncated:       truncated,

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
@@ -420,13 +419,19 @@ func registerQueryTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 			rows = rows[:limit]
 		}
 
+		// Extract column names from ColumnInfo for response
+		columnNames := make([]string, len(queryResult.Columns))
+		for i, col := range queryResult.Columns {
+			columnNames[i] = col.Name
+		}
+
 		result := struct {
 			Columns   []string         `json:"columns"`
 			Rows      []map[string]any `json:"rows"`
 			RowCount  int              `json:"row_count"`
 			Truncated bool             `json:"truncated"`
 		}{
-			Columns:   queryResult.Columns,
+			Columns:   columnNames,
 			Rows:      rows,
 			RowCount:  len(rows),
 			Truncated: truncated,
@@ -494,11 +499,6 @@ func registerSampleTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 			limit = 10
 		}
 
-		// Build query with properly sanitized identifiers to prevent SQL injection
-		quotedSchema := pgx.Identifier{schemaName}.Sanitize()
-		quotedTable := pgx.Identifier{tableName}.Sanitize()
-		sql := fmt.Sprintf(`SELECT * FROM %s.%s LIMIT %d`, quotedSchema, quotedTable, limit)
-
 		// Get datasource config and create executor
 		dsType, dsConfig, err := getDefaultDatasourceConfig(tenantCtx, deps, projectID)
 		if err != nil {
@@ -512,10 +512,22 @@ func registerSampleTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 		}
 		defer executor.Close()
 
+		// Build query with properly sanitized identifiers to prevent SQL injection
+		// Use adapter's QuoteIdentifier for database-agnostic quoting
+		quotedSchema := executor.QuoteIdentifier(schemaName)
+		quotedTable := executor.QuoteIdentifier(tableName)
+		sql := fmt.Sprintf(`SELECT * FROM %s.%s LIMIT %d`, quotedSchema, quotedTable, limit)
+
 		// Execute query
 		queryResult, err := executor.ExecuteQuery(tenantCtx, sql, 0)
 		if err != nil {
 			return nil, fmt.Errorf("sample query failed: %w", err)
+		}
+
+		// Extract column names from ColumnInfo for response
+		columnNames := make([]string, len(queryResult.Columns))
+		for i, col := range queryResult.Columns {
+			columnNames[i] = col.Name
 		}
 
 		result := struct {
@@ -524,7 +536,7 @@ func registerSampleTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 			RowCount  int              `json:"row_count"`
 			Truncated bool             `json:"truncated"`
 		}{
-			Columns:   queryResult.Columns,
+			Columns:   columnNames,
 			Rows:      queryResult.Rows,
 			RowCount:  queryResult.RowCount,
 			Truncated: false,
