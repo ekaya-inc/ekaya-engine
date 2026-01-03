@@ -400,6 +400,13 @@ const ProjectDashboard = () => {
 
   const intelligenceTiles: Tile[] = [
     {
+      title: 'Ontology',
+      icon: Layers,
+      path: `/projects/${pid}/ontology`,
+      disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
+      color: 'purple',
+    },
+    {
       title: 'Entities',
       icon: Boxes,
       path: `/projects/${pid}/entities`,
@@ -412,13 +419,6 @@ const ProjectDashboard = () => {
       path: `/projects/${pid}/relationships`,
       disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
       color: 'indigo',
-    },
-    {
-      title: 'Ontology',
-      icon: Layers,
-      path: `/projects/${pid}/ontology`,
-      disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
-      color: 'purple',
     },
   ];
 
