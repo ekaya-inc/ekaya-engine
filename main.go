@@ -205,11 +205,15 @@ func main() {
 	workerPoolConfig := llm.DefaultWorkerPoolConfig()
 	llmWorkerPool := llm.NewWorkerPool(workerPoolConfig, logger)
 
+	// Create circuit breaker for LLM resilience
+	circuitBreakerConfig := llm.DefaultCircuitBreakerConfig()
+	llmCircuitBreaker := llm.NewCircuitBreaker(circuitBreakerConfig)
+
 	columnEnrichmentService := services.NewColumnEnrichmentService(
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo,
-		datasourceService, adapterFactory, llmFactory, llmWorkerPool, getTenantCtx, logger)
+		datasourceService, adapterFactory, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
 	relationshipEnrichmentService := services.NewRelationshipEnrichmentService(
-		entityRelationshipRepo, ontologyEntityRepo, llmFactory, llmWorkerPool, getTenantCtx, logger)
+		entityRelationshipRepo, ontologyEntityRepo, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
 
 	// Ontology DAG service for orchestrated workflow execution
 	ontologyDAGService := services.NewOntologyDAGService(

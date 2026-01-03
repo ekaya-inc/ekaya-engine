@@ -15,13 +15,13 @@ import (
 func TestWorkerPool_Process_Success(t *testing.T) {
 	pool := NewWorkerPool(WorkerPoolConfig{MaxConcurrent: 2}, zap.NewNop())
 
-	items := []WorkItem{
-		{ID: "task1", Execute: func(ctx context.Context) (any, error) { return "result1", nil }},
-		{ID: "task2", Execute: func(ctx context.Context) (any, error) { return "result2", nil }},
-		{ID: "task3", Execute: func(ctx context.Context) (any, error) { return "result3", nil }},
+	items := []WorkItem[string]{
+		{ID: "task1", Execute: func(ctx context.Context) (string, error) { return "result1", nil }},
+		{ID: "task2", Execute: func(ctx context.Context) (string, error) { return "result2", nil }},
+		{ID: "task3", Execute: func(ctx context.Context) (string, error) { return "result3", nil }},
 	}
 
-	results := pool.Process(context.Background(), items, nil)
+	results := Process(context.Background(), pool, items, nil)
 
 	if len(results) != 3 {
 		t.Errorf("expected 3 results, got %d", len(results))
@@ -33,7 +33,7 @@ func TestWorkerPool_Process_Success(t *testing.T) {
 		if r.Err != nil {
 			t.Errorf("task %s failed: %v", r.ID, r.Err)
 		}
-		resultsByID[r.ID] = r.Result.(string)
+		resultsByID[r.ID] = r.Result
 	}
 
 	if resultsByID["task1"] != "result1" || resultsByID["task2"] != "result2" || resultsByID["task3"] != "result3" {
@@ -45,20 +45,20 @@ func TestWorkerPool_Process_WithErrors(t *testing.T) {
 	pool := NewWorkerPool(WorkerPoolConfig{MaxConcurrent: 2}, zap.NewNop())
 
 	expectedErr := errors.New("task failed")
-	items := []WorkItem{
-		{ID: "task1", Execute: func(ctx context.Context) (any, error) { return "result1", nil }},
-		{ID: "task2", Execute: func(ctx context.Context) (any, error) { return "", expectedErr }},
-		{ID: "task3", Execute: func(ctx context.Context) (any, error) { return "result3", nil }},
+	items := []WorkItem[string]{
+		{ID: "task1", Execute: func(ctx context.Context) (string, error) { return "result1", nil }},
+		{ID: "task2", Execute: func(ctx context.Context) (string, error) { return "", expectedErr }},
+		{ID: "task3", Execute: func(ctx context.Context) (string, error) { return "result3", nil }},
 	}
 
-	results := pool.Process(context.Background(), items, nil)
+	results := Process(context.Background(), pool, items, nil)
 
 	if len(results) != 3 {
 		t.Errorf("expected 3 results, got %d", len(results))
 	}
 
 	// Verify task2 failed and others succeeded
-	resultsByID := make(map[string]WorkResult)
+	resultsByID := make(map[string]WorkResult[string])
 	for _, r := range results {
 		resultsByID[r.ID] = r
 	}
@@ -77,8 +77,8 @@ func TestWorkerPool_Process_WithErrors(t *testing.T) {
 func TestWorkerPool_Process_EmptyItems(t *testing.T) {
 	pool := NewWorkerPool(WorkerPoolConfig{MaxConcurrent: 2}, zap.NewNop())
 
-	items := []WorkItem{}
-	results := pool.Process(context.Background(), items, nil)
+	items := []WorkItem[string]{}
+	results := Process(context.Background(), pool, items, nil)
 
 	if results != nil {
 		t.Errorf("expected nil results for empty items, got %v", results)
@@ -90,30 +90,30 @@ func TestWorkerPool_Process_ContextCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	items := []WorkItem{
-		{ID: "task1", Execute: func(ctx context.Context) (any, error) {
+	items := []WorkItem[string]{
+		{ID: "task1", Execute: func(ctx context.Context) (string, error) {
 			// Cancel after starting first task
 			cancel()
 			// Wait a moment for cancellation to propagate
 			time.Sleep(10 * time.Millisecond)
 			select {
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return "", ctx.Err()
 			default:
 				return "result1", nil
 			}
 		}},
-		{ID: "task2", Execute: func(ctx context.Context) (any, error) {
+		{ID: "task2", Execute: func(ctx context.Context) (string, error) {
 			select {
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return "", ctx.Err()
 			default:
 				return "result2", nil
 			}
 		}},
 	}
 
-	results := pool.Process(ctx, items, nil)
+	results := Process(ctx, pool, items, nil)
 
 	// At least one task should detect cancellation
 	foundCancellation := false
@@ -134,12 +134,12 @@ func TestWorkerPool_Process_ConcurrencyLimit(t *testing.T) {
 	var currentConcurrent atomic.Int32
 	var maxObservedConcurrent atomic.Int32
 
-	items := make([]WorkItem, 10)
+	items := make([]WorkItem[string], 10)
 	for i := 0; i < 10; i++ {
 		taskID := fmt.Sprintf("task%d", i)
-		items[i] = WorkItem{
+		items[i] = WorkItem[string]{
 			ID: taskID,
-			Execute: func(ctx context.Context) (any, error) {
+			Execute: func(ctx context.Context) (string, error) {
 				current := currentConcurrent.Add(1)
 				defer currentConcurrent.Add(-1)
 
@@ -158,7 +158,7 @@ func TestWorkerPool_Process_ConcurrencyLimit(t *testing.T) {
 		}
 	}
 
-	results := pool.Process(context.Background(), items, nil)
+	results := Process(context.Background(), pool, items, nil)
 
 	if len(results) != 10 {
 		t.Errorf("expected 10 results, got %d", len(results))
@@ -178,16 +178,16 @@ func TestWorkerPool_Process_ConcurrencyLimit(t *testing.T) {
 func TestWorkerPool_Process_ProgressCallback(t *testing.T) {
 	pool := NewWorkerPool(WorkerPoolConfig{MaxConcurrent: 2}, zap.NewNop())
 
-	items := []WorkItem{
-		{ID: "task1", Execute: func(ctx context.Context) (any, error) { return "result1", nil }},
-		{ID: "task2", Execute: func(ctx context.Context) (any, error) { return "result2", nil }},
-		{ID: "task3", Execute: func(ctx context.Context) (any, error) { return "result3", nil }},
+	items := []WorkItem[string]{
+		{ID: "task1", Execute: func(ctx context.Context) (string, error) { return "result1", nil }},
+		{ID: "task2", Execute: func(ctx context.Context) (string, error) { return "result2", nil }},
+		{ID: "task3", Execute: func(ctx context.Context) (string, error) { return "result3", nil }},
 	}
 
 	var mu sync.Mutex
 	progressUpdates := []int{}
 
-	results := pool.Process(context.Background(), items, func(completed, total int) {
+	results := Process(context.Background(), pool, items, func(completed, total int) {
 		mu.Lock()
 		defer mu.Unlock()
 		progressUpdates = append(progressUpdates, completed)

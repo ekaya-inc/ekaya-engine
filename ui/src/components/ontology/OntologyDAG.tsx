@@ -260,13 +260,42 @@ export const OntologyDAG = ({
   // Initial load
   useEffect(() => {
     const init = async () => {
-      setIsLoading(true);
-      await fetchStatus();
-      setIsLoading(false);
+      if (!projectId || !datasourceId) return;
 
-      // Start polling if DAG is running
-      if (dagStatus && !isTerminalStatus(dagStatus.status)) {
-        startPolling();
+      setIsLoading(true);
+
+      try {
+        const response = await engineApi.getOntologyDAGStatus(projectId, datasourceId);
+
+        if (!isMountedRef.current) return;
+
+        if (response.data) {
+          setDagStatus(response.data);
+
+          // Use response data directly instead of state to avoid stale closure
+          if (!isTerminalStatus(response.data.status)) {
+            startPolling();
+          }
+
+          if (response.data.status === 'completed') {
+            onComplete?.();
+          }
+        } else {
+          // No DAG exists
+          setDagStatus(null);
+        }
+
+        setError(null);
+      } catch (err) {
+        if (!isMountedRef.current) return;
+        const errorMessage = err instanceof Error ? err.message : 'Failed to fetch status';
+        console.error('Failed to fetch DAG status:', err);
+        setError(errorMessage);
+        onError?.(errorMessage);
+      } finally {
+        if (isMountedRef.current) {
+          setIsLoading(false);
+        }
       }
     };
 

@@ -46,6 +46,7 @@ type columnEnrichmentService struct {
 	adapterFactory   datasource.DatasourceAdapterFactory
 	llmFactory       llm.LLMClientFactory
 	workerPool       *llm.WorkerPool
+	circuitBreaker   *llm.CircuitBreaker
 	getTenantCtx     TenantContextFunc
 	logger           *zap.Logger
 }
@@ -60,6 +61,7 @@ func NewColumnEnrichmentService(
 	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
 	workerPool *llm.WorkerPool,
+	circuitBreaker *llm.CircuitBreaker,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) ColumnEnrichmentService {
@@ -72,6 +74,7 @@ func NewColumnEnrichmentService(
 		adapterFactory:   adapterFactory,
 		llmFactory:       llmFactory,
 		workerPool:       workerPool,
+		circuitBreaker:   circuitBreaker,
 		getTenantCtx:     getTenantCtx,
 		logger:           logger.Named("column-enrichment"),
 	}
@@ -104,12 +107,12 @@ func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID u
 	}
 
 	// Build work items for parallel processing
-	var workItems []llm.WorkItem
+	var workItems []llm.WorkItem[string]
 	for _, tableName := range tableNames {
 		name := tableName // Capture for closure
-		workItems = append(workItems, llm.WorkItem{
+		workItems = append(workItems, llm.WorkItem[string]{
 			ID: name,
-			Execute: func(ctx context.Context) (any, error) {
+			Execute: func(ctx context.Context) (string, error) {
 				// Acquire a fresh database connection for this work item to avoid
 				// concurrent access issues when multiple workers share the same context.
 				// Each worker goroutine needs its own connection since pgx connections
@@ -137,7 +140,7 @@ func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID u
 	}
 
 	// Process all tables with worker pool
-	tableResults := s.workerPool.Process(ctx, workItems, func(completed, total int) {
+	tableResults := llm.Process(ctx, s.workerPool, workItems, func(completed, total int) {
 		if progressCallback != nil {
 			progressCallback(completed, total,
 				fmt.Sprintf("Enriching columns (%d/%d tables)...", completed, total))
@@ -409,7 +412,15 @@ func (s *columnEnrichmentService) enrichColumnsWithLLM(
 	return s.enrichColumnBatch(ctx, projectID, llmClient, entity, columns, fkInfo, enumSamples)
 }
 
+// chunkWorkItem holds metadata for a chunk work item.
+type chunkWorkItem struct {
+	Index int
+	Start int
+	End   int
+}
+
 // enrichColumnsInChunks processes columns in chunks to avoid context limits.
+// For tables with >50 columns, chunks are processed in parallel using the worker pool.
 func (s *columnEnrichmentService) enrichColumnsInChunks(
 	ctx context.Context,
 	projectID uuid.UUID,
@@ -420,7 +431,9 @@ func (s *columnEnrichmentService) enrichColumnsInChunks(
 	enumSamples map[string][]string,
 	chunkSize int,
 ) ([]columnEnrichment, error) {
-	var allEnrichments []columnEnrichment
+	// Build work items for each chunk
+	var workItems []llm.WorkItem[[]columnEnrichment]
+	var chunkMetadata []chunkWorkItem
 
 	for i := 0; i < len(columns); i += chunkSize {
 		end := i + chunkSize
@@ -428,12 +441,6 @@ func (s *columnEnrichmentService) enrichColumnsInChunks(
 			end = len(columns)
 		}
 		chunk := columns[i:end]
-
-		s.logger.Debug("Enriching column chunk",
-			zap.String("table", entity.PrimaryTable),
-			zap.Int("chunk_start", i),
-			zap.Int("chunk_end", end),
-			zap.Int("total_columns", len(columns)))
 
 		// Filter FK info and enum samples to only include columns in this chunk
 		chunkFKInfo := make(map[string]string)
@@ -447,18 +454,65 @@ func (s *columnEnrichmentService) enrichColumnsInChunks(
 			}
 		}
 
-		enrichments, err := s.enrichColumnBatch(ctx, projectID, llmClient, entity, chunk, chunkFKInfo, chunkEnumSamples)
-		if err != nil {
-			return nil, fmt.Errorf("chunk %d-%d failed: %w", i, end, err)
-		}
+		// Capture loop variables for closure
+		chunkIdx := len(workItems)
+		chunkCols := chunk
+		chunkFK := chunkFKInfo
+		chunkEnum := chunkEnumSamples
+		start := i
+		chunkEnd := end
 
-		allEnrichments = append(allEnrichments, enrichments...)
+		chunkMetadata = append(chunkMetadata, chunkWorkItem{
+			Index: chunkIdx,
+			Start: start,
+			End:   chunkEnd,
+		})
+
+		workItems = append(workItems, llm.WorkItem[[]columnEnrichment]{
+			ID: fmt.Sprintf("%s-chunk-%d", entity.PrimaryTable, chunkIdx),
+			Execute: func(ctx context.Context) ([]columnEnrichment, error) {
+				s.logger.Debug("Enriching column chunk",
+					zap.String("table", entity.PrimaryTable),
+					zap.Int("chunk_start", start),
+					zap.Int("chunk_end", chunkEnd),
+					zap.Int("total_columns", len(columns)))
+
+				return s.enrichColumnBatch(ctx, projectID, llmClient, entity, chunkCols, chunkFK, chunkEnum)
+			},
+		})
+	}
+
+	// Build ID -> chunk index map for result reassembly
+	chunkIndexByID := make(map[string]int)
+	for _, meta := range chunkMetadata {
+		chunkIndexByID[fmt.Sprintf("%s-chunk-%d", entity.PrimaryTable, meta.Index)] = meta.Index
+	}
+
+	// Process chunks in parallel using worker pool
+	results := llm.Process(ctx, s.workerPool, workItems, nil)
+
+	// Aggregate results in order (by chunk index)
+	// Results come back in completion order, so we need to map them back to chunk index
+	resultsByChunk := make(map[int][]columnEnrichment)
+	for _, result := range results {
+		chunkIdx := chunkIndexByID[result.ID]
+		if result.Err != nil {
+			meta := chunkMetadata[chunkIdx]
+			return nil, fmt.Errorf("chunk %d-%d failed: %w", meta.Start, meta.End, result.Err)
+		}
+		resultsByChunk[chunkIdx] = result.Result
+	}
+
+	// Assemble results in order by chunk index
+	var allEnrichments []columnEnrichment
+	for i := 0; i < len(workItems); i++ {
+		allEnrichments = append(allEnrichments, resultsByChunk[i]...)
 	}
 
 	return allEnrichments, nil
 }
 
-// enrichColumnBatch enriches a batch of columns with retry logic.
+// enrichColumnBatch enriches a batch of columns with retry logic and circuit breaker protection.
 func (s *columnEnrichmentService) enrichColumnBatch(
 	ctx context.Context,
 	projectID uuid.UUID,
@@ -468,6 +522,17 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 	fkInfo map[string]string,
 	enumSamples map[string][]string,
 ) ([]columnEnrichment, error) {
+	// Check circuit breaker before attempting LLM call
+	allowed, err := s.circuitBreaker.Allow()
+	if !allowed {
+		s.logger.Error("Circuit breaker prevented LLM call",
+			zap.String("table", entity.PrimaryTable),
+			zap.String("circuit_state", s.circuitBreaker.State().String()),
+			zap.Int("consecutive_failures", s.circuitBreaker.ConsecutiveFailures()),
+			zap.Error(err))
+		return nil, err
+	}
+
 	systemMsg := s.columnEnrichmentSystemMessage()
 	prompt := s.buildColumnEnrichmentPrompt(entity, columns, fkInfo, enumSamples)
 
@@ -480,7 +545,7 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 	}
 
 	var result *llm.GenerateResponseResult
-	err := retry.Do(ctx, retryConfig, func() error {
+	err = retry.Do(ctx, retryConfig, func() error {
 		var retryErr error
 		result, retryErr = llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.3, false)
 		if retryErr != nil {
@@ -506,8 +571,17 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 	})
 
 	if err != nil {
+		// Record failure in circuit breaker
+		s.circuitBreaker.RecordFailure()
+		s.logger.Error("Circuit breaker recorded failure",
+			zap.String("table", entity.PrimaryTable),
+			zap.String("circuit_state", s.circuitBreaker.State().String()),
+			zap.Int("consecutive_failures", s.circuitBreaker.ConsecutiveFailures()))
 		return nil, fmt.Errorf("LLM call failed after retries: %w", err)
 	}
+
+	// Record success in circuit breaker
+	s.circuitBreaker.RecordSuccess()
 
 	// Parse response (wrapped in object for standardization)
 	response, err := llm.ParseJSONResponse[columnEnrichmentResponse](result.Content)
