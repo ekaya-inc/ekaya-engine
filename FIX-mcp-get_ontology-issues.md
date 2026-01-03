@@ -1,6 +1,6 @@
 # MCP get_ontology - Issues and Remaining Work
 
-**Last updated:** 2026-01-03
+**Last updated:** 2026-01-04
 
 ## Status
 
@@ -256,8 +256,24 @@ WHERE LOWER(h.username) = LOWER({{username}}) OR LOWER(v.username) = LOWER({{use
   - **Validation:** CreateTerm/UpdateTerm validate term name and definition required
   - **Default source:** CreateTerm sets source="user" if not provided
   - **Tests:** `pkg/services/glossary_service_test.go` (13 tests) covering CRUD operations, validation, and SuggestTerms with various scenarios (success, no ontology, no entities, LLM errors, conventions, column details)
-- [ ] **Step 5: Handler** - Create `pkg/handlers/glossary_handler.go` with HTTP endpoints
+- [x] **Step 5: Handler** ✅ COMPLETED (2026-01-04)
+  - **File:** `pkg/handlers/glossary_handler.go`
+  - **Endpoints:** GET/POST `/glossary`, GET/PUT/DELETE `/glossary/{tid}`, POST `/glossary/suggest`
+  - **Pattern:** Follows `entity_handler.go` with RegisterRoutes, uses ApiResponse wrapper
+  - **Helper added:** `ParseTermID` in `pkg/handlers/params.go` for term ID extraction
+  - **Tests:** `pkg/handlers/glossary_integration_test.go` (11 integration tests) covering all CRUD endpoints, validation, suggest, and error cases
+  - **Implementation notes for next session:**
+    - Request/response types defined: `GlossaryListResponse`, `CreateGlossaryTermRequest`, `UpdateGlossaryTermRequest`
+    - All handlers follow thin pattern: parse params → call service → format response
+    - Validation errors (missing term/definition) return 400, not found returns 404
+    - Suggest endpoint checks for ontology and returns 400 if none exists
+    - Uses same auth/tenant middleware pattern as other handlers
 - [ ] **Step 6: Register in main.go** - Wire up handler registration
+  - Add after other handler registrations (around line 360 in main.go)
+  - Requires: `glossaryRepo := repositories.NewGlossaryRepository()`
+  - Requires: `glossaryService := services.NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, llmClientFactory, logger)`
+  - Requires: `glossaryHandler := handlers.NewGlossaryHandler(glossaryService, logger)`
+  - Call: `glossaryHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)`
 - [ ] **Step 7: Expose in get_ontology** - Add `get_glossary` MCP tool or include in domain depth
 
 **Why This Matters for MCP Clients:** When asked "What's our revenue?", the agent needs to know:
