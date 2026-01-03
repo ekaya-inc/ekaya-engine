@@ -39,40 +39,41 @@ func NewWorkerPool(config WorkerPoolConfig, logger *zap.Logger) *WorkerPool {
 }
 
 // WorkItem represents a unit of work to be processed.
-type WorkItem struct {
+type WorkItem[T any] struct {
 	ID      string                                 // For logging/tracking
-	Execute func(ctx context.Context) (any, error) // The LLM call to make
+	Execute func(ctx context.Context) (T, error)  // The work to be executed
 }
 
 // WorkResult represents the result of a work item.
-type WorkResult struct {
+type WorkResult[T any] struct {
 	ID     string
-	Result any
+	Result T
 	Err    error
 }
 
 // Process executes all work items with bounded parallelism.
 // Returns results in completion order (not submission order).
 // Continues processing all items even if some fail.
-func (p *WorkerPool) Process(
+func Process[T any](
 	ctx context.Context,
-	items []WorkItem,
+	pool *WorkerPool,
+	items []WorkItem[T],
 	onProgress func(completed, total int),
-) []WorkResult {
+) []WorkResult[T] {
 	if len(items) == 0 {
 		return nil
 	}
 
-	results := make([]WorkResult, 0, len(items))
-	resultsChan := make(chan WorkResult, len(items))
-	sem := make(chan struct{}, p.config.MaxConcurrent)
+	results := make([]WorkResult[T], 0, len(items))
+	resultsChan := make(chan WorkResult[T], len(items))
+	sem := make(chan struct{}, pool.config.MaxConcurrent)
 
 	var wg sync.WaitGroup
 
 	// Submit all work items
 	for _, item := range items {
 		wg.Add(1)
-		go func(item WorkItem) {
+		go func(item WorkItem[T]) {
 			defer wg.Done()
 
 			// Acquire semaphore slot (blocks if at max concurrency)
@@ -80,13 +81,14 @@ func (p *WorkerPool) Process(
 			case sem <- struct{}{}:
 				defer func() { <-sem }() // Release slot when done
 			case <-ctx.Done():
-				resultsChan <- WorkResult{ID: item.ID, Err: ctx.Err()}
+				var zero T
+				resultsChan <- WorkResult[T]{ID: item.ID, Result: zero, Err: ctx.Err()}
 				return
 			}
 
-			// Execute the LLM call
+			// Execute the work
 			result, err := item.Execute(ctx)
-			resultsChan <- WorkResult{
+			resultsChan <- WorkResult[T]{
 				ID:     item.ID,
 				Result: result,
 				Err:    err,

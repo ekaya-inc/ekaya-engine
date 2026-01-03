@@ -9,7 +9,7 @@ Branch: `ddanieli/create-ontology-workflow-dag`
 |-------|----------|--------|-------|
 | Issue 1: Missing RLS on 5 tables | High | ✅ DONE | Migration 024 created |
 | Issue 2: DAG startup error propagation | Medium | ✅ DONE | Error messages now stored on nodes |
-| Issue 3: Worker Pool generics | Minor | 📋 TODO | Type safety |
+| Issue 3: Worker Pool generics | Minor | ✅ DONE | Completed 2026-01-03 |
 | Issue 4: Column chunk parallelism | Minor | 📋 TODO | Performance |
 | Issue 5: Heartbeat goroutine leak | Low | 📋 TODO | Edge case |
 | Issue 6: UI stale closure | Low | 📋 TODO | React best practice |
@@ -285,9 +285,10 @@ Added 5 comprehensive unit tests covering all scenarios:
 
 ---
 
-## Issue 3: Worker Pool Uses `any` Instead of Generics
+## Issue 3: Worker Pool Uses `any` Instead of Generics ✅
 
 **Severity:** Minor
+**Status:** COMPLETED 2026-01-03
 
 ### Problem
 
@@ -357,22 +358,67 @@ Update callers in:
 - `pkg/services/column_enrichment.go`
 - `pkg/services/relationship_enrichment.go`
 
-### Alternative
+### Implementation Summary
 
-If generics cause issues, document that callers must type-assert and add helper functions:
+**Completed:** 2026-01-03
 
+Successfully converted worker pool from `any` to generics, achieving compile-time type safety and eliminating runtime type assertions.
+
+**Key Implementation Decisions:**
+
+1. **Process function is a standalone generic function, not a method**
+   - Signature: `func Process[T any](ctx context.Context, pool *WorkerPool, items []WorkItem[T], ...) []WorkResult[T]`
+   - **Why:** Go methods cannot have type parameters beyond their receiver type
+   - **Migration path:** Change `pool.Process(...)` to `llm.Process(ctx, pool, ...)`
+
+2. **Type parameters propagate through the stack:**
+   - `WorkItem[T any]` with typed `Execute` function
+   - `WorkResult[T any]` with typed `Result` field
+   - Callers specify concrete types: `WorkItem[string]`, `WorkItem[*batchResult]`
+
+3. **Zero value handling in cancellation path:**
+   - When context is cancelled before execution, must return zero value of type `T`
+   - See `pkg/llm/worker_pool.go:84-85` for pattern
+
+**Migration Pattern for Future Sessions:**
+
+When adding new worker pool usage:
 ```go
-func AsString(r WorkResult) (string, error) {
+// Build typed work items
+items := []llm.WorkItem[YourType]{
+    {
+        ID: "work-1",
+        Execute: func(ctx context.Context) (YourType, error) {
+            // Your work here
+            return result, nil
+        },
+    },
+}
+
+// Process with explicit type parameter
+results := llm.Process(ctx, pool, items, progressCallback)
+
+// Results are typed - no assertions needed
+for _, r := range results {
     if r.Err != nil {
-        return "", r.Err
+        // handle error
     }
-    s, ok := r.Result.(string)
-    if !ok {
-        return "", fmt.Errorf("expected string, got %T", r.Result)
-    }
-    return s, nil
+    // r.Result is YourType, not any
 }
 ```
+
+**Testing:**
+- All 8 worker pool unit tests pass
+- All 13 column enrichment integration tests pass
+- All 8 relationship enrichment integration tests pass
+- No runtime behavior changes - tests unchanged except for types
+
+### Files Modified
+
+- `pkg/llm/worker_pool.go`: Converted to generics (lines 42-115)
+- `pkg/services/column_enrichment.go`: Updated to use `WorkItem[string]` (lines 107-145)
+- `pkg/services/relationship_enrichment.go`: Updated to use `WorkItem[*batchResult]` (lines 117-144)
+- `pkg/llm/worker_pool_test.go`: Updated all test cases to use typed work items
 
 ---
 

@@ -114,7 +114,7 @@ func (s *relationshipEnrichmentService) EnrichProject(ctx context.Context, proje
 
 	// Build work items for parallel processing
 	const batchSize = 20
-	var workItems []llm.WorkItem
+	var workItems []llm.WorkItem[*batchResult]
 	for i := 0; i < len(validRelationships); i += batchSize {
 		end := i + batchSize
 		if end > len(validRelationships) {
@@ -125,16 +125,16 @@ func (s *relationshipEnrichmentService) EnrichProject(ctx context.Context, proje
 
 		// Capture batch for closure
 		batchCopy := batch
-		workItems = append(workItems, llm.WorkItem{
+		workItems = append(workItems, llm.WorkItem[*batchResult]{
 			ID: batchID,
-			Execute: func(ctx context.Context) (any, error) {
+			Execute: func(ctx context.Context) (*batchResult, error) {
 				return s.enrichBatchInternal(ctx, projectID, batchCopy, entityByID)
 			},
 		})
 	}
 
 	// Process all batches with worker pool
-	batchResults := s.workerPool.Process(ctx, workItems, func(completed, total int) {
+	batchResults := llm.Process(ctx, s.workerPool, workItems, func(completed, total int) {
 		if progressCallback != nil {
 			// Estimate relationship progress based on batch completion
 			relProgress := (completed * len(validRelationships)) / total
@@ -151,13 +151,11 @@ func (s *relationshipEnrichmentService) EnrichProject(ctx context.Context, proje
 				zap.Error(r.Err))
 			// Count batch size as failed (result may be nil on error)
 			if r.Result != nil {
-				batchRes := r.Result.(*batchResult)
-				result.RelationshipsFailed += batchRes.BatchSize
+				result.RelationshipsFailed += r.Result.BatchSize
 			}
 		} else {
-			batchRes := r.Result.(*batchResult)
-			result.RelationshipsEnriched += batchRes.Enriched
-			result.RelationshipsFailed += batchRes.Failed
+			result.RelationshipsEnriched += r.Result.Enriched
+			result.RelationshipsFailed += r.Result.Failed
 		}
 	}
 

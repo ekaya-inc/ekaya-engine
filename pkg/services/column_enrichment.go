@@ -104,12 +104,12 @@ func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID u
 	}
 
 	// Build work items for parallel processing
-	var workItems []llm.WorkItem
+	var workItems []llm.WorkItem[string]
 	for _, tableName := range tableNames {
 		name := tableName // Capture for closure
-		workItems = append(workItems, llm.WorkItem{
+		workItems = append(workItems, llm.WorkItem[string]{
 			ID: name,
-			Execute: func(ctx context.Context) (any, error) {
+			Execute: func(ctx context.Context) (string, error) {
 				// Acquire a fresh database connection for this work item to avoid
 				// concurrent access issues when multiple workers share the same context.
 				// Each worker goroutine needs its own connection since pgx connections
@@ -137,7 +137,7 @@ func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID u
 	}
 
 	// Process all tables with worker pool
-	tableResults := s.workerPool.Process(ctx, workItems, func(completed, total int) {
+	tableResults := llm.Process(ctx, s.workerPool, workItems, func(completed, total int) {
 		if progressCallback != nil {
 			progressCallback(completed, total,
 				fmt.Sprintf("Enriching columns (%d/%d tables)...", completed, total))
