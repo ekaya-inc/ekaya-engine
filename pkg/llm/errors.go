@@ -75,8 +75,10 @@ func ClassifyError(err error) *Error {
 		return NewError(ErrorTypeEndpoint, "connection failed", true, err)
 	}
 
-	// Timeout (retryable)
-	if strings.Contains(lower, "timeout") {
+	// Timeout and deadline exceeded (retryable)
+	if strings.Contains(lower, "timeout") ||
+		strings.Contains(lower, "deadline exceeded") ||
+		strings.Contains(lower, "context canceled") {
 		return NewError(ErrorTypeEndpoint, "request timeout", true, err)
 	}
 

@@ -4,12 +4,17 @@ package llm
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
 )
+
+// DefaultRequestTimeout is the maximum time to wait for an LLM response.
+// This prevents hanging indefinitely when the LLM server stops responding.
+const DefaultRequestTimeout = 5 * time.Minute
 
 // Client provides access to OpenAI-compatible LLM endpoints.
 type Client struct {
@@ -29,6 +34,8 @@ type Config struct {
 }
 
 // NewClient creates a new OpenAI-compatible LLM client.
+// The client uses a 5-minute HTTP timeout to prevent hanging indefinitely
+// when the LLM server stops responding (e.g., after a GPU crash).
 func NewClient(cfg *Config, logger *zap.Logger) (*Client, error) {
 	if cfg.Endpoint == "" {
 		return nil, fmt.Errorf("endpoint is required")
@@ -39,6 +46,11 @@ func NewClient(cfg *Config, logger *zap.Logger) (*Client, error) {
 
 	clientConfig := openai.DefaultConfig(cfg.APIKey)
 	clientConfig.BaseURL = strings.TrimSuffix(cfg.Endpoint, "/")
+
+	// Use custom HTTP client with timeout to prevent hanging on unresponsive servers
+	clientConfig.HTTPClient = &http.Client{
+		Timeout: DefaultRequestTimeout,
+	}
 
 	return &Client{
 		client:    openai.NewClientWithConfig(clientConfig),
