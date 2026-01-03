@@ -10,6 +10,7 @@ import type {
   CreateDatasourceResponse,
   CreateQueryRequest,
   CreateRelationshipRequest,
+  DAGStatusResponse,
   DatasourceConfig,
   DatasourceSchema,
   DatasourceType,
@@ -17,7 +18,6 @@ import type {
   DeleteQueryResponse,
   DiscoveryResults,
   EntitiesListResponse,
-  EntityDiscoveryStatus,
   ExecuteQueryRequest,
   ExecuteQueryResponse,
   GetDatasourceResponse,
@@ -30,7 +30,6 @@ import type {
   RelationshipsResponse,
   SaveSelectionsResponse,
   SchemaRefreshResponse,
-  StartEntityDiscoveryResponse,
   TestConnectionRequest,
   TestConnectionResponse,
   TestQueryRequest,
@@ -495,49 +494,6 @@ class EngineApiService {
     return this.makeRequest<EntitiesListResponse>(`/${projectId}/entities`);
   }
 
-  // --- Entity Discovery Methods ---
-
-  /**
-   * Start entity discovery workflow for a datasource
-   * POST /api/projects/{projectId}/datasources/{datasourceId}/entities/discover
-   */
-  async startEntityDiscovery(
-    projectId: string,
-    datasourceId: string
-  ): Promise<ApiResponse<StartEntityDiscoveryResponse>> {
-    return this.makeRequest<StartEntityDiscoveryResponse>(
-      `/${projectId}/datasources/${datasourceId}/entities/discover`,
-      { method: 'POST' }
-    );
-  }
-
-  /**
-   * Get entity discovery workflow status
-   * GET /api/projects/{projectId}/datasources/{datasourceId}/entities/status
-   */
-  async getEntityDiscoveryStatus(
-    projectId: string,
-    datasourceId: string
-  ): Promise<ApiResponse<EntityDiscoveryStatus>> {
-    return this.makeRequest<EntityDiscoveryStatus>(
-      `/${projectId}/datasources/${datasourceId}/entities/status`
-    );
-  }
-
-  /**
-   * Cancel entity discovery workflow
-   * POST /api/projects/{projectId}/datasources/{datasourceId}/entities/cancel
-   */
-  async cancelEntityDiscovery(
-    projectId: string,
-    datasourceId: string
-  ): Promise<ApiResponse<{ status: string }>> {
-    return this.makeRequest<{ status: string }>(
-      `/${projectId}/datasources/${datasourceId}/entities/cancel`,
-      { method: 'POST' }
-    );
-  }
-
   // --- MCP Configuration Methods ---
 
   /**
@@ -603,6 +559,62 @@ class EngineApiService {
     }
 
     return true;
+  }
+
+  // --- Ontology DAG Methods ---
+
+  /**
+   * Start or refresh ontology extraction (DAG-based)
+   * POST /api/projects/{projectId}/datasources/{datasourceId}/ontology/extract
+   */
+  async startOntologyExtraction(
+    projectId: string,
+    datasourceId: string
+  ): Promise<ApiResponse<DAGStatusResponse>> {
+    return this.makeRequest<DAGStatusResponse>(
+      `/${projectId}/datasources/${datasourceId}/ontology/extract`,
+      { method: 'POST' }
+    );
+  }
+
+  /**
+   * Get ontology DAG status (for polling)
+   * GET /api/projects/{projectId}/datasources/{datasourceId}/ontology/dag
+   */
+  async getOntologyDAGStatus(
+    projectId: string,
+    datasourceId: string
+  ): Promise<ApiResponse<DAGStatusResponse | null>> {
+    return this.makeRequest<DAGStatusResponse | null>(
+      `/${projectId}/datasources/${datasourceId}/ontology/dag`
+    );
+  }
+
+  /**
+   * Cancel a running ontology DAG
+   * POST /api/projects/{projectId}/datasources/{datasourceId}/ontology/dag/cancel
+   */
+  async cancelOntologyDAG(
+    projectId: string,
+    datasourceId: string
+  ): Promise<ApiResponse<{ status: string }>> {
+    return this.makeRequest<{ status: string }>(
+      `/${projectId}/datasources/${datasourceId}/ontology/dag/cancel`,
+      { method: 'POST' }
+    );
+  }
+
+  /**
+   * Delete all ontology data for project
+   */
+  async deleteOntology(
+    projectId: string,
+    datasourceId: string
+  ): Promise<ApiResponse<{ message: string }>> {
+    return this.makeRequest<{ message: string }>(
+      `/${projectId}/datasources/${datasourceId}/ontology`,
+      { method: 'DELETE' }
+    );
   }
 }
 

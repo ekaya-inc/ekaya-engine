@@ -8,14 +8,12 @@ import {
   Network,
   Pencil,
   Plus,
-  Sparkles,
   Trash2,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { AddRelationshipDialog } from "../components/AddRelationshipDialog";
-import { RelationshipDiscoveryProgress } from "../components/RelationshipDiscoveryProgress";
 import { RemoveRelationshipDialog } from "../components/RemoveRelationshipDialog";
 import { Button } from "../components/ui/Button";
 import {
@@ -32,6 +30,7 @@ import type { RelationshipDetail, RelationshipType, DatasourceSchema } from "../
 /**
  * RelationshipsPage - Display and manage data relationships
  * Shows all relationships between tables with filtering and grouping options.
+ * Relationship discovery is now handled by the unified DAG workflow on the Ontology page.
  */
 const RelationshipsPage = () => {
   const navigate = useNavigate();
@@ -54,29 +53,8 @@ const RelationshipsPage = () => {
 
   // Dialog state
   const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [discoveryOpen, setDiscoveryOpen] = useState(false);
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
   const [relationshipToRemove, setRelationshipToRemove] = useState<RelationshipDetail | null>(null);
-
-  // Handler for "Find Relationships" button - opens discovery progress dialog
-  const handleFindRelationships = (): void => {
-    setDiscoveryOpen(true);
-  };
-
-  // Handler for when discovery completes - refresh relationships
-  const handleDiscoveryComplete = async (): Promise<void> => {
-    if (!pid || !selectedDatasource?.datasourceId) return;
-    try {
-      const response = await engineApi.getRelationships(pid, selectedDatasource.datasourceId);
-      if (response.data) {
-        setRelationships(response.data.relationships);
-        setEmptyTables(response.data.empty_tables ?? []);
-        setOrphanTables(response.data.orphan_tables ?? []);
-      }
-    } catch (err) {
-      console.error("Failed to refresh relationships after discovery:", err);
-    }
-  };
 
   // Handler for when a new relationship is added
   const handleRelationshipAdded = (newRelationship: RelationshipDetail): void => {
@@ -283,6 +261,7 @@ const RelationshipsPage = () => {
             <h2 className="text-xl font-semibold mb-2">No Relationships Found</h2>
             <p className="text-sm text-muted-foreground mb-6">
               No foreign key or inferred relationships have been discovered yet.
+              Run the ontology extraction workflow to discover relationships.
               {totalTablesInSchema > 0 && (
                 <span className="block mt-2 text-amber-600 dark:text-amber-400 font-medium">
                   {totalTablesInSchema} table{totalTablesInSchema !== 1 ? 's' : ''} in the schema could have relationships.
@@ -290,16 +269,10 @@ const RelationshipsPage = () => {
               )}
             </p>
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              {totalTablesInSchema > 0 && (
-                <Button
-                  variant="default"
-                  onClick={handleFindRelationships}
-                  className="bg-amber-600 hover:bg-amber-700 text-white"
-                >
-                  <Sparkles className="mr-2 h-4 w-4" />
-                  Find Relationships
-                </Button>
-              )}
+              <Button onClick={() => navigate(`/projects/${pid}/ontology`)}>
+                Go to Ontology
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
               <Button variant="outline" onClick={() => setAddDialogOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" />
                 Add Relationship
@@ -316,15 +289,6 @@ const RelationshipsPage = () => {
           datasourceId={selectedDatasource?.datasourceId ?? ''}
           schema={schema}
           onRelationshipAdded={handleRelationshipAdded}
-        />
-
-        {/* Relationship Discovery Progress (for empty state) */}
-        <RelationshipDiscoveryProgress
-          projectId={pid ?? ''}
-          datasourceId={selectedDatasource?.datasourceId ?? ''}
-          isOpen={discoveryOpen}
-          onClose={() => setDiscoveryOpen(false)}
-          onComplete={handleDiscoveryComplete}
         />
       </div>
     );
@@ -383,13 +347,12 @@ const RelationshipsPage = () => {
                 </div>
               </div>
               <Button
-                variant="default"
+                variant="outline"
                 size="sm"
-                onClick={handleFindRelationships}
-                className="bg-amber-600 hover:bg-amber-700 text-white"
+                onClick={() => navigate(`/projects/${pid}/ontology`)}
               >
-                <Sparkles className="mr-2 h-4 w-4" />
-                Find Relationships
+                Go to Ontology
+                <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </div>
           )}
@@ -664,15 +627,6 @@ const RelationshipsPage = () => {
         datasourceId={selectedDatasource?.datasourceId ?? ''}
         schema={schema}
         onRelationshipAdded={handleRelationshipAdded}
-      />
-
-      {/* Relationship Discovery Progress */}
-      <RelationshipDiscoveryProgress
-        projectId={pid ?? ''}
-        datasourceId={selectedDatasource?.datasourceId ?? ''}
-        isOpen={discoveryOpen}
-        onClose={() => setDiscoveryOpen(false)}
-        onComplete={handleDiscoveryComplete}
       />
 
       {/* Remove Relationship Confirmation */}

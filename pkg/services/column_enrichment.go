@@ -14,6 +14,8 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
+	"github.com/ekaya-inc/ekaya-engine/pkg/retry"
+	"github.com/ekaya-inc/ekaya-engine/pkg/services/dag"
 )
 
 // ColumnEnrichmentService provides semantic enrichment for database columns.
@@ -24,7 +26,8 @@ type ColumnEnrichmentService interface {
 
 	// EnrichProject enriches all tables in a project.
 	// Returns the enrichment result with success/failure counts.
-	EnrichProject(ctx context.Context, projectID uuid.UUID, tableNames []string) (*EnrichColumnsResult, error)
+	// The progressCallback is called after each table to report progress (can be nil).
+	EnrichProject(ctx context.Context, projectID uuid.UUID, tableNames []string, progressCallback dag.ProgressCallback) (*EnrichColumnsResult, error)
 }
 
 // EnrichColumnsResult holds the result of a column enrichment operation.
@@ -42,6 +45,7 @@ type columnEnrichmentService struct {
 	dsSvc            DatasourceService
 	adapterFactory   datasource.DatasourceAdapterFactory
 	llmFactory       llm.LLMClientFactory
+	workerPool       *llm.WorkerPool
 	getTenantCtx     TenantContextFunc
 	logger           *zap.Logger
 }
@@ -55,6 +59,7 @@ func NewColumnEnrichmentService(
 	dsSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
+	workerPool *llm.WorkerPool,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) ColumnEnrichmentService {
@@ -66,6 +71,7 @@ func NewColumnEnrichmentService(
 		dsSvc:            dsSvc,
 		adapterFactory:   adapterFactory,
 		llmFactory:       llmFactory,
+		workerPool:       workerPool,
 		getTenantCtx:     getTenantCtx,
 		logger:           logger.Named("column-enrichment"),
 	}
@@ -74,7 +80,7 @@ func NewColumnEnrichmentService(
 var _ ColumnEnrichmentService = (*columnEnrichmentService)(nil)
 
 // EnrichProject enriches all specified tables (or all entities if empty).
-func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID uuid.UUID, tableNames []string) (*EnrichColumnsResult, error) {
+func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID uuid.UUID, tableNames []string, progressCallback dag.ProgressCallback) (*EnrichColumnsResult, error) {
 	startTime := time.Now()
 	result := &EnrichColumnsResult{
 		TablesEnriched: []string{},
@@ -97,15 +103,54 @@ func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID u
 		return result, nil
 	}
 
-	// Enrich each table, continuing on failure
+	// Build work items for parallel processing
+	var workItems []llm.WorkItem
 	for _, tableName := range tableNames {
-		if err := s.EnrichTable(ctx, projectID, tableName); err != nil {
-			s.logger.Error("Failed to enrich table",
-				zap.String("table", tableName),
-				zap.Error(err))
-			result.TablesFailed[tableName] = err.Error()
+		name := tableName // Capture for closure
+		workItems = append(workItems, llm.WorkItem{
+			ID: name,
+			Execute: func(ctx context.Context) (any, error) {
+				// Acquire a fresh database connection for this work item to avoid
+				// concurrent access issues when multiple workers share the same context.
+				// Each worker goroutine needs its own connection since pgx connections
+				// are not safe for concurrent use.
+				var workCtx context.Context
+				var cleanup func()
+				if s.getTenantCtx != nil {
+					var err error
+					workCtx, cleanup, err = s.getTenantCtx(ctx, projectID)
+					if err != nil {
+						return name, fmt.Errorf("acquire tenant context: %w", err)
+					}
+					defer cleanup()
+				} else {
+					// For tests that don't use real database connections
+					workCtx = ctx
+				}
+
+				if err := s.EnrichTable(workCtx, projectID, name); err != nil {
+					return name, err
+				}
+				return name, nil
+			},
+		})
+	}
+
+	// Process all tables with worker pool
+	tableResults := s.workerPool.Process(ctx, workItems, func(completed, total int) {
+		if progressCallback != nil {
+			progressCallback(completed, total,
+				fmt.Sprintf("Enriching columns (%d/%d tables)...", completed, total))
+		}
+	})
+
+	// Aggregate results
+	for _, r := range tableResults {
+		if r.Err != nil {
+			s.logTableFailure(r.ID, "Failed to enrich table", r.Err)
+			result.TablesFailed[r.ID] = r.Err.Error()
 		} else {
-			result.TablesEnriched = append(result.TablesEnriched, tableName)
+			result.TablesEnriched = append(result.TablesEnriched, r.ID)
 		}
 	}
 
@@ -336,6 +381,7 @@ type columnEnrichment struct {
 }
 
 // enrichColumnsWithLLM uses the LLM to generate semantic metadata for columns.
+// Implements chunking for large tables and retry logic for transient failures.
 func (s *columnEnrichmentService) enrichColumnsWithLLM(
 	ctx context.Context,
 	projectID uuid.UUID,
@@ -349,17 +395,128 @@ func (s *columnEnrichmentService) enrichColumnsWithLLM(
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
 
+	// Chunk columns if table has many columns to avoid context limits
+	const maxColumnsPerChunk = 50
+	if len(columns) > maxColumnsPerChunk {
+		s.logger.Info("Table has many columns, using chunked enrichment",
+			zap.String("table", entity.PrimaryTable),
+			zap.Int("total_columns", len(columns)),
+			zap.Int("chunk_size", maxColumnsPerChunk))
+		return s.enrichColumnsInChunks(ctx, projectID, llmClient, entity, columns, fkInfo, enumSamples, maxColumnsPerChunk)
+	}
+
+	// Single batch enrichment with retry
+	return s.enrichColumnBatch(ctx, projectID, llmClient, entity, columns, fkInfo, enumSamples)
+}
+
+// enrichColumnsInChunks processes columns in chunks to avoid context limits.
+func (s *columnEnrichmentService) enrichColumnsInChunks(
+	ctx context.Context,
+	projectID uuid.UUID,
+	llmClient llm.LLMClient,
+	entity *models.OntologyEntity,
+	columns []*models.SchemaColumn,
+	fkInfo map[string]string,
+	enumSamples map[string][]string,
+	chunkSize int,
+) ([]columnEnrichment, error) {
+	var allEnrichments []columnEnrichment
+
+	for i := 0; i < len(columns); i += chunkSize {
+		end := i + chunkSize
+		if end > len(columns) {
+			end = len(columns)
+		}
+		chunk := columns[i:end]
+
+		s.logger.Debug("Enriching column chunk",
+			zap.String("table", entity.PrimaryTable),
+			zap.Int("chunk_start", i),
+			zap.Int("chunk_end", end),
+			zap.Int("total_columns", len(columns)))
+
+		// Filter FK info and enum samples to only include columns in this chunk
+		chunkFKInfo := make(map[string]string)
+		chunkEnumSamples := make(map[string][]string)
+		for _, col := range chunk {
+			if target, ok := fkInfo[col.ColumnName]; ok {
+				chunkFKInfo[col.ColumnName] = target
+			}
+			if samples, ok := enumSamples[col.ColumnName]; ok {
+				chunkEnumSamples[col.ColumnName] = samples
+			}
+		}
+
+		enrichments, err := s.enrichColumnBatch(ctx, projectID, llmClient, entity, chunk, chunkFKInfo, chunkEnumSamples)
+		if err != nil {
+			return nil, fmt.Errorf("chunk %d-%d failed: %w", i, end, err)
+		}
+
+		allEnrichments = append(allEnrichments, enrichments...)
+	}
+
+	return allEnrichments, nil
+}
+
+// enrichColumnBatch enriches a batch of columns with retry logic.
+func (s *columnEnrichmentService) enrichColumnBatch(
+	ctx context.Context,
+	projectID uuid.UUID,
+	llmClient llm.LLMClient,
+	entity *models.OntologyEntity,
+	columns []*models.SchemaColumn,
+	fkInfo map[string]string,
+	enumSamples map[string][]string,
+) ([]columnEnrichment, error) {
 	systemMsg := s.columnEnrichmentSystemMessage()
 	prompt := s.buildColumnEnrichmentPrompt(entity, columns, fkInfo, enumSamples)
 
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.3, false)
+	// Retry LLM call with exponential backoff
+	retryConfig := &retry.Config{
+		MaxRetries:   3,
+		InitialDelay: 500 * time.Millisecond,
+		MaxDelay:     10 * time.Second,
+		Multiplier:   2.0,
+	}
+
+	var result *llm.GenerateResponseResult
+	err := retry.Do(ctx, retryConfig, func() error {
+		var retryErr error
+		result, retryErr = llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.3, false)
+		if retryErr != nil {
+			// Classify error to determine if retryable
+			classified := llm.ClassifyError(retryErr)
+			if classified.Retryable {
+				s.logger.Warn("LLM call failed, retrying",
+					zap.String("table", entity.PrimaryTable),
+					zap.Int("column_count", len(columns)),
+					zap.String("error_type", string(classified.Type)),
+					zap.Error(retryErr))
+				return retryErr
+			}
+			// Non-retryable error, fail immediately
+			s.logger.Error("LLM call failed with non-retryable error",
+				zap.String("table", entity.PrimaryTable),
+				zap.Int("column_count", len(columns)),
+				zap.String("error_type", string(classified.Type)),
+				zap.Error(retryErr))
+			return retryErr
+		}
+		return nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("LLM call failed: %w", err)
+		return nil, fmt.Errorf("LLM call failed after retries: %w", err)
 	}
 
 	// Parse response (wrapped in object for standardization)
 	response, err := llm.ParseJSONResponse[columnEnrichmentResponse](result.Content)
 	if err != nil {
+		s.logger.Error("Failed to parse LLM response",
+			zap.String("table", entity.PrimaryTable),
+			zap.Int("column_count", len(columns)),
+			zap.String("response_preview", truncateString(result.Content, 200)),
+			zap.Error(err))
 		return nil, fmt.Errorf("parse LLM response: %w", err)
 	}
 
@@ -526,4 +683,22 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 	}
 
 	return details
+}
+
+// logTableFailure logs detailed information about a failed table enrichment.
+func (s *columnEnrichmentService) logTableFailure(
+	tableName string,
+	reason string,
+	err error,
+) {
+	fields := []zap.Field{
+		zap.String("table", tableName),
+		zap.String("reason", reason),
+	}
+
+	if err != nil {
+		fields = append(fields, zap.Error(err))
+	}
+
+	s.logger.Error("Table enrichment failed", fields...)
 }

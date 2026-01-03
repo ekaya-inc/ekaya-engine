@@ -210,80 +210,72 @@ When manually testing the ontology extraction workflow, use Chrome browser integ
 
 | Table | Purpose |
 |-------|---------|
-| `engine_ontology_workflows` | Workflow state, progress, task queue |
-| `engine_ontologies` | Ontology data (entity_summaries, column_details) |
-| `engine_ontology_questions` | Questions generated during analysis (decoupled from workflow) |
-| `engine_ontology_chat_messages` | LLM conversation history |
-| `engine_workflow_state` | Per-entity state (table/column/global). Preserved after workflow completes for assessor scripts; deleted when new extraction starts. |
+| `engine_ontology_dag` | DAG workflow state, progress, current step |
+| `engine_dag_nodes` | Individual DAG node states (one per step) |
+| `engine_ontologies` | Ontology data (domain_summary, entity_summaries, column_details) |
+| `engine_ontology_entities` | Discovered entities with descriptions and metadata |
+| `engine_entity_relationships` | Relationships between entities |
+| `engine_ontology_questions` | Questions generated during analysis |
+| `engine_ontology_chat_messages` | Ontology-specific chat history |
+| `engine_llm_conversations` | All LLM request/response logs |
 | `engine_project_knowledge` | Project-level knowledge and context |
 
 ### Clear Tables Before Testing
 
 ```sql
-TRUNCATE engine_ontology_workflows, engine_ontologies, engine_ontology_questions, engine_ontology_chat_messages, engine_workflow_state, engine_project_knowledge CASCADE;
+TRUNCATE engine_ontology_dag, engine_dag_nodes, engine_ontologies, engine_ontology_entities, engine_entity_relationships, engine_ontology_questions, engine_ontology_chat_messages, engine_llm_conversations, engine_project_knowledge CASCADE;
 ```
 
-### Monitor Workflow Progress
+### Monitor DAG Workflow Progress
 
 ```sql
--- Overall workflow state and timing
-SELECT state, progress->>'message' as msg,
+-- Overall DAG state and timing
+SELECT state, current_step, progress,
        EXTRACT(EPOCH FROM (COALESCE(completed_at, now()) - started_at))::int as elapsed_seconds
-FROM engine_ontology_workflows ORDER BY created_at DESC LIMIT 1;
+FROM engine_ontology_dag ORDER BY created_at DESC LIMIT 1;
 
--- Task queue size
-SELECT jsonb_array_length(task_queue) as queue_size
-FROM engine_ontology_workflows ORDER BY created_at DESC LIMIT 1;
+-- DAG node states
+SELECT node_id, state, started_at, completed_at
+FROM engine_dag_nodes ORDER BY started_at;
 ```
 
-### Monitor Entity States
+### Monitor Entities and Relationships
 
 ```sql
--- Entity state summary by type and status
-SELECT entity_type, status, COUNT(*)
-FROM engine_workflow_state
-GROUP BY entity_type, status
-ORDER BY entity_type, status;
+-- Entity count and enrichment status
+SELECT COUNT(*) as total,
+       COUNT(*) FILTER (WHERE description IS NOT NULL) as enriched
+FROM engine_ontology_entities;
 
--- Find entities blocking workflow (not complete/failed)
-SELECT entity_key, status, state_data
-FROM engine_workflow_state
-WHERE status NOT IN ('complete', 'failed');
-```
-
-### Check Questions Queue
-
-Questions are stored in `state_data` JSONB for entities with `status = 'needs_input'`:
-
-```sql
--- Find entities needing user input
-SELECT entity_key, state_data->'questions' as questions
-FROM engine_workflow_state
-WHERE status = 'needs_input';
-
--- Count required vs optional questions (parse from state_data)
-SELECT entity_key,
-       jsonb_array_length(state_data->'questions') as total_questions,
-       state_data->'llm_analysis'->>'has_required_questions' as has_required
-FROM engine_workflow_state
-WHERE status = 'needs_input';
+-- Relationship count and enrichment status
+SELECT COUNT(*) as total,
+       COUNT(*) FILTER (WHERE description IS NOT NULL) as enriched
+FROM engine_entity_relationships;
 ```
 
 ### Check Entity Summaries Written
 
 ```sql
--- Count entity summaries
+-- Count entity summaries in ontology
 SELECT jsonb_object_keys(entity_summaries) as entity
 FROM engine_ontologies WHERE is_active = true;
 ```
 
 ### What to Watch For
 
-1. **Progress updates** - Should increment after each batch completes
-2. **Parallel execution** - Work Queue should show multiple "Processing" tasks
-3. **Stuck workflows** - Check for `needs_input` status blocking completion
-4. **Task failures** - Check `last_error` in `engine_workflow_state`
-5. **Token limit errors** - Large tables may exceed LLM context limits
+1. **DAG state progression** - Should move through steps: EntityDiscovery → EntityEnrichment → RelationshipDiscovery → RelationshipEnrichment → OntologyFinalization → ColumnEnrichment
+2. **Parallel execution** - Multiple LLM calls processed concurrently within each step
+3. **Entity/relationship counts** - Should match expected schema size
+4. **Token limit errors** - Large tables may exceed LLM context limits
+
+### LLM Debug Logging
+
+When built with the `debug` tag, LLM request/response pairs are written to:
+```
+$TMPDIR/ekaya-engine-llm-conversations
+```
+
+Files are named with timestamps: `<timestamp>_<model>_request.txt` and `<timestamp>_<model>_response.txt`.
 
 ## Manual Testing: MCP Server
 

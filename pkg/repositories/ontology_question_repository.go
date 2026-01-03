@@ -13,6 +13,12 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
+// QuestionCounts represents the count of required and optional pending questions.
+type QuestionCounts struct {
+	Required int `json:"required"`
+	Optional int `json:"optional"`
+}
+
 // OntologyQuestionRepository provides data access for ontology questions.
 type OntologyQuestionRepository interface {
 	// Create inserts a new question.
@@ -41,6 +47,9 @@ type OntologyQuestionRepository interface {
 
 	// ListByOntologyID returns all questions for an ontology (for deduplication).
 	ListByOntologyID(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyQuestion, error)
+
+	// DeleteByProject deletes all questions for a project.
+	DeleteByProject(ctx context.Context, projectID uuid.UUID) error
 }
 
 type ontologyQuestionRepository struct{}
@@ -361,6 +370,22 @@ func (r *ontologyQuestionRepository) ListByOntologyID(ctx context.Context, ontol
 	}
 
 	return questions, nil
+}
+
+func (r *ontologyQuestionRepository) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `DELETE FROM engine_ontology_questions WHERE project_id = $1`
+
+	_, err := scope.Conn.Exec(ctx, query, projectID)
+	if err != nil {
+		return fmt.Errorf("delete questions by project: %w", err)
+	}
+
+	return nil
 }
 
 // ============================================================================

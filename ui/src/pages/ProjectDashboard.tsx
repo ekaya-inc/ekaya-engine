@@ -353,7 +353,7 @@ const ProjectDashboard = () => {
     },
     {
       id: 'community' as const,
-      title: 'Community Model',
+      title: 'Community Models',
       badge: 'Easy',
       badgeColor: 'bg-gray-500 text-white',
     },
@@ -400,6 +400,13 @@ const ProjectDashboard = () => {
 
   const intelligenceTiles: Tile[] = [
     {
+      title: 'Ontology',
+      icon: Layers,
+      path: `/projects/${pid}/ontology`,
+      disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
+      color: 'purple',
+    },
+    {
       title: 'Entities',
       icon: Boxes,
       path: `/projects/${pid}/entities`,
@@ -412,13 +419,6 @@ const ProjectDashboard = () => {
       path: `/projects/${pid}/relationships`,
       disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
       color: 'indigo',
-    },
-    {
-      title: 'Ontology',
-      icon: Layers,
-      path: `/projects/${pid}/ontology`,
-      disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
-      color: 'purple',
     },
   ];
 
@@ -843,10 +843,15 @@ const ProjectDashboard = () => {
           {selectedAIOption === 'community' && (
             <div className="rounded-b-lg bg-surface-secondary p-6 border border-t-0 border-border-light">
               <p className="text-text-secondary mb-4">
-                The Ekaya Community Models are free to use. We fine-tune the Community Models using anonymized schema, natural language and SQL queries from participants. The end result is a more robust and accurate model than the frontier models in this domain.
+                The Ekaya Community Models are open weight and free to use. We fine-tune the Community Models using anonymized schema, natural language and SQL queries from participants who opt-in to sharing their data. The end result is a more robust and accurate model than the frontier models in this domain.
               </p>
-              <div className="flex items-center justify-center py-8 text-text-tertiary">
-                <span className="text-lg font-medium">Coming Soon</span>
+              <div className="flex items-center justify-center py-8">
+                <a
+                  href="mailto:support@ekaya.ai?subject=Add Community Models to my installation"
+                  className="rounded-lg px-6 py-3 text-sm font-medium bg-surface-submit text-white hover:bg-surface-submit-hover transition-colors"
+                >
+                  Contact Support
+                </a>
               </div>
             </div>
           )}
@@ -882,8 +887,13 @@ const ProjectDashboard = () => {
               <p className="text-text-secondary mb-4">
                 These models have been fine-tuned for this domain and include prevention of SQL and LLM prompt injection attacks as well as detecting data leakage. These models are required for some features.
               </p>
-              <div className="flex items-center justify-center py-8 text-text-tertiary">
-                <span className="text-lg font-medium">Coming Soon</span>
+              <div className="flex items-center justify-center py-8">
+                <a
+                  href="mailto:sales@ekaya.ai?subject=Add Security Models to my installation"
+                  className="rounded-lg px-6 py-3 text-sm font-medium bg-surface-submit text-white hover:bg-surface-submit-hover transition-colors"
+                >
+                  Contact Sales
+                </a>
               </div>
             </div>
           )}

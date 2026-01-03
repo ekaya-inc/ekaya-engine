@@ -133,14 +133,12 @@ func main() {
 
 	// Ontology repositories
 	ontologyRepo := repositories.NewOntologyRepository()
-	ontologyWorkflowRepo := repositories.NewOntologyWorkflowRepository()
 	ontologyChatRepo := repositories.NewOntologyChatRepository()
 	knowledgeRepo := repositories.NewKnowledgeRepository()
-	workflowStateRepo := repositories.NewWorkflowStateRepository()
 	ontologyQuestionRepo := repositories.NewOntologyQuestionRepository()
-	relationshipCandidateRepo := repositories.NewRelationshipCandidateRepository()
 	ontologyEntityRepo := repositories.NewOntologyEntityRepository()
 	entityRelationshipRepo := repositories.NewEntityRelationshipRepository()
+	ontologyDAGRepo := repositories.NewOntologyDAGRepository()
 
 	// Create connection manager with config-driven settings
 	connManagerCfg := datasource.ConnectionManagerConfig{
@@ -174,8 +172,8 @@ func main() {
 	// Ontology services
 	knowledgeService := services.NewKnowledgeService(knowledgeRepo, logger)
 	ontologyBuilderService := services.NewOntologyBuilderService(
-		ontologyRepo, schemaRepo, ontologyWorkflowRepo,
-		knowledgeRepo, workflowStateRepo, ontologyEntityRepo, entityRelationshipRepo,
+		ontologyRepo, schemaRepo, ontologyDAGRepo,
+		knowledgeRepo, ontologyEntityRepo, entityRelationshipRepo,
 		llmFactory, logger)
 	ontologyQuestionService := services.NewOntologyQuestionService(
 		ontologyQuestionRepo, ontologyRepo, knowledgeRepo,
@@ -187,36 +185,45 @@ func main() {
 	convRecorder := llm.NewAsyncConversationRecorder(convRepo, llm.TenantContextFunc(getTenantCtx), logger, 100)
 	llmFactory.SetRecorder(convRecorder)
 
-	ontologyWorkflowService := services.NewOntologyWorkflowService(
-		ontologyWorkflowRepo, ontologyRepo, schemaRepo, workflowStateRepo, ontologyQuestionRepo,
-		convRepo, datasourceService, adapterFactory, ontologyBuilderService, getTenantCtx, logger)
 	ontologyChatService := services.NewOntologyChatService(
 		ontologyChatRepo, ontologyRepo, knowledgeRepo,
-		schemaRepo, ontologyWorkflowRepo, workflowStateRepo,
+		schemaRepo, ontologyDAGRepo,
 		ontologyEntityRepo, entityRelationshipRepo,
 		llmFactory, datasourceService, adapterFactory, logger)
 	deterministicRelationshipService := services.NewDeterministicRelationshipService(
 		datasourceService, adapterFactory, ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo)
 	ontologyFinalizationService := services.NewOntologyFinalizationService(
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, llmFactory, getTenantCtx, logger)
-	relationshipWorkflowService := services.NewRelationshipWorkflowService(
-		ontologyWorkflowRepo, relationshipCandidateRepo, schemaRepo, workflowStateRepo, ontologyRepo, ontologyEntityRepo,
-		datasourceService, adapterFactory, llmFactory, discoveryService, deterministicRelationshipService, ontologyFinalizationService, getTenantCtx, logger)
 	entityService := services.NewEntityService(ontologyEntityRepo, ontologyRepo, logger)
 	entityDiscoveryService := services.NewEntityDiscoveryService(
-		ontologyWorkflowRepo, ontologyEntityRepo, schemaRepo, ontologyRepo,
-		datasourceService, adapterFactory, llmFactory, getTenantCtx, logger)
+		ontologyEntityRepo, schemaRepo, ontologyRepo,
+		llmFactory, getTenantCtx, logger)
 	ontologyContextService := services.NewOntologyContextService(
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, projectService, logger)
+
+	// Create worker pool for parallel LLM calls
+	workerPoolConfig := llm.DefaultWorkerPoolConfig()
+	llmWorkerPool := llm.NewWorkerPool(workerPoolConfig, logger)
+
 	columnEnrichmentService := services.NewColumnEnrichmentService(
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo,
-		datasourceService, adapterFactory, llmFactory, getTenantCtx, logger)
+		datasourceService, adapterFactory, llmFactory, llmWorkerPool, getTenantCtx, logger)
 	relationshipEnrichmentService := services.NewRelationshipEnrichmentService(
-		entityRelationshipRepo, ontologyEntityRepo, llmFactory, logger)
+		entityRelationshipRepo, ontologyEntityRepo, llmFactory, llmWorkerPool, getTenantCtx, logger)
 
-	// Wire enrichment services to relationship workflow for auto-trigger after extraction
-	relationshipWorkflowService.SetColumnEnrichmentService(columnEnrichmentService)
-	relationshipWorkflowService.SetRelationshipEnrichmentService(relationshipEnrichmentService)
+	// Ontology DAG service for orchestrated workflow execution
+	ontologyDAGService := services.NewOntologyDAGService(
+		ontologyDAGRepo, ontologyRepo, ontologyEntityRepo, schemaRepo,
+		entityRelationshipRepo, ontologyQuestionRepo, ontologyChatRepo, knowledgeRepo,
+		getTenantCtx, logger)
+
+	// Wire DAG adapters using setter pattern (avoids import cycles)
+	ontologyDAGService.SetEntityDiscoveryMethods(services.NewEntityDiscoveryAdapter(entityDiscoveryService))
+	ontologyDAGService.SetEntityEnrichmentMethods(services.NewEntityEnrichmentAdapter(entityDiscoveryService, schemaRepo, getTenantCtx))
+	ontologyDAGService.SetRelationshipDiscoveryMethods(services.NewRelationshipDiscoveryAdapter(deterministicRelationshipService))
+	ontologyDAGService.SetRelationshipEnrichmentMethods(services.NewRelationshipEnrichmentAdapter(relationshipEnrichmentService))
+	ontologyDAGService.SetFinalizationMethods(services.NewOntologyFinalizationAdapter(ontologyFinalizationService))
+	ontologyDAGService.SetColumnEnrichmentMethods(services.NewColumnEnrichmentAdapter(columnEnrichmentService))
 
 	mux := http.NewServeMux()
 
@@ -334,33 +341,24 @@ func main() {
 	mcpConfigHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register ontology handlers (protected)
-	ontologyHandler := handlers.NewOntologyHandler(ontologyWorkflowService, projectService, logger)
-	ontologyHandler.SetEnrichmentService(columnEnrichmentService)
-	ontologyHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
-
 	ontologyQuestionsHandler := handlers.NewOntologyQuestionsHandler(ontologyQuestionService, logger)
 	ontologyQuestionsHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	ontologyChatHandler := handlers.NewOntologyChatHandler(ontologyChatService, knowledgeService, logger)
 	ontologyChatHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
-	// Register relationship workflow handler (protected)
-	relationshipWorkflowHandler := handlers.NewRelationshipWorkflowHandler(
-		relationshipWorkflowService, logger)
-	relationshipWorkflowHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
-
 	// Register entity handler (protected)
 	entityHandler := handlers.NewEntityHandler(entityService, logger)
 	entityHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
-
-	// Register entity discovery handler (protected)
-	entityDiscoveryHandler := handlers.NewEntityDiscoveryHandler(entityDiscoveryService, logger)
-	entityDiscoveryHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register entity relationship handler (protected)
 	entityRelationshipHandler := handlers.NewEntityRelationshipHandler(
 		deterministicRelationshipService, logger)
 	entityRelationshipHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register ontology DAG handler (protected) - unified workflow execution
+	ontologyDAGHandler := handlers.NewOntologyDAGHandler(ontologyDAGService, projectService, logger)
+	ontologyDAGHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"
@@ -420,9 +418,9 @@ func main() {
 			logger.Error("HTTP server shutdown error", zap.Error(err))
 		}
 
-		// 2. Shutdown workflow service (cancels tasks, releases ownership)
-		if err := ontologyWorkflowService.Shutdown(shutdownCtx); err != nil {
-			logger.Error("Workflow service shutdown error", zap.Error(err))
+		// 2. Shutdown DAG service (cancels DAGs, releases ownership)
+		if err := ontologyDAGService.Shutdown(shutdownCtx); err != nil {
+			logger.Error("DAG service shutdown error", zap.Error(err))
 		}
 
 		// 3. Close conversation recorder (drain pending writes)

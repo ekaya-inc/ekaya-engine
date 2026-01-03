@@ -43,8 +43,7 @@ type ontologyChatService struct {
 	ontologyRepo       repositories.OntologyRepository
 	knowledgeRepo      repositories.KnowledgeRepository
 	schemaRepo         repositories.SchemaRepository
-	workflowRepo       repositories.OntologyWorkflowRepository
-	stateRepo          repositories.WorkflowStateRepository
+	dagRepo            repositories.OntologyDAGRepository
 	ontologyEntityRepo repositories.OntologyEntityRepository
 	entityRelRepo      repositories.EntityRelationshipRepository
 	llmFactory         llm.LLMClientFactory
@@ -59,8 +58,7 @@ func NewOntologyChatService(
 	ontologyRepo repositories.OntologyRepository,
 	knowledgeRepo repositories.KnowledgeRepository,
 	schemaRepo repositories.SchemaRepository,
-	workflowRepo repositories.OntologyWorkflowRepository,
-	stateRepo repositories.WorkflowStateRepository,
+	dagRepo repositories.OntologyDAGRepository,
 	ontologyEntityRepo repositories.OntologyEntityRepository,
 	entityRelRepo repositories.EntityRelationshipRepository,
 	llmFactory llm.LLMClientFactory,
@@ -73,8 +71,7 @@ func NewOntologyChatService(
 		ontologyRepo:       ontologyRepo,
 		knowledgeRepo:      knowledgeRepo,
 		schemaRepo:         schemaRepo,
-		workflowRepo:       workflowRepo,
-		stateRepo:          stateRepo,
+		dagRepo:            dagRepo,
 		ontologyEntityRepo: ontologyEntityRepo,
 		entityRelRepo:      entityRelRepo,
 		llmFactory:         llmFactory,
@@ -96,14 +93,9 @@ func (s *ontologyChatService) Initialize(ctx context.Context, projectID uuid.UUI
 		return nil, err
 	}
 
-	// Get pending questions count from workflow state
-	pendingCount, err := s.stateRepo.GetPendingQuestionsCountByProject(ctx, projectID)
-	if err != nil {
-		s.logger.Error("Failed to get pending question count",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return nil, err
-	}
+	// Note: The old workflow state pending questions system has been replaced by DAG-based workflow.
+	// Pending question count is now always 0 since questions are handled differently.
+	pendingCount := 0
 
 	// Get the ontology to provide context
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
@@ -126,30 +118,14 @@ func (s *ontologyChatService) Initialize(ctx context.Context, projectID uuid.UUI
 			entityCount := ontology.TableCount()
 			openingMessage = fmt.Sprintf(
 				"Hello! I'm here to help you refine your data ontology. "+
-					"I have analyzed %d tables in your database. ",
+					"I have analyzed %d tables in your database. "+
+					"Feel free to ask me anything about your schema or tell me about specific business rules.",
 				entityCount,
 			)
-			if pendingCount > 0 {
-				openingMessage += fmt.Sprintf(
-					"There are %d questions I'd like to ask to better understand your data. "+
-						"You can answer them in the Questions panel, or feel free to ask me anything about your schema.",
-					pendingCount,
-				)
-			} else {
-				openingMessage += "Feel free to ask me anything about your schema or tell me about specific business rules."
-			}
 		}
 	} else {
 		// Continuing conversation
-		if pendingCount > 0 {
-			openingMessage = fmt.Sprintf(
-				"Welcome back! There are %d pending questions to help refine the ontology. "+
-					"How can I assist you today?",
-				pendingCount,
-			)
-		} else {
-			openingMessage = "Welcome back! How can I help you refine your data ontology?"
-		}
+		openingMessage = "Welcome back! How can I help you refine your data ontology?"
 	}
 
 	s.logger.Info("Chat initialized",
@@ -175,28 +151,34 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 		return fmt.Errorf("user ID not found in context: %w", err)
 	}
 
-	// Get workflow first to get ontologyID for all messages
-	workflow, err := s.workflowRepo.GetLatestByProject(ctx, projectID)
+	// Get DAG first to get ontologyID for all messages
+	dag, err := s.dagRepo.GetLatestByProject(ctx, projectID)
 	if err != nil {
-		s.logger.Error("Failed to get workflow",
+		s.logger.Error("Failed to get DAG",
 			zap.String("project_id", projectID.String()),
 			zap.Error(err))
-		eventChan <- models.NewErrorEvent("No ontology workflow found. Please run extraction first.")
+		eventChan <- models.NewErrorEvent("No ontology extraction found. Please run extraction first.")
 		return err
 	}
-
-	if workflow.Config == nil {
-		s.logger.Error("Workflow has no configuration",
-			zap.String("project_id", projectID.String()),
-			zap.String("workflow_id", workflow.ID.String()))
-		eventChan <- models.NewErrorEvent("Workflow has no configuration")
-		return fmt.Errorf("workflow %s has no configuration", workflow.ID)
+	if dag == nil {
+		s.logger.Error("No DAG found for project",
+			zap.String("project_id", projectID.String()))
+		eventChan <- models.NewErrorEvent("No ontology extraction found. Please run extraction first.")
+		return fmt.Errorf("no DAG found for project %s", projectID)
 	}
 
-	// Save user message with ontologyID from workflow
+	if dag.OntologyID == nil {
+		s.logger.Error("DAG has no ontology",
+			zap.String("project_id", projectID.String()),
+			zap.String("dag_id", dag.ID.String()))
+		eventChan <- models.NewErrorEvent("DAG has no ontology")
+		return fmt.Errorf("DAG %s has no ontology", dag.ID)
+	}
+
+	// Save user message with ontologyID from DAG
 	userMessage := &models.ChatMessage{
 		ProjectID:  projectID,
-		OntologyID: workflow.OntologyID,
+		OntologyID: *dag.OntologyID,
 		Role:       models.ChatRoleUser,
 		Content:    message,
 	}
@@ -210,18 +192,18 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 	}
 
 	// Get datasource config (decrypted)
-	ds, err := s.datasourceService.Get(ctx, projectID, workflow.Config.DatasourceID)
+	ds, err := s.datasourceService.Get(ctx, projectID, dag.DatasourceID)
 	if err != nil {
 		s.logger.Error("Failed to get datasource",
 			zap.String("project_id", projectID.String()),
-			zap.String("datasource_id", workflow.Config.DatasourceID.String()),
+			zap.String("datasource_id", dag.DatasourceID.String()),
 			zap.Error(err))
 		eventChan <- models.NewErrorEvent("Failed to get datasource configuration")
 		return err
 	}
 
 	// Create query executor with identity parameters for connection pooling
-	queryExecutor, err := s.adapterFactory.NewQueryExecutor(ctx, ds.DatasourceType, ds.Config, projectID, workflow.Config.DatasourceID, userID)
+	queryExecutor, err := s.adapterFactory.NewQueryExecutor(ctx, ds.DatasourceType, ds.Config, projectID, dag.DatasourceID, userID)
 	if err != nil {
 		s.logger.Error("Failed to create query executor",
 			zap.String("project_id", projectID.String()),
@@ -234,10 +216,8 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 	// Create tool executor
 	toolExecutor := llm.NewOntologyToolExecutor(&llm.OntologyToolExecutorConfig{
 		ProjectID:          projectID,
-		DatasourceID:       workflow.Config.DatasourceID,
+		DatasourceID:       dag.DatasourceID,
 		OntologyRepo:       s.ontologyRepo,
-		WorkflowRepo:       s.workflowRepo,
-		StateRepo:          s.stateRepo,
 		KnowledgeRepo:      s.knowledgeRepo,
 		SchemaRepo:         s.schemaRepo,
 		OntologyEntityRepo: s.ontologyEntityRepo,
@@ -328,7 +308,7 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 			if len(pendingToolCalls) > 0 || textBuilder.Len() > 0 {
 				assistantMsg := &models.ChatMessage{
 					ProjectID:  projectID,
-					OntologyID: workflow.OntologyID,
+					OntologyID: ontology.ID,
 					Role:       models.ChatRoleAssistant,
 					Content:    textBuilder.String(),
 					ToolCalls:  pendingToolCalls,
@@ -350,7 +330,7 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 			}
 			toolMsg := &models.ChatMessage{
 				ProjectID:  projectID,
-				OntologyID: workflow.OntologyID,
+				OntologyID: ontology.ID,
 				Role:       models.ChatRoleTool,
 				Content:    event.Content,
 				ToolCallID: toolCallID,
@@ -367,7 +347,7 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 			if textBuilder.Len() > 0 {
 				assistantMsg := &models.ChatMessage{
 					ProjectID:  projectID,
-					OntologyID: workflow.OntologyID,
+					OntologyID: ontology.ID,
 					Role:       models.ChatRoleAssistant,
 					Content:    textBuilder.String(),
 				}

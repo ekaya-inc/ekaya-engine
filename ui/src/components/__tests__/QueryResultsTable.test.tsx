@@ -5,7 +5,12 @@
 import { render, screen, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+import type { ColumnInfo } from '../../types/query';
 import { QueryResultsTable } from '../QueryResultsTable';
+
+// Helper to convert string array to ColumnInfo array
+const toColumnInfo = (names: string[]): ColumnInfo[] =>
+  names.map((name) => ({ name, type: 'text' }));
 
 // Mock clipboard API
 const mockClipboard = {
@@ -35,7 +40,7 @@ describe('QueryResultsTable', () => {
   });
 
   it('renders column headers correctly', () => {
-    const columns = ['id', 'name', 'email'];
+    const columns = toColumnInfo(['id', 'name', 'email']);
     const rows = [
       { id: 1, name: 'Alice', email: 'alice@example.com' },
     ];
@@ -54,7 +59,7 @@ describe('QueryResultsTable', () => {
   });
 
   it('displays correct number of rows respecting maxRows', () => {
-    const columns = ['id', 'value'];
+    const columns = toColumnInfo(['id', 'value']);
     const rows = Array.from({ length: 20 }, (_, i) => ({
       id: i + 1,
       value: `Row ${i + 1}`,
@@ -79,7 +84,7 @@ describe('QueryResultsTable', () => {
   });
 
   it('shows row count summary', () => {
-    const columns = ['id'];
+    const columns = toColumnInfo(['id']);
     const rows = [{ id: 1 }, { id: 2 }, { id: 3 }];
 
     render(
@@ -103,7 +108,7 @@ describe('QueryResultsTable', () => {
   });
 
   it('handles null values in cells', () => {
-    const columns = ['id', 'nullable_field'];
+    const columns = toColumnInfo(['id', 'nullable_field']);
     const rows = [{ id: 1, nullable_field: null }];
 
     render(
@@ -121,7 +126,7 @@ describe('QueryResultsTable', () => {
   });
 
   it('handles boolean values with appropriate styling', () => {
-    const columns = ['id', 'active'];
+    const columns = toColumnInfo(['id', 'active']);
     const rows = [
       { id: 1, active: true },
       { id: 2, active: false },
@@ -143,9 +148,10 @@ describe('QueryResultsTable', () => {
   });
 
   it('truncates to maxColumns', () => {
-    const columns = Array.from({ length: 30 }, (_, i) => `col_${i}`);
+    const columnNames = Array.from({ length: 30 }, (_, i) => `col_${i}`);
+    const columns = toColumnInfo(columnNames);
     const rows = [
-      Object.fromEntries(columns.map((col, i) => [col, `value_${i}`])),
+      Object.fromEntries(columnNames.map((col, i) => [col, `value_${i}`])),
     ];
 
     render(
@@ -169,7 +175,8 @@ describe('QueryResultsTable', () => {
   });
 
   it('shows truncation warning when applicable', () => {
-    const columns = Array.from({ length: 25 }, (_, i) => `col_${i}`);
+    const columnNames = Array.from({ length: 25 }, (_, i) => `col_${i}`);
+    const columns = toColumnInfo(columnNames);
     const rows = Array.from({ length: 50 }, (_, i) => ({
       col_0: i,
     }));
@@ -194,7 +201,7 @@ describe('QueryResultsTable', () => {
   });
 
   it('does not show truncation warning when no truncation', () => {
-    const columns = ['id', 'name'];
+    const columns = toColumnInfo(['id', 'name']);
     const rows = [{ id: 1, name: 'Alice' }];
 
     render(
@@ -216,7 +223,7 @@ describe('QueryResultsTable', () => {
   });
 
   it('displays alternating row colors', () => {
-    const columns = ['id'];
+    const columns = toColumnInfo(['id']);
     const rows = [{ id: 1 }, { id: 2 }, { id: 3 }];
 
     render(
@@ -236,7 +243,7 @@ describe('QueryResultsTable', () => {
   });
 
   it('renders copy buttons for cell values', () => {
-    const columns = ['id', 'name'];
+    const columns = toColumnInfo(['id', 'name']);
     const rows = [{ id: 1, name: 'Alice' }];
 
     render(
@@ -257,7 +264,7 @@ describe('QueryResultsTable', () => {
   });
 
   it('formats numbers with locale-specific formatting', () => {
-    const columns = ['id', 'amount'];
+    const columns = toColumnInfo(['id', 'amount']);
     const rows = [{ id: 1, amount: 1234567.89 }];
 
     render(
@@ -278,7 +285,7 @@ describe('QueryResultsTable', () => {
   });
 
   it('applies sticky styling to first column', () => {
-    const columns = ['id', 'name', 'email'];
+    const columns = toColumnInfo(['id', 'name', 'email']);
     const rows = [{ id: 1, name: 'Alice', email: 'alice@example.com' }];
 
     render(

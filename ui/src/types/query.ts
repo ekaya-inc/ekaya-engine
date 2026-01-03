@@ -134,10 +134,18 @@ export interface ValidateQueryRequest {
 }
 
 /**
+ * Column information from query execution
+ */
+export interface ColumnInfo {
+  name: string;
+  type: string;
+}
+
+/**
  * Response from query execution (execute or test)
  */
 export interface ExecuteQueryResponse {
-  columns: string[];
+  columns: ColumnInfo[];
   rows: Record<string, unknown>[];
   row_count: number;
 }

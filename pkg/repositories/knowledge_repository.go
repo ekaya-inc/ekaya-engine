@@ -19,6 +19,7 @@ type KnowledgeRepository interface {
 	GetByType(ctx context.Context, projectID uuid.UUID, factType string) ([]*models.KnowledgeFact, error)
 	GetByKey(ctx context.Context, projectID uuid.UUID, factType, key string) (*models.KnowledgeFact, error)
 	Delete(ctx context.Context, id uuid.UUID) error
+	DeleteByProject(ctx context.Context, projectID uuid.UUID) error
 }
 
 type knowledgeRepository struct{}
@@ -168,6 +169,22 @@ func (r *knowledgeRepository) Delete(ctx context.Context, id uuid.UUID) error {
 
 	if result.RowsAffected() == 0 {
 		return fmt.Errorf("knowledge fact not found")
+	}
+
+	return nil
+}
+
+func (r *knowledgeRepository) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `DELETE FROM engine_project_knowledge WHERE project_id = $1`
+
+	_, err := scope.Conn.Exec(ctx, query, projectID)
+	if err != nil {
+		return fmt.Errorf("delete knowledge by project: %w", err)
 	}
 
 	return nil

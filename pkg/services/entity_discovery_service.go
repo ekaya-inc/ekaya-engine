@@ -4,345 +4,54 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
-	"github.com/ekaya-inc/ekaya-engine/pkg/services/workflow"
-	"github.com/ekaya-inc/ekaya-engine/pkg/services/workqueue"
 )
 
-// EntityDiscoveryService provides operations for standalone entity discovery workflows.
-// This is separate from relationship detection and can be run independently.
+// EntityDiscoveryService provides entity discovery operations for the DAG workflow.
+// It contains the core algorithms for identifying and enriching entities from schema metadata.
 type EntityDiscoveryService interface {
-	// StartDiscovery initiates a new entity discovery workflow.
-	StartDiscovery(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.OntologyWorkflow, error)
+	// IdentifyEntitiesFromDDL discovers entities from DDL metadata (PK/unique constraints)
+	IdentifyEntitiesFromDDL(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID) (int, []*models.SchemaTable, []*models.SchemaColumn, error)
 
-	// GetStatus returns the current entity discovery workflow status for a datasource.
-	GetStatus(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyWorkflow, error)
-
-	// GetStatusWithCounts returns workflow status with entity counts.
-	GetStatusWithCounts(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyWorkflow, *EntityDiscoveryCounts, error)
-
-	// Cancel cancels a running entity discovery workflow.
-	Cancel(ctx context.Context, workflowID uuid.UUID) error
-
-	// Shutdown gracefully stops all active workflows owned by this server.
-	Shutdown(ctx context.Context) error
-}
-
-// EntityDiscoveryCounts holds counts of discovered entities.
-type EntityDiscoveryCounts struct {
-	EntityCount     int
-	OccurrenceCount int
+	// EnrichEntitiesWithLLM uses an LLM to generate entity names and descriptions
+	EnrichEntitiesWithLLM(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID, tables []*models.SchemaTable, columns []*models.SchemaColumn) error
 }
 
 type entityDiscoveryService struct {
-	workflowRepo   repositories.OntologyWorkflowRepository
-	entityRepo     repositories.OntologyEntityRepository
-	schemaRepo     repositories.SchemaRepository
-	ontologyRepo   repositories.OntologyRepository
-	dsSvc          DatasourceService
-	adapterFactory datasource.DatasourceAdapterFactory
-	llmFactory     llm.LLMClientFactory
-	getTenantCtx   TenantContextFunc
-	logger         *zap.Logger
-	infra          *workflow.WorkflowInfra
+	entityRepo   repositories.OntologyEntityRepository
+	schemaRepo   repositories.SchemaRepository
+	ontologyRepo repositories.OntologyRepository
+	llmFactory   llm.LLMClientFactory
+	getTenantCtx TenantContextFunc
+	logger       *zap.Logger
 }
 
 // NewEntityDiscoveryService creates a new entity discovery service.
 func NewEntityDiscoveryService(
-	workflowRepo repositories.OntologyWorkflowRepository,
 	entityRepo repositories.OntologyEntityRepository,
 	schemaRepo repositories.SchemaRepository,
 	ontologyRepo repositories.OntologyRepository,
-	dsSvc DatasourceService,
-	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) EntityDiscoveryService {
-	namedLogger := logger.Named("entity-discovery")
-	infra := workflow.NewWorkflowInfra(workflowRepo, getTenantCtx, namedLogger)
-
 	return &entityDiscoveryService{
-		workflowRepo:   workflowRepo,
-		entityRepo:     entityRepo,
-		schemaRepo:     schemaRepo,
-		ontologyRepo:   ontologyRepo,
-		dsSvc:          dsSvc,
-		adapterFactory: adapterFactory,
-		llmFactory:     llmFactory,
-		getTenantCtx:   getTenantCtx,
-		logger:         namedLogger,
-		infra:          infra,
+		entityRepo:   entityRepo,
+		schemaRepo:   schemaRepo,
+		ontologyRepo: ontologyRepo,
+		llmFactory:   llmFactory,
+		getTenantCtx: getTenantCtx,
+		logger:       logger.Named("entity-discovery"),
 	}
 }
 
 var _ EntityDiscoveryService = (*entityDiscoveryService)(nil)
-
-func (s *entityDiscoveryService) StartDiscovery(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.OntologyWorkflow, error) {
-	// Step 1: Check for existing workflow for this datasource in entities phase
-	existing, err := s.workflowRepo.GetLatestByDatasourceAndPhase(ctx, datasourceID, models.WorkflowPhaseEntities)
-	if err != nil {
-		s.logger.Error("Failed to check existing workflow",
-			zap.String("datasource_id", datasourceID.String()),
-			zap.Error(err))
-		return nil, err
-	}
-
-	// If there's an active workflow, don't start a new one
-	if existing != nil && !existing.State.IsTerminal() {
-		return nil, fmt.Errorf("entity discovery already in progress for this datasource")
-	}
-
-	// Step 2: Get or create ontology for this project
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		s.logger.Error("Failed to check for existing ontology",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return nil, fmt.Errorf("check existing ontology: %w", err)
-	}
-
-	if ontology == nil {
-		// No active ontology exists - create one
-		nextVersion, err := s.ontologyRepo.GetNextVersion(ctx, projectID)
-		if err != nil {
-			s.logger.Error("Failed to get next ontology version",
-				zap.String("project_id", projectID.String()),
-				zap.Error(err))
-			return nil, fmt.Errorf("get next version: %w", err)
-		}
-
-		ontology = &models.TieredOntology{
-			ID:              uuid.New(),
-			ProjectID:       projectID,
-			Version:         nextVersion,
-			IsActive:        true,
-			EntitySummaries: make(map[string]*models.EntitySummary),
-			ColumnDetails:   make(map[string][]models.ColumnDetail),
-			Metadata:        make(map[string]any),
-		}
-
-		if err := s.ontologyRepo.Create(ctx, ontology); err != nil {
-			s.logger.Error("Failed to create ontology",
-				zap.String("project_id", projectID.String()),
-				zap.Error(err))
-			return nil, fmt.Errorf("failed to create ontology: %w", err)
-		}
-
-		s.logger.Info("Created new ontology for entity discovery",
-			zap.String("project_id", projectID.String()),
-			zap.String("ontology_id", ontology.ID.String()),
-			zap.Int("version", nextVersion))
-	} else {
-		s.logger.Info("Reusing existing ontology for entity discovery",
-			zap.String("project_id", projectID.String()),
-			zap.String("ontology_id", ontology.ID.String()),
-			zap.Int("version", ontology.Version))
-
-		// Delete existing entities for this ontology (fresh discovery)
-		if err := s.entityRepo.DeleteByOntology(ctx, ontology.ID); err != nil {
-			s.logger.Error("Failed to delete existing entities",
-				zap.String("ontology_id", ontology.ID.String()),
-				zap.Error(err))
-			return nil, fmt.Errorf("delete existing entities: %w", err)
-		}
-	}
-
-	// Step 3: Create workflow for entities phase
-	now := time.Now()
-	wf := &models.OntologyWorkflow{
-		ID:           uuid.New(),
-		ProjectID:    projectID,
-		OntologyID:   ontology.ID,
-		State:        models.WorkflowStatePending,
-		Phase:        models.WorkflowPhaseEntities,
-		DatasourceID: &datasourceID,
-		Progress: &models.WorkflowProgress{
-			CurrentPhase: "initializing",
-			Current:      0,
-			Total:        100,
-			Message:      "Starting entity discovery...",
-		},
-		TaskQueue: []models.WorkflowTask{},
-		Config: &models.WorkflowConfig{
-			DatasourceID: datasourceID,
-		},
-		StartedAt: &now,
-	}
-
-	if err := s.workflowRepo.Create(ctx, wf); err != nil {
-		s.logger.Error("Failed to create workflow",
-			zap.String("project_id", projectID.String()),
-			zap.String("datasource_id", datasourceID.String()),
-			zap.Error(err))
-		return nil, err
-	}
-
-	// Step 4: Claim ownership and transition to running
-	claimed, err := s.workflowRepo.ClaimOwnership(ctx, wf.ID, s.infra.ServerInstanceID())
-	if err != nil {
-		s.logger.Error("Failed to claim workflow ownership",
-			zap.String("workflow_id", wf.ID.String()),
-			zap.Error(err))
-		return nil, fmt.Errorf("claim ownership: %w", err)
-	}
-	if !claimed {
-		s.logger.Error("Workflow already owned by another server",
-			zap.String("workflow_id", wf.ID.String()))
-		return nil, fmt.Errorf("workflow already owned by another server")
-	}
-
-	// Transition to running
-	wf.State = models.WorkflowStateRunning
-	if err := s.workflowRepo.UpdateState(ctx, wf.ID, models.WorkflowStateRunning, ""); err != nil {
-		s.logger.Error("Failed to start workflow",
-			zap.String("workflow_id", wf.ID.String()),
-			zap.Error(err))
-		return nil, err
-	}
-
-	// Start heartbeat goroutine to maintain ownership
-	s.infra.StartHeartbeat(wf.ID, projectID)
-
-	s.logger.Info("Entity discovery started",
-		zap.String("project_id", projectID.String()),
-		zap.String("workflow_id", wf.ID.String()),
-		zap.String("datasource_id", datasourceID.String()),
-		zap.String("server_instance_id", s.infra.ServerInstanceID().String()))
-
-	// Step 5: Create work queue and enqueue tasks
-	queue := workqueue.New(s.logger, workqueue.WithStrategy(workqueue.NewParallelLLMStrategy()))
-	s.infra.StoreQueue(wf.ID, queue)
-
-	// Start single writer goroutine for task queue updates
-	s.infra.StartTaskQueueWriter(wf.ID)
-
-	// Set up callback to sync task queue to database for UI visibility
-	workflowID := wf.ID // Capture for closure
-	queue.SetOnUpdate(func(snapshots []workqueue.TaskSnapshot) {
-		// Convert snapshots to models.WorkflowTask with status mapping
-		tasks := make([]models.WorkflowTask, len(snapshots))
-		for i, snap := range snapshots {
-			status := string(snap.Status)
-			switch snap.Status {
-			case workqueue.TaskStatusPending:
-				status = models.TaskStatusQueued
-			case workqueue.TaskStatusRunning:
-				status = models.TaskStatusProcessing
-			case workqueue.TaskStatusCompleted:
-				status = models.TaskStatusComplete
-			case workqueue.TaskStatusFailed, workqueue.TaskStatusCancelled:
-				status = models.TaskStatusFailed
-			case workqueue.TaskStatusPaused:
-				status = models.TaskStatusPaused
-			}
-
-			tasks[i] = models.WorkflowTask{
-				ID:          snap.ID,
-				Name:        snap.Name,
-				Status:      status,
-				RequiresLLM: snap.RequiresLLM,
-				Error:       snap.Error,
-				RetryCount:  snap.RetryCount,
-			}
-		}
-		// Send to single writer goroutine (non-blocking due to buffered channel)
-		s.infra.SendTaskQueueUpdate(workflow.TaskQueueUpdate{
-			ProjectID:  projectID,
-			WorkflowID: workflowID,
-			Tasks:      tasks,
-		})
-	})
-
-	// Run workflow in background - HTTP request returns immediately
-	go s.runWorkflow(projectID, wf.ID, ontology.ID, datasourceID, queue)
-
-	return wf, nil
-}
-
-// runWorkflow orchestrates the entity discovery phases.
-// Runs in a background goroutine - acquires its own DB connection.
-func (s *entityDiscoveryService) runWorkflow(projectID, workflowID, ontologyID, datasourceID uuid.UUID, queue *workqueue.Queue) {
-	// Clean up when done
-	defer s.infra.DeleteQueue(workflowID)
-	defer s.infra.StopTaskQueueWriter(workflowID)
-	defer s.infra.StopHeartbeat(workflowID)
-	defer func() {
-		// Release ownership so other servers can take over if needed
-		ctx, cleanup, err := s.getTenantCtx(context.Background(), projectID)
-		if err != nil {
-			s.logger.Error("Failed to acquire DB connection for ownership release",
-				zap.String("workflow_id", workflowID.String()),
-				zap.Error(err))
-			return
-		}
-		defer cleanup()
-		if releaseErr := s.workflowRepo.ReleaseOwnership(ctx, workflowID); releaseErr != nil {
-			s.logger.Error("Failed to release workflow ownership",
-				zap.String("workflow_id", workflowID.String()),
-				zap.Error(releaseErr))
-		}
-	}()
-
-	// Entity discovery: DDL-based algorithm
-	// Uses is_primary_key and is_unique flags from engine_schema_columns
-	// instead of running expensive COUNT(DISTINCT) queries
-
-	ctx := context.Background()
-
-	// Identify entities from DDL metadata (PK and unique constraints)
-	s.logger.Info("Identifying entities from DDL metadata",
-		zap.String("workflow_id", workflowID.String()))
-
-	if err := s.updateProgress(ctx, projectID, workflowID, "Analyzing schema constraints...", 20); err != nil {
-		s.logger.Error("Failed to update progress", zap.Error(err))
-	}
-
-	entityCount, tables, columns, err := s.identifyEntitiesFromDDL(ctx, projectID, ontologyID, datasourceID)
-	if err != nil {
-		s.logger.Error("Failed to identify entities from DDL", zap.Error(err))
-		s.markWorkflowFailed(projectID, workflowID, fmt.Sprintf("entity identification: %v", err))
-		return
-	}
-
-	// Enrich entities with LLM-generated names and descriptions
-	if err := s.updateProgress(ctx, projectID, workflowID, "Generating entity names and descriptions...", 60); err != nil {
-		s.logger.Error("Failed to update progress", zap.Error(err))
-	}
-
-	s.logger.Info("Starting LLM enrichment for entities",
-		zap.String("workflow_id", workflowID.String()),
-		zap.Int("entity_count", entityCount))
-
-	if err := s.enrichEntitiesWithLLM(ctx, projectID, ontologyID, datasourceID, tables, columns); err != nil {
-		// Log but don't fail - entities will have table names as fallback
-		s.logger.Error("Failed to enrich entities with LLM - entities will use table names as fallback",
-			zap.Error(err),
-			zap.String("workflow_id", workflowID.String()))
-	} else {
-		s.logger.Info("LLM enrichment completed successfully",
-			zap.String("workflow_id", workflowID.String()))
-	}
-
-	// Mark workflow as complete
-	s.logger.Info("Entity discovery complete",
-		zap.String("workflow_id", workflowID.String()),
-		zap.Int("entities_discovered", entityCount))
-
-	if err := s.updateProgress(ctx, projectID, workflowID, "Complete", 100); err != nil {
-		s.logger.Error("Failed to update progress", zap.Error(err))
-	}
-
-	s.finalizeWorkflow(projectID, workflowID)
-}
 
 // entityCandidate represents a column that may represent an entity.
 type entityCandidate struct {
@@ -353,9 +62,17 @@ type entityCandidate struct {
 	reason     string  // "primary_key" or "unique_not_null"
 }
 
-// identifyEntitiesFromDDL finds entities using DDL metadata (is_primary_key, is_unique)
+// IdentifyEntitiesFromDDL finds entities using DDL metadata (is_primary_key, is_unique)
 // from engine_schema_columns instead of running expensive COUNT(DISTINCT) queries.
 // Returns the count and the tables/columns for LLM enrichment.
+func (s *entityDiscoveryService) IdentifyEntitiesFromDDL(
+	ctx context.Context,
+	projectID, ontologyID, datasourceID uuid.UUID,
+) (int, []*models.SchemaTable, []*models.SchemaColumn, error) {
+	return s.identifyEntitiesFromDDL(ctx, projectID, ontologyID, datasourceID)
+}
+
+// identifyEntitiesFromDDL is the internal implementation.
 func (s *entityDiscoveryService) identifyEntitiesFromDDL(
 	ctx context.Context,
 	projectID, ontologyID, datasourceID uuid.UUID,
@@ -498,8 +215,18 @@ type entityEnrichment struct {
 	AlternativeNames []string              `json:"alternative_names"`
 }
 
-// enrichEntitiesWithLLM uses an LLM to generate clean entity names and descriptions
+// EnrichEntitiesWithLLM uses an LLM to generate clean entity names and descriptions
 // based on the full schema context.
+func (s *entityDiscoveryService) EnrichEntitiesWithLLM(
+	ctx context.Context,
+	projectID, ontologyID, datasourceID uuid.UUID,
+	tables []*models.SchemaTable,
+	columns []*models.SchemaColumn,
+) error {
+	return s.enrichEntitiesWithLLM(ctx, projectID, ontologyID, datasourceID, tables, columns)
+}
+
+// enrichEntitiesWithLLM is the internal implementation.
 func (s *entityDiscoveryService) enrichEntitiesWithLLM(
 	ctx context.Context,
 	projectID, ontologyID, datasourceID uuid.UUID,
@@ -661,248 +388,36 @@ func (s *entityDiscoveryService) buildEntityEnrichmentPrompt(
 	}
 
 	sb.WriteString("\n## Response Format\n\n")
-	sb.WriteString("Respond with a JSON array:\n")
+	sb.WriteString("Respond with a JSON object containing an \"entities\" array:\n")
 	sb.WriteString("```json\n")
-	sb.WriteString("[\n")
-	sb.WriteString("  {\n")
-	sb.WriteString("    \"table_name\": \"accounts\",\n")
-	sb.WriteString("    \"entity_name\": \"Account\",\n")
-	sb.WriteString("    \"description\": \"A user account that can access the platform.\",\n")
-	sb.WriteString("    \"domain\": \"customer\",\n")
-	sb.WriteString("    \"key_columns\": [{\"name\": \"email\", \"synonyms\": [\"e-mail\", \"mail\"]}, {\"name\": \"name\", \"synonyms\": [\"username\"]}],\n")
-	sb.WriteString("    \"alternative_names\": [\"user\", \"member\"]\n")
-	sb.WriteString("  },\n")
-	sb.WriteString("  ...\n")
-	sb.WriteString("]\n")
+	sb.WriteString("{\n")
+	sb.WriteString("  \"entities\": [\n")
+	sb.WriteString("    {\n")
+	sb.WriteString("      \"table_name\": \"accounts\",\n")
+	sb.WriteString("      \"entity_name\": \"Account\",\n")
+	sb.WriteString("      \"description\": \"A user account that can access the platform.\",\n")
+	sb.WriteString("      \"domain\": \"customer\",\n")
+	sb.WriteString("      \"key_columns\": [{\"name\": \"email\", \"synonyms\": [\"e-mail\", \"mail\"]}, {\"name\": \"name\", \"synonyms\": [\"username\"]}],\n")
+	sb.WriteString("      \"alternative_names\": [\"user\", \"member\"]\n")
+	sb.WriteString("    },\n")
+	sb.WriteString("    ...\n")
+	sb.WriteString("  ]\n")
+	sb.WriteString("}\n")
 	sb.WriteString("```\n")
 
 	return sb.String()
 }
 
+// entityEnrichmentResponse is the object-wrapped response from the LLM.
+type entityEnrichmentResponse struct {
+	Entities []entityEnrichment `json:"entities"`
+}
+
 func (s *entityDiscoveryService) parseEntityEnrichmentResponse(content string) ([]entityEnrichment, error) {
-	// Use the generic ParseJSONResponse helper
-	enrichments, err := llm.ParseJSONResponse[[]entityEnrichment](content)
+	// Use the generic ParseJSONResponse helper to unwrap the object format
+	response, err := llm.ParseJSONResponse[entityEnrichmentResponse](content)
 	if err != nil {
 		return nil, fmt.Errorf("parse entity enrichment response: %w", err)
 	}
-	return enrichments, nil
-}
-
-// analyzeGraphConnectivity builds a graph from foreign key relationships.
-func (s *entityDiscoveryService) analyzeGraphConnectivity(
-	ctx context.Context,
-	projectID, workflowID, datasourceID uuid.UUID,
-) ([]ConnectedComponent, []string, error) {
-	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("get tenant context: %w", err)
-	}
-	defer cleanup()
-
-	// Get datasource to create adapter
-	ds, err := s.dsSvc.Get(tenantCtx, projectID, datasourceID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("get datasource: %w", err)
-	}
-
-	// Create schema discoverer adapter
-	adapter, err := s.adapterFactory.NewSchemaDiscoverer(tenantCtx, ds.DatasourceType, ds.Config, projectID, datasourceID, "")
-	if err != nil {
-		return nil, nil, fmt.Errorf("create schema discoverer: %w", err)
-	}
-	defer adapter.Close()
-
-	// Check if datasource supports foreign keys
-	if !adapter.SupportsForeignKeys() {
-		s.logger.Info("Datasource does not support foreign keys, skipping graph analysis",
-			zap.String("workflow_id", workflowID.String()),
-			zap.String("datasource_type", string(ds.DatasourceType)))
-		return []ConnectedComponent{}, []string{}, nil
-	}
-
-	// Discover foreign keys
-	fks, err := adapter.DiscoverForeignKeys(tenantCtx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("discover foreign keys: %w", err)
-	}
-
-	// Build graph from foreign keys
-	graph := NewTableGraph()
-	for _, fk := range fks {
-		graph.AddForeignKey(fk)
-	}
-
-	// Get all tables and add them to the graph (to identify islands)
-	tables, err := s.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("list tables: %w", err)
-	}
-
-	for _, t := range tables {
-		graph.AddTable(t.SchemaName, t.TableName)
-	}
-
-	// Find connected components and islands
-	components, islands := graph.FindConnectedComponents(s.logger)
-
-	// Log results
-	s.logger.Info("Graph connectivity analysis complete",
-		zap.String("workflow_id", workflowID.String()),
-		zap.Int("connected_components", len(components)),
-		zap.Int("island_tables", len(islands)))
-
-	return components, islands, nil
-}
-
-// updateProgress updates the workflow progress.
-func (s *entityDiscoveryService) updateProgress(ctx context.Context, projectID, workflowID uuid.UUID, message string, percentage int) error {
-	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
-	if err != nil {
-		return fmt.Errorf("get tenant context: %w", err)
-	}
-	defer cleanup()
-
-	progress := &models.WorkflowProgress{
-		CurrentPhase: "entity_discovery",
-		Current:      percentage,
-		Total:        100,
-		Message:      message,
-	}
-
-	return s.workflowRepo.UpdateProgress(tenantCtx, workflowID, progress)
-}
-
-// finalizeWorkflow marks the workflow as completed.
-func (s *entityDiscoveryService) finalizeWorkflow(projectID, workflowID uuid.UUID) {
-	ctx, cleanup, err := s.getTenantCtx(context.Background(), projectID)
-	if err != nil {
-		s.logger.Error("Failed to acquire DB connection for finalization",
-			zap.String("workflow_id", workflowID.String()),
-			zap.Error(err))
-		return
-	}
-	defer cleanup()
-
-	if err := s.workflowRepo.UpdateState(ctx, workflowID, models.WorkflowStateCompleted, ""); err != nil {
-		s.logger.Error("Failed to mark workflow complete",
-			zap.String("workflow_id", workflowID.String()),
-			zap.Error(err))
-		return
-	}
-
-	s.logger.Info("Workflow completed successfully",
-		zap.String("workflow_id", workflowID.String()))
-}
-
-// markWorkflowFailed marks the workflow as failed with an error message.
-func (s *entityDiscoveryService) markWorkflowFailed(projectID, workflowID uuid.UUID, errMsg string) {
-	ctx, cleanup, err := s.getTenantCtx(context.Background(), projectID)
-	if err != nil {
-		s.logger.Error("Failed to acquire DB connection for failure marking",
-			zap.String("workflow_id", workflowID.String()),
-			zap.Error(err))
-		return
-	}
-	defer cleanup()
-
-	if err := s.workflowRepo.UpdateState(ctx, workflowID, models.WorkflowStateFailed, errMsg); err != nil {
-		s.logger.Error("Failed to mark workflow as failed",
-			zap.String("workflow_id", workflowID.String()),
-			zap.Error(err))
-	}
-
-	s.logger.Error("Workflow failed",
-		zap.String("workflow_id", workflowID.String()),
-		zap.String("error", errMsg))
-}
-
-// GetStatus returns the current entity discovery workflow status for a datasource.
-func (s *entityDiscoveryService) GetStatus(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyWorkflow, error) {
-	return s.workflowRepo.GetLatestByDatasourceAndPhase(ctx, datasourceID, models.WorkflowPhaseEntities)
-}
-
-// GetStatusWithCounts returns workflow status with entity counts.
-func (s *entityDiscoveryService) GetStatusWithCounts(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyWorkflow, *EntityDiscoveryCounts, error) {
-	workflow, err := s.workflowRepo.GetLatestByDatasourceAndPhase(ctx, datasourceID, models.WorkflowPhaseEntities)
-	if err != nil {
-		return nil, nil, fmt.Errorf("get workflow: %w", err)
-	}
-
-	if workflow == nil {
-		return nil, nil, nil
-	}
-
-	// Get entity counts
-	counts := &EntityDiscoveryCounts{}
-	entities, err := s.entityRepo.GetByOntology(ctx, workflow.OntologyID)
-	if err != nil {
-		s.logger.Error("Failed to get entities for counts",
-			zap.String("ontology_id", workflow.OntologyID.String()),
-			zap.Error(err))
-		// Return workflow without counts rather than failing
-		return workflow, counts, nil
-	}
-
-	counts.EntityCount = len(entities)
-	// Count occurrences for each entity
-	for _, e := range entities {
-		occurrences, err := s.entityRepo.GetOccurrencesByEntity(ctx, e.ID)
-		if err != nil {
-			s.logger.Error("Failed to get occurrences for entity",
-				zap.String("entity_id", e.ID.String()),
-				zap.Error(err))
-			continue
-		}
-		counts.OccurrenceCount += len(occurrences)
-	}
-
-	return workflow, counts, nil
-}
-
-// Cancel cancels a running entity discovery workflow.
-func (s *entityDiscoveryService) Cancel(ctx context.Context, workflowID uuid.UUID) error {
-	// Get the workflow to find its project ID
-	wf, err := s.workflowRepo.GetByID(ctx, workflowID)
-	if err != nil {
-		return fmt.Errorf("get workflow: %w", err)
-	}
-
-	if wf == nil {
-		return fmt.Errorf("workflow not found")
-	}
-
-	// Cancel the queue if we own it
-	if queue, ok := s.infra.LoadQueue(workflowID); ok {
-		queue.Cancel()
-	}
-
-	// Update state to failed (cancelled is treated as failed)
-	return s.workflowRepo.UpdateState(ctx, workflowID, models.WorkflowStateFailed, "cancelled by user")
-}
-
-// Shutdown gracefully stops all active workflows owned by this server.
-func (s *entityDiscoveryService) Shutdown(ctx context.Context) error {
-	s.logger.Info("Shutting down entity discovery service",
-		zap.String("server_instance_id", s.infra.ServerInstanceID().String()))
-
-	return s.infra.Shutdown(ctx, func(workflowID, projectID uuid.UUID, queue *workqueue.Queue) {
-		s.logger.Info("Cancelling workflow for shutdown",
-			zap.String("workflow_id", workflowID.String()))
-
-		// Cancel the queue (signals tasks to stop)
-		queue.Cancel()
-
-		// Release ownership if we have a project ID
-		if projectID != uuid.Nil {
-			tenantCtx, cleanup, err := s.getTenantCtx(context.Background(), projectID)
-			if err == nil {
-				if releaseErr := s.workflowRepo.ReleaseOwnership(tenantCtx, workflowID); releaseErr != nil {
-					s.logger.Error("Failed to release ownership during shutdown",
-						zap.String("workflow_id", workflowID.String()),
-						zap.Error(releaseErr))
-				}
-				cleanup()
-			}
-		}
-	})
+	return response.Entities, nil
 }
