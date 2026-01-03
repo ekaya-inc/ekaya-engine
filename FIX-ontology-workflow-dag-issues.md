@@ -145,28 +145,79 @@ WHERE ontology_id = '<ontology_id>';
 
 ---
 
-## Issue 3: Moderate Failure Rate in ColumnEnrichment (37%)
+## Issue 3: Moderate Failure Rate in ColumnEnrichment (37%) ✅ COMPLETE
 
 **Severity**: Moderate
+**Status**: ✅ Fixed, Tested, and Committed (2026-01-03)
 
 **Observed Behavior**:
 - 14 out of 38 tables failed to enrich (37% failure rate)
 - Final message: "Enriched 24 tables (14 failed)"
 
-**Possible Causes**:
-1. Similar to relationship enrichment - LLM issues
-2. Tables with many columns exceeding context limits
-3. Specific table structures causing parsing issues
+**Root Cause Analysis**:
+1. No retry logic for transient LLM failures (rate limits, timeouts, server errors)
+2. No detailed logging to diagnose specific failure reasons
+3. No handling for tables with many columns exceeding LLM context limits
+4. No chunking strategy for large tables
 
-**Files to Investigate**:
-- `pkg/services/dag/column_enrichment_node.go` - Check error handling
-- Check if failed tables have common characteristics (many columns, special characters, etc.)
+**Files Modified**:
+- `pkg/services/column_enrichment.go` - Enhanced error handling, retry logic, and chunking
+- `pkg/services/column_enrichment_test.go` - Comprehensive test coverage
 
-**How to Fix**:
-1. Add per-table error logging to identify patterns
-2. Implement chunking for tables with many columns
-3. Add retry logic for transient failures
-4. Consider graceful degradation - partial enrichment instead of full failure
+**Implementation Details**:
+1. **Detailed Error Logging**: Added `logTableFailure()` function that logs:
+   - Table name
+   - Specific failure reason
+   - Error details if available
+
+2. **Retry Logic with Exponential Backoff**:
+   - Uses existing `pkg/retry` package
+   - 3 retries with 500ms initial delay, 10s max delay, 2x multiplier
+   - Leverages `llm.ClassifyError()` to distinguish retryable vs non-retryable errors
+   - Retryable: rate limits (429), timeouts, server errors (5xx), GPU errors
+   - Non-retryable: authentication (401), model not found, bad requests
+
+3. **Column Chunking for Large Tables**:
+   - Implemented `enrichColumnsInChunks()` to handle tables with > 50 columns
+   - Splits columns into chunks of 50 to avoid context limits
+   - Each chunk is enriched separately and results are combined
+   - Filters FK info and enum samples per chunk for efficiency
+
+4. **Enhanced Error Context**:
+   - All table failures now log with table context
+   - LLM response previews included in parse error logs
+   - Progress callbacks report after each table
+
+**Testing**:
+- `TestColumnEnrichmentService_EnrichProject_Success` - Happy path
+- `TestColumnEnrichmentService_EnrichProject_WithRetryOnTransientError` - Verifies retry on transient failures
+- `TestColumnEnrichmentService_EnrichProject_NonRetryableError` - Verifies behavior on permanent errors
+- `TestColumnEnrichmentService_EnrichProject_LargeTable` - Verifies chunking for 60-column table
+- `TestColumnEnrichmentService_EnrichProject_ProgressCallback` - Verifies progress reporting
+- `TestColumnEnrichmentService_EnrichProject_EmptyProject` - Edge case handling
+
+**Commit Date**: 2026-01-03
+
+**What Was Done**:
+1. Added comprehensive error logging with `logTableFailure()` to diagnose each failure
+2. Implemented retry logic using `pkg/retry` with exponential backoff (3 retries, 500ms→10s delays)
+3. Added column chunking via `enrichColumnsInChunks()` for tables with >50 columns
+4. Extracted `enrichColumnBatch()` to handle single batch enrichment with retry
+5. Leveraged `llm.ClassifyError()` to distinguish retryable (rate limits, timeouts) from permanent errors
+6. Enhanced parse error logging with truncated LLM response previews for debugging
+7. Created comprehensive test suite covering success, retries, chunking, and edge cases
+
+**Expected Impact**:
+- Transient LLM failures (rate limits, timeouts) should auto-recover via retry
+- Large tables (>50 columns) will be processed in chunks instead of failing due to context limits
+- Detailed logs will reveal remaining failures for targeted fixes
+- Overall failure rate should drop significantly (target: <15%)
+
+**Next Session Should**:
+1. Run a full ontology extraction and monitor server logs for column enrichment phase
+2. Compare new failure rate against the original 37% baseline
+3. Analyze remaining failures using the detailed error logs to identify patterns
+4. If failures persist above ~15%, investigate: chunk size tuning, LLM prompt adjustments, or data quality issues
 
 ---
 
