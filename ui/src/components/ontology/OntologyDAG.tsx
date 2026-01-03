@@ -21,6 +21,14 @@ import engineApi from '../../services/engineApi';
 import type { DAGNodeName, DAGNodeStatus, DAGStatusResponse, DAGStatus } from '../../types';
 import { DAGNodeDescriptions } from '../../types';
 import { Button } from '../ui/Button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/Dialog';
 
 interface OntologyDAGProps {
   projectId: string;
@@ -97,6 +105,7 @@ export const OntologyDAG = ({
   const [isStarting, setIsStarting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showReextractDialog, setShowReextractDialog] = useState(false);
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isMountedRef = useRef(true);
@@ -313,7 +322,15 @@ export const OntologyDAG = ({
     if (isComplete || isFailed) {
       return (
         <Button
-          onClick={() => void handleStart()}
+          onClick={() => {
+            if (isComplete) {
+              // Show confirmation dialog for re-extraction
+              setShowReextractDialog(true);
+            } else {
+              // Failed extraction - retry without confirmation
+              void handleStart();
+            }
+          }}
           disabled={isStarting}
           className="bg-purple-600 hover:bg-purple-700 text-white"
         >
@@ -325,7 +342,7 @@ export const OntologyDAG = ({
           ) : (
             <>
               <RefreshCw className="h-4 w-4 mr-2" />
-              {isFailed ? 'Retry' : 'Refresh Ontology'}
+              {isFailed ? 'Retry Extraction' : 'Re-extract Ontology'}
             </>
           )}
         </Button>
@@ -560,6 +577,48 @@ export const OntologyDAG = ({
           })}
         </div>
       </div>
+
+      {/* Re-extraction confirmation dialog */}
+      <Dialog open={showReextractDialog} onOpenChange={setShowReextractDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Re-extract Ontology?</DialogTitle>
+            <DialogDescription>
+              This will start a complete re-extraction of your ontology from scratch, which typically
+              takes 10-15 minutes. All existing ontology data will be replaced.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 dark:bg-amber-900/20 dark:border-amber-800">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-amber-800 dark:text-amber-200">
+                  <p className="font-medium mb-1">This is a full re-extraction</p>
+                  <p>
+                    If you&apos;re looking to update the ontology with recent schema changes, this feature
+                    is not yet implemented. For now, re-extraction will analyze your entire database
+                    from the beginning.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowReextractDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                setShowReextractDialog(false);
+                void handleStart();
+              }}
+              className="bg-purple-600 hover:bg-purple-700 text-white"
+            >
+              Start Re-extraction
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
