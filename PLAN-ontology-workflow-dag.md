@@ -500,24 +500,48 @@ Legend: [✓] Complete  [▶] Running  [○] Pending  [✗] Failed
 
 ## Section 8: Implementation Phases
 
-### Phase 1: Database & Models
+### Phase 1: Database & Models ✅ COMPLETED
 
 **Tasks:**
-1. Create migration for `engine_ontology_dag` and `engine_dag_nodes` tables
-2. Create migration to drop `engine_ontology_workflows`, `engine_relationship_candidates`, `engine_workflow_state`
-3. Create Go models in `pkg/models/ontology_dag.go`
-4. Create repository in `pkg/repositories/ontology_dag_repository.go`
+1. ✅ Create migration for `engine_ontology_dag` and `engine_dag_nodes` tables
+2. ✅ Create migration to drop `engine_ontology_workflows`, `engine_relationship_candidates`, `engine_workflow_state`
+3. ✅ Create Go models in `pkg/models/ontology_dag.go`
+4. ✅ Create repository in `pkg/repositories/ontology_dag_repository.go`
+5. ✅ Create integration tests in `pkg/repositories/ontology_dag_repository_test.go`
 
-**Files:**
+**Files Created:**
 ```
 migrations/
-  0XX_create_ontology_dag.up.sql
-  0XX_create_ontology_dag.down.sql
+  023_create_ontology_dag.up.sql    # Creates engine_ontology_dag and engine_dag_nodes tables, drops legacy tables
+  023_create_ontology_dag.down.sql  # Rollback: drops DAG tables, recreates legacy tables
 pkg/models/
-  ontology_dag.go
+  ontology_dag.go                   # OntologyDAG, DAGNode models with status types and node names
 pkg/repositories/
-  ontology_dag_repository.go
+  ontology_dag_repository.go        # Full CRUD + ownership + node operations
+  ontology_dag_repository_test.go   # Integration tests (build tag: integration)
 ```
+
+**Implementation Notes for Future Sessions:**
+
+1. **Model Constants**: The `pkg/models/ontology_dag.go` file defines:
+   - `DAGStatus` enum: pending, running, completed, failed, cancelled
+   - `DAGNodeStatus` enum: pending, running, completed, failed, skipped
+   - `DAGNodeName` constants for all 6 nodes with `DAGNodeOrder` map
+   - `AllDAGNodes()` helper returns nodes in execution order
+   - `DAGNodeProgress` struct for tracking current/total/message
+
+2. **Repository Interface**: The `OntologyDAGRepository` interface provides:
+   - DAG CRUD: Create, GetByID, GetByIDWithNodes, GetLatestByDatasource, GetActiveByDatasource, Update, UpdateStatus, Delete, DeleteByProject
+   - Ownership: ClaimOwnership, UpdateHeartbeat, ReleaseOwnership (for multi-server robustness)
+   - Nodes: CreateNodes, GetNodesByDAG, UpdateNodeStatus, UpdateNodeProgress, IncrementNodeRetryCount, GetNextPendingNode
+
+3. **Database Schema**:
+   - Partial unique index ensures only one active DAG per datasource
+   - RLS policies applied to both tables
+   - Trigger updates `updated_at` automatically
+   - Heartbeat index for efficient stale DAG detection
+
+4. **Test Pattern**: Tests use `testhelpers.GetEngineDB(t)` shared container pattern. Run with `go test -tags=integration ./pkg/repositories/...`
 
 ### Phase 2: DAG Service & Nodes
 
