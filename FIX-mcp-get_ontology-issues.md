@@ -11,7 +11,7 @@
 | Phase 3: Ontology Finalization | ✅ COMPLETE | Domain description, auto-triggered |
 | Phase 4: Column Workflow | ✅ COMPLETE | Column semantics, enum values, FK roles |
 | Phase 5: Project Conventions | ✅ COMPLETE | Soft delete, currency (bundled with Phase 3) |
-| Phase 6: Business Glossary | 📋 READY | Metric definitions - see spec below |
+| Phase 6: Business Glossary | 🚧 IN PROGRESS | Step 1 (migration) ✅, Steps 2-7 pending |
 
 ---
 
@@ -225,9 +225,19 @@ WHERE LOWER(h.username) = LOWER({{username}}) OR LOWER(v.username) = LOWER({{use
 
 ---
 
-## Phase 6: Business Glossary (Ready to Implement)
+## Phase 6: Business Glossary (In Progress)
 
 **Goal:** Define business metrics and calculations for executive reporting.
+
+### Task Checklist
+
+- [x] **Step 1: Database Migration** - Created `migrations/025_business_glossary.{up,down}.sql` with table, RLS, indexes, and trigger. Added integration test `migrations/025_business_glossary_test.go`.
+- [ ] **Step 2: Model** - Create `pkg/models/glossary.go` with `BusinessGlossaryTerm` and `Filter` structs
+- [ ] **Step 3: Repository** - Create `pkg/repositories/glossary_repository.go` with CRUD operations
+- [ ] **Step 4: Service** - Create `pkg/services/glossary_service.go` with business logic and LLM suggestion
+- [ ] **Step 5: Handler** - Create `pkg/handlers/glossary_handler.go` with HTTP endpoints
+- [ ] **Step 6: Register in main.go** - Wire up handler registration
+- [ ] **Step 7: Expose in get_ontology** - Add `get_glossary` MCP tool or include in domain depth
 
 **Why This Matters for MCP Clients:** When asked "What's our revenue?", the agent needs to know:
 - Revenue = `SUM(earned_amount)` not `SUM(total_amount)`
