@@ -15,11 +15,15 @@ import (
 // ToolGroupApprovedQueries is the identifier for the pre-approved queries tool group.
 const ToolGroupApprovedQueries = "approved_queries"
 
+// ToolGroupAgentTools is the identifier for the agent tools group.
+const ToolGroupAgentTools = "agent_tools"
+
 // validToolGroups defines the known tool group identifiers for validation.
 // UI metadata (names, descriptions, warnings) is defined in the frontend.
 var validToolGroups = map[string]bool{
 	"developer":              true,
 	ToolGroupApprovedQueries: true,
+	ToolGroupAgentTools:      true,
 }
 
 // MCPConfigResponse is the API response format for MCP configuration.

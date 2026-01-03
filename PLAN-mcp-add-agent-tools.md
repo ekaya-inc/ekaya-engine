@@ -28,40 +28,21 @@ Add a new "Agent Tools" section to the MCP Server configuration page, positioned
 
 ---
 
-### Step 2: Update Models
+### Step 2: Update Models ✅ COMPLETED
 
-**File:** `pkg/models/mcp_config.go`
+**Files Modified:**
+- `pkg/models/mcp_config.go` - Added `AgentAPIKeyEncrypted` field to `MCPConfig` struct
+- `pkg/services/mcp_config.go` - Added `ToolGroupAgentTools` constant and registered in `validToolGroups`
 
-Add to `MCPConfig` struct:
+**Implementation Notes:**
+- `AgentAPIKeyEncrypted` uses `json:"-"` tag to prevent serialization (never exposed via API)
+- `ToolGroupAgentTools` constant defined as `"agent_tools"` for consistency with existing patterns
+- Both `ToolGroupApprovedQueries` and `ToolGroupAgentTools` constants are now exported for use by other packages
 
-```go
-type MCPConfig struct {
-    ProjectID              uuid.UUID                   `json:"project_id"`
-    ToolGroups             map[string]*ToolGroupConfig `json:"tool_groups"`
-    AgentAPIKeyEncrypted   string                      `json:"-"` // Never serialize
-    CreatedAt              time.Time                   `json:"created_at"`
-    UpdatedAt              time.Time                   `json:"updated_at"`
-}
-```
-
-Add new tool group constant in `pkg/services/mcp_config.go`:
-
-```go
-// ToolGroupApprovedQueries is the identifier for the pre-approved queries tool group.
-const ToolGroupApprovedQueries = "approved_queries"
-
-// ToolGroupAgentTools is the identifier for the agent tools group.
-const ToolGroupAgentTools = "agent_tools"
-
-// validToolGroups defines the known tool group identifiers for validation.
-var validToolGroups = map[string]bool{
-    "developer":              true,
-    ToolGroupApprovedQueries: true,
-    ToolGroupAgentTools:      true, // Add this line
-}
-```
-
-**Pattern reference:** `pkg/services/mcp_config.go:16-23`
+**Code Locations:**
+- `pkg/models/mcp_config.go:25` - AgentAPIKeyEncrypted field
+- `pkg/services/mcp_config.go:18-19` - ToolGroupAgentTools constant
+- `pkg/services/mcp_config.go:23-27` - validToolGroups map with agent_tools entry
 
 ---
 

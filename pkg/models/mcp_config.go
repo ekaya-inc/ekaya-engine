@@ -20,10 +20,11 @@ type ToolGroupConfig struct {
 
 // MCPConfig represents the MCP server configuration for a project.
 type MCPConfig struct {
-	ProjectID  uuid.UUID                   `json:"project_id"`
-	ToolGroups map[string]*ToolGroupConfig `json:"tool_groups"`
-	CreatedAt  time.Time                   `json:"created_at"`
-	UpdatedAt  time.Time                   `json:"updated_at"`
+	ProjectID            uuid.UUID                   `json:"project_id"`
+	ToolGroups           map[string]*ToolGroupConfig `json:"tool_groups"`
+	AgentAPIKeyEncrypted string                      `json:"-"` // Never serialize - encrypted at rest
+	CreatedAt            time.Time                   `json:"created_at"`
+	UpdatedAt            time.Time                   `json:"updated_at"`
 }
 
 // DefaultMCPConfig returns the default MCP configuration for a new project.
