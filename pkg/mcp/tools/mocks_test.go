@@ -154,6 +154,10 @@ func (m *mockProjectService) SetDefaultDatasourceID(ctx context.Context, project
 	return nil
 }
 
+func (m *mockProjectService) SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string) {
+	// No-op for tests
+}
+
 // mockDatasourceService implements services.DatasourceService for testing.
 type mockDatasourceService struct {
 	datasource      *models.Datasource

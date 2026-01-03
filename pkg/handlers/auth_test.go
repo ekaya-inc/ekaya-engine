@@ -43,7 +43,7 @@ func TestAuthHandler_CompleteOAuth_Success(t *testing.T) {
 	}
 
 	oauthService := &mockOAuthService{token: "test-jwt-token"}
-	handler := NewAuthHandler(oauthService, cfg, zap.NewNop())
+	handler := NewAuthHandler(oauthService, &mockProjectService{}, cfg, zap.NewNop())
 
 	reqBody := CompleteOAuthRequest{
 		Code:         "auth-code-123",
@@ -107,7 +107,7 @@ func TestAuthHandler_CompleteOAuth_MissingCode(t *testing.T) {
 		BaseURL: "http://localhost:3443",
 	}
 
-	handler := NewAuthHandler(&mockOAuthService{}, cfg, zap.NewNop())
+	handler := NewAuthHandler(&mockOAuthService{}, &mockProjectService{}, cfg, zap.NewNop())
 
 	reqBody := CompleteOAuthRequest{
 		Code:         "", // Missing
@@ -143,7 +143,7 @@ func TestAuthHandler_CompleteOAuth_MissingState(t *testing.T) {
 		BaseURL: "http://localhost:3443",
 	}
 
-	handler := NewAuthHandler(&mockOAuthService{}, cfg, zap.NewNop())
+	handler := NewAuthHandler(&mockOAuthService{}, &mockProjectService{}, cfg, zap.NewNop())
 
 	reqBody := CompleteOAuthRequest{
 		Code:         "auth-code-123",
@@ -170,7 +170,7 @@ func TestAuthHandler_CompleteOAuth_MissingCodeVerifier(t *testing.T) {
 		BaseURL: "http://localhost:3443",
 	}
 
-	handler := NewAuthHandler(&mockOAuthService{}, cfg, zap.NewNop())
+	handler := NewAuthHandler(&mockOAuthService{}, &mockProjectService{}, cfg, zap.NewNop())
 
 	reqBody := CompleteOAuthRequest{
 		Code:         "auth-code-123",
@@ -198,7 +198,7 @@ func TestAuthHandler_CompleteOAuth_InvalidAuthURL(t *testing.T) {
 	}
 
 	oauthService := &mockOAuthService{err: services.ErrInvalidAuthURL}
-	handler := NewAuthHandler(oauthService, cfg, zap.NewNop())
+	handler := NewAuthHandler(oauthService, &mockProjectService{}, cfg, zap.NewNop())
 
 	reqBody := CompleteOAuthRequest{
 		Code:         "auth-code-123",
@@ -236,7 +236,7 @@ func TestAuthHandler_CompleteOAuth_TokenExchangeFailed(t *testing.T) {
 	}
 
 	oauthService := &mockOAuthService{err: errors.New("connection refused")}
-	handler := NewAuthHandler(oauthService, cfg, zap.NewNop())
+	handler := NewAuthHandler(oauthService, &mockProjectService{}, cfg, zap.NewNop())
 
 	reqBody := CompleteOAuthRequest{
 		Code:         "auth-code-123",
@@ -272,7 +272,7 @@ func TestAuthHandler_CompleteOAuth_InvalidJSON(t *testing.T) {
 		BaseURL: "http://localhost:3443",
 	}
 
-	handler := NewAuthHandler(&mockOAuthService{}, cfg, zap.NewNop())
+	handler := NewAuthHandler(&mockOAuthService{}, &mockProjectService{}, cfg, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/complete-oauth", bytes.NewReader([]byte("not json")))
 	req.Header.Set("Content-Type", "application/json")
@@ -303,7 +303,7 @@ func TestAuthHandler_CookieSettingsForLocalhost(t *testing.T) {
 	}
 
 	oauthService := &mockOAuthService{token: "test-jwt-token"}
-	handler := NewAuthHandler(oauthService, cfg, zap.NewNop())
+	handler := NewAuthHandler(oauthService, &mockProjectService{}, cfg, zap.NewNop())
 
 	reqBody := CompleteOAuthRequest{
 		Code:         "auth-code-123",
