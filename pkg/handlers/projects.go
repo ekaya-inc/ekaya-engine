@@ -18,10 +18,12 @@ type TenantMiddleware func(http.HandlerFunc) http.HandlerFunc
 
 // ProjectResponse is the standard response for project endpoints.
 type ProjectResponse struct {
-	Status  string `json:"status"`
-	PID     string `json:"pid"`
-	Name    string `json:"name,omitempty"`
-	PAPIURL string `json:"papi_url,omitempty"`
+	Status          string `json:"status"`
+	PID             string `json:"pid"`
+	Name            string `json:"name,omitempty"`
+	PAPIURL         string `json:"papi_url,omitempty"`
+	ProjectsPageURL string `json:"projects_page_url,omitempty"`
+	ProjectPageURL  string `json:"project_page_url,omitempty"`
 }
 
 // ProjectsHandler handles project-related HTTP requests.
@@ -53,6 +55,7 @@ func (h *ProjectsHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *aut
 
 // GetCurrent handles GET /projects
 // Returns project info using project ID from JWT claims.
+// Triggers async sync from ekaya-central to update project name if changed.
 func (h *ProjectsHandler) GetCurrent(w http.ResponseWriter, r *http.Request) {
 	claims, ok := auth.GetClaims(r.Context())
 	if !ok || claims.ProjectID == "" {
@@ -87,6 +90,11 @@ func (h *ProjectsHandler) GetCurrent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Trigger async sync from ekaya-central if we have PAPI URL and token
+	if token, hasToken := auth.GetToken(r.Context()); hasToken && claims.PAPI != "" {
+		h.projectService.SyncFromCentralAsync(projectID, claims.PAPI, token)
+	}
+
 	response := h.buildProjectResponse(project)
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
@@ -114,10 +122,12 @@ func (h *ProjectsHandler) Provision(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := ProjectResponse{
-		Status:  "success",
-		PID:     result.ProjectID.String(),
-		Name:    result.Name,
-		PAPIURL: result.PAPIURL,
+		Status:          "success",
+		PID:             result.ProjectID.String(),
+		Name:            result.Name,
+		PAPIURL:         result.PAPIURL,
+		ProjectsPageURL: result.ProjectsPageURL,
+		ProjectPageURL:  result.ProjectPageURL,
 	}
 
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
@@ -195,17 +205,25 @@ func (h *ProjectsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 // buildProjectResponse creates a ProjectResponse from a Project model.
 func (h *ProjectsHandler) buildProjectResponse(project *models.Project) ProjectResponse {
-	var papiURL string
+	var papiURL, projectsPageURL, projectPageURL string
 	if project.Parameters != nil {
-		if papi, ok := project.Parameters["papi_url"].(string); ok {
-			papiURL = papi
+		if v, ok := project.Parameters["papi_url"].(string); ok {
+			papiURL = v
+		}
+		if v, ok := project.Parameters["projects_page_url"].(string); ok {
+			projectsPageURL = v
+		}
+		if v, ok := project.Parameters["project_page_url"].(string); ok {
+			projectPageURL = v
 		}
 	}
 
 	return ProjectResponse{
-		Status:  "success",
-		PID:     project.ID.String(),
-		Name:    project.Name,
-		PAPIURL: papiURL,
+		Status:          "success",
+		PID:             project.ID.String(),
+		Name:            project.Name,
+		PAPIURL:         papiURL,
+		ProjectsPageURL: projectsPageURL,
+		ProjectPageURL:  projectPageURL,
 	}
 }
