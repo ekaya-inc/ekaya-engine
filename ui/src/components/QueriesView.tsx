@@ -234,6 +234,19 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
       if (response.success) {
         if (response.data) {
           setQueryResults(response.data);
+
+          // Auto-populate output columns from test results
+          const newOutputColumns: OutputColumn[] = response.data.columns.map((col) => ({
+            name: col.name,
+            type: col.type,
+            description: '',
+          }));
+
+          if (isCreateMode) {
+            setNewQuery((prev) => ({ ...prev, output_columns: newOutputColumns }));
+          } else {
+            setEditingState((prev) => prev ? { ...prev, output_columns: newOutputColumns } : prev);
+          }
         }
         toast({
           title: 'Query executed successfully',
@@ -790,7 +803,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                   {newQuery.parameters.length > 0 && (
                     <div className="border-t border-border-light pt-4">
                       <h3 className="text-sm font-medium text-text-primary mb-3">
-                        Test with Parameter Values
+                        Test
                       </h3>
                       <ParameterInputForm
                         parameters={newQuery.parameters}
@@ -798,6 +811,42 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                         onChange={setTestParameterValues}
                       />
                     </div>
+                  )}
+
+                  <div>
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        handleTestQuery(
+                          newQuery.sql_query,
+                          true,
+                          newQuery.parameters,
+                          testParameterValues
+                        )
+                      }
+                      disabled={
+                        !newQuery.sql_query.trim() ||
+                        isTesting ||
+                        hasUndefinedParams(newQuery.sql_query, newQuery.parameters)
+                      }
+                    >
+                      {isTesting ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Play className="mr-2 h-4 w-4" />
+                      )}
+                      Test Query
+                    </Button>
+                  </div>
+
+                  {queryResults && (
+                    <QueryResultsTable
+                      columns={queryResults.columns}
+                      rows={queryResults.rows}
+                      totalRowCount={queryResults.row_count}
+                      maxRows={10}
+                      maxColumns={20}
+                    />
                   )}
 
                   <OutputColumnEditor
@@ -824,31 +873,8 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     />
                   </div>
 
-                  <div className="flex justify-between gap-2 pt-4 border-t border-border-light">
-                    <Button
-                      variant="outline"
-                      onClick={() =>
-                        handleTestQuery(
-                          newQuery.sql_query,
-                          true,
-                          newQuery.parameters,
-                          testParameterValues
-                        )
-                      }
-                      disabled={
-                        !newQuery.sql_query.trim() ||
-                        isTesting ||
-                        hasUndefinedParams(newQuery.sql_query, newQuery.parameters)
-                      }
-                    >
-                      {isTesting ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Play className="mr-2 h-4 w-4" />
-                      )}
-                      Test Query
-                    </Button>
-                    <div className="flex gap-2">
+                  <div className="pt-4 border-t border-border-light">
+                    <div className="flex justify-end gap-2">
                       <Button
                         variant="outline"
                         onClick={() => {
@@ -876,13 +902,12 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                         Save Query
                       </Button>
                     </div>
+                    {!testPassed && newQuery.sql_query.trim() && (
+                      <p className="text-sm text-amber-600 dark:text-amber-400 text-right mt-2">
+                        Please test the query before saving
+                      </p>
+                    )}
                   </div>
-
-                  {!testPassed && newQuery.sql_query.trim() && (
-                    <p className="text-sm text-amber-600 dark:text-amber-400">
-                      Please test the query before saving
-                    </p>
-                  )}
                 </CardContent>
               </>
             ) : editingQueryId && editingState ? (
@@ -992,7 +1017,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                   {editingState.parameters.length > 0 && (
                     <div className="border-t border-border-light pt-4">
                       <h3 className="text-sm font-medium text-text-primary mb-3">
-                        Test with Parameter Values
+                        Test
                       </h3>
                       <ParameterInputForm
                         parameters={editingState.parameters}
@@ -1000,6 +1025,42 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                         onChange={setTestParameterValues}
                       />
                     </div>
+                  )}
+
+                  <div>
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        handleTestQuery(
+                          editingState.sql_query,
+                          false,
+                          editingState.parameters,
+                          testParameterValues
+                        )
+                      }
+                      disabled={
+                        !editingState.sql_query.trim() ||
+                        isTesting ||
+                        hasUndefinedParams(editingState.sql_query, editingState.parameters)
+                      }
+                    >
+                      {isTesting ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Play className="mr-2 h-4 w-4" />
+                      )}
+                      Test Query
+                    </Button>
+                  </div>
+
+                  {queryResults && (
+                    <QueryResultsTable
+                      columns={queryResults.columns}
+                      rows={queryResults.rows}
+                      totalRowCount={queryResults.row_count}
+                      maxRows={10}
+                      maxColumns={20}
+                    />
                   )}
 
                   <OutputColumnEditor
@@ -1026,52 +1087,8 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     />
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="edit-enabled"
-                      checked={editingState.is_enabled}
-                      onChange={(e) =>
-                        setEditingState({
-                          ...editingState,
-                          is_enabled: e.target.checked,
-                        })
-                      }
-                      className="rounded border-border-light"
-                    />
-                    <label
-                      htmlFor="edit-enabled"
-                      className="text-sm text-text-primary"
-                    >
-                      Enable query
-                    </label>
-                  </div>
-
-                  <div className="flex justify-between gap-2 pt-4 border-t border-border-light">
-                    <Button
-                      variant="outline"
-                      onClick={() =>
-                        handleTestQuery(
-                          editingState.sql_query,
-                          false,
-                          editingState.parameters,
-                          testParameterValues
-                        )
-                      }
-                      disabled={
-                        !editingState.sql_query.trim() ||
-                        isTesting ||
-                        hasUndefinedParams(editingState.sql_query, editingState.parameters)
-                      }
-                    >
-                      {isTesting ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Play className="mr-2 h-4 w-4" />
-                      )}
-                      Test Query
-                    </Button>
-                    <div className="flex gap-2">
+                  <div className="pt-4 border-t border-border-light">
+                    <div className="flex justify-end gap-2">
                       <Button
                         variant="outline"
                         onClick={() => {
@@ -1100,13 +1117,12 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                         Save Changes
                       </Button>
                     </div>
+                    {!editTestPassed && editingState.sql_query.trim() && (
+                      <p className="text-sm text-amber-600 dark:text-amber-400 text-right mt-2">
+                        Please test the query before saving
+                      </p>
+                    )}
                   </div>
-
-                  {!editTestPassed && editingState.sql_query.trim() && (
-                    <p className="text-sm text-amber-600 dark:text-amber-400">
-                      Please test the query before saving
-                    </p>
-                  )}
                 </CardContent>
               </>
             ) : selectedQuery ? (

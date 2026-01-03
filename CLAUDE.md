@@ -210,33 +210,46 @@ When manually testing the ontology extraction workflow, use Chrome browser integ
 
 | Table | Purpose |
 |-------|---------|
-| `engine_ontology_dag` | DAG workflow state, progress, current step |
+| `engine_ontology_dag` | DAG workflow state, status, current_node |
 | `engine_dag_nodes` | Individual DAG node states (one per step) |
-| `engine_ontologies` | Ontology data (domain_summary, entity_summaries, column_details) |
-| `engine_ontology_entities` | Discovered entities with descriptions and metadata |
-| `engine_entity_relationships` | Relationships between entities |
-| `engine_ontology_questions` | Questions generated during analysis |
-| `engine_ontology_chat_messages` | Ontology-specific chat history |
-| `engine_llm_conversations` | All LLM request/response logs |
-| `engine_project_knowledge` | Project-level knowledge and context |
+| `engine_ontologies` | Tiered ontology storage (domain_summary, entity_summaries, column_details) |
+| `engine_ontology_entities` | Discovered domain entities (user, account, order, etc.) with descriptions |
+| `engine_ontology_entity_occurrences` | Where entities appear across schema with role semantics (visitor, host, etc.) |
+| `engine_ontology_entity_aliases` | Alternative names for entities (for query matching) |
+| `engine_ontology_entity_key_columns` | Important business columns per entity with synonyms |
+| `engine_entity_relationships` | Entity-to-entity relationships from FK constraints or inference |
+| `engine_ontology_questions` | Questions generated during analysis for user clarification |
+| `engine_ontology_chat_messages` | Ontology refinement chat history |
+| `engine_llm_conversations` | Verbatim LLM request/response logs for debugging and analytics |
+| `engine_project_knowledge` | Project-level facts learned during refinement |
 
 ### Clear Tables Before Testing
 
 ```sql
-TRUNCATE engine_ontology_dag, engine_dag_nodes, engine_ontologies, engine_ontology_entities, engine_entity_relationships, engine_ontology_questions, engine_ontology_chat_messages, engine_llm_conversations, engine_project_knowledge CASCADE;
+-- Clear ALL projects (use only when single project or full reset needed)
+TRUNCATE engine_ontology_dag, engine_dag_nodes, engine_ontologies, engine_ontology_entities, engine_ontology_entity_occurrences, engine_ontology_entity_aliases, engine_ontology_entity_key_columns, engine_entity_relationships, engine_ontology_questions, engine_ontology_chat_messages, engine_llm_conversations, engine_project_knowledge CASCADE;
+```
+
+**Note:** When multiple projects exist in different states, scope deletes to a specific project:
+```sql
+-- Clear ontology data for a specific project (CASCADE handles child tables)
+DELETE FROM engine_ontologies WHERE project_id = '<project-id>';
+DELETE FROM engine_ontology_dag WHERE project_id = '<project-id>';
+DELETE FROM engine_llm_conversations WHERE project_id = '<project-id>';
+DELETE FROM engine_project_knowledge WHERE project_id = '<project-id>';
 ```
 
 ### Monitor DAG Workflow Progress
 
 ```sql
 -- Overall DAG state and timing
-SELECT state, current_step, progress,
+SELECT status, current_node,
        EXTRACT(EPOCH FROM (COALESCE(completed_at, now()) - started_at))::int as elapsed_seconds
 FROM engine_ontology_dag ORDER BY created_at DESC LIMIT 1;
 
 -- DAG node states
-SELECT node_id, state, started_at, completed_at
-FROM engine_dag_nodes ORDER BY started_at;
+SELECT node_name, status, started_at, completed_at
+FROM engine_dag_nodes ORDER BY node_order;
 ```
 
 ### Monitor Entities and Relationships
@@ -261,12 +274,29 @@ SELECT jsonb_object_keys(entity_summaries) as entity
 FROM engine_ontologies WHERE is_active = true;
 ```
 
+### Monitor LLM Conversations
+
+```sql
+-- Recent LLM calls with timing and token usage
+SELECT model, status, duration_ms, prompt_tokens, completion_tokens, created_at
+FROM engine_llm_conversations ORDER BY created_at DESC LIMIT 10;
+
+-- LLM errors
+SELECT model, error_message, context, created_at
+FROM engine_llm_conversations WHERE status != 'success' ORDER BY created_at DESC;
+
+-- Token usage by model
+SELECT model, COUNT(*) as calls, SUM(total_tokens) as total_tokens, AVG(duration_ms)::int as avg_ms
+FROM engine_llm_conversations GROUP BY model;
+```
+
 ### What to Watch For
 
-1. **DAG state progression** - Should move through steps: EntityDiscovery → EntityEnrichment → RelationshipDiscovery → RelationshipEnrichment → OntologyFinalization → ColumnEnrichment
+1. **DAG state progression** - Should move through steps: EntityDiscovery → EntityEnrichment → RelationshipDiscovery → RelationshipEnrichment → ColumnEnrichment → OntologyFinalization
 2. **Parallel execution** - Multiple LLM calls processed concurrently within each step
 3. **Entity/relationship counts** - Should match expected schema size
 4. **Token limit errors** - Large tables may exceed LLM context limits
+5. **LLM conversation logging** - Check `engine_llm_conversations` for failed calls, high latency, or token spikes
 
 ### LLM Debug Logging
 
