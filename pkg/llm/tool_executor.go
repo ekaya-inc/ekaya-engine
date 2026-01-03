@@ -20,7 +20,6 @@ type OntologyToolExecutor struct {
 	projectID          uuid.UUID
 	datasourceID       uuid.UUID
 	ontologyRepo       repositories.OntologyRepository
-	workflowRepo       repositories.OntologyWorkflowRepository
 	knowledgeRepo      repositories.KnowledgeRepository
 	schemaRepo         repositories.SchemaRepository
 	ontologyEntityRepo repositories.OntologyEntityRepository
@@ -34,7 +33,6 @@ type OntologyToolExecutorConfig struct {
 	ProjectID          uuid.UUID
 	DatasourceID       uuid.UUID
 	OntologyRepo       repositories.OntologyRepository
-	WorkflowRepo       repositories.OntologyWorkflowRepository
 	KnowledgeRepo      repositories.KnowledgeRepository
 	SchemaRepo         repositories.SchemaRepository
 	OntologyEntityRepo repositories.OntologyEntityRepository
@@ -49,7 +47,6 @@ func NewOntologyToolExecutor(cfg *OntologyToolExecutorConfig) *OntologyToolExecu
 		projectID:          cfg.ProjectID,
 		datasourceID:       cfg.DatasourceID,
 		ontologyRepo:       cfg.OntologyRepo,
-		workflowRepo:       cfg.WorkflowRepo,
 		knowledgeRepo:      cfg.KnowledgeRepo,
 		schemaRepo:         cfg.SchemaRepo,
 		ontologyEntityRepo: cfg.OntologyEntityRepo,

@@ -42,8 +42,10 @@ type heartbeatInfo struct {
 
 // WorkflowInfra provides shared infrastructure for workflow services.
 // It handles heartbeat management, task queue persistence, and queue lifecycle.
+// Note: This is deprecated infrastructure from the old workflow system.
+// The DAG-based workflow has its own heartbeat management.
 type WorkflowInfra struct {
-	workflowRepo     repositories.OntologyWorkflowRepository
+	dagRepo          repositories.OntologyDAGRepository
 	getTenantCtx     TenantContextFunc
 	logger           *zap.Logger
 	serverInstanceID uuid.UUID
@@ -54,8 +56,9 @@ type WorkflowInfra struct {
 }
 
 // NewWorkflowInfra creates a new workflow infrastructure instance.
+// Deprecated: Use the DAG-based workflow system instead.
 func NewWorkflowInfra(
-	workflowRepo repositories.OntologyWorkflowRepository,
+	dagRepo repositories.OntologyDAGRepository,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) *WorkflowInfra {
@@ -64,7 +67,7 @@ func NewWorkflowInfra(
 		zap.String("server_instance_id", serverID.String()))
 
 	return &WorkflowInfra{
-		workflowRepo:     workflowRepo,
+		dagRepo:          dagRepo,
 		getTenantCtx:     getTenantCtx,
 		logger:           logger,
 		serverInstanceID: serverID,
@@ -108,7 +111,7 @@ func (w *WorkflowInfra) StartHeartbeat(workflowID, projectID uuid.UUID) {
 						zap.Error(err))
 					continue
 				}
-				if err := w.workflowRepo.UpdateHeartbeat(ctx, workflowID, w.serverInstanceID); err != nil {
+				if err := w.dagRepo.UpdateHeartbeat(ctx, workflowID, w.serverInstanceID); err != nil {
 					w.logger.Error("Failed to update heartbeat",
 						zap.String("workflow_id", workflowID.String()),
 						zap.Error(err))
@@ -206,22 +209,11 @@ func (w *WorkflowInfra) runTaskQueueWriter(writer *taskQueueWriter) {
 }
 
 // persistTaskQueue saves the task queue to the database.
-func (w *WorkflowInfra) persistTaskQueue(projectID, workflowID uuid.UUID, tasks []models.WorkflowTask) {
-	// Acquire a fresh DB connection since this runs in a goroutine
-	ctx, cleanup, err := w.getTenantCtx(context.Background(), projectID)
-	if err != nil {
-		w.logger.Error("Failed to acquire DB connection for task queue update",
-			zap.String("workflow_id", workflowID.String()),
-			zap.Error(err))
-		return
-	}
-	defer cleanup()
-
-	if err := w.workflowRepo.UpdateTaskQueue(ctx, workflowID, tasks); err != nil {
-		w.logger.Error("Failed to persist task queue",
-			zap.String("workflow_id", workflowID.String()),
-			zap.Error(err))
-	}
+// Deprecated: Task queue persistence is no longer supported in the DAG-based workflow.
+// The DAG system uses node-level state tracking instead.
+func (w *WorkflowInfra) persistTaskQueue(_, workflowID uuid.UUID, _ []models.WorkflowTask) {
+	w.logger.Warn("Task queue persistence is deprecated in DAG-based workflow",
+		zap.String("workflow_id", workflowID.String()))
 }
 
 // ============================================================================

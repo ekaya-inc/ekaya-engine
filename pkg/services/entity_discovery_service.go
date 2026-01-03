@@ -388,29 +388,36 @@ func (s *entityDiscoveryService) buildEntityEnrichmentPrompt(
 	}
 
 	sb.WriteString("\n## Response Format\n\n")
-	sb.WriteString("Respond with a JSON array:\n")
+	sb.WriteString("Respond with a JSON object containing an \"entities\" array:\n")
 	sb.WriteString("```json\n")
-	sb.WriteString("[\n")
-	sb.WriteString("  {\n")
-	sb.WriteString("    \"table_name\": \"accounts\",\n")
-	sb.WriteString("    \"entity_name\": \"Account\",\n")
-	sb.WriteString("    \"description\": \"A user account that can access the platform.\",\n")
-	sb.WriteString("    \"domain\": \"customer\",\n")
-	sb.WriteString("    \"key_columns\": [{\"name\": \"email\", \"synonyms\": [\"e-mail\", \"mail\"]}, {\"name\": \"name\", \"synonyms\": [\"username\"]}],\n")
-	sb.WriteString("    \"alternative_names\": [\"user\", \"member\"]\n")
-	sb.WriteString("  },\n")
-	sb.WriteString("  ...\n")
-	sb.WriteString("]\n")
+	sb.WriteString("{\n")
+	sb.WriteString("  \"entities\": [\n")
+	sb.WriteString("    {\n")
+	sb.WriteString("      \"table_name\": \"accounts\",\n")
+	sb.WriteString("      \"entity_name\": \"Account\",\n")
+	sb.WriteString("      \"description\": \"A user account that can access the platform.\",\n")
+	sb.WriteString("      \"domain\": \"customer\",\n")
+	sb.WriteString("      \"key_columns\": [{\"name\": \"email\", \"synonyms\": [\"e-mail\", \"mail\"]}, {\"name\": \"name\", \"synonyms\": [\"username\"]}],\n")
+	sb.WriteString("      \"alternative_names\": [\"user\", \"member\"]\n")
+	sb.WriteString("    },\n")
+	sb.WriteString("    ...\n")
+	sb.WriteString("  ]\n")
+	sb.WriteString("}\n")
 	sb.WriteString("```\n")
 
 	return sb.String()
 }
 
+// entityEnrichmentResponse is the object-wrapped response from the LLM.
+type entityEnrichmentResponse struct {
+	Entities []entityEnrichment `json:"entities"`
+}
+
 func (s *entityDiscoveryService) parseEntityEnrichmentResponse(content string) ([]entityEnrichment, error) {
-	// Use the generic ParseJSONResponse helper
-	enrichments, err := llm.ParseJSONResponse[[]entityEnrichment](content)
+	// Use the generic ParseJSONResponse helper to unwrap the object format
+	response, err := llm.ParseJSONResponse[entityEnrichmentResponse](content)
 	if err != nil {
 		return nil, fmt.Errorf("parse entity enrichment response: %w", err)
 	}
-	return enrichments, nil
+	return response.Entities, nil
 }

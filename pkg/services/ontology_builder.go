@@ -74,7 +74,6 @@ type DescriptionProcessingResult struct {
 type ontologyBuilderService struct {
 	ontologyRepo       repositories.OntologyRepository
 	schemaRepo         repositories.SchemaRepository
-	workflowRepo       repositories.OntologyWorkflowRepository
 	knowledgeRepo      repositories.KnowledgeRepository
 	ontologyEntityRepo repositories.OntologyEntityRepository
 	entityRelRepo      repositories.EntityRelationshipRepository
@@ -83,10 +82,13 @@ type ontologyBuilderService struct {
 }
 
 // NewOntologyBuilderService creates a new ontology builder service.
+// Note: The workflowRepo parameter is deprecated and ignored. The old workflow-based
+// methods (BuildTieredOntology, ProcessProjectDescription) are no longer supported
+// as they have been replaced by the DAG-based workflow system.
 func NewOntologyBuilderService(
 	ontologyRepo repositories.OntologyRepository,
 	schemaRepo repositories.SchemaRepository,
-	workflowRepo repositories.OntologyWorkflowRepository,
+	_ repositories.OntologyDAGRepository, // Deprecated: workflow functionality replaced by DAG system
 	knowledgeRepo repositories.KnowledgeRepository,
 	ontologyEntityRepo repositories.OntologyEntityRepository,
 	entityRelRepo repositories.EntityRelationshipRepository,
@@ -96,7 +98,6 @@ func NewOntologyBuilderService(
 	return &ontologyBuilderService{
 		ontologyRepo:       ontologyRepo,
 		schemaRepo:         schemaRepo,
-		workflowRepo:       workflowRepo,
 		knowledgeRepo:      knowledgeRepo,
 		ontologyEntityRepo: ontologyEntityRepo,
 		entityRelRepo:      entityRelRepo,
@@ -111,122 +112,11 @@ var _ OntologyBuilderService = (*ontologyBuilderService)(nil)
 // BuildTieredOntology - Main Orchestration
 // ============================================================================
 
-func (s *ontologyBuilderService) BuildTieredOntology(ctx context.Context, projectID uuid.UUID, workflowID uuid.UUID) error {
-	startTime := time.Now()
-
-	// Add workflow context for conversation recording
-	ctx = llm.WithWorkflowID(ctx, workflowID)
-
-	s.logger.Info("Starting tiered ontology build from domain entities",
-		zap.String("project_id", projectID.String()),
-		zap.String("workflow_id", workflowID.String()))
-
-	// Get the active ontology
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		return fmt.Errorf("failed to get active ontology: %w", err)
-	}
-	if ontology == nil {
-		return fmt.Errorf("no active ontology found")
-	}
-
-	// Get workflow to find datasource
-	workflow, err := s.workflowRepo.GetByID(ctx, workflowID)
-	if err != nil {
-		return fmt.Errorf("failed to get workflow: %w", err)
-	}
-	if workflow.Config == nil {
-		return fmt.Errorf("workflow has no config")
-	}
-
-	// Load domain entities from the Entities phase
-	domainEntities, err := s.ontologyEntityRepo.GetByOntology(ctx, ontology.ID)
-	if err != nil {
-		return fmt.Errorf("failed to load domain entities: %w", err)
-	}
-
-	// Load entity relationships from the Relationships phase
-	entityRelationships, err := s.entityRelRepo.GetByOntology(ctx, ontology.ID)
-	if err != nil {
-		return fmt.Errorf("failed to load entity relationships: %w", err)
-	}
-
-	entityCount := len(domainEntities)
-	relationshipCount := len(entityRelationships)
-
-	s.logger.Info("Loaded domain entities and relationships",
-		zap.Int("entity_count", entityCount),
-		zap.Int("relationship_count", relationshipCount))
-
-	// Update workflow progress
-	if err := s.workflowRepo.UpdateProgress(ctx, workflowID, &models.WorkflowProgress{
-		CurrentPhase: models.WorkflowPhaseTier1Building,
-		Message:      fmt.Sprintf("Building ontology from %d entities and %d relationships...", entityCount, relationshipCount),
-		Current:      0,
-		Total:        entityCount,
-	}); err != nil {
-		s.logger.Error("Failed to update progress", zap.Error(err))
-	}
-
-	// Load occurrences for each entity to understand where they appear
-	entityOccurrences := make(map[uuid.UUID][]*models.OntologyEntityOccurrence)
-	for _, entity := range domainEntities {
-		occurrences, err := s.ontologyEntityRepo.GetOccurrencesByEntity(ctx, entity.ID)
-		if err != nil {
-			s.logger.Warn("Failed to load occurrences for entity",
-				zap.String("entity_name", entity.Name),
-				zap.Error(err))
-			continue
-		}
-		entityOccurrences[entity.ID] = occurrences
-	}
-
-	// Build entity summaries from domain entities (not tables)
-	entitySummaries := s.buildEntitySummariesFromDomainEntities(domainEntities, entityOccurrences, entityRelationships)
-
-	// Save entity summaries
-	if err := s.ontologyRepo.UpdateEntitySummaries(ctx, projectID, entitySummaries); err != nil {
-		return fmt.Errorf("failed to save entity summaries: %w", err)
-	}
-
-	// Update progress - entity summaries complete
-	if err := s.workflowRepo.UpdateProgress(ctx, workflowID, &models.WorkflowProgress{
-		CurrentPhase: models.WorkflowPhaseTier0Building,
-		Message:      "Building domain summary...",
-		Current:      entityCount,
-		Total:        entityCount,
-	}); err != nil {
-		s.logger.Error("Failed to update progress", zap.Error(err))
-	}
-
-	// Build domain summary from domain entities
-	domainSummary := s.buildDomainSummaryFromEntities(domainEntities, entityRelationships, entitySummaries)
-
-	// Save domain summary
-	if err := s.ontologyRepo.UpdateDomainSummary(ctx, projectID, domainSummary); err != nil {
-		return fmt.Errorf("failed to save domain summary: %w", err)
-	}
-
-	// Update progress - ontology is now ready
-	if err := s.workflowRepo.UpdateProgress(ctx, workflowID, &models.WorkflowProgress{
-		CurrentPhase:  models.WorkflowPhaseCompleting,
-		Message:       "Ontology complete",
-		Current:       entityCount,
-		Total:         entityCount,
-		OntologyReady: true,
-	}); err != nil {
-		s.logger.Error("Failed to update progress", zap.Error(err))
-	}
-
-	s.logger.Info("Tiered ontology build completed",
-		zap.String("project_id", projectID.String()),
-		zap.String("workflow_id", workflowID.String()),
-		zap.Int("entities", len(entitySummaries)),
-		zap.Int("relationships", relationshipCount),
-		zap.Int("domains", len(domainSummary.Domains)),
-		zap.Duration("elapsed", time.Since(startTime)))
-
-	return nil
+// BuildTieredOntology is deprecated. Use the DAG-based workflow system instead.
+// This method was part of the old workflow system and has been replaced by the
+// DAG orchestrator which provides more robust execution with node-level state tracking.
+func (s *ontologyBuilderService) BuildTieredOntology(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+	return fmt.Errorf("BuildTieredOntology is deprecated: use the DAG-based workflow system instead")
 }
 
 // buildEntitySummariesFromDomainEntities creates entity summaries from domain entities
@@ -792,169 +682,11 @@ func (s *ontologyBuilderService) parseTier0Response(response string, entities ma
 // AnalyzeEntity
 // ============================================================================
 
-func (s *ontologyBuilderService) AnalyzeEntity(ctx context.Context, projectID uuid.UUID, workflowID uuid.UUID, tableName string) ([]*models.OntologyQuestion, error) {
-	startTime := time.Now()
-
-	// Add workflow context for conversation recording
-	ctx = llm.WithWorkflowID(ctx, workflowID)
-
-	s.logger.Info("Analyzing entity",
-		zap.String("project_id", projectID.String()),
-		zap.String("workflow_id", workflowID.String()),
-		zap.String("table_name", tableName))
-
-	// Get workflow to find datasource
-	workflow, err := s.workflowRepo.GetByID(ctx, workflowID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get workflow: %w", err)
-	}
-	if workflow.Config == nil {
-		return nil, fmt.Errorf("workflow has no config")
-	}
-
-	// Load the table schema (schema-agnostic lookup)
-	table, err := s.schemaRepo.FindTableByName(ctx, projectID, workflow.Config.DatasourceID, tableName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get table %s: %w", tableName, err)
-	}
-
-	// Load columns for the table (GetTableByName doesn't include columns)
-	columnPtrs, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get columns for table %s: %w", tableName, err)
-	}
-	// Convert []*SchemaColumn to []SchemaColumn
-	table.Columns = make([]models.SchemaColumn, len(columnPtrs))
-	for i, col := range columnPtrs {
-		table.Columns[i] = *col
-	}
-
-	// columnGatheredData would contain sample values from column scanning
-	// This was previously loaded from workflow state, but the DAG-based workflow
-	// no longer uses that mechanism. For now, pass an empty map.
-	columnGatheredData := make(map[string]map[string]any)
-
-	// Load the existing ontology to get the entity summary and domain context
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get ontology: %w", err)
-	}
-
-	var entitySummary *models.EntitySummary
-	var domainContext *models.DomainContext
-	var entityHint *models.EntityHint
-
-	if ontology != nil {
-		if ontology.EntitySummaries != nil {
-			entitySummary = ontology.EntitySummaries[tableName]
-		}
-
-		// Extract domain context from metadata
-		if ontology.Metadata != nil {
-			if dc, ok := ontology.Metadata["domain_context"]; ok {
-				if dcMap, ok := dc.(map[string]any); ok {
-					domainContext = &models.DomainContext{}
-					if s, ok := dcMap["summary"].(string); ok {
-						domainContext.Summary = s
-					}
-					if pd, ok := dcMap["primary_domains"].([]any); ok {
-						for _, d := range pd {
-							if ds, ok := d.(string); ok {
-								domainContext.PrimaryDomains = append(domainContext.PrimaryDomains, ds)
-							}
-						}
-					}
-					if kt, ok := dcMap["key_terminology"].(map[string]any); ok {
-						domainContext.KeyTerminology = make(map[string]string)
-						for k, v := range kt {
-							if vs, ok := v.(string); ok {
-								domainContext.KeyTerminology[k] = vs
-							}
-						}
-					}
-				}
-			}
-
-			// Extract entity hint from metadata
-			if hints, ok := ontology.Metadata["entity_hints"]; ok {
-				if hintsMap, ok := hints.(map[string]any); ok {
-					if hint, ok := hintsMap[tableName]; ok {
-						if hintMap, ok := hint.(map[string]any); ok {
-							entityHint = &models.EntityHint{}
-							if bn, ok := hintMap["business_name"].(string); ok {
-								entityHint.BusinessName = bn
-							}
-							if d, ok := hintMap["domain"].(string); ok {
-								entityHint.Domain = d
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Load relationships for this table
-	relationships, err := s.schemaRepo.GetRelationshipDetails(ctx, projectID, workflow.Config.DatasourceID)
-	if err != nil {
-		s.logger.Warn("Failed to load relationships", zap.Error(err))
-		relationships = nil
-	}
-
-	// Filter relationships to only those involving this table
-	var tableRelationships []*models.RelationshipDetail
-	for _, rel := range relationships {
-		if rel.SourceTableName == tableName || rel.TargetTableName == tableName {
-			tableRelationships = append(tableRelationships, rel)
-		}
-	}
-
-	// Get LLM client
-	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create LLM client: %w", err)
-	}
-
-	// Build prompt and call LLM
-	prompt := s.buildEntityAnalysisPrompt(table, entitySummary, domainContext, entityHint, tableRelationships, columnGatheredData)
-	systemMsg := s.entityAnalysisSystemMessage()
-
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.3, false)
-	if err != nil {
-		return nil, fmt.Errorf("LLM call failed: %w", err)
-	}
-
-	// Parse the response
-	questions, entitySummaryFromLLM, err := s.parseEntityAnalysisResponse(result.Content, projectID, workflow.OntologyID, workflowID, tableName)
-	if err != nil {
-		s.logger.Warn("Failed to parse entity analysis response, treating as no questions",
-			zap.String("table_name", tableName),
-			zap.Error(err))
-		return []*models.OntologyQuestion{}, nil
-	}
-
-	// Write initial entity summary immediately if we got one from LLM
-	if entitySummaryFromLLM != nil {
-		entitySummaryFromLLM.ColumnCount = len(table.Columns)
-		if err := s.ontologyRepo.UpdateEntitySummary(ctx, projectID, tableName, entitySummaryFromLLM); err != nil {
-			s.logger.Warn("Failed to write initial entity summary",
-				zap.String("table_name", tableName),
-				zap.Error(err))
-			// Non-fatal - continue with questions
-		} else {
-			s.logger.Debug("Wrote initial entity summary",
-				zap.String("table_name", tableName),
-				zap.String("business_name", entitySummaryFromLLM.BusinessName))
-		}
-	}
-
-	s.logger.Info("Entity analysis complete",
-		zap.String("table_name", tableName),
-		zap.Int("question_count", len(questions)),
-		zap.Bool("has_entity_summary", entitySummaryFromLLM != nil),
-		zap.Duration("elapsed", time.Since(startTime)))
-
-	return questions, nil
+// AnalyzeEntity is deprecated. Use the DAG-based workflow system instead.
+// This method was part of the old workflow system and has been replaced by the
+// DAG orchestrator which provides more robust execution with node-level state tracking.
+func (s *ontologyBuilderService) AnalyzeEntity(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ string) ([]*models.OntologyQuestion, error) {
+	return nil, fmt.Errorf("AnalyzeEntity is deprecated: use the DAG-based workflow system instead")
 }
 
 func (s *ontologyBuilderService) entityAnalysisSystemMessage() string {
@@ -1357,72 +1089,10 @@ func (s *ontologyBuilderService) parseEntityAnalysisResponse(response string, pr
 // GenerateQuestions (Deprecated)
 // ============================================================================
 
-func (s *ontologyBuilderService) GenerateQuestions(ctx context.Context, projectID uuid.UUID, workflowID uuid.UUID) ([]*models.OntologyQuestion, error) {
-	startTime := time.Now()
-
-	// Add workflow context for conversation recording
-	ctx = llm.WithWorkflowID(ctx, workflowID)
-
-	s.logger.Info("Generating questions",
-		zap.String("project_id", projectID.String()),
-		zap.String("workflow_id", workflowID.String()))
-
-	// Get workflow to find datasource
-	workflow, err := s.workflowRepo.GetByID(ctx, workflowID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get workflow: %w", err)
-	}
-	if workflow.Config == nil {
-		return nil, fmt.Errorf("workflow has no config")
-	}
-
-	// Load schema tables
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, workflow.Config.DatasourceID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list tables: %w", err)
-	}
-
-	if len(tables) == 0 {
-		s.logger.Warn("No tables found for question generation")
-		return []*models.OntologyQuestion{}, nil
-	}
-
-	// Load relationships
-	relationships, err := s.loadRelationships(ctx, projectID, tables)
-	if err != nil {
-		s.logger.Error("Failed to load relationships", zap.Error(err))
-	}
-
-	// Build schema context
-	schemaContext := s.buildSchemaContext(tables, relationships)
-
-	// Get LLM client
-	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create LLM client: %w", err)
-	}
-
-	prompt := s.buildQuestionGenerationPrompt(schemaContext)
-	systemMsg := s.questionGenerationSystemMessage()
-
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.3, false)
-	if err != nil {
-		return nil, fmt.Errorf("LLM call failed: %w", err)
-	}
-
-	questions, err := s.parseQuestionsResponse(result.Content, projectID, workflow.OntologyID, workflowID)
-	if err != nil {
-		return nil, fmt.Errorf("parse response: %w", err)
-	}
-
-	// Sort by priority and limit
-	questions = s.sortAndLimitQuestions(questions, 10)
-
-	s.logger.Info("Questions generated",
-		zap.Int("question_count", len(questions)),
-		zap.Duration("elapsed", time.Since(startTime)))
-
-	return questions, nil
+// GenerateQuestions is deprecated. Use the DAG-based workflow system instead.
+// The DAG system generates questions through its own node processing.
+func (s *ontologyBuilderService) GenerateQuestions(_ context.Context, _ uuid.UUID, _ uuid.UUID) ([]*models.OntologyQuestion, error) {
+	return nil, fmt.Errorf("GenerateQuestions is deprecated: use the DAG-based workflow system instead")
 }
 
 func (s *ontologyBuilderService) questionGenerationSystemMessage() string {
@@ -1915,115 +1585,11 @@ func uniqueStrings(input []string) []string {
 // ProcessProjectDescription - Kickoff Task
 // ============================================================================
 
-func (s *ontologyBuilderService) ProcessProjectDescription(ctx context.Context, projectID uuid.UUID, workflowID uuid.UUID, description string) (*DescriptionProcessingResult, error) {
-	if description == "" {
-		// No description provided - return empty result
-		return &DescriptionProcessingResult{
-			EntityHints: make(map[string]*models.EntityHint),
-		}, nil
-	}
-
-	// Add workflow context for conversation recording
-	ctx = llm.WithWorkflowID(ctx, workflowID)
-
-	startTime := time.Now()
-	s.logger.Info("Processing project description",
-		zap.String("project_id", projectID.String()),
-		zap.String("workflow_id", workflowID.String()),
-		zap.Int("description_len", len(description)))
-
-	// Update workflow progress
-	if err := s.workflowRepo.UpdateProgress(ctx, workflowID, &models.WorkflowProgress{
-		CurrentPhase: models.WorkflowPhaseDescriptionProcessing,
-		Message:      "Analyzing project description...",
-	}); err != nil {
-		s.logger.Error("Failed to update progress", zap.Error(err))
-	}
-
-	// Get workflow to find datasource
-	workflow, err := s.workflowRepo.GetByID(ctx, workflowID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get workflow: %w", err)
-	}
-	if workflow.Config == nil {
-		return nil, fmt.Errorf("workflow has no config")
-	}
-
-	// Load schema tables with columns for context
-	tables, err := s.loadTablesWithColumns(ctx, projectID, workflow.Config.DatasourceID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load tables: %w", err)
-	}
-
-	// Build schema summary for LLM
-	schemaSummary := s.buildSchemaSummaryForDescription(tables)
-
-	// Get LLM client
-	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create LLM client: %w", err)
-	}
-
-	prompt := s.buildDescriptionProcessingPrompt(description, schemaSummary)
-	systemMsg := s.descriptionProcessingSystemMessage()
-
-	llmResult, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.3, false)
-	if err != nil {
-		return nil, fmt.Errorf("LLM call failed: %w", err)
-	}
-
-	// Parse response
-	result, err := s.parseDescriptionProcessingResponse(llmResult.Content, projectID, workflow.OntologyID, workflowID)
-	if err != nil {
-		s.logger.Warn("Failed to parse description processing response",
-			zap.Error(err),
-			zap.String("response", llmResult.Content))
-		// Return empty result rather than failing
-		return &DescriptionProcessingResult{
-			EntityHints: make(map[string]*models.EntityHint),
-		}, nil
-	}
-
-	// Store domain context in ontology metadata for use by subsequent tasks
-	if result.DomainContext != nil {
-		metadata := map[string]any{
-			"domain_context": result.DomainContext,
-		}
-		if len(result.EntityHints) > 0 {
-			metadata["entity_hints"] = result.EntityHints
-		}
-		if err := s.ontologyRepo.UpdateMetadata(ctx, projectID, metadata); err != nil {
-			s.logger.Error("Failed to store domain context in metadata",
-				zap.Error(err))
-			// Continue - this is non-fatal
-		}
-	}
-
-	// Persist knowledge facts extracted from the description
-	for _, fact := range result.KnowledgeFacts {
-		if err := s.knowledgeRepo.Upsert(ctx, fact); err != nil {
-			s.logger.Error("Failed to store knowledge fact from description",
-				zap.String("fact_type", fact.FactType),
-				zap.String("key", fact.Key),
-				zap.Error(err))
-			// Continue - non-fatal, log and proceed
-		}
-	}
-
-	// Note: Clarifying questions from description analysis are now returned in the result
-	// and should be stored in workflow state by the caller (InitializeOntologyTask)
-	if len(result.ClarifyingQuestions) > 0 {
-		s.logger.Info("Description processing generated clarifying questions",
-			zap.Int("count", len(result.ClarifyingQuestions)))
-	}
-
-	s.logger.Info("Project description processed",
-		zap.Int("knowledge_facts", len(result.KnowledgeFacts)),
-		zap.Int("questions", len(result.ClarifyingQuestions)),
-		zap.Int("entity_hints", len(result.EntityHints)),
-		zap.Duration("elapsed", time.Since(startTime)))
-
-	return result, nil
+// ProcessProjectDescription is deprecated. Use the DAG-based workflow system instead.
+// This method was part of the old workflow system and has been replaced by the
+// DAG orchestrator which provides more robust execution with node-level state tracking.
+func (s *ontologyBuilderService) ProcessProjectDescription(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ string) (*DescriptionProcessingResult, error) {
+	return nil, fmt.Errorf("ProcessProjectDescription is deprecated: use the DAG-based workflow system instead")
 }
 
 func (s *ontologyBuilderService) descriptionProcessingSystemMessage() string {

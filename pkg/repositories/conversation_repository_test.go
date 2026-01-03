@@ -16,30 +16,32 @@ import (
 
 // conversationTestContext holds test dependencies for conversation repository tests.
 type conversationTestContext struct {
-	t          *testing.T
-	engineDB   *testhelpers.EngineDB
-	repo       ConversationRepository
-	projectID  uuid.UUID
-	ontologyID uuid.UUID
-	workflowID uuid.UUID
+	t            *testing.T
+	engineDB     *testhelpers.EngineDB
+	repo         ConversationRepository
+	projectID    uuid.UUID
+	ontologyID   uuid.UUID
+	dagID        uuid.UUID
+	datasourceID uuid.UUID
 }
 
 // setupConversationTest initializes the test context with shared testcontainer.
 func setupConversationTest(t *testing.T) *conversationTestContext {
 	engineDB := testhelpers.GetEngineDB(t)
 	tc := &conversationTestContext{
-		t:          t,
-		engineDB:   engineDB,
-		repo:       NewConversationRepository(),
-		projectID:  uuid.MustParse("00000000-0000-0000-0000-000000000050"),
-		ontologyID: uuid.MustParse("00000000-0000-0000-0000-000000000052"),
-		workflowID: uuid.MustParse("00000000-0000-0000-0000-000000000051"),
+		t:            t,
+		engineDB:     engineDB,
+		repo:         NewConversationRepository(),
+		projectID:    uuid.MustParse("00000000-0000-0000-0000-000000000050"),
+		ontologyID:   uuid.MustParse("00000000-0000-0000-0000-000000000052"),
+		dagID:        uuid.MustParse("00000000-0000-0000-0000-000000000051"),
+		datasourceID: uuid.MustParse("00000000-0000-0000-0000-000000000053"),
 	}
 	tc.ensureTestData()
 	return tc
 }
 
-// ensureTestData creates the test project, ontology, and workflow if they don't exist.
+// ensureTestData creates the test project, ontology, datasource, and DAG if they don't exist.
 func (tc *conversationTestContext) ensureTestData() {
 	tc.t.Helper()
 	ctx := context.Background()
@@ -59,7 +61,17 @@ func (tc *conversationTestContext) ensureTestData() {
 		tc.t.Fatalf("failed to ensure test project: %v", err)
 	}
 
-	// Create ontology (required for workflow FK)
+	// Create datasource (required for DAG FK)
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_datasources (id, project_id, name, datasource_type, datasource_config)
+		VALUES ($1, $2, 'Conversation Test Datasource', 'postgres', 'encrypted_config')
+		ON CONFLICT (id) DO NOTHING
+	`, tc.datasourceID, tc.projectID)
+	if err != nil {
+		tc.t.Fatalf("failed to ensure test datasource: %v", err)
+	}
+
+	// Create ontology (required for DAG FK)
 	now := time.Now()
 	_, err = scope.Conn.Exec(ctx, `
 		INSERT INTO engine_ontologies (id, project_id, is_active, created_at, updated_at)
@@ -70,14 +82,14 @@ func (tc *conversationTestContext) ensureTestData() {
 		tc.t.Fatalf("failed to ensure test ontology: %v", err)
 	}
 
-	// Create workflow (config contains datasource_id)
+	// Create DAG (replaces engine_ontology_workflows)
 	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_ontology_workflows (id, project_id, ontology_id, state, progress, task_queue, config, created_at, updated_at)
-		VALUES ($1, $2, $3, 'pending', '{}', '[]', '{}', $4, $4)
+		INSERT INTO engine_ontology_dag (id, project_id, datasource_id, ontology_id, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, 'pending', $5, $5)
 		ON CONFLICT (id) DO NOTHING
-	`, tc.workflowID, tc.projectID, tc.ontologyID, now)
+	`, tc.dagID, tc.projectID, tc.datasourceID, tc.ontologyID, now)
 	if err != nil {
-		tc.t.Fatalf("failed to ensure test workflow: %v", err)
+		tc.t.Fatalf("failed to ensure test DAG: %v", err)
 	}
 }
 
@@ -155,7 +167,7 @@ func TestConversationRepository_Save_Success(t *testing.T) {
 
 	conv := &models.LLMConversation{
 		ProjectID:       tc.projectID,
-		Context:         map[string]any{"workflow_id": tc.workflowID.String()},
+		Context:         map[string]any{"dag_id": tc.dagID.String()},
 		Iteration:       1,
 		Endpoint:        "https://api.openai.com/v1",
 		Model:           "gpt-4",
@@ -342,7 +354,7 @@ func TestConversationRepository_GetByContext_ReturnsConversations(t *testing.T) 
 	for i := 0; i < 3; i++ {
 		conv := &models.LLMConversation{
 			ProjectID:       tc.projectID,
-			Context:         map[string]any{"workflow_id": tc.workflowID.String()},
+			Context:         map[string]any{"dag_id": tc.dagID.String()},
 			Iteration:       i + 1,
 			Endpoint:        "https://api.openai.com/v1",
 			Model:           "gpt-4",
@@ -357,7 +369,7 @@ func TestConversationRepository_GetByContext_ReturnsConversations(t *testing.T) 
 	}
 
 	// Fetch by context key-value
-	conversations, err := tc.repo.GetByContext(ctx, tc.projectID, "workflow_id", tc.workflowID.String())
+	conversations, err := tc.repo.GetByContext(ctx, tc.projectID, "dag_id", tc.dagID.String())
 	if err != nil {
 		t.Fatalf("failed to get conversations: %v", err)
 	}

@@ -188,6 +188,13 @@ func TestDAGRepository_GetLatestByDatasource(t *testing.T) {
 	// Create first DAG
 	dag1 := tc.createTestDAG(ctx)
 
+	// Mark dag1 as completed to avoid unique constraint violation
+	// (only one active DAG per datasource is allowed)
+	err := tc.repo.UpdateStatus(ctx, dag1.ID, models.DAGStatusCompleted, nil)
+	if err != nil {
+		t.Fatalf("Failed to complete first DAG: %v", err)
+	}
+
 	time.Sleep(10 * time.Millisecond)
 
 	// Create second DAG
@@ -198,7 +205,7 @@ func TestDAGRepository_GetLatestByDatasource(t *testing.T) {
 		OntologyID:   &tc.ontologyID,
 		Status:       models.DAGStatusRunning,
 	}
-	err := tc.repo.Create(ctx, dag2)
+	err = tc.repo.Create(ctx, dag2)
 	if err != nil {
 		t.Fatalf("Create second DAG failed: %v", err)
 	}
@@ -214,7 +221,6 @@ func TestDAGRepository_GetLatestByDatasource(t *testing.T) {
 	if latest.ID != dag2.ID {
 		t.Errorf("expected latest DAG to be %s, got %s", dag2.ID, latest.ID)
 	}
-	_ = dag1 // silence unused warning
 }
 
 func TestDAGRepository_GetActiveByDatasource(t *testing.T) {

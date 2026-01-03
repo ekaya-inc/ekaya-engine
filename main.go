@@ -133,7 +133,6 @@ func main() {
 
 	// Ontology repositories
 	ontologyRepo := repositories.NewOntologyRepository()
-	ontologyWorkflowRepo := repositories.NewOntologyWorkflowRepository()
 	ontologyChatRepo := repositories.NewOntologyChatRepository()
 	knowledgeRepo := repositories.NewKnowledgeRepository()
 	ontologyQuestionRepo := repositories.NewOntologyQuestionRepository()
@@ -173,7 +172,7 @@ func main() {
 	// Ontology services
 	knowledgeService := services.NewKnowledgeService(knowledgeRepo, logger)
 	ontologyBuilderService := services.NewOntologyBuilderService(
-		ontologyRepo, schemaRepo, ontologyWorkflowRepo,
+		ontologyRepo, schemaRepo, ontologyDAGRepo,
 		knowledgeRepo, ontologyEntityRepo, entityRelationshipRepo,
 		llmFactory, logger)
 	ontologyQuestionService := services.NewOntologyQuestionService(
@@ -188,7 +187,7 @@ func main() {
 
 	ontologyChatService := services.NewOntologyChatService(
 		ontologyChatRepo, ontologyRepo, knowledgeRepo,
-		schemaRepo, ontologyWorkflowRepo,
+		schemaRepo, ontologyDAGRepo,
 		ontologyEntityRepo, entityRelationshipRepo,
 		llmFactory, datasourceService, adapterFactory, logger)
 	deterministicRelationshipService := services.NewDeterministicRelationshipService(
