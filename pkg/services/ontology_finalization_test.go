@@ -145,6 +145,10 @@ func (m *mockEntityRepoForFinalization) GetAllOccurrencesByProject(ctx context.C
 	return nil, nil
 }
 
+func (m *mockEntityRepoForFinalization) UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error {
+	return nil
+}
+
 func (m *mockEntityRepoForFinalization) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {
 	return nil
 }

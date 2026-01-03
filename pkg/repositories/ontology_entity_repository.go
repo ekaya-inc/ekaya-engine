@@ -32,6 +32,7 @@ type OntologyEntityRepository interface {
 	GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error)
 	GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.OntologyEntityOccurrence, error)
 	GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntityOccurrence, error)
+	UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error
 
 	// Alias operations
 	CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error
@@ -343,6 +344,25 @@ func (r *ontologyEntityRepository) GetAllOccurrencesByProject(ctx context.Contex
 	}
 
 	return occurrences, nil
+}
+
+func (r *ontologyEntityRepository) UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		UPDATE engine_ontology_entity_occurrences
+		SET role = $4
+		WHERE entity_id = $1 AND table_name = $2 AND column_name = $3`
+
+	_, err := scope.Conn.Exec(ctx, query, entityID, tableName, columnName, role)
+	if err != nil {
+		return fmt.Errorf("failed to update occurrence role: %w", err)
+	}
+
+	return nil
 }
 
 // ============================================================================

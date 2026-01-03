@@ -65,65 +65,38 @@ When drilling into `users` table at `depth: tables`, relationships showed:
 
 ---
 
-## Issue 2: Column roles are empty
+## Issue 2: Column roles are empty ✅ COMPLETED
 
 **Priority:** MEDIUM (missing context, but survivable)
 
-### Observed Behavior
-Every column showed `"role": ""` at `depth: tables`.
+**Status:** Fixed on 2026-01-03
 
-**Expected:** Should see "dimension", "measure", "identifier", "attribute" from ColumnEnrichment.
+### What Was Fixed
 
-### Root Cause Analysis
+Implemented **Option A** - Update occurrences during column enrichment. After the LLM enriches columns with FK roles (e.g., "host", "visitor"), we now update the corresponding `engine_ontology_entity_occurrences.role` field.
 
-**The `Role` field IS correctly wired through**, but it's NULL in the database because roles are only populated during **optional column enrichment**.
+**Changes Made:**
 
-**Data flow verification:**
+1. **Repository layer** (`pkg/repositories/ontology_entity_repository.go`):
+   - Added `UpdateOccurrenceRole(ctx, entityID, tableName, columnName, role)` method to the `OntologyEntityRepository` interface
+   - Implemented the method with a simple UPDATE query targeting the occurrence by entity_id, table_name, and column_name
 
-1. **Creation** (`pkg/services/entity_discovery_service.go:175-180`):
-   ```go
-   occurrence := &models.OntologyEntityOccurrence{
-       EntityID:   entity.ID,
-       SchemaName: c.schemaName,
-       TableName:  c.tableName,
-       ColumnName: c.columnName,
-       Confidence: c.confidence,
-       // ← Role is NOT SET here - defaults to nil
-   }
-   ```
+2. **Service layer** (`pkg/services/column_enrichment.go`):
+   - Added `updateOccurrenceRoles()` helper method that:
+     - Extracts FK roles from LLM enrichment results
+     - Maps FK target tables to entity IDs using `entityByPrimaryTable` (same pattern as relationship fix)
+     - Updates each occurrence's role in the database
+   - Called from `EnrichTable()` after saving column details to JSONB
+   - Failures are logged but don't fail the enrichment (roles are supplementary data)
 
-2. **Model** (`pkg/models/ontology_entity.go:37`):
-   ```go
-   Role *string `json:"role,omitempty"` // nullable pointer
-   ```
+**Test Coverage:**
 
-3. **Service passthrough** (`pkg/services/ontology_context.go:205-209`):
-   ```go
-   occurrencesByEntityID[occ.EntityID] = append(..., models.EntityOccurrence{
-       Table:  occ.TableName,
-       Column: occ.ColumnName,
-       Role:   occ.Role,  // ← Correctly passes through - just NULL
-   })
-   ```
+- Added `TestColumnEnrichmentService_UpdateOccurrenceRoles` - verifies roles are extracted from LLM response and passed to repository
+- Updated mock implementations in related test files to satisfy the new interface method
 
-**The Gap:** The column enrichment workflow (`POST /api/projects/:id/ontology/enrich-columns`) populates `engine_ontologies.column_details` JSONB with role data, but this enriched data is NOT used to update `engine_ontology_entity_occurrences.role`.
+### Original Problem
 
-### Fix Required
-
-**Option A (Update occurrences during enrichment):**
-After column enrichment writes to `column_details` JSONB, also update matching rows in `engine_ontology_entity_occurrences.role`.
-
-**Option B (Use enriched data at query time):**
-In `GetEntitiesContext()`, also load `column_details` and merge roles into occurrences before returning.
-
-Option A is cleaner - keeps data normalized in one place.
-
-### Files to Modify
-
-| File | Lines | Change |
-|------|-------|--------|
-| `pkg/services/column_enrichment_service.go` (or equivalent) | TBD | After enrichment, update occurrence roles |
-| OR `pkg/services/ontology_context.go` | 174-210 | Load column_details and merge roles |
+Every column showed `"role": ""` at `depth: tables`. The LLM correctly enriched columns with roles like "host" and "visitor", but this data was only stored in `column_details` JSONB and not propagated to `engine_ontology_entity_occurrences.role`.
 
 ---
 
