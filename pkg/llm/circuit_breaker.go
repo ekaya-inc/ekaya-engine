@@ -43,7 +43,7 @@ type CircuitBreakerConfig struct {
 // DefaultCircuitBreakerConfig returns sensible defaults for the circuit breaker.
 func DefaultCircuitBreakerConfig() CircuitBreakerConfig {
 	return CircuitBreakerConfig{
-		Threshold:  5,              // Trip after 5 consecutive failures
+		Threshold:  5,                // Trip after 5 consecutive failures
 		ResetAfter: 30 * time.Second, // Try again after 30 seconds
 	}
 }

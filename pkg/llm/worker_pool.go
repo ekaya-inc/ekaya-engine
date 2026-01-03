@@ -40,8 +40,8 @@ func NewWorkerPool(config WorkerPoolConfig, logger *zap.Logger) *WorkerPool {
 
 // WorkItem represents a unit of work to be processed.
 type WorkItem[T any] struct {
-	ID      string                                 // For logging/tracking
-	Execute func(ctx context.Context) (T, error)  // The work to be executed
+	ID      string                               // For logging/tracking
+	Execute func(ctx context.Context) (T, error) // The work to be executed
 }
 
 // WorkResult represents the result of a work item.
