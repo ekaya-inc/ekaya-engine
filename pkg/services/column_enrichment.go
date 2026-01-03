@@ -319,7 +319,12 @@ func (s *columnEnrichmentService) getDatasource(ctx context.Context, projectID u
 	return nil, fmt.Errorf("no datasource found for project %s", projectID)
 }
 
-// columnEnrichment is the LLM response structure for column enrichment.
+// columnEnrichmentResponse wraps the LLM response for standardization.
+type columnEnrichmentResponse struct {
+	Columns []columnEnrichment `json:"columns"`
+}
+
+// columnEnrichment is the LLM response structure for a single column.
 type columnEnrichment struct {
 	Name         string             `json:"name"`
 	Description  string             `json:"description"`
@@ -352,12 +357,13 @@ func (s *columnEnrichmentService) enrichColumnsWithLLM(
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
 
-	enrichments, err := llm.ParseJSONResponse[[]columnEnrichment](result.Content)
+	// Parse response (wrapped in object for standardization)
+	response, err := llm.ParseJSONResponse[columnEnrichmentResponse](result.Content)
 	if err != nil {
 		return nil, fmt.Errorf("parse LLM response: %w", err)
 	}
 
-	return enrichments, nil
+	return response.Columns, nil
 }
 
 func (s *columnEnrichmentService) columnEnrichmentSystemMessage() string {
@@ -429,21 +435,23 @@ func (s *columnEnrichmentService) buildColumnEnrichmentPrompt(
 	sb.WriteString("   (e.g., payer_user_id -> \"payer\", payee_user_id -> \"payee\")\n")
 
 	// Response format
-	sb.WriteString("\n## Response Format (JSON array)\n")
+	sb.WriteString("\n## Response Format (JSON object)\n")
 	sb.WriteString("```json\n")
-	sb.WriteString("[\n")
-	sb.WriteString("  {\n")
-	sb.WriteString("    \"name\": \"column_name\",\n")
-	sb.WriteString("    \"description\": \"Business meaning of this column\",\n")
-	sb.WriteString("    \"semantic_type\": \"status\",\n")
-	sb.WriteString("    \"role\": \"dimension\",\n")
-	sb.WriteString("    \"synonyms\": [\"alt_name1\", \"alt_name2\"],\n")
-	sb.WriteString("    \"enum_values\": [\n")
-	sb.WriteString("      {\"value\": \"active\", \"label\": \"Active\", \"description\": \"Entity is currently active\"}\n")
-	sb.WriteString("    ],\n")
-	sb.WriteString("    \"fk_role\": null\n")
-	sb.WriteString("  }\n")
-	sb.WriteString("]\n")
+	sb.WriteString("{\n")
+	sb.WriteString("  \"columns\": [\n")
+	sb.WriteString("    {\n")
+	sb.WriteString("      \"name\": \"column_name\",\n")
+	sb.WriteString("      \"description\": \"Business meaning of this column\",\n")
+	sb.WriteString("      \"semantic_type\": \"status\",\n")
+	sb.WriteString("      \"role\": \"dimension\",\n")
+	sb.WriteString("      \"synonyms\": [\"alt_name1\", \"alt_name2\"],\n")
+	sb.WriteString("      \"enum_values\": [\n")
+	sb.WriteString("        {\"value\": \"active\", \"label\": \"Active\", \"description\": \"Entity is currently active\"}\n")
+	sb.WriteString("      ],\n")
+	sb.WriteString("      \"fk_role\": null\n")
+	sb.WriteString("    }\n")
+	sb.WriteString("  ]\n")
+	sb.WriteString("}\n")
 	sb.WriteString("```\n")
 
 	return sb.String()
