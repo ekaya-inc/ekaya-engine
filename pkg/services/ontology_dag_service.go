@@ -483,8 +483,8 @@ func (s *ontologyDAGService) executeDAG(projectID, dagID uuid.UUID) {
 	// Get DAG with nodes
 	dagRecord, err := s.dagRepo.GetByIDWithNodes(tenantCtx, dagID)
 	if err != nil {
-		s.logger.Error("Failed to get DAG", zap.Error(err))
-		s.markDAGFailed(projectID, dagID, "failed to get DAG")
+		s.logger.Error("Failed to get DAG record", zap.Error(err))
+		s.markDAGFailed(projectID, dagID, "failed to get DAG record")
 		return
 	}
 
@@ -510,12 +510,8 @@ func (s *ontologyDAGService) executeDAG(projectID, dagID uuid.UUID) {
 				zap.String("node_name", node.NodeName),
 				zap.Error(err))
 
-			// Mark node and DAG as failed
-			errMsg := err.Error()
-			if updateErr := s.dagRepo.UpdateNodeStatus(tenantCtx, node.ID, models.DAGNodeStatusFailed, &errMsg); updateErr != nil {
-				s.logger.Error("Failed to update node status", zap.Error(updateErr))
-			}
-			s.markDAGFailed(projectID, dagID, fmt.Sprintf("node %s failed: %s", node.NodeName, err.Error()))
+			// Let markDAGFailed handle marking both the node and DAG as failed
+			s.markDAGFailed(projectID, dagID, err.Error())
 			return
 		}
 	}
@@ -682,7 +678,8 @@ func (s *ontologyDAGService) releaseOwnership(projectID, dagID uuid.UUID) {
 	}
 }
 
-// markDAGFailed marks the DAG as failed.
+// markDAGFailed marks the DAG as failed and stores the error message on the appropriate node.
+// If a current node is set, the error is stored there; otherwise it's stored on the first node.
 func (s *ontologyDAGService) markDAGFailed(projectID, dagID uuid.UUID, errMsg string) {
 	ctx, cleanup, err := s.getTenantCtx(context.Background(), projectID)
 	if err != nil {
@@ -691,6 +688,58 @@ func (s *ontologyDAGService) markDAGFailed(projectID, dagID uuid.UUID, errMsg st
 	}
 	defer cleanup()
 
+	// Get the DAG to find the current node or determine which node to mark failed
+	dagRecord, err := s.dagRepo.GetByIDWithNodes(ctx, dagID)
+	if err != nil {
+		s.logger.Error("Failed to get DAG for error marking", zap.Error(err))
+		// Still mark the DAG as failed even if we can't get the nodes
+		if updateErr := s.dagRepo.UpdateStatus(ctx, dagID, models.DAGStatusFailed, nil); updateErr != nil {
+			s.logger.Error("Failed to mark DAG as failed", zap.Error(updateErr))
+		}
+		return
+	}
+
+	// Find the node to mark as failed:
+	// 1. If current_node is set, use that node
+	// 2. Otherwise, use the first pending/running node
+	// 3. If no pending/running nodes, use the first node (EntityDiscovery)
+	var targetNode *models.DAGNode
+	if dagRecord.CurrentNode != nil {
+		// Find the current node
+		for i := range dagRecord.Nodes {
+			if dagRecord.Nodes[i].NodeName == *dagRecord.CurrentNode {
+				targetNode = &dagRecord.Nodes[i]
+				break
+			}
+		}
+	}
+
+	// If no current node, find the first pending or running node
+	if targetNode == nil {
+		for i := range dagRecord.Nodes {
+			if dagRecord.Nodes[i].Status == models.DAGNodeStatusPending ||
+				dagRecord.Nodes[i].Status == models.DAGNodeStatusRunning {
+				targetNode = &dagRecord.Nodes[i]
+				break
+			}
+		}
+	}
+
+	// If still no target node (shouldn't happen), use the first node
+	if targetNode == nil && len(dagRecord.Nodes) > 0 {
+		targetNode = &dagRecord.Nodes[0]
+	}
+
+	// Mark the target node as failed with the error message
+	if targetNode != nil {
+		if err := s.dagRepo.UpdateNodeStatus(ctx, targetNode.ID, models.DAGNodeStatusFailed, &errMsg); err != nil {
+			s.logger.Error("Failed to update node status with error",
+				zap.String("node_id", targetNode.ID.String()),
+				zap.Error(err))
+		}
+	}
+
+	// Mark the DAG as failed
 	if err := s.dagRepo.UpdateStatus(ctx, dagID, models.DAGStatusFailed, nil); err != nil {
 		s.logger.Error("Failed to mark DAG as failed", zap.Error(err))
 	}

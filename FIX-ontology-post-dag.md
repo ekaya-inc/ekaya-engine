@@ -8,7 +8,7 @@ Branch: `ddanieli/create-ontology-workflow-dag`
 | Issue | Severity | Status | Notes |
 |-------|----------|--------|-------|
 | Issue 1: Missing RLS on 5 tables | High | ✅ DONE | Migration 024 created |
-| Issue 2: DAG startup error propagation | Medium | 📋 TODO | UX improvement |
+| Issue 2: DAG startup error propagation | Medium | ✅ DONE | Error messages now stored on nodes |
 | Issue 3: Worker Pool generics | Minor | 📋 TODO | Type safety |
 | Issue 4: Column chunk parallelism | Minor | 📋 TODO | Performance |
 | Issue 5: Heartbeat goroutine leak | Low | 📋 TODO | Edge case |
@@ -165,9 +165,10 @@ ALTER TABLE engine_ontology_entity_occurrences DISABLE ROW LEVEL SECURITY;
 
 ---
 
-## Issue 2: Background DAG Execution Has No Startup Error Propagation
+## Issue 2: Background DAG Execution Has No Startup Error Propagation ✅
 
 **Severity:** Medium
+**Status:** COMPLETED 2026-01-03
 
 ### Problem
 
@@ -242,9 +243,45 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 }
 ```
 
-### Files to Modify
+### Implementation Notes
 
-- `pkg/services/ontology_dag_service.go`
+Implemented **Option A** - Enhanced the `markDAGFailed` function to store error messages on the appropriate node:
+
+1. **Error message storage**: When `markDAGFailed` is called, it now:
+   - Fetches the DAG with its nodes using `GetByIDWithNodes`
+   - Identifies the appropriate node to mark as failed (current node, or first pending/running node, or first node)
+   - Updates that node's status to `failed` with the error message via `UpdateNodeStatus`
+   - Updates the DAG status to `failed`
+
+2. **Node selection logic** (in priority order):
+   - If `current_node` is set, mark that node as failed
+   - Otherwise, mark the first pending or running node
+   - As a fallback, mark the first node (EntityDiscovery)
+
+3. **UI visibility**: Error messages are now stored in the `error_message` field on the failed node, which the UI can display when polling DAG status.
+
+4. **Graceful degradation**: If `GetByIDWithNodes` fails, the DAG is still marked as failed (without a specific node error message).
+
+5. **Code cleanup**: Simplified `executeDAG` to delegate node failure marking to `markDAGFailed` rather than duplicating logic.
+
+### Testing
+
+Added 5 comprehensive unit tests covering all scenarios:
+
+1. `TestMarkDAGFailed_StoresErrorOnCurrentNode`: Verifies error stored on current node when `current_node` is set
+2. `TestMarkDAGFailed_StoresErrorOnFirstPendingNode`: Verifies fallback to first pending/running node when no current node
+3. `TestMarkDAGFailed_WhenGetByIDWithNodesFails_StillMarksDAGFailed`: Ensures graceful degradation if node fetching fails
+4. `TestMarkDAGFailed_WithAllNodesCompleted_MarksFirstNode`: Verifies fallback to first node when all nodes are completed
+5. `TestMarkDAGFailed_WhenTenantCtxFails_LogsError`: Confirms no updates attempted when tenant context unavailable
+
+### Files Modified
+
+- `pkg/services/ontology_dag_service.go`:
+  - Enhanced `markDAGFailed` function with node error storage logic (lines 681-746)
+  - Simplified `executeDAG` to use `markDAGFailed` for all failure cases (lines 486-517)
+- `pkg/services/ontology_dag_service_test.go`:
+  - Added mock support for `getByIDWithNodesFunc` (lines 205, 234-238)
+  - Added 5 unit tests for `markDAGFailed` (lines 332-599)
 
 ---
 

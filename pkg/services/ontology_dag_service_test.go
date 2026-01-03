@@ -202,6 +202,7 @@ type mockDAGRepository struct {
 	getNodesByDAGFunc    func(ctx context.Context, dagID uuid.UUID) ([]models.DAGNode, error)
 	updateNodeStatusFunc func(ctx context.Context, nodeID uuid.UUID, status models.DAGNodeStatus, errorMessage *string) error
 	updateStatusFunc     func(ctx context.Context, dagID uuid.UUID, status models.DAGStatus, currentNode *string) error
+	getByIDWithNodesFunc func(ctx context.Context, id uuid.UUID) (*models.OntologyDAG, error)
 }
 
 func (m *mockDAGRepository) GetNodesByDAG(ctx context.Context, dagID uuid.UUID) ([]models.DAGNode, error) {
@@ -231,6 +232,9 @@ func (m *mockDAGRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.
 	return nil, nil
 }
 func (m *mockDAGRepository) GetByIDWithNodes(ctx context.Context, id uuid.UUID) (*models.OntologyDAG, error) {
+	if m.getByIDWithNodesFunc != nil {
+		return m.getByIDWithNodesFunc(ctx, id)
+	}
 	return nil, nil
 }
 func (m *mockDAGRepository) GetLatestByDatasource(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyDAG, error) {
@@ -324,4 +328,272 @@ func TestCancel_MarksNonCompletedNodesAsSkipped(t *testing.T) {
 	assert.True(t, skippedNodes[nodes[2].ID], "Pending node should be skipped")
 	// Node 3 (pending) should be skipped
 	assert.True(t, skippedNodes[nodes[3].ID], "Pending node should be skipped")
+}
+
+// ============================================================================
+// markDAGFailed Tests
+// ============================================================================
+
+// TestMarkDAGFailed_StoresErrorOnCurrentNode verifies that early startup errors
+// are properly stored on the current node for UI visibility.
+func TestMarkDAGFailed_StoresErrorOnCurrentNode(t *testing.T) {
+	dagID := uuid.New()
+	projectID := uuid.New()
+	currentNodeName := string(models.DAGNodeEntityDiscovery)
+	errorMessage := "failed to get tenant context"
+
+	// Create test nodes
+	nodes := []models.DAGNode{
+		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeEntityDiscovery), Status: models.DAGNodeStatusRunning},
+		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeEntityEnrichment), Status: models.DAGNodeStatusPending},
+		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeRelationshipDiscovery), Status: models.DAGNodeStatusPending},
+	}
+
+	dag := &models.OntologyDAG{
+		ID:          dagID,
+		ProjectID:   projectID,
+		Status:      models.DAGStatusRunning,
+		CurrentNode: &currentNodeName,
+		Nodes:       nodes,
+	}
+
+	// Track updates
+	var updatedNodeID uuid.UUID
+	var updatedErrorMsg string
+	var updatedDAGStatus models.DAGStatus
+
+	mockRepo := &mockDAGRepository{
+		updateNodeStatusFunc: func(_ context.Context, nodeID uuid.UUID, status models.DAGNodeStatus, errMsg *string) error {
+			updatedNodeID = nodeID
+			if errMsg != nil {
+				updatedErrorMsg = *errMsg
+			}
+			assert.Equal(t, models.DAGNodeStatusFailed, status)
+			return nil
+		},
+		updateStatusFunc: func(_ context.Context, id uuid.UUID, status models.DAGStatus, _ *string) error {
+			updatedDAGStatus = status
+			assert.Equal(t, dagID, id)
+			return nil
+		},
+		getByIDWithNodesFunc: func(_ context.Context, id uuid.UUID) (*models.OntologyDAG, error) {
+			assert.Equal(t, dagID, id)
+			return dag, nil
+		},
+	}
+
+	// Create service with mock repository and mock getTenantCtx
+	logger, _ := zap.NewDevelopment()
+	service := &ontologyDAGService{
+		dagRepo: mockRepo,
+		logger:  logger,
+		getTenantCtx: func(ctx context.Context, _ uuid.UUID) (context.Context, func(), error) {
+			// Return a valid context for this test
+			return ctx, func() {}, nil
+		},
+	}
+
+	// Execute markDAGFailed
+	service.markDAGFailed(projectID, dagID, errorMessage)
+
+	// Verify the current node was marked as failed with the error message
+	assert.Equal(t, nodes[0].ID, updatedNodeID, "Current node should be marked as failed")
+	assert.Equal(t, errorMessage, updatedErrorMsg, "Error message should be stored on the node")
+	assert.Equal(t, models.DAGStatusFailed, updatedDAGStatus, "DAG should be marked as failed")
+}
+
+// TestMarkDAGFailed_StoresErrorOnFirstPendingNode verifies that when no current node
+// is set, the error is stored on the first pending/running node.
+func TestMarkDAGFailed_StoresErrorOnFirstPendingNode(t *testing.T) {
+	dagID := uuid.New()
+	projectID := uuid.New()
+	errorMessage := "failed during initialization"
+
+	// Create test nodes - first node is pending (no current node set yet)
+	nodes := []models.DAGNode{
+		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeEntityDiscovery), Status: models.DAGNodeStatusPending},
+		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeEntityEnrichment), Status: models.DAGNodeStatusPending},
+	}
+
+	dag := &models.OntologyDAG{
+		ID:          dagID,
+		ProjectID:   projectID,
+		Status:      models.DAGStatusPending,
+		CurrentNode: nil, // No current node set
+		Nodes:       nodes,
+	}
+
+	// Track updates
+	var updatedNodeID uuid.UUID
+	var updatedErrorMsg string
+
+	mockRepo := &mockDAGRepository{
+		updateNodeStatusFunc: func(_ context.Context, nodeID uuid.UUID, status models.DAGNodeStatus, errMsg *string) error {
+			updatedNodeID = nodeID
+			if errMsg != nil {
+				updatedErrorMsg = *errMsg
+			}
+			assert.Equal(t, models.DAGNodeStatusFailed, status)
+			return nil
+		},
+		updateStatusFunc: func(_ context.Context, id uuid.UUID, status models.DAGStatus, _ *string) error {
+			assert.Equal(t, dagID, id)
+			assert.Equal(t, models.DAGStatusFailed, status)
+			return nil
+		},
+		getByIDWithNodesFunc: func(_ context.Context, id uuid.UUID) (*models.OntologyDAG, error) {
+			return dag, nil
+		},
+	}
+
+	logger, _ := zap.NewDevelopment()
+	service := &ontologyDAGService{
+		dagRepo: mockRepo,
+		logger:  logger,
+		getTenantCtx: func(ctx context.Context, _ uuid.UUID) (context.Context, func(), error) {
+			return ctx, func() {}, nil
+		},
+	}
+
+	// Execute markDAGFailed
+	service.markDAGFailed(projectID, dagID, errorMessage)
+
+	// Verify the first pending node was marked as failed
+	assert.Equal(t, nodes[0].ID, updatedNodeID, "First pending node should be marked as failed")
+	assert.Equal(t, errorMessage, updatedErrorMsg, "Error message should be stored on the node")
+}
+
+// TestMarkDAGFailed_WhenGetByIDWithNodesFails_StillMarksDAGFailed verifies that even
+// if we can't get the nodes, the DAG status is still updated to failed.
+func TestMarkDAGFailed_WhenGetByIDWithNodesFails_StillMarksDAGFailed(t *testing.T) {
+	dagID := uuid.New()
+	projectID := uuid.New()
+	errorMessage := "initialization failed"
+
+	// Track updates
+	var dagUpdateCalled bool
+
+	mockRepo := &mockDAGRepository{
+		getByIDWithNodesFunc: func(_ context.Context, id uuid.UUID) (*models.OntologyDAG, error) {
+			return nil, assert.AnError // Simulate failure to get DAG
+		},
+		updateStatusFunc: func(_ context.Context, id uuid.UUID, status models.DAGStatus, _ *string) error {
+			dagUpdateCalled = true
+			assert.Equal(t, dagID, id)
+			assert.Equal(t, models.DAGStatusFailed, status)
+			return nil
+		},
+	}
+
+	logger, _ := zap.NewDevelopment()
+	service := &ontologyDAGService{
+		dagRepo: mockRepo,
+		logger:  logger,
+		getTenantCtx: func(ctx context.Context, _ uuid.UUID) (context.Context, func(), error) {
+			return ctx, func() {}, nil
+		},
+	}
+
+	// Execute markDAGFailed
+	service.markDAGFailed(projectID, dagID, errorMessage)
+
+	// Verify the DAG status was still updated even though GetByIDWithNodes failed
+	assert.True(t, dagUpdateCalled, "DAG status should be updated even if GetByIDWithNodes fails")
+}
+
+// TestMarkDAGFailed_WithAllNodesCompleted_MarksFirstNode verifies that when all nodes
+// are completed (no pending/running nodes), the first node is marked as failed.
+func TestMarkDAGFailed_WithAllNodesCompleted_MarksFirstNode(t *testing.T) {
+	dagID := uuid.New()
+	projectID := uuid.New()
+	errorMessage := "post-completion error"
+
+	// Create test nodes - all completed
+	nodes := []models.DAGNode{
+		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeEntityDiscovery), Status: models.DAGNodeStatusCompleted},
+		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeEntityEnrichment), Status: models.DAGNodeStatusCompleted},
+	}
+
+	dag := &models.OntologyDAG{
+		ID:          dagID,
+		ProjectID:   projectID,
+		Status:      models.DAGStatusCompleted,
+		CurrentNode: nil,
+		Nodes:       nodes,
+	}
+
+	// Track updates
+	var updatedNodeID uuid.UUID
+
+	mockRepo := &mockDAGRepository{
+		getByIDWithNodesFunc: func(_ context.Context, id uuid.UUID) (*models.OntologyDAG, error) {
+			return dag, nil
+		},
+		updateNodeStatusFunc: func(_ context.Context, nodeID uuid.UUID, status models.DAGNodeStatus, errMsg *string) error {
+			updatedNodeID = nodeID
+			assert.Equal(t, models.DAGNodeStatusFailed, status)
+			assert.Equal(t, errorMessage, *errMsg)
+			return nil
+		},
+		updateStatusFunc: func(_ context.Context, id uuid.UUID, status models.DAGStatus, _ *string) error {
+			assert.Equal(t, models.DAGStatusFailed, status)
+			return nil
+		},
+	}
+
+	logger, _ := zap.NewDevelopment()
+	service := &ontologyDAGService{
+		dagRepo: mockRepo,
+		logger:  logger,
+		getTenantCtx: func(ctx context.Context, _ uuid.UUID) (context.Context, func(), error) {
+			return ctx, func() {}, nil
+		},
+	}
+
+	// Execute markDAGFailed
+	service.markDAGFailed(projectID, dagID, errorMessage)
+
+	// Verify the first node was marked as failed (fallback behavior)
+	assert.Equal(t, nodes[0].ID, updatedNodeID, "First node should be marked as failed when all nodes are completed")
+}
+
+// TestMarkDAGFailed_WhenTenantCtxFails_LogsError verifies that when getTenantCtx fails,
+// only error logging occurs and no updates are attempted.
+func TestMarkDAGFailed_WhenTenantCtxFails_LogsError(t *testing.T) {
+	dagID := uuid.New()
+	projectID := uuid.New()
+	errorMessage := "some error"
+
+	// Track if any repository methods were called
+	var repoMethodCalled bool
+
+	mockRepo := &mockDAGRepository{
+		getByIDWithNodesFunc: func(_ context.Context, id uuid.UUID) (*models.OntologyDAG, error) {
+			repoMethodCalled = true
+			return nil, nil
+		},
+		updateStatusFunc: func(_ context.Context, id uuid.UUID, status models.DAGStatus, _ *string) error {
+			repoMethodCalled = true
+			return nil
+		},
+		updateNodeStatusFunc: func(_ context.Context, nodeID uuid.UUID, status models.DAGNodeStatus, errMsg *string) error {
+			repoMethodCalled = true
+			return nil
+		},
+	}
+
+	logger, _ := zap.NewDevelopment()
+	service := &ontologyDAGService{
+		dagRepo: mockRepo,
+		logger:  logger,
+		getTenantCtx: func(ctx context.Context, _ uuid.UUID) (context.Context, func(), error) {
+			return nil, nil, assert.AnError // Simulate failure to get tenant context
+		},
+	}
+
+	// Execute markDAGFailed
+	service.markDAGFailed(projectID, dagID, errorMessage)
+
+	// Verify no repository methods were called
+	assert.False(t, repoMethodCalled, "No repository methods should be called when getTenantCtx fails")
 }
