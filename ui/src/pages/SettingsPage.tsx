@@ -1,13 +1,5 @@
-import {
-  Settings,
-  ArrowLeft,
-  Moon,
-  Sun,
-  Monitor,
-  User,
-  Bell,
-  Shield,
-} from "lucide-react";
+import { Settings, ArrowLeft, Moon, Sun, Monitor, LogOut } from "lucide-react";
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { useTheme } from "../components/ThemeProvider";
@@ -24,6 +16,24 @@ const SettingsPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
   const { theme, setTheme } = useTheme();
+  const [isSigningOut, setIsSigningOut] = useState(false);
+
+  const handleSignOut = async () => {
+    setIsSigningOut(true);
+    try {
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await response.json();
+      if (data.success && data.redirect_url) {
+        window.location.href = data.redirect_url;
+      }
+    } catch (error) {
+      console.error("Sign out failed:", error);
+      setIsSigningOut(false);
+    }
+  };
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -116,140 +126,33 @@ const SettingsPage = () => {
           </CardContent>
         </Card>
 
-        {/* User Preferences */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
-                <User className="h-5 w-5 text-blue-500" />
-              </div>
-              <div>
-                <CardTitle>User Preferences</CardTitle>
-                <CardDescription>
-                  Configure your personal settings
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium text-text-primary">Language</div>
-                  <div className="text-sm text-text-secondary">
-                    Select your preferred language
-                  </div>
-                </div>
-                <select className="rounded-md border border-border-light bg-surface-primary px-3 py-2 text-sm">
-                  <option>English</option>
-                  <option>Spanish</option>
-                  <option>French</option>
-                </select>
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium text-text-primary">Time Zone</div>
-                  <div className="text-sm text-text-secondary">
-                    Set your local time zone
-                  </div>
-                </div>
-                <select className="rounded-md border border-border-light bg-surface-primary px-3 py-2 text-sm">
-                  <option>UTC</option>
-                  <option>EST</option>
-                  <option>PST</option>
-                </select>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Notifications */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-yellow-500/10">
-                <Bell className="h-5 w-5 text-yellow-500" />
-              </div>
-              <div>
-                <CardTitle>Notifications</CardTitle>
-                <CardDescription>
-                  Manage how you receive notifications
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <label className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium text-text-primary">
-                    Query Completion
-                  </div>
-                  <div className="text-sm text-text-secondary">
-                    Notify when queries finish running
-                  </div>
-                </div>
-                <input type="checkbox" className="rounded" defaultChecked />
-              </label>
-              <label className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium text-text-primary">
-                    Schema Changes
-                  </div>
-                  <div className="text-sm text-text-secondary">
-                    Alert on database schema modifications
-                  </div>
-                </div>
-                <input type="checkbox" className="rounded" defaultChecked />
-              </label>
-              <label className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium text-text-primary">
-                    System Updates
-                  </div>
-                  <div className="text-sm text-text-secondary">
-                    Receive system update notifications
-                  </div>
-                </div>
-                <input type="checkbox" className="rounded" />
-              </label>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Security */}
+        {/* Account */}
         <Card>
           <CardHeader>
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-500/10">
-                <Shield className="h-5 w-5 text-red-500" />
+                <LogOut className="h-5 w-5 text-red-500" />
               </div>
               <div>
-                <CardTitle>Security</CardTitle>
-                <CardDescription>Manage your security settings</CardDescription>
+                <CardTitle>Account</CardTitle>
+                <CardDescription>
+                  Sign out of this project
+                </CardDescription>
               </div>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              <Button variant="outline" className="w-full justify-start">
-                Change Password
-              </Button>
-              <Button variant="outline" className="w-full justify-start">
-                Two-Factor Authentication
-              </Button>
-              <Button variant="outline" className="w-full justify-start">
-                API Keys
-              </Button>
-              <Button
-                variant="outline"
-                className="w-full justify-start text-red-600 hover:text-red-700"
-              >
-                Clear All Sessions
-              </Button>
-            </div>
+            <Button
+              variant="outline"
+              onClick={handleSignOut}
+              disabled={isSigningOut}
+              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+            >
+              {isSigningOut ? "Signing out..." : "Sign Out"}
+            </Button>
           </CardContent>
         </Card>
+
       </div>
     </div>
   );

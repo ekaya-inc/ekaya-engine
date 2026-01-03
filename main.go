@@ -20,6 +20,7 @@ import (
 	_ "github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource/postgres" // Register postgres adapter
 	"github.com/ekaya-inc/ekaya-engine/pkg/audit"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/central"
 	"github.com/ekaya-inc/ekaya-engine/pkg/config"
 	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
@@ -156,8 +157,11 @@ func main() {
 	// Create security auditor for SIEM logging
 	securityAuditor := audit.NewSecurityAuditor(logger)
 
+	// Create ekaya-central client for fetching project info
+	centralClient := central.NewClient(logger)
+
 	// Create services
-	projectService := services.NewProjectService(db, projectRepo, userRepo, redisClient, cfg.BaseURL, logger)
+	projectService := services.NewProjectService(db, projectRepo, userRepo, centralClient, redisClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, credentialEncryptor, adapterFactory, projectService, logger)
 	schemaService := services.NewSchemaService(schemaRepo, ontologyEntityRepo, datasourceService, adapterFactory, logger)
@@ -236,7 +240,7 @@ func main() {
 	healthHandler.RegisterRoutes(mux)
 
 	// Register auth handler (public - no auth required)
-	authHandler := handlers.NewAuthHandler(oauthService, cfg, logger)
+	authHandler := handlers.NewAuthHandler(oauthService, projectService, cfg, logger)
 	authHandler.RegisterRoutes(mux)
 
 	// Register config handler (public - no auth required)

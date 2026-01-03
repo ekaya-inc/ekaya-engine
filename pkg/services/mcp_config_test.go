@@ -120,6 +120,10 @@ func (m *mockProjectServiceForMCP) SetDefaultDatasourceID(ctx context.Context, p
 	return nil
 }
 
+func (m *mockProjectServiceForMCP) SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string) {
+	// No-op for tests
+}
+
 // Tests
 
 func TestMCPConfigService_Get_ApprovedQueriesDisabledWhenNoEnabledQueries(t *testing.T) {

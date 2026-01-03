@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
@@ -25,25 +26,34 @@ type CompleteOAuthResponse struct {
 	RedirectURL string `json:"redirect_url"`
 }
 
+// LogoutResponse represents the response for logout.
+type LogoutResponse struct {
+	Success     bool   `json:"success"`
+	RedirectURL string `json:"redirect_url"`
+}
+
 // AuthHandler handles authentication-related HTTP requests.
 type AuthHandler struct {
-	oauthService services.OAuthService
-	config       *config.Config
-	logger       *zap.Logger
+	oauthService   services.OAuthService
+	projectService services.ProjectService
+	config         *config.Config
+	logger         *zap.Logger
 }
 
 // NewAuthHandler creates a new auth handler.
-func NewAuthHandler(oauthService services.OAuthService, cfg *config.Config, logger *zap.Logger) *AuthHandler {
+func NewAuthHandler(oauthService services.OAuthService, projectService services.ProjectService, cfg *config.Config, logger *zap.Logger) *AuthHandler {
 	return &AuthHandler{
-		oauthService: oauthService,
-		config:       cfg,
-		logger:       logger,
+		oauthService:   oauthService,
+		projectService: projectService,
+		config:         cfg,
+		logger:         logger,
 	}
 }
 
 // RegisterRoutes registers the auth handler's routes on the given mux.
 func (h *AuthHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/auth/complete-oauth", h.CompleteOAuth)
+	mux.HandleFunc("POST /api/auth/logout", h.Logout)
 }
 
 // CompleteOAuth handles POST /api/auth/complete-oauth
@@ -126,4 +136,57 @@ func (h *AuthHandler) CompleteOAuth(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		h.logger.Error("Failed to encode response", zap.Error(err))
 	}
+}
+
+// Logout handles POST /api/auth/logout
+// Clears the ekaya_jwt cookie and returns a redirect URL to ekaya-central projects page.
+func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	// Derive cookie settings from base URL (same settings used when setting the cookie)
+	cookieSettings := auth.DeriveCookieSettings(h.config.BaseURL, h.config.CookieDomain)
+
+	// Clear the JWT cookie by setting MaxAge to -1
+	http.SetCookie(w, &http.Cookie{
+		Name:     "ekaya_jwt",
+		Value:    "",
+		HttpOnly: true,
+		Secure:   cookieSettings.Secure,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1, // Delete immediately
+		Path:     "/",
+		Domain:   cookieSettings.Domain,
+	})
+
+	// Get redirect URL from project's stored projects_page_url
+	redirectURL := h.getProjectsPageURL(r)
+
+	h.logger.Info("User logged out", zap.String("redirect_url", redirectURL))
+
+	// Return success with redirect URL
+	if err := WriteJSON(w, http.StatusOK, LogoutResponse{
+		Success:     true,
+		RedirectURL: redirectURL,
+	}); err != nil {
+		h.logger.Error("Failed to encode response", zap.Error(err))
+	}
+}
+
+// getProjectsPageURL retrieves the projects page URL from the project's stored parameters.
+// Falls back to AuthServerURL + "/projects" if not available.
+func (h *AuthHandler) getProjectsPageURL(r *http.Request) string {
+	// Try to get from project parameters
+	claims, ok := auth.GetClaims(r.Context())
+	if ok && claims.ProjectID != "" {
+		projectID, err := uuid.Parse(claims.ProjectID)
+		if err == nil {
+			project, err := h.projectService.GetByIDWithoutTenant(r.Context(), projectID)
+			if err == nil && project.Parameters != nil {
+				if url, ok := project.Parameters["projects_page_url"].(string); ok && url != "" {
+					return url
+				}
+			}
+		}
+	}
+
+	// Fallback to constructed URL
+	return h.config.AuthServerURL + "/projects"
 }

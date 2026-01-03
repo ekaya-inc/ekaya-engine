@@ -74,7 +74,7 @@ func TestCompleteOAuthFlow_Success(t *testing.T) {
 		JWKSEndpoints: cfg.Auth.JWKSEndpoints,
 	}, logger)
 
-	authHandler := NewAuthHandler(oauthService, cfg, logger)
+	authHandler := NewAuthHandler(oauthService, &mockProjectService{}, cfg, logger)
 
 	// Step 1: Set up session with state (simulating OAuth initiation)
 	req1 := httptest.NewRequest("POST", "/api/auth/complete-oauth", nil)
@@ -156,7 +156,7 @@ func TestCompleteOAuthFlow_InvalidAuthURL(t *testing.T) {
 		JWKSEndpoints: cfg.Auth.JWKSEndpoints,
 	}, logger)
 
-	authHandler := NewAuthHandler(oauthService, cfg, logger)
+	authHandler := NewAuthHandler(oauthService, &mockProjectService{}, cfg, logger)
 
 	// Try with malicious auth_url NOT in whitelist
 	reqBody := map[string]string{

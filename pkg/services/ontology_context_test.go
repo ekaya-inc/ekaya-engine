@@ -266,6 +266,10 @@ func (m *mockProjectServiceForOntology) SetDefaultDatasourceID(ctx context.Conte
 	return nil
 }
 
+func (m *mockProjectServiceForOntology) SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string) {
+	// No-op for tests
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
