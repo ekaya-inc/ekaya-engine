@@ -115,15 +115,21 @@ export function SqlEditor({
   return (
     <div className="space-y-1">
       <div
-        className={`rounded-md border-2 overflow-hidden transition-colors ${borderClass}`}
+        className={`rounded-md border-2 overflow-hidden transition-colors ${borderClass} relative`}
         style={{ minHeight }}
       >
+        {readOnly && (
+          <div
+            className="absolute inset-0 z-10 cursor-default bg-gray-500/5 dark:bg-gray-900/20"
+          />
+        )}
         <CodeMirror
           value={value}
           onChange={onChange}
           extensions={extensions}
           theme={isDark ? oneDark : 'light'}
           readOnly={readOnly}
+          editable={!readOnly}
           placeholder={placeholder}
           basicSetup={{
             lineNumbers: true,

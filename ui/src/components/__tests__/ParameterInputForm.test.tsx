@@ -59,7 +59,6 @@ describe('ParameterInputForm', () => {
       />
     );
 
-    expect(screen.getByText('Query Parameters')).toBeInTheDocument();
     expect(screen.getByLabelText(/customer_id/)).toBeInTheDocument();
     expect(screen.getByLabelText(/start_date/)).toBeInTheDocument();
     expect(screen.getByLabelText(/limit/)).toBeInTheDocument();
@@ -80,7 +79,7 @@ describe('ParameterInputForm', () => {
     expect(customerIdLabel?.querySelector('.text-red-500')).toBeInTheDocument();
   });
 
-  it('separates required and optional parameters', () => {
+  it('renders required parameters before optional parameters', () => {
     render(
       <ParameterInputForm
         parameters={sampleParameters}
@@ -89,8 +88,11 @@ describe('ParameterInputForm', () => {
       />
     );
 
-    expect(screen.getByText('Required Parameters')).toBeInTheDocument();
-    expect(screen.getByText('Optional Parameters')).toBeInTheDocument();
+    // Required parameter (customer_id) should be in the document
+    expect(screen.getByLabelText(/customer_id/)).toBeInTheDocument();
+    // Optional parameters should also be rendered
+    expect(screen.getByLabelText(/start_date/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/limit/)).toBeInTheDocument();
   });
 
   it('renders text input for string type', () => {

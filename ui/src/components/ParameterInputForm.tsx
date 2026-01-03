@@ -169,20 +169,8 @@ export const ParameterInputForm = ({
 
   return (
     <div className="space-y-4">
-      <div className="border-b border-border-light pb-2">
-        <h3 className="text-sm font-medium text-text-primary">
-          Query Parameters
-        </h3>
-        <p className="text-xs text-text-secondary mt-1">
-          Provide values for the parameters used in this query
-        </p>
-      </div>
-
       {requiredParams.length > 0 && (
         <div className="space-y-3">
-          <h4 className="text-xs font-medium text-text-primary uppercase tracking-wide">
-            Required Parameters
-          </h4>
           {requiredParams.map((param) => (
             <div key={param.name}>
               <label
@@ -212,9 +200,6 @@ export const ParameterInputForm = ({
 
       {optionalParams.length > 0 && (
         <div className="space-y-3">
-          <h4 className="text-xs font-medium text-text-primary uppercase tracking-wide">
-            Optional Parameters
-          </h4>
           {optionalParams.map((param) => (
             <div key={param.name}>
               <label
