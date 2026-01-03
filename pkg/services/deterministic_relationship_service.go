@@ -77,32 +77,20 @@ func (s *deterministicRelationshipService) DiscoverRelationships(ctx context.Con
 		return &DiscoveryResult{}, nil // No entities, no relationships to discover
 	}
 
-	// Get all entity occurrences for this project
-	occurrences, err := s.entityRepo.GetAllOccurrencesByProject(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("get occurrences: %w", err)
-	}
-
-	// Build lookup maps for efficient entity matching
-	// entityByID: for looking up entity by ID
-	entityByID := make(map[uuid.UUID]*models.OntologyEntity)
+	// entityByPrimaryTable: maps "schema.table" to the entity that owns that table
+	// Using PrimarySchema/PrimaryTable is more accurate than occurrences because
+	// a table can have multiple entity occurrences (e.g., billing_engagements has
+	// "billing_engagement" as primary entity plus "user" occurrences for host_id/visitor_id)
+	entityByPrimaryTable := make(map[string]*models.OntologyEntity)
 	for _, entity := range entities {
-		entityByID[entity.ID] = entity
-	}
-
-	// occByTable: maps "schema.table" to first entity with occurrence in that table
-	occByTable := make(map[string]*models.OntologyEntity)
-	for _, occ := range occurrences {
-		key := fmt.Sprintf("%s.%s", occ.SchemaName, occ.TableName)
-		if _, exists := occByTable[key]; !exists {
-			occByTable[key] = entityByID[occ.EntityID]
-		}
+		key := fmt.Sprintf("%s.%s", entity.PrimarySchema, entity.PrimaryTable)
+		entityByPrimaryTable[key] = entity
 	}
 
 	// =========================================================================
 	// Phase 1: FK Relationships (Gold Standard)
 	// All FKs from engine_schema_relationships become entity relationships.
-	// Find entities by table occurrence, not by PK match.
+	// Find entities by their primary table ownership.
 	// =========================================================================
 
 	// Get all schema relationships (FKs) for this datasource
@@ -147,18 +135,18 @@ func (s *deterministicRelationshipService) DiscoverRelationships(ctx context.Con
 			continue
 		}
 
-		// Find source entity by table occurrence
+		// Find source entity by primary table
 		sourceKey := fmt.Sprintf("%s.%s", sourceTable.SchemaName, sourceTable.TableName)
-		sourceEntity := occByTable[sourceKey]
+		sourceEntity := entityByPrimaryTable[sourceKey]
 		if sourceEntity == nil {
-			continue // No entity associated with source table
+			continue // No entity owns this table
 		}
 
-		// Find target entity by table occurrence
+		// Find target entity by primary table
 		targetKey := fmt.Sprintf("%s.%s", targetTable.SchemaName, targetTable.TableName)
-		targetEntity := occByTable[targetKey]
+		targetEntity := entityByPrimaryTable[targetKey]
 		if targetEntity == nil {
-			continue // No entity associated with target table
+			continue // No entity owns this table
 		}
 
 		// Don't create self-referencing relationships
@@ -309,8 +297,8 @@ func (s *deterministicRelationshipService) DiscoverRelationships(ctx context.Con
 				continue
 			}
 
-			// Find source entity for candidate's table
-			sourceEntity := occByTable[fmt.Sprintf("%s.%s", candidate.schema, candidate.table)]
+			// Find source entity for candidate's table (by primary table ownership)
+			sourceEntity := entityByPrimaryTable[fmt.Sprintf("%s.%s", candidate.schema, candidate.table)]
 			if sourceEntity == nil {
 				continue
 			}
