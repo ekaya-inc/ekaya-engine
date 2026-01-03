@@ -244,7 +244,18 @@ WHERE LOWER(h.username) = LOWER({{username}}) OR LOWER(v.username) = LOWER({{use
     - GetByTerm and GetByID return `nil, nil` for not-found (not an error), consistent with other repos
     - Delete and Update return error for not-found records
     - JSONB fields properly handle empty slices → NULL and NULL → empty slices
-- [ ] **Step 4: Service** - Create `pkg/services/glossary_service.go` with business logic and LLM suggestion
+- [x] **Step 4: Service** ✅ COMPLETED
+  - **File:** `pkg/services/glossary_service.go`
+  - **Interface:** `GlossaryService` with 6 methods: CreateTerm, UpdateTerm, DeleteTerm, GetTerms, GetTerm, SuggestTerms
+  - **Dependencies:** GlossaryRepository, OntologyRepository, OntologyEntityRepository, LLMClientFactory
+  - **SuggestTerms implementation:**
+    - Loads active ontology and entities for context
+    - Builds LLM prompt with domain summary, conventions, entities, and column details
+    - Uses `llm.ParseJSONResponse` to extract structured suggestions
+    - Returns terms with source="suggested" (not persisted until user accepts)
+  - **Validation:** CreateTerm/UpdateTerm validate term name and definition required
+  - **Default source:** CreateTerm sets source="user" if not provided
+  - **Tests:** `pkg/services/glossary_service_test.go` (13 tests) covering CRUD operations, validation, and SuggestTerms with various scenarios (success, no ontology, no entities, LLM errors, conventions, column details)
 - [ ] **Step 5: Handler** - Create `pkg/handlers/glossary_handler.go` with HTTP endpoints
 - [ ] **Step 6: Register in main.go** - Wire up handler registration
 - [ ] **Step 7: Expose in get_ontology** - Add `get_glossary` MCP tool or include in domain depth
