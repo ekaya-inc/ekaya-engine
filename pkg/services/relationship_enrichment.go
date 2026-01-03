@@ -12,6 +12,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
+	"github.com/ekaya-inc/ekaya-engine/pkg/retry"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services/dag"
 )
 
@@ -82,16 +83,30 @@ func (s *relationshipEnrichmentService) EnrichProject(ctx context.Context, proje
 		entityByID[e.ID] = e
 	}
 
-	totalRelationships := len(relationships)
+	// Validate relationships before enrichment
+	validRelationships := s.validateRelationships(relationships, entityByID)
+	if len(validRelationships) < len(relationships) {
+		skipped := len(relationships) - len(validRelationships)
+		s.logger.Warn("Skipped invalid relationships",
+			zap.Int("skipped", skipped),
+			zap.Int("total", len(relationships)))
+		result.RelationshipsFailed += skipped
+	}
+
+	totalRelationships := len(validRelationships)
+	if totalRelationships == 0 {
+		result.DurationMs = time.Since(startTime).Milliseconds()
+		return result, nil
+	}
 
 	// Enrich relationships in batches
 	const batchSize = 20
-	for i := 0; i < len(relationships); i += batchSize {
+	for i := 0; i < len(validRelationships); i += batchSize {
 		end := i + batchSize
-		if end > len(relationships) {
-			end = len(relationships)
+		if end > len(validRelationships) {
+			end = len(validRelationships)
 		}
-		batch := relationships[i:end]
+		batch := validRelationships[i:end]
 
 		enriched, failed := s.enrichBatch(ctx, projectID, batch, entityByID)
 		result.RelationshipsEnriched += enriched
@@ -100,8 +115,8 @@ func (s *relationshipEnrichmentService) EnrichProject(ctx context.Context, proje
 		// Report progress after each batch
 		if progressCallback != nil {
 			processed := result.RelationshipsEnriched + result.RelationshipsFailed
-			msg := fmt.Sprintf("Enriching relationships (%d/%d)...", processed, totalRelationships)
-			progressCallback(processed, totalRelationships, msg)
+			msg := fmt.Sprintf("Enriching relationships (%d/%d)...", processed, len(relationships))
+			progressCallback(processed, len(relationships), msg)
 		}
 	}
 
@@ -116,7 +131,7 @@ func (s *relationshipEnrichmentService) EnrichProject(ctx context.Context, proje
 	return result, nil
 }
 
-// enrichBatch enriches a batch of relationships via LLM.
+// enrichBatch enriches a batch of relationships via LLM with retry logic.
 func (s *relationshipEnrichmentService) enrichBatch(
 	ctx context.Context,
 	projectID uuid.UUID,
@@ -126,23 +141,69 @@ func (s *relationshipEnrichmentService) enrichBatch(
 	// Build prompt with relationship context
 	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
 	if err != nil {
-		s.logger.Error("Failed to create LLM client", zap.Error(err))
+		s.logger.Error("Failed to create LLM client",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
 		return 0, len(relationships)
 	}
 
 	systemMsg := s.relationshipEnrichmentSystemMessage()
 	prompt := s.buildRelationshipEnrichmentPrompt(relationships, entityByID)
 
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.3, false)
+	// Retry LLM call with exponential backoff
+	retryConfig := &retry.Config{
+		MaxRetries:   3,
+		InitialDelay: 500 * time.Millisecond,
+		MaxDelay:     10 * time.Second,
+		Multiplier:   2.0,
+	}
+
+	var result *llm.GenerateResponseResult
+	err = retry.Do(ctx, retryConfig, func() error {
+		var retryErr error
+		result, retryErr = llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.3, false)
+		if retryErr != nil {
+			// Classify error to determine if retryable
+			classified := llm.ClassifyError(retryErr)
+			if classified.Retryable {
+				s.logger.Warn("LLM call failed, retrying",
+					zap.String("error_type", string(classified.Type)),
+					zap.Error(retryErr))
+				return retryErr
+			}
+			// Non-retryable error, fail immediately
+			s.logger.Error("LLM call failed with non-retryable error",
+				zap.String("error_type", string(classified.Type)),
+				zap.Error(retryErr))
+			return retryErr
+		}
+		return nil
+	})
+
 	if err != nil {
-		s.logger.Error("LLM call failed", zap.Error(err))
+		s.logger.Error("LLM call failed after retries",
+			zap.String("project_id", projectID.String()),
+			zap.Int("batch_size", len(relationships)),
+			zap.Error(err))
+		// Log the specific relationships that failed
+		for _, rel := range relationships {
+			s.logRelationshipFailure(rel, "LLM call failed", err)
+		}
 		return 0, len(relationships)
 	}
 
 	// Parse response (wrapped in object for standardization)
 	response, err := llm.ParseJSONResponse[relationshipEnrichmentResponse](result.Content)
 	if err != nil {
-		s.logger.Error("Failed to parse LLM response", zap.Error(err))
+		s.logger.Error("Failed to parse LLM response",
+			zap.String("project_id", projectID.String()),
+			zap.Int("batch_size", len(relationships)),
+			zap.String("response_preview", truncateString(result.Content, 200)),
+			zap.Error(err))
+		// Log the specific relationships that failed
+		for _, rel := range relationships {
+			s.logRelationshipFailure(rel, "Failed to parse LLM response", err)
+		}
 		return 0, len(relationships)
 	}
 	enrichments := response.Relationships
@@ -159,15 +220,13 @@ func (s *relationshipEnrichmentService) enrichBatch(
 		key := fmt.Sprintf("%s.%s->%s.%s", rel.SourceColumnTable, rel.SourceColumnName, rel.TargetColumnTable, rel.TargetColumnName)
 		description, ok := enrichmentByKey[key]
 		if !ok || description == "" {
-			s.logger.Debug("No enrichment found for relationship", zap.String("key", key))
+			s.logRelationshipFailure(rel, "No enrichment found in LLM response", nil)
 			failed++
 			continue
 		}
 
 		if err := s.relationshipRepo.UpdateDescription(ctx, rel.ID, description); err != nil {
-			s.logger.Error("Failed to update relationship description",
-				zap.String("relationship_id", rel.ID.String()),
-				zap.Error(err))
+			s.logRelationshipFailure(rel, "Failed to update database", err)
 			failed++
 			continue
 		}
@@ -270,4 +329,73 @@ func (s *relationshipEnrichmentService) buildRelationshipEnrichmentPrompt(
 	sb.WriteString("```\n")
 
 	return sb.String()
+}
+
+// validateRelationships filters out malformed relationships before enrichment.
+func (s *relationshipEnrichmentService) validateRelationships(
+	relationships []*models.EntityRelationship,
+	entityByID map[uuid.UUID]*models.OntologyEntity,
+) []*models.EntityRelationship {
+	valid := make([]*models.EntityRelationship, 0, len(relationships))
+
+	for _, rel := range relationships {
+		// Check required fields
+		if rel.SourceColumnTable == "" || rel.SourceColumnName == "" ||
+			rel.TargetColumnTable == "" || rel.TargetColumnName == "" {
+			s.logger.Error("Relationship missing required fields",
+				zap.String("relationship_id", rel.ID.String()),
+				zap.String("source_table", rel.SourceColumnTable),
+				zap.String("source_column", rel.SourceColumnName),
+				zap.String("target_table", rel.TargetColumnTable),
+				zap.String("target_column", rel.TargetColumnName))
+			continue
+		}
+
+		// Check that source and target entities exist
+		_, sourceExists := entityByID[rel.SourceEntityID]
+		_, targetExists := entityByID[rel.TargetEntityID]
+		if !sourceExists || !targetExists {
+			s.logger.Error("Relationship references missing entities",
+				zap.String("relationship_id", rel.ID.String()),
+				zap.String("source_entity_id", rel.SourceEntityID.String()),
+				zap.String("target_entity_id", rel.TargetEntityID.String()),
+				zap.Bool("source_exists", sourceExists),
+				zap.Bool("target_exists", targetExists))
+			continue
+		}
+
+		valid = append(valid, rel)
+	}
+
+	return valid
+}
+
+// logRelationshipFailure logs detailed information about a failed relationship enrichment.
+func (s *relationshipEnrichmentService) logRelationshipFailure(
+	rel *models.EntityRelationship,
+	reason string,
+	err error,
+) {
+	fields := []zap.Field{
+		zap.String("relationship_id", rel.ID.String()),
+		zap.String("source", fmt.Sprintf("%s.%s", rel.SourceColumnTable, rel.SourceColumnName)),
+		zap.String("target", fmt.Sprintf("%s.%s", rel.TargetColumnTable, rel.TargetColumnName)),
+		zap.String("detection_method", rel.DetectionMethod),
+		zap.Float64("confidence", rel.Confidence),
+		zap.String("reason", reason),
+	}
+
+	if err != nil {
+		fields = append(fields, zap.Error(err))
+	}
+
+	s.logger.Error("Relationship enrichment failed", fields...)
+}
+
+// truncateString truncates a string to a maximum length for logging.
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }

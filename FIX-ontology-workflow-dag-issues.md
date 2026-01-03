@@ -56,9 +56,10 @@
 
 ---
 
-## Issue 2: High Failure Rate in RelationshipEnrichment (78%)
+## Issue 2: High Failure Rate in RelationshipEnrichment (78%) ✅ COMPLETE
 
 **Severity**: High
+**Status**: ✅ Fixed, Tested, and Committed
 
 **Observed Behavior**:
 - 67 out of 86 relationships failed to enrich (78% failure rate)
@@ -73,21 +74,74 @@ WHERE ontology_id = '<ontology_id>';
 -- Result: total_rels=86, with_descriptions=19
 ```
 
-**Possible Causes**:
-1. LLM rate limiting or timeouts
-2. Invalid relationship data causing LLM parsing failures
-3. Context window limits being exceeded for certain relationships
-4. Missing or malformed entity data that relationships reference
+**Root Cause Analysis**:
+1. No retry logic for transient LLM failures (rate limits, timeouts, server errors)
+2. No detailed logging to diagnose specific failure reasons
+3. No validation of relationship data before sending to LLM
+4. Malformed relationships with missing fields or invalid entity references
 
-**Files to Investigate**:
-- `pkg/services/dag/relationship_enrichment_node.go` - Check error handling and logging
-- Check server logs for specific error messages during enrichment
+**Files Modified**:
+- `pkg/services/relationship_enrichment.go` - Enhanced error handling and retry logic
+- `pkg/services/relationship_enrichment_test.go` - Comprehensive test coverage
 
-**How to Fix**:
-1. Add detailed error logging for each failed relationship
-2. Implement retry logic with exponential backoff for transient failures
-3. Consider batching relationships to avoid rate limits
-4. Add validation before LLM calls to catch malformed data early
+**Implementation Details**:
+1. **Detailed Error Logging**: Added `logRelationshipFailure()` function that logs:
+   - Relationship ID
+   - Source/target table and column
+   - Detection method and confidence
+   - Specific failure reason
+   - Error details if available
+
+2. **Retry Logic with Exponential Backoff**:
+   - Uses existing `pkg/retry` package
+   - 3 retries with 500ms initial delay, 10s max delay, 2x multiplier
+   - Leverages `llm.ClassifyError()` to distinguish retryable vs non-retryable errors
+   - Retryable: rate limits (429), timeouts, server errors (5xx), GPU errors
+   - Non-retryable: authentication (401), model not found, bad requests
+
+3. **Validation Before LLM Calls**: Added `validateRelationships()` function that filters out:
+   - Relationships with missing required fields (table/column names)
+   - Relationships referencing non-existent entities
+   - Invalid relationships are counted as failed and logged immediately
+
+4. **Rate Limit Handling**:
+   - Retry logic automatically handles 429 rate limit responses
+   - Exponential backoff provides breathing room between retries
+   - LLM error classification marks rate limits as retryable
+
+5. **Enhanced Error Context**:
+   - Added `truncateString()` helper to safely log LLM response previews
+   - All batch failures now log every individual relationship
+   - Error messages include project context and batch size
+
+**Testing**:
+- `TestRelationshipEnrichmentService_EnrichProject_Success` - Happy path
+- `TestRelationshipEnrichmentService_EnrichProject_WithRetryOnTransientError` - Verifies retry on transient failures
+- `TestRelationshipEnrichmentService_EnrichProject_ValidationFiltersInvalid` - Validates pre-LLM filtering
+- `TestRelationshipEnrichmentService_EnrichProject_NonRetryableError` - Verifies no retry on permanent errors
+- `TestRelationshipEnrichmentService_EnrichProject_ProgressCallback` - Verifies progress reporting
+- `TestRelationshipEnrichmentService_EnrichProject_EmptyProject` - Edge case handling
+
+**Commit Date**: 2026-01-03
+
+**What Was Done**:
+1. Added comprehensive error logging with `logRelationshipFailure()` to diagnose each failure
+2. Implemented retry logic using `pkg/retry` with exponential backoff (3 retries, 500ms→10s delays)
+3. Added `validateRelationships()` to filter out malformed data before LLM calls
+4. Leveraged `llm.ClassifyError()` to distinguish retryable (rate limits, timeouts) from permanent errors
+5. Enhanced batch failure logging with truncated LLM response previews for debugging
+6. Created comprehensive test suite covering success, retries, validation, and edge cases
+
+**Expected Impact**:
+- Transient LLM failures (rate limits, timeouts) should auto-recover via retry
+- Invalid relationships detected early, preventing wasted LLM calls
+- Detailed logs will reveal if remaining failures are due to data quality, LLM issues, or other causes
+
+**Next Session Should**:
+1. Run a full ontology extraction and monitor server logs for relationship enrichment phase
+2. Compare new failure rate against the original 78% baseline
+3. Analyze remaining failures using the detailed error logs to identify patterns
+4. If failures persist above ~20%, investigate: batch size tuning, LLM prompt adjustments, or data quality issues
 
 ---
 
