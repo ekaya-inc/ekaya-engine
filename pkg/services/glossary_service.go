@@ -332,13 +332,13 @@ func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntolog
 
 // suggestedTermResponse represents a single term in the LLM response.
 type suggestedTermResponse struct {
-	Term        string                 `json:"term"`
-	Definition  string                 `json:"definition"`
-	SQLPattern  string                 `json:"sql_pattern,omitempty"`
-	BaseTable   string                 `json:"base_table,omitempty"`
-	ColumnsUsed []string               `json:"columns_used,omitempty"`
-	Filters     []suggestedFilter      `json:"filters,omitempty"`
-	Aggregation string                 `json:"aggregation,omitempty"`
+	Term        string            `json:"term"`
+	Definition  string            `json:"definition"`
+	SQLPattern  string            `json:"sql_pattern,omitempty"`
+	BaseTable   string            `json:"base_table,omitempty"`
+	ColumnsUsed []string          `json:"columns_used,omitempty"`
+	Filters     []suggestedFilter `json:"filters,omitempty"`
+	Aggregation string            `json:"aggregation,omitempty"`
 }
 
 type suggestedFilter struct {

@@ -19,11 +19,11 @@ import (
 // ============================================================================
 
 type mockGlossaryRepo struct {
-	terms       map[uuid.UUID]*models.BusinessGlossaryTerm
-	createErr   error
-	updateErr   error
-	deleteErr   error
-	getByIDErr  error
+	terms        map[uuid.UUID]*models.BusinessGlossaryTerm
+	createErr    error
+	updateErr    error
+	deleteErr    error
+	getByIDErr   error
 	getByProjErr error
 }
 

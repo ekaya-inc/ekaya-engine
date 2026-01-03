@@ -11,7 +11,7 @@
 | Phase 3: Ontology Finalization | ✅ COMPLETE | Domain description, auto-triggered |
 | Phase 4: Column Workflow | ✅ COMPLETE | Column semantics, enum values, FK roles |
 | Phase 5: Project Conventions | ✅ COMPLETE | Soft delete, currency (bundled with Phase 3) |
-| Phase 6: Business Glossary | 🚧 IN PROGRESS | Step 1 (migration) ✅, Steps 2-7 pending |
+| Phase 6: Business Glossary | ✅ COMPLETE | All steps (1-7) complete |
 
 ---
 
@@ -280,16 +280,15 @@ WHERE LOWER(h.username) = LOWER({{username}}) OR LOWER(v.username) = LOWER({{use
     - `PUT /api/projects/{pid}/glossary/{tid}` - Update term
     - `DELETE /api/projects/{pid}/glossary/{tid}` - Delete term
     - `POST /api/projects/{pid}/glossary/suggest` - LLM suggests terms based on ontology
-- [ ] **Step 7: Expose in get_ontology** - Add `get_glossary` MCP tool or include in domain depth
-  - **Recommendation:** Create a new `get_glossary` MCP tool in `pkg/mcp/tools/` (Option A from spec)
-  - **Key files to reference:**
-    - `pkg/mcp/tools/ontology.go` - Pattern for creating MCP tools
-    - `pkg/services/glossary_service.go` - `GetTerms()` method returns all glossary terms
-    - `pkg/handlers/glossary_handler.go` - HTTP handler for reference
-  - **Implementation steps:**
-    1. Create tool registration in `pkg/mcp/tools/glossary.go`
-    2. Add tool filtering support in `pkg/mcp/tools/developer.go` (NewToolFilter)
-    3. Register the tool in `main.go` similar to RegisterOntologyTools
+- [x] **Step 7: Expose in get_ontology** - Add `get_glossary` MCP tool ✅ COMPLETED (2026-01-04)
+  - **File:** `pkg/mcp/tools/glossary.go`
+  - **Tool:** `get_glossary` - Returns all business glossary terms for MCP clients
+  - **Visibility:** Tied to `approved_queries` visibility (same as `get_ontology`)
+  - **Implementation:**
+    1. Created `pkg/mcp/tools/glossary.go` with `GlossaryToolDeps` struct and `RegisterGlossaryTools()` function
+    2. Added `get_glossary` to `ontologyToolNames` map in `pkg/mcp/tools/developer.go` for tool filtering
+    3. Registered glossary tools in `main.go` after glossary service creation
+  - **Tests:** `pkg/mcp/tools/glossary_test.go` (6 tests) covering deps structure, registration, auth checks, and response conversion
 
 **Why This Matters for MCP Clients:** When asked "What's our revenue?", the agent needs to know:
 - Revenue = `SUM(earned_amount)` not `SUM(total_amount)`
