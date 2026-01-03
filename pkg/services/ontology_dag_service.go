@@ -197,10 +197,8 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 		return nil, fmt.Errorf("update DAG status: %w", err)
 	}
 
-	// Start heartbeat goroutine
-	s.startHeartbeat(dagRecord.ID, projectID)
-
 	// Run DAG execution in background
+	// Note: heartbeat is started inside executeDAG after defer is established
 	go s.executeDAG(projectID, dagRecord.ID)
 
 	// Return DAG with nodes
@@ -461,11 +459,26 @@ func (s *ontologyDAGService) executeDAG(projectID, dagID uuid.UUID) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.activeDAGs.Store(dagID, cancel)
 
+	// Set up defer FIRST to ensure cleanup happens even if panic occurs
 	defer func() {
+		// Recover from panics and mark DAG as failed
+		if r := recover(); r != nil {
+			s.logger.Error("DAG execution panicked",
+				zap.String("dag_id", dagID.String()),
+				zap.String("project_id", projectID.String()),
+				zap.Any("panic", r),
+				zap.Stack("stack"))
+			// Mark DAG as failed with panic message
+			s.markDAGFailed(projectID, dagID, fmt.Sprintf("panic during execution: %v", r))
+		}
+
 		s.activeDAGs.Delete(dagID)
 		s.stopHeartbeat(dagID)
 		s.releaseOwnership(projectID, dagID)
 	}()
+
+	// Start heartbeat after defer is established so stopHeartbeat is guaranteed to run
+	s.startHeartbeat(dagID, projectID)
 
 	s.logger.Info("Starting DAG execution",
 		zap.String("dag_id", dagID.String()),

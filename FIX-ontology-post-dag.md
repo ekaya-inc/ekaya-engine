@@ -11,7 +11,7 @@ Branch: `ddanieli/create-ontology-workflow-dag`
 | Issue 2: DAG startup error propagation | Medium | ✅ DONE | Error messages now stored on nodes |
 | Issue 3: Worker Pool generics | Minor | ✅ DONE | Completed 2026-01-03 |
 | Issue 4: Column chunk parallelism | Minor | ✅ DONE | Completed 2026-01-03 |
-| Issue 5: Heartbeat goroutine leak | Low | 📋 TODO | Edge case |
+| Issue 5: Heartbeat goroutine leak | Low | ✅ DONE | Completed 2026-01-03 |
 | Issue 6: UI stale closure | Low | 📋 TODO | React best practice |
 | Issue 7: LLM circuit breaker | Enhancement | 📋 TODO | Resilience |
 
@@ -522,9 +522,10 @@ If you need to modify chunked column enrichment behavior:
 
 ---
 
-## Issue 5: Potential Heartbeat Goroutine Leak
+## Issue 5: Potential Heartbeat Goroutine Leak ✅
 
 **Severity:** Low
+**Status:** ✅ COMPLETED 2026-01-03
 
 ### Problem
 
@@ -551,36 +552,76 @@ func (s *ontologyDAGService) executeDAG(projectID, dagID uuid.UUID) {
 - Heartbeat goroutine would continue running until process exit
 - Minor resource leak
 
-### Suggested Fix
+### Implementation Summary
 
-Start heartbeat after defer is established:
+**Completed:** 2026-01-03
 
-```go
-func (s *ontologyDAGService) executeDAG(projectID, dagID uuid.UUID) {
-    // Set up defer FIRST
-    defer func() {
-        s.activeDAGs.Delete(dagID)
-        s.stopHeartbeat(dagID)
-        s.releaseOwnership(projectID, dagID)
+Successfully fixed the potential heartbeat goroutine leak and added panic recovery to ensure proper cleanup and DAG failure tracking.
 
-        if r := recover(); r != nil {
-            s.logger.Error("DAG execution panicked",
-                zap.String("dag_id", dagID.String()),
-                zap.Any("panic", r))
-            // Update DAG status to failed
-        }
-    }()
+**Key Changes:**
 
-    // Now start heartbeat (defer will clean it up)
-    s.startHeartbeat(dagID, projectID)
+1. **Moved heartbeat start to after defer establishment** (`ontology_dag_service.go:481`):
+   - Previously: `startHeartbeat` was called in `Start()` method before spawning goroutine
+   - Now: `startHeartbeat` is called inside `executeDAG` after defer block is established
+   - This guarantees `stopHeartbeat` will always be called, even if panic occurs
 
-    // ... rest of execution
-}
-```
+2. **Added panic recovery in defer block** (`ontology_dag_service.go:463-478`):
+   - Recovers from any panic using `recover()`
+   - Logs panic with stack trace using `zap.Stack("stack")`
+   - Calls `markDAGFailed` with descriptive panic message
+   - Ensures all cleanup happens: activeDAGs deletion, heartbeat stop, ownership release
 
-### Files to Modify
+3. **Removed heartbeat start from Start() method** (`ontology_dag_service.go:200-202`):
+   - Deleted `s.startHeartbeat(dagRecord.ID, projectID)` call
+   - Added comment explaining heartbeat is started inside executeDAG
 
-- `pkg/services/ontology_dag_service.go`
+**Testing:**
+
+Added 2 comprehensive unit tests in `pkg/services/ontology_dag_service_test.go`:
+
+1. **`TestExecuteDAG_PanicRecovery`** (lines 603-713):
+   - Simulates panic during `getTenantCtx` call
+   - Verifies panic is recovered and doesn't crash process
+   - Verifies `markDAGFailed` is called with panic message
+   - Verifies all cleanup happens (activeDAGs, heartbeat)
+   - Uses mock repository to track DAG failure updates
+
+2. **`TestExecuteDAG_HeartbeatCleanupOrder`** (lines 715-773):
+   - Simulates early error (repository failure)
+   - Verifies cleanup happens even on non-panic errors
+   - Verifies heartbeat and activeDAGs are properly cleaned up
+   - Ensures no goroutine leaks
+
+**Error Handling:**
+
+The panic recovery provides detailed logging including:
+- DAG ID and Project ID
+- Panic value (the error that caused the panic)
+- Full stack trace for debugging
+- Error stored on DAG node for UI visibility
+
+**Files Modified:**
+
+- `pkg/services/ontology_dag_service.go`:
+  - Removed `startHeartbeat` call from `Start()` method (line ~200)
+  - Added panic recovery in `executeDAG` defer (lines 462-477)
+  - Moved `startHeartbeat` call to after defer (line 480)
+  - Added comment explaining execution order
+
+- `pkg/services/ontology_dag_service_test.go`:
+  - Added imports: `fmt`, `sync`, `time`
+  - Added `TestExecuteDAG_PanicRecovery` test (lines 603-713)
+  - Added `TestExecuteDAG_HeartbeatCleanupOrder` test (lines 715-773)
+
+**Context for Future Sessions:**
+
+If you need to modify DAG execution behavior:
+- The defer block at the start of `executeDAG` is critical - it handles both normal and panic cleanup
+- `markDAGFailed` is safe to call from panic recovery - it handles its own errors gracefully
+- The heartbeat is started after defer setup to guarantee cleanup
+- All cleanup operations (stopHeartbeat, releaseOwnership, activeDAGs deletion) are in the defer
+- Panic messages are formatted with `fmt.Sprintf("panic during execution: %v", r)` for clarity
+- **Order matters:** defer → recover → startHeartbeat ensures no leaks even on panic
 
 ---
 

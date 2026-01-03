@@ -2,7 +2,10 @@ package services
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -596,4 +599,175 @@ func TestMarkDAGFailed_WhenTenantCtxFails_LogsError(t *testing.T) {
 
 	// Verify no repository methods were called
 	assert.False(t, repoMethodCalled, "No repository methods should be called when getTenantCtx fails")
+}
+
+// TestExecuteDAG_PanicRecovery verifies that panics during DAG execution
+// are recovered, cleanup happens properly, and the DAG is marked as failed.
+func TestExecuteDAG_PanicRecovery(t *testing.T) {
+	projectID := uuid.New()
+	dagID := uuid.New()
+
+	// Track whether markDAGFailed was called
+	var markDAGFailedCalls []string
+	var mu sync.Mutex
+
+	// Create mock repository that tracks calls
+	mockRepo := &mockDAGRepository{
+		getByIDWithNodesFunc: func(ctx context.Context, id uuid.UUID) (*models.OntologyDAG, error) {
+			// Return a DAG with one node
+			return &models.OntologyDAG{
+				ID:        dagID,
+				ProjectID: projectID,
+				Nodes: []models.DAGNode{
+					{
+						ID:       uuid.New(),
+						DAGID:    dagID,
+						NodeName: string(models.DAGNodeEntityDiscovery),
+						Status:   models.DAGNodeStatusPending,
+					},
+				},
+			}, nil
+		},
+		updateStatusFunc: func(ctx context.Context, id uuid.UUID, status models.DAGStatus, currentNode *string) error {
+			if status == models.DAGStatusFailed {
+				mu.Lock()
+				markDAGFailedCalls = append(markDAGFailedCalls, "updateStatus")
+				mu.Unlock()
+			}
+			return nil
+		},
+		updateNodeStatusFunc: func(ctx context.Context, nodeID uuid.UUID, status models.DAGNodeStatus, errorMessage *string) error {
+			if status == models.DAGNodeStatusFailed && errorMessage != nil {
+				mu.Lock()
+				markDAGFailedCalls = append(markDAGFailedCalls, fmt.Sprintf("updateNodeStatus: %s", *errorMessage))
+				mu.Unlock()
+			}
+			return nil
+		},
+	}
+
+	// Create a test service
+	service := &ontologyDAGService{
+		dagRepo:          mockRepo,
+		logger:           zap.NewNop(),
+		serverInstanceID: uuid.New(),
+	}
+
+	// Set getTenantCtx to cause a panic only on first call
+	// (subsequent calls from markDAGFailed should succeed)
+	callCount := 0
+	var callMu sync.Mutex
+	service.getTenantCtx = func(ctx context.Context, pid uuid.UUID) (context.Context, func(), error) {
+		callMu.Lock()
+		callCount++
+		count := callCount
+		callMu.Unlock()
+
+		if count == 1 {
+			// First call - panic to test recovery
+			panic("simulated panic during DAG execution")
+		}
+		// Subsequent calls - succeed to allow markDAGFailed to work
+		return ctx, func() {}, nil
+	}
+
+	// Execute DAG in a goroutine (as it would be in production)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		service.executeDAG(projectID, dagID)
+	}()
+
+	// Wait for goroutine to complete with timeout
+	select {
+	case <-done:
+		// Good, execution completed
+	case <-time.After(2 * time.Second):
+		t.Fatal("Test timed out waiting for executeDAG to complete")
+	}
+
+	// Give a small amount of time for cleanup to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify markDAGFailed was called (which updates status and node status)
+	mu.Lock()
+	defer mu.Unlock()
+	assert.True(t, len(markDAGFailedCalls) >= 1, "markDAGFailed should have been called at least once")
+
+	// Check that at least one call mentions panic
+	foundPanicMessage := false
+	for _, call := range markDAGFailedCalls {
+		if contains(call, "panic") {
+			foundPanicMessage = true
+			break
+		}
+	}
+	assert.True(t, foundPanicMessage, "Error message should mention panic")
+
+	// Verify activeDAGs was cleaned up
+	_, exists := service.activeDAGs.Load(dagID)
+	assert.False(t, exists, "DAG should be removed from activeDAGs after panic")
+
+	// Verify heartbeat was cleaned up
+	_, exists = service.heartbeatCancel.Load(dagID)
+	assert.False(t, exists, "Heartbeat should be cleaned up after panic")
+}
+
+// TestExecuteDAG_HeartbeatCleanupOrder verifies that the heartbeat
+// is properly started and stopped even when execution fails early.
+func TestExecuteDAG_HeartbeatCleanupOrder(t *testing.T) {
+	projectID := uuid.New()
+	dagID := uuid.New()
+
+	// Create mock repository
+	mockRepo := &mockDAGRepository{
+		getByIDWithNodesFunc: func(ctx context.Context, id uuid.UUID) (*models.OntologyDAG, error) {
+			// Return error to cause early exit
+			return nil, fmt.Errorf("simulated repository error")
+		},
+		updateStatusFunc: func(ctx context.Context, id uuid.UUID, status models.DAGStatus, currentNode *string) error {
+			return nil
+		},
+		updateNodeStatusFunc: func(ctx context.Context, nodeID uuid.UUID, status models.DAGNodeStatus, errorMessage *string) error {
+			return nil
+		},
+	}
+
+	// Create a test service
+	service := &ontologyDAGService{
+		dagRepo:          mockRepo,
+		logger:           zap.NewNop(),
+		serverInstanceID: uuid.New(),
+	}
+
+	// Set getTenantCtx to succeed
+	service.getTenantCtx = func(ctx context.Context, pid uuid.UUID) (context.Context, func(), error) {
+		return ctx, func() {}, nil
+	}
+
+	// Execute DAG in a goroutine
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		service.executeDAG(projectID, dagID)
+	}()
+
+	// Wait for goroutine to complete with timeout
+	select {
+	case <-done:
+		// Good, execution completed
+	case <-time.After(2 * time.Second):
+		t.Fatal("Test timed out waiting for executeDAG to complete")
+	}
+
+	// Give a small amount of time for cleanup to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify activeDAGs was cleaned up
+	_, exists := service.activeDAGs.Load(dagID)
+	assert.False(t, exists, "DAG should be removed from activeDAGs after completion")
+
+	// Verify heartbeat was cleaned up
+	_, exists = service.heartbeatCancel.Load(dagID)
+	assert.False(t, exists, "Heartbeat should be cleaned up after completion")
 }
