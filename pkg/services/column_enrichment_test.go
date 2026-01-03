@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -408,9 +410,15 @@ type testColEnrichmentLLMClient struct {
 	failUntil    int // Fail until call count reaches this value
 	errorType    llm.ErrorType
 	errorMessage string
+	generateFunc func(ctx context.Context, prompt, systemMsg string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error)
 }
 
 func (c *testColEnrichmentLLMClient) GenerateResponse(ctx context.Context, prompt, systemMsg string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+	// Use custom function if provided
+	if c.generateFunc != nil {
+		return c.generateFunc(ctx, prompt, systemMsg, temperature, thinking)
+	}
+
 	c.callCount++
 
 	// Simulate transient failures
@@ -1290,6 +1298,211 @@ func (c *testColEnrichmentRetryableFailureClient) GetEndpoint() string {
 
 func (c *testColEnrichmentRetryableFailureClient) Close() error {
 	return nil
+}
+
+func TestColumnEnrichmentService_EnrichColumnsInChunks_ParallelProcessing(t *testing.T) {
+	projectID := uuid.New()
+
+	entity := &models.OntologyEntity{
+		ID:           uuid.New(),
+		Name:         "LargeTable",
+		PrimaryTable: "large_table",
+	}
+
+	// Create 120 columns (will be split into 3 chunks of 50, 50, 20)
+	columns := make([]*models.SchemaColumn, 120)
+	for i := 0; i < 120; i++ {
+		columns[i] = &models.SchemaColumn{
+			ColumnName: fmt.Sprintf("col_%d", i+1),
+			DataType:   "varchar",
+		}
+	}
+
+	// Track concurrent execution
+	type callInfo struct {
+		startTime int64
+		endTime   int64
+	}
+	var callsMu sync.Mutex
+	calls := []callInfo{}
+
+	// Create LLM client that tracks concurrent calls and returns all columns
+	client := &testColEnrichmentLLMClient{
+		generateFunc: func(ctx context.Context, prompt, systemMsg string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+			callsMu.Lock()
+			callIdx := len(calls)
+			calls = append(calls, callInfo{startTime: time.Now().UnixNano()})
+			callsMu.Unlock()
+
+			// Simulate LLM processing time to ensure overlap
+			time.Sleep(50 * time.Millisecond)
+
+			callsMu.Lock()
+			calls[callIdx].endTime = time.Now().UnixNano()
+			callsMu.Unlock()
+
+			// Parse which columns are in this chunk by looking at the prompt
+			// The prompt format includes "| col_N |" in a markdown table
+			enrichments := []string{}
+			for i := 1; i <= 120; i++ {
+				// Be very specific with the pattern to avoid substring matches
+				// Look for column names between pipe delimiters with spaces
+				pattern := fmt.Sprintf(" col_%d ", i)
+				if strings.Contains(prompt, pattern) {
+					enrichments = append(enrichments, fmt.Sprintf(`{
+						"name": "col_%d",
+						"description": "Column %d",
+						"semantic_type": "text",
+						"role": "attribute",
+						"fk_role": null
+					}`, i, i))
+				}
+			}
+
+			if len(enrichments) == 0 {
+				return nil, fmt.Errorf("no columns found in prompt")
+			}
+
+			response := `{"columns": [` + strings.Join(enrichments, ",") + `]}`
+			return &llm.GenerateResponseResult{Content: response}, nil
+		},
+	}
+
+	llmFactory := &testColEnrichmentLLMFactory{client: client}
+
+	service := &columnEnrichmentService{
+		llmFactory: llmFactory,
+		workerPool: llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 3}, zap.NewNop()),
+		logger:     zap.NewNop(),
+	}
+
+	// Execute chunked enrichment
+	ctx := context.Background()
+	llmClient, err := llmFactory.CreateForProject(ctx, projectID)
+	require.NoError(t, err)
+
+	result, err := service.enrichColumnsInChunks(
+		ctx,
+		projectID,
+		llmClient,
+		entity,
+		columns,
+		make(map[string]string),
+		make(map[string][]string),
+		50,
+	)
+
+	// Verify success
+	require.NoError(t, err)
+	assert.Equal(t, 120, len(result), "Should enrich all 120 columns")
+
+	// Verify all columns were enriched in order
+	for i := 0; i < 120; i++ {
+		assert.Equal(t, fmt.Sprintf("col_%d", i+1), result[i].Name, "Column at index %d should be col_%d", i, i+1)
+	}
+
+	// Verify parallel execution
+	callsMu.Lock()
+	assert.Equal(t, 3, len(calls), "Should have made 3 LLM calls for 3 chunks")
+
+	// Check if any calls overlapped in time (indicating parallelism)
+	if len(calls) >= 2 {
+		// Sort by start time
+		sortedCalls := make([]callInfo, len(calls))
+		copy(sortedCalls, calls)
+		sort.Slice(sortedCalls, func(i, j int) bool {
+			return sortedCalls[i].startTime < sortedCalls[j].startTime
+		})
+
+		// Check if second call started before first call ended
+		overlapDetected := sortedCalls[1].startTime < sortedCalls[0].endTime
+		assert.True(t, overlapDetected, "Chunks should be processed in parallel")
+	}
+	callsMu.Unlock()
+}
+
+func TestColumnEnrichmentService_EnrichColumnsInChunks_ChunkFailure(t *testing.T) {
+	projectID := uuid.New()
+
+	entity := &models.OntologyEntity{
+		ID:           uuid.New(),
+		Name:         "LargeTable",
+		PrimaryTable: "large_table",
+	}
+
+	// Create 100 columns (will be split into 2 chunks of 50)
+	columns := make([]*models.SchemaColumn, 100)
+	for i := 0; i < 100; i++ {
+		columns[i] = &models.SchemaColumn{
+			ColumnName: fmt.Sprintf("col_%d", i+1),
+			DataType:   "varchar",
+		}
+	}
+
+	// Create LLM client that fails on second chunk (consistently, even with retries)
+	callCount := 0
+	var mu sync.Mutex
+	client := &testColEnrichmentLLMClient{
+		generateFunc: func(ctx context.Context, prompt, systemMsg string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+			mu.Lock()
+			callCount++
+			mu.Unlock()
+
+			// Detect second chunk by looking for col_51 (which is in the second chunk)
+			// This makes it fail consistently regardless of retry attempts
+			if strings.Contains(prompt, " col_51 ") {
+				return nil, llm.NewError(llm.ErrorTypeAuth, "auth error", false, errors.New("unauthorized"))
+			}
+
+			// Return valid response for first chunk
+			enrichments := []string{}
+			for i := 1; i <= 100; i++ {
+				pattern := fmt.Sprintf(" col_%d ", i)
+				if strings.Contains(prompt, pattern) {
+					enrichments = append(enrichments, fmt.Sprintf(`{
+						"name": "col_%d",
+						"description": "Column %d",
+						"semantic_type": "text",
+						"role": "attribute",
+						"fk_role": null
+					}`, i, i))
+				}
+			}
+
+			response := `{"columns": [` + strings.Join(enrichments, ",") + `]}`
+			return &llm.GenerateResponseResult{Content: response}, nil
+		},
+	}
+
+	llmFactory := &testColEnrichmentLLMFactory{client: client}
+
+	service := &columnEnrichmentService{
+		llmFactory: llmFactory,
+		workerPool: llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 2}, zap.NewNop()),
+		logger:     zap.NewNop(),
+	}
+
+	// Execute chunked enrichment
+	ctx := context.Background()
+	llmClient, err := llmFactory.CreateForProject(ctx, projectID)
+	require.NoError(t, err)
+
+	result, err := service.enrichColumnsInChunks(
+		ctx,
+		projectID,
+		llmClient,
+		entity,
+		columns,
+		make(map[string]string),
+		make(map[string][]string),
+		50,
+	)
+
+	// Verify failure
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "chunk")
+	assert.Contains(t, err.Error(), "failed")
 }
 
 // Helper function to join strings

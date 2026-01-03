@@ -409,7 +409,15 @@ func (s *columnEnrichmentService) enrichColumnsWithLLM(
 	return s.enrichColumnBatch(ctx, projectID, llmClient, entity, columns, fkInfo, enumSamples)
 }
 
+// chunkWorkItem holds metadata for a chunk work item.
+type chunkWorkItem struct {
+	Index int
+	Start int
+	End   int
+}
+
 // enrichColumnsInChunks processes columns in chunks to avoid context limits.
+// For tables with >50 columns, chunks are processed in parallel using the worker pool.
 func (s *columnEnrichmentService) enrichColumnsInChunks(
 	ctx context.Context,
 	projectID uuid.UUID,
@@ -420,7 +428,9 @@ func (s *columnEnrichmentService) enrichColumnsInChunks(
 	enumSamples map[string][]string,
 	chunkSize int,
 ) ([]columnEnrichment, error) {
-	var allEnrichments []columnEnrichment
+	// Build work items for each chunk
+	var workItems []llm.WorkItem[[]columnEnrichment]
+	var chunkMetadata []chunkWorkItem
 
 	for i := 0; i < len(columns); i += chunkSize {
 		end := i + chunkSize
@@ -428,12 +438,6 @@ func (s *columnEnrichmentService) enrichColumnsInChunks(
 			end = len(columns)
 		}
 		chunk := columns[i:end]
-
-		s.logger.Debug("Enriching column chunk",
-			zap.String("table", entity.PrimaryTable),
-			zap.Int("chunk_start", i),
-			zap.Int("chunk_end", end),
-			zap.Int("total_columns", len(columns)))
 
 		// Filter FK info and enum samples to only include columns in this chunk
 		chunkFKInfo := make(map[string]string)
@@ -447,12 +451,58 @@ func (s *columnEnrichmentService) enrichColumnsInChunks(
 			}
 		}
 
-		enrichments, err := s.enrichColumnBatch(ctx, projectID, llmClient, entity, chunk, chunkFKInfo, chunkEnumSamples)
-		if err != nil {
-			return nil, fmt.Errorf("chunk %d-%d failed: %w", i, end, err)
-		}
+		// Capture loop variables for closure
+		chunkIdx := len(workItems)
+		chunkCols := chunk
+		chunkFK := chunkFKInfo
+		chunkEnum := chunkEnumSamples
+		start := i
+		chunkEnd := end
 
-		allEnrichments = append(allEnrichments, enrichments...)
+		chunkMetadata = append(chunkMetadata, chunkWorkItem{
+			Index: chunkIdx,
+			Start: start,
+			End:   chunkEnd,
+		})
+
+		workItems = append(workItems, llm.WorkItem[[]columnEnrichment]{
+			ID: fmt.Sprintf("%s-chunk-%d", entity.PrimaryTable, chunkIdx),
+			Execute: func(ctx context.Context) ([]columnEnrichment, error) {
+				s.logger.Debug("Enriching column chunk",
+					zap.String("table", entity.PrimaryTable),
+					zap.Int("chunk_start", start),
+					zap.Int("chunk_end", chunkEnd),
+					zap.Int("total_columns", len(columns)))
+
+				return s.enrichColumnBatch(ctx, projectID, llmClient, entity, chunkCols, chunkFK, chunkEnum)
+			},
+		})
+	}
+
+	// Process chunks in parallel using worker pool
+	results := llm.Process(ctx, s.workerPool, workItems, nil)
+
+	// Aggregate results in order (by chunk index)
+	// Results come back in completion order, so we need to map them back to chunk index
+	resultsByChunk := make(map[int][]columnEnrichment)
+	for _, result := range results {
+		if result.Err != nil {
+			// Find the chunk index from the result ID
+			var chunkIdx int
+			fmt.Sscanf(result.ID, entity.PrimaryTable+"-chunk-%d", &chunkIdx)
+			meta := chunkMetadata[chunkIdx]
+			return nil, fmt.Errorf("chunk %d-%d failed: %w", meta.Start, meta.End, result.Err)
+		}
+		// Parse chunk index from result ID
+		var chunkIdx int
+		fmt.Sscanf(result.ID, entity.PrimaryTable+"-chunk-%d", &chunkIdx)
+		resultsByChunk[chunkIdx] = result.Result
+	}
+
+	// Assemble results in order by chunk index
+	var allEnrichments []columnEnrichment
+	for i := 0; i < len(workItems); i++ {
+		allEnrichments = append(allEnrichments, resultsByChunk[i]...)
 	}
 
 	return allEnrichments, nil

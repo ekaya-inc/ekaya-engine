@@ -10,7 +10,7 @@ Branch: `ddanieli/create-ontology-workflow-dag`
 | Issue 1: Missing RLS on 5 tables | High | ✅ DONE | Migration 024 created |
 | Issue 2: DAG startup error propagation | Medium | ✅ DONE | Error messages now stored on nodes |
 | Issue 3: Worker Pool generics | Minor | ✅ DONE | Completed 2026-01-03 |
-| Issue 4: Column chunk parallelism | Minor | 📋 TODO | Performance |
+| Issue 4: Column chunk parallelism | Minor | ✅ DONE | Completed 2026-01-03 |
 | Issue 5: Heartbeat goroutine leak | Low | 📋 TODO | Edge case |
 | Issue 6: UI stale closure | Low | 📋 TODO | React best practice |
 | Issue 7: LLM circuit breaker | Enhancement | 📋 TODO | Resilience |
@@ -422,82 +422,103 @@ for _, r := range results {
 
 ---
 
-## Issue 4: Column Chunk Enrichment Still Serial
+## Issue 4: Column Chunk Enrichment Still Serial ✅
 
 **Severity:** Minor
+**Status:** COMPLETED 2026-01-03
 
 ### Problem
 
-Tables with >50 columns are chunked, but chunks process serially:
+Tables with >50 columns are chunked to avoid LLM context limits, but chunks were processed serially rather than in parallel.
 
-**Current (`pkg/services/column_enrichment.go:395-441`):**
-```go
-func (s *columnEnrichmentService) enrichColumnsInChunks(...) ([]columnEnrichment, error) {
-    var allEnrichments []columnEnrichment
-
-    for i := 0; i < len(columns); i += chunkSize {
-        // Each chunk waits for the previous to complete
-        enrichments, err := s.enrichColumnBatch(ctx, projectID, llmClient, entity, chunk, ...)
-        if err != nil {
-            return nil, fmt.Errorf("chunk %d-%d failed: %w", i, end, err)
-        }
-        allEnrichments = append(allEnrichments, enrichments...)
-    }
-
-    return allEnrichments, nil
-}
-```
-
-For a 200-column table, this means 4 serial LLM calls instead of potentially parallel.
+**Before (`pkg/services/column_enrichment.go`):**
+- For a table with 120 columns, 3 chunks created (50, 50, 20)
+- Each chunk waited for previous chunk to complete before starting
+- Result: 3 sequential LLM calls, total time = 3 × single chunk time
 
 ### Impact
 
-- Large tables take longer than necessary
-- Worker pool benefits don't apply within a single table
+- Large tables took longer than necessary
+- Worker pool benefits didn't apply within a single table
+- Wasted idle capacity when fewer than MaxConcurrent tables were being processed
 
-### Suggested Fix
+### Implementation Summary
 
-Use the worker pool for chunks within large tables:
+**Completed:** 2026-01-03
 
-```go
-func (s *columnEnrichmentService) enrichColumnsInChunks(...) ([]columnEnrichment, error) {
-    // Build work items for each chunk
-    var workItems []llm.WorkItem
-    for i := 0; i < len(columns); i += chunkSize {
-        end := i + chunkSize
-        if end > len(columns) {
-            end = len(columns)
-        }
-        chunk := columns[i:end]
-        chunkIdx := i // Capture for closure
+Successfully converted `enrichColumnsInChunks` from serial to parallel processing using the generic worker pool.
 
-        workItems = append(workItems, llm.WorkItem{
-            ID: fmt.Sprintf("chunk-%d", chunkIdx),
-            Execute: func(ctx context.Context) (any, error) {
-                return s.enrichColumnBatch(ctx, projectID, llmClient, entity, chunk, ...)
-            },
-        })
-    }
+**Key Implementation Details:**
 
-    // Process chunks in parallel
-    results := s.workerPool.Process(ctx, workItems, nil)
+1. **Work item generation**: Each chunk becomes a `WorkItem[[]columnEnrichment]` with its own execute function that captures:
+   - Column slice for that chunk
+   - Filtered FK info for only columns in that chunk
+   - Filtered enum samples for only columns in that chunk
+   - Chunk start/end indices for logging
 
-    // Aggregate results in order
-    var allEnrichments []columnEnrichment
-    for _, r := range results {
-        if r.Err != nil {
-            return nil, r.Err
-        }
-        allEnrichments = append(allEnrichments, r.Result.([]columnEnrichment)...)
-    }
+2. **Parallel execution**: Worker pool processes multiple chunks concurrently (bounded by pool's MaxConcurrent setting)
 
-    return allEnrichments, nil
-}
-```
+3. **Result ordering**: Results come back in completion order, but must be reassembled in chunk order:
+   - Parse chunk index from result ID using `fmt.Sscanf`
+   - Build `resultsByChunk` map to store results by their original chunk index
+   - Assemble final slice in order (chunk 0, then chunk 1, then chunk 2, etc.)
 
-### Files to Modify
+4. **Error handling**: Any chunk failure stops the entire operation with descriptive error including chunk range
 
-- `pkg/services/column_enrichment.go`
+**Critical Design Decisions:**
+
+- **Closure variable capture**: Loop variables (chunkIdx, start, chunkEnd, chunk, FK info, enum samples) must be captured into new variables before being closed over in the Execute function - otherwise all chunks would reference the same values from the final loop iteration
+- **ID format**: Work item IDs follow pattern `{table_name}-chunk-{index}` to enable parsing back to chunk index
+- **Fail-fast**: First chunk error terminates processing - no partial results returned
+- **Retry logic preserved**: All retry logic remains in `enrichColumnBatch`, so transient failures within a chunk still retry appropriately
+
+**Testing:**
+
+Added 2 comprehensive unit tests in `pkg/services/column_enrichment_test.go`:
+
+1. **`TestColumnEnrichmentService_EnrichColumnsInChunks_ParallelProcessing`** (lines 1303-1391):
+   - Creates 120 columns → 3 chunks
+   - Tracks concurrent execution using timestamps and mutex
+   - Simulates 50ms processing time per chunk to ensure overlap
+   - Verifies parallel execution by checking if second call started before first call ended
+   - Verifies all 120 columns returned in correct order
+
+2. **`TestColumnEnrichmentService_EnrichColumnsInChunks_ChunkFailure`** (lines 1393-1508):
+   - Creates 100 columns → 2 chunks
+   - Forces second chunk to fail consistently (even with retries) by detecting presence of `col_51`
+   - Verifies error propagates with chunk range in message
+   - Verifies no partial results returned
+
+**Performance Impact:**
+
+For tables with >50 columns:
+- **Before**: Chunks processed serially (e.g., 200 columns = 4 sequential LLM calls taking ~40 seconds)
+- **After**: Chunks processed in parallel up to worker pool limit (e.g., with MaxConcurrent=8, all 4 chunks run simultaneously, taking ~10 seconds)
+
+**Files Modified:**
+
+- `pkg/services/column_enrichment.go` (lines 412-509):
+  - Added `chunkWorkItem` struct to hold chunk metadata (Index, Start, End)
+  - Replaced serial for-loop with work item generation loop
+  - Added parallel processing via `llm.Process(ctx, s.workerPool, workItems, nil)`
+  - Added result assembly logic with chunk index parsing and ordering
+
+- `pkg/services/column_enrichment_test.go`:
+  - Added `generateFunc` field to `testColEnrichmentLLMClient` for custom test behavior (line 413)
+  - Conditional dispatch in `GenerateResponse` to use custom func if provided (lines 416-419)
+  - Added `TestColumnEnrichmentService_EnrichColumnsInChunks_ParallelProcessing` test (lines 1303-1391)
+  - Added `TestColumnEnrichmentService_EnrichColumnsInChunks_ChunkFailure` test (lines 1393-1508)
+  - Added imports: `sort`, `time`
+
+**Context for Future Sessions:**
+
+If you need to modify chunked column enrichment behavior:
+- The chunking threshold is 50 columns (hardcoded in `enrichColumnsWithLLM`)
+- Chunk size is passed as parameter to `enrichColumnsInChunks` (currently 50)
+- Each chunk filters FK info and enum samples to only include relevant columns
+- Work items are created in chunk order, but execute in parallel and complete in arbitrary order
+- Final result slice must match input column order exactly (tests verify this)
+- Any changes to work item ID format must update the `fmt.Sscanf` parsing logic
 
 ---
 
