@@ -12,7 +12,7 @@ Branch: `ddanieli/create-ontology-workflow-dag`
 | Issue 3: Worker Pool generics | Minor | ✅ DONE | Completed 2026-01-03 |
 | Issue 4: Column chunk parallelism | Minor | ✅ DONE | Completed 2026-01-03 |
 | Issue 5: Heartbeat goroutine leak | Low | ✅ DONE | Completed 2026-01-03 |
-| Issue 6: UI stale closure | Low | 📋 TODO | React best practice |
+| Issue 6: UI stale closure | Low | ✅ DONE | React best practice |
 | Issue 7: LLM circuit breaker | Enhancement | 📋 TODO | Resilience |
 
 ---
@@ -625,16 +625,17 @@ If you need to modify DAG execution behavior:
 
 ---
 
-## Issue 6: UI Stale Closure Risk in useEffect
+## Issue 6: UI Stale Closure Risk in useEffect ✅
 
 **Severity:** Low
+**Status:** ✅ COMPLETED 2026-01-03
 
 ### Problem
 
-In `ui/src/components/ontology/OntologyDAG.tsx`, the initial useEffect checks `dagStatus` which may not have updated yet:
+In `ui/src/components/ontology/OntologyDAG.tsx`, the initial useEffect checked `dagStatus` state variable after calling `fetchStatus()`, which may not have updated yet due to React's asynchronous state updates:
 
 ```tsx
-// Lines 261-280
+// Before (Lines 261-280)
 useEffect(() => {
     const init = async () => {
         setIsLoading(true);
@@ -657,32 +658,50 @@ useEffect(() => {
 - Polling might not start even when DAG is running
 - Race condition between state update and check
 
-### Suggested Fix
+### Implementation
 
-Move the polling decision into the fetchStatus callback or use the response directly:
+Replaced the `fetchStatus()` call with inline API call to use response data directly instead of relying on state updates:
 
 ```tsx
+// After (Lines 261-309)
 useEffect(() => {
     const init = async () => {
+        if (!projectId || !datasourceId) return;
+
         setIsLoading(true);
 
         try {
             const response = await engineApi.getOntologyDAGStatus(projectId, datasourceId);
 
+            if (!isMountedRef.current) return;
+
             if (response.data) {
                 setDagStatus(response.data);
 
-                // Use response directly, not state
+                // Use response data directly instead of state to avoid stale closure
                 if (!isTerminalStatus(response.data.status)) {
                     startPolling();
                 }
+
+                if (response.data.status === 'completed') {
+                    onComplete?.();
+                }
             } else {
+                // No DAG exists
                 setDagStatus(null);
             }
+
+            setError(null);
         } catch (err) {
-            // Handle error
+            if (!isMountedRef.current) return;
+            const errorMessage = err instanceof Error ? err.message : 'Failed to fetch status';
+            console.error('Failed to fetch DAG status:', err);
+            setError(errorMessage);
+            onError?.(errorMessage);
         } finally {
-            setIsLoading(false);
+            if (isMountedRef.current) {
+                setIsLoading(false);
+            }
         }
     };
 
@@ -695,9 +714,30 @@ useEffect(() => {
 }, [projectId, datasourceId]);
 ```
 
-### Files to Modify
+### Key Changes
 
-- `ui/src/components/ontology/OntologyDAG.tsx`
+1. **Removed dependency on `fetchStatus` callback**: The initial load effect now makes its own API call inline
+2. **Use response data directly**: Instead of checking `dagStatus` state, the code checks `response.data.status` directly
+3. **Eliminated race condition**: The polling decision is made using the fresh API response, not stale state
+4. **Consistent error handling**: Duplicated error handling from `fetchStatus` to maintain consistency
+5. **Preserved guard clauses**: Added early return for missing projectId/datasourceId and mount checks throughout
+
+### Why This Matters
+
+React's state updates are asynchronous batched operations. When you call `setDagStatus(data)`, React doesn't update the `dagStatus` variable immediately. The original code called `fetchStatus()` (which sets state) and then immediately checked `dagStatus` - but that check was reading the OLD value, not the newly set value. This created a race condition where polling might not start even when a DAG was running.
+
+The fix captures the API response in a local variable (`response.data`) and uses that for all decisions, bypassing React's state update timing entirely.
+
+### Files Modified
+
+- `ui/src/components/ontology/OntologyDAG.tsx` (lines 261-309): Replaced `fetchStatus()` call with inline API call and direct response checking
+
+### Testing
+
+- TypeScript compilation passes with strict mode enabled (`npm run build` at ui/ directory)
+- No new type errors introduced
+- Logic is equivalent to original but eliminates stale closure risk
+- Manual testing: DAG polling starts correctly when component mounts with running DAG
 
 ---
 
