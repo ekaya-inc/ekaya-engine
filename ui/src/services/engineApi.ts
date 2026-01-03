@@ -10,6 +10,7 @@ import type {
   CreateDatasourceResponse,
   CreateQueryRequest,
   CreateRelationshipRequest,
+  DAGStatusResponse,
   DatasourceConfig,
   DatasourceSchema,
   DatasourceType,
@@ -603,6 +604,49 @@ class EngineApiService {
     }
 
     return true;
+  }
+
+  // --- Ontology DAG Methods ---
+
+  /**
+   * Start or refresh ontology extraction (DAG-based)
+   * POST /api/projects/{projectId}/datasources/{datasourceId}/ontology/extract
+   */
+  async startOntologyExtraction(
+    projectId: string,
+    datasourceId: string
+  ): Promise<ApiResponse<DAGStatusResponse>> {
+    return this.makeRequest<DAGStatusResponse>(
+      `/${projectId}/datasources/${datasourceId}/ontology/extract`,
+      { method: 'POST' }
+    );
+  }
+
+  /**
+   * Get ontology DAG status (for polling)
+   * GET /api/projects/{projectId}/datasources/{datasourceId}/ontology/dag
+   */
+  async getOntologyDAGStatus(
+    projectId: string,
+    datasourceId: string
+  ): Promise<ApiResponse<DAGStatusResponse | null>> {
+    return this.makeRequest<DAGStatusResponse | null>(
+      `/${projectId}/datasources/${datasourceId}/ontology/dag`
+    );
+  }
+
+  /**
+   * Cancel a running ontology DAG
+   * POST /api/projects/{projectId}/datasources/{datasourceId}/ontology/dag/cancel
+   */
+  async cancelOntologyDAG(
+    projectId: string,
+    datasourceId: string
+  ): Promise<ApiResponse<{ status: string }>> {
+    return this.makeRequest<{ status: string }>(
+      `/${projectId}/datasources/${datasourceId}/ontology/dag/cancel`,
+      { method: 'POST' }
+    );
   }
 }
 

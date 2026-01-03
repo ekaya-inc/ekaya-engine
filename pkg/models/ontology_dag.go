@@ -97,22 +97,22 @@ func (s DAGNodeStatus) IsTerminal() bool {
 type DAGNodeName string
 
 const (
-	DAGNodeEntityDiscovery       DAGNodeName = "EntityDiscovery"
-	DAGNodeEntityEnrichment      DAGNodeName = "EntityEnrichment"
-	DAGNodeRelationshipDiscovery DAGNodeName = "RelationshipDiscovery"
+	DAGNodeEntityDiscovery        DAGNodeName = "EntityDiscovery"
+	DAGNodeEntityEnrichment       DAGNodeName = "EntityEnrichment"
+	DAGNodeRelationshipDiscovery  DAGNodeName = "RelationshipDiscovery"
 	DAGNodeRelationshipEnrichment DAGNodeName = "RelationshipEnrichment"
-	DAGNodeOntologyFinalization  DAGNodeName = "OntologyFinalization"
-	DAGNodeColumnEnrichment      DAGNodeName = "ColumnEnrichment"
+	DAGNodeOntologyFinalization   DAGNodeName = "OntologyFinalization"
+	DAGNodeColumnEnrichment       DAGNodeName = "ColumnEnrichment"
 )
 
 // DAGNodeOrder defines the execution order for each node.
 var DAGNodeOrder = map[DAGNodeName]int{
-	DAGNodeEntityDiscovery:       1,
-	DAGNodeEntityEnrichment:      2,
-	DAGNodeRelationshipDiscovery: 3,
+	DAGNodeEntityDiscovery:        1,
+	DAGNodeEntityEnrichment:       2,
+	DAGNodeRelationshipDiscovery:  3,
 	DAGNodeRelationshipEnrichment: 4,
-	DAGNodeOntologyFinalization:  5,
-	DAGNodeColumnEnrichment:      6,
+	DAGNodeOntologyFinalization:   5,
+	DAGNodeColumnEnrichment:       6,
 }
 
 // AllDAGNodes returns all DAG node names in execution order.

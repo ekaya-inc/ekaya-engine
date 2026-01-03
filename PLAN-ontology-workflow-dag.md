@@ -648,24 +648,66 @@ pkg/handlers/
 
 7. **Route Registration**: Handler registered in main.go after entity relationship handler, before static file serving. Uses `RegisterRoutes()` pattern consistent with other handlers.
 
-### Phase 4: UI
+### Phase 4: UI ✅ COMPLETED
 
 **Tasks:**
-1. Create DAG visualization component
-2. Update OntologyPage to use new API
-3. Remove workflow buttons from Entities/Relationships pages
-4. Add polling for real-time updates
+1. ✅ Create DAG visualization component
+2. ✅ Update OntologyPage to use new API
+3. ✅ Remove workflow buttons from Entities/Relationships pages
+4. ✅ Add polling for real-time updates (every 2 seconds while running)
 
-**Files:**
+**Files Created/Modified:**
 ```
 ui/src/
+  types/
+    ontology.ts                  # Added DAG types: DAGStatus, DAGNodeStatus, DAGNode, DAGStatusResponse, DAGNodeDescriptions
+  services/
+    engineApi.ts                 # Added DAG API methods: startOntologyExtraction, getOntologyDAGStatus, cancelOntologyDAG
   components/
-    OntologyDAG.tsx
+    ontology/
+      OntologyDAG.tsx           # New DAG visualization with polling, start/cancel/retry actions
   pages/
-    OntologyPage.tsx  (update)
-    EntitiesPage.tsx  (update)
-    RelationshipsPage.tsx  (update)
+    OntologyPage.tsx            # Simplified to show OntologyDAG component
+    EntitiesPage.tsx            # Removed EntityDiscoveryProgress, links to Ontology page
+    RelationshipsPage.tsx       # Removed RelationshipDiscoveryProgress, links to Ontology page
 ```
+
+**Implementation Notes:**
+
+1. **OntologyDAG Component**: Full DAG visualization with:
+   - Visual pipeline showing all 6 nodes with status indicators
+   - Real-time polling every 2 seconds while running
+   - Start Extraction / Cancel / Retry buttons based on state
+   - Progress bars for nodes with progress data
+   - Error messages displayed inline
+   - Tab visibility handling (refetch on tab focus)
+
+2. **API Methods Added to engineApi.ts**:
+   - `startOntologyExtraction(projectId, datasourceId)` - POST /ontology/extract
+   - `getOntologyDAGStatus(projectId, datasourceId)` - GET /ontology/dag
+   - `cancelOntologyDAG(projectId, datasourceId)` - POST /ontology/dag/cancel
+
+3. **Type Definitions Added**:
+   - `DAGStatus`: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+   - `DAGNodeStatus`: 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+   - `DAGNodeName`: All 6 node names
+   - `DAGNodeProgress`: {current, total, message}
+   - `DAGNode`: {name, status, progress?, error?}
+   - `DAGStatusResponse`: Full API response structure
+   - `DAGNodeDescriptions`: Human-readable titles and descriptions for each node
+
+4. **Entities/Relationships Page Changes**:
+   - Removed "Discover Entities" button from EntitiesPage
+   - Removed "Find Relationships" button from RelationshipsPage
+   - Both pages now have "Go to Ontology" links
+   - Removed EntityDiscoveryProgress and RelationshipDiscoveryProgress dialogs
+   - Empty states updated to point users to Ontology page
+
+5. **Polling Behavior**:
+   - Polls every 2 seconds while DAG is running
+   - Stops polling when status is completed/failed/cancelled
+   - Resumes polling on tab visibility change
+   - Cleanup on unmount
 
 ### Phase 5: Cleanup
 

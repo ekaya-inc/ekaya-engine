@@ -473,3 +473,90 @@ export type QuestionPanelState =
   | 'waiting_for_llm'      // Processing answer with LLM
   | 'showing_follow_up'    // LLM asked for clarification
   | 'all_complete';        // No more questions
+
+// ===================================================================
+// DAG Workflow Types (New Unified Ontology Extraction)
+// ===================================================================
+
+/**
+ * DAG status values
+ */
+export type DAGStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+/**
+ * DAG node status values
+ */
+export type DAGNodeStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+
+/**
+ * DAG node names in execution order
+ */
+export type DAGNodeName =
+  | 'EntityDiscovery'
+  | 'EntityEnrichment'
+  | 'RelationshipDiscovery'
+  | 'RelationshipEnrichment'
+  | 'OntologyFinalization'
+  | 'ColumnEnrichment';
+
+/**
+ * Progress within a DAG node
+ */
+export interface DAGNodeProgress {
+  current: number;
+  total: number;
+  message?: string;
+}
+
+/**
+ * A node within the DAG
+ */
+export interface DAGNode {
+  name: DAGNodeName;
+  status: DAGNodeStatus;
+  progress?: DAGNodeProgress;
+  error?: string;
+}
+
+/**
+ * Response from DAG status API
+ * Matches pkg/handlers/ontology_dag_handler.go DAGStatusResponse
+ */
+export interface DAGStatusResponse {
+  dag_id: string;
+  status: DAGStatus;
+  current_node?: string;
+  nodes: DAGNode[];
+  started_at?: string;
+  completed_at?: string;
+}
+
+/**
+ * Human-readable descriptions for each DAG node
+ */
+export const DAGNodeDescriptions: Record<DAGNodeName, { title: string; description: string }> = {
+  EntityDiscovery: {
+    title: 'Entity Discovery',
+    description: 'Identifying entities from schema constraints',
+  },
+  EntityEnrichment: {
+    title: 'Entity Enrichment',
+    description: 'Generating entity names and descriptions',
+  },
+  RelationshipDiscovery: {
+    title: 'Relationship Discovery',
+    description: 'Discovering foreign key relationships',
+  },
+  RelationshipEnrichment: {
+    title: 'Relationship Enrichment',
+    description: 'Generating relationship descriptions',
+  },
+  OntologyFinalization: {
+    title: 'Ontology Finalization',
+    description: 'Generating domain summary and conventions',
+  },
+  ColumnEnrichment: {
+    title: 'Column Enrichment',
+    description: 'Generating column descriptions and semantic types',
+  },
+};

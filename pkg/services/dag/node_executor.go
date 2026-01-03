@@ -28,9 +28,9 @@ type ProgressReporter interface {
 
 // BaseNode provides common functionality for all DAG nodes.
 type BaseNode struct {
-	nodeName   models.DAGNodeName
-	dagRepo    repositories.OntologyDAGRepository
-	logger     *zap.Logger
+	nodeName      models.DAGNodeName
+	dagRepo       repositories.OntologyDAGRepository
+	logger        *zap.Logger
 	currentNodeID uuid.UUID
 }
 

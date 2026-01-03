@@ -1,16 +1,15 @@
 import {
   ArrowLeft,
+  ArrowRight,
   Boxes,
   ChevronDown,
   ChevronRight,
   MapPin,
-  Sparkles,
   Tag,
 } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
-import { EntityDiscoveryProgress } from "../components/EntityDiscoveryProgress";
 import { Button } from "../components/ui/Button";
 import {
   Card,
@@ -19,26 +18,22 @@ import {
   CardHeader,
   CardTitle,
 } from "../components/ui/Card";
-import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext";
 import engineApi from "../services/engineApi";
 import type { EntityDetail } from "../types";
 
 /**
  * EntitiesPage - Display domain entities discovered in the schema
  * Shows all entities with their aliases and occurrences (read-only).
+ * Entity discovery is now handled by the unified DAG workflow on the Ontology page.
  */
 const EntitiesPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
-  const { selectedDatasource } = useDatasourceConnection();
 
   // State for entities data
   const [entities, setEntities] = useState<EntityDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Discovery dialog state
-  const [discoveryOpen, setDiscoveryOpen] = useState(false);
 
   // Track which entities have expanded occurrences
   const [expandedEntities, setExpandedEntities] = useState<Set<string>>(new Set());
@@ -83,16 +78,6 @@ const EntitiesPage = () => {
   useEffect(() => {
     fetchEntities();
   }, [fetchEntities]);
-
-  // Handler for "Discover Entities" button
-  const handleDiscoverEntities = (): void => {
-    setDiscoveryOpen(true);
-  };
-
-  // Handler for when discovery completes - refresh entities
-  const handleDiscoveryComplete = async (): Promise<void> => {
-    await fetchEntities();
-  };
 
   // Calculate totals
   const totalOccurrences = entities.reduce((sum, e) => sum + e.occurrence_count, 0);
@@ -169,27 +154,14 @@ const EntitiesPage = () => {
             </div>
             <h2 className="text-xl font-semibold mb-2">No Entities Discovered</h2>
             <p className="text-sm text-muted-foreground mb-6">
-              No domain entities have been discovered yet. Run entity discovery to identify domain concepts in your database schema.
+              No domain entities have been discovered yet. Run the ontology extraction workflow to identify domain concepts in your database schema.
             </p>
-            {selectedDatasource?.datasourceId && (
-              <Button onClick={handleDiscoverEntities}>
-                <Sparkles className="mr-2 h-4 w-4" />
-                Discover Entities
-              </Button>
-            )}
+            <Button onClick={() => navigate(`/projects/${pid}/ontology`)}>
+              Go to Ontology
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
           </div>
         </div>
-
-        {/* Discovery dialog */}
-        {pid && selectedDatasource?.datasourceId && (
-          <EntityDiscoveryProgress
-            projectId={pid}
-            datasourceId={selectedDatasource.datasourceId}
-            isOpen={discoveryOpen}
-            onClose={() => setDiscoveryOpen(false)}
-            onComplete={handleDiscoveryComplete}
-          />
-        )}
       </div>
     );
   }
@@ -205,12 +177,10 @@ const EntitiesPage = () => {
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Dashboard
           </Button>
-          {selectedDatasource?.datasourceId && (
-            <Button variant="outline" onClick={handleDiscoverEntities}>
-              <Sparkles className="mr-2 h-4 w-4" />
-              Rediscover Entities
-            </Button>
-          )}
+          <Button variant="outline" onClick={() => navigate(`/projects/${pid}/ontology`)}>
+            Go to Ontology
+            <ArrowRight className="ml-2 h-4 w-4" />
+          </Button>
         </div>
         <h1 className="text-3xl font-bold text-text-primary">
           Entities
@@ -342,17 +312,6 @@ const EntitiesPage = () => {
           </div>
         </CardContent>
       </Card>
-
-      {/* Discovery dialog */}
-      {pid && selectedDatasource?.datasourceId && (
-        <EntityDiscoveryProgress
-          projectId={pid}
-          datasourceId={selectedDatasource.datasourceId}
-          isOpen={discoveryOpen}
-          onClose={() => setDiscoveryOpen(false)}
-          onComplete={handleDiscoveryComplete}
-        />
-      )}
     </div>
   );
 };

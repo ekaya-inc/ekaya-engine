@@ -40,12 +40,12 @@ type ontologyDAGService struct {
 	schemaRepo   repositories.SchemaRepository
 
 	// Adapted service methods for dag package
-	entityDiscoveryMethods    dag.EntityDiscoveryMethods
-	entityEnrichmentMethods   dag.EntityEnrichmentMethods
-	relationshipDiscoveryMethods dag.DeterministicRelationshipMethods
+	entityDiscoveryMethods        dag.EntityDiscoveryMethods
+	entityEnrichmentMethods       dag.EntityEnrichmentMethods
+	relationshipDiscoveryMethods  dag.DeterministicRelationshipMethods
 	relationshipEnrichmentMethods dag.RelationshipEnrichmentMethods
-	finalizationMethods       dag.OntologyFinalizationMethods
-	columnEnrichmentMethods   dag.ColumnEnrichmentMethods
+	finalizationMethods           dag.OntologyFinalizationMethods
+	columnEnrichmentMethods       dag.ColumnEnrichmentMethods
 
 	getTenantCtx TenantContextFunc
 	logger       *zap.Logger
