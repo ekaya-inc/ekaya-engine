@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -266,6 +267,7 @@ func (s *ontologyDAGService) Cancel(ctx context.Context, dagID uuid.UUID) error 
 
 // Delete deletes all ontology data for a project including DAGs, ontologies, entities, and relationships.
 // This is a destructive operation that removes all extracted knowledge.
+// All deletions are performed in a single transaction to prevent partial state.
 func (s *ontologyDAGService) Delete(ctx context.Context, projectID uuid.UUID) error {
 	s.logger.Info("Deleting ontology data", zap.String("project_id", projectID.String()))
 
@@ -282,65 +284,91 @@ func (s *ontologyDAGService) Delete(ctx context.Context, projectID uuid.UUID) er
 		return fmt.Errorf("cannot delete ontology while extraction is running")
 	}
 
-	// Get active ontology to delete associated data
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err != nil {
-		s.logger.Error("Failed to get active ontology", zap.String("project_id", projectID.String()), zap.Error(err))
-		return fmt.Errorf("get active ontology: %w", err)
+	// Get the tenant scope for transaction
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
 	}
 
-	// Delete DAGs first (includes cascading delete of DAG nodes via foreign key)
-	if err := s.dagRepo.DeleteByProject(ctx, projectID); err != nil {
+	// Start a transaction to ensure atomic deletion
+	tx, err := scope.Conn.Begin(ctx)
+	if err != nil {
+		s.logger.Error("Failed to begin transaction", zap.String("project_id", projectID.String()), zap.Error(err))
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback on defer is best-effort
+
+	// Delete in order respecting foreign key constraints:
+	// 1. DAG nodes (via CASCADE from DAGs)
+	// 2. DAGs
+	// 3. Entity aliases (via CASCADE from entities)
+	// 4. Entity relationships
+	// 5. Ontology entities
+	// 6. Ontology questions
+	// 7. Chat messages
+	// 8. Project knowledge
+	// 9. Ontologies
+
+	// Delete DAGs (cascade deletes dag_nodes)
+	if _, err := tx.Exec(ctx, "DELETE FROM engine_ontology_dag WHERE project_id = $1", projectID); err != nil {
 		s.logger.Error("Failed to delete DAGs", zap.String("project_id", projectID.String()), zap.Error(err))
 		return fmt.Errorf("delete DAGs: %w", err)
 	}
 	s.logger.Debug("Deleted DAGs", zap.String("project_id", projectID.String()))
 
-	// Delete ontology entities and relationships if ontology exists
-	if ontology != nil {
-		// Delete entities (includes cascading delete of entity aliases via foreign key)
-		if err := s.entityRepo.DeleteByOntology(ctx, ontology.ID); err != nil {
-			s.logger.Error("Failed to delete entities", zap.String("ontology_id", ontology.ID.String()), zap.Error(err))
-			return fmt.Errorf("delete entities: %w", err)
-		}
-		s.logger.Debug("Deleted entities", zap.String("ontology_id", ontology.ID.String()))
-
-		// Delete relationships using repository
-		if err := s.relationshipRepo.DeleteByOntology(ctx, ontology.ID); err != nil {
-			s.logger.Error("Failed to delete relationships", zap.String("ontology_id", ontology.ID.String()), zap.Error(err))
-			return fmt.Errorf("delete relationships: %w", err)
-		}
-		s.logger.Debug("Deleted relationships", zap.String("ontology_id", ontology.ID.String()))
+	// Delete entity relationships (must be before entities due to FK)
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM engine_entity_relationships
+		WHERE ontology_id IN (SELECT id FROM engine_ontologies WHERE project_id = $1)
+	`, projectID); err != nil {
+		s.logger.Error("Failed to delete relationships", zap.String("project_id", projectID.String()), zap.Error(err))
+		return fmt.Errorf("delete relationships: %w", err)
 	}
+	s.logger.Debug("Deleted relationships", zap.String("project_id", projectID.String()))
 
-	// Delete project-level data using repositories
+	// Delete ontology entities (cascade deletes entity_aliases)
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM engine_ontology_entities
+		WHERE ontology_id IN (SELECT id FROM engine_ontologies WHERE project_id = $1)
+	`, projectID); err != nil {
+		s.logger.Error("Failed to delete entities", zap.String("project_id", projectID.String()), zap.Error(err))
+		return fmt.Errorf("delete entities: %w", err)
+	}
+	s.logger.Debug("Deleted entities", zap.String("project_id", projectID.String()))
+
 	// Delete ontology questions
-	if err := s.questionRepo.DeleteByProject(ctx, projectID); err != nil {
+	if _, err := tx.Exec(ctx, "DELETE FROM engine_ontology_questions WHERE project_id = $1", projectID); err != nil {
 		s.logger.Error("Failed to delete questions", zap.String("project_id", projectID.String()), zap.Error(err))
 		return fmt.Errorf("delete questions: %w", err)
 	}
 	s.logger.Debug("Deleted questions", zap.String("project_id", projectID.String()))
 
 	// Delete chat messages
-	if err := s.chatRepo.ClearHistory(ctx, projectID); err != nil {
+	if _, err := tx.Exec(ctx, "DELETE FROM engine_ontology_chat_messages WHERE project_id = $1", projectID); err != nil {
 		s.logger.Error("Failed to delete chat messages", zap.String("project_id", projectID.String()), zap.Error(err))
 		return fmt.Errorf("delete chat messages: %w", err)
 	}
 	s.logger.Debug("Deleted chat messages", zap.String("project_id", projectID.String()))
 
 	// Delete project knowledge
-	if err := s.knowledgeRepo.DeleteByProject(ctx, projectID); err != nil {
+	if _, err := tx.Exec(ctx, "DELETE FROM engine_project_knowledge WHERE project_id = $1", projectID); err != nil {
 		s.logger.Error("Failed to delete project knowledge", zap.String("project_id", projectID.String()), zap.Error(err))
 		return fmt.Errorf("delete project knowledge: %w", err)
 	}
 	s.logger.Debug("Deleted project knowledge", zap.String("project_id", projectID.String()))
 
-	// Delete ontologies (should be last)
-	if err := s.ontologyRepo.DeleteByProject(ctx, projectID); err != nil {
+	// Delete ontologies (must be last due to FK references)
+	if _, err := tx.Exec(ctx, "DELETE FROM engine_ontologies WHERE project_id = $1", projectID); err != nil {
 		s.logger.Error("Failed to delete ontologies", zap.String("project_id", projectID.String()), zap.Error(err))
 		return fmt.Errorf("delete ontologies: %w", err)
 	}
 	s.logger.Debug("Deleted ontologies", zap.String("project_id", projectID.String()))
+
+	// Commit the transaction
+	if err := tx.Commit(ctx); err != nil {
+		s.logger.Error("Failed to commit transaction", zap.String("project_id", projectID.String()), zap.Error(err))
+		return fmt.Errorf("commit transaction: %w", err)
+	}
 
 	s.logger.Info("Successfully deleted all ontology data", zap.String("project_id", projectID.String()))
 	return nil
