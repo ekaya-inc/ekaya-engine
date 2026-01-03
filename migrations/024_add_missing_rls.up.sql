@@ -13,6 +13,13 @@ CREATE POLICY entity_relationships_access ON engine_entity_relationships
             SELECT id FROM engine_ontologies
             WHERE project_id = current_setting('app.current_project_id', true)::uuid
         )
+    )
+    WITH CHECK (
+        current_setting('app.current_project_id', true) IS NULL
+        OR ontology_id IN (
+            SELECT id FROM engine_ontologies
+            WHERE project_id = current_setting('app.current_project_id', true)::uuid
+        )
     );
 
 -- ============================================================================
@@ -24,6 +31,10 @@ CREATE POLICY ontology_entities_access ON engine_ontology_entities
     USING (
         current_setting('app.current_project_id', true) IS NULL
         OR project_id = current_setting('app.current_project_id', true)::uuid
+    )
+    WITH CHECK (
+        current_setting('app.current_project_id', true) IS NULL
+        OR project_id = current_setting('app.current_project_id', true)::uuid
     );
 
 -- ============================================================================
@@ -33,6 +44,13 @@ ALTER TABLE engine_ontology_entity_aliases ENABLE ROW LEVEL SECURITY;
 CREATE POLICY entity_aliases_access ON engine_ontology_entity_aliases
     FOR ALL
     USING (
+        current_setting('app.current_project_id', true) IS NULL
+        OR entity_id IN (
+            SELECT id FROM engine_ontology_entities
+            WHERE project_id = current_setting('app.current_project_id', true)::uuid
+        )
+    )
+    WITH CHECK (
         current_setting('app.current_project_id', true) IS NULL
         OR entity_id IN (
             SELECT id FROM engine_ontology_entities
@@ -52,6 +70,13 @@ CREATE POLICY entity_key_columns_access ON engine_ontology_entity_key_columns
             SELECT id FROM engine_ontology_entities
             WHERE project_id = current_setting('app.current_project_id', true)::uuid
         )
+    )
+    WITH CHECK (
+        current_setting('app.current_project_id', true) IS NULL
+        OR entity_id IN (
+            SELECT id FROM engine_ontology_entities
+            WHERE project_id = current_setting('app.current_project_id', true)::uuid
+        )
     );
 
 -- ============================================================================
@@ -61,6 +86,13 @@ ALTER TABLE engine_ontology_entity_occurrences ENABLE ROW LEVEL SECURITY;
 CREATE POLICY entity_occurrences_access ON engine_ontology_entity_occurrences
     FOR ALL
     USING (
+        current_setting('app.current_project_id', true) IS NULL
+        OR entity_id IN (
+            SELECT id FROM engine_ontology_entities
+            WHERE project_id = current_setting('app.current_project_id', true)::uuid
+        )
+    )
+    WITH CHECK (
         current_setting('app.current_project_id', true) IS NULL
         OR entity_id IN (
             SELECT id FROM engine_ontology_entities
