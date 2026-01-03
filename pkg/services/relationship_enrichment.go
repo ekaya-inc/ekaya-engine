@@ -277,7 +277,7 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 	if err != nil {
 		// Record failure in circuit breaker
 		s.circuitBreaker.RecordFailure()
-		s.logger.Warn("Circuit breaker recorded failure",
+		s.logger.Error("Circuit breaker recorded failure",
 			zap.String("project_id", projectID.String()),
 			zap.String("circuit_state", s.circuitBreaker.State().String()),
 			zap.Int("consecutive_failures", s.circuitBreaker.ConsecutiveFailures()))
