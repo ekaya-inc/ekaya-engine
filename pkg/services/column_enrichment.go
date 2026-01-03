@@ -110,7 +110,25 @@ func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID u
 		workItems = append(workItems, llm.WorkItem{
 			ID: name,
 			Execute: func(ctx context.Context) (any, error) {
-				if err := s.EnrichTable(ctx, projectID, name); err != nil {
+				// Acquire a fresh database connection for this work item to avoid
+				// concurrent access issues when multiple workers share the same context.
+				// Each worker goroutine needs its own connection since pgx connections
+				// are not safe for concurrent use.
+				var workCtx context.Context
+				var cleanup func()
+				if s.getTenantCtx != nil {
+					var err error
+					workCtx, cleanup, err = s.getTenantCtx(ctx, projectID)
+					if err != nil {
+						return name, fmt.Errorf("acquire tenant context: %w", err)
+					}
+					defer cleanup()
+				} else {
+					// For tests that don't use real database connections
+					workCtx = ctx
+				}
+
+				if err := s.EnrichTable(workCtx, projectID, name); err != nil {
 					return name, err
 				}
 				return name, nil
