@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services/dag"
@@ -191,3 +192,136 @@ func (t *testColumnEnrichment) EnrichProject(_ context.Context, _ uuid.UUID, _ [
 // end-to-end coverage with mocked service. The service-level logic is
 // straightforward repository delegation, so integration tests are more valuable
 // than unit tests with complex mock implementations.
+
+// ============================================================================
+// Cancel Method Tests
+// ============================================================================
+
+// mockDAGRepository is a mock implementation for testing Cancel
+type mockDAGRepository struct {
+	getNodesByDAGFunc    func(ctx context.Context, dagID uuid.UUID) ([]models.DAGNode, error)
+	updateNodeStatusFunc func(ctx context.Context, nodeID uuid.UUID, status models.DAGNodeStatus, errorMessage *string) error
+	updateStatusFunc     func(ctx context.Context, dagID uuid.UUID, status models.DAGStatus, currentNode *string) error
+}
+
+func (m *mockDAGRepository) GetNodesByDAG(ctx context.Context, dagID uuid.UUID) ([]models.DAGNode, error) {
+	if m.getNodesByDAGFunc != nil {
+		return m.getNodesByDAGFunc(ctx, dagID)
+	}
+	return nil, nil
+}
+
+func (m *mockDAGRepository) UpdateNodeStatus(ctx context.Context, nodeID uuid.UUID, status models.DAGNodeStatus, errorMessage *string) error {
+	if m.updateNodeStatusFunc != nil {
+		return m.updateNodeStatusFunc(ctx, nodeID, status, errorMessage)
+	}
+	return nil
+}
+
+func (m *mockDAGRepository) UpdateStatus(ctx context.Context, dagID uuid.UUID, status models.DAGStatus, currentNode *string) error {
+	if m.updateStatusFunc != nil {
+		return m.updateStatusFunc(ctx, dagID, status, currentNode)
+	}
+	return nil
+}
+
+// Stub methods to satisfy the interface
+func (m *mockDAGRepository) Create(ctx context.Context, dag *models.OntologyDAG) error { return nil }
+func (m *mockDAGRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.OntologyDAG, error) {
+	return nil, nil
+}
+func (m *mockDAGRepository) GetByIDWithNodes(ctx context.Context, id uuid.UUID) (*models.OntologyDAG, error) {
+	return nil, nil
+}
+func (m *mockDAGRepository) GetLatestByDatasource(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyDAG, error) {
+	return nil, nil
+}
+func (m *mockDAGRepository) GetLatestByProject(ctx context.Context, projectID uuid.UUID) (*models.OntologyDAG, error) {
+	return nil, nil
+}
+func (m *mockDAGRepository) GetActiveByDatasource(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyDAG, error) {
+	return nil, nil
+}
+func (m *mockDAGRepository) GetActiveByProject(ctx context.Context, projectID uuid.UUID) (*models.OntologyDAG, error) {
+	return nil, nil
+}
+func (m *mockDAGRepository) Update(ctx context.Context, dag *models.OntologyDAG) error { return nil }
+func (m *mockDAGRepository) Delete(ctx context.Context, id uuid.UUID) error            { return nil }
+func (m *mockDAGRepository) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+func (m *mockDAGRepository) ClaimOwnership(ctx context.Context, dagID, ownerID uuid.UUID) (bool, error) {
+	return true, nil
+}
+func (m *mockDAGRepository) UpdateHeartbeat(ctx context.Context, dagID, ownerID uuid.UUID) error {
+	return nil
+}
+func (m *mockDAGRepository) ReleaseOwnership(ctx context.Context, dagID uuid.UUID) error { return nil }
+func (m *mockDAGRepository) CreateNodes(ctx context.Context, nodes []models.DAGNode) error {
+	return nil
+}
+func (m *mockDAGRepository) UpdateNodeProgress(ctx context.Context, nodeID uuid.UUID, progress *models.DAGNodeProgress) error {
+	return nil
+}
+func (m *mockDAGRepository) IncrementNodeRetryCount(ctx context.Context, nodeID uuid.UUID) error {
+	return nil
+}
+func (m *mockDAGRepository) GetNextPendingNode(ctx context.Context, dagID uuid.UUID) (*models.DAGNode, error) {
+	return nil, nil
+}
+
+// TestCancel_MarksNonCompletedNodesAsSkipped verifies that canceling a DAG
+// marks all running and pending nodes as skipped.
+func TestCancel_MarksNonCompletedNodesAsSkipped(t *testing.T) {
+	dagID := uuid.New()
+	ctx := context.Background()
+
+	// Create test nodes with various statuses
+	nodes := []models.DAGNode{
+		{ID: uuid.New(), DAGID: dagID, NodeName: "EntityDiscovery", Status: models.DAGNodeStatusCompleted},
+		{ID: uuid.New(), DAGID: dagID, NodeName: "EntityEnrichment", Status: models.DAGNodeStatusRunning},
+		{ID: uuid.New(), DAGID: dagID, NodeName: "RelationshipDiscovery", Status: models.DAGNodeStatusPending},
+		{ID: uuid.New(), DAGID: dagID, NodeName: "RelationshipEnrichment", Status: models.DAGNodeStatusPending},
+	}
+
+	// Track which nodes were marked as skipped
+	skippedNodes := make(map[uuid.UUID]bool)
+
+	mockRepo := &mockDAGRepository{
+		getNodesByDAGFunc: func(_ context.Context, id uuid.UUID) ([]models.DAGNode, error) {
+			assert.Equal(t, dagID, id)
+			return nodes, nil
+		},
+		updateNodeStatusFunc: func(_ context.Context, nodeID uuid.UUID, status models.DAGNodeStatus, _ *string) error {
+			assert.Equal(t, models.DAGNodeStatusSkipped, status)
+			skippedNodes[nodeID] = true
+			return nil
+		},
+		updateStatusFunc: func(_ context.Context, id uuid.UUID, status models.DAGStatus, _ *string) error {
+			assert.Equal(t, dagID, id)
+			assert.Equal(t, models.DAGStatusCancelled, status)
+			return nil
+		},
+	}
+
+	// Create service with mock repository
+	logger, _ := zap.NewDevelopment()
+	service := &ontologyDAGService{
+		dagRepo: mockRepo,
+		logger:  logger,
+	}
+
+	// Execute Cancel
+	err := service.Cancel(ctx, dagID)
+	assert.NoError(t, err)
+
+	// Verify only non-completed nodes were marked as skipped
+	// Node 0 (completed) should NOT be skipped
+	assert.False(t, skippedNodes[nodes[0].ID], "Completed node should not be skipped")
+	// Node 1 (running) should be skipped
+	assert.True(t, skippedNodes[nodes[1].ID], "Running node should be skipped")
+	// Node 2 (pending) should be skipped
+	assert.True(t, skippedNodes[nodes[2].ID], "Pending node should be skipped")
+	// Node 3 (pending) should be skipped
+	assert.True(t, skippedNodes[nodes[3].ID], "Pending node should be skipped")
+}

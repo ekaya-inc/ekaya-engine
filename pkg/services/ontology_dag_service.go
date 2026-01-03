@@ -236,7 +236,31 @@ func (s *ontologyDAGService) Cancel(ctx context.Context, dagID uuid.UUID) error 
 		cancel.(context.CancelFunc)()
 	}
 
-	// Update status
+	// Get all nodes for this DAG
+	nodes, err := s.dagRepo.GetNodesByDAG(ctx, dagID)
+	if err != nil {
+		s.logger.Error("Failed to get nodes for cancellation", zap.String("dag_id", dagID.String()), zap.Error(err))
+		return fmt.Errorf("get nodes: %w", err)
+	}
+
+	// Mark all non-completed nodes as skipped
+	for _, node := range nodes {
+		if node.Status != models.DAGNodeStatusCompleted && node.Status != models.DAGNodeStatusFailed {
+			if err := s.dagRepo.UpdateNodeStatus(ctx, node.ID, models.DAGNodeStatusSkipped, nil); err != nil {
+				s.logger.Error("Failed to mark node as skipped",
+					zap.String("node_id", node.ID.String()),
+					zap.String("node_name", node.NodeName),
+					zap.Error(err))
+				// Continue with other nodes even if one fails
+			} else {
+				s.logger.Debug("Marked node as skipped",
+					zap.String("node_id", node.ID.String()),
+					zap.String("node_name", node.NodeName))
+			}
+		}
+	}
+
+	// Update DAG status
 	return s.dagRepo.UpdateStatus(ctx, dagID, models.DAGStatusCancelled, nil)
 }
 
