@@ -51,10 +51,13 @@ The workflow is a simple linear pipeline - no parallel branches, no user interac
 [3] Relationship Discovery (FK-based, deterministic)
            │
            ▼
-[4] Ontology Finalization (LLM: domain summary, conventions)
+[4] Relationship Enrichment (LLM: relationship descriptions)
            │
            ▼
-[5] Column Enrichment (LLM: descriptions, semantic types, enums)
+[5] Ontology Finalization (LLM: domain summary, conventions)
+           │
+           ▼
+[6] Column Enrichment (LLM: descriptions, semantic types, enums)
            │
            ▼
        [Complete]
@@ -62,19 +65,22 @@ The workflow is a simple linear pipeline - no parallel branches, no user interac
 
 ### Node Descriptions
 
-| Node | Name | Type | What It Does |
-|------|------|------|--------------|
-| 1 | `EntityDiscovery` | Data | Identify entities from PKs/unique constraints |
-| 2 | `EntityEnrichment` | LLM | Generate entity names, descriptions |
-| 3 | `RelationshipDiscovery` | Data | Discover FK relationships, save to schema |
-| 4 | `OntologyFinalization` | LLM | Generate domain summary, detect conventions |
-| 5 | `ColumnEnrichment` | LLM | Generate column descriptions, semantic types, enum values |
+| Node | Name | Type | What It Does | Service Method |
+|------|------|------|--------------|----------------|
+| 1 | `EntityDiscovery` | Data | Identify entities from PKs/unique constraints | `EntityDiscoveryService.identifyEntitiesFromDDL()` |
+| 2 | `EntityEnrichment` | LLM | Generate entity names, descriptions | `EntityDiscoveryService.enrichEntitiesWithLLM()` |
+| 3 | `RelationshipDiscovery` | Data | Discover FK relationships, save to schema | `DeterministicRelationshipService.DiscoverRelationships()` |
+| 4 | `RelationshipEnrichment` | LLM | Generate relationship descriptions via LLM | `RelationshipEnrichmentService.EnrichProject()` |
+| 5 | `OntologyFinalization` | LLM | Generate domain summary, detect conventions | `OntologyFinalizationService.Finalize()` |
+| 6 | `ColumnEnrichment` | LLM | Generate column descriptions, semantic types, enum values | `ColumnEnrichmentService.EnrichProject()` |
 
 ### Execution Strategy
 - Nodes execute sequentially (simple linear pipeline)
 - Each node completes fully before the next starts
 - Failed nodes can be retried without re-running completed nodes
 - Progress persisted to database after each node completes
+- **Retry logic**: Use `pkg/retry.DoWithResult[T]()` for node-level retries (default: 3 retries, 100ms initial, 5s max, 2x multiplier)
+- **LLM timeout**: 5 minutes per request (see `pkg/llm/client.go:DefaultRequestTimeout`)
 
 ---
 
@@ -103,6 +109,11 @@ func DetermineStartNode(ctx, projectID, datasourceID) string {
     relationships := schemaRepo.GetRelationships(ctx, projectID, datasourceID)
     if len(relationships) == 0 {
         return "RelationshipDiscovery"
+    }
+
+    // Relationships not enriched (missing descriptions)
+    if CountRelationshipsWithoutDescription(projectID) > 0 {
+        return "RelationshipEnrichment"
     }
 
     // No domain summary
@@ -270,12 +281,129 @@ Each node wraps existing service methods:
 | `EntityDiscoveryNode` | `entity_discovery_service.identifyEntitiesFromDDL()` |
 | `EntityEnrichmentNode` | `entity_discovery_service.enrichEntitiesWithLLM()` |
 | `RelationshipDiscoveryNode` | `deterministic_relationship_service.DiscoverRelationships()` |
+| `RelationshipEnrichmentNode` | `relationship_enrichment_service.EnrichProject()` |
 | `OntologyFinalizationNode` | `ontology_finalization.Finalize()` |
 | `ColumnEnrichmentNode` | `column_enrichment.EnrichProject()` |
 
 ---
 
-## Section 5: API
+## Section 5: Existing Code to Leverage
+
+### Service Layer
+
+The DAG implementation should reuse existing services rather than reimplementing logic:
+
+#### Entity Discovery
+- **File**: `pkg/services/entity_discovery_service.go`
+- **What to use**: Split `IdentifyAndEnrichEntities()` into two phases:
+  - Phase 1 (deterministic): `identifyEntitiesFromDDL()` - parse schema for PKs/unique constraints
+  - Phase 2 (LLM): `enrichEntitiesWithLLM()` - generate names and descriptions
+- **Note**: Current implementation combines both phases; DAG nodes should call them separately
+
+#### Relationship Discovery
+- **File**: `pkg/services/deterministic_relationship_service.go`
+- **What to use**: `DiscoverRelationships(ctx, projectID, datasourceID)` - discovers FK relationships and PK matches
+- **Output**: Saves relationships to `engine_schema_relationships` table
+
+#### Relationship Enrichment
+- **File**: `pkg/services/relationship_enrichment.go`
+- **What to use**: `EnrichProject(ctx, projectID)` - generates LLM descriptions for all relationships
+- **Repository**: `EntityRelationshipRepository.UpdateDescription(ctx, id, description)`
+- **LLM prompt**: Returns object-wrapped response: `{"relationships": [...]}`
+
+#### Ontology Finalization
+- **File**: `pkg/services/ontology_finalization.go`
+- **What to use**: `Finalize(ctx, projectID, datasourceID)` - generates domain summary and detects conventions
+- **Output**: Updates `engine_ontologies.domain_summary` JSONB field
+
+#### Column Enrichment
+- **File**: `pkg/services/column_enrichment.go`
+- **What to use**: `EnrichProject(ctx, projectID)` - generates column metadata (descriptions, semantic types, enums)
+- **LLM prompt**: Returns object-wrapped response: `{"columns": [...]}`
+- **Output**: Updates `engine_ontologies.column_details` JSONB field
+
+### LLM Utilities
+
+#### Response Parsing
+- **File**: `pkg/llm/json.go`
+- **Functions**:
+  - `ParseJSONResponse[T any](response string) (T, error)` - Unmarshal JSON to typed struct
+  - `ExtractJSON(text string) (string, error)` - Extract JSON from markdown code blocks or surrounding text
+
+#### Error Handling
+- **File**: `pkg/llm/errors.go`
+- **Functions**:
+  - `IsRetryable(err error) bool` - Classifies errors as retryable or permanent
+  - Retryable: deadline exceeded, context canceled, HTTP 5xx, rate limits
+  - Permanent: invalid JSON, malformed responses, HTTP 4xx (except 429)
+
+#### Client Configuration
+- **File**: `pkg/llm/client.go`
+- **Constants**:
+  - `DefaultRequestTimeout = 5 * time.Minute` - Prevents infinite hangs when LLM server crashes
+  - HTTP client has timeout set to prevent deadlocks
+
+### Retry Utilities
+
+- **File**: `pkg/retry/retry.go`
+- **Function**: `DoWithResult[T any](ctx, fn func() (T, error), opts ...Option) (T, error)`
+- **Default config**:
+  - `DefaultMaxRetries = 3`
+  - `DefaultInitialInterval = 100 * time.Millisecond`
+  - `DefaultMaxInterval = 5 * time.Second`
+  - `DefaultMultiplier = 2.0`
+- **Usage**: Wrap node execution in retry logic for transient failures
+
+### Repository Methods
+
+#### EntityRelationshipRepository
+- **File**: `pkg/repositories/entity_relationship_repository.go`
+- **Methods**:
+  - `GetByProject(ctx, projectID) ([]*models.EntityRelationship, error)` - Get all relationships for a project
+  - `UpdateDescription(ctx, id, description string) error` - Update relationship description
+
+#### SchemaRepository
+- **File**: `pkg/repositories/schema_repository.go`
+- **Methods**:
+  - `GetRelationships(ctx, projectID, datasourceID) ([]*models.SchemaRelationship, error)` - Get FK relationships from schema
+
+### Service Wiring Pattern
+
+To avoid circular dependencies, use setter methods for cross-service dependencies:
+
+```go
+// From main.go (lines 280-281)
+relationshipWorkflowService.SetColumnEnrichmentService(columnEnrichmentService)
+relationshipWorkflowService.SetRelationshipEnrichmentService(relationshipEnrichmentService)
+```
+
+This pattern allows services to reference each other without creating import cycles.
+
+### LLM Response Format Standard
+
+**All LLM prompts should request object-wrapped responses** (not raw arrays):
+
+```json
+// ✅ CORRECT - Object-wrapped
+{
+  "columns": [...],
+  "entities": [...],
+  "relationships": [...]
+}
+
+// ❌ WRONG - Raw array
+[...]
+```
+
+**Why**: Object wrappers make responses easier to extend (e.g., adding metadata) and more consistent to parse.
+
+**Files using this pattern**:
+- `pkg/services/relationship_enrichment.go` - `{"relationships": [...]}`
+- `pkg/services/column_enrichment.go` - `{"columns": [...]}`
+
+---
+
+## Section 6: API
 
 ### Endpoints
 
@@ -294,6 +422,7 @@ Response:
     {"name": "EntityDiscovery", "status": "running", "progress": {"current": 3, "total": 15}},
     {"name": "EntityEnrichment", "status": "pending"},
     {"name": "RelationshipDiscovery", "status": "pending"},
+    {"name": "RelationshipEnrichment", "status": "pending"},
     {"name": "OntologyFinalization", "status": "pending"},
     {"name": "ColumnEnrichment", "status": "pending"}
   ]
@@ -314,7 +443,7 @@ POST /api/projects/{pid}/datasources/{dsid}/ontology/dag/cancel
 
 ---
 
-## Section 6: UI Changes
+## Section 7: UI Changes
 
 ### Ontology Page
 
@@ -334,12 +463,14 @@ Replace current workflow status with DAG visualization:
 │  [▶] Relationship Discovery ──────────────────────────────────│
 │      Discovering FK relationships... (5/25)                    │
 │                                                                 │
+│  [○] Relationship Enrichment                                    │
+│                                                                 │
 │  [○] Ontology Finalization                                     │
 │                                                                 │
 │  [○] Column Enrichment                                         │
 │                                                                 │
 │  ──────────────────────────────────────────────────────────── │
-│  Status: Running (2/5 nodes complete)         [Cancel]         │
+│  Status: Running (2/6 nodes complete)         [Cancel]         │
 └────────────────────────────────────────────────────────────────┘
 
 Legend: [✓] Complete  [▶] Running  [○] Pending  [✗] Failed
@@ -367,7 +498,7 @@ Legend: [✓] Complete  [▶] Running  [○] Pending  [✗] Failed
 
 ---
 
-## Section 7: Implementation Phases
+## Section 8: Implementation Phases
 
 ### Phase 1: Database & Models
 
@@ -393,8 +524,8 @@ pkg/repositories/
 **Tasks:**
 1. Create `OntologyDAGService` interface and implementation
 2. Create `NodeExecutor` interface
-3. Create 5 node executors wrapping existing service methods
-4. Wire into `main.go`
+3. Create 6 node executors wrapping existing service methods
+4. Wire into `main.go` using setter pattern for cross-service dependencies
 
 **Files:**
 ```
@@ -406,6 +537,7 @@ pkg/services/
     entity_discovery_node.go
     entity_enrichment_node.go
     relationship_discovery_node.go
+    relationship_enrichment_node.go
     ontology_finalization_node.go
     column_enrichment_node.go
 ```
@@ -462,7 +594,7 @@ pkg/handlers/
 
 ---
 
-## Section 8: Execution Flow Example
+## Section 9: Execution Flow Example
 
 ### Fresh Extraction
 
@@ -495,14 +627,20 @@ Create 5 node records (status: pending)
     - Node status: completed
     │
     ▼
-[4] OntologyFinalization starts
+[4] RelationshipEnrichment starts
+    - Call LLM for relationship descriptions
+    - Update engine_entity_relationships.description
+    - Node status: completed
+    │
+    ▼
+[5] OntologyFinalization starts
     - Call LLM for domain summary
     - Detect conventions (soft delete, audit columns)
     - Update engine_ontologies.domain_summary
     - Node status: completed
     │
     ▼
-[5] ColumnEnrichment starts
+[6] ColumnEnrichment starts
     - For each table, call LLM for column metadata
     - Update engine_ontologies.column_details
     - Node status: completed
@@ -526,7 +664,7 @@ POST /ontology/extract
     │
     ▼
 Find existing failed DAG
-Skip nodes 1-4 (already completed)
+Skip nodes 1-5 (already completed)
 Resume ColumnEnrichment from table 26
     │
     ▼
@@ -582,10 +720,11 @@ pkg/
   services/
     ontology_dag_service.go      # Main orchestrator
     dag/
-      node_executor.go           # Interface
+      node_executor.go              # Interface
       entity_discovery_node.go
       entity_enrichment_node.go
       relationship_discovery_node.go
+      relationship_enrichment_node.go
       ontology_finalization_node.go
       column_enrichment_node.go
   handlers/
@@ -609,7 +748,135 @@ pkg/handlers/
 ```
 pkg/services/
   entity_discovery_service.go    # Extract methods, remove workflow
+  relationship_enrichment.go     # Keep as-is (already suitable)
   column_enrichment.go           # Keep as-is (already suitable)
   ontology_finalization.go       # Keep as-is (already suitable)
-main.go                          # Wire new service
+main.go                          # Wire new service using setter pattern
+```
+
+---
+
+## Appendix C: Session Learnings (2026-01-03)
+
+This appendix documents key implementation learnings that should guide DAG development.
+
+### Node 4: Relationship Enrichment Added
+
+**Why**: Relationships discovered by node 3 are deterministic (FK/PK matching) and lack semantic meaning. Node 4 enriches them with LLM-generated descriptions.
+
+**Implementation**:
+- Service: `pkg/services/relationship_enrichment.go`
+- Method: `EnrichProject(ctx, projectID)`
+- Repository: `EntityRelationshipRepository.UpdateDescription(ctx, id, description)`
+- LLM response format: `{"relationships": [{"id": "uuid", "description": "..."}]}`
+
+**Node order updated**:
+1. EntityDiscovery (deterministic)
+2. EntityEnrichment (LLM)
+3. RelationshipDiscovery (deterministic)
+4. **RelationshipEnrichment (LLM)** ← NEW
+5. OntologyFinalization (LLM)
+6. ColumnEnrichment (LLM)
+
+### LLM Timeout Configuration
+
+**Problem**: LLM server crashes caused infinite hangs in HTTP requests.
+
+**Solution**: `pkg/llm/client.go` now has `DefaultRequestTimeout = 5 * time.Minute` to prevent deadlocks.
+
+**Error handling**: `pkg/llm/errors.go` classifies "deadline exceeded" and "context canceled" as retryable errors via `IsRetryable(err error) bool`.
+
+### Retry Strategy
+
+**Package**: `pkg/retry/retry.go`
+
+**Function**: `DoWithResult[T any](ctx, fn func() (T, error), opts ...Option) (T, error)`
+
+**Default configuration**:
+- `DefaultMaxRetries = 3`
+- `DefaultInitialInterval = 100ms`
+- `DefaultMaxInterval = 5s`
+- `DefaultMultiplier = 2.0` (exponential backoff)
+
+**Usage**: DAG nodes should wrap execution in retry logic for transient failures (network issues, LLM timeouts, rate limits).
+
+### LLM Response Format Standard
+
+**Rule**: All LLM prompts must request object-wrapped responses (not raw arrays).
+
+**Rationale**:
+- Easier to extend with metadata
+- More consistent parsing
+- Clearer structure
+
+**Examples**:
+```json
+// ✅ CORRECT
+{"relationships": [...], "entities": [...], "columns": [...]}
+
+// ❌ WRONG
+[...]
+```
+
+**Files already using this pattern**:
+- `pkg/services/relationship_enrichment.go`
+- `pkg/services/column_enrichment.go`
+
+### Service Wiring Pattern
+
+**Problem**: Circular dependencies when services reference each other.
+
+**Solution**: Use setter methods for cross-service dependencies.
+
+**Example from `main.go`**:
+```go
+relationshipWorkflowService.SetColumnEnrichmentService(columnEnrichmentService)
+relationshipWorkflowService.SetRelationshipEnrichmentService(relationshipEnrichmentService)
+```
+
+**Why**: Allows services to reference each other without creating import cycles.
+
+### Repository Methods for DAG Implementation
+
+**EntityRelationshipRepository** (`pkg/repositories/entity_relationship_repository.go`):
+- `GetByProject(ctx, projectID) ([]*models.EntityRelationship, error)` - Fetch all relationships for a project
+- `UpdateDescription(ctx, id, description string) error` - Update relationship description after LLM enrichment
+
+**SchemaRepository** (`pkg/repositories/schema_repository.go`):
+- `GetRelationships(ctx, projectID, datasourceID) ([]*models.SchemaRelationship, error)` - Get FK relationships from schema
+
+### LLM Utility Functions
+
+**JSON parsing** (`pkg/llm/json.go`):
+- `ParseJSONResponse[T any](response string) (T, error)` - Unmarshal JSON to typed struct with error handling
+- `ExtractJSON(text string) (string, error)` - Extract JSON from markdown code blocks or surrounding text
+
+**Error classification** (`pkg/llm/errors.go`):
+- `IsRetryable(err error) bool` - Determines if error should trigger retry
+- Retryable: deadline exceeded, context canceled, HTTP 5xx, rate limits (429)
+- Permanent: invalid JSON, malformed responses, HTTP 4xx (except 429)
+
+### State Detection Logic Update
+
+**New check** for node 4 (RelationshipEnrichment):
+```go
+// Relationships not enriched (missing descriptions)
+if CountRelationshipsWithoutDescription(projectID) > 0 {
+    return "RelationshipEnrichment"
+}
+```
+
+This check runs after RelationshipDiscovery but before OntologyFinalization.
+
+### Implementation Checklist
+
+When implementing the DAG system, ensure:
+
+1. **All 6 nodes are created** (not 5) - RelationshipEnrichment is mandatory
+2. **Retry logic uses `pkg/retry`** - Don't reimplement exponential backoff
+3. **LLM responses are object-wrapped** - Update prompts to match standard format
+4. **Services are wired with setters** - Avoid circular dependency issues
+5. **LLM timeout is configured** - Use `DefaultRequestTimeout` constant
+6. **Error classification uses `IsRetryable`** - Don't guess which errors to retry
+7. **JSON parsing uses `pkg/llm/json.go`** - Don't use raw `json.Unmarshal`
 ```
