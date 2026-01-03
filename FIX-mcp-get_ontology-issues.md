@@ -593,30 +593,31 @@ type GlossaryTermBrief struct {
 
 ## Code Quality: Minor Nitpicks
 
-### URL Construction Should Use net/url Package
+### URL Construction Should Use net/url Package ✅ COMPLETED
 
 **Location:** `pkg/services/mcp_config.go:239`
 
-Current code uses `fmt.Sprintf`:
+**Status:** Fixed on 2026-01-04
+
+**What Was Fixed:**
+
+Changed URL construction from fragile `fmt.Sprintf` to `url.JoinPath` (Go 1.19+):
+
 ```go
+// Before
 ServerURL: fmt.Sprintf("%s/mcp/%s", s.baseURL, projectID.String())
+
+// After
+serverURL, err := url.JoinPath(s.baseURL, "mcp", projectID.String())
+if err != nil {
+    // Log error and fall back to simple concatenation
+}
 ```
 
-**Issue:** String concatenation for URLs is fragile - doesn't handle:
-- Trailing slashes on baseURL
-- URL encoding of path segments
-- Edge cases with special characters
+**Test Coverage Added:**
 
-**Fix:** Use `net/url` package for proper URL construction:
-```go
-import "net/url"
-
-u, _ := url.Parse(s.baseURL)
-u.Path = path.Join(u.Path, "mcp", projectID.String())
-ServerURL: u.String()
-```
-
-Or use `url.JoinPath` (Go 1.19+):
-```go
-serverURL, _ := url.JoinPath(s.baseURL, "mcp", projectID.String())
-```
+`TestMCPConfigService_Get_ServerURLConstruction` - Table-driven test verifying:
+- Base URL without trailing slash
+- Base URL with trailing slash
+- Base URL with path
+- Base URL with path and trailing slash
