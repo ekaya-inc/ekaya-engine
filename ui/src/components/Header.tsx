@@ -4,13 +4,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useProject } from '../contexts/ProjectContext';
 
 const Header = () => {
-  const { projectName, projectId, papiUrl } = useProject();
+  const { projectName, urls } = useProject();
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
-
-  // Build the project page URL: {papiUrl}/projects/{projectId}
-  const projectPageUrl =
-    papiUrl && projectId ? `${papiUrl}/projects/${projectId}` : null;
 
   // Display project name if available, otherwise show "Ekaya Project"
   const displayName = projectName ?? 'Ekaya Project';
@@ -18,9 +14,9 @@ const Header = () => {
   return (
     <header className="border-b border-border-light bg-header-primary">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
-        {projectPageUrl ? (
+        {urls.projectPageUrl ? (
           <a
-            href={projectPageUrl}
+            href={urls.projectPageUrl}
             className="text-xl font-semibold text-text-primary hover:text-accent-primary transition-colors"
             title={`Open ${displayName} in Ekaya Central`}
           >

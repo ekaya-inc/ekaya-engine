@@ -6,6 +6,8 @@ export interface ProjectInfoResponse {
   pid: string;
   name?: string;
   papi_url?: string;
+  projects_page_url?: string;
+  project_page_url?: string;
 }
 
 export interface ProvisionResponse extends ProjectInfoResponse {

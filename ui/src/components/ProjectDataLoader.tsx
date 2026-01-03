@@ -84,7 +84,14 @@ export default function ProjectDataLoader({
         }
 
         // Step 2: Store project info in context
-        setProjectInfo(pid as string, projectInfo.name ?? null, projectInfo.papi_url ?? null);
+        const urlInfo: { projectsPageUrl?: string; projectPageUrl?: string } = {};
+        if (projectInfo.projects_page_url) {
+          urlInfo.projectsPageUrl = projectInfo.projects_page_url;
+        }
+        if (projectInfo.project_page_url) {
+          urlInfo.projectPageUrl = projectInfo.project_page_url;
+        }
+        setProjectInfo(pid as string, projectInfo.name ?? null, urlInfo);
 
         // Step 3: Load datasources
         console.log("Loading datasources for project:", pid);
