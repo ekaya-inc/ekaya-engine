@@ -111,8 +111,8 @@ var DAGNodeOrder = map[DAGNodeName]int{
 	DAGNodeEntityEnrichment:       2,
 	DAGNodeRelationshipDiscovery:  3,
 	DAGNodeRelationshipEnrichment: 4,
-	DAGNodeOntologyFinalization:   5,
-	DAGNodeColumnEnrichment:       6,
+	DAGNodeColumnEnrichment:       5,
+	DAGNodeOntologyFinalization:   6,
 }
 
 // AllDAGNodes returns all DAG node names in execution order.
@@ -122,8 +122,8 @@ func AllDAGNodes() []DAGNodeName {
 		DAGNodeEntityEnrichment,
 		DAGNodeRelationshipDiscovery,
 		DAGNodeRelationshipEnrichment,
-		DAGNodeOntologyFinalization,
 		DAGNodeColumnEnrichment,
+		DAGNodeOntologyFinalization,
 	}
 }
 
