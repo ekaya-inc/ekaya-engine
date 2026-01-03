@@ -209,7 +209,7 @@ func main() {
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo,
 		datasourceService, adapterFactory, llmFactory, llmWorkerPool, getTenantCtx, logger)
 	relationshipEnrichmentService := services.NewRelationshipEnrichmentService(
-		entityRelationshipRepo, ontologyEntityRepo, llmFactory, llmWorkerPool, logger)
+		entityRelationshipRepo, ontologyEntityRepo, llmFactory, llmWorkerPool, getTenantCtx, logger)
 
 	// Ontology DAG service for orchestrated workflow execution
 	ontologyDAGService := services.NewOntologyDAGService(

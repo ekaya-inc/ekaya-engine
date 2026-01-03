@@ -174,7 +174,7 @@ func TestRelationshipEnrichmentService_ValidationFiltersInvalid(t *testing.T) {
 	entityRepo := &testRelEnrichmentEntityRepo{entities: entities}
 	mockFactory := llm.NewMockClientFactory()
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, testPool, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, testPool, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -227,7 +227,7 @@ func TestRelationshipEnrichmentService_RetryOnTransientError(t *testing.T) {
 	}
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, testPool, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, testPool, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -273,7 +273,7 @@ func TestRelationshipEnrichmentService_NonRetryableError(t *testing.T) {
 	}
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, testPool, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, testPool, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -321,7 +321,7 @@ func TestRelationshipEnrichmentService_InvalidJSONResponse(t *testing.T) {
 	}
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, testPool, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, testPool, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)

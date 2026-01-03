@@ -43,6 +43,7 @@ type relationshipEnrichmentService struct {
 	entityRepo       repositories.OntologyEntityRepository
 	llmFactory       llm.LLMClientFactory
 	workerPool       *llm.WorkerPool
+	getTenantCtx     TenantContextFunc
 	logger           *zap.Logger
 }
 
@@ -52,6 +53,7 @@ func NewRelationshipEnrichmentService(
 	entityRepo repositories.OntologyEntityRepository,
 	llmFactory llm.LLMClientFactory,
 	workerPool *llm.WorkerPool,
+	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) RelationshipEnrichmentService {
 	return &relationshipEnrichmentService{
@@ -59,6 +61,7 @@ func NewRelationshipEnrichmentService(
 		entityRepo:       entityRepo,
 		llmFactory:       llmFactory,
 		workerPool:       workerPool,
+		getTenantCtx:     getTenantCtx,
 		logger:           logger.Named("relationship-enrichment"),
 	}
 }
@@ -177,6 +180,8 @@ func (s *relationshipEnrichmentService) EnrichProject(ctx context.Context, proje
 }
 
 // enrichBatchInternal enriches a batch of relationships via LLM with retry logic.
+// Each batch acquires its own database connection to avoid concurrent access issues
+// when multiple batches run in parallel via the worker pool.
 func (s *relationshipEnrichmentService) enrichBatchInternal(
 	ctx context.Context,
 	projectID uuid.UUID,
@@ -186,8 +191,30 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 	result := &batchResult{
 		BatchSize: len(relationships),
 	}
+
+	// Acquire a fresh database connection for this batch to avoid concurrent access
+	// issues when multiple workers share the same context. Each worker goroutine
+	// needs its own connection since pgx connections are not safe for concurrent use.
+	var batchCtx context.Context
+	var cleanup func()
+	if s.getTenantCtx != nil {
+		var err error
+		batchCtx, cleanup, err = s.getTenantCtx(ctx, projectID)
+		if err != nil {
+			s.logger.Error("Failed to acquire tenant context for batch",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			result.Failed = len(relationships)
+			return result, fmt.Errorf("acquire tenant context: %w", err)
+		}
+		defer cleanup()
+	} else {
+		// For tests that don't use real database connections
+		batchCtx = ctx
+	}
+
 	// Build prompt with relationship context
-	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
+	llmClient, err := s.llmFactory.CreateForProject(batchCtx, projectID)
 	if err != nil {
 		s.logger.Error("Failed to create LLM client",
 			zap.String("project_id", projectID.String()),
@@ -208,9 +235,9 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 	}
 
 	var llmResult *llm.GenerateResponseResult
-	err = retry.Do(ctx, retryConfig, func() error {
+	err = retry.Do(batchCtx, retryConfig, func() error {
 		var retryErr error
-		llmResult, retryErr = llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.3, false)
+		llmResult, retryErr = llmClient.GenerateResponse(batchCtx, prompt, systemMsg, 0.3, false)
 		if retryErr != nil {
 			// Classify error to determine if retryable
 			classified := llm.ClassifyError(retryErr)
@@ -276,7 +303,7 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 			continue
 		}
 
-		if err := s.relationshipRepo.UpdateDescription(ctx, rel.ID, description); err != nil {
+		if err := s.relationshipRepo.UpdateDescription(batchCtx, rel.ID, description); err != nil {
 			s.logRelationshipFailure(rel, "Failed to update database", err)
 			result.Failed++
 			continue
