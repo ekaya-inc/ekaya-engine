@@ -83,6 +83,10 @@ func (m *mockRelationshipWorkflowService) SetColumnEnrichmentService(svc service
 	// No-op for tests
 }
 
+func (m *mockRelationshipWorkflowService) SetRelationshipEnrichmentService(svc services.RelationshipEnrichmentService) {
+	// No-op for tests
+}
+
 func TestRelationshipWorkflowHandler_GetEntities_Success(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()

@@ -18,6 +18,7 @@ type EntityRelationshipRepository interface {
 	GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error)
 	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error)
 	GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error)
+	UpdateDescription(ctx context.Context, id uuid.UUID, description string) error
 	DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error
 }
 
@@ -181,6 +182,22 @@ func (r *entityRelationshipRepository) GetByTables(ctx context.Context, projectI
 	}
 
 	return relationships, nil
+}
+
+func (r *entityRelationshipRepository) UpdateDescription(ctx context.Context, id uuid.UUID, description string) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `UPDATE engine_entity_relationships SET description = $1 WHERE id = $2`
+
+	_, err := scope.Conn.Exec(ctx, query, description, id)
+	if err != nil {
+		return fmt.Errorf("failed to update entity relationship description: %w", err)
+	}
+
+	return nil
 }
 
 func (r *entityRelationshipRepository) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {

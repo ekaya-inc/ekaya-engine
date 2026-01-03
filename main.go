@@ -211,9 +211,12 @@ func main() {
 	columnEnrichmentService := services.NewColumnEnrichmentService(
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo,
 		datasourceService, adapterFactory, llmFactory, getTenantCtx, logger)
+	relationshipEnrichmentService := services.NewRelationshipEnrichmentService(
+		entityRelationshipRepo, ontologyEntityRepo, llmFactory, logger)
 
-	// Wire column enrichment to relationship workflow for auto-trigger after extraction
+	// Wire enrichment services to relationship workflow for auto-trigger after extraction
 	relationshipWorkflowService.SetColumnEnrichmentService(columnEnrichmentService)
+	relationshipWorkflowService.SetRelationshipEnrichmentService(relationshipEnrichmentService)
 
 	mux := http.NewServeMux()
 

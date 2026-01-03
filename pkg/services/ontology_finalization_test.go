@@ -197,6 +197,10 @@ func (m *mockRelationshipRepoForFinalization) GetByTables(ctx context.Context, p
 	return m.relationships, nil
 }
 
+func (m *mockRelationshipRepoForFinalization) UpdateDescription(ctx context.Context, id uuid.UUID, description string) error {
+	return nil
+}
+
 func (m *mockRelationshipRepoForFinalization) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }

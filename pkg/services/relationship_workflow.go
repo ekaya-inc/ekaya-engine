@@ -84,25 +84,29 @@ type RelationshipWorkflowService interface {
 
 	// SetColumnEnrichmentService sets the column enrichment service (optional).
 	SetColumnEnrichmentService(svc ColumnEnrichmentService)
+
+	// SetRelationshipEnrichmentService sets the relationship enrichment service (optional).
+	SetRelationshipEnrichmentService(svc RelationshipEnrichmentService)
 }
 
 type relationshipWorkflowService struct {
-	workflowRepo         repositories.OntologyWorkflowRepository
-	candidateRepo        repositories.RelationshipCandidateRepository
-	schemaRepo           repositories.SchemaRepository
-	stateRepo            repositories.WorkflowStateRepository
-	ontologyRepo         repositories.OntologyRepository
-	entityRepo           repositories.OntologyEntityRepository
-	dsSvc                DatasourceService
-	adapterFactory       datasource.DatasourceAdapterFactory
-	llmFactory           llm.LLMClientFactory
-	discoveryService     RelationshipDiscoveryService
-	deterministicService DeterministicRelationshipService
-	finalizationSvc      OntologyFinalizationService
-	columnEnrichmentSvc  ColumnEnrichmentService
-	getTenantCtx         TenantContextFunc
-	logger               *zap.Logger
-	infra                *workflow.WorkflowInfra
+	workflowRepo              repositories.OntologyWorkflowRepository
+	candidateRepo             repositories.RelationshipCandidateRepository
+	schemaRepo                repositories.SchemaRepository
+	stateRepo                 repositories.WorkflowStateRepository
+	ontologyRepo              repositories.OntologyRepository
+	entityRepo                repositories.OntologyEntityRepository
+	dsSvc                     DatasourceService
+	adapterFactory            datasource.DatasourceAdapterFactory
+	llmFactory                llm.LLMClientFactory
+	discoveryService          RelationshipDiscoveryService
+	deterministicService      DeterministicRelationshipService
+	finalizationSvc           OntologyFinalizationService
+	columnEnrichmentSvc       ColumnEnrichmentService
+	relationshipEnrichmentSvc RelationshipEnrichmentService
+	getTenantCtx              TenantContextFunc
+	logger                    *zap.Logger
+	infra                     *workflow.WorkflowInfra
 }
 
 // NewRelationshipWorkflowService creates a new relationship workflow service.
@@ -150,6 +154,12 @@ var _ RelationshipWorkflowService = (*relationshipWorkflowService)(nil)
 // Called after construction to avoid circular dependencies.
 func (s *relationshipWorkflowService) SetColumnEnrichmentService(svc ColumnEnrichmentService) {
 	s.columnEnrichmentSvc = svc
+}
+
+// SetRelationshipEnrichmentService sets the relationship enrichment service (optional).
+// Called after construction to avoid circular dependencies.
+func (s *relationshipWorkflowService) SetRelationshipEnrichmentService(svc RelationshipEnrichmentService) {
+	s.relationshipEnrichmentSvc = svc
 }
 
 func (s *relationshipWorkflowService) StartDetection(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.OntologyWorkflow, error) {
@@ -1051,6 +1061,29 @@ func (s *relationshipWorkflowService) finalizeWorkflow(projectID, workflowID uui
 		s.logger.Error("Failed to update final progress",
 			zap.String("workflow_id", workflowID.String()),
 			zap.Error(updateErr))
+	}
+
+	// Auto-trigger relationship enrichment to generate descriptions
+	// NOTE: Run BEFORE marking workflow complete so UI waits for enrichment
+	if s.relationshipEnrichmentSvc != nil {
+		s.logger.Info("Starting relationship enrichment",
+			zap.String("workflow_id", workflowID.String()),
+			zap.String("project_id", projectID.String()))
+
+		result, err := s.relationshipEnrichmentSvc.EnrichProject(ctx, projectID)
+		if err != nil {
+			s.logger.Error("Failed to enrich relationships",
+				zap.String("workflow_id", workflowID.String()),
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			// Non-blocking - continue to ontology finalization
+		} else {
+			s.logger.Info("Relationship enrichment complete",
+				zap.String("workflow_id", workflowID.String()),
+				zap.Int("enriched", result.RelationshipsEnriched),
+				zap.Int("failed", result.RelationshipsFailed),
+				zap.Int64("duration_ms", result.DurationMs))
+		}
 	}
 
 	// Auto-trigger ontology finalization to generate domain summary
