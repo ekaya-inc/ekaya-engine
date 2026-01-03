@@ -482,6 +482,12 @@ func (s *columnEnrichmentService) enrichColumnsInChunks(
 		})
 	}
 
+	// Build ID -> chunk index map for result reassembly
+	chunkIndexByID := make(map[string]int)
+	for _, meta := range chunkMetadata {
+		chunkIndexByID[fmt.Sprintf("%s-chunk-%d", entity.PrimaryTable, meta.Index)] = meta.Index
+	}
+
 	// Process chunks in parallel using worker pool
 	results := llm.Process(ctx, s.workerPool, workItems, nil)
 
@@ -489,16 +495,11 @@ func (s *columnEnrichmentService) enrichColumnsInChunks(
 	// Results come back in completion order, so we need to map them back to chunk index
 	resultsByChunk := make(map[int][]columnEnrichment)
 	for _, result := range results {
+		chunkIdx := chunkIndexByID[result.ID]
 		if result.Err != nil {
-			// Find the chunk index from the result ID
-			var chunkIdx int
-			fmt.Sscanf(result.ID, entity.PrimaryTable+"-chunk-%d", &chunkIdx)
 			meta := chunkMetadata[chunkIdx]
 			return nil, fmt.Errorf("chunk %d-%d failed: %w", meta.Start, meta.End, result.Err)
 		}
-		// Parse chunk index from result ID
-		var chunkIdx int
-		fmt.Sscanf(result.ID, entity.PrimaryTable+"-chunk-%d", &chunkIdx)
 		resultsByChunk[chunkIdx] = result.Result
 	}
 
