@@ -232,7 +232,7 @@ WHERE LOWER(h.username) = LOWER({{username}}) OR LOWER(v.username) = LOWER({{use
 ### Task Checklist
 
 - [x] **Step 1: Database Migration** - Created `migrations/025_business_glossary.{up,down}.sql` with table, RLS, indexes, and trigger. Added integration test `migrations/025_business_glossary_test.go`.
-- [ ] **Step 2: Model** - Create `pkg/models/glossary.go` with `BusinessGlossaryTerm` and `Filter` structs
+- [x] **Step 2: Model** - Created `pkg/models/glossary.go` with `BusinessGlossaryTerm` and `Filter` structs. Model includes all fields from the spec: ID, ProjectID, Term, Definition, SQLPattern, BaseTable, ColumnsUsed ([]string), Filters ([]Filter), Aggregation, Source, CreatedBy, CreatedAt, UpdatedAt. Filter struct has Column, Operator, and Values fields. JSON tags include omitempty where appropriate.
 - [ ] **Step 3: Repository** - Create `pkg/repositories/glossary_repository.go` with CRUD operations
 - [ ] **Step 4: Service** - Create `pkg/services/glossary_service.go` with business logic and LLM suggestion
 - [ ] **Step 5: Handler** - Create `pkg/handlers/glossary_handler.go` with HTTP endpoints
