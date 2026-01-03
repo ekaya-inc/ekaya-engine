@@ -824,3 +824,163 @@ func TestGetColumnsContext_TooManyTables(t *testing.T) {
 	assert.Contains(t, err.Error(), "too many tables requested")
 	assert.Contains(t, err.Error(), fmt.Sprintf("maximum %d tables allowed", MaxColumnsDepthTables))
 }
+
+func TestGetDomainContext_DeduplicatesRelationships(t *testing.T) {
+	// Tests that duplicate relationships (same source→target pair) are deduplicated,
+	// keeping the relationship with the longest description for more context.
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	entityID1 := uuid.New() // user
+	entityID2 := uuid.New() // billing_engagement
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+	}
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:            entityID1,
+			Name:          "user",
+			PrimarySchema: "public",
+			PrimaryTable:  "users",
+			PrimaryColumn: "id",
+		},
+		{
+			ID:            entityID2,
+			Name:          "billing_engagement",
+			PrimarySchema: "public",
+			PrimaryTable:  "billing_engagements",
+			PrimaryColumn: "id",
+		},
+	}
+
+	occurrences := []*models.OntologyEntityOccurrence{
+		{ID: uuid.New(), EntityID: entityID1, TableName: "users", ColumnName: "id"},
+		{ID: uuid.New(), EntityID: entityID2, TableName: "billing_engagements", ColumnName: "id"},
+	}
+
+	// Create duplicate relationships: same user→billing_engagement pair via host_id and visitor_id
+	// This simulates the scenario where both FKs create separate relationship rows
+	shortDesc := "via FK"
+	longDesc := "User participates in billing engagement as either host or visitor"
+	relationships := []*models.EntityRelationship{
+		{
+			ID:                uuid.New(),
+			SourceEntityID:    entityID1,
+			TargetEntityID:    entityID2,
+			SourceColumnTable: "users",
+			SourceColumnName:  "id",
+			TargetColumnTable: "billing_engagements",
+			TargetColumnName:  "host_id",
+			Description:       &shortDesc, // Short description
+		},
+		{
+			ID:                uuid.New(),
+			SourceEntityID:    entityID1,
+			TargetEntityID:    entityID2,
+			SourceColumnTable: "users",
+			SourceColumnName:  "id",
+			TargetColumnTable: "billing_engagements",
+			TargetColumnName:  "visitor_id",
+			Description:       &longDesc, // Longer, more descriptive - should be kept
+		},
+		{
+			ID:                uuid.New(),
+			SourceEntityID:    entityID1,
+			TargetEntityID:    entityID2,
+			SourceColumnTable: "users",
+			SourceColumnName:  "id",
+			TargetColumnTable: "billing_engagements",
+			TargetColumnName:  "created_by",
+			Description:       nil, // No description
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
+	entityRepo := &mockOntologyEntityRepository{
+		entities:    entities,
+		occurrences: occurrences,
+	}
+	relationshipRepo := &mockEntityRelationshipRepository{relationships: relationships}
+	schemaRepo := &mockSchemaRepository{}
+	projectService := &mockProjectServiceForOntology{}
+
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+
+	result, err := svc.GetDomainContext(ctx, projectID)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+
+	// Should only have 1 relationship (deduplicated from 3)
+	assert.Len(t, result.Relationships, 1, "Expected 3 duplicate relationships to be deduplicated to 1")
+
+	// Should keep the longest description
+	assert.Equal(t, "user", result.Relationships[0].From)
+	assert.Equal(t, "billing_engagement", result.Relationships[0].To)
+	assert.Equal(t, longDesc, result.Relationships[0].Label, "Should keep the longest description for more context")
+}
+
+func TestGetDomainContext_DeduplicatesRelationships_FirstWinsWhenSameLength(t *testing.T) {
+	// When descriptions have the same length, the first one encountered should be kept
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	entityID1 := uuid.New()
+	entityID2 := uuid.New()
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+	}
+
+	entities := []*models.OntologyEntity{
+		{ID: entityID1, Name: "user", PrimaryTable: "users"},
+		{ID: entityID2, Name: "order", PrimaryTable: "orders"},
+	}
+
+	occurrences := []*models.OntologyEntityOccurrence{
+		{ID: uuid.New(), EntityID: entityID1, TableName: "users", ColumnName: "id"},
+		{ID: uuid.New(), EntityID: entityID2, TableName: "orders", ColumnName: "id"},
+	}
+
+	// Same-length descriptions
+	desc1 := "first"
+	desc2 := "later"
+	relationships := []*models.EntityRelationship{
+		{
+			ID:             uuid.New(),
+			SourceEntityID: entityID1,
+			TargetEntityID: entityID2,
+			Description:    &desc1,
+		},
+		{
+			ID:             uuid.New(),
+			SourceEntityID: entityID1,
+			TargetEntityID: entityID2,
+			Description:    &desc2,
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
+	entityRepo := &mockOntologyEntityRepository{
+		entities:    entities,
+		occurrences: occurrences,
+	}
+	relationshipRepo := &mockEntityRelationshipRepository{relationships: relationships}
+	schemaRepo := &mockSchemaRepository{}
+	projectService := &mockProjectServiceForOntology{}
+
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+
+	result, err := svc.GetDomainContext(ctx, projectID)
+
+	assert.NoError(t, err)
+	assert.Len(t, result.Relationships, 1)
+	// When same length, first one wins (no update happens)
+	assert.Equal(t, "first", result.Relationships[0].Label)
+}

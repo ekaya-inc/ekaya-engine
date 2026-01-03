@@ -127,7 +127,9 @@ func (s *ontologyContextService) GetDomainContext(ctx context.Context, projectID
 	}
 
 	// Build relationships from normalized entity_relationships table
+	// Deduplicate by source→target pair, keeping the longest label for more context
 	relationships := make([]models.RelationshipEdge, 0, len(entityRelationships))
+	seen := make(map[string]int) // key -> index in relationships slice
 	for _, rel := range entityRelationships {
 		sourceName := entityNameByID[rel.SourceEntityID]
 		targetName := entityNameByID[rel.TargetEntityID]
@@ -140,6 +142,16 @@ func (s *ontologyContextService) GetDomainContext(ctx context.Context, projectID
 			label = *rel.Description
 		}
 
+		key := sourceName + "→" + targetName
+		if idx, exists := seen[key]; exists {
+			// Keep the longer label for more context
+			if len(label) > len(relationships[idx].Label) {
+				relationships[idx].Label = label
+			}
+			continue
+		}
+
+		seen[key] = len(relationships)
 		relationships = append(relationships, models.RelationshipEdge{
 			From:  sourceName,
 			To:    targetName,

@@ -185,62 +185,34 @@ The enriched `column_details` JSONB (which contains `FKRole`) is NOT loaded at t
 
 ---
 
-## Issue 4: Duplicate relationships at domain level
+## Issue 4: Duplicate relationships at domain level ✅ COMPLETED
 
 **Priority:** LOW (cosmetic, doesn't break queries)
 
-### Observed Behavior
-"Offer → Engagement Payment Intent" appeared 3+ times with slightly different labels.
+**Status:** Fixed on 2026-01-03
 
-### Root Cause Analysis
+### What Was Fixed
 
-**Location:** `pkg/services/ontology_context.go:129-148`
+Added deduplication logic in `GetDomainContext()` to prevent duplicate relationships (same source→target entity pair) from appearing multiple times. When duplicates exist, the implementation keeps the relationship with the longest description to provide more context.
 
-There is NO deduplication logic:
-```go
-relationships := make([]models.RelationshipEdge, 0, len(entityRelationships))
-for _, rel := range entityRelationships {
-    sourceName := entityNameByID[rel.SourceEntityID]
-    targetName := entityNameByID[rel.TargetEntityID]
-    if sourceName == "" || targetName == "" {
-        continue
-    }
-    // ...
-    relationships = append(relationships, models.RelationshipEdge{
-        From:  sourceName,
-        To:    targetName,
-        Label: label,
-    })
-    // ← Appends ALL relationships, including duplicates
-}
-```
+**Changes Made:**
 
-**Why duplicates exist in DB:**
-- Same entity pair can have multiple FK columns (e.g., `host_id` and `visitor_id` both → `users`)
+1. **Service layer** (`pkg/services/ontology_context.go:129-160`):
+   - Added `seen` map to track source→target pairs by key (e.g., "user→billing_engagement")
+   - When a duplicate is found, compare label lengths and keep the longer one
+   - This handles cases where the same entity pair has multiple FK columns (e.g., `host_id` and `visitor_id` both → `users`)
+
+**Test Coverage:**
+
+- Added `TestGetDomainContext_DeduplicatesRelationships` - verifies 3 duplicate relationships are deduplicated to 1, keeping the longest label
+- Added `TestGetDomainContext_DeduplicatesRelationships_FirstWinsWhenSameLength` - verifies first relationship wins when labels have same length
+
+### Original Problem
+
+"Offer → Engagement Payment Intent" appeared 3+ times with slightly different labels because:
+- Same entity pair can have multiple FK columns
 - Same FK detected by multiple methods (FK constraint + PK-match inference)
 - Different descriptions for same logical relationship
-
-### Fix Required
-
-Deduplicate by source→target pair, keeping first (or longest) label:
-```go
-seen := make(map[string]bool)
-for _, rel := range entityRelationships {
-    // ... name lookup ...
-    key := sourceName + "→" + targetName
-    if seen[key] {
-        continue  // Skip duplicate
-    }
-    seen[key] = true
-    relationships = append(...)
-}
-```
-
-### Files to Modify
-
-| File | Lines | Change |
-|------|-------|--------|
-| `pkg/services/ontology_context.go` | 129-148 | Add deduplication map |
 
 ---
 
