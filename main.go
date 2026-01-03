@@ -200,11 +200,16 @@ func main() {
 		llmFactory, getTenantCtx, logger)
 	ontologyContextService := services.NewOntologyContextService(
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, projectService, logger)
+
+	// Create worker pool for parallel LLM calls
+	workerPoolConfig := llm.DefaultWorkerPoolConfig()
+	llmWorkerPool := llm.NewWorkerPool(workerPoolConfig, logger)
+
 	columnEnrichmentService := services.NewColumnEnrichmentService(
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo,
-		datasourceService, adapterFactory, llmFactory, getTenantCtx, logger)
+		datasourceService, adapterFactory, llmFactory, llmWorkerPool, getTenantCtx, logger)
 	relationshipEnrichmentService := services.NewRelationshipEnrichmentService(
-		entityRelationshipRepo, ontologyEntityRepo, llmFactory, logger)
+		entityRelationshipRepo, ontologyEntityRepo, llmFactory, llmWorkerPool, logger)
 
 	// Ontology DAG service for orchestrated workflow execution
 	ontologyDAGService := services.NewOntologyDAGService(

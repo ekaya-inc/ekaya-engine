@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -503,6 +505,7 @@ func TestColumnEnrichmentService_EnrichProject_Success(t *testing.T) {
 		schemaRepo:       schemaRepo,
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
+		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
 		logger:           zap.NewNop(),
 	}
 
@@ -580,6 +583,7 @@ func TestColumnEnrichmentService_EnrichProject_WithRetryOnTransientError(t *test
 		schemaRepo:       schemaRepo,
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
+		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
 		logger:           zap.NewNop(),
 	}
 
@@ -637,6 +641,7 @@ func TestColumnEnrichmentService_EnrichProject_NonRetryableError(t *testing.T) {
 		schemaRepo:       schemaRepo,
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
+		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
 		logger:           zap.NewNop(),
 	}
 
@@ -710,6 +715,7 @@ func TestColumnEnrichmentService_EnrichProject_LargeTable(t *testing.T) {
 		schemaRepo:       schemaRepo,
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
+		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
 		logger:           zap.NewNop(),
 	}
 
@@ -767,6 +773,7 @@ func TestColumnEnrichmentService_EnrichProject_ProgressCallback(t *testing.T) {
 		schemaRepo:       schemaRepo,
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
+		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
 		logger:           zap.NewNop(),
 	}
 
@@ -815,6 +822,7 @@ func TestColumnEnrichmentService_EnrichProject_EmptyProject(t *testing.T) {
 		schemaRepo:       schemaRepo,
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
+		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
 		logger:           zap.NewNop(),
 	}
 
@@ -875,6 +883,7 @@ func TestColumnEnrichmentService_EnrichProject_PartialFailure(t *testing.T) {
 		schemaRepo:       schemaRepo,
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
+		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
 		logger:           zap.NewNop(),
 	}
 
@@ -976,6 +985,7 @@ func TestColumnEnrichmentService_EnrichTable_WithForeignKeys(t *testing.T) {
 		schemaRepo:       schemaRepo,
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
+		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
 		logger:           zap.NewNop(),
 	}
 
@@ -1051,6 +1061,7 @@ func TestColumnEnrichmentService_EnrichTable_WithEnumValues(t *testing.T) {
 		schemaRepo:       schemaRepo,
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
+		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
 		logger:           zap.NewNop(),
 	}
 
@@ -1123,6 +1134,7 @@ func TestColumnEnrichmentService_EnrichTable_NoEntity(t *testing.T) {
 		schemaRepo:       schemaRepo,
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
+		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
 		logger:           zap.NewNop(),
 	}
 
@@ -1162,6 +1174,7 @@ func TestColumnEnrichmentService_EnrichTable_NoColumns(t *testing.T) {
 		schemaRepo:       schemaRepo,
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
+		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
 		logger:           zap.NewNop(),
 	}
 
@@ -1220,6 +1233,7 @@ func TestColumnEnrichmentService_EnrichProject_ContinuesOnFailure(t *testing.T) 
 		schemaRepo:       schemaRepo,
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
+		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
 		logger:           zap.NewNop(),
 	}
 
@@ -1237,12 +1251,22 @@ func TestColumnEnrichmentService_EnrichProject_ContinuesOnFailure(t *testing.T) 
 type testColEnrichmentRetryableFailureClient struct {
 	response  string
 	callCount int
+	mu        sync.Mutex
 }
 
 func (c *testColEnrichmentRetryableFailureClient) GenerateResponse(ctx context.Context, prompt, systemMsg string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+	c.mu.Lock()
 	c.callCount++
-	// Fail on all calls during the second table (calls 2-5: 1 initial + 3 retries)
-	if c.callCount >= 2 && c.callCount <= 5 {
+	count := c.callCount
+	c.mu.Unlock()
+
+	// Fail on all calls for table2 (detect by checking if prompt contains "Table2")
+	// This makes the test deterministic regardless of execution order
+	if strings.Contains(prompt, "Table2") || strings.Contains(prompt, "table2") {
+		return nil, llm.NewError(llm.ErrorTypeEndpoint, "endpoint error", true, errors.New("endpoint error"))
+	}
+	// Also keep the old behavior as fallback for compatibility
+	if count >= 2 && count <= 5 {
 		return nil, llm.NewError(llm.ErrorTypeEndpoint, "endpoint error", true, errors.New("endpoint error"))
 	}
 	return &llm.GenerateResponseResult{Content: c.response}, nil

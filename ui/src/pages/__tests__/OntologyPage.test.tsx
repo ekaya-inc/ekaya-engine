@@ -1,8 +1,9 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import React from 'react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import OntologyDAG from '../../components/ontology/OntologyDAG';
 import OntologyPage from '../OntologyPage';
 
 // Mock the OntologyDAG component
@@ -27,7 +28,6 @@ vi.mock('react-router-dom', async () => {
 });
 
 // Import the mocked OntologyDAG
-import OntologyDAG from '../../components/ontology/OntologyDAG';
 
 describe('OntologyPage', () => {
   beforeEach(() => {

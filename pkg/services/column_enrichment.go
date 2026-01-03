@@ -45,6 +45,7 @@ type columnEnrichmentService struct {
 	dsSvc            DatasourceService
 	adapterFactory   datasource.DatasourceAdapterFactory
 	llmFactory       llm.LLMClientFactory
+	workerPool       *llm.WorkerPool
 	getTenantCtx     TenantContextFunc
 	logger           *zap.Logger
 }
@@ -58,6 +59,7 @@ func NewColumnEnrichmentService(
 	dsSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
+	workerPool *llm.WorkerPool,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) ColumnEnrichmentService {
@@ -69,6 +71,7 @@ func NewColumnEnrichmentService(
 		dsSvc:            dsSvc,
 		adapterFactory:   adapterFactory,
 		llmFactory:       llmFactory,
+		workerPool:       workerPool,
 		getTenantCtx:     getTenantCtx,
 		logger:           logger.Named("column-enrichment"),
 	}
@@ -100,22 +103,36 @@ func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID u
 		return result, nil
 	}
 
-	totalTables := len(tableNames)
+	// Build work items for parallel processing
+	var workItems []llm.WorkItem
+	for _, tableName := range tableNames {
+		name := tableName // Capture for closure
+		workItems = append(workItems, llm.WorkItem{
+			ID: name,
+			Execute: func(ctx context.Context) (any, error) {
+				if err := s.EnrichTable(ctx, projectID, name); err != nil {
+					return name, err
+				}
+				return name, nil
+			},
+		})
+	}
 
-	// Enrich each table, continuing on failure
-	for idx, tableName := range tableNames {
-		if err := s.EnrichTable(ctx, projectID, tableName); err != nil {
-			s.logTableFailure(tableName, "Failed to enrich table", err)
-			result.TablesFailed[tableName] = err.Error()
-		} else {
-			result.TablesEnriched = append(result.TablesEnriched, tableName)
-		}
-
-		// Report progress after each table
+	// Process all tables with worker pool
+	tableResults := s.workerPool.Process(ctx, workItems, func(completed, total int) {
 		if progressCallback != nil {
-			processed := idx + 1
-			msg := fmt.Sprintf("Enriching columns (%d/%d tables)...", processed, totalTables)
-			progressCallback(processed, totalTables, msg)
+			progressCallback(completed, total,
+				fmt.Sprintf("Enriching columns (%d/%d tables)...", completed, total))
+		}
+	})
+
+	// Aggregate results
+	for _, r := range tableResults {
+		if r.Err != nil {
+			s.logTableFailure(r.ID, "Failed to enrich table", r.Err)
+			result.TablesFailed[r.ID] = r.Err.Error()
+		} else {
+			result.TablesEnriched = append(result.TablesEnriched, r.ID)
 		}
 	}
 

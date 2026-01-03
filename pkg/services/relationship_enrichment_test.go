@@ -173,7 +173,8 @@ func TestRelationshipEnrichmentService_ValidationFiltersInvalid(t *testing.T) {
 	relRepo := &testRelEnrichmentRelRepo{relationships: relationships}
 	entityRepo := &testRelEnrichmentEntityRepo{entities: entities}
 	mockFactory := llm.NewMockClientFactory()
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, zap.NewNop())
+	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, testPool, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -225,7 +226,8 @@ func TestRelationshipEnrichmentService_RetryOnTransientError(t *testing.T) {
 		}, nil
 	}
 
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, zap.NewNop())
+	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, testPool, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -270,7 +272,8 @@ func TestRelationshipEnrichmentService_NonRetryableError(t *testing.T) {
 		return nil, llm.NewError(llm.ErrorTypeAuth, "invalid api key", false, errors.New("401 unauthorized"))
 	}
 
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, zap.NewNop())
+	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, testPool, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -317,7 +320,8 @@ func TestRelationshipEnrichmentService_InvalidJSONResponse(t *testing.T) {
 		}, nil
 	}
 
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, zap.NewNop())
+	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, testPool, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)

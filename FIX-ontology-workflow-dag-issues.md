@@ -558,13 +558,14 @@ This is noted for future design - no changes needed now.
 
 ---
 
-## Issue 8: LLM Calls Are Serialized - Should Use Parallel Worker Pool
+## Issue 8: LLM Calls Are Serialized - Should Use Parallel Worker Pool ✅ COMPLETE
 
 **Severity**: High (Performance)
+**Status**: ✅ Fixed, Tested, and Committed (2026-01-03)
 
-**Current Behavior**:
+**Original Behavior**:
 
-Both `relationship_enrichment.go` and `column_enrichment.go` process LLM calls **serially**:
+Both `relationship_enrichment.go` and `column_enrichment.go` processed LLM calls **serially**:
 
 ```go
 // relationship_enrichment.go - Serial batch processing
@@ -582,292 +583,103 @@ for idx, tableName := range tableNames {
 }
 ```
 
-This means:
+This meant:
 - With 86 relationships in batches of 20 = 5 LLM calls, executed one at a time
 - With 38 tables = 38 LLM calls, executed one at a time
-- Total time = sum of all individual LLM call times
+- Total time = sum of all individual LLM call times (~15+ minutes)
 
-**Expected Behavior**:
+**Files Modified**:
+- `pkg/llm/worker_pool.go` - Created new worker pool with bounded parallelism using semaphore pattern
+- `pkg/llm/worker_pool_test.go` - Comprehensive test suite (8 tests) covering success, errors, concurrency limits, progress callbacks, context cancellation
+- `pkg/services/relationship_enrichment.go` - Refactored to use worker pool for parallel batch processing
+- `pkg/services/relationship_enrichment_test.go` - Updated all tests to inject worker pool with MaxConcurrent: 1 for determinism
+- `pkg/services/column_enrichment.go` - Refactored to use worker pool for parallel table processing
+- `pkg/services/column_enrichment_test.go` - Updated all tests to inject worker pool with MaxConcurrent: 1 for determinism, fixed flaky test with mutex
+- `main.go` - Created and injected worker pool into both enrichment services
+- `ui/src/pages/__tests__/OntologyPage.test.tsx` - Fixed import ordering (minor cleanup)
 
-Send up to **8 concurrent LLM requests** using a worker pool pattern:
-- As responses come back, immediately start new requests
-- Maintain 8 outstanding requests at all times until work is exhausted
-- LLM providers (OpenAI, Anthropic) can batch requests server-side for efficiency
+**Implementation Details**:
 
-**Existing Infrastructure**:
+1. **Worker Pool Architecture** (`pkg/llm/worker_pool.go`):
+   - Uses Go semaphore pattern (`chan struct{}`) to limit concurrent LLM calls to 8
+   - Non-generic implementation: `WorkItem` and `WorkResult` use `any` type for simplicity
+   - Goroutines acquire semaphore slot before executing work item
+   - Results are collected as they complete (not in submission order)
+   - Progress callback invoked after each completion for real-time updates
+   - Respects context cancellation - stops acquiring new slots when context is done
+   - Fail-safe: continues processing all items even if some fail
 
-The codebase already has a `workqueue` package with concurrency strategies:
-- `pkg/services/workqueue/strategy.go` - `ThrottledLLMStrategy(maxConcurrent int)`
-- However, enrichment services don't use this - they use simple `for` loops
+2. **Relationship Enrichment Changes**:
+   - Created `batchResult` struct to hold enrichment results per batch
+   - Refactored `enrichBatch` → `enrichBatchInternal` to return structured result
+   - Build `[]llm.WorkItem` with closures that capture each batch
+   - Call `workerPool.Process()` to execute all batches concurrently
+   - Progress callback maps batch completion to relationship progress
+   - Aggregate results after all batches complete
 
-**Proposed Design: LLMWorkerPool**
+3. **Column Enrichment Changes**:
+   - Build `[]llm.WorkItem` with closures that capture each table name
+   - Call `workerPool.Process()` to execute all tables concurrently
+   - Progress callback directly reports table completion
+   - Aggregate results after all tables complete
 
-Create a reusable, DI-injectable worker pool for parallel LLM execution:
+4. **Dependency Injection** (`main.go`):
+   - Created worker pool with `llm.DefaultWorkerPoolConfig()` (MaxConcurrent: 8)
+   - Injected into both `NewRelationshipEnrichmentService` and `NewColumnEnrichmentService`
+   - Single shared pool for all LLM enrichment operations
 
-```go
-// pkg/llm/worker_pool.go
+5. **Test Updates**:
+   - All tests use `MaxConcurrent: 1` to ensure deterministic execution order
+   - Fixed race condition in `testColEnrichmentRetryableFailureClient` by adding mutex
+   - Made `TestColumnEnrichmentService_EnrichProject_ContinuesOnFailure` deterministic by checking prompt content instead of call count
+   - All existing tests pass with new architecture
 
-// WorkerPoolConfig configures the LLM worker pool.
-type WorkerPoolConfig struct {
-    MaxConcurrent int // Maximum concurrent LLM calls (default: 8)
-}
+6. **Non-Generic Design Decision**:
+   - Used `any` type instead of generics (`WorkItem[T any]`) for simplicity
+   - Avoids type parameter complexity in service constructors
+   - Callers do type assertion on results (e.g., `r.Result.(*batchResult)`)
+   - Trade-off: Less type safety but simpler dependency injection
 
-// DefaultWorkerPoolConfig returns sensible defaults.
-func DefaultWorkerPoolConfig() WorkerPoolConfig {
-    return WorkerPoolConfig{
-        MaxConcurrent: 8,
-    }
-}
-
-// WorkerPool manages concurrent LLM call execution with bounded parallelism.
-// It uses a semaphore to limit outstanding requests and processes results
-// as they complete, allowing new requests to start immediately.
-type WorkerPool struct {
-    config WorkerPoolConfig
-    logger *zap.Logger
-}
-
-// NewWorkerPool creates a new LLM worker pool.
-func NewWorkerPool(config WorkerPoolConfig, logger *zap.Logger) *WorkerPool {
-    if config.MaxConcurrent < 1 {
-        config.MaxConcurrent = 8
-    }
-    return &WorkerPool{
-        config: config,
-        logger: logger.Named("llm-worker-pool"),
-    }
-}
-
-// WorkItem represents a unit of work to be processed.
-type WorkItem[T any] struct {
-    ID      string                                    // For logging/tracking
-    Execute func(ctx context.Context) (T, error)     // The LLM call to make
-}
-
-// WorkResult represents the result of a work item.
-type WorkResult[T any] struct {
-    ID     string
-    Result T
-    Err    error
-}
-
-// Process executes all work items with bounded parallelism.
-// Returns results in completion order (not submission order).
-// Continues processing all items even if some fail.
-func (p *WorkerPool) Process[T any](
-    ctx context.Context,
-    items []WorkItem[T],
-    onProgress func(completed, total int),
-) []WorkResult[T] {
-    if len(items) == 0 {
-        return nil
-    }
-
-    results := make([]WorkResult[T], 0, len(items))
-    resultsChan := make(chan WorkResult[T], len(items))
-    sem := make(chan struct{}, p.config.MaxConcurrent)
-
-    var wg sync.WaitGroup
-
-    // Submit all work items
-    for _, item := range items {
-        wg.Add(1)
-        go func(item WorkItem[T]) {
-            defer wg.Done()
-
-            // Acquire semaphore slot (blocks if at max concurrency)
-            select {
-            case sem <- struct{}{}:
-                defer func() { <-sem }() // Release slot when done
-            case <-ctx.Done():
-                resultsChan <- WorkResult[T]{ID: item.ID, Err: ctx.Err()}
-                return
-            }
-
-            // Execute the LLM call
-            result, err := item.Execute(ctx)
-            resultsChan <- WorkResult[T]{
-                ID:     item.ID,
-                Result: result,
-                Err:    err,
-            }
-        }(item)
-    }
-
-    // Close results channel when all work is done
-    go func() {
-        wg.Wait()
-        close(resultsChan)
-    }()
-
-    // Collect results and report progress
-    completed := 0
-    for result := range resultsChan {
-        results = append(results, result)
-        completed++
-        if onProgress != nil {
-            onProgress(completed, len(items))
-        }
-    }
-
-    return results
-}
-```
-
-**Usage in Relationship Enrichment**:
-
-```go
-func (s *relationshipEnrichmentService) EnrichProject(
-    ctx context.Context,
-    projectID uuid.UUID,
-    progressCallback dag.ProgressCallback,
-) (*EnrichRelationshipsResult, error) {
-    // ... setup code ...
-
-    // Build work items for each batch
-    var workItems []llm.WorkItem[*batchResult]
-    for i := 0; i < len(validRelationships); i += batchSize {
-        batch := validRelationships[i:min(i+batchSize, len(validRelationships))]
-        batchID := fmt.Sprintf("batch-%d", i/batchSize)
-
-        workItems = append(workItems, llm.WorkItem[*batchResult]{
-            ID: batchID,
-            Execute: func(ctx context.Context) (*batchResult, error) {
-                return s.enrichBatchInternal(ctx, projectID, batch, entityByID)
-            },
-        })
-    }
-
-    // Process all batches with 8 concurrent LLM calls
-    results := s.workerPool.Process(ctx, workItems, func(completed, total int) {
-        if progressCallback != nil {
-            // Map batch progress to relationship progress
-            relProgress := (completed * len(validRelationships)) / total
-            progressCallback(relProgress, len(relationships),
-                fmt.Sprintf("Enriching relationships (%d/%d)...", relProgress, len(relationships)))
-        }
-    })
-
-    // Aggregate results
-    for _, r := range results {
-        if r.Err != nil {
-            result.RelationshipsFailed += r.Result.BatchSize
-        } else {
-            result.RelationshipsEnriched += r.Result.Enriched
-            result.RelationshipsFailed += r.Result.Failed
-        }
-    }
-
-    return result, nil
-}
-```
-
-**Usage in Column Enrichment**:
-
-```go
-func (s *columnEnrichmentService) EnrichProject(
-    ctx context.Context,
-    projectID uuid.UUID,
-    tableNames []string,
-    progressCallback dag.ProgressCallback,
-) (*EnrichColumnsResult, error) {
-    // ... setup code ...
-
-    // Build work items for each table
-    var workItems []llm.WorkItem[string] // Returns table name on success
-    for _, tableName := range tableNames {
-        name := tableName // Capture for closure
-        workItems = append(workItems, llm.WorkItem[string]{
-            ID: name,
-            Execute: func(ctx context.Context) (string, error) {
-                if err := s.EnrichTable(ctx, projectID, name); err != nil {
-                    return name, err
-                }
-                return name, nil
-            },
-        })
-    }
-
-    // Process all tables with 8 concurrent LLM calls
-    results := s.workerPool.Process(ctx, workItems, func(completed, total int) {
-        if progressCallback != nil {
-            progressCallback(completed, total,
-                fmt.Sprintf("Enriching columns (%d/%d tables)...", completed, total))
-        }
-    })
-
-    // Aggregate results
-    for _, r := range results {
-        if r.Err != nil {
-            s.logTableFailure(r.ID, "Failed to enrich table", r.Err)
-            result.TablesFailed[r.ID] = r.Err.Error()
-        } else {
-            result.TablesEnriched = append(result.TablesEnriched, r.ID)
-        }
-    }
-
-    return result, nil
-}
-```
-
-**Dependency Injection**:
-
-Add `WorkerPool` to service constructors:
-
-```go
-// In main.go or service initialization
-workerPoolConfig := llm.DefaultWorkerPoolConfig() // MaxConcurrent: 8
-llmWorkerPool := llm.NewWorkerPool(workerPoolConfig, logger)
-
-relationshipEnrichmentService := services.NewRelationshipEnrichmentService(
-    relationshipRepo,
-    entityRepo,
-    llmFactory,
-    llmWorkerPool,  // NEW: inject worker pool
-    logger,
-)
-
-columnEnrichmentService := services.NewColumnEnrichmentService(
-    // ... existing deps ...
-    llmWorkerPool,  // NEW: inject worker pool
-    logger,
-)
-```
-
-**Testing Considerations**:
-
-```go
-// For unit tests, use MaxConcurrent: 1 to serialize and make tests deterministic
-testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
-
-// For integration tests, can use full parallelism
-integrationPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), logger)
-```
+**Testing**:
+- `TestWorkerPool_Process_Success` - Verifies basic parallel execution
+- `TestWorkerPool_Process_WithErrors` - Verifies error handling doesn't stop other work
+- `TestWorkerPool_Process_EmptyItems` - Edge case handling
+- `TestWorkerPool_Process_ContextCancellation` - Context propagation
+- `TestWorkerPool_Process_ConcurrencyLimit` - Verifies semaphore correctly limits to MaxConcurrent
+- `TestWorkerPool_Process_ProgressCallback` - Verifies progress reporting
+- `TestWorkerPool_ConfigDefault` - Verifies invalid config is corrected to defaults
+- All enrichment service tests updated and passing
 
 **Expected Performance Improvement**:
 
-| Scenario | Serial (current) | Parallel (8 concurrent) |
-|----------|------------------|-------------------------|
+| Scenario | Serial (before) | Parallel (after - 8 concurrent) |
+|----------|-----------------|--------------------------------|
 | 5 relationship batches @ 3s each | 15s | ~3-6s |
 | 38 tables @ 20s each | 760s (~12.5 min) | ~100-150s (~2 min) |
-| **Total enrichment phase** | ~15+ min | ~3-4 min |
+| **Total enrichment phase** | ~15+ min | **~3-4 min** |
 
-**Implementation Steps**:
+**Commit Date**: 2026-01-03
 
-1. Create `pkg/llm/worker_pool.go` with the `WorkerPool` type
-2. Add `WorkerPool` to `RelationshipEnrichmentService` constructor
-3. Refactor `EnrichProject` to use worker pool instead of serial loop
-4. Add `WorkerPool` to `ColumnEnrichmentService` constructor
-5. Refactor `EnrichProject` to use worker pool instead of serial loop
-6. Update `main.go` to create and inject the worker pool
-7. Update tests to use `MaxConcurrent: 1` for determinism
-8. Integration test with real LLM to verify parallelism works
+**What Was Done**:
+1. Created reusable `WorkerPool` in `pkg/llm/` using semaphore pattern for bounded parallelism
+2. Refactored relationship enrichment to process batches concurrently (up to 8 at once)
+3. Refactored column enrichment to process tables concurrently (up to 8 at once)
+4. Injected worker pool via dependency injection in `main.go`
+5. Updated all tests to use `MaxConcurrent: 1` for deterministic behavior
+6. Fixed race condition in column enrichment test by adding mutex protection
+7. Created comprehensive test suite for worker pool (8 tests covering all edge cases)
 
-**Alternative: Use Existing workqueue Package**
+**Next Session Should**:
+1. Run a full ontology extraction and time the enrichment phases
+2. Compare total runtime against the original ~15 minute baseline
+3. Monitor server logs to verify 8 concurrent LLM calls are happening
+4. Check for any new errors related to concurrent access (unlikely but worth checking)
+5. If performance gain is less than expected, investigate: LLM API rate limits, network bottlenecks, or database contention
 
-The codebase has `pkg/services/workqueue` with `ThrottledLLMStrategy`. However:
-- It's designed for task queues with callbacks, not request/response patterns
-- Would require significant refactoring to fit the enrichment use case
-- The simpler `WorkerPool` above is more appropriate for batch LLM calls
+**Architecture Notes for Future Work**:
+- Worker pool is intentionally generic and reusable for other LLM batch operations
+- Consider making MaxConcurrent configurable via environment variable if different projects need different limits
+- Could add metrics/telemetry to track actual concurrency and identify bottlenecks
+- If LLM providers enforce per-minute rate limits, may need to add rate limiting layer on top of worker pool
 
-The `workqueue` package could be refactored to expose a simpler `ProcessBatch` API, but creating a focused `WorkerPool` in the `llm` package is cleaner.
+---
