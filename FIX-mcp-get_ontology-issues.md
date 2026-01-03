@@ -233,7 +233,17 @@ WHERE LOWER(h.username) = LOWER({{username}}) OR LOWER(v.username) = LOWER({{use
 
 - [x] **Step 1: Database Migration** - Created `migrations/025_business_glossary.{up,down}.sql` with table, RLS, indexes, and trigger. Added integration test `migrations/025_business_glossary_test.go`.
 - [x] **Step 2: Model** - Created `pkg/models/glossary.go` with `BusinessGlossaryTerm` and `Filter` structs. Model includes all fields from the spec: ID, ProjectID, Term, Definition, SQLPattern, BaseTable, ColumnsUsed ([]string), Filters ([]Filter), Aggregation, Source, CreatedBy, CreatedAt, UpdatedAt. Filter struct has Column, Operator, and Values fields. JSON tags include omitempty where appropriate.
-- [ ] **Step 3: Repository** - Create `pkg/repositories/glossary_repository.go` with CRUD operations
+- [x] **Step 3: Repository** ✅ COMPLETED
+  - **File:** `pkg/repositories/glossary_repository.go`
+  - **Interface:** `GlossaryRepository` with 6 methods: Create, Update, Delete, GetByProject, GetByTerm, GetByID
+  - **Pattern:** Follows `ontology_entity_repository.go` - uses `database.GetTenantScope(ctx)`, RETURNING clause, proper JSONB handling
+  - **Helper functions:** `nullString()`, `jsonbValue()`, `jsonUnmarshal()`, `scanGlossaryTerm()` for database field handling
+  - **Tests:** `pkg/repositories/glossary_repository_test.go` (19 integration tests) covering CRUD, JSONB fields, edge cases, and RLS enforcement
+  - **Key implementation notes:**
+    - Uses `pgx.Row` interface pattern for scanning to support both QueryRow and Rows iteration
+    - GetByTerm and GetByID return `nil, nil` for not-found (not an error), consistent with other repos
+    - Delete and Update return error for not-found records
+    - JSONB fields properly handle empty slices → NULL and NULL → empty slices
 - [ ] **Step 4: Service** - Create `pkg/services/glossary_service.go` with business logic and LLM suggestion
 - [ ] **Step 5: Handler** - Create `pkg/handlers/glossary_handler.go` with HTTP endpoints
 - [ ] **Step 6: Register in main.go** - Wire up handler registration
