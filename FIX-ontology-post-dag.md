@@ -13,7 +13,7 @@ Branch: `ddanieli/create-ontology-workflow-dag`
 | Issue 4: Column chunk parallelism | Minor | ✅ DONE | Completed 2026-01-03 |
 | Issue 5: Heartbeat goroutine leak | Low | ✅ DONE | Completed 2026-01-03 |
 | Issue 6: UI stale closure | Low | ✅ DONE | React best practice |
-| Issue 7: LLM circuit breaker | Enhancement | 📋 TODO | Resilience |
+| Issue 7: LLM circuit breaker | Enhancement | ✅ DONE | Committed 2026-01-03 |
 
 ---
 
@@ -741,9 +741,10 @@ The fix captures the API response in a local variable (`response.data`) and uses
 
 ---
 
-## Issue 7: No Circuit Breaker for LLM Provider Outages
+## Issue 7: No Circuit Breaker for LLM Provider Outages ✅
 
 **Severity:** Enhancement
+**Status:** ✅ COMPLETED 2026-01-03
 
 ### Problem
 
@@ -850,6 +851,111 @@ circuitBreaker := llm.NewCircuitBreaker(llm.CircuitBreakerConfig{
 - `pkg/services/column_enrichment.go`
 - `pkg/services/relationship_enrichment.go`
 - `main.go` (wire circuit breaker)
+
+### Implementation Summary
+
+**Completed:** 2026-01-03
+
+Successfully implemented a thread-safe circuit breaker pattern to protect against LLM provider outages.
+
+**Key Implementation Details:**
+
+1. **Circuit Breaker States** (`pkg/llm/circuit_breaker.go`):
+   - **Closed**: Normal operation, requests flow through
+   - **Open**: Circuit tripped, requests blocked with descriptive error
+   - **Half-Open**: Testing recovery, allows one request through
+
+2. **Configuration** (Defaults):
+   - Threshold: 5 consecutive failures before tripping
+   - Reset timeout: 30 seconds before attempting recovery
+   - Thread-safe: Uses `sync.RWMutex` for concurrent access
+
+3. **Integration Points**:
+   - `columnEnrichmentService.enrichColumnBatch()`: Checks circuit before LLM call, records success/failure
+   - `relationshipEnrichmentService.enrichBatchInternal()`: Checks circuit before LLM call, records success/failure
+   - Single shared circuit breaker instance for all LLM operations (wired in `main.go`)
+
+4. **Error Handling**:
+   - Circuit breaker check happens **before** retry logic
+   - If circuit is open, fails fast without attempting LLM call
+   - Records failures only after all retries exhausted
+   - Logs circuit state transitions with detailed context
+
+5. **State Transitions**:
+   - Closed → Open: After N consecutive failures (default: 5)
+   - Open → Half-Open: After timeout expires (default: 30s)
+   - Half-Open → Closed: On successful request
+   - Half-Open → Open: On failed request
+
+**Testing:**
+
+Created 11 comprehensive unit tests in `pkg/llm/circuit_breaker_test.go`:
+1. Initial state verification
+2. Tripping after threshold
+3. Not tripping before threshold
+4. Success resets failure count
+5. Transition to half-open after timeout
+6. Half-open success closes circuit
+7. Half-open failure reopens circuit
+8. Half-open rejects additional requests
+9. Manual reset
+10. Default configuration values
+11. Concurrent access (race detector)
+
+All tests pass, including race detector (`go test -race`).
+
+**Behavior:**
+
+Before circuit breaker:
+- 38 tables × 3 retries = 114 failed LLM calls before workflow fails
+- Each retry with exponential backoff (0.5s, 1s, 2s)
+- Total wait time: ~4 minutes of repeated failures
+
+After circuit breaker:
+- First 5 failures trigger retries (15 LLM calls with backoff)
+- Circuit trips open after 5th consecutive failure
+- All subsequent operations fail immediately with circuit breaker error
+- After 30 seconds, circuit tests recovery with one request
+- If recovery succeeds, normal operation resumes
+
+**Design Decisions:**
+
+1. **Single shared circuit breaker**: All enrichment services share one circuit breaker instance
+   - **Why**: LLM provider outage affects all operations equally
+   - **Alternative considered**: Per-service circuit breakers would delay detection across services
+
+2. **Check before retry logic**: Circuit breaker evaluated before entering retry loop
+   - **Why**: Avoids wasting time on retries when provider is known to be down
+   - **Alternative considered**: Check within retry loop would still attempt first call
+
+3. **Record failure after all retries**: Only increment failure count after retry logic exhausts
+   - **Why**: Transient errors shouldn't trip circuit if retries succeed
+   - **Alternative considered**: Record on first failure would trip circuit prematurely
+
+**Files Modified:**
+
+- `pkg/llm/circuit_breaker.go` (created): 155 lines, full implementation
+- `pkg/llm/circuit_breaker_test.go` (created): 367 lines, 11 test cases
+- `pkg/services/column_enrichment.go` (lines 40, 49, 55, 64, 77, 524-583): Added circuit breaker field and integration
+- `pkg/services/relationship_enrichment.go` (lines 41, 46, 52, 57, 66, 217-297): Added circuit breaker field and integration
+- `pkg/services/relationship_enrichment_test.go` (4 test functions): Added circuit breaker instantiation
+- `main.go` (lines 208-216): Created and wired circuit breaker instance
+
+**Context for Future Sessions:**
+
+The circuit breaker is a global shared resource:
+- Lives for the lifetime of the application process
+- State persists across multiple DAG executions
+- If you manually restart the server, circuit state resets to closed
+- Circuit state is not persisted to database (in-memory only)
+- Cannot be configured per-project (one circuit protects all projects)
+
+If you need to add circuit breaker protection to other LLM-calling services:
+1. Add `circuitBreaker *llm.CircuitBreaker` field to service struct
+2. Pass the shared instance from main.go in constructor
+3. Call `circuitBreaker.Allow()` before LLM operation
+4. Call `circuitBreaker.RecordSuccess()` on success
+5. Call `circuitBreaker.RecordFailure()` on failure (after retries)
 
 ---
 

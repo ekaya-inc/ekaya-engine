@@ -46,6 +46,7 @@ type columnEnrichmentService struct {
 	adapterFactory   datasource.DatasourceAdapterFactory
 	llmFactory       llm.LLMClientFactory
 	workerPool       *llm.WorkerPool
+	circuitBreaker   *llm.CircuitBreaker
 	getTenantCtx     TenantContextFunc
 	logger           *zap.Logger
 }
@@ -60,6 +61,7 @@ func NewColumnEnrichmentService(
 	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
 	workerPool *llm.WorkerPool,
+	circuitBreaker *llm.CircuitBreaker,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) ColumnEnrichmentService {
@@ -72,6 +74,7 @@ func NewColumnEnrichmentService(
 		adapterFactory:   adapterFactory,
 		llmFactory:       llmFactory,
 		workerPool:       workerPool,
+		circuitBreaker:   circuitBreaker,
 		getTenantCtx:     getTenantCtx,
 		logger:           logger.Named("column-enrichment"),
 	}
@@ -508,7 +511,7 @@ func (s *columnEnrichmentService) enrichColumnsInChunks(
 	return allEnrichments, nil
 }
 
-// enrichColumnBatch enriches a batch of columns with retry logic.
+// enrichColumnBatch enriches a batch of columns with retry logic and circuit breaker protection.
 func (s *columnEnrichmentService) enrichColumnBatch(
 	ctx context.Context,
 	projectID uuid.UUID,
@@ -518,6 +521,17 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 	fkInfo map[string]string,
 	enumSamples map[string][]string,
 ) ([]columnEnrichment, error) {
+	// Check circuit breaker before attempting LLM call
+	allowed, err := s.circuitBreaker.Allow()
+	if !allowed {
+		s.logger.Error("Circuit breaker prevented LLM call",
+			zap.String("table", entity.PrimaryTable),
+			zap.String("circuit_state", s.circuitBreaker.State().String()),
+			zap.Int("consecutive_failures", s.circuitBreaker.ConsecutiveFailures()),
+			zap.Error(err))
+		return nil, err
+	}
+
 	systemMsg := s.columnEnrichmentSystemMessage()
 	prompt := s.buildColumnEnrichmentPrompt(entity, columns, fkInfo, enumSamples)
 
@@ -530,7 +544,7 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 	}
 
 	var result *llm.GenerateResponseResult
-	err := retry.Do(ctx, retryConfig, func() error {
+	err = retry.Do(ctx, retryConfig, func() error {
 		var retryErr error
 		result, retryErr = llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.3, false)
 		if retryErr != nil {
@@ -556,8 +570,17 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 	})
 
 	if err != nil {
+		// Record failure in circuit breaker
+		s.circuitBreaker.RecordFailure()
+		s.logger.Warn("Circuit breaker recorded failure",
+			zap.String("table", entity.PrimaryTable),
+			zap.String("circuit_state", s.circuitBreaker.State().String()),
+			zap.Int("consecutive_failures", s.circuitBreaker.ConsecutiveFailures()))
 		return nil, fmt.Errorf("LLM call failed after retries: %w", err)
 	}
+
+	// Record success in circuit breaker
+	s.circuitBreaker.RecordSuccess()
 
 	// Parse response (wrapped in object for standardization)
 	response, err := llm.ParseJSONResponse[columnEnrichmentResponse](result.Content)

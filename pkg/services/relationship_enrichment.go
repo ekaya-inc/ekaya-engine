@@ -43,6 +43,7 @@ type relationshipEnrichmentService struct {
 	entityRepo       repositories.OntologyEntityRepository
 	llmFactory       llm.LLMClientFactory
 	workerPool       *llm.WorkerPool
+	circuitBreaker   *llm.CircuitBreaker
 	getTenantCtx     TenantContextFunc
 	logger           *zap.Logger
 }
@@ -53,6 +54,7 @@ func NewRelationshipEnrichmentService(
 	entityRepo repositories.OntologyEntityRepository,
 	llmFactory llm.LLMClientFactory,
 	workerPool *llm.WorkerPool,
+	circuitBreaker *llm.CircuitBreaker,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) RelationshipEnrichmentService {
@@ -61,6 +63,7 @@ func NewRelationshipEnrichmentService(
 		entityRepo:       entityRepo,
 		llmFactory:       llmFactory,
 		workerPool:       workerPool,
+		circuitBreaker:   circuitBreaker,
 		getTenantCtx:     getTenantCtx,
 		logger:           logger.Named("relationship-enrichment"),
 	}
@@ -211,6 +214,23 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 		batchCtx = ctx
 	}
 
+	// Check circuit breaker before attempting LLM call
+	allowed, err := s.circuitBreaker.Allow()
+	if !allowed {
+		s.logger.Error("Circuit breaker prevented LLM call",
+			zap.String("project_id", projectID.String()),
+			zap.Int("batch_size", len(relationships)),
+			zap.String("circuit_state", s.circuitBreaker.State().String()),
+			zap.Int("consecutive_failures", s.circuitBreaker.ConsecutiveFailures()),
+			zap.Error(err))
+		// Log the specific relationships that failed
+		for _, rel := range relationships {
+			s.logRelationshipFailure(rel, "Circuit breaker open", err)
+		}
+		result.Failed = len(relationships)
+		return result, err
+	}
+
 	// Build prompt with relationship context
 	llmClient, err := s.llmFactory.CreateForProject(batchCtx, projectID)
 	if err != nil {
@@ -255,6 +275,12 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 	})
 
 	if err != nil {
+		// Record failure in circuit breaker
+		s.circuitBreaker.RecordFailure()
+		s.logger.Warn("Circuit breaker recorded failure",
+			zap.String("project_id", projectID.String()),
+			zap.String("circuit_state", s.circuitBreaker.State().String()),
+			zap.Int("consecutive_failures", s.circuitBreaker.ConsecutiveFailures()))
 		s.logger.Error("LLM call failed after retries",
 			zap.String("project_id", projectID.String()),
 			zap.Int("batch_size", len(relationships)),
@@ -266,6 +292,9 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 		result.Failed = len(relationships)
 		return result, err
 	}
+
+	// Record success in circuit breaker
+	s.circuitBreaker.RecordSuccess()
 
 	// Parse response (wrapped in object for standardization)
 	response, err := llm.ParseJSONResponse[relationshipEnrichmentResponse](llmResult.Content)

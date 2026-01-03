@@ -514,6 +514,7 @@ func TestColumnEnrichmentService_EnrichProject_Success(t *testing.T) {
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
 		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
 		logger:           zap.NewNop(),
 	}
 
@@ -592,6 +593,7 @@ func TestColumnEnrichmentService_EnrichProject_WithRetryOnTransientError(t *test
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
 		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
 		logger:           zap.NewNop(),
 	}
 
@@ -650,6 +652,7 @@ func TestColumnEnrichmentService_EnrichProject_NonRetryableError(t *testing.T) {
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
 		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
 		logger:           zap.NewNop(),
 	}
 
@@ -724,6 +727,7 @@ func TestColumnEnrichmentService_EnrichProject_LargeTable(t *testing.T) {
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
 		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
 		logger:           zap.NewNop(),
 	}
 
@@ -782,6 +786,7 @@ func TestColumnEnrichmentService_EnrichProject_ProgressCallback(t *testing.T) {
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
 		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
 		logger:           zap.NewNop(),
 	}
 
@@ -831,6 +836,7 @@ func TestColumnEnrichmentService_EnrichProject_EmptyProject(t *testing.T) {
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
 		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
 		logger:           zap.NewNop(),
 	}
 
@@ -892,6 +898,7 @@ func TestColumnEnrichmentService_EnrichProject_PartialFailure(t *testing.T) {
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
 		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
 		logger:           zap.NewNop(),
 	}
 
@@ -994,6 +1001,7 @@ func TestColumnEnrichmentService_EnrichTable_WithForeignKeys(t *testing.T) {
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
 		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
 		logger:           zap.NewNop(),
 	}
 
@@ -1070,6 +1078,7 @@ func TestColumnEnrichmentService_EnrichTable_WithEnumValues(t *testing.T) {
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
 		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
 		logger:           zap.NewNop(),
 	}
 
@@ -1094,7 +1103,8 @@ func TestColumnEnrichmentService_EnrichTable_WithEnumValues(t *testing.T) {
 
 func TestColumnEnrichmentService_identifyEnumCandidates(t *testing.T) {
 	service := &columnEnrichmentService{
-		logger: zap.NewNop(),
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
 	}
 
 	distinctCount5 := int64(5)
@@ -1143,6 +1153,7 @@ func TestColumnEnrichmentService_EnrichTable_NoEntity(t *testing.T) {
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
 		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
 		logger:           zap.NewNop(),
 	}
 
@@ -1183,6 +1194,7 @@ func TestColumnEnrichmentService_EnrichTable_NoColumns(t *testing.T) {
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
 		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
 		logger:           zap.NewNop(),
 	}
 
@@ -1234,6 +1246,14 @@ func TestColumnEnrichmentService_EnrichProject_ContinuesOnFailure(t *testing.T) 
 
 	llmFactory := &testColEnrichmentLLMFactory{client: client}
 
+	// Use a circuit breaker with high threshold so it doesn't trip during this test
+	// The test expects table2 to fail but table1 and table3 to succeed, so we need
+	// the circuit to stay closed throughout
+	highThresholdCircuit := llm.NewCircuitBreaker(llm.CircuitBreakerConfig{
+		Threshold:  10, // High threshold to prevent tripping
+		ResetAfter: 30 * time.Second,
+	})
+
 	service := &columnEnrichmentService{
 		ontologyRepo:     ontologyRepo,
 		entityRepo:       entityRepo,
@@ -1242,6 +1262,7 @@ func TestColumnEnrichmentService_EnrichProject_ContinuesOnFailure(t *testing.T) 
 		dsSvc:            &testColEnrichmentDatasourceService{},
 		llmFactory:       llmFactory,
 		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:   highThresholdCircuit,
 		logger:           zap.NewNop(),
 	}
 
@@ -1371,9 +1392,10 @@ func TestColumnEnrichmentService_EnrichColumnsInChunks_ParallelProcessing(t *tes
 	llmFactory := &testColEnrichmentLLMFactory{client: client}
 
 	service := &columnEnrichmentService{
-		llmFactory: llmFactory,
-		workerPool: llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 3}, zap.NewNop()),
-		logger:     zap.NewNop(),
+		llmFactory:     llmFactory,
+		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 3}, zap.NewNop()),
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
 	}
 
 	// Execute chunked enrichment
@@ -1477,9 +1499,10 @@ func TestColumnEnrichmentService_EnrichColumnsInChunks_ChunkFailure(t *testing.T
 	llmFactory := &testColEnrichmentLLMFactory{client: client}
 
 	service := &columnEnrichmentService{
-		llmFactory: llmFactory,
-		workerPool: llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 2}, zap.NewNop()),
-		logger:     zap.NewNop(),
+		llmFactory:     llmFactory,
+		workerPool:     llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 2}, zap.NewNop()),
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
 	}
 
 	// Execute chunked enrichment
