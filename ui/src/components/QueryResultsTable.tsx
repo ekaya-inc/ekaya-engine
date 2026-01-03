@@ -13,12 +13,13 @@ import { AlertCircle, Copy } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { useToast } from '../hooks/useToast';
+import type { ColumnInfo } from '../types/query';
 import { cn } from '../utils/cn';
 
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 
 interface QueryResultsTableProps {
-  columns: string[];
+  columns: ColumnInfo[];
   rows: Record<string, unknown>[];
   totalRowCount: number;
   maxRows?: number;
@@ -139,7 +140,7 @@ export const QueryResultsTable = ({
 }: QueryResultsTableProps) => {
   // Limit columns to maxColumns
   const displayColumns = useMemo(
-    () => columns.slice(0, maxColumns),
+    () => columns.slice(0, maxColumns).map((col) => col.name),
     [columns, maxColumns]
   );
 
