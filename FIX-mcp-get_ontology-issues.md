@@ -268,13 +268,28 @@ WHERE LOWER(h.username) = LOWER({{username}}) OR LOWER(v.username) = LOWER({{use
     - Validation errors (missing term/definition) return 400, not found returns 404
     - Suggest endpoint checks for ontology and returns 400 if none exists
     - Uses same auth/tenant middleware pattern as other handlers
-- [ ] **Step 6: Register in main.go** - Wire up handler registration
-  - Add after other handler registrations (around line 360 in main.go)
-  - Requires: `glossaryRepo := repositories.NewGlossaryRepository()`
-  - Requires: `glossaryService := services.NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, llmClientFactory, logger)`
-  - Requires: `glossaryHandler := handlers.NewGlossaryHandler(glossaryService, logger)`
-  - Call: `glossaryHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)`
+- [x] **Step 6: Register in main.go** ✅ COMPLETED (2026-01-04)
+  - **File:** `main.go` (lines 367-371)
+  - Added glossary repository, service, and handler wiring after ontologyDAGHandler registration
+  - Dependencies: glossaryRepo, ontologyRepo, ontologyEntityRepo, llmFactory, logger
+  - Routes registered with authMiddleware and tenantMiddleware
+  - **Working endpoints:**
+    - `GET /api/projects/{pid}/glossary` - List all terms
+    - `POST /api/projects/{pid}/glossary` - Create term
+    - `GET /api/projects/{pid}/glossary/{tid}` - Get single term
+    - `PUT /api/projects/{pid}/glossary/{tid}` - Update term
+    - `DELETE /api/projects/{pid}/glossary/{tid}` - Delete term
+    - `POST /api/projects/{pid}/glossary/suggest` - LLM suggests terms based on ontology
 - [ ] **Step 7: Expose in get_ontology** - Add `get_glossary` MCP tool or include in domain depth
+  - **Recommendation:** Create a new `get_glossary` MCP tool in `pkg/mcp/tools/` (Option A from spec)
+  - **Key files to reference:**
+    - `pkg/mcp/tools/ontology.go` - Pattern for creating MCP tools
+    - `pkg/services/glossary_service.go` - `GetTerms()` method returns all glossary terms
+    - `pkg/handlers/glossary_handler.go` - HTTP handler for reference
+  - **Implementation steps:**
+    1. Create tool registration in `pkg/mcp/tools/glossary.go`
+    2. Add tool filtering support in `pkg/mcp/tools/developer.go` (NewToolFilter)
+    3. Register the tool in `main.go` similar to RegisterOntologyTools
 
 **Why This Matters for MCP Clients:** When asked "What's our revenue?", the agent needs to know:
 - Revenue = `SUM(earned_amount)` not `SUM(total_amount)`
