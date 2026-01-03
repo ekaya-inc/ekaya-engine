@@ -208,7 +208,9 @@ func main() {
 
 	// Ontology DAG service for orchestrated workflow execution
 	ontologyDAGService := services.NewOntologyDAGService(
-		ontologyDAGRepo, ontologyRepo, ontologyEntityRepo, schemaRepo, getTenantCtx, logger)
+		ontologyDAGRepo, ontologyRepo, ontologyEntityRepo, schemaRepo,
+		entityRelationshipRepo, ontologyQuestionRepo, ontologyChatRepo, knowledgeRepo,
+		getTenantCtx, logger)
 
 	// Wire DAG adapters using setter pattern (avoids import cycles)
 	ontologyDAGService.SetEntityDiscoveryMethods(services.NewEntityDiscoveryAdapter(entityDiscoveryService))

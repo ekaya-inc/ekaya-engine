@@ -181,3 +181,13 @@ type testColumnEnrichment struct{}
 func (t *testColumnEnrichment) EnrichProject(_ context.Context, _ uuid.UUID, _ []string, _ dag.ProgressCallback) (*dag.ColumnEnrichmentResult, error) {
 	return nil, nil
 }
+
+// ============================================================================
+// Delete Method Tests
+// ============================================================================
+
+// Note: Delete method integration tests would require real database fixtures.
+// The handler tests in pkg/handlers/ontology_dag_handler_test.go provide
+// end-to-end coverage with mocked service. The service-level logic is
+// straightforward repository delegation, so integration tests are more valuable
+// than unit tests with complex mock implementations.

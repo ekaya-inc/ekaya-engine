@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import engineApi from '../../../services/engineApi';
@@ -11,6 +12,7 @@ vi.mock('../../../services/engineApi', () => ({
     getOntologyDAGStatus: vi.fn(),
     startOntologyExtraction: vi.fn(),
     cancelOntologyDAG: vi.fn(),
+    deleteOntology: vi.fn(),
   },
 }));
 
@@ -28,6 +30,28 @@ vi.mock('../../ui/Dialog', () => ({
     <p data-testid="dialog-description">{children}</p>,
   DialogFooter: ({ children }: { children: React.ReactNode }) =>
     <div data-testid="dialog-footer">{children}</div>,
+}));
+
+// Mock the Input component
+vi.mock('../../ui/Input', () => ({
+  Input: ({ id, value, onChange, placeholder, className, type }: {
+    id?: string;
+    value: string;
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    placeholder?: string;
+    className?: string;
+    type?: string;
+  }) => (
+    <input
+      id={id}
+      data-testid="delete-confirm-input"
+      type={type ?? 'text'}
+      value={value}
+      onChange={onChange}
+      placeholder={placeholder}
+      className={className}
+    />
+  ),
 }));
 
 const mockCompletedDAG: DAGStatusResponse = {
@@ -247,6 +271,263 @@ describe('OntologyDAG - Re-extraction Confirmation', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Retry Extraction')).toBeInTheDocument();
+    });
+  });
+});
+
+describe('OntologyDAG - Delete Ontology Functionality', () => {
+  const mockProps = {
+    projectId: 'proj-1',
+    datasourceId: 'ds-1',
+    onComplete: vi.fn(),
+    onError: vi.fn(),
+  };
+
+  const mockRunningDAG: DAGStatusResponse = {
+    dag_id: 'dag-running',
+    status: 'running',
+    current_node: 'EntityDiscovery',
+    nodes: [
+      {
+        name: 'EntityDiscovery',
+        status: 'running',
+        progress: { current: 10, total: 38, message: 'Processing...' },
+      },
+    ],
+    started_at: '2024-01-20T10:00:00Z',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows Delete Ontology button when DAG is complete', async () => {
+    vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValue({
+      success: true,
+      data: mockCompletedDAG,
+    });
+
+    render(<OntologyDAG {...mockProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /delete ontology/i })).toBeInTheDocument();
+    });
+  });
+
+  it('shows Delete Ontology button when DAG is failed', async () => {
+    vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValue({
+      success: true,
+      data: mockFailedDAG,
+    });
+
+    render(<OntologyDAG {...mockProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /delete ontology/i })).toBeInTheDocument();
+    });
+  });
+
+  it('does NOT show Delete Ontology button when DAG is running', async () => {
+    vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValue({
+      success: true,
+      data: mockRunningDAG,
+    });
+
+    render(<OntologyDAG {...mockProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Extracting ontology\.\.\./)).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole('button', { name: /delete ontology/i })).not.toBeInTheDocument();
+  });
+
+  it('shows delete confirmation dialog when Delete Ontology button is clicked', async () => {
+    vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValue({
+      success: true,
+      data: mockCompletedDAG,
+    });
+
+    render(<OntologyDAG {...mockProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /delete ontology/i })).toBeInTheDocument();
+    });
+
+    const deleteButton = screen.getByRole('button', { name: /delete ontology/i });
+    fireEvent.click(deleteButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dialog-title')).toHaveTextContent('Delete Ontology?');
+      expect(screen.getByText(/permanently delete all ontology data/)).toBeInTheDocument();
+      expect(screen.getByText(/This is a destructive action/)).toBeInTheDocument();
+    });
+  });
+
+  it('delete confirm button is disabled until user types "delete ontology"', async () => {
+    vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValue({
+      success: true,
+      data: mockCompletedDAG,
+    });
+
+    const user = userEvent.setup();
+    render(<OntologyDAG {...mockProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /delete ontology/i })).toBeInTheDocument();
+    });
+
+    const deleteButton = screen.getByRole('button', { name: /delete ontology/i });
+    fireEvent.click(deleteButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dialog-title')).toBeInTheDocument();
+    });
+
+    // Find the confirm button in the dialog (second button with "Delete Ontology" text)
+    const dialogFooter = screen.getByTestId('dialog-footer');
+    const confirmButton = dialogFooter.querySelector('button:last-child') as HTMLButtonElement;
+
+    // Initially disabled
+    expect(confirmButton).toBeDisabled();
+
+    // Type incorrect text
+    const input = screen.getByTestId('delete-confirm-input');
+    await user.type(input, 'wrong text');
+    expect(confirmButton).toBeDisabled();
+
+    // Clear and type correct text
+    await user.clear(input);
+    await user.type(input, 'delete ontology');
+    expect(confirmButton).not.toBeDisabled();
+  });
+
+  it('calls deleteOntology API and resets state on successful deletion', async () => {
+    vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValue({
+      success: true,
+      data: mockCompletedDAG,
+    });
+    vi.mocked(engineApi.deleteOntology).mockResolvedValue({
+      success: true,
+    });
+
+    const user = userEvent.setup();
+    render(<OntologyDAG {...mockProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /delete ontology/i })).toBeInTheDocument();
+    });
+
+    // Click delete button to open dialog
+    const deleteButton = screen.getByRole('button', { name: /delete ontology/i });
+    fireEvent.click(deleteButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dialog-title')).toBeInTheDocument();
+    });
+
+    // Type confirmation text
+    const input = screen.getByTestId('delete-confirm-input');
+    await user.type(input, 'delete ontology');
+
+    // Click confirm button
+    const dialogFooter = screen.getByTestId('dialog-footer');
+    const confirmButton = dialogFooter.querySelector('button:last-child') as HTMLButtonElement;
+    fireEvent.click(confirmButton);
+
+    await waitFor(() => {
+      expect(engineApi.deleteOntology).toHaveBeenCalledWith('proj-1', 'ds-1');
+    });
+
+    // State should reset - shows empty state
+    await waitFor(() => {
+      expect(screen.getByText('Ready to Extract Ontology')).toBeInTheDocument();
+    });
+  });
+
+  it('closes dialog and resets confirmation text when cancel is clicked', async () => {
+    vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValue({
+      success: true,
+      data: mockCompletedDAG,
+    });
+
+    const user = userEvent.setup();
+    render(<OntologyDAG {...mockProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /delete ontology/i })).toBeInTheDocument();
+    });
+
+    // Click delete button to open dialog
+    const deleteButton = screen.getByRole('button', { name: /delete ontology/i });
+    fireEvent.click(deleteButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dialog-title')).toBeInTheDocument();
+    });
+
+    // Type some text in the confirmation input
+    const input = screen.getByTestId('delete-confirm-input');
+    await user.type(input, 'delete');
+
+    // Click cancel button
+    const cancelButton = screen.getByRole('button', { name: /cancel/i });
+    fireEvent.click(cancelButton);
+
+    // Dialog should close
+    await waitFor(() => {
+      expect(screen.queryByTestId('dialog-title')).not.toBeInTheDocument();
+    });
+
+    // API should not have been called
+    expect(engineApi.deleteOntology).not.toHaveBeenCalled();
+
+    // Re-open dialog to verify confirmation text was reset
+    fireEvent.click(deleteButton);
+
+    await waitFor(() => {
+      const newInput = screen.getByTestId('delete-confirm-input');
+      expect(newInput).toHaveValue('');
+    });
+  });
+
+  it('shows error when delete API fails', async () => {
+    vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValue({
+      success: true,
+      data: mockCompletedDAG,
+    });
+    vi.mocked(engineApi.deleteOntology).mockRejectedValue(new Error('Network error'));
+
+    const user = userEvent.setup();
+    render(<OntologyDAG {...mockProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /delete ontology/i })).toBeInTheDocument();
+    });
+
+    // Click delete button to open dialog
+    const deleteButton = screen.getByRole('button', { name: /delete ontology/i });
+    fireEvent.click(deleteButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dialog-title')).toBeInTheDocument();
+    });
+
+    // Type confirmation text and confirm
+    const input = screen.getByTestId('delete-confirm-input');
+    await user.type(input, 'delete ontology');
+
+    const dialogFooter = screen.getByTestId('dialog-footer');
+    const confirmButton = dialogFooter.querySelector('button:last-child') as HTMLButtonElement;
+    fireEvent.click(confirmButton);
+
+    await waitFor(() => {
+      expect(engineApi.deleteOntology).toHaveBeenCalledWith('proj-1', 'ds-1');
+    });
+
+    // onError callback should be called
+    await waitFor(() => {
+      expect(mockProps.onError).toHaveBeenCalledWith('Network error');
     });
   });
 });

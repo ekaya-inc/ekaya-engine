@@ -13,6 +13,7 @@ import {
   Loader2,
   Network,
   RefreshCw,
+  Trash2,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -29,6 +30,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../ui/Dialog';
+import { Input } from '../ui/Input';
 
 interface OntologyDAGProps {
   projectId: string;
@@ -104,8 +106,11 @@ export const OntologyDAG = ({
   const [isLoading, setIsLoading] = useState(true);
   const [isStarting, setIsStarting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showReextractDialog, setShowReextractDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isMountedRef = useRef(true);
@@ -222,6 +227,33 @@ export const OntologyDAG = ({
       }
     }
   }, [projectId, datasourceId, stopPolling, fetchStatus]);
+
+  // Delete ontology
+  const handleDelete = useCallback(async () => {
+    try {
+      setIsDeleting(true);
+
+      await engineApi.deleteOntology(projectId, datasourceId);
+
+      if (!isMountedRef.current) return;
+
+      // Reset state
+      setDagStatus(null);
+      setShowDeleteDialog(false);
+      setDeleteConfirmText('');
+      stopPolling();
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      const errorMessage = err instanceof Error ? err.message : 'Failed to delete ontology';
+      console.error('Failed to delete ontology:', err);
+      setError(errorMessage);
+      onError?.(errorMessage);
+    } finally {
+      if (isMountedRef.current) {
+        setIsDeleting(false);
+      }
+    }
+  }, [projectId, datasourceId, stopPolling, onError]);
 
   // Initial load
   useEffect(() => {
@@ -469,7 +501,20 @@ export const OntologyDAG = ({
             </p>
           </div>
         </div>
-        {getActionButton()}
+        <div className="flex items-center gap-2">
+          {dagStatus && !isRunning && (
+            <Button
+              variant="outline"
+              onClick={() => setShowDeleteDialog(true)}
+              disabled={isDeleting}
+              className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete Ontology
+            </Button>
+          )}
+          {getActionButton()}
+        </div>
       </div>
 
       {/* Status banner */}
@@ -615,6 +660,76 @@ export const OntologyDAG = ({
               className="bg-purple-600 hover:bg-purple-700 text-white"
             >
               Start Re-extraction
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete ontology confirmation dialog */}
+      <Dialog open={showDeleteDialog} onOpenChange={(open) => {
+        setShowDeleteDialog(open);
+        if (!open) {
+          setDeleteConfirmText('');
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Ontology?</DialogTitle>
+            <DialogDescription>
+              This will permanently delete all ontology data, including entities, relationships,
+              questions, and chat history. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <div className="rounded-lg bg-red-50 border border-red-200 p-4 dark:bg-red-900/20 dark:border-red-800">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-red-800 dark:text-red-200">
+                  <p className="font-medium mb-1">Warning: This is a destructive action</p>
+                  <p>
+                    All extracted knowledge will be permanently deleted. You will need to run a full
+                    re-extraction to restore the ontology.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div>
+              <label htmlFor="delete-confirm" className="block text-sm font-medium text-text-primary mb-2">
+                Type <code className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-xs font-mono">delete ontology</code> to confirm
+              </label>
+              <Input
+                id="delete-confirm"
+                type="text"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder="delete ontology"
+                className="w-full"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowDeleteDialog(false);
+                setDeleteConfirmText('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void handleDelete()}
+              disabled={deleteConfirmText !== 'delete ontology' || isDeleting}
+              className="bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete Ontology'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

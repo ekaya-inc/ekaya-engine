@@ -302,9 +302,10 @@ Chose approach #1 (rename + confirmation) over implementing full incremental ref
 
 ---
 
-## Issue 5: Missing "Delete Ontology" Functionality
+## Issue 5: Missing "Delete Ontology" Functionality ✅ COMPLETE
 
 **Severity**: Moderate
+**Status**: ✅ Fixed, Tested, and Committed (2026-01-03)
 
 **Observed Behavior**:
 - No way to delete an existing ontology from the UI
@@ -315,13 +316,60 @@ Chose approach #1 (rename + confirmation) over implementing full incremental ref
 - Must have a serious confirmation dialog requiring the user to type "delete ontology"
 - This is a destructive action and should be treated as such
 
-**How to Fix**:
-1. Add "Delete Ontology" button (perhaps in a dropdown menu or settings area)
-2. Implement confirmation modal:
-   - Warning text explaining data loss
-   - Text input requiring exact string "delete ontology"
-   - Button disabled until confirmation text matches
-3. Backend: `DELETE /api/projects/{pid}/datasources/{did}/ontology`
+**Files Modified**:
+- `main.go` - Updated OntologyDAGService constructor to include all required repositories
+- `pkg/services/ontology_dag_service.go` - Added Delete method to service interface and implementation
+- `pkg/services/ontology_dag_service_test.go` - Added test documentation note
+- `pkg/handlers/ontology_dag_handler.go` - Added DELETE endpoint and handler method
+- `pkg/handlers/ontology_dag_handler_test.go` - Added comprehensive test coverage (4 tests)
+- `pkg/repositories/ontology_dag_repository.go` - Added GetActiveByProject method
+- `pkg/repositories/ontology_question_repository.go` - Added DeleteByProject method
+- `pkg/repositories/knowledge_repository.go` - Added DeleteByProject method
+- `ui/src/services/engineApi.ts` - Added deleteOntology API method
+- `ui/src/components/ontology/OntologyDAG.tsx` - Added Delete button and confirmation dialog with text input
+- `ui/src/components/ontology/__tests__/OntologyDAG.test.tsx` - Added comprehensive test coverage (7 tests)
+- `ui/src/components/__tests__/QueryResultsTable.test.tsx` - Minor whitespace cleanup
+
+**Implementation Details**:
+1. **Backend Service (ontology_dag_service.go)**:
+   - Added `Delete(ctx context.Context, projectID uuid.UUID) error` method to interface
+   - Implementation deletes all ontology-related data:
+     - DAGs (with cascading delete of DAG nodes)
+     - Ontology entities (with cascading delete of entity aliases)
+     - Entity relationships
+     - Ontology questions
+     - Chat messages
+     - Project knowledge
+     - Ontologies
+   - Uses transactional approach with comprehensive error handling and logging
+   - Prevents deletion while extraction is running
+
+2. **Backend Handler (ontology_dag_handler.go)**:
+   - Registered DELETE endpoint: `DELETE /api/projects/{pid}/datasources/{dsid}/ontology`
+   - Handler validates project/datasource IDs and calls service Delete method
+   - Returns success message on completion
+
+3. **Frontend UI (OntologyDAG.tsx)**:
+   - Added "Delete Ontology" button in header (shown only when DAG exists and is not running)
+   - Button styled in red with Trash2 icon to indicate destructive action
+   - Opens confirmation dialog when clicked
+
+4. **Confirmation Dialog**:
+   - Clear warning about permanent data loss
+   - Red warning banner explaining consequences
+   - Text input requiring exact string "delete ontology" to enable delete button
+   - Delete button disabled until confirmation text matches exactly
+   - Shows loading state during deletion
+   - Resets state after successful deletion
+
+**Testing**:
+- Backend handler tests: 4 tests covering success, service error, running DAG error, and invalid project ID
+- Frontend tests: 7 tests covering button visibility, confirmation dialog, text input validation, successful deletion, cancellation, and error handling
+- All tests pass ✅
+
+**Commit Date**: 2026-01-03
+
+**Verification Date**: 2026-01-03 - Confirmed implementation is complete with comprehensive test coverage
 
 ---
 

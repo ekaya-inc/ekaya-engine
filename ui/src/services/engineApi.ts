@@ -603,6 +603,19 @@ class EngineApiService {
       { method: 'POST' }
     );
   }
+
+  /**
+   * Delete all ontology data for project
+   */
+  async deleteOntology(
+    projectId: string,
+    datasourceId: string
+  ): Promise<ApiResponse<{ message: string }>> {
+    return this.makeRequest<{ message: string }>(
+      `/${projectId}/datasources/${datasourceId}/ontology`,
+      { method: 'DELETE' }
+    );
+  }
 }
 
 // Create and export singleton instance

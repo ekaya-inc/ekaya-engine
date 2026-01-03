@@ -80,6 +80,10 @@ func (h *OntologyDAGHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *
 	// Cancel running DAG
 	mux.HandleFunc("POST "+base+"/dag/cancel",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Cancel)))
+
+	// Delete all ontology data for project
+	mux.HandleFunc("DELETE "+base,
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Delete)))
 }
 
 // StartExtraction handles POST /api/projects/{pid}/datasources/{dsid}/ontology/extract
@@ -186,6 +190,30 @@ func (h *OntologyDAGHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := ApiResponse{Success: true, Data: map[string]string{"status": "cancelled"}}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// Delete handles DELETE /api/projects/{pid}/datasources/{dsid}/ontology
+// Deletes all ontology data for the project.
+func (h *OntologyDAGHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	projectID, _, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	if err := h.dagService.Delete(r.Context(), projectID); err != nil {
+		h.logger.Error("Failed to delete ontology",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "delete_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	response := ApiResponse{Success: true, Data: map[string]string{"message": "Ontology deleted successfully"}}
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}

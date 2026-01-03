@@ -6,7 +6,6 @@ import { render, screen, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import type { ColumnInfo } from '../../types/query';
-
 import { QueryResultsTable } from '../QueryResultsTable';
 
 // Helper to convert string array to ColumnInfo array

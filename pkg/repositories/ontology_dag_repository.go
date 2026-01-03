@@ -22,6 +22,7 @@ type OntologyDAGRepository interface {
 	GetLatestByDatasource(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyDAG, error)
 	GetLatestByProject(ctx context.Context, projectID uuid.UUID) (*models.OntologyDAG, error)
 	GetActiveByDatasource(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyDAG, error)
+	GetActiveByProject(ctx context.Context, projectID uuid.UUID) (*models.OntologyDAG, error)
 	Update(ctx context.Context, dag *models.OntologyDAG) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status models.DAGStatus, currentNode *string) error
 	Delete(ctx context.Context, id uuid.UUID) error
@@ -195,6 +196,33 @@ func (r *ontologyDAGRepository) GetActiveByDatasource(ctx context.Context, datas
 		LIMIT 1`
 
 	row := scope.Conn.QueryRow(ctx, query, datasourceID)
+	dag, err := scanDAGRow(row)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return dag, nil
+}
+
+func (r *ontologyDAGRepository) GetActiveByProject(ctx context.Context, projectID uuid.UUID) (*models.OntologyDAG, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT id, project_id, datasource_id, ontology_id,
+		       status, current_node, schema_fingerprint,
+		       owner_id, last_heartbeat,
+		       started_at, completed_at, created_at, updated_at
+		FROM engine_ontology_dag
+		WHERE project_id = $1 AND status IN ('pending', 'running')
+		ORDER BY created_at DESC
+		LIMIT 1`
+
+	row := scope.Conn.QueryRow(ctx, query, projectID)
 	dag, err := scanDAGRow(row)
 	if err != nil {
 		if err == pgx.ErrNoRows {

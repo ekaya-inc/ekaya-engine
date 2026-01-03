@@ -29,15 +29,22 @@ type OntologyDAGService interface {
 	// Cancel cancels a running DAG.
 	Cancel(ctx context.Context, dagID uuid.UUID) error
 
+	// Delete deletes all ontology data for a project including DAGs, ontologies, entities, and relationships.
+	Delete(ctx context.Context, projectID uuid.UUID) error
+
 	// Shutdown gracefully stops all DAGs owned by this server.
 	Shutdown(ctx context.Context) error
 }
 
 type ontologyDAGService struct {
-	dagRepo      repositories.OntologyDAGRepository
-	ontologyRepo repositories.OntologyRepository
-	entityRepo   repositories.OntologyEntityRepository
-	schemaRepo   repositories.SchemaRepository
+	dagRepo          repositories.OntologyDAGRepository
+	ontologyRepo     repositories.OntologyRepository
+	entityRepo       repositories.OntologyEntityRepository
+	schemaRepo       repositories.SchemaRepository
+	relationshipRepo repositories.EntityRelationshipRepository
+	questionRepo     repositories.OntologyQuestionRepository
+	chatRepo         repositories.OntologyChatRepository
+	knowledgeRepo    repositories.KnowledgeRepository
 
 	// Adapted service methods for dag package
 	entityDiscoveryMethods        dag.EntityDiscoveryMethods
@@ -65,6 +72,10 @@ func NewOntologyDAGService(
 	ontologyRepo repositories.OntologyRepository,
 	entityRepo repositories.OntologyEntityRepository,
 	schemaRepo repositories.SchemaRepository,
+	relationshipRepo repositories.EntityRelationshipRepository,
+	questionRepo repositories.OntologyQuestionRepository,
+	chatRepo repositories.OntologyChatRepository,
+	knowledgeRepo repositories.KnowledgeRepository,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) *ontologyDAGService {
@@ -73,6 +84,10 @@ func NewOntologyDAGService(
 		ontologyRepo:     ontologyRepo,
 		entityRepo:       entityRepo,
 		schemaRepo:       schemaRepo,
+		relationshipRepo: relationshipRepo,
+		questionRepo:     questionRepo,
+		chatRepo:         chatRepo,
+		knowledgeRepo:    knowledgeRepo,
 		getTenantCtx:     getTenantCtx,
 		logger:           logger.Named("ontology-dag"),
 		serverInstanceID: uuid.New(),
@@ -223,6 +238,88 @@ func (s *ontologyDAGService) Cancel(ctx context.Context, dagID uuid.UUID) error 
 
 	// Update status
 	return s.dagRepo.UpdateStatus(ctx, dagID, models.DAGStatusCancelled, nil)
+}
+
+// Delete deletes all ontology data for a project including DAGs, ontologies, entities, and relationships.
+// This is a destructive operation that removes all extracted knowledge.
+func (s *ontologyDAGService) Delete(ctx context.Context, projectID uuid.UUID) error {
+	s.logger.Info("Deleting ontology data", zap.String("project_id", projectID.String()))
+
+	// Check if there's a running DAG - cannot delete while extraction is in progress
+	activeDAG, err := s.dagRepo.GetActiveByProject(ctx, projectID)
+	if err != nil {
+		s.logger.Error("Failed to check for active DAG", zap.String("project_id", projectID.String()), zap.Error(err))
+		return fmt.Errorf("check active DAG: %w", err)
+	}
+	if activeDAG != nil && activeDAG.Status == models.DAGStatusRunning {
+		s.logger.Warn("Cannot delete ontology while extraction is running",
+			zap.String("project_id", projectID.String()),
+			zap.String("dag_id", activeDAG.ID.String()))
+		return fmt.Errorf("cannot delete ontology while extraction is running")
+	}
+
+	// Get active ontology to delete associated data
+	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	if err != nil {
+		s.logger.Error("Failed to get active ontology", zap.String("project_id", projectID.String()), zap.Error(err))
+		return fmt.Errorf("get active ontology: %w", err)
+	}
+
+	// Delete DAGs first (includes cascading delete of DAG nodes via foreign key)
+	if err := s.dagRepo.DeleteByProject(ctx, projectID); err != nil {
+		s.logger.Error("Failed to delete DAGs", zap.String("project_id", projectID.String()), zap.Error(err))
+		return fmt.Errorf("delete DAGs: %w", err)
+	}
+	s.logger.Debug("Deleted DAGs", zap.String("project_id", projectID.String()))
+
+	// Delete ontology entities and relationships if ontology exists
+	if ontology != nil {
+		// Delete entities (includes cascading delete of entity aliases via foreign key)
+		if err := s.entityRepo.DeleteByOntology(ctx, ontology.ID); err != nil {
+			s.logger.Error("Failed to delete entities", zap.String("ontology_id", ontology.ID.String()), zap.Error(err))
+			return fmt.Errorf("delete entities: %w", err)
+		}
+		s.logger.Debug("Deleted entities", zap.String("ontology_id", ontology.ID.String()))
+
+		// Delete relationships using repository
+		if err := s.relationshipRepo.DeleteByOntology(ctx, ontology.ID); err != nil {
+			s.logger.Error("Failed to delete relationships", zap.String("ontology_id", ontology.ID.String()), zap.Error(err))
+			return fmt.Errorf("delete relationships: %w", err)
+		}
+		s.logger.Debug("Deleted relationships", zap.String("ontology_id", ontology.ID.String()))
+	}
+
+	// Delete project-level data using repositories
+	// Delete ontology questions
+	if err := s.questionRepo.DeleteByProject(ctx, projectID); err != nil {
+		s.logger.Error("Failed to delete questions", zap.String("project_id", projectID.String()), zap.Error(err))
+		return fmt.Errorf("delete questions: %w", err)
+	}
+	s.logger.Debug("Deleted questions", zap.String("project_id", projectID.String()))
+
+	// Delete chat messages
+	if err := s.chatRepo.ClearHistory(ctx, projectID); err != nil {
+		s.logger.Error("Failed to delete chat messages", zap.String("project_id", projectID.String()), zap.Error(err))
+		return fmt.Errorf("delete chat messages: %w", err)
+	}
+	s.logger.Debug("Deleted chat messages", zap.String("project_id", projectID.String()))
+
+	// Delete project knowledge
+	if err := s.knowledgeRepo.DeleteByProject(ctx, projectID); err != nil {
+		s.logger.Error("Failed to delete project knowledge", zap.String("project_id", projectID.String()), zap.Error(err))
+		return fmt.Errorf("delete project knowledge: %w", err)
+	}
+	s.logger.Debug("Deleted project knowledge", zap.String("project_id", projectID.String()))
+
+	// Delete ontologies (should be last)
+	if err := s.ontologyRepo.DeleteByProject(ctx, projectID); err != nil {
+		s.logger.Error("Failed to delete ontologies", zap.String("project_id", projectID.String()), zap.Error(err))
+		return fmt.Errorf("delete ontologies: %w", err)
+	}
+	s.logger.Debug("Deleted ontologies", zap.String("project_id", projectID.String()))
+
+	s.logger.Info("Successfully deleted all ontology data", zap.String("project_id", projectID.String()))
+	return nil
 }
 
 // Shutdown gracefully stops all DAGs owned by this server.

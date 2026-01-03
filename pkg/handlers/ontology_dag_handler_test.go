@@ -20,6 +20,7 @@ type mockOntologyDAGService struct {
 	startFunc     func(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.OntologyDAG, error)
 	getStatusFunc func(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyDAG, error)
 	cancelFunc    func(ctx context.Context, dagID uuid.UUID) error
+	deleteFunc    func(ctx context.Context, projectID uuid.UUID) error
 }
 
 func (m *mockOntologyDAGService) Start(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.OntologyDAG, error) {
@@ -39,6 +40,13 @@ func (m *mockOntologyDAGService) GetStatus(ctx context.Context, datasourceID uui
 func (m *mockOntologyDAGService) Cancel(ctx context.Context, dagID uuid.UUID) error {
 	if m.cancelFunc != nil {
 		return m.cancelFunc(ctx, dagID)
+	}
+	return nil
+}
+
+func (m *mockOntologyDAGService) Delete(ctx context.Context, projectID uuid.UUID) error {
+	if m.deleteFunc != nil {
+		return m.deleteFunc(ctx, projectID)
 	}
 	return nil
 }
@@ -600,5 +608,135 @@ func TestOntologyDAGHandler_FailedDAG(t *testing.T) {
 	}
 	if secondNode["error"] != errMsg {
 		t.Errorf("expected error message '%s', got '%s'", errMsg, secondNode["error"])
+	}
+}
+
+// ============================================================================
+// Delete Handler Tests
+// ============================================================================
+
+func TestOntologyDAGHandler_Delete_Success(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	deleteCalled := false
+	mockService := &mockOntologyDAGService{
+		deleteFunc: func(ctx context.Context, pID uuid.UUID) error {
+			if pID != projectID {
+				return fmt.Errorf("unexpected project ID")
+			}
+			deleteCalled = true
+			return nil
+		},
+	}
+
+	handler := NewOntologyDAGHandler(mockService, nil, zap.NewNop())
+
+	url := fmt.Sprintf("/api/projects/%s/datasources/%s/ontology", projectID, datasourceID)
+	req := httptest.NewRequest(http.MethodDelete, url, nil)
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+	rec := httptest.NewRecorder()
+
+	handler.Delete(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	if !deleteCalled {
+		t.Error("expected delete to be called")
+	}
+
+	var response ApiResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if !response.Success {
+		t.Errorf("expected success to be true")
+	}
+
+	dataMap := response.Data.(map[string]any)
+	if dataMap["message"] != "Ontology deleted successfully" {
+		t.Errorf("expected success message, got '%s'", dataMap["message"])
+	}
+}
+
+func TestOntologyDAGHandler_Delete_ServiceError(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	mockService := &mockOntologyDAGService{
+		deleteFunc: func(ctx context.Context, pID uuid.UUID) error {
+			return fmt.Errorf("delete failed")
+		},
+	}
+
+	handler := NewOntologyDAGHandler(mockService, nil, zap.NewNop())
+
+	url := fmt.Sprintf("/api/projects/%s/datasources/%s/ontology", projectID, datasourceID)
+	req := httptest.NewRequest(http.MethodDelete, url, nil)
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+	rec := httptest.NewRecorder()
+
+	handler.Delete(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+	}
+}
+
+func TestOntologyDAGHandler_Delete_RunningDAGError(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	mockService := &mockOntologyDAGService{
+		deleteFunc: func(ctx context.Context, pID uuid.UUID) error {
+			return fmt.Errorf("cannot delete ontology while extraction is running")
+		},
+	}
+
+	handler := NewOntologyDAGHandler(mockService, nil, zap.NewNop())
+
+	url := fmt.Sprintf("/api/projects/%s/datasources/%s/ontology", projectID, datasourceID)
+	req := httptest.NewRequest(http.MethodDelete, url, nil)
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+	rec := httptest.NewRecorder()
+
+	handler.Delete(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+	}
+
+	var response map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if response["message"] != "cannot delete ontology while extraction is running" {
+		t.Errorf("expected error message about running extraction, got '%s'", response["message"])
+	}
+}
+
+func TestOntologyDAGHandler_Delete_InvalidProjectID(t *testing.T) {
+	datasourceID := uuid.New()
+
+	mockService := &mockOntologyDAGService{}
+	handler := NewOntologyDAGHandler(mockService, nil, zap.NewNop())
+
+	url := fmt.Sprintf("/api/projects/invalid-uuid/datasources/%s/ontology", datasourceID)
+	req := httptest.NewRequest(http.MethodDelete, url, nil)
+	req.SetPathValue("pid", "invalid-uuid")
+	req.SetPathValue("dsid", datasourceID.String())
+	rec := httptest.NewRecorder()
+
+	handler.Delete(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
 	}
 }
