@@ -226,7 +226,6 @@ func main() {
 	ontologyDAGService.SetRelationshipEnrichmentMethods(services.NewRelationshipEnrichmentAdapter(relationshipEnrichmentService))
 	ontologyDAGService.SetFinalizationMethods(services.NewOntologyFinalizationAdapter(ontologyFinalizationService))
 	ontologyDAGService.SetColumnEnrichmentMethods(services.NewColumnEnrichmentAdapter(columnEnrichmentService))
-	_ = ontologyDAGService // DAG service ready for use - handlers added in Phase 3
 
 	// Wire enrichment services to relationship workflow for auto-trigger after extraction
 	relationshipWorkflowService.SetColumnEnrichmentService(columnEnrichmentService)
@@ -376,6 +375,10 @@ func main() {
 		deterministicRelationshipService, logger)
 	entityRelationshipHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
+	// Register ontology DAG handler (protected) - unified workflow execution
+	ontologyDAGHandler := handlers.NewOntologyDAGHandler(ontologyDAGService, projectService, logger)
+	ontologyDAGHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"
 	fileServer := http.FileServer(http.Dir(uiDir))
@@ -439,7 +442,12 @@ func main() {
 			logger.Error("Workflow service shutdown error", zap.Error(err))
 		}
 
-		// 3. Close conversation recorder (drain pending writes)
+		// 3. Shutdown DAG service (cancels DAGs, releases ownership)
+		if err := ontologyDAGService.Shutdown(shutdownCtx); err != nil {
+			logger.Error("DAG service shutdown error", zap.Error(err))
+		}
+
+		// 4. Close conversation recorder (drain pending writes)
 		convRecorder.Close()
 
 		close(shutdownComplete)

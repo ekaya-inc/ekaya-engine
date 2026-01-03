@@ -587,20 +587,66 @@ pkg/services/
 
 6. **Retry Integration**: Node execution wraps calls in `retry.DoIfRetryable()` which uses `llm.IsRetryable()` to determine if errors should trigger retry.
 
-7. **main.go Wiring**: The DAG service is created and all adapters are wired but marked with `_ = ontologyDAGService` since handlers are added in Phase 3.
+7. **main.go Wiring**: The DAG service is created and all adapters are wired. Handlers are registered in Phase 3.
 
-### Phase 3: API & Handler
+### Phase 3: API & Handler ✅ COMPLETED
 
 **Tasks:**
-1. Create handler for DAG endpoints
-2. Register routes in `main.go`
-3. Remove old workflow endpoints
+1. ✅ Create handler for DAG endpoints (POST /extract, GET /dag, POST /dag/cancel)
+2. ✅ Register routes in `main.go`
+3. ✅ Add DAG service shutdown to server shutdown handler
+4. ✅ Add unit tests for the handler
 
-**Files:**
+**Files Created:**
 ```
 pkg/handlers/
-  ontology_dag_handler.go
+  ontology_dag_handler.go           # HTTP handler for DAG endpoints
+  ontology_dag_handler_test.go      # Unit tests for all handler methods
 ```
+
+**Implementation Notes for Future Sessions:**
+
+1. **API Endpoints**: Three endpoints are registered at `/api/projects/{pid}/datasources/{dsid}/ontology/`:
+   - `POST /extract` - Start or refresh ontology extraction (returns running DAG if one exists)
+   - `GET /dag` - Get current DAG status for UI polling (returns null data if no DAG)
+   - `POST /dag/cancel` - Cancel a running DAG
+
+2. **Response Format**: Matches the plan specification:
+   ```json
+   {
+     "dag_id": "uuid",
+     "status": "running",
+     "current_node": "EntityDiscovery",
+     "nodes": [
+       {"name": "EntityDiscovery", "status": "running", "progress": {"current": 3, "total": 15}},
+       {"name": "EntityEnrichment", "status": "pending"},
+       ...
+     ]
+   }
+   ```
+
+3. **Graceful Shutdown**: DAG service shutdown added to main.go's shutdown handler (step 4, after old workflow service). The shutdown sequence is:
+   1. HTTP server graceful drain
+   2. Old workflow service shutdown
+   3. DAG service shutdown (cancels DAGs, releases ownership)
+   4. Conversation recorder close
+
+4. **Handler Structure**:
+   - Uses `ParseProjectAndDatasourceIDs()` helper from handlers package for consistent ID parsing
+   - Response types (`DAGStatusResponse`, `DAGNodeResponse`, `DAGProgressResponse`) are defined in the handler file
+   - Uses `toDAGResponse()` and `toNodeResponse()` helpers to convert models to API responses
+   - Times are formatted as RFC3339 strings for JSON serialization
+
+5. **Test Coverage**: Unit tests cover:
+   - StartExtraction success and service error
+   - GetStatus success, no DAG exists, and service error
+   - Cancel success, no DAG found, DAG not running, and cancel error
+   - Completed DAG with all nodes completed
+   - Failed DAG with error message on failed node
+
+6. **Old Workflow Endpoints**: Not removed yet - left in place for backward compatibility during Phase 4 UI migration. Will be removed in Phase 5 cleanup.
+
+7. **Route Registration**: Handler registered in main.go after entity relationship handler, before static file serving. Uses `RegisterRoutes()` pattern consistent with other handlers.
 
 ### Phase 4: UI
 
