@@ -530,4 +530,70 @@ describe('OntologyDAG - Delete Ontology Functionality', () => {
       expect(mockProps.onError).toHaveBeenCalledWith('Network error');
     });
   });
+
+  it('calls onStatusChange with false when no DAG exists', async () => {
+    vi.mocked(engineApi.getOntologyDAGStatus).mockResolvedValueOnce({
+      data: null,
+      success: true,
+    });
+
+    const onStatusChange = vi.fn();
+    render(<OntologyDAG {...mockProps} onStatusChange={onStatusChange} />);
+
+    await waitFor(() => {
+      expect(onStatusChange).toHaveBeenCalledWith(false);
+    });
+  });
+
+  it('calls onStatusChange with true when DAG exists', async () => {
+    const onStatusChange = vi.fn();
+    render(<OntologyDAG {...mockProps} onStatusChange={onStatusChange} />);
+
+    await waitFor(() => {
+      expect(onStatusChange).toHaveBeenCalledWith(true);
+    });
+  });
+
+  it('calls onStatusChange when DAG is deleted', async () => {
+    vi.mocked(engineApi.deleteOntology).mockResolvedValueOnce({
+      data: { message: 'Deleted' },
+      success: true,
+    });
+
+    const onStatusChange = vi.fn();
+    const user = userEvent.setup();
+    render(<OntologyDAG {...mockProps} onStatusChange={onStatusChange} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /delete ontology/i })).toBeInTheDocument();
+    });
+
+    // Initial call with true (DAG exists)
+    expect(onStatusChange).toHaveBeenCalledWith(true);
+
+    // Click delete button to open dialog
+    const deleteButton = screen.getByRole('button', { name: /delete ontology/i });
+    fireEvent.click(deleteButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dialog-title')).toBeInTheDocument();
+    });
+
+    // Type confirmation text and confirm
+    const input = screen.getByTestId('delete-confirm-input');
+    await user.type(input, 'delete ontology');
+
+    const dialogFooter = screen.getByTestId('dialog-footer');
+    const confirmButton = dialogFooter.querySelector('button:last-child') as HTMLButtonElement;
+    fireEvent.click(confirmButton);
+
+    await waitFor(() => {
+      expect(engineApi.deleteOntology).toHaveBeenCalledWith('proj-1', 'ds-1');
+    });
+
+    // Should be called with false after deletion
+    await waitFor(() => {
+      expect(onStatusChange).toHaveBeenCalledWith(false);
+    });
+  });
 });

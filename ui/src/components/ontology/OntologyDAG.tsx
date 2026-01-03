@@ -37,6 +37,7 @@ interface OntologyDAGProps {
   datasourceId: string;
   onComplete?: () => void;
   onError?: (error: string) => void;
+  onStatusChange?: (hasOntology: boolean) => void;
 }
 
 // Polling interval in milliseconds (2 seconds as per plan)
@@ -101,6 +102,7 @@ export const OntologyDAG = ({
   datasourceId,
   onComplete,
   onError,
+  onStatusChange,
 }: OntologyDAGProps) => {
   const [dagStatus, setDagStatus] = useState<DAGStatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -295,6 +297,11 @@ export const OntologyDAG = ({
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [isRunning, fetchStatus]);
+
+  // Notify parent of ontology existence status
+  useEffect(() => {
+    onStatusChange?.(dagStatus !== null);
+  }, [dagStatus, onStatusChange]);
 
   // Count completed nodes
   const completedNodes = dagStatus?.nodes.filter((n) => n.status === 'completed').length ?? 0;

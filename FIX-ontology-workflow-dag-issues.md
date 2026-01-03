@@ -458,9 +458,10 @@ Used "skipped" status instead of creating a new "cancelled" status because:
 
 ---
 
-## Issue 7: "How it works" Banner Shown When Ontology Already Exists
+## Issue 7: "How it works" Banner Shown When Ontology Already Exists ✅ COMPLETE
 
 **Severity**: Low (UI Polish)
+**Status**: ✅ Fixed, Tested, and Committed (2026-01-03)
 
 **Observed Behavior**:
 - The informational banner at the bottom ("How it works: The extraction process runs automatically through 6 steps...") is always displayed
@@ -472,9 +473,61 @@ Used "skipped" status instead of creating a new "cancelled" status because:
   - User is about to start their first extraction
 - Hide the banner once an ontology exists and workflow is not running
 
-**How to Fix**:
-1. Add conditional rendering based on ontology existence
-2. `{!hasOntology && <HowItWorksBanner />}`
+**Files Modified**:
+- `ui/src/components/ontology/OntologyDAG.tsx` - Added onStatusChange callback prop
+- `ui/src/pages/OntologyPage.tsx` - Added hasOntology state and conditional banner rendering
+- `ui/src/components/ontology/__tests__/OntologyDAG.test.tsx` - Added 3 test cases for status change callback
+
+**Implementation Details**:
+1. **OntologyDAG Component Changes**:
+   - Added optional `onStatusChange?: (hasOntology: boolean) => void` prop to component interface
+   - Added useEffect hook that calls `onStatusChange(dagStatus !== null)` whenever dagStatus changes
+   - This notifies parent component whenever ontology existence status changes (initial load, after deletion, after extraction)
+
+2. **OntologyPage Component Changes**:
+   - Added `hasOntology` state (boolean) to track whether ontology data exists
+   - Created `handleStatusChange` callback that updates hasOntology state
+   - Passed `onStatusChange={handleStatusChange}` to OntologyDAG component
+   - Wrapped info banner in conditional: `{!hasOntology && <InfoBanner />}`
+
+3. **Status Change Triggers**:
+   - **On initial load**: OntologyDAG fetches status and calls onStatusChange(dagStatus !== null)
+   - **After deletion**: OntologyDAG resets dagStatus to null, triggering onStatusChange(false)
+   - **After extraction**: DAG status exists, triggering onStatusChange(true)
+
+4. **Test Coverage**:
+   - `calls onStatusChange with false when no DAG exists` - Verifies callback when API returns null
+   - `calls onStatusChange with true when DAG exists` - Verifies callback when DAG data is present
+   - `calls onStatusChange when DAG is deleted` - Verifies callback transitions from true→false after deletion
+
+**Design Decision - Event-Driven Pattern**:
+Used callback prop pattern instead of context or lifting state because:
+- Simple parent-child relationship (OntologyPage → OntologyDAG)
+- Only one consumer needs the status (OntologyPage for banner visibility)
+- Keeps OntologyDAG reusable - doesn't force it to know about banner visibility logic
+- Clear data flow: DAG component owns status, parent reacts to changes
+
+**Alternative Considered**:
+Could have exposed `dagStatus` via prop directly (`onStatusChange={(status) => ...}`) but chose boolean because:
+- Parent only needs to know "exists or not" for banner logic
+- Simpler contract - boolean is easier to reason about than full status object
+- Prevents parent from coupling to DAG status internals
+
+**Commit Date**: 2026-01-03
+
+**What Was Done**:
+1. Modified OntologyDAG to accept optional onStatusChange callback prop
+2. Added useEffect to call onStatusChange(dagStatus !== null) when dagStatus changes
+3. Modified OntologyPage to track hasOntology state via handleStatusChange callback
+4. Wrapped info banner in conditional rendering: `{!hasOntology && <Banner />}`
+5. Added 3 comprehensive test cases covering status changes on load, existence, and deletion
+
+**Expected Behavior After Fix**:
+1. User visits page with no ontology → Banner is visible
+2. User starts extraction → Banner remains visible (ontology doesn't exist yet)
+3. Extraction completes → Banner disappears (onStatusChange(true) called)
+4. User deletes ontology → Banner reappears (onStatusChange(false) called)
+5. User refreshes page with existing ontology → Banner is hidden from initial load
 
 ---
 

@@ -19,6 +19,7 @@ const OntologyPage = () => {
   const { selectedDatasource } = useDatasourceConnection();
 
   const [error, setError] = useState<string | null>(null);
+  const [hasOntology, setHasOntology] = useState(false);
 
   // Handler for DAG completion
   const handleComplete = useCallback(() => {
@@ -34,6 +35,11 @@ const OntologyPage = () => {
   // Handler for retry after error
   const handleRetry = useCallback(() => {
     setError(null);
+  }, []);
+
+  // Handler for ontology status changes
+  const handleStatusChange = useCallback((hasOntologyData: boolean) => {
+    setHasOntology(hasOntologyData);
   }, []);
 
   // No datasource selected
@@ -121,18 +127,21 @@ const OntologyPage = () => {
           datasourceId={selectedDatasource.datasourceId}
           onComplete={handleComplete}
           onError={handleError}
+          onStatusChange={handleStatusChange}
         />
       )}
 
-      {/* Info panel */}
-      <div className="mt-6 rounded-lg border border-purple-200 bg-purple-50 p-4">
-        <p className="text-purple-800 text-sm">
-          <strong>How it works:</strong> The extraction process runs automatically through 6 steps:
-          entity discovery, entity enrichment, relationship discovery, relationship enrichment,
-          ontology finalization, and column enrichment. You can leave this page and return later
-          to check progress.
-        </p>
-      </div>
+      {/* Info panel - only show when no ontology exists */}
+      {!hasOntology && (
+        <div className="mt-6 rounded-lg border border-purple-200 bg-purple-50 p-4">
+          <p className="text-purple-800 text-sm">
+            <strong>How it works:</strong> The extraction process runs automatically through 6 steps:
+            entity discovery, entity enrichment, relationship discovery, relationship enrichment,
+            ontology finalization, and column enrichment. You can leave this page and return later
+            to check progress.
+          </p>
+        </div>
+      )}
     </div>
   );
 };
