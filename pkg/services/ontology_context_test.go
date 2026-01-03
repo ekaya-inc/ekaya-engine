@@ -614,6 +614,95 @@ func TestGetTablesContext_AllTables(t *testing.T) {
 	assert.Len(t, result.Tables, 2)
 }
 
+func TestGetTablesContext_FKRoles(t *testing.T) {
+	// Tests that FK roles from enriched column_details are exposed at tables depth
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	entityID1 := uuid.New()
+	tableID := uuid.New()
+
+	// Ontology with enriched column_details containing FK roles
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"billing_engagements": {
+				{Name: "id", IsPrimaryKey: true},
+				{Name: "host_id", IsForeignKey: true, ForeignTable: "users", FKRole: "host"},
+				{Name: "visitor_id", IsForeignKey: true, ForeignTable: "users", FKRole: "visitor"},
+				{Name: "status", EnumValues: []models.EnumValue{{Value: "active"}, {Value: "completed"}}},
+			},
+		},
+	}
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:            entityID1,
+			ProjectID:     projectID,
+			OntologyID:    ontologyID,
+			Name:          "billing_engagement",
+			Description:   "A paid session between host and visitor",
+			PrimarySchema: "public",
+			PrimaryTable:  "billing_engagements",
+			PrimaryColumn: "id",
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
+	entityRepo := &mockOntologyEntityRepository{entities: entities}
+	relationshipRepo := &mockEntityRelationshipRepository{}
+
+	// Mock schema columns for the table
+	schemaRepo := &mockSchemaRepository{
+		columnsByTable: map[string][]*models.SchemaColumn{
+			"billing_engagements": {
+				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "host_id", DataType: "uuid", IsPrimaryKey: false},
+				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "visitor_id", DataType: "uuid", IsPrimaryKey: false},
+				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "status", DataType: "varchar", IsPrimaryKey: false},
+			},
+		},
+	}
+	projectService := &mockProjectServiceForOntology{}
+
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+
+	result, err := svc.GetTablesContext(ctx, projectID, []string{"billing_engagements"})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result.Tables, 1)
+
+	table := result.Tables["billing_engagements"]
+	assert.Equal(t, "billing_engagement", table.BusinessName)
+	assert.Len(t, table.Columns, 4)
+
+	// Verify FK roles are exposed
+	columnByName := make(map[string]models.ColumnOverview)
+	for _, col := range table.Columns {
+		columnByName[col.Name] = col
+	}
+
+	// host_id should have FKRole = "host"
+	hostCol := columnByName["host_id"]
+	assert.Equal(t, "host", hostCol.FKRole, "host_id should have FK role 'host'")
+
+	// visitor_id should have FKRole = "visitor"
+	visitorCol := columnByName["visitor_id"]
+	assert.Equal(t, "visitor", visitorCol.FKRole, "visitor_id should have FK role 'visitor'")
+
+	// id should not have FKRole (it's a PK, not FK)
+	idCol := columnByName["id"]
+	assert.Empty(t, idCol.FKRole, "primary key should not have FK role")
+
+	// status should have HasEnumValues = true
+	statusCol := columnByName["status"]
+	assert.True(t, statusCol.HasEnumValues, "status should have enum values")
+	assert.Empty(t, statusCol.FKRole, "status should not have FK role")
+}
+
 func TestGetColumnsContext(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()

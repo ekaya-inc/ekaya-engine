@@ -100,9 +100,28 @@ Every column showed `"role": ""` at `depth: tables`. The LLM correctly enriched 
 
 ---
 
-## Issue 3: FK semantic roles not visible
+## Issue 3: FK semantic roles not visible ✅ COMPLETED
 
 **Priority:** MEDIUM (would help with multi-FK tables)
+
+**Status:** Fixed on 2026-01-03
+
+### What Was Fixed
+
+Added `FKRole` field to `ColumnOverview` struct and updated `GetTablesContext()` to load enriched column data from `ontology.ColumnDetails` and merge FK roles. Also added `HasEnumValues` from enriched data.
+
+**Changes Made:**
+
+1. **Model layer** (`pkg/models/ontology_context.go`):
+   - Added `FKRole string` field to `ColumnOverview` struct with `json:"fk_role,omitempty"` tag
+
+2. **Service layer** (`pkg/services/ontology_context.go`):
+   - Updated `GetTablesContext()` to build enriched column lookup from `ontology.ColumnDetails`
+   - Merged `FKRole` and `HasEnumValues` from enriched data into `ColumnOverview`
+
+**Test Coverage:**
+
+- Added `TestGetTablesContext_FKRoles` - verifies FK roles (host, visitor) and enum values are exposed at tables depth
 
 ### Observed Behavior
 `billing_engagements` has `host_id` and `visitor_id` - both reference `users`. The approved query showed this pattern, but `get_ontology` didn't expose which FK plays which role.

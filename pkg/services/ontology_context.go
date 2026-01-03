@@ -245,13 +245,25 @@ func (s *ontologyContextService) GetEntitiesContext(ctx context.Context, project
 
 // GetTablesContext returns table summaries, optionally filtered by table names.
 func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID uuid.UUID, tableNames []string) (*models.OntologyTablesContext, error) {
-	// Get active ontology (only for checking it exists)
+	// Get active ontology (contains enriched column_details for FK roles)
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get active ontology: %w", err)
 	}
 	if ontology == nil {
 		return nil, fmt.Errorf("no active ontology found")
+	}
+
+	// Build enriched column lookup from ontology.ColumnDetails for FK roles
+	// Key: tableName -> columnName -> ColumnDetail
+	enrichedColumns := make(map[string]map[string]models.ColumnDetail)
+	if ontology.ColumnDetails != nil {
+		for tableName, cols := range ontology.ColumnDetails {
+			enrichedColumns[tableName] = make(map[string]models.ColumnDetail)
+			for _, col := range cols {
+				enrichedColumns[tableName][col.Name] = col
+			}
+		}
 	}
 
 	// Get entities from normalized table to get business names/descriptions
@@ -321,16 +333,24 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 		}
 
 		schemaColumns := columnsByTable[tableName]
+		tableEnriched := enrichedColumns[tableName] // nil if not enriched
 
-		// Build column overview from schema columns
+		// Build column overview from schema columns, merging enriched data
 		columns := make([]models.ColumnOverview, 0, len(schemaColumns))
 		for _, col := range schemaColumns {
-			columns = append(columns, models.ColumnOverview{
-				Name:          col.ColumnName,
-				Type:          col.DataType,
-				IsPrimaryKey:  col.IsPrimaryKey,
-				HasEnumValues: false, // Would need column workflow for enum detection
-			})
+			overview := models.ColumnOverview{
+				Name:         col.ColumnName,
+				Type:         col.DataType,
+				IsPrimaryKey: col.IsPrimaryKey,
+			}
+
+			// Merge enriched data if available (FKRole, HasEnumValues)
+			if enriched, ok := tableEnriched[col.ColumnName]; ok {
+				overview.FKRole = enriched.FKRole
+				overview.HasEnumValues = len(enriched.EnumValues) > 0
+			}
+
+			columns = append(columns, overview)
 		}
 
 		// Build table relationships
