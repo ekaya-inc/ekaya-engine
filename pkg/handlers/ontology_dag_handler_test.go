@@ -62,6 +62,10 @@ func (m *mockProjectServiceForDAG) GetDefaultDatasourceID(ctx context.Context, p
 	return uuid.New(), nil
 }
 
+func (m *mockProjectServiceForDAG) SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string) {
+	// No-op for tests
+}
+
 func TestOntologyDAGHandler_StartExtraction_Success(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()

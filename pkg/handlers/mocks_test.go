@@ -84,6 +84,10 @@ func (m *mockProjectService) SetDefaultDatasourceID(ctx context.Context, project
 	return nil
 }
 
+func (m *mockProjectService) SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string) {
+	// No-op for tests
+}
+
 // mockAuthService is a mock AuthService for integration testing.
 type mockAuthService struct {
 	claims *auth.Claims

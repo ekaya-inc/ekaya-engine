@@ -12,6 +12,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/central"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -19,10 +20,12 @@ import (
 
 // ProvisionResult contains the result of provisioning a project.
 type ProvisionResult struct {
-	ProjectID uuid.UUID
-	Name      string
-	PAPIURL   string
-	Created   bool // true if project was created, false if already existed
+	ProjectID       uuid.UUID
+	Name            string
+	PAPIURL         string
+	ProjectsPageURL string // URL to ekaya-central projects list
+	ProjectPageURL  string // URL to this project in ekaya-central
+	Created         bool   // true if project was created, false if already existed
 }
 
 // ProjectService defines the interface for project operations.
@@ -34,16 +37,18 @@ type ProjectService interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 	GetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error)
 	SetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID, datasourceID uuid.UUID) error
+	SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string)
 }
 
 // projectService implements ProjectService.
 type projectService struct {
-	db          *database.DB
-	projectRepo repositories.ProjectRepository
-	userRepo    repositories.UserRepository
-	redis       *redis.Client
-	baseURL     string
-	logger      *zap.Logger
+	db            *database.DB
+	projectRepo   repositories.ProjectRepository
+	userRepo      repositories.UserRepository
+	centralClient *central.Client
+	redis         *redis.Client
+	baseURL       string
+	logger        *zap.Logger
 }
 
 // NewProjectService creates a new project service with dependencies.
@@ -51,17 +56,19 @@ func NewProjectService(
 	db *database.DB,
 	projectRepo repositories.ProjectRepository,
 	userRepo repositories.UserRepository,
+	centralClient *central.Client,
 	redisClient *redis.Client,
 	baseURL string,
 	logger *zap.Logger,
 ) ProjectService {
 	return &projectService{
-		db:          db,
-		projectRepo: projectRepo,
-		userRepo:    userRepo,
-		redis:       redisClient,
-		baseURL:     baseURL,
-		logger:      logger,
+		db:            db,
+		projectRepo:   projectRepo,
+		userRepo:      userRepo,
+		centralClient: centralClient,
+		redis:         redisClient,
+		baseURL:       baseURL,
+		logger:        logger,
 	}
 }
 
@@ -83,17 +90,25 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 	existingProject, err := s.projectRepo.Get(ctx, projectID)
 	if err == nil {
 		// Project exists - return its info
-		var papiURL string
+		var papiURL, projectsPageURL, projectPageURL string
 		if existingProject.Parameters != nil {
-			if papi, ok := existingProject.Parameters["papi_url"].(string); ok {
-				papiURL = papi
+			if v, ok := existingProject.Parameters["papi_url"].(string); ok {
+				papiURL = v
+			}
+			if v, ok := existingProject.Parameters["projects_page_url"].(string); ok {
+				projectsPageURL = v
+			}
+			if v, ok := existingProject.Parameters["project_page_url"].(string); ok {
+				projectPageURL = v
 			}
 		}
 		return &ProvisionResult{
-			ProjectID: existingProject.ID,
-			Name:      existingProject.Name,
-			PAPIURL:   papiURL,
-			Created:   false,
+			ProjectID:       existingProject.ID,
+			Name:            existingProject.Name,
+			PAPIURL:         papiURL,
+			ProjectsPageURL: projectsPageURL,
+			ProjectPageURL:  projectPageURL,
+			Created:         false,
 		}, nil
 	}
 
@@ -123,19 +138,27 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 		s.cacheProjectConfig(ctx, project)
 	}
 
-	// Extract papi_url from parameters
-	var papiURL string
+	// Extract URLs from parameters
+	var papiURL, projectsPageURL, projectPageURL string
 	if params != nil {
-		if papi, ok := params["papi_url"].(string); ok {
-			papiURL = papi
+		if v, ok := params["papi_url"].(string); ok {
+			papiURL = v
+		}
+		if v, ok := params["projects_page_url"].(string); ok {
+			projectsPageURL = v
+		}
+		if v, ok := params["project_page_url"].(string); ok {
+			projectPageURL = v
 		}
 	}
 
 	return &ProvisionResult{
-		ProjectID: project.ID,
-		Name:      project.Name,
-		PAPIURL:   papiURL,
-		Created:   true,
+		ProjectID:       project.ID,
+		Name:            project.Name,
+		PAPIURL:         papiURL,
+		ProjectsPageURL: projectsPageURL,
+		ProjectPageURL:  projectPageURL,
+		Created:         true,
 	}, nil
 }
 
@@ -288,6 +311,9 @@ func (s *projectService) ProvisionFromClaims(ctx context.Context, claims *auth.C
 	if claims.Subject == "" {
 		return nil, fmt.Errorf("missing subject in claims")
 	}
+	if claims.PAPI == "" {
+		return nil, fmt.Errorf("missing PAPI URL in claims")
+	}
 
 	// Parse project ID
 	projectID, err := uuid.Parse(claims.ProjectID)
@@ -301,25 +327,38 @@ func (s *projectService) ProvisionFromClaims(ctx context.Context, claims *auth.C
 		return nil, fmt.Errorf("invalid user ID in subject: %w", err)
 	}
 
-	// Build parameters from claims
+	// Provision project with ekaya-central (notifies central and gets project info)
+	token, ok := auth.GetToken(ctx)
+	if !ok {
+		return nil, fmt.Errorf("missing JWT token in context")
+	}
+
+	projectInfo, err := s.centralClient.ProvisionProject(ctx, claims.PAPI, claims.ProjectID, token)
+	if err != nil {
+		return nil, fmt.Errorf("failed to provision project with ekaya-central: %w", err)
+	}
+
+	// Build parameters from claims and central response
 	params := map[string]interface{}{
 		"roles": claims.Roles,
 	}
-	if claims.PAPI != "" {
-		params["papi_url"] = claims.PAPI
+	params["papi_url"] = claims.PAPI
+	if projectInfo.URLs.ProjectsPage != "" {
+		params["projects_page_url"] = projectInfo.URLs.ProjectsPage
 	}
-
-	// Use email as project name (ekaya-central has the actual name)
-	projectName := claims.Email
+	if projectInfo.URLs.ProjectPage != "" {
+		params["project_page_url"] = projectInfo.URLs.ProjectPage
+	}
 
 	s.logger.Info("Provisioning project from claims",
 		zap.String("project_id", claims.ProjectID),
+		zap.String("project_name", projectInfo.Name),
 		zap.String("email", claims.Email),
 		zap.String("papi", claims.PAPI),
 		zap.Strings("roles", claims.Roles))
 
 	// Ensure project exists (idempotent)
-	result, err := s.Provision(ctx, projectID, projectName, params)
+	result, err := s.Provision(ctx, projectID, projectInfo.Name, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to provision project: %w", err)
 	}
@@ -360,6 +399,74 @@ func (s *projectService) ProvisionFromClaims(ctx context.Context, claims *auth.C
 		zap.String("role", userRole))
 
 	return result, nil
+}
+
+// SyncFromCentralAsync fetches project info from ekaya-central in the background
+// and updates the local project if the name has changed. This is fire-and-forget
+// so the user doesn't wait for the sync to complete.
+func (s *projectService) SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string) {
+	go func() {
+		// Use background context since the request context may be cancelled
+		ctx, cancel := context.WithTimeout(context.Background(), central.DefaultTimeout)
+		defer cancel()
+
+		// Fetch project info from ekaya-central
+		projectInfo, err := s.centralClient.GetProject(ctx, papiURL, projectID.String(), token)
+		if err != nil {
+			s.logger.Error("Failed to sync project from ekaya-central",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			return
+		}
+
+		// Get current project from DB
+		scope, err := s.db.WithoutTenant(ctx)
+		if err != nil {
+			s.logger.Error("Failed to acquire connection for sync",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			return
+		}
+		defer scope.Close()
+
+		ctx = database.SetTenantScope(ctx, scope)
+
+		project, err := s.projectRepo.Get(ctx, projectID)
+		if err != nil {
+			s.logger.Error("Failed to get project for sync",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			return
+		}
+
+		// Check if name changed
+		if project.Name == projectInfo.Name {
+			s.logger.Debug("Project name unchanged, skipping sync",
+				zap.String("project_id", projectID.String()))
+			return
+		}
+
+		// Update project name
+		oldName := project.Name
+		project.Name = projectInfo.Name
+
+		if err := s.projectRepo.Update(ctx, project); err != nil {
+			s.logger.Error("Failed to update project name from central",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			return
+		}
+
+		s.logger.Info("Synced project name from ekaya-central",
+			zap.String("project_id", projectID.String()),
+			zap.String("old_name", oldName),
+			zap.String("new_name", projectInfo.Name))
+
+		// Update Redis cache
+		if s.redis != nil {
+			s.cacheProjectConfig(ctx, project)
+		}
+	}()
 }
 
 // Ensure projectService implements ProjectService at compile time.

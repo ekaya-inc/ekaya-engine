@@ -70,6 +70,10 @@ func (m *mockProjectServiceForIntegration) SetDefaultDatasourceID(ctx context.Co
 	return nil
 }
 
+func (m *mockProjectServiceForIntegration) SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string) {
+	// No-op for tests
+}
+
 // setupOntologyContextTest creates a test context with real database.
 func setupOntologyContextTest(t *testing.T) *ontologyContextTestContext {
 	t.Helper()
