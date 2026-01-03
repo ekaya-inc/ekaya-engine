@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
@@ -283,8 +284,8 @@ func TestGlossaryRepository_Update_NotFound(t *testing.T) {
 	}
 
 	err := tc.repo.Update(ctx, term)
-	if err == nil {
-		t.Error("expected error for non-existent term")
+	if err != apperrors.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
 
@@ -324,8 +325,8 @@ func TestGlossaryRepository_Delete_NotFound(t *testing.T) {
 	defer cleanup()
 
 	err := tc.repo.Delete(ctx, uuid.New())
-	if err == nil {
-		t.Error("expected error for non-existent term")
+	if err != apperrors.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
 

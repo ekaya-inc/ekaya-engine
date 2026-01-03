@@ -2,11 +2,12 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
-	"strings"
 
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
@@ -243,7 +244,7 @@ func (h *GlossaryHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Check for not found
-		if strings.Contains(err.Error(), "glossary term not found") {
+		if errors.Is(err, apperrors.ErrNotFound) {
 			if err := ErrorResponse(w, http.StatusNotFound, "term_not_found", "Glossary term not found"); err != nil {
 				h.logger.Error("Failed to write error response", zap.Error(err))
 			}
@@ -291,7 +292,7 @@ func (h *GlossaryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			zap.Error(err))
 
 		// Check for not found
-		if strings.Contains(err.Error(), "glossary term not found") {
+		if errors.Is(err, apperrors.ErrNotFound) {
 			if err := ErrorResponse(w, http.StatusNotFound, "term_not_found", "Glossary term not found"); err != nil {
 				h.logger.Error("Failed to write error response", zap.Error(err))
 			}

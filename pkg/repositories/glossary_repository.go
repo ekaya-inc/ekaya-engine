@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
@@ -99,7 +100,7 @@ func (r *glossaryRepository) Update(ctx context.Context, term *models.BusinessGl
 	).Scan(&term.UpdatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return fmt.Errorf("glossary term not found: %s", term.ID)
+			return apperrors.ErrNotFound
 		}
 		return fmt.Errorf("failed to update glossary term: %w", err)
 	}
@@ -121,7 +122,7 @@ func (r *glossaryRepository) Delete(ctx context.Context, termID uuid.UUID) error
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("glossary term not found: %s", termID)
+		return apperrors.ErrNotFound
 	}
 
 	return nil
