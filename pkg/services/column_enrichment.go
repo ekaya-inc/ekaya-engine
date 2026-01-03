@@ -14,6 +14,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
+	"github.com/ekaya-inc/ekaya-engine/pkg/services/dag"
 )
 
 // ColumnEnrichmentService provides semantic enrichment for database columns.
@@ -24,7 +25,8 @@ type ColumnEnrichmentService interface {
 
 	// EnrichProject enriches all tables in a project.
 	// Returns the enrichment result with success/failure counts.
-	EnrichProject(ctx context.Context, projectID uuid.UUID, tableNames []string) (*EnrichColumnsResult, error)
+	// The progressCallback is called after each table to report progress (can be nil).
+	EnrichProject(ctx context.Context, projectID uuid.UUID, tableNames []string, progressCallback dag.ProgressCallback) (*EnrichColumnsResult, error)
 }
 
 // EnrichColumnsResult holds the result of a column enrichment operation.
@@ -74,7 +76,7 @@ func NewColumnEnrichmentService(
 var _ ColumnEnrichmentService = (*columnEnrichmentService)(nil)
 
 // EnrichProject enriches all specified tables (or all entities if empty).
-func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID uuid.UUID, tableNames []string) (*EnrichColumnsResult, error) {
+func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID uuid.UUID, tableNames []string, progressCallback dag.ProgressCallback) (*EnrichColumnsResult, error) {
 	startTime := time.Now()
 	result := &EnrichColumnsResult{
 		TablesEnriched: []string{},
@@ -97,8 +99,10 @@ func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID u
 		return result, nil
 	}
 
+	totalTables := len(tableNames)
+
 	// Enrich each table, continuing on failure
-	for _, tableName := range tableNames {
+	for idx, tableName := range tableNames {
 		if err := s.EnrichTable(ctx, projectID, tableName); err != nil {
 			s.logger.Error("Failed to enrich table",
 				zap.String("table", tableName),
@@ -106,6 +110,13 @@ func (s *columnEnrichmentService) EnrichProject(ctx context.Context, projectID u
 			result.TablesFailed[tableName] = err.Error()
 		} else {
 			result.TablesEnriched = append(result.TablesEnriched, tableName)
+		}
+
+		// Report progress after each table
+		if progressCallback != nil {
+			processed := idx + 1
+			msg := fmt.Sprintf("Enriching columns (%d/%d tables)...", processed, totalTables)
+			progressCallback(processed, totalTables, msg)
 		}
 	}
 

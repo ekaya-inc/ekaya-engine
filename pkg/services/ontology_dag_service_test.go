@@ -166,7 +166,7 @@ func (t *testRelationshipDiscovery) DiscoverRelationships(_ context.Context, _, 
 
 type testRelationshipEnrichment struct{}
 
-func (t *testRelationshipEnrichment) EnrichProject(_ context.Context, _ uuid.UUID) (*dag.RelationshipEnrichmentResult, error) {
+func (t *testRelationshipEnrichment) EnrichProject(_ context.Context, _ uuid.UUID, _ dag.ProgressCallback) (*dag.RelationshipEnrichmentResult, error) {
 	return nil, nil
 }
 
@@ -178,6 +178,6 @@ func (t *testFinalization) Finalize(_ context.Context, _ uuid.UUID) error {
 
 type testColumnEnrichment struct{}
 
-func (t *testColumnEnrichment) EnrichProject(_ context.Context, _ uuid.UUID, _ []string) (*dag.ColumnEnrichmentResult, error) {
+func (t *testColumnEnrichment) EnrichProject(_ context.Context, _ uuid.UUID, _ []string, _ dag.ProgressCallback) (*dag.ColumnEnrichmentResult, error) {
 	return nil, nil
 }

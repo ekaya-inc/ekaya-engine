@@ -20,7 +20,7 @@ type ColumnEnrichmentResult struct {
 
 // ColumnEnrichmentMethods defines the interface for column enrichment.
 type ColumnEnrichmentMethods interface {
-	EnrichProject(ctx context.Context, projectID uuid.UUID, tableNames []string) (*ColumnEnrichmentResult, error)
+	EnrichProject(ctx context.Context, projectID uuid.UUID, tableNames []string, progressCallback ProgressCallback) (*ColumnEnrichmentResult, error)
 }
 
 // ColumnEnrichmentNode wraps LLM-based column enrichment.
@@ -52,8 +52,15 @@ func (n *ColumnEnrichmentNode) Execute(ctx context.Context, dag *models.Ontology
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 
+	// Create a progress callback that wraps ReportProgress
+	progressCallback := func(current, total int, message string) {
+		if err := n.ReportProgress(ctx, current, total, message); err != nil {
+			n.Logger().Warn("Failed to report progress", zap.Error(err))
+		}
+	}
+
 	// Call the underlying service method (nil means enrich all entity tables)
-	result, err := n.columnEnrichmentSvc.EnrichProject(ctx, dag.ProjectID, nil)
+	result, err := n.columnEnrichmentSvc.EnrichProject(ctx, dag.ProjectID, nil, progressCallback)
 	if err != nil {
 		return fmt.Errorf("enrich columns: %w", err)
 	}

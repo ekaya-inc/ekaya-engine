@@ -12,13 +12,15 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
+	"github.com/ekaya-inc/ekaya-engine/pkg/services/dag"
 )
 
 // RelationshipEnrichmentService provides semantic enrichment for entity relationships.
 // It uses LLM to generate business-meaningful descriptions for relationships.
 type RelationshipEnrichmentService interface {
 	// EnrichProject enriches all relationships in a project with descriptions.
-	EnrichProject(ctx context.Context, projectID uuid.UUID) (*EnrichRelationshipsResult, error)
+	// The progressCallback is called after each batch to report progress (can be nil).
+	EnrichProject(ctx context.Context, projectID uuid.UUID, progressCallback dag.ProgressCallback) (*EnrichRelationshipsResult, error)
 }
 
 // EnrichRelationshipsResult holds the result of a relationship enrichment operation.
@@ -53,7 +55,7 @@ func NewRelationshipEnrichmentService(
 var _ RelationshipEnrichmentService = (*relationshipEnrichmentService)(nil)
 
 // EnrichProject enriches all relationships in a project.
-func (s *relationshipEnrichmentService) EnrichProject(ctx context.Context, projectID uuid.UUID) (*EnrichRelationshipsResult, error) {
+func (s *relationshipEnrichmentService) EnrichProject(ctx context.Context, projectID uuid.UUID, progressCallback dag.ProgressCallback) (*EnrichRelationshipsResult, error) {
 	startTime := time.Now()
 	result := &EnrichRelationshipsResult{}
 
@@ -80,6 +82,8 @@ func (s *relationshipEnrichmentService) EnrichProject(ctx context.Context, proje
 		entityByID[e.ID] = e
 	}
 
+	totalRelationships := len(relationships)
+
 	// Enrich relationships in batches
 	const batchSize = 20
 	for i := 0; i < len(relationships); i += batchSize {
@@ -92,6 +96,13 @@ func (s *relationshipEnrichmentService) EnrichProject(ctx context.Context, proje
 		enriched, failed := s.enrichBatch(ctx, projectID, batch, entityByID)
 		result.RelationshipsEnriched += enriched
 		result.RelationshipsFailed += failed
+
+		// Report progress after each batch
+		if progressCallback != nil {
+			processed := result.RelationshipsEnriched + result.RelationshipsFailed
+			msg := fmt.Sprintf("Enriching relationships (%d/%d)...", processed, totalRelationships)
+			progressCallback(processed, totalRelationships, msg)
+		}
 	}
 
 	result.DurationMs = time.Since(startTime).Milliseconds()

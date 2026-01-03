@@ -18,9 +18,12 @@ type RelationshipEnrichmentResult struct {
 	DurationMs            int64
 }
 
+// ProgressCallback is a function that reports progress updates.
+type ProgressCallback func(current, total int, message string)
+
 // RelationshipEnrichmentMethods defines the interface for relationship enrichment.
 type RelationshipEnrichmentMethods interface {
-	EnrichProject(ctx context.Context, projectID uuid.UUID) (*RelationshipEnrichmentResult, error)
+	EnrichProject(ctx context.Context, projectID uuid.UUID, progressCallback ProgressCallback) (*RelationshipEnrichmentResult, error)
 }
 
 // RelationshipEnrichmentNode wraps LLM-based relationship enrichment.
@@ -52,8 +55,15 @@ func (n *RelationshipEnrichmentNode) Execute(ctx context.Context, dag *models.On
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 
-	// Call the underlying service method
-	result, err := n.relationshipEnrichmentSvc.EnrichProject(ctx, dag.ProjectID)
+	// Create a progress callback that wraps ReportProgress
+	progressCallback := func(current, total int, message string) {
+		if err := n.ReportProgress(ctx, current, total, message); err != nil {
+			n.Logger().Warn("Failed to report progress", zap.Error(err))
+		}
+	}
+
+	// Call the underlying service method with progress callback
+	result, err := n.relationshipEnrichmentSvc.EnrichProject(ctx, dag.ProjectID, progressCallback)
 	if err != nil {
 		return fmt.Errorf("enrich relationships: %w", err)
 	}

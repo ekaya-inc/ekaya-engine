@@ -93,8 +93,8 @@ func NewRelationshipEnrichmentAdapter(svc RelationshipEnrichmentService) dag.Rel
 	return &RelationshipEnrichmentAdapter{svc: svc}
 }
 
-func (a *RelationshipEnrichmentAdapter) EnrichProject(ctx context.Context, projectID uuid.UUID) (*dag.RelationshipEnrichmentResult, error) {
-	result, err := a.svc.EnrichProject(ctx, projectID)
+func (a *RelationshipEnrichmentAdapter) EnrichProject(ctx context.Context, projectID uuid.UUID, progressCallback dag.ProgressCallback) (*dag.RelationshipEnrichmentResult, error) {
+	result, err := a.svc.EnrichProject(ctx, projectID, progressCallback)
 	if err != nil {
 		return nil, err
 	}
@@ -129,8 +129,8 @@ func NewColumnEnrichmentAdapter(svc ColumnEnrichmentService) dag.ColumnEnrichmen
 	return &ColumnEnrichmentAdapter{svc: svc}
 }
 
-func (a *ColumnEnrichmentAdapter) EnrichProject(ctx context.Context, projectID uuid.UUID, tableNames []string) (*dag.ColumnEnrichmentResult, error) {
-	result, err := a.svc.EnrichProject(ctx, projectID, tableNames)
+func (a *ColumnEnrichmentAdapter) EnrichProject(ctx context.Context, projectID uuid.UUID, tableNames []string, progressCallback dag.ProgressCallback) (*dag.ColumnEnrichmentResult, error) {
+	result, err := a.svc.EnrichProject(ctx, projectID, tableNames, progressCallback)
 	if err != nil {
 		return nil, err
 	}
