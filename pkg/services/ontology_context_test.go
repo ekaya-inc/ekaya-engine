@@ -615,24 +615,25 @@ func TestGetTablesContext_AllTables(t *testing.T) {
 }
 
 func TestGetTablesContext_FKRoles(t *testing.T) {
-	// Tests that FK roles from enriched column_details are exposed at tables depth
+	// Tests that FK roles and analytical roles from enriched column_details are exposed at tables depth
 	ctx := context.Background()
 	projectID := uuid.New()
 	ontologyID := uuid.New()
 	entityID1 := uuid.New()
 	tableID := uuid.New()
 
-	// Ontology with enriched column_details containing FK roles
+	// Ontology with enriched column_details containing FK roles and analytical roles
 	ontology := &models.TieredOntology{
 		ID:        ontologyID,
 		ProjectID: projectID,
 		IsActive:  true,
 		ColumnDetails: map[string][]models.ColumnDetail{
 			"billing_engagements": {
-				{Name: "id", IsPrimaryKey: true},
-				{Name: "host_id", IsForeignKey: true, ForeignTable: "users", FKRole: "host"},
-				{Name: "visitor_id", IsForeignKey: true, ForeignTable: "users", FKRole: "visitor"},
-				{Name: "status", EnumValues: []models.EnumValue{{Value: "active"}, {Value: "completed"}}},
+				{Name: "id", IsPrimaryKey: true, Role: models.ColumnRoleIdentifier},
+				{Name: "host_id", IsForeignKey: true, ForeignTable: "users", FKRole: "host", Role: models.ColumnRoleDimension},
+				{Name: "visitor_id", IsForeignKey: true, ForeignTable: "users", FKRole: "visitor", Role: models.ColumnRoleDimension},
+				{Name: "status", EnumValues: []models.EnumValue{{Value: "active"}, {Value: "completed"}}, Role: models.ColumnRoleDimension},
+				{Name: "amount", Role: models.ColumnRoleMeasure},
 			},
 		},
 	}
@@ -662,6 +663,7 @@ func TestGetTablesContext_FKRoles(t *testing.T) {
 				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "host_id", DataType: "uuid", IsPrimaryKey: false},
 				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "visitor_id", DataType: "uuid", IsPrimaryKey: false},
 				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "status", DataType: "varchar", IsPrimaryKey: false},
+				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "amount", DataType: "numeric", IsPrimaryKey: false},
 			},
 		},
 	}
@@ -677,30 +679,39 @@ func TestGetTablesContext_FKRoles(t *testing.T) {
 
 	table := result.Tables["billing_engagements"]
 	assert.Equal(t, "billing_engagement", table.BusinessName)
-	assert.Len(t, table.Columns, 4)
+	assert.Len(t, table.Columns, 5)
 
-	// Verify FK roles are exposed
+	// Verify FK roles and analytical roles are exposed
 	columnByName := make(map[string]models.ColumnOverview)
 	for _, col := range table.Columns {
 		columnByName[col.Name] = col
 	}
 
-	// host_id should have FKRole = "host"
+	// host_id should have FKRole = "host" and Role = "dimension"
 	hostCol := columnByName["host_id"]
 	assert.Equal(t, "host", hostCol.FKRole, "host_id should have FK role 'host'")
+	assert.Equal(t, models.ColumnRoleDimension, hostCol.Role, "host_id should have analytical role 'dimension'")
 
-	// visitor_id should have FKRole = "visitor"
+	// visitor_id should have FKRole = "visitor" and Role = "dimension"
 	visitorCol := columnByName["visitor_id"]
 	assert.Equal(t, "visitor", visitorCol.FKRole, "visitor_id should have FK role 'visitor'")
+	assert.Equal(t, models.ColumnRoleDimension, visitorCol.Role, "visitor_id should have analytical role 'dimension'")
 
-	// id should not have FKRole (it's a PK, not FK)
+	// id should have Role = "identifier" but no FKRole (it's a PK, not FK)
 	idCol := columnByName["id"]
 	assert.Empty(t, idCol.FKRole, "primary key should not have FK role")
+	assert.Equal(t, models.ColumnRoleIdentifier, idCol.Role, "id should have analytical role 'identifier'")
 
-	// status should have HasEnumValues = true
+	// status should have HasEnumValues = true and Role = "dimension"
 	statusCol := columnByName["status"]
 	assert.True(t, statusCol.HasEnumValues, "status should have enum values")
 	assert.Empty(t, statusCol.FKRole, "status should not have FK role")
+	assert.Equal(t, models.ColumnRoleDimension, statusCol.Role, "status should have analytical role 'dimension'")
+
+	// amount should have Role = "measure"
+	amountCol := columnByName["amount"]
+	assert.Equal(t, models.ColumnRoleMeasure, amountCol.Role, "amount should have analytical role 'measure'")
+	assert.Empty(t, amountCol.FKRole, "amount should not have FK role")
 }
 
 func TestGetColumnsContext(t *testing.T) {

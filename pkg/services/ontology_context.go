@@ -356,8 +356,9 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 				IsPrimaryKey: col.IsPrimaryKey,
 			}
 
-			// Merge enriched data if available (FKRole, HasEnumValues)
+			// Merge enriched data if available (Role, FKRole, HasEnumValues)
 			if enriched, ok := tableEnriched[col.ColumnName]; ok {
+				overview.Role = enriched.Role
 				overview.FKRole = enriched.FKRole
 				overview.HasEnumValues = len(enriched.EnumValues) > 0
 			}

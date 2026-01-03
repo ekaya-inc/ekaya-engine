@@ -1,6 +1,6 @@
 # MCP get_ontology - Issues and Remaining Work
 
-**Last updated:** 2026-01-04
+**Last updated:** 2026-01-04 (Issue 3 enhancement: analytical roles at tables depth)
 
 ## Status
 
@@ -118,10 +118,11 @@ Added `FKRole` field to `ColumnOverview` struct and updated `GetTablesContext()`
 2. **Service layer** (`pkg/services/ontology_context.go`):
    - Updated `GetTablesContext()` to build enriched column lookup from `ontology.ColumnDetails`
    - Merged `FKRole` and `HasEnumValues` from enriched data into `ColumnOverview`
+   - **2026-01-04 enhancement:** Also merge `Role` (dimension/measure/identifier) from enriched data so analytical roles are visible at tables depth
 
 **Test Coverage:**
 
-- Added `TestGetTablesContext_FKRoles` - verifies FK roles (host, visitor) and enum values are exposed at tables depth
+- Added `TestGetTablesContext_FKRoles` - verifies FK roles (host, visitor), analytical roles (dimension/measure/identifier), and enum values are exposed at tables depth
 
 ### Observed Behavior
 `billing_engagements` has `host_id` and `visitor_id` - both reference `users`. The approved query showed this pattern, but `get_ontology` didn't expose which FK plays which role.
