@@ -44,7 +44,6 @@ type ontologyChatService struct {
 	knowledgeRepo      repositories.KnowledgeRepository
 	schemaRepo         repositories.SchemaRepository
 	workflowRepo       repositories.OntologyWorkflowRepository
-	stateRepo          repositories.WorkflowStateRepository
 	ontologyEntityRepo repositories.OntologyEntityRepository
 	entityRelRepo      repositories.EntityRelationshipRepository
 	llmFactory         llm.LLMClientFactory
@@ -60,7 +59,6 @@ func NewOntologyChatService(
 	knowledgeRepo repositories.KnowledgeRepository,
 	schemaRepo repositories.SchemaRepository,
 	workflowRepo repositories.OntologyWorkflowRepository,
-	stateRepo repositories.WorkflowStateRepository,
 	ontologyEntityRepo repositories.OntologyEntityRepository,
 	entityRelRepo repositories.EntityRelationshipRepository,
 	llmFactory llm.LLMClientFactory,
@@ -74,7 +72,6 @@ func NewOntologyChatService(
 		knowledgeRepo:      knowledgeRepo,
 		schemaRepo:         schemaRepo,
 		workflowRepo:       workflowRepo,
-		stateRepo:          stateRepo,
 		ontologyEntityRepo: ontologyEntityRepo,
 		entityRelRepo:      entityRelRepo,
 		llmFactory:         llmFactory,
@@ -96,14 +93,9 @@ func (s *ontologyChatService) Initialize(ctx context.Context, projectID uuid.UUI
 		return nil, err
 	}
 
-	// Get pending questions count from workflow state
-	pendingCount, err := s.stateRepo.GetPendingQuestionsCountByProject(ctx, projectID)
-	if err != nil {
-		s.logger.Error("Failed to get pending question count",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return nil, err
-	}
+	// Note: The old workflow state pending questions system has been replaced by DAG-based workflow.
+	// Pending question count is now always 0 since questions are handled differently.
+	pendingCount := 0
 
 	// Get the ontology to provide context
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
@@ -126,30 +118,14 @@ func (s *ontologyChatService) Initialize(ctx context.Context, projectID uuid.UUI
 			entityCount := ontology.TableCount()
 			openingMessage = fmt.Sprintf(
 				"Hello! I'm here to help you refine your data ontology. "+
-					"I have analyzed %d tables in your database. ",
+					"I have analyzed %d tables in your database. "+
+					"Feel free to ask me anything about your schema or tell me about specific business rules.",
 				entityCount,
 			)
-			if pendingCount > 0 {
-				openingMessage += fmt.Sprintf(
-					"There are %d questions I'd like to ask to better understand your data. "+
-						"You can answer them in the Questions panel, or feel free to ask me anything about your schema.",
-					pendingCount,
-				)
-			} else {
-				openingMessage += "Feel free to ask me anything about your schema or tell me about specific business rules."
-			}
 		}
 	} else {
 		// Continuing conversation
-		if pendingCount > 0 {
-			openingMessage = fmt.Sprintf(
-				"Welcome back! There are %d pending questions to help refine the ontology. "+
-					"How can I assist you today?",
-				pendingCount,
-			)
-		} else {
-			openingMessage = "Welcome back! How can I help you refine your data ontology?"
-		}
+		openingMessage = "Welcome back! How can I help you refine your data ontology?"
 	}
 
 	s.logger.Info("Chat initialized",
@@ -237,7 +213,6 @@ func (s *ontologyChatService) SendMessage(ctx context.Context, projectID uuid.UU
 		DatasourceID:       workflow.Config.DatasourceID,
 		OntologyRepo:       s.ontologyRepo,
 		WorkflowRepo:       s.workflowRepo,
-		StateRepo:          s.stateRepo,
 		KnowledgeRepo:      s.knowledgeRepo,
 		SchemaRepo:         s.schemaRepo,
 		OntologyEntityRepo: s.ontologyEntityRepo,

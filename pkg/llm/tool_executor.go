@@ -21,7 +21,6 @@ type OntologyToolExecutor struct {
 	datasourceID       uuid.UUID
 	ontologyRepo       repositories.OntologyRepository
 	workflowRepo       repositories.OntologyWorkflowRepository
-	stateRepo          repositories.WorkflowStateRepository
 	knowledgeRepo      repositories.KnowledgeRepository
 	schemaRepo         repositories.SchemaRepository
 	ontologyEntityRepo repositories.OntologyEntityRepository
@@ -36,7 +35,6 @@ type OntologyToolExecutorConfig struct {
 	DatasourceID       uuid.UUID
 	OntologyRepo       repositories.OntologyRepository
 	WorkflowRepo       repositories.OntologyWorkflowRepository
-	StateRepo          repositories.WorkflowStateRepository
 	KnowledgeRepo      repositories.KnowledgeRepository
 	SchemaRepo         repositories.SchemaRepository
 	OntologyEntityRepo repositories.OntologyEntityRepository
@@ -52,7 +50,6 @@ func NewOntologyToolExecutor(cfg *OntologyToolExecutorConfig) *OntologyToolExecu
 		datasourceID:       cfg.DatasourceID,
 		ontologyRepo:       cfg.OntologyRepo,
 		workflowRepo:       cfg.WorkflowRepo,
-		stateRepo:          cfg.StateRepo,
 		knowledgeRepo:      cfg.KnowledgeRepo,
 		schemaRepo:         cfg.SchemaRepo,
 		ontologyEntityRepo: cfg.OntologyEntityRepo,
@@ -527,35 +524,12 @@ func (e *OntologyToolExecutor) answerQuestion(ctx context.Context, arguments str
 		return "", fmt.Errorf("question_id and answer are required")
 	}
 
-	// Find the question in workflow state
-	_, entityState, _, err := e.stateRepo.FindQuestionByID(ctx, args.QuestionID)
-	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			return `{"error": "Question not found"}`, nil
-		}
-		return "", fmt.Errorf("failed to find question: %w", err)
-	}
-
-	// Update the question with the answer using the entity state ID
-	if err := e.stateRepo.UpdateQuestionInEntity(ctx, entityState.ID, args.QuestionID, string(models.QuestionStatusAnswered), args.Answer); err != nil {
-		return "", fmt.Errorf("failed to update question: %w", err)
-	}
-
-	e.logger.Info("Answered question via tool",
+	// Note: The old workflow state system has been replaced by the DAG-based workflow.
+	// This tool is deprecated and returns a not-found response.
+	e.logger.Info("answerQuestion tool called (deprecated)",
 		zap.String("question_id", args.QuestionID))
 
-	response := map[string]any{
-		"success":     true,
-		"question_id": args.QuestionID,
-		"message":     "Question marked as answered",
-	}
-
-	responseJSON, err := json.Marshal(response)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal response: %w", err)
-	}
-
-	return string(responseJSON), nil
+	return `{"error": "Question not found - workflow state system has been replaced by DAG-based workflow"}`, nil
 }
 
 // ============================================================================
@@ -567,47 +541,15 @@ type getPendingQuestionsArgs struct {
 }
 
 func (e *OntologyToolExecutor) getPendingQuestions(ctx context.Context, arguments string) (string, error) {
-	var args getPendingQuestionsArgs
-	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
-
-	limit := args.Limit
-	if limit <= 0 {
-		limit = 5
-	}
-	if limit > 20 {
-		limit = 20
-	}
-
-	// Get pending questions from workflow state
-	pendingQuestions, err := e.stateRepo.GetPendingQuestions(ctx, e.projectID, limit)
-	if err != nil {
-		return "", fmt.Errorf("failed to get pending questions: %w", err)
-	}
-
-	// Build response
-	type questionInfo struct {
-		ID       string `json:"id"`
-		Text     string `json:"text"`
-		Category string `json:"category"`
-		Priority int    `json:"priority"`
-	}
-
-	result := make([]questionInfo, 0, len(pendingQuestions))
-	for _, q := range pendingQuestions {
-		result = append(result, questionInfo{
-			ID:       q.ID,
-			Text:     q.Text,
-			Category: q.Category,
-			Priority: q.Priority,
-		})
-	}
+	// Note: The old workflow state system has been replaced by the DAG-based workflow.
+	// This tool is deprecated and returns an empty list.
+	e.logger.Info("getPendingQuestions tool called (deprecated)")
 
 	response := map[string]any{
-		"questions":     result,
-		"count":         len(result),
-		"total_pending": len(pendingQuestions),
+		"questions":     []any{},
+		"count":         0,
+		"total_pending": 0,
+		"message":       "Workflow state system has been replaced by DAG-based workflow",
 	}
 
 	responseJSON, err := json.Marshal(response)

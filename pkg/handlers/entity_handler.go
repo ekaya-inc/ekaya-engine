@@ -35,6 +35,16 @@ type EntityDetailResponse struct {
 	DeletionReason  *string                    `json:"deletion_reason,omitempty"`
 }
 
+// EntityOccurrenceResponse represents an occurrence of an entity in the schema.
+type EntityOccurrenceResponse struct {
+	ID         string  `json:"id"`
+	SchemaName string  `json:"schema_name"`
+	TableName  string  `json:"table_name"`
+	ColumnName string  `json:"column_name"`
+	Role       *string `json:"role,omitempty"`
+	Confidence float64 `json:"confidence"`
+}
+
 // EntityAliasResponse represents an alias for an entity.
 type EntityAliasResponse struct {
 	ID     string  `json:"id"`

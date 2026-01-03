@@ -76,7 +76,6 @@ type ontologyBuilderService struct {
 	schemaRepo         repositories.SchemaRepository
 	workflowRepo       repositories.OntologyWorkflowRepository
 	knowledgeRepo      repositories.KnowledgeRepository
-	workflowStateRepo  repositories.WorkflowStateRepository
 	ontologyEntityRepo repositories.OntologyEntityRepository
 	entityRelRepo      repositories.EntityRelationshipRepository
 	llmFactory         llm.LLMClientFactory
@@ -89,7 +88,6 @@ func NewOntologyBuilderService(
 	schemaRepo repositories.SchemaRepository,
 	workflowRepo repositories.OntologyWorkflowRepository,
 	knowledgeRepo repositories.KnowledgeRepository,
-	workflowStateRepo repositories.WorkflowStateRepository,
 	ontologyEntityRepo repositories.OntologyEntityRepository,
 	entityRelRepo repositories.EntityRelationshipRepository,
 	llmFactory llm.LLMClientFactory,
@@ -100,7 +98,6 @@ func NewOntologyBuilderService(
 		schemaRepo:         schemaRepo,
 		workflowRepo:       workflowRepo,
 		knowledgeRepo:      knowledgeRepo,
-		workflowStateRepo:  workflowStateRepo,
 		ontologyEntityRepo: ontologyEntityRepo,
 		entityRelRepo:      entityRelRepo,
 		llmFactory:         llmFactory,
@@ -228,17 +225,6 @@ func (s *ontologyBuilderService) BuildTieredOntology(ctx context.Context, projec
 		zap.Int("relationships", relationshipCount),
 		zap.Int("domains", len(domainSummary.Domains)),
 		zap.Duration("elapsed", time.Since(startTime)))
-
-	// Mark global entity as complete so orchestrator can finalize workflow
-	globalState, err := s.workflowStateRepo.GetByEntity(ctx, workflowID, models.WorkflowEntityTypeGlobal, "")
-	if err != nil {
-		return fmt.Errorf("get global entity state: %w", err)
-	}
-	if globalState != nil {
-		if err := s.workflowStateRepo.UpdateStatus(ctx, globalState.ID, models.WorkflowEntityStatusComplete, nil); err != nil {
-			return fmt.Errorf("update global entity status: %w", err)
-		}
-	}
 
 	return nil
 }
@@ -843,23 +829,10 @@ func (s *ontologyBuilderService) AnalyzeEntity(ctx context.Context, projectID uu
 		table.Columns[i] = *col
 	}
 
-	// Load gathered data from workflow state for each column
+	// columnGatheredData would contain sample values from column scanning
+	// This was previously loaded from workflow state, but the DAG-based workflow
+	// no longer uses that mechanism. For now, pass an empty map.
 	columnGatheredData := make(map[string]map[string]any)
-	if s.workflowStateRepo != nil {
-		for _, col := range table.Columns {
-			colEntityKey := models.ColumnEntityKey(tableName, col.ColumnName)
-			ws, err := s.workflowStateRepo.GetByEntity(ctx, workflowID, models.WorkflowEntityTypeColumn, colEntityKey)
-			if err != nil {
-				s.logger.Warn("Failed to load column workflow state",
-					zap.String("column", col.ColumnName),
-					zap.Error(err))
-				continue
-			}
-			if ws != nil && ws.StateData != nil && ws.StateData.Gathered != nil {
-				columnGatheredData[col.ColumnName] = ws.StateData.Gathered
-			}
-		}
-	}
 
 	// Load the existing ontology to get the entity summary and domain context
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)

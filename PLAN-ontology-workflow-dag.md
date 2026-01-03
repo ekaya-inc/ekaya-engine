@@ -709,23 +709,43 @@ ui/src/
    - Resumes polling on tab visibility change
    - Cleanup on unmount
 
-### Phase 5: Cleanup
+### Phase 5: Cleanup ✅ COMPLETED
 
 **Tasks:**
-1. Remove old service files no longer needed
-2. Remove old handler files
-3. Update tests
+1. ✅ Remove old service files no longer needed
+2. ✅ Remove old handler files
+3. ✅ Update tests
 
-**Files to remove:**
+**Files removed:**
 ```
 pkg/services/
-  entity_discovery_service.go  (keep methods, remove workflow logic)
-  relationship_workflow.go     (remove entirely)
-  ontology_workflow.go         (remove entirely)
+  entity_discovery_service.go  (refactored: kept methods, removed workflow logic)
+  relationship_workflow.go     (removed entirely)
+  relationship_workflow_test.go (removed entirely)
+  ontology_workflow.go         (removed entirely)
+  ontology_tasks.go            (removed entirely - old workflow tasks)
+  workflow_orchestrator.go     (removed entirely - old workflow orchestrator)
+  workflow_orchestrator_test.go (removed entirely)
+  workflow_orchestrator_integration_test.go (removed entirely)
 pkg/handlers/
-  entity_discovery_handler.go  (remove workflow endpoints)
-  relationship_workflow_handler.go  (remove entirely)
+  entity_discovery_handler.go  (removed entirely - DAG handles extraction)
+  relationship_workflow.go     (removed entirely - file name was wrong in plan)
+  relationship_workflow_test.go (removed entirely)
+  ontology.go                  (removed entirely - old workflow handler)
+  ontology_test.go             (removed entirely)
 ```
+
+**Files created:**
+```
+pkg/services/
+  tenant_context.go            (TenantContextFunc alias moved here from ontology_tasks.go)
+```
+
+**Implementation Notes:**
+1. **entity_discovery_service.go** was refactored to export `IdentifyEntitiesFromDDL()` and `EnrichEntitiesWithLLM()` as public interface methods. The service no longer has workflow orchestration - just the core algorithms.
+2. **dag_adapters.go** updated: `NewEntityEnrichmentAdapter()` now takes additional parameters (`schemaRepo`, `getTenantCtx`) since it can no longer access private fields of the service.
+3. **main.go** updated: Removed old service creations (`ontologyWorkflowService`, `relationshipWorkflowService`), old handler registrations (`OntologyHandler`, `RelationshipWorkflowHandler`, `EntityDiscoveryHandler`), and old shutdown handler references.
+4. **entity_handler.go** updated: Added `EntityOccurrenceResponse` type that was previously in entity_discovery_handler.go.
 
 ---
 

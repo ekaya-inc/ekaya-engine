@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services/dag"
 )
 
@@ -15,56 +16,49 @@ import (
 
 // EntityDiscoveryAdapter adapts EntityDiscoveryService for the dag package.
 type EntityDiscoveryAdapter struct {
-	svc *entityDiscoveryService
+	svc EntityDiscoveryService
 }
 
 // NewEntityDiscoveryAdapter creates a new adapter.
-// Note: svc must be the concrete type *entityDiscoveryService.
 func NewEntityDiscoveryAdapter(svc EntityDiscoveryService) dag.EntityDiscoveryMethods {
-	concrete, ok := svc.(*entityDiscoveryService)
-	if !ok {
-		return nil
-	}
-	return &EntityDiscoveryAdapter{svc: concrete}
+	return &EntityDiscoveryAdapter{svc: svc}
 }
 
 func (a *EntityDiscoveryAdapter) IdentifyEntitiesFromDDL(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID) (int, []*models.SchemaTable, []*models.SchemaColumn, error) {
-	return a.svc.identifyEntitiesFromDDL(ctx, projectID, ontologyID, datasourceID)
+	return a.svc.IdentifyEntitiesFromDDL(ctx, projectID, ontologyID, datasourceID)
 }
 
 // EntityEnrichmentAdapter adapts EntityDiscoveryService for entity enrichment.
 type EntityEnrichmentAdapter struct {
-	svc *entityDiscoveryService
+	svc        EntityDiscoveryService
+	schemaRepo repositories.SchemaRepository
+	getTenant  TenantContextFunc
 }
 
 // NewEntityEnrichmentAdapter creates a new adapter.
-func NewEntityEnrichmentAdapter(svc EntityDiscoveryService) dag.EntityEnrichmentMethods {
-	concrete, ok := svc.(*entityDiscoveryService)
-	if !ok {
-		return nil
-	}
-	return &EntityEnrichmentAdapter{svc: concrete}
+func NewEntityEnrichmentAdapter(svc EntityDiscoveryService, schemaRepo repositories.SchemaRepository, getTenant TenantContextFunc) dag.EntityEnrichmentMethods {
+	return &EntityEnrichmentAdapter{svc: svc, schemaRepo: schemaRepo, getTenant: getTenant}
 }
 
 func (a *EntityEnrichmentAdapter) EnrichEntitiesWithLLM(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID) error {
 	// Get tables and columns for enrichment context
-	tenantCtx, cleanup, err := a.svc.getTenantCtx(ctx, projectID)
+	tenantCtx, cleanup, err := a.getTenant(ctx, projectID)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
-	tables, err := a.svc.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID)
+	tables, err := a.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID)
 	if err != nil {
 		return err
 	}
 
-	columns, err := a.svc.schemaRepo.ListColumnsByDatasource(tenantCtx, projectID, datasourceID)
+	columns, err := a.schemaRepo.ListColumnsByDatasource(tenantCtx, projectID, datasourceID)
 	if err != nil {
 		return err
 	}
 
-	return a.svc.enrichEntitiesWithLLM(ctx, projectID, ontologyID, datasourceID, tables, columns)
+	return a.svc.EnrichEntitiesWithLLM(ctx, projectID, ontologyID, datasourceID, tables, columns)
 }
 
 // RelationshipDiscoveryAdapter adapts DeterministicRelationshipService for the dag package.

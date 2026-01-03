@@ -13,6 +13,12 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
+// QuestionCounts represents the count of required and optional pending questions.
+type QuestionCounts struct {
+	Required int `json:"required"`
+	Optional int `json:"optional"`
+}
+
 // OntologyQuestionRepository provides data access for ontology questions.
 type OntologyQuestionRepository interface {
 	// Create inserts a new question.
