@@ -141,6 +141,7 @@ func main() {
 	relationshipCandidateRepo := repositories.NewRelationshipCandidateRepository()
 	ontologyEntityRepo := repositories.NewOntologyEntityRepository()
 	entityRelationshipRepo := repositories.NewEntityRelationshipRepository()
+	ontologyDAGRepo := repositories.NewOntologyDAGRepository()
 
 	// Create connection manager with config-driven settings
 	connManagerCfg := datasource.ConnectionManagerConfig{
@@ -213,6 +214,19 @@ func main() {
 		datasourceService, adapterFactory, llmFactory, getTenantCtx, logger)
 	relationshipEnrichmentService := services.NewRelationshipEnrichmentService(
 		entityRelationshipRepo, ontologyEntityRepo, llmFactory, logger)
+
+	// Ontology DAG service for orchestrated workflow execution
+	ontologyDAGService := services.NewOntologyDAGService(
+		ontologyDAGRepo, ontologyRepo, ontologyEntityRepo, schemaRepo, getTenantCtx, logger)
+
+	// Wire DAG adapters using setter pattern (avoids import cycles)
+	ontologyDAGService.SetEntityDiscoveryMethods(services.NewEntityDiscoveryAdapter(entityDiscoveryService))
+	ontologyDAGService.SetEntityEnrichmentMethods(services.NewEntityEnrichmentAdapter(entityDiscoveryService))
+	ontologyDAGService.SetRelationshipDiscoveryMethods(services.NewRelationshipDiscoveryAdapter(deterministicRelationshipService))
+	ontologyDAGService.SetRelationshipEnrichmentMethods(services.NewRelationshipEnrichmentAdapter(relationshipEnrichmentService))
+	ontologyDAGService.SetFinalizationMethods(services.NewOntologyFinalizationAdapter(ontologyFinalizationService))
+	ontologyDAGService.SetColumnEnrichmentMethods(services.NewColumnEnrichmentAdapter(columnEnrichmentService))
+	_ = ontologyDAGService // DAG service ready for use - handlers added in Phase 3
 
 	// Wire enrichment services to relationship workflow for auto-trigger after extraction
 	relationshipWorkflowService.SetColumnEnrichmentService(columnEnrichmentService)

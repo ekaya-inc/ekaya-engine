@@ -543,28 +543,51 @@ pkg/repositories/
 
 4. **Test Pattern**: Tests use `testhelpers.GetEngineDB(t)` shared container pattern. Run with `go test -tags=integration ./pkg/repositories/...`
 
-### Phase 2: DAG Service & Nodes
+### Phase 2: DAG Service & Nodes ✅ COMPLETED
 
 **Tasks:**
-1. Create `OntologyDAGService` interface and implementation
-2. Create `NodeExecutor` interface
-3. Create 6 node executors wrapping existing service methods
-4. Wire into `main.go` using setter pattern for cross-service dependencies
+1. ✅ Create `OntologyDAGService` interface and implementation
+2. ✅ Create `NodeExecutor` interface with `BaseNode` for common functionality
+3. ✅ Create 6 node executors wrapping existing service methods
+4. ✅ Wire into `main.go` using setter pattern for cross-service dependencies
+5. ✅ Create adapter layer to bridge services and dag package (avoids import cycles)
+6. ✅ Add unit tests for node ordering, interface contracts, and execution context
 
-**Files:**
+**Files Created:**
 ```
 pkg/services/
-  ontology_dag_service.go
-  ontology_dag_service_test.go
+  ontology_dag_service.go      # Main DAG orchestrator (Start, GetStatus, Cancel, Shutdown)
+  ontology_dag_service_test.go # Unit tests for node ordering and interface contracts
+  dag_adapters.go              # Adapter layer bridging services to dag package interfaces
   dag/
-    node_executor.go
-    entity_discovery_node.go
-    entity_enrichment_node.go
-    relationship_discovery_node.go
-    relationship_enrichment_node.go
-    ontology_finalization_node.go
-    column_enrichment_node.go
+    node_executor.go                   # NodeExecutor interface + BaseNode with progress reporting
+    entity_discovery_node.go           # Wraps identifyEntitiesFromDDL()
+    entity_enrichment_node.go          # Wraps enrichEntitiesWithLLM()
+    relationship_discovery_node.go     # Wraps DeterministicRelationshipService.DiscoverRelationships()
+    relationship_enrichment_node.go    # Wraps RelationshipEnrichmentService.EnrichProject()
+    ontology_finalization_node.go      # Wraps OntologyFinalizationService.Finalize()
+    column_enrichment_node.go          # Wraps ColumnEnrichmentService.EnrichProject()
 ```
+
+**Implementation Notes for Future Sessions:**
+
+1. **Adapter Pattern**: The `dag_adapters.go` file contains adapters that convert between the services package types and the dag package interfaces. This allows the dag package to remain independent of the services package, avoiding import cycles.
+
+2. **Service Method Setters**: `OntologyDAGService` uses setter methods (e.g., `SetEntityDiscoveryMethods()`) to receive dependencies. These are called in `main.go` after all services are constructed.
+
+3. **DAG Execution Flow**:
+   - `Start()` → Creates DAG + 6 nodes → Claims ownership → Starts heartbeat → Spawns goroutine
+   - Goroutine executes nodes sequentially with retry logic via `pkg/retry`
+   - Each node updates its status (pending → running → completed/failed)
+   - `GetStatus()` returns current DAG with all node states for UI polling
+
+4. **Ownership & Heartbeat**: The service tracks a `serverInstanceID` and maintains a heartbeat (every 30s) for multi-server robustness. This allows detecting stale DAGs if a server crashes.
+
+5. **Progress Reporting**: Each node has `SetCurrentNodeID()` which enables `ReportProgress()` calls to update the database with current/total/message for UI visibility.
+
+6. **Retry Integration**: Node execution wraps calls in `retry.DoIfRetryable()` which uses `llm.IsRetryable()` to determine if errors should trigger retry.
+
+7. **main.go Wiring**: The DAG service is created and all adapters are wired but marked with `_ = ontologyDAGService` since handlers are added in Phase 3.
 
 ### Phase 3: API & Handler
 
