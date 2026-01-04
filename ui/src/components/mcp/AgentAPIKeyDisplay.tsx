@@ -28,22 +28,31 @@ export default function AgentAPIKeyDisplay({ projectId }: AgentAPIKeyDisplayProp
 
   // Fetch initial key (masked)
   useEffect(() => {
+    let cancelled = false;
+
     const fetchKey = async () => {
       try {
         setLoading(true);
         const response = await engineApi.getAgentAPIKey(projectId, false);
-        if (response.success && response.data) {
+        if (!cancelled && response.success && response.data) {
           setKey(response.data.key);
           setMasked(response.data.masked);
         }
       } catch (error) {
-        console.error('Failed to fetch agent API key:', error);
+        if (!cancelled) {
+          console.error('Failed to fetch agent API key:', error);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     };
 
     void fetchKey();
+    return () => {
+      cancelled = true;
+    };
   }, [projectId]);
 
   // Reveal key on focus
@@ -156,6 +165,14 @@ export default function AgentAPIKeyDisplay({ projectId }: AgentAPIKeyDisplayProp
       <p className="text-xs text-text-secondary">
         Click the key to reveal. Use this key for agent authentication.
       </p>
+      <details className="text-xs text-text-secondary mt-2">
+        <summary className="cursor-pointer hover:text-text-primary">Usage example</summary>
+        <pre className="mt-1 p-2 bg-bg-secondary rounded text-xs overflow-x-auto">
+{`# Use the X-API-Key header for agent authentication
+curl -H "X-API-Key: <your-key>" \\
+  https://your-server/mcp/${projectId}`}
+        </pre>
+      </details>
 
       {/* Confirmation Dialog */}
       <Dialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>

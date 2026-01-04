@@ -392,6 +392,12 @@ const MCPServerPage = () => {
                   <div className="ml-6 -mt-2">
                     <div className="rounded-md border border-border-light bg-surface-secondary p-4">
                       <AgentAPIKeyDisplay projectId={pid!} />
+                      {/* Warning when agent tools enabled but approved queries disabled */}
+                      {!isApprovedQueriesEnabled && (
+                        <p className="mt-3 text-sm text-yellow-600">
+                          Note: Agent Tools require Business User Tools to be enabled for agents to access queries.
+                        </p>
+                      )}
                     </div>
                   </div>
                 )}

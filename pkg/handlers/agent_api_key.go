@@ -86,6 +86,10 @@ func (h *AgentAPIKeyHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if !reveal {
 		responseKey = "****"
 		masked = true
+	} else {
+		// Audit log: key was revealed
+		h.logger.Info("Agent API key revealed",
+			zap.String("project_id", projectID.String()))
 	}
 
 	response := ApiResponse{
