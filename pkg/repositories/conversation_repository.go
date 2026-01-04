@@ -17,6 +17,7 @@ import (
 type ConversationRepository interface {
 	Save(ctx context.Context, conv *models.LLMConversation) error
 	Update(ctx context.Context, conv *models.LLMConversation) error
+	UpdateStatus(ctx context.Context, id uuid.UUID, status, errorMessage string) error
 	GetByProject(ctx context.Context, projectID uuid.UUID, limit int) ([]*models.LLMConversation, error)
 	GetByContext(ctx context.Context, projectID uuid.UUID, key, value string) ([]*models.LLMConversation, error)
 	GetByConversationID(ctx context.Context, conversationID uuid.UUID) ([]*models.LLMConversation, error)
@@ -144,6 +145,35 @@ func (r *conversationRepository) Update(ctx context.Context, conv *models.LLMCon
 
 	if result.RowsAffected() == 0 {
 		return fmt.Errorf("conversation not found: %s", conv.ID)
+	}
+
+	return nil
+}
+
+func (r *conversationRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status, errorMessage string) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	// Use NULL for empty error_message
+	var errMsg *string
+	if errorMessage != "" {
+		errMsg = &errorMessage
+	}
+
+	query := `
+		UPDATE engine_llm_conversations
+		SET status = $2, error_message = $3
+		WHERE id = $1`
+
+	result, err := scope.Conn.Exec(ctx, query, id, status, errMsg)
+	if err != nil {
+		return fmt.Errorf("failed to update conversation status: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("conversation not found: %s", id)
 	}
 
 	return nil
