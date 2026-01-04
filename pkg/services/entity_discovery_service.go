@@ -24,12 +24,13 @@ type EntityDiscoveryService interface {
 }
 
 type entityDiscoveryService struct {
-	entityRepo   repositories.OntologyEntityRepository
-	schemaRepo   repositories.SchemaRepository
-	ontologyRepo repositories.OntologyRepository
-	llmFactory   llm.LLMClientFactory
-	getTenantCtx TenantContextFunc
-	logger       *zap.Logger
+	entityRepo       repositories.OntologyEntityRepository
+	schemaRepo       repositories.SchemaRepository
+	ontologyRepo     repositories.OntologyRepository
+	conversationRepo repositories.ConversationRepository
+	llmFactory       llm.LLMClientFactory
+	getTenantCtx     TenantContextFunc
+	logger           *zap.Logger
 }
 
 // NewEntityDiscoveryService creates a new entity discovery service.
@@ -37,17 +38,19 @@ func NewEntityDiscoveryService(
 	entityRepo repositories.OntologyEntityRepository,
 	schemaRepo repositories.SchemaRepository,
 	ontologyRepo repositories.OntologyRepository,
+	conversationRepo repositories.ConversationRepository,
 	llmFactory llm.LLMClientFactory,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) EntityDiscoveryService {
 	return &entityDiscoveryService{
-		entityRepo:   entityRepo,
-		schemaRepo:   schemaRepo,
-		ontologyRepo: ontologyRepo,
-		llmFactory:   llmFactory,
-		getTenantCtx: getTenantCtx,
-		logger:       logger.Named("entity-discovery"),
+		entityRepo:       entityRepo,
+		schemaRepo:       schemaRepo,
+		ontologyRepo:     ontologyRepo,
+		conversationRepo: conversationRepo,
+		llmFactory:       llmFactory,
+		getTenantCtx:     getTenantCtx,
+		logger:           logger.Named("entity-discovery"),
 	}
 }
 
@@ -282,7 +285,18 @@ func (s *entityDiscoveryService) enrichEntitiesWithLLM(
 	enrichments, err := s.parseEntityEnrichmentResponse(result.Content)
 	if err != nil {
 		s.logger.Warn("Failed to parse entity enrichment response, keeping original names",
+			zap.String("conversation_id", result.ConversationID.String()),
 			zap.Error(err))
+
+		// Update conversation status for parse failure
+		if s.conversationRepo != nil {
+			errorMessage := fmt.Sprintf("parse_failure: %s", err.Error())
+			if updateErr := s.conversationRepo.UpdateStatus(tenantCtx, result.ConversationID, models.LLMConversationStatusError, errorMessage); updateErr != nil {
+				s.logger.Warn("Failed to update conversation status",
+					zap.String("conversation_id", result.ConversationID.String()),
+					zap.Error(updateErr))
+			}
+		}
 		return nil // Don't fail the workflow for enrichment parsing errors
 	}
 

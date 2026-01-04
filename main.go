@@ -203,10 +203,10 @@ func main() {
 	deterministicRelationshipService := services.NewDeterministicRelationshipService(
 		datasourceService, adapterFactory, ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo)
 	ontologyFinalizationService := services.NewOntologyFinalizationService(
-		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, llmFactory, getTenantCtx, logger)
+		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, convRepo, llmFactory, getTenantCtx, logger)
 	entityService := services.NewEntityService(ontologyEntityRepo, ontologyRepo, logger)
 	entityDiscoveryService := services.NewEntityDiscoveryService(
-		ontologyEntityRepo, schemaRepo, ontologyRepo,
+		ontologyEntityRepo, schemaRepo, ontologyRepo, convRepo,
 		llmFactory, getTenantCtx, logger)
 	ontologyContextService := services.NewOntologyContextService(
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, projectService, logger)
@@ -220,10 +220,10 @@ func main() {
 	llmCircuitBreaker := llm.NewCircuitBreaker(circuitBreakerConfig)
 
 	columnEnrichmentService := services.NewColumnEnrichmentService(
-		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo,
+		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, convRepo,
 		datasourceService, adapterFactory, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
 	relationshipEnrichmentService := services.NewRelationshipEnrichmentService(
-		entityRelationshipRepo, ontologyEntityRepo, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
+		entityRelationshipRepo, ontologyEntityRepo, convRepo, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
 
 	// Ontology DAG service for orchestrated workflow execution
 	ontologyDAGService := services.NewOntologyDAGService(
@@ -234,7 +234,8 @@ func main() {
 	// Wire DAG adapters using setter pattern (avoids import cycles)
 	ontologyDAGService.SetEntityDiscoveryMethods(services.NewEntityDiscoveryAdapter(entityDiscoveryService))
 	ontologyDAGService.SetEntityEnrichmentMethods(services.NewEntityEnrichmentAdapter(entityDiscoveryService, schemaRepo, getTenantCtx))
-	ontologyDAGService.SetRelationshipDiscoveryMethods(services.NewRelationshipDiscoveryAdapter(deterministicRelationshipService))
+	ontologyDAGService.SetFKDiscoveryMethods(services.NewFKDiscoveryAdapter(deterministicRelationshipService))
+	ontologyDAGService.SetPKMatchDiscoveryMethods(services.NewPKMatchDiscoveryAdapter(deterministicRelationshipService))
 	ontologyDAGService.SetRelationshipEnrichmentMethods(services.NewRelationshipEnrichmentAdapter(relationshipEnrichmentService))
 	ontologyDAGService.SetFinalizationMethods(services.NewOntologyFinalizationAdapter(ontologyFinalizationService))
 	ontologyDAGService.SetColumnEnrichmentMethods(services.NewColumnEnrichmentAdapter(columnEnrichmentService))
