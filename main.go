@@ -348,6 +348,14 @@ func main() {
 	mcpConfigHandler := handlers.NewMCPConfigHandler(mcpConfigService, logger)
 	mcpConfigHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
+	// Register agent API key handler (protected)
+	agentAPIKeyService, err := services.NewAgentAPIKeyService(mcpConfigRepo, logger)
+	if err != nil {
+		logger.Fatal("Failed to create agent API key service", zap.Error(err))
+	}
+	agentAPIKeyHandler := handlers.NewAgentAPIKeyHandler(agentAPIKeyService, logger)
+	agentAPIKeyHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
 	// Register ontology handlers (protected)
 	ontologyQuestionsHandler := handlers.NewOntologyQuestionsHandler(ontologyQuestionService, logger)
 	ontologyQuestionsHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)

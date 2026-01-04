@@ -133,147 +133,41 @@ Add a new "Agent Tools" section to the MCP Server configuration page, positioned
 
 ---
 
-### Step 5: Create Agent API Key Handler
+### Step 5: Create Agent API Key Handler ✅ COMPLETED
 
-**File:** `pkg/handlers/agent_api_key.go`
+**Files Created:**
+- `pkg/handlers/agent_api_key.go` - Handler implementation
+- `pkg/handlers/agent_api_key_test.go` - Unit tests
 
-```go
-package handlers
+**Files Modified:**
+- `main.go` - Wired up service and handler
 
-import (
-    "encoding/json"
-    "net/http"
+**What Was Done:**
+1. Created `AgentAPIKeyHandler` with `Get` and `Regenerate` endpoints
+2. GET `/api/projects/{pid}/mcp/agent-key` - Returns masked key by default, full key with `?reveal=true`
+3. POST `/api/projects/{pid}/mcp/agent-key/regenerate` - Generates new key, invalidates old
+4. Auto-generates key if one doesn't exist on GET request
+5. Added comprehensive unit tests covering:
+   - Masked and revealed key responses
+   - Auto-generation when key doesn't exist
+   - Error handling for both endpoints
+   - Invalid project ID validation
+6. Wired up AgentAPIKeyService and AgentAPIKeyHandler in main.go
 
-    "go.uber.org/zap"
+**Code Locations:**
+- `pkg/handlers/agent_api_key.go:50-102` - Get handler with auto-generation and masking logic
+- `pkg/handlers/agent_api_key.go:106-133` - Regenerate handler
+- `pkg/handlers/agent_api_key.go:38-45` - RegisterRoutes with auth/tenant middleware
+- `main.go:351-357` - Service and handler wiring
 
-    "github.com/ekaya-inc/ekaya-engine/pkg/auth"
-    "github.com/ekaya-inc/ekaya-engine/pkg/services"
-)
+**Implementation Notes for Future Sessions:**
+- The handler follows existing patterns from `pkg/handlers/mcp_config.go`
+- Uses `ParseProjectID`, `ErrorResponse`, `WriteJSON`, and `ApiResponse` helper functions
+- Response types defined: `GetAgentAPIKeyResponse` (key + masked bool) and `RegenerateAgentAPIKeyResponse` (key only)
+- Routes use same auth/tenant middleware pattern as other protected endpoints
+- Tests use a mock service implementing `services.AgentAPIKeyService` interface
 
-// GetAgentAPIKeyResponse is the response for GET /api/projects/{pid}/mcp/agent-key
-type GetAgentAPIKeyResponse struct {
-    Key    string `json:"key"`    // Masked or full key depending on ?reveal=true
-    Masked bool   `json:"masked"` // Whether key is masked
-}
-
-// RegenerateAgentAPIKeyResponse is the response for POST /api/projects/{pid}/mcp/agent-key/regenerate
-type RegenerateAgentAPIKeyResponse struct {
-    Key string `json:"key"` // New unmasked key
-}
-
-// AgentAPIKeyHandler handles agent API key HTTP requests.
-type AgentAPIKeyHandler struct {
-    agentKeyService services.AgentAPIKeyService
-    logger          *zap.Logger
-}
-
-// NewAgentAPIKeyHandler creates a new agent API key handler.
-func NewAgentAPIKeyHandler(agentKeyService services.AgentAPIKeyService, logger *zap.Logger) *AgentAPIKeyHandler {
-    return &AgentAPIKeyHandler{
-        agentKeyService: agentKeyService,
-        logger:          logger,
-    }
-}
-
-// RegisterRoutes registers the agent API key handler's routes on the given mux.
-func (h *AgentAPIKeyHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.Middleware, tenantMiddleware TenantMiddleware) {
-    keyBase := "/api/projects/{pid}/mcp/agent-key"
-
-    mux.HandleFunc("GET "+keyBase,
-        authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Get)))
-    mux.HandleFunc("POST "+keyBase+"/regenerate",
-        authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Regenerate)))
-}
-
-// Get handles GET /api/projects/{pid}/mcp/agent-key
-func (h *AgentAPIKeyHandler) Get(w http.ResponseWriter, r *http.Request) {
-    projectID, ok := ParseProjectID(w, r, h.logger)
-    if !ok {
-        return
-    }
-
-    key, err := h.agentKeyService.GetKey(r.Context(), projectID)
-    if err != nil {
-        h.logger.Error("Failed to get agent API key",
-            zap.String("project_id", projectID.String()),
-            zap.Error(err))
-        if err := ErrorResponse(w, http.StatusInternalServerError, "internal_error", "Failed to get agent API key"); err != nil {
-            h.logger.Error("Failed to write error response", zap.Error(err))
-        }
-        return
-    }
-
-    // Generate key if it doesn't exist
-    if key == "" {
-        key, err = h.agentKeyService.GenerateKey(r.Context(), projectID)
-        if err != nil {
-            h.logger.Error("Failed to generate agent API key",
-                zap.String("project_id", projectID.String()),
-                zap.Error(err))
-            if err := ErrorResponse(w, http.StatusInternalServerError, "internal_error", "Failed to generate agent API key"); err != nil {
-                h.logger.Error("Failed to write error response", zap.Error(err))
-            }
-            return
-        }
-    }
-
-    // Check if ?reveal=true query parameter is present
-    reveal := r.URL.Query().Get("reveal") == "true"
-
-    responseKey := key
-    masked := false
-    if !reveal {
-        responseKey = "****"
-        masked = true
-    }
-
-    response := ApiResponse{
-        Success: true,
-        Data: GetAgentAPIKeyResponse{
-            Key:    responseKey,
-            Masked: masked,
-        },
-    }
-
-    if err := WriteJSON(w, http.StatusOK, response); err != nil {
-        h.logger.Error("Failed to write response", zap.Error(err))
-    }
-}
-
-// Regenerate handles POST /api/projects/{pid}/mcp/agent-key/regenerate
-func (h *AgentAPIKeyHandler) Regenerate(w http.ResponseWriter, r *http.Request) {
-    projectID, ok := ParseProjectID(w, r, h.logger)
-    if !ok {
-        return
-    }
-
-    newKey, err := h.agentKeyService.RegenerateKey(r.Context(), projectID)
-    if err != nil {
-        h.logger.Error("Failed to regenerate agent API key",
-            zap.String("project_id", projectID.String()),
-            zap.Error(err))
-        if err := ErrorResponse(w, http.StatusInternalServerError, "internal_error", "Failed to regenerate agent API key"); err != nil {
-            h.logger.Error("Failed to write error response", zap.Error(err))
-        }
-        return
-    }
-
-    response := ApiResponse{
-        Success: true,
-        Data: RegenerateAgentAPIKeyResponse{
-            Key: newKey,
-        },
-    }
-
-    if err := WriteJSON(w, http.StatusOK, response); err != nil {
-        h.logger.Error("Failed to write response", zap.Error(err))
-    }
-}
-```
-
-**Pattern reference:** `pkg/handlers/mcp_config.go` (handler structure and route registration)
-
-**Wire up in:** `cmd/server/main.go` (add to handler initialization and route registration)
+**Pattern Reference:** `pkg/handlers/mcp_config.go` (handler structure and route registration)
 
 ---
 
