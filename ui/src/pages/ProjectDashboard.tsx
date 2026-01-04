@@ -2,7 +2,6 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Boxes,
   Brain,
-  BrainCircuit,
   Check,
   ChevronDown,
   Database,
@@ -427,13 +426,6 @@ const ProjectDashboard = () => {
 
   const applicationTiles: Tile[] = [
     {
-      title: 'AI Data Liaison',
-      icon: BrainCircuit,
-      path: `/projects/${pid}/ai-data-liaison`,
-      disabled: !isConnected || !hasSelectedTables,
-      color: 'blue',
-    },
-    {
       title: 'MCP Server',
       icon: Server,
       path: `/projects/${pid}/mcp-server`,
@@ -442,8 +434,8 @@ const ProjectDashboard = () => {
     },
   ];
 
-    const handleTileClick = (tile: Tile): void => {
-      if (!tile.disabled) {
+  const handleTileClick = (tile: Tile): void => {
+    if (!tile.disabled) {
       navigate(tile.path);
     }
   };
@@ -561,21 +553,23 @@ const ProjectDashboard = () => {
     <div className="mx-auto max-w-6xl space-y-8">
       {/* Applications Section */}
       <section>
-        <h1 className="text-2xl font-semibold mb-2">Applications</h1>
+        <div className="flex items-center justify-between mb-2">
+          <h1 className="text-2xl font-semibold">Applications</h1>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate(`/projects/${pid}/applications`)}
+          >
+            <Plus className="h-4 w-4" />
+            Install Application
+          </Button>
+        </div>
         <p className="text-text-secondary mb-4">
-          Deploy applications that connect to your data through secure, governed interfaces.
+          Install applications that safely connect to your data through secure interfaces.
         </p>
         <div className="grid gap-6 md:grid-cols-2">
           {applicationTiles.map(renderApplicationTile)}
         </div>
-        <Button
-          variant="outline"
-          className="w-full mt-4"
-          onClick={() => navigate(`/projects/${pid}/applications`)}
-        >
-          <Plus className="h-4 w-4" />
-          Install Application
-        </Button>
       </section>
 
       {/* Data Section */}
