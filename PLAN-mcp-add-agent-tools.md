@@ -171,95 +171,68 @@ Add a new "Agent Tools" section to the MCP Server configuration page, positioned
 
 ---
 
-### Step 6: Update MCP Authentication Middleware
+### Step 6: Update MCP Authentication Middleware ✅ COMPLETED
 
-**File:** `pkg/mcp/auth/middleware.go` (modify existing file)
+**Files Modified:**
+- `pkg/mcp/auth/middleware.go` - Extended middleware to support agent API key auth
+- `pkg/mcp/auth/middleware_test.go` - Comprehensive tests for agent key auth
+- `pkg/handlers/mcp_handler_test.go` - Updated mock to include agentKeyService parameter
+- `pkg/handlers/mcp_integration_test.go` - Updated mock to include agentKeyService parameter
+- `main.go` - Moved agentAPIKeyService creation before mcpAuthMiddleware
 
-Add agent API key authentication path alongside existing JWT authentication:
+**What Was Done:**
 
-```go
-// Authenticate middleware extracts and validates either JWT or Agent API Key authentication.
-// It supports two authentication methods:
-// 1. JWT (existing): Authorization: Bearer <jwt>
-// 2. Agent API Key: Authorization: api-key:<key> OR X-API-Key: <key>
-func (m *Middleware) Authenticate(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        ctx := r.Context()
+1. **Extended Middleware struct** (`pkg/mcp/auth/middleware.go:23-27`):
+   - Added `agentKeyService services.AgentAPIKeyService` field
+   - Updated `NewMiddleware` to accept optional agentKeyService (can be nil)
 
-        // Try JWT authentication first
-        authHeader := r.Header.Get("Authorization")
-        if strings.HasPrefix(authHeader, "Bearer ") {
-            // Existing JWT path...
-            token := strings.TrimPrefix(authHeader, "Bearer ")
-            claims, err := m.jwtValidator.Validate(ctx, token)
-            if err != nil {
-                http.Error(w, "Invalid token", http.StatusUnauthorized)
-                return
-            }
-            ctx = auth.WithClaims(ctx, claims)
-            next.ServeHTTP(w, r.WithContext(ctx))
-            return
-        }
+2. **Updated RequireAuth** (`pkg/mcp/auth/middleware.go:46-68`):
+   - Checks for API key authentication first (Authorization: api-key:xxx or X-API-Key header)
+   - Falls through to JWT authentication if no API key provided
+   - Refactored into separate handlers for clarity
 
-        // Try Agent API Key authentication
-        apiKey := ""
-        if strings.HasPrefix(authHeader, "api-key:") {
-            apiKey = strings.TrimPrefix(authHeader, "api-key:")
-        } else {
-            apiKey = r.Header.Get("X-API-Key")
-        }
+3. **Added handleAgentKeyAuth** (`pkg/mcp/auth/middleware.go:71-136`):
+   - Validates agentKeyService is configured (returns 500 if nil)
+   - Extracts project ID from path param or falls back to URL path parsing
+   - Validates API key via agentKeyService.ValidateKey()
+   - Creates synthetic claims with `Subject = "agent"` marker
+   - Injects claims into context (no token for agent auth)
 
-        if apiKey != "" {
-            // Extract project ID from URL path: /mcp/{project-id}
-            projectID, err := extractProjectIDFromPath(r.URL.Path)
-            if err != nil {
-                http.Error(w, "Invalid project ID in path", http.StatusBadRequest)
-                return
-            }
+4. **Added handleJWTAuth** (`pkg/mcp/auth/middleware.go:139-179`):
+   - Extracted existing JWT logic into separate method
+   - No functional changes to JWT flow
 
-            // Validate API key
-            valid, err := m.agentKeyService.ValidateKey(ctx, projectID, apiKey)
-            if err != nil {
-                m.logger.Error("Failed to validate agent API key", zap.Error(err))
-                http.Error(w, "Authentication failed", http.StatusInternalServerError)
-                return
-            }
-            if !valid {
-                http.Error(w, "Invalid API key", http.StatusUnauthorized)
-                return
-            }
+5. **Added extractProjectIDFromPath** (`pkg/mcp/auth/middleware.go:182-190`):
+   - Parses project UUID from /mcp/{project-id} path format
+   - Used as fallback when PathValue not set
 
-            // Create synthetic claims for agent context
-            claims := &auth.Claims{
-                ProjectID: projectID,
-                UserID:    "agent", // Special marker for agent authentication
-                Email:     "agent@system",
-                Name:      "Agent",
-            }
+6. **Comprehensive test coverage** (`pkg/mcp/auth/middleware_test.go:305-661`):
+   - `TestMiddleware_RequireAuth_AgentAPIKey_AuthorizationHeader` - Authorization: api-key:xxx
+   - `TestMiddleware_RequireAuth_AgentAPIKey_XAPIKeyHeader` - X-API-Key header
+   - `TestMiddleware_RequireAuth_AgentAPIKey_InvalidKey` - Wrong key rejected
+   - `TestMiddleware_RequireAuth_AgentAPIKey_NoKeyConfigured` - No key for project
+   - `TestMiddleware_RequireAuth_AgentAPIKey_InvalidProjectID` - Invalid UUID format
+   - `TestMiddleware_RequireAuth_AgentAPIKey_ServiceError` - DB error handling
+   - `TestMiddleware_RequireAuth_AgentAPIKey_NoService` - Nil service handling
+   - `TestMiddleware_RequireAuth_AgentAPIKey_ExtractProjectFromPath` - Fallback path parsing
+   - `TestExtractProjectIDFromPath` - Path extraction edge cases
 
-            ctx = auth.WithClaims(ctx, claims)
-            next.ServeHTTP(w, r.WithContext(ctx))
-            return
-        }
+7. **Wiring in main.go** (`main.go:135-140, 318`):
+   - Moved agentAPIKeyService creation earlier (before MCP handler setup)
+   - Passed agentKeyService to mcpauth.NewMiddleware()
 
-        // No valid authentication found
-        http.Error(w, "Missing or invalid authentication", http.StatusUnauthorized)
-    })
-}
+**Code Locations:**
+- `pkg/mcp/auth/middleware.go:23-27` - Middleware struct with agentKeyService
+- `pkg/mcp/auth/middleware.go:30-37` - NewMiddleware constructor
+- `pkg/mcp/auth/middleware.go:71-136` - handleAgentKeyAuth method
+- `pkg/mcp/auth/middleware.go:124-128` - Synthetic claims for agent (Subject = "agent")
+- `main.go:318` - mcpAuthMiddleware wiring with agentAPIKeyService
 
-// extractProjectIDFromPath extracts project UUID from /mcp/{project-id} path.
-func extractProjectIDFromPath(path string) (uuid.UUID, error) {
-    // Expected format: /mcp/{project-id} or /mcp/{project-id}/...
-    parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
-    if len(parts) < 2 || parts[0] != "mcp" {
-        return uuid.Nil, fmt.Errorf("invalid path format")
-    }
-
-    return uuid.Parse(parts[1])
-}
-```
-
-**Dependencies:** Add `agentKeyService services.AgentAPIKeyService` to `Middleware` struct
+**Key Implementation Notes for Future Sessions:**
+- Agent auth uses `claims.Subject = "agent"` to identify agent vs user authentication
+- Tool filtering (Step 7) should check `claims.Subject == "agent"` to apply agent restrictions
+- API key checked BEFORE JWT to prioritize explicit agent authentication
+- All RFC 6750 error responses maintained for both auth methods
 
 ---
 

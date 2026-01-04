@@ -176,7 +176,7 @@ func TestMCPIntegration_AuthFailures(t *testing.T) {
 	t.Run("missing token returns 401 with WWW-Authenticate", func(t *testing.T) {
 		// Use auth service that rejects all requests
 		failingAuthService := &mcpFailingAuthService{err: auth.ErrMissingAuthorization}
-		middleware := mcpauth.NewMiddleware(failingAuthService, logger)
+		middleware := mcpauth.NewMiddleware(failingAuthService, nil, logger)
 
 		mux := http.NewServeMux()
 		mcpHandler.RegisterRoutes(mux, middleware)
@@ -204,7 +204,7 @@ func TestMCPIntegration_AuthFailures(t *testing.T) {
 			claims: &auth.Claims{ProjectID: "other-project"},
 			token:  "test-token",
 		}
-		middleware := mcpauth.NewMiddleware(mismatchAuthService, logger)
+		middleware := mcpauth.NewMiddleware(mismatchAuthService, nil, logger)
 
 		mux := http.NewServeMux()
 		mcpHandler.RegisterRoutes(mux, middleware)
