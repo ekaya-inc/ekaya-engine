@@ -19,6 +19,7 @@ import ProjectDashboard from './pages/ProjectDashboard';
 import QueriesPage from './pages/QueriesPage';
 import RelationshipsPage from './pages/RelationshipsPage';
 import SchemaPage from './pages/SchemaPage';
+import ApplicationsPage from './pages/ApplicationsPage';
 import SettingsPage from './pages/SettingsPage';
 
 const App = (): JSX.Element => {
@@ -34,6 +35,7 @@ const App = (): JSX.Element => {
                 <Route path="/" element={<HomePage />} />
                 <Route path="/projects/:pid" element={<ProjectProvider><ProjectDataLoader><Layout /></ProjectDataLoader></ProjectProvider>}>
                   <Route index element={<ProjectDashboard />} />
+                  <Route path="applications" element={<ApplicationsPage />} />
                   <Route path="datasource" element={<DatasourcePage />} />
                   <Route path="schema" element={<SchemaPage />} />
                   <Route path="relationships" element={<RelationshipsPage />} />

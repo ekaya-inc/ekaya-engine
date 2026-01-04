@@ -65,22 +65,16 @@ The section renders using `renderApplicationTile()` (lines 436-508) which create
 - Disabled tiles (`available: false`) have `opacity-60` and `cursor-not-allowed`
 - The route still needs to be added to `ui/src/App.tsx` (Task 3)
 
-### 3. [ ] Add Route for Applications Page
+### 3. [x] Add Route for Applications Page
+
+**Status:** COMPLETE
 
 **File:** `ui/src/App.tsx`
 
-Add the route inside the project routes block (around line 30-42):
-
-```tsx
-<Route path="/projects/:pid" element={<ProjectProvider><ProjectDataLoader><Layout /></ProjectDataLoader></ProjectProvider>}>
-  <Route index element={<ProjectDashboard />} />
-  <Route path="applications" element={<ApplicationsPage />} />  {/* ADD THIS */}
-  <Route path="datasource" element={<DatasourcePage />} />
-  {/* ... rest of routes */}
-</Route>
-```
-
-Import the new page component at the top of App.tsx.
+**What was done:**
+- Added `ApplicationsPage` import (line 22)
+- Added route `<Route path="applications" element={<ApplicationsPage />} />` inside the project routes block (line 38)
+- Route is accessible at `/projects/:pid/applications`
 
 ### 4. Application Installation Flow (Future)
 
