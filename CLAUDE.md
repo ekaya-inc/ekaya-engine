@@ -180,6 +180,17 @@ psql -c "SELECT * FROM engine_projects;"
 psql -c "SELECT * FROM engine_users;"
 ```
 
+### Row-Level Security (RLS)
+
+Most tables use RLS for tenant isolation. To query RLS-protected tables (ontology, schema, datasources, etc.), set the tenant context first:
+
+```bash
+# Set tenant context before querying
+psql -c "SELECT set_config('app.current_project_id', '<project-id>', false); SELECT * FROM engine_ontologies;"
+```
+
+Tables **without** RLS (admin tables): `engine_projects`, `engine_users`
+
 ## Testing
 
 ```bash
