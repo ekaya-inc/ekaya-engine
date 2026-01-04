@@ -350,6 +350,68 @@ func TestProjectRepository_Delete_CascadesToUsers(t *testing.T) {
 	}
 }
 
+// TestProjectRepository_Update_UpdatesName tests that Update correctly updates the project name.
+func TestProjectRepository_Update_UpdatesName(t *testing.T) {
+	tc := setupProjectTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create a project with initial name
+	project := tc.createTestProject(ctx, "Original Name")
+
+	// Update the name
+	project.Name = "Updated Name"
+	err := tc.repo.Update(ctx, project)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	// Retrieve and verify name was updated
+	retrieved, err := tc.repo.Get(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if retrieved.Name != "Updated Name" {
+		t.Errorf("expected name 'Updated Name', got %q", retrieved.Name)
+	}
+}
+
+// TestProjectRepository_Update_UpdatesNameAndParameters tests that Update correctly updates both name and parameters.
+func TestProjectRepository_Update_UpdatesNameAndParameters(t *testing.T) {
+	tc := setupProjectTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create a project
+	project := tc.createTestProject(ctx, "Original Name")
+
+	// Update both name and parameters
+	project.Name = "New Name"
+	project.Parameters["new_key"] = "new_value"
+	err := tc.repo.Update(ctx, project)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	// Retrieve and verify both were updated
+	retrieved, err := tc.repo.Get(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if retrieved.Name != "New Name" {
+		t.Errorf("expected name 'New Name', got %q", retrieved.Name)
+	}
+	if retrieved.Parameters["new_key"] != "new_value" {
+		t.Errorf("expected parameter new_key=new_value, got %v", retrieved.Parameters["new_key"])
+	}
+}
+
 // TestProjectRepository_NoTenantScope tests that operations fail without tenant scope.
 func TestProjectRepository_NoTenantScope(t *testing.T) {
 	tc := setupProjectTest(t)

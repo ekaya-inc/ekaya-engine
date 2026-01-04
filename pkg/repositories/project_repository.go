@@ -132,10 +132,10 @@ func (r *projectRepository) Update(ctx context.Context, project *models.Project)
 
 	query := `
 		UPDATE engine_projects
-		SET parameters = $2, updated_at = $3
+		SET name = $2, parameters = $3, updated_at = $4
 		WHERE id = $1`
 
-	result, err := scope.Conn.Exec(ctx, query, project.ID, params, project.UpdatedAt)
+	result, err := scope.Conn.Exec(ctx, query, project.ID, project.Name, params, project.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to update project: %w", err)
 	}
