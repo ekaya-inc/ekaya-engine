@@ -3,6 +3,8 @@ package llm
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 )
 
 // GenerateResponseResult contains the response content and usage metadata.
@@ -11,6 +13,7 @@ type GenerateResponseResult struct {
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
+	ConversationID   uuid.UUID // For correlating with debug logs and database records
 }
 
 // LLMClient defines the interface for LLM operations.

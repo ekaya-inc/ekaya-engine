@@ -225,7 +225,7 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 			zap.Error(err))
 		// Log the specific relationships that failed
 		for _, rel := range relationships {
-			s.logRelationshipFailure(rel, "Circuit breaker open", err)
+			s.logRelationshipFailure(rel, "Circuit breaker open", err, uuid.Nil)
 		}
 		result.Failed = len(relationships)
 		return result, err
@@ -286,8 +286,13 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 			zap.Int("batch_size", len(relationships)),
 			zap.Error(err))
 		// Log the specific relationships that failed
+		// llmResult may have ConversationID even on error (from RecordingClient)
+		var convID uuid.UUID
+		if llmResult != nil {
+			convID = llmResult.ConversationID
+		}
 		for _, rel := range relationships {
-			s.logRelationshipFailure(rel, "LLM call failed", err)
+			s.logRelationshipFailure(rel, "LLM call failed", err, convID)
 		}
 		result.Failed = len(relationships)
 		return result, err
@@ -306,7 +311,7 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 			zap.Error(err))
 		// Log the specific relationships that failed
 		for _, rel := range relationships {
-			s.logRelationshipFailure(rel, "Failed to parse LLM response", err)
+			s.logRelationshipFailure(rel, "Failed to parse LLM response", err, llmResult.ConversationID)
 		}
 		result.Failed = len(relationships)
 		return result, err
@@ -325,13 +330,13 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 		key := fmt.Sprintf("%s.%s->%s.%s", rel.SourceColumnTable, rel.SourceColumnName, rel.TargetColumnTable, rel.TargetColumnName)
 		description, ok := enrichmentByKey[key]
 		if !ok || description == "" {
-			s.logRelationshipFailure(rel, "No enrichment found in LLM response", nil)
+			s.logRelationshipFailure(rel, "No enrichment found in LLM response", nil, llmResult.ConversationID)
 			result.Failed++
 			continue
 		}
 
 		if err := s.relationshipRepo.UpdateDescription(batchCtx, rel.ID, description); err != nil {
-			s.logRelationshipFailure(rel, "Failed to update database", err)
+			s.logRelationshipFailure(rel, "Failed to update database", err, llmResult.ConversationID)
 			result.Failed++
 			continue
 		}
@@ -476,10 +481,12 @@ func (s *relationshipEnrichmentService) validateRelationships(
 }
 
 // logRelationshipFailure logs detailed information about a failed relationship enrichment.
+// conversationID allows correlating with LLM debug logs (zero UUID if not applicable).
 func (s *relationshipEnrichmentService) logRelationshipFailure(
 	rel *models.EntityRelationship,
 	reason string,
 	err error,
+	conversationID uuid.UUID,
 ) {
 	fields := []zap.Field{
 		zap.String("relationship_id", rel.ID.String()),
@@ -488,6 +495,10 @@ func (s *relationshipEnrichmentService) logRelationshipFailure(
 		zap.String("detection_method", rel.DetectionMethod),
 		zap.Float64("confidence", rel.Confidence),
 		zap.String("reason", reason),
+	}
+
+	if conversationID != uuid.Nil {
+		fields = append(fields, zap.String("conversation_id", conversationID.String()))
 	}
 
 	if err != nil {
