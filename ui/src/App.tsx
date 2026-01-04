@@ -8,6 +8,7 @@ import { ConfigProvider } from './contexts/ConfigContext';
 import { DatasourceConnectionProvider } from './contexts/DatasourceConnectionContext';
 import { ProjectProvider } from './contexts/ProjectContext';
 import { ToastProviderComponent } from './hooks/useToast';
+import ApplicationsPage from './pages/ApplicationsPage';
 import DatasourcePage from './pages/DatasourcePage';
 import EntitiesPage from './pages/EntitiesPage';
 import HelpPage from './pages/HelpPage';
@@ -19,7 +20,6 @@ import ProjectDashboard from './pages/ProjectDashboard';
 import QueriesPage from './pages/QueriesPage';
 import RelationshipsPage from './pages/RelationshipsPage';
 import SchemaPage from './pages/SchemaPage';
-import ApplicationsPage from './pages/ApplicationsPage';
 import SettingsPage from './pages/SettingsPage';
 
 const App = (): JSX.Element => {
