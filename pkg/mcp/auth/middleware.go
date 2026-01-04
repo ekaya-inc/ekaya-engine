@@ -165,7 +165,7 @@ func (m *Middleware) handleJWTAuth(w http.ResponseWriter, r *http.Request, next 
 
 	// Validate project ID match
 	if err := m.authService.ValidateProjectIDMatch(claims, urlProjectID); err != nil {
-		m.logger.Warn("MCP auth failed: project ID mismatch",
+		m.logger.Debug("MCP auth failed: project ID mismatch",
 			zap.String("url_project_id", urlProjectID),
 			zap.String("token_project_id", claims.ProjectID))
 		m.writeWWWAuthenticate(w, http.StatusForbidden, "insufficient_scope", "The access token does not have access to this project")

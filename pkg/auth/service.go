@@ -102,7 +102,7 @@ func (s *authService) RequireProjectID(claims *Claims) error {
 // ValidateProjectIDMatch ensures the URL project ID matches the token project ID.
 func (s *authService) ValidateProjectIDMatch(claims *Claims, urlProjectID string) error {
 	if urlProjectID != "" && claims.ProjectID != urlProjectID {
-		s.logger.Warn("Project ID mismatch",
+		s.logger.Debug("Project ID mismatch",
 			zap.String("url_project_id", urlProjectID),
 			zap.String("token_project_id", claims.ProjectID))
 		return ErrProjectIDMismatch
