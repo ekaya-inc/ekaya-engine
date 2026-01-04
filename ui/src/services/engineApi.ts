@@ -519,6 +519,34 @@ class EngineApiService {
   }
 
   /**
+   * Get agent API key for a project
+   * GET /api/projects/{projectId}/mcp/agent-key
+   * @param reveal - If true, returns the full key; otherwise returns masked key
+   */
+  async getAgentAPIKey(
+    projectId: string,
+    reveal: boolean = false
+  ): Promise<ApiResponse<{ key: string; masked: boolean }>> {
+    const query = reveal ? '?reveal=true' : '';
+    return this.makeRequest<{ key: string; masked: boolean }>(
+      `/${projectId}/mcp/agent-key${query}`
+    );
+  }
+
+  /**
+   * Regenerate agent API key for a project
+   * POST /api/projects/{projectId}/mcp/agent-key/regenerate
+   */
+  async regenerateAgentAPIKey(
+    projectId: string
+  ): Promise<ApiResponse<{ key: string }>> {
+    return this.makeRequest<{ key: string }>(
+      `/${projectId}/mcp/agent-key/regenerate`,
+      { method: 'POST' }
+    );
+  }
+
+  /**
    * Get default port for datasource type
    */
   getDefaultPort(type: DatasourceType): number {

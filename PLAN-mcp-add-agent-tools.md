@@ -370,9 +370,20 @@ var approvedQueryToolNames = map[string]bool{
 
 ---
 
-### Step 9: Frontend - Add API Methods
+### Step 9: Frontend - Add API Methods [x] COMPLETED
 
 **File:** `ui/src/services/engineApi.ts`
+
+**What Was Done:**
+1. Added `getAgentAPIKey(projectId, reveal)` method that calls GET `/{projectId}/mcp/agent-key` with optional `?reveal=true` query param
+2. Added `regenerateAgentAPIKey(projectId)` method that calls POST `/{projectId}/mcp/agent-key/regenerate`
+3. Both methods follow existing patterns from the file and return properly typed `ApiResponse<T>` responses
+
+**Code Locations:**
+- `ui/src/services/engineApi.ts:521-534` - getAgentAPIKey method
+- `ui/src/services/engineApi.ts:536-547` - regenerateAgentAPIKey method
+
+**Original Plan:**
 
 Add methods:
 
