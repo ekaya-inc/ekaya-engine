@@ -625,39 +625,37 @@ export const AgentAPIKeyDisplay = ({ projectId }: AgentAPIKeyDisplayProps) => {
 
 ---
 
-### Step 11: Frontend - Update MCP Server Page
+### Step 11: Frontend - Update MCP Server Page [x] COMPLETED
 
-**File:** `ui/src/pages/MCPServerPage.tsx`
+**File Modified:** `ui/src/pages/MCPServerPage.tsx`
 
-Add Agent Tools section between Business User Tools (approved_queries) and Developer Tools:
+**What Was Done:**
 
-1. Import component:
+1. **Imported AgentAPIKeyDisplay component** (`ui/src/pages/MCPServerPage.tsx:6`):
+   ```typescript
+   import AgentAPIKeyDisplay from '../components/mcp/AgentAPIKeyDisplay';
+   ```
 
-```typescript
-import { AgentAPIKeyDisplay } from '../components/mcp/AgentAPIKeyDisplay';
-```
+2. **Added Agent Tools section** (`ui/src/pages/MCPServerPage.tsx:379-397`):
+   - Positioned between Business User Tools and Developer Tools (as specified)
+   - Uses MCPToolGroup component with metadata from TOOL_GROUP_METADATA
+   - Conditionally renders only when agent_tools config exists in backend response
+   - Shows warning from metadata
 
-2. Add section rendering (insert after approved_queries section, before developer section):
+3. **Added AgentAPIKeyDisplay below the toggle** (`ui/src/pages/MCPServerPage.tsx:391-397`):
+   - Renders only when Agent Tools is enabled
+   - Indented with `ml-6 -mt-2` to visually connect to the toggle above
+   - Wrapped in a styled container matching the design system
 
-```typescript
-{/* Agent Tools Section */}
-<MCPToolGroup
-  groupId={TOOL_GROUP_IDS.AGENT_TOOLS}
-  state={config.toolGroups[TOOL_GROUP_IDS.AGENT_TOOLS]}
-  onToggle={handleToggleToolGroup}
-  onToggleSubOption={handleToggleSubOption}
-  disabled={updating}
-  additionalInfo={
-    config.toolGroups[TOOL_GROUP_IDS.AGENT_TOOLS]?.enabled ? (
-      <div className="mt-4 p-4 bg-gray-50 rounded-md">
-        <AgentAPIKeyDisplay projectId={pid!} />
-      </div>
-    ) : null
-  }
-/>
-```
+4. **Updated tool group filter** (`ui/src/pages/MCPServerPage.tsx:401`):
+   - Added `&& groupName !== TOOL_GROUP_IDS.AGENT_TOOLS` to exclude agent_tools from the generic loop
+   - Prevents duplicate rendering since agent_tools has its own dedicated section
 
-**Pattern reference:** `ui/src/pages/MCPServerPage.tsx:33-150` (existing tool group rendering)
+**Implementation Notes for Future Sessions:**
+- The component uses default export pattern (`import AgentAPIKeyDisplay from`)
+- Agent Tools section only renders if the backend returns `agent_tools` in `config.toolGroups`
+- The `!` assertions are safe because of the conditional check above
+- The API key display appears immediately below the toggle when enabled, not as a sub-option
 
 ---
 

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import MCPLogo from '../components/icons/MCPLogo';
+import AgentAPIKeyDisplay from '../components/mcp/AgentAPIKeyDisplay';
 import MCPServerURL from '../components/mcp/MCPServerURL';
 import MCPToolGroup from '../components/mcp/MCPToolGroup';
 import { Button } from '../components/ui/Button';
@@ -375,9 +376,29 @@ const MCPServerPage = () => {
                   } : {})}
                 />
 
-                {/* Other Tool Groups (excluding approved_queries which is handled above) */}
+                {/* Agent Tools Section */}
+                {config.toolGroups[TOOL_GROUP_IDS.AGENT_TOOLS] && TOOL_GROUP_METADATA[TOOL_GROUP_IDS.AGENT_TOOLS] && (
+                  <MCPToolGroup
+                    name={TOOL_GROUP_METADATA[TOOL_GROUP_IDS.AGENT_TOOLS]!.name}
+                    description={TOOL_GROUP_METADATA[TOOL_GROUP_IDS.AGENT_TOOLS]!.description}
+                    warning={TOOL_GROUP_METADATA[TOOL_GROUP_IDS.AGENT_TOOLS]!.warning}
+                    enabled={config.toolGroups[TOOL_GROUP_IDS.AGENT_TOOLS]!.enabled}
+                    onToggle={(enabled) => handleToggleToolGroup(TOOL_GROUP_IDS.AGENT_TOOLS, enabled)}
+                    disabled={updating}
+                  />
+                )}
+                {/* Agent API Key Display - shown below the Agent Tools toggle when enabled */}
+                {config.toolGroups[TOOL_GROUP_IDS.AGENT_TOOLS]?.enabled && (
+                  <div className="ml-6 -mt-2">
+                    <div className="rounded-md border border-border-light bg-surface-secondary p-4">
+                      <AgentAPIKeyDisplay projectId={pid!} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Other Tool Groups (excluding approved_queries and agent_tools which are handled above) */}
                 {Object.entries(config.toolGroups)
-                  .filter(([groupName]) => groupName !== TOOL_GROUP_IDS.APPROVED_QUERIES)
+                  .filter(([groupName]) => groupName !== TOOL_GROUP_IDS.APPROVED_QUERIES && groupName !== TOOL_GROUP_IDS.AGENT_TOOLS)
                   .map(([groupName, groupState]) => {
                     // Get metadata for this tool group
                     const metadata = TOOL_GROUP_METADATA[groupName];
