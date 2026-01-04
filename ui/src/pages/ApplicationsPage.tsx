@@ -16,6 +16,7 @@ import {
   CardHeader,
   CardTitle,
 } from '../components/ui/Card';
+import { useToast } from '../hooks/useToast';
 import { cn } from '../utils/cn';
 
 type AppColor = 'blue' | 'purple' | 'green' | 'gray';
@@ -86,16 +87,15 @@ const getColorClasses = (color: AppColor): { bg: string; text: string } => {
 const ApplicationsPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
+  const { toast } = useToast();
 
-  const handleInstall = (appId: string) => {
-    // MVP: Navigate to app-specific page
-    if (appId === 'ai-data-liaison') {
-      navigate(`/projects/${pid}/ai-data-liaison`);
-    } else if (appId === 'product-kit') {
-      navigate(`/projects/${pid}/product-kit`);
-    } else if (appId === 'on-premise-chat') {
-      navigate(`/projects/${pid}/on-premise-chat`);
-    }
+  const handleInstall = (app: ApplicationInfo) => {
+    // MVP: Show coming soon toast for apps without dedicated pages yet
+    toast({
+      title: app.title,
+      description: `${app.title} installation coming soon!`,
+      variant: 'default',
+    });
   };
 
   return (
@@ -132,7 +132,7 @@ const ApplicationsPage = () => {
                   ? 'cursor-pointer hover:shadow-md'
                   : 'cursor-not-allowed opacity-60',
               )}
-              onClick={() => app.available && handleInstall(app.id)}
+              onClick={() => app.available && handleInstall(app)}
             >
               <CardHeader className="pb-2">
                 <div

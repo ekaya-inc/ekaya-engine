@@ -76,26 +76,39 @@ The section renders using `renderApplicationTile()` (lines 436-508) which create
 - Added route `<Route path="applications" element={<ApplicationsPage />} />` inside the project routes block (line 38)
 - Route is accessible at `/projects/:pid/applications`
 
-### 4. Application Installation Flow (Future)
+### 4. [x] Application Installation Flow (MVP)
 
-For MVP, clicking an available application tile should:
-1. Navigate to a detail/configuration page for that application, OR
-2. Show a dialog with installation confirmation
+**Status:** COMPLETE
 
-**Placeholder Implementation:**
+For MVP, clicking an available application tile shows a "coming soon" toast notification instead of navigating to a non-existent page.
+
+**What was done:**
+- Updated `handleInstall()` to accept the full `ApplicationInfo` object instead of just the ID
+- Changed from navigation (to non-existent routes) to toast notifications
+- Toast shows application title and "installation coming soon!" message
+- Added `useToast` hook import
+
+**Implementation:**
 
 ```typescript
-const handleInstall = (appId: string) => {
-  // MVP: Navigate to app-specific page or show coming soon toast
-  if (appId === 'product-kit') {
-    navigate(`/projects/${pid}/product-kit`);
-    // OR show toast: "Product Kit installation coming soon"
-  } else if (appId === 'on-premise-chat') {
-    navigate(`/projects/${pid}/on-premise-chat`);
-    // OR show toast: "On-Premise Chat installation coming soon"
-  }
+const handleInstall = (app: ApplicationInfo) => {
+  // MVP: Show coming soon toast for apps without dedicated pages yet
+  toast({
+    title: app.title,
+    description: `${app.title} installation coming soon!`,
+    variant: 'default',
+  });
 };
 ```
+
+**Tests added:**
+- Created `ui/src/pages/__tests__/ApplicationsPage.test.tsx` with 8 tests covering:
+  - Page header rendering
+  - All application tiles rendering
+  - Toast notification for each available application
+  - Disabled tile not triggering toast
+  - Back button navigation
+  - Coming Soon text for disabled tiles
 
 ### 5. Add AI Data Liaison Tile to Project Dashboard
 
