@@ -10,6 +10,7 @@ import {
   Loader2,
   MessageCircleQuestion,
   Network,
+  Plus,
   Search,
   Server,
 } from 'lucide-react';
@@ -19,6 +20,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import MCPLogo from '../components/icons/MCPLogo';
 // TEMPORARY: Import commented out for MVP launch - Coming Soon UI replaces full panels
 // import ManagedAIOptionPanel from '../components/ManagedAIOptionPanel';
+import { Button } from '../components/ui/Button';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import {
   Dialog,
@@ -558,6 +560,14 @@ const ProjectDashboard = () => {
         <div className="grid gap-6 md:grid-cols-2">
           {applicationTiles.map(renderApplicationTile)}
         </div>
+        <Button
+          variant="outline"
+          className="w-full mt-4"
+          onClick={() => navigate(`/projects/${pid}/applications`)}
+        >
+          <Plus className="h-4 w-4" />
+          Install Application
+        </Button>
       </section>
 
       {/* Data Section */}
