@@ -494,6 +494,8 @@ export type DAGNodeStatus = 'pending' | 'running' | 'completed' | 'failed' | 'sk
 export type DAGNodeName =
   | 'EntityDiscovery'
   | 'EntityEnrichment'
+  | 'FKDiscovery'
+  | 'PKMatchDiscovery'
   | 'RelationshipDiscovery'
   | 'RelationshipEnrichment'
   | 'OntologyFinalization'
@@ -542,6 +544,14 @@ export const DAGNodeDescriptions: Record<DAGNodeName, { title: string; descripti
   EntityEnrichment: {
     title: 'Entity Enrichment',
     description: 'Generating entity names and descriptions',
+  },
+  FKDiscovery: {
+    title: 'Foreign Key Discovery',
+    description: 'Discovering foreign key relationships',
+  },
+  PKMatchDiscovery: {
+    title: 'Primary Key Match Discovery',
+    description: 'Discovering relationships via primary key matching',
   },
   RelationshipDiscovery: {
     title: 'Relationship Discovery',
