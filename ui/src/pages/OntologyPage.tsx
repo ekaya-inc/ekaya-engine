@@ -135,10 +135,10 @@ const OntologyPage = () => {
       {!hasOntology && (
         <div className="mt-6 rounded-lg border border-purple-200 bg-purple-50 p-4">
           <p className="text-purple-800 text-sm">
-            <strong>How it works:</strong> The extraction process runs automatically through 6 steps:
-            entity discovery, entity enrichment, relationship discovery, relationship enrichment,
-            ontology finalization, and column enrichment. You can leave this page and return later
-            to check progress.
+            <strong>How it works:</strong> The extraction process runs automatically through 7 steps:
+            entity discovery, entity enrichment, foreign key discovery, column enrichment, primary key match discovery,
+            relationship enrichment, and ontology finalization. You can leave this page and return
+            later to check progress.
           </p>
         </div>
       )}

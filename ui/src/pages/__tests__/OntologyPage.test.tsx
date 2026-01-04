@@ -89,7 +89,7 @@ describe('OntologyPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/How it works:/i)).toBeInTheDocument();
     });
-    expect(screen.getByText(/The extraction process runs automatically through 6 steps/i)).toBeInTheDocument();
+    expect(screen.getByText(/The extraction process runs automatically through 7 steps/i)).toBeInTheDocument();
   });
 
   it('shows "No Datasource Selected" when no datasource is selected', () => {

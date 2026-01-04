@@ -292,7 +292,7 @@ FROM engine_llm_conversations GROUP BY model;
 
 ### What to Watch For
 
-1. **DAG state progression** - Should move through steps: EntityDiscovery → EntityEnrichment → RelationshipDiscovery → RelationshipEnrichment → ColumnEnrichment → OntologyFinalization
+1. **DAG state progression** - Should move through steps: EntityDiscovery → EntityEnrichment → FKDiscovery → ColumnEnrichment → PKMatchDiscovery → RelationshipEnrichment → OntologyFinalization
 2. **Parallel execution** - Multiple LLM calls processed concurrently within each step
 3. **Entity/relationship counts** - Should match expected schema size
 4. **Token limit errors** - Large tables may exceed LLM context limits
