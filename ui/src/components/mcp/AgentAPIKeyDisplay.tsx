@@ -84,7 +84,7 @@ export default function AgentAPIKeyDisplay({ projectId }: AgentAPIKeyDisplayProp
         description: 'Agent API key copied to clipboard',
         variant: 'success',
       });
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to copy API key',
@@ -109,7 +109,7 @@ export default function AgentAPIKeyDisplay({ projectId }: AgentAPIKeyDisplayProp
           variant: 'success',
         });
       }
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to regenerate API key',

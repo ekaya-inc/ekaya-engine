@@ -23,7 +23,9 @@ describe('mcpToolMetadata', () => {
   describe('TOOL_GROUP_METADATA', () => {
     it('has metadata for developer tools', () => {
       const metadata = TOOL_GROUP_METADATA[TOOL_GROUP_IDS.DEVELOPER];
-      expect(metadata).toBeDefined();
+      if (metadata === undefined) {
+        throw new Error('Expected metadata to be defined');
+      }
       expect(metadata.name).toBe('Developer Tools');
       expect(metadata.description).toBeTruthy();
       expect(metadata.warning).toBeTruthy();
@@ -33,7 +35,9 @@ describe('mcpToolMetadata', () => {
 
     it('has metadata for approved queries', () => {
       const metadata = TOOL_GROUP_METADATA[TOOL_GROUP_IDS.APPROVED_QUERIES];
-      expect(metadata).toBeDefined();
+      if (metadata === undefined) {
+        throw new Error('Expected metadata to be defined');
+      }
       expect(metadata.name).toBe('Pre-Approved Queries');
       expect(metadata.description).toBeTruthy();
       expect(metadata.subOptions).toBeDefined();
@@ -43,7 +47,9 @@ describe('mcpToolMetadata', () => {
 
     it('has metadata for agent tools', () => {
       const metadata = TOOL_GROUP_METADATA[TOOL_GROUP_IDS.AGENT_TOOLS];
-      expect(metadata).toBeDefined();
+      if (metadata === undefined) {
+        throw new Error('Expected metadata to be defined');
+      }
       expect(metadata.name).toBe('Agent Tools');
       expect(metadata.description).toContain('AI Agents');
       expect(metadata.description).toContain('Pre-Approved Queries');
@@ -52,14 +58,20 @@ describe('mcpToolMetadata', () => {
 
     it('agent tools has no subOptions', () => {
       const metadata = TOOL_GROUP_METADATA[TOOL_GROUP_IDS.AGENT_TOOLS];
+      if (metadata === undefined) {
+        throw new Error('Expected metadata to be defined');
+      }
       expect(metadata.subOptions).toBeUndefined();
     });
 
     it('all tool group IDs have corresponding metadata', () => {
       for (const id of Object.values(TOOL_GROUP_IDS)) {
-        expect(TOOL_GROUP_METADATA[id]).toBeDefined();
-        expect(TOOL_GROUP_METADATA[id].name).toBeTruthy();
-        expect(TOOL_GROUP_METADATA[id].description).toBeTruthy();
+        const metadata = TOOL_GROUP_METADATA[id];
+        expect(metadata).toBeDefined();
+        if (metadata !== undefined) {
+          expect(metadata.name).toBeTruthy();
+          expect(metadata.description).toBeTruthy();
+        }
       }
     });
   });
