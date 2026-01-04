@@ -236,9 +236,49 @@ Add a new "Agent Tools" section to the MCP Server configuration page, positioned
 
 ---
 
-### Step 7: Update Tool Filtering for Agent Tools
+### Step 7: Update Tool Filtering for Agent Tools ✅ COMPLETED
 
-**File:** `pkg/mcp/tools/developer.go`
+**Files Modified:**
+- `pkg/mcp/tools/developer.go` - Updated NewToolFilter and added filterAgentTools function
+- `pkg/mcp/tools/developer_filter_test.go` - Added comprehensive tests for agent tool filtering
+
+**What Was Done:**
+
+1. **Added agentToolNames map** (`pkg/mcp/tools/developer.go:82-87`):
+   - Lists tools available to agents: `list_approved_queries` and `execute_approved_query`
+   - Agents can only access approved_queries tools, not developer tools
+
+2. **Updated NewToolFilter** (`pkg/mcp/tools/developer.go:134-151`):
+   - Checks `claims.Subject == "agent"` to identify agent authentication (set by MCP auth middleware)
+   - If agent auth, checks if `agent_tools` is enabled via `MCPConfigService.IsToolGroupEnabled`
+   - Calls `filterAgentTools` for agent-specific filtering
+   - Falls through to existing user tool filtering logic for non-agent auth
+
+3. **Added filterAgentTools function** (`pkg/mcp/tools/developer.go:235-258`):
+   - Health tool always available (consistent with user auth)
+   - When `agent_tools` disabled: only health tool available
+   - When `agent_tools` enabled: health + approved_queries tools (list_approved_queries, execute_approved_query)
+   - Developer tools, schema tools, and ontology tools are never available to agents
+
+4. **Comprehensive test coverage** (`pkg/mcp/tools/developer_filter_test.go`):
+   - `TestFilterAgentTools_Disabled` - Unit test for filter function with disabled flag
+   - `TestFilterAgentTools_Enabled` - Unit test for filter function with enabled flag
+   - `TestNewToolFilter_AgentAuth_AgentToolsEnabled` - Integration test with agent_tools enabled
+   - `TestNewToolFilter_AgentAuth_AgentToolsDisabled` - Integration test with agent_tools disabled
+   - `TestNewToolFilter_AgentAuth_NoConfig` - Integration test with no config (defaults to disabled)
+   - `TestNewToolFilter_UserAuth_AgentToolsEnabledDoesNotAffectUsers` - Verifies user auth is unaffected by agent_tools config
+
+**Key Implementation Notes for Future Sessions:**
+- Agent authentication is identified by `claims.Subject == "agent"` (set in `pkg/mcp/auth/middleware.go:127`)
+- The plan mentioned checking `claims.UserID == "agent"` but the actual implementation uses `claims.Subject`
+- Agent tool filtering is completely separate from user tool filtering - agents cannot access developer tools regardless of developer tool group settings
+
+**Code Locations:**
+- `pkg/mcp/tools/developer.go:82-87` - agentToolNames map
+- `pkg/mcp/tools/developer.go:134-151` - Agent auth handling in NewToolFilter
+- `pkg/mcp/tools/developer.go:235-258` - filterAgentTools function
+
+**Original Plan File Reference:**
 
 Update `NewToolFilter` function to handle agent_tools group:
 

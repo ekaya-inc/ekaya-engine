@@ -79,6 +79,13 @@ var ontologyToolNames = map[string]bool{
 	"get_glossary": true,
 }
 
+// agentToolNames lists tools available to agents when agent_tools is enabled.
+// Agents can only access approved_queries tools, not developer tools.
+var agentToolNames = map[string]bool{
+	"list_approved_queries":  true,
+	"execute_approved_query": true,
+}
+
 // RegisterDeveloperTools registers the developer tool group tools.
 // These tools are only accessible when the developer tool group is enabled.
 func RegisterDeveloperTools(s *server.MCPServer, deps *DeveloperToolDeps) {
@@ -93,6 +100,7 @@ func RegisterDeveloperTools(s *server.MCPServer, deps *DeveloperToolDeps) {
 // It filters out developer tools when the developer group is disabled, filters out
 // the execute tool when EnableExecute is false, and filters out approved_queries tools
 // when the approved_queries group is disabled or no enabled queries exist.
+// For agent authentication, it restricts access to only approved_queries tools when agent_tools is enabled.
 func NewToolFilter(deps *DeveloperToolDeps) func(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
 	return func(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
 		// Get claims from context
@@ -123,6 +131,27 @@ func NewToolFilter(deps *DeveloperToolDeps) func(ctx context.Context, tools []mc
 		// Set tenant context for the config query
 		tenantCtx := database.SetTenantScope(ctx, scope)
 
+		// Check if this is agent authentication (Subject = "agent" set by MCP auth middleware)
+		isAgent := claims.Subject == "agent"
+
+		if isAgent {
+			// Agent authentication - only allow approved_queries tools when agent_tools is enabled
+			agentEnabled, err := deps.MCPConfigService.IsToolGroupEnabled(tenantCtx, projectID, services.ToolGroupAgentTools)
+			if err != nil {
+				deps.Logger.Error("Tool filter: failed to check agent_tools config",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+				return filterAgentTools(tools, false)
+			}
+
+			deps.Logger.Debug("Tool filter: agent authentication, filtering to agent tools only",
+				zap.String("project_id", projectID.String()),
+				zap.Bool("agent_tools_enabled", agentEnabled))
+
+			return filterAgentTools(tools, agentEnabled)
+		}
+
+		// User authentication - apply normal tool group filtering
 		// Check developer tools config
 		devConfig, err := deps.MCPConfigService.GetToolGroupConfig(tenantCtx, projectID, developerToolGroup)
 		if err != nil {
@@ -199,6 +228,31 @@ func filterTools(tools []mcp.Tool, showDeveloper, showExecute, showApprovedQueri
 		}
 
 		filtered = append(filtered, tool)
+	}
+	return filtered
+}
+
+// filterAgentTools filters tools for agent authentication.
+// When agent_tools is enabled, only approved_queries tools (list_approved_queries, execute_approved_query) are allowed.
+// When disabled, no tools are available (except health which is always available).
+func filterAgentTools(tools []mcp.Tool, agentToolsEnabled bool) []mcp.Tool {
+	filtered := make([]mcp.Tool, 0, len(tools))
+	for _, tool := range tools {
+		// Health is always available
+		if tool.Name == "health" {
+			filtered = append(filtered, tool)
+			continue
+		}
+
+		// When agent_tools disabled, filter out everything except health
+		if !agentToolsEnabled {
+			continue
+		}
+
+		// When agent_tools enabled, only allow approved_queries tools
+		if agentToolNames[tool.Name] {
+			filtered = append(filtered, tool)
+		}
 	}
 	return filtered
 }
