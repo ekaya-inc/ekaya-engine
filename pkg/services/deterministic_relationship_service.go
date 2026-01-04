@@ -297,16 +297,19 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			continue
 		}
 
-		// Check cardinality if stats available
-		if col.DistinctCount != nil {
-			if *col.DistinctCount < 20 {
+		// Require stats to exist (fail-fast on missing data)
+		if col.DistinctCount == nil {
+			continue // No stats = cannot evaluate = skip
+		}
+		// Check cardinality threshold
+		if *col.DistinctCount < 20 {
+			continue
+		}
+		// Check cardinality ratio if row count available
+		if table.RowCount != nil && *table.RowCount > 0 {
+			ratio := float64(*col.DistinctCount) / float64(*table.RowCount)
+			if ratio < 0.05 {
 				continue
-			}
-			if table.RowCount != nil && *table.RowCount > 0 {
-				ratio := float64(*col.DistinctCount) / float64(*table.RowCount)
-				if ratio < 0.05 {
-					continue
-				}
 			}
 		}
 

@@ -278,7 +278,16 @@ func TestPKMatch_NoGarbageRelationships(t *testing.T) {
   - Updated all mock implementations in test files to match new signature
   - **Key decision**: Added `stats_updated_at` timestamp to track when stats were last persisted
 
-- [ ] **Task 2: Add defensive null checks** - Require stats to exist (fail-fast on missing data)
+- [x] **Task 2: Add defensive null checks** - Require stats to exist (fail-fast on missing data)
+  - Changed cardinality check in `DiscoverPKMatchRelationships()` from optimistic to defensive
+  - Now requires `DistinctCount != nil` before evaluating column as FK candidate
+  - Columns without stats are immediately skipped (fail-fast pattern)
+  - Preserved graceful degradation: if RowCount is nil, ratio check is skipped but absolute threshold still enforced
+  - File: `pkg/services/deterministic_relationship_service.go:300-314`
+  - Tests added:
+    - `TestPKMatch_RequiresDistinctCount` - Verifies columns without DistinctCount are skipped
+    - `TestPKMatch_WorksWithoutRowCount` - Verifies graceful degradation when RowCount is nil
+    - Added full mock infrastructure for testing deterministic relationship service (530+ lines)
 - [ ] **Task 3: Add is_joinable check** - Use the flag we already compute
 - [ ] **Task 4: Expand name exclusions** - Catch `num_*`, `rating`, `score`, `level`, aggregates
 - [ ] **Task 5: Add semantic validation** - Detect suspiciously small values and low cardinality ratios
