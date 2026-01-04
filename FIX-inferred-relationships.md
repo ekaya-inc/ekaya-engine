@@ -297,7 +297,26 @@ func TestPKMatch_NoGarbageRelationships(t *testing.T) {
     - `TestPKMatch_RequiresJoinableFlag` - Verifies columns with IsJoinable=nil or false are skipped
     - Test validates that only explicitly joinable columns create relationships
   - Note: Pre-existing test compilation issues in test file do not affect production code (builds successfully)
-- [ ] **Task 4: Expand name exclusions** - Catch `num_*`, `rating`, `score`, `level`, aggregates
+- [x] **Task 4: Expand name exclusions** - Catch `num_*`, `rating`, `score`, `level`, aggregates
+  - **Status**: Complete - prevents garbage relationships from columns with aggregate/metric names
+  - Updated `isPKMatchExcludedName()` in `pkg/services/deterministic_relationship_service.go:465-486`
+  - Added count column patterns:
+    - `num_*` prefix (num_users, num_items)
+    - `total_*` prefix (total_amount, total_sales)
+    - Existing `_count`, `_amount`, `_total` suffixes remain
+  - Added aggregate function patterns:
+    - `_sum`, `_avg`, `_min`, `_max` suffixes
+  - Added rating/score/level patterns:
+    - `_rating`, `_score`, `_level` suffixes
+    - Exact matches for `rating`, `score`, `level`
+  - All patterns are case-insensitive (lowercased before comparison)
+  - Comprehensive test coverage added in `TestIsPKMatchExcludedName` (76 test cases):
+    - Tests all new patterns (num_, total_, aggregates, rating/score/level)
+    - Tests case insensitivity
+    - Tests that valid FK columns (user_id, account_id) are NOT excluded
+    - Tests edge cases (document_id vs _amount suffix, internal vs num_ prefix)
+  - **Impact**: These patterns prevent the algorithm from considering aggregate/metric columns as FK candidates, even if their values happen to match PKs in other tables
+  - All tests pass, production code builds successfully
 - [ ] **Task 5: Add semantic validation** - Detect suspiciously small values and low cardinality ratios
 - [ ] **Task 6: Write tests** - All tests should FAIL before fixes, PASS after
 

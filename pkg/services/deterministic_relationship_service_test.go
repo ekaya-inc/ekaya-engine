@@ -396,6 +396,76 @@ func TestPKMatch_WorksWithoutRowCount(t *testing.T) {
 	}
 }
 
+// TestIsPKMatchExcludedName verifies that the name exclusion function catches
+// all patterns that should not be considered as FK candidates.
+func TestIsPKMatchExcludedName(t *testing.T) {
+	tests := []struct {
+		name     string
+		column   string
+		excluded bool
+	}{
+		// Count patterns with num_ prefix
+		{"num_users should be excluded", "num_users", true},
+		{"num_items should be excluded", "num_items", true},
+		{"NUM_ORDERS should be excluded (case insensitive)", "NUM_ORDERS", true},
+
+		// Count patterns with total_ prefix
+		{"total_amount should be excluded", "total_amount", true},
+		{"total_sales should be excluded", "total_sales", true},
+		{"TOTAL_REVENUE should be excluded (case insensitive)", "TOTAL_REVENUE", true},
+
+		// Existing count suffix patterns
+		{"user_count should be excluded", "user_count", true},
+		{"order_count should be excluded", "order_count", true},
+
+		// Amount/total suffixes
+		{"order_amount should be excluded", "order_amount", true},
+		{"sale_total should be excluded", "sale_total", true},
+
+		// Aggregate function suffixes
+		{"revenue_sum should be excluded", "revenue_sum", true},
+		{"price_avg should be excluded", "price_avg", true},
+		{"score_min should be excluded", "score_min", true},
+		{"value_max should be excluded", "value_max", true},
+
+		// Rating patterns
+		{"rating should be excluded", "rating", true},
+		{"user_rating should be excluded", "user_rating", true},
+		{"product_rating should be excluded", "product_rating", true},
+		{"RATING should be excluded (case insensitive)", "RATING", true},
+
+		// Score patterns
+		{"score should be excluded", "score", true},
+		{"credit_score should be excluded", "credit_score", true},
+		{"quality_score should be excluded", "quality_score", true},
+
+		// Level patterns
+		{"level should be excluded", "level", true},
+		{"mod_level should be excluded", "mod_level", true},
+		{"access_level should be excluded", "access_level", true},
+
+		// Valid FK column names should NOT be excluded
+		{"user_id should NOT be excluded", "user_id", false},
+		{"account_id should NOT be excluded", "account_id", false},
+		{"id should NOT be excluded", "id", false},
+		{"owner_id should NOT be excluded", "owner_id", false},
+		{"host_id should NOT be excluded", "host_id", false},
+
+		// Edge cases - columns with excluded patterns as substrings
+		{"document_id should NOT be excluded (ment != amount)", "document_id", false},
+		{"internal should NOT be excluded (internal != num_)", "internal", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isPKMatchExcludedName(tt.column)
+			if result != tt.excluded {
+				t.Errorf("isPKMatchExcludedName(%q) = %v, want %v", tt.column, result, tt.excluded)
+			}
+		})
+	}
+}
+
 // TestPKMatch_RequiresJoinableFlag verifies that columns with IsJoinable=false
 // or IsJoinable=nil are skipped and do not create relationships.
 func TestPKMatch_RequiresJoinableFlag(t *testing.T) {

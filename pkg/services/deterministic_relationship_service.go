@@ -465,8 +465,24 @@ func isPKMatchExcludedName(columnName string) bool {
 		return true
 	}
 
-	// Count/amount patterns
-	if strings.HasSuffix(lower, "_count") || strings.HasSuffix(lower, "_amount") || strings.HasSuffix(lower, "_total") {
+	// Count/amount patterns (expanded)
+	if strings.HasPrefix(lower, "num_") || // num_users, num_items
+		strings.HasPrefix(lower, "total_") || // total_amount
+		strings.HasSuffix(lower, "_count") ||
+		strings.HasSuffix(lower, "_amount") ||
+		strings.HasSuffix(lower, "_total") ||
+		strings.HasSuffix(lower, "_sum") ||
+		strings.HasSuffix(lower, "_avg") ||
+		strings.HasSuffix(lower, "_min") ||
+		strings.HasSuffix(lower, "_max") {
+		return true
+	}
+
+	// Rating/score patterns
+	if strings.HasSuffix(lower, "_rating") ||
+		strings.HasSuffix(lower, "_score") ||
+		strings.HasSuffix(lower, "_level") ||
+		lower == "rating" || lower == "score" || lower == "level" {
 		return true
 	}
 
