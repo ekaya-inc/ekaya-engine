@@ -335,8 +335,8 @@ func TestDAGRepository_CreateNodes(t *testing.T) {
 
 	dag := tc.createTestDAG(ctx)
 
-	// Create all nodes
-	nodes := make([]models.DAGNode, 0, 6)
+	// Create all nodes (7 nodes in current DAG)
+	nodes := make([]models.DAGNode, 0, 7)
 	for _, nodeName := range models.AllDAGNodes() {
 		nodes = append(nodes, models.DAGNode{
 			DAGID:     dag.ID,
@@ -356,8 +356,8 @@ func TestDAGRepository_CreateNodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetNodesByDAG failed: %v", err)
 	}
-	if len(retrieved) != 6 {
-		t.Fatalf("expected 6 nodes, got %d", len(retrieved))
+	if len(retrieved) != 7 {
+		t.Fatalf("expected 7 nodes, got %d", len(retrieved))
 	}
 
 	// Verify order

@@ -24,9 +24,10 @@ func TestDAGNodes_AllNodesHaveCorrectOrder(t *testing.T) {
 	expectedOrder := []models.DAGNodeName{
 		models.DAGNodeEntityDiscovery,
 		models.DAGNodeEntityEnrichment,
-		models.DAGNodeRelationshipDiscovery,
-		models.DAGNodeRelationshipEnrichment,
+		models.DAGNodeFKDiscovery,
 		models.DAGNodeColumnEnrichment,
+		models.DAGNodePKMatchDiscovery,
+		models.DAGNodeRelationshipEnrichment,
 		models.DAGNodeOntologyFinalization,
 	}
 
@@ -50,9 +51,13 @@ func TestNodeExecutorInterfaces_AreWellDefined(t *testing.T) {
 	var eem dag.EntityEnrichmentMethods = &testEntityEnrichment{}
 	assert.NotNil(t, eem)
 
-	// DeterministicRelationshipMethods
-	var drm dag.DeterministicRelationshipMethods = &testRelationshipDiscovery{}
-	assert.NotNil(t, drm)
+	// FKDiscoveryMethods
+	var fkm dag.FKDiscoveryMethods = &testFKDiscovery{}
+	assert.NotNil(t, fkm)
+
+	// PKMatchDiscoveryMethods
+	var pkm dag.PKMatchDiscoveryMethods = &testPKMatchDiscovery{}
+	assert.NotNil(t, pkm)
 
 	// RelationshipEnrichmentMethods
 	var rem dag.RelationshipEnrichmentMethods = &testRelationshipEnrichment{}
@@ -162,9 +167,15 @@ func (t *testEntityEnrichment) EnrichEntitiesWithLLM(_ context.Context, _, _, _ 
 	return nil
 }
 
-type testRelationshipDiscovery struct{}
+type testFKDiscovery struct{}
 
-func (t *testRelationshipDiscovery) DiscoverRelationships(_ context.Context, _, _ uuid.UUID) (*dag.RelationshipDiscoveryResult, error) {
+func (t *testFKDiscovery) DiscoverFKRelationships(_ context.Context, _, _ uuid.UUID) (*dag.FKDiscoveryResult, error) {
+	return nil, nil
+}
+
+type testPKMatchDiscovery struct{}
+
+func (t *testPKMatchDiscovery) DiscoverPKMatchRelationships(_ context.Context, _, _ uuid.UUID) (*dag.PKMatchDiscoveryResult, error) {
 	return nil, nil
 }
 

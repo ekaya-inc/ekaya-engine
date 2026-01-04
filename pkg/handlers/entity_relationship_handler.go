@@ -92,9 +92,23 @@ func (h *EntityRelationshipHandler) Discover(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	result, err := h.relationshipService.DiscoverRelationships(r.Context(), projectID, datasourceID)
+	// Discover FK relationships first
+	fkResult, err := h.relationshipService.DiscoverFKRelationships(r.Context(), projectID, datasourceID)
 	if err != nil {
-		h.logger.Error("Failed to discover relationships",
+		h.logger.Error("Failed to discover FK relationships",
+			zap.String("project_id", projectID.String()),
+			zap.String("datasource_id", datasourceID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "discover_relationships_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Discover pk_match relationships
+	pkMatchResult, err := h.relationshipService.DiscoverPKMatchRelationships(r.Context(), projectID, datasourceID)
+	if err != nil {
+		h.logger.Error("Failed to discover pk_match relationships",
 			zap.String("project_id", projectID.String()),
 			zap.String("datasource_id", datasourceID.String()),
 			zap.Error(err))
@@ -105,9 +119,9 @@ func (h *EntityRelationshipHandler) Discover(w http.ResponseWriter, r *http.Requ
 	}
 
 	response := DiscoverEntityRelationshipsResponse{
-		FKRelationships:       result.FKRelationships,
-		InferredRelationships: result.InferredRelationships,
-		TotalRelationships:    result.TotalRelationships,
+		FKRelationships:       fkResult.FKRelationships,
+		InferredRelationships: pkMatchResult.InferredRelationships,
+		TotalRelationships:    fkResult.FKRelationships + pkMatchResult.InferredRelationships,
 	}
 
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {

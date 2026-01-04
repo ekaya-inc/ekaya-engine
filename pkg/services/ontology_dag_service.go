@@ -50,7 +50,8 @@ type ontologyDAGService struct {
 	// Adapted service methods for dag package
 	entityDiscoveryMethods        dag.EntityDiscoveryMethods
 	entityEnrichmentMethods       dag.EntityEnrichmentMethods
-	relationshipDiscoveryMethods  dag.DeterministicRelationshipMethods
+	fkDiscoveryMethods            dag.FKDiscoveryMethods
+	pkMatchDiscoveryMethods       dag.PKMatchDiscoveryMethods
 	relationshipEnrichmentMethods dag.RelationshipEnrichmentMethods
 	finalizationMethods           dag.OntologyFinalizationMethods
 	columnEnrichmentMethods       dag.ColumnEnrichmentMethods
@@ -109,9 +110,14 @@ func (s *ontologyDAGService) SetEntityEnrichmentMethods(methods dag.EntityEnrich
 	s.entityEnrichmentMethods = methods
 }
 
-// SetRelationshipDiscoveryMethods sets the relationship discovery methods interface.
-func (s *ontologyDAGService) SetRelationshipDiscoveryMethods(methods dag.DeterministicRelationshipMethods) {
-	s.relationshipDiscoveryMethods = methods
+// SetFKDiscoveryMethods sets the FK discovery methods interface.
+func (s *ontologyDAGService) SetFKDiscoveryMethods(methods dag.FKDiscoveryMethods) {
+	s.fkDiscoveryMethods = methods
+}
+
+// SetPKMatchDiscoveryMethods sets the pk_match discovery methods interface.
+func (s *ontologyDAGService) SetPKMatchDiscoveryMethods(methods dag.PKMatchDiscoveryMethods) {
+	s.pkMatchDiscoveryMethods = methods
 }
 
 // SetRelationshipEnrichmentMethods sets the relationship enrichment methods interface.
@@ -603,11 +609,20 @@ func (s *ontologyDAGService) getNodeExecutor(nodeName models.DAGNodeName, nodeID
 		node.SetCurrentNodeID(nodeID)
 		return node, nil
 
-	case models.DAGNodeRelationshipDiscovery:
-		if s.relationshipDiscoveryMethods == nil {
-			return nil, fmt.Errorf("relationship discovery methods not set")
+	case models.DAGNodeFKDiscovery, models.DAGNodeRelationshipDiscovery:
+		// DAGNodeRelationshipDiscovery is deprecated but supported for backward compatibility
+		if s.fkDiscoveryMethods == nil {
+			return nil, fmt.Errorf("FK discovery methods not set")
 		}
-		node := dag.NewRelationshipDiscoveryNode(s.dagRepo, s.relationshipDiscoveryMethods, s.logger)
+		node := dag.NewFKDiscoveryNode(s.dagRepo, s.fkDiscoveryMethods, s.logger)
+		node.SetCurrentNodeID(nodeID)
+		return node, nil
+
+	case models.DAGNodePKMatchDiscovery:
+		if s.pkMatchDiscoveryMethods == nil {
+			return nil, fmt.Errorf("pk_match discovery methods not set")
+		}
+		node := dag.NewPKMatchDiscoveryNode(s.dagRepo, s.pkMatchDiscoveryMethods, s.logger)
 		node.SetCurrentNodeID(nodeID)
 		return node, nil
 

@@ -12,19 +12,26 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
 
-// DiscoveryResult contains the results of deterministic relationship discovery.
-type DiscoveryResult struct {
-	FKRelationships       int `json:"fk_relationships"`
+// FKDiscoveryResult contains the results of FK relationship discovery.
+type FKDiscoveryResult struct {
+	FKRelationships int `json:"fk_relationships"`
+}
+
+// PKMatchDiscoveryResult contains the results of pk_match relationship discovery.
+type PKMatchDiscoveryResult struct {
 	InferredRelationships int `json:"inferred_relationships"`
-	TotalRelationships    int `json:"total_relationships"`
 }
 
 // DeterministicRelationshipService discovers entity relationships from FK constraints
 // and PK-match inference.
 type DeterministicRelationshipService interface {
-	// DiscoverRelationships discovers relationships from FK constraints and PK-match
-	// inference for a datasource. Requires entities to exist before calling.
-	DiscoverRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*DiscoveryResult, error)
+	// DiscoverFKRelationships discovers relationships from database FK constraints.
+	// Requires entities to exist before calling.
+	DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*FKDiscoveryResult, error)
+
+	// DiscoverPKMatchRelationships discovers relationships via pairwise SQL join testing.
+	// Requires entities and column enrichment to exist before calling.
+	DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*PKMatchDiscoveryResult, error)
 
 	// GetByProject returns all entity relationships for a project.
 	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error)
@@ -58,7 +65,7 @@ func NewDeterministicRelationshipService(
 	}
 }
 
-func (s *deterministicRelationshipService) DiscoverRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*DiscoveryResult, error) {
+func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*FKDiscoveryResult, error) {
 	// Get active ontology for the project
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
 	if err != nil {
@@ -74,24 +81,15 @@ func (s *deterministicRelationshipService) DiscoverRelationships(ctx context.Con
 		return nil, fmt.Errorf("get entities: %w", err)
 	}
 	if len(entities) == 0 {
-		return &DiscoveryResult{}, nil // No entities, no relationships to discover
+		return &FKDiscoveryResult{}, nil // No entities, no relationships to discover
 	}
 
 	// entityByPrimaryTable: maps "schema.table" to the entity that owns that table
-	// Using PrimarySchema/PrimaryTable is more accurate than occurrences because
-	// a table can have multiple entity occurrences (e.g., billing_engagements has
-	// "billing_engagement" as primary entity plus "user" occurrences for host_id/visitor_id)
 	entityByPrimaryTable := make(map[string]*models.OntologyEntity)
 	for _, entity := range entities {
 		key := fmt.Sprintf("%s.%s", entity.PrimarySchema, entity.PrimaryTable)
 		entityByPrimaryTable[key] = entity
 	}
-
-	// =========================================================================
-	// Phase 1: FK Relationships (Gold Standard)
-	// All FKs from engine_schema_relationships become entity relationships.
-	// Find entities by their primary table ownership.
-	// =========================================================================
 
 	// Get all schema relationships (FKs) for this datasource
 	schemaRels, err := s.schemaRepo.ListRelationshipsByDatasource(ctx, projectID, datasourceID)
@@ -178,11 +176,51 @@ func (s *deterministicRelationshipService) DiscoverRelationships(ctx context.Con
 		fkCount++
 	}
 
-	// =========================================================================
-	// Phase 2: PK-Match Inference
-	// Find non-PK columns that can join to entity PKs by testing actual SQL joins.
-	// Skip if both columns are auto-increment PKs.
-	// =========================================================================
+	return &FKDiscoveryResult{
+		FKRelationships: fkCount,
+	}, nil
+}
+
+func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*PKMatchDiscoveryResult, error) {
+	// Get active ontology for the project
+	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("get active ontology: %w", err)
+	}
+	if ontology == nil {
+		return nil, fmt.Errorf("no active ontology found for project")
+	}
+
+	// Get all entities for this ontology
+	entities, err := s.entityRepo.GetByOntology(ctx, ontology.ID)
+	if err != nil {
+		return nil, fmt.Errorf("get entities: %w", err)
+	}
+	if len(entities) == 0 {
+		return &PKMatchDiscoveryResult{}, nil // No entities, no relationships to discover
+	}
+
+	// entityByPrimaryTable: maps "schema.table" to the entity that owns that table
+	entityByPrimaryTable := make(map[string]*models.OntologyEntity)
+	for _, entity := range entities {
+		key := fmt.Sprintf("%s.%s", entity.PrimarySchema, entity.PrimaryTable)
+		entityByPrimaryTable[key] = entity
+	}
+
+	// Load tables and columns
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("list tables: %w", err)
+	}
+	tableByID := make(map[uuid.UUID]*models.SchemaTable)
+	for _, t := range tables {
+		tableByID[t.ID] = t
+	}
+
+	columns, err := s.schemaRepo.ListColumnsByDatasource(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("list columns: %w", err)
+	}
 
 	// Get datasource to create schema discoverer for join analysis
 	ds, err := s.datasourceService.Get(ctx, projectID, datasourceID)
@@ -317,38 +355,12 @@ func (s *deterministicRelationshipService) DiscoverRelationships(ctx context.Con
 				continue
 			}
 
-			// Calculate orphan rate
-			// Use table's row count if available, otherwise use join result approximation
-			var sourceRowCount int64
-			if table, ok := tableByID[candidate.column.SchemaTableID]; ok && table.RowCount != nil && *table.RowCount > 0 {
-				sourceRowCount = *table.RowCount
-			} else if joinResult.SourceMatched > 0 {
-				// Approximate from join result
-				sourceRowCount = joinResult.SourceMatched + joinResult.OrphanCount
-			} else {
-				continue // Can't calculate orphan rate
-			}
-
-			orphanRate := float64(joinResult.OrphanCount) / float64(sourceRowCount)
-
-			// Determine status based on orphan rate thresholds
-			var status string
-			if orphanRate < 0.05 {
-				// < 5% orphans: confirmed relationship
-				status = models.RelationshipStatusConfirmed
-			} else if orphanRate < 0.20 {
-				// 5-20% orphans: pending (needs review)
-				status = models.RelationshipStatusPending
-			} else {
-				// > 20% orphans: skip, not a valid relationship
+			// Real FK relationships have 0% orphans - all source values must exist in target
+			if joinResult.OrphanCount > 0 {
 				continue
 			}
-
-			// Calculate confidence: lower orphan rate = higher confidence
-			confidence := 0.9 - (orphanRate * 2) // 0% orphans = 0.9, 20% orphans = 0.5
-			if confidence < 0.5 {
-				confidence = 0.5
-			}
+			status := models.RelationshipStatusConfirmed
+			confidence := 0.9
 
 			// Create the relationship (database handles duplicates via ON CONFLICT)
 			rel := &models.EntityRelationship{
@@ -375,10 +387,8 @@ func (s *deterministicRelationshipService) DiscoverRelationships(ctx context.Con
 		}
 	}
 
-	return &DiscoveryResult{
-		FKRelationships:       fkCount,
+	return &PKMatchDiscoveryResult{
 		InferredRelationships: inferredCount,
-		TotalRelationships:    fkCount + inferredCount,
 	}, nil
 }
 

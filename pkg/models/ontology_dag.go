@@ -99,20 +99,28 @@ type DAGNodeName string
 const (
 	DAGNodeEntityDiscovery        DAGNodeName = "EntityDiscovery"
 	DAGNodeEntityEnrichment       DAGNodeName = "EntityEnrichment"
-	DAGNodeRelationshipDiscovery  DAGNodeName = "RelationshipDiscovery"
+	DAGNodeFKDiscovery            DAGNodeName = "FKDiscovery"
+	DAGNodeColumnEnrichment       DAGNodeName = "ColumnEnrichment"
+	DAGNodePKMatchDiscovery       DAGNodeName = "PKMatchDiscovery"
 	DAGNodeRelationshipEnrichment DAGNodeName = "RelationshipEnrichment"
 	DAGNodeOntologyFinalization   DAGNodeName = "OntologyFinalization"
-	DAGNodeColumnEnrichment       DAGNodeName = "ColumnEnrichment"
+
+	// Deprecated: Use DAGNodeFKDiscovery instead. Kept for backward compatibility with existing DAGs.
+	DAGNodeRelationshipDiscovery DAGNodeName = "RelationshipDiscovery"
 )
 
 // DAGNodeOrder defines the execution order for each node.
 var DAGNodeOrder = map[DAGNodeName]int{
 	DAGNodeEntityDiscovery:        1,
 	DAGNodeEntityEnrichment:       2,
-	DAGNodeRelationshipDiscovery:  3,
-	DAGNodeRelationshipEnrichment: 4,
-	DAGNodeColumnEnrichment:       5,
-	DAGNodeOntologyFinalization:   6,
+	DAGNodeFKDiscovery:            3,
+	DAGNodeColumnEnrichment:       4,
+	DAGNodePKMatchDiscovery:       5,
+	DAGNodeRelationshipEnrichment: 6,
+	DAGNodeOntologyFinalization:   7,
+
+	// Deprecated: mapped to same order as FKDiscovery for backward compatibility
+	DAGNodeRelationshipDiscovery: 3,
 }
 
 // AllDAGNodes returns all DAG node names in execution order.
@@ -120,9 +128,10 @@ func AllDAGNodes() []DAGNodeName {
 	return []DAGNodeName{
 		DAGNodeEntityDiscovery,
 		DAGNodeEntityEnrichment,
-		DAGNodeRelationshipDiscovery,
-		DAGNodeRelationshipEnrichment,
+		DAGNodeFKDiscovery,
 		DAGNodeColumnEnrichment,
+		DAGNodePKMatchDiscovery,
+		DAGNodeRelationshipEnrichment,
 		DAGNodeOntologyFinalization,
 	}
 }

@@ -61,25 +61,43 @@ func (a *EntityEnrichmentAdapter) EnrichEntitiesWithLLM(ctx context.Context, pro
 	return a.svc.EnrichEntitiesWithLLM(ctx, projectID, ontologyID, datasourceID, tables, columns)
 }
 
-// RelationshipDiscoveryAdapter adapts DeterministicRelationshipService for the dag package.
-type RelationshipDiscoveryAdapter struct {
+// FKDiscoveryAdapter adapts DeterministicRelationshipService for FK discovery.
+type FKDiscoveryAdapter struct {
 	svc DeterministicRelationshipService
 }
 
-// NewRelationshipDiscoveryAdapter creates a new adapter.
-func NewRelationshipDiscoveryAdapter(svc DeterministicRelationshipService) dag.DeterministicRelationshipMethods {
-	return &RelationshipDiscoveryAdapter{svc: svc}
+// NewFKDiscoveryAdapter creates a new adapter.
+func NewFKDiscoveryAdapter(svc DeterministicRelationshipService) dag.FKDiscoveryMethods {
+	return &FKDiscoveryAdapter{svc: svc}
 }
 
-func (a *RelationshipDiscoveryAdapter) DiscoverRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*dag.RelationshipDiscoveryResult, error) {
-	result, err := a.svc.DiscoverRelationships(ctx, projectID, datasourceID)
+func (a *FKDiscoveryAdapter) DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*dag.FKDiscoveryResult, error) {
+	result, err := a.svc.DiscoverFKRelationships(ctx, projectID, datasourceID)
 	if err != nil {
 		return nil, err
 	}
-	return &dag.RelationshipDiscoveryResult{
-		FKRelationships:       result.FKRelationships,
+	return &dag.FKDiscoveryResult{
+		FKRelationships: result.FKRelationships,
+	}, nil
+}
+
+// PKMatchDiscoveryAdapter adapts DeterministicRelationshipService for pk_match discovery.
+type PKMatchDiscoveryAdapter struct {
+	svc DeterministicRelationshipService
+}
+
+// NewPKMatchDiscoveryAdapter creates a new adapter.
+func NewPKMatchDiscoveryAdapter(svc DeterministicRelationshipService) dag.PKMatchDiscoveryMethods {
+	return &PKMatchDiscoveryAdapter{svc: svc}
+}
+
+func (a *PKMatchDiscoveryAdapter) DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*dag.PKMatchDiscoveryResult, error) {
+	result, err := a.svc.DiscoverPKMatchRelationships(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, err
+	}
+	return &dag.PKMatchDiscoveryResult{
 		InferredRelationships: result.InferredRelationships,
-		TotalRelationships:    result.TotalRelationships,
 	}, nil
 }
 
