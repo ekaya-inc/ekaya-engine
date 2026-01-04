@@ -41,6 +41,7 @@ type batchResult struct {
 type relationshipEnrichmentService struct {
 	relationshipRepo repositories.EntityRelationshipRepository
 	entityRepo       repositories.OntologyEntityRepository
+	conversationRepo repositories.ConversationRepository
 	llmFactory       llm.LLMClientFactory
 	workerPool       *llm.WorkerPool
 	circuitBreaker   *llm.CircuitBreaker
@@ -52,6 +53,7 @@ type relationshipEnrichmentService struct {
 func NewRelationshipEnrichmentService(
 	relationshipRepo repositories.EntityRelationshipRepository,
 	entityRepo repositories.OntologyEntityRepository,
+	conversationRepo repositories.ConversationRepository,
 	llmFactory llm.LLMClientFactory,
 	workerPool *llm.WorkerPool,
 	circuitBreaker *llm.CircuitBreaker,
@@ -61,6 +63,7 @@ func NewRelationshipEnrichmentService(
 	return &relationshipEnrichmentService{
 		relationshipRepo: relationshipRepo,
 		entityRepo:       entityRepo,
+		conversationRepo: conversationRepo,
 		llmFactory:       llmFactory,
 		workerPool:       workerPool,
 		circuitBreaker:   circuitBreaker,
@@ -225,7 +228,7 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 			zap.Error(err))
 		// Log the specific relationships that failed
 		for _, rel := range relationships {
-			s.logRelationshipFailure(rel, "Circuit breaker open", err, uuid.Nil)
+			s.logRelationshipFailure(batchCtx, rel, "Circuit breaker open", err, uuid.Nil)
 		}
 		result.Failed = len(relationships)
 		return result, err
@@ -292,7 +295,7 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 			convID = llmResult.ConversationID
 		}
 		for _, rel := range relationships {
-			s.logRelationshipFailure(rel, "LLM call failed", err, convID)
+			s.logRelationshipFailure(batchCtx, rel, "LLM call failed", err, convID)
 		}
 		result.Failed = len(relationships)
 		return result, err
@@ -311,32 +314,52 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 			zap.Error(err))
 		// Log the specific relationships that failed
 		for _, rel := range relationships {
-			s.logRelationshipFailure(rel, "Failed to parse LLM response", err, llmResult.ConversationID)
+			s.logRelationshipFailure(batchCtx, rel, "Failed to parse LLM response", err, llmResult.ConversationID)
 		}
 		result.Failed = len(relationships)
 		return result, err
 	}
 	enrichments := response.Relationships
 
-	// Build lookup by relationship key
-	enrichmentByKey := make(map[string]string)
+	// Build lookup by ID -> description
+	enrichmentByID := make(map[int]string)
+	maxExpectedID := len(relationships)
 	for _, e := range enrichments {
-		key := fmt.Sprintf("%s.%s->%s.%s", e.SourceTable, e.SourceColumn, e.TargetTable, e.TargetColumn)
-		enrichmentByKey[key] = e.Description
+		enrichmentByID[e.ID] = e.Description
+
+		// Detect hallucinated IDs (LLM returned an ID we didn't ask for)
+		if e.ID < 1 || e.ID > maxExpectedID {
+			s.logger.Error("LLM returned invalid relationship ID",
+				zap.String("project_id", projectID.String()),
+				zap.Int("hallucinated_id", e.ID),
+				zap.Int("max_valid_id", maxExpectedID),
+				zap.String("description", e.Description),
+				zap.String("conversation_id", llmResult.ConversationID.String()))
+
+			// Update conversation status for hallucination
+			if s.conversationRepo != nil {
+				errorMessage := fmt.Sprintf("hallucination: invalid ID %d (expected 1-%d)", e.ID, maxExpectedID)
+				if updateErr := s.conversationRepo.UpdateStatus(batchCtx, llmResult.ConversationID, models.LLMConversationStatusError, errorMessage); updateErr != nil {
+					s.logger.Warn("Failed to update conversation status for hallucination",
+						zap.String("conversation_id", llmResult.ConversationID.String()),
+						zap.Error(updateErr))
+				}
+			}
+		}
 	}
 
-	// Update each relationship
-	for _, rel := range relationships {
-		key := fmt.Sprintf("%s.%s->%s.%s", rel.SourceColumnTable, rel.SourceColumnName, rel.TargetColumnTable, rel.TargetColumnName)
-		description, ok := enrichmentByKey[key]
+	// Update each relationship by ID (1-indexed)
+	for i, rel := range relationships {
+		id := i + 1 // 1-indexed to match prompt
+		description, ok := enrichmentByID[id]
 		if !ok || description == "" {
-			s.logRelationshipFailure(rel, "No enrichment found in LLM response", nil, llmResult.ConversationID)
+			s.logRelationshipFailure(batchCtx, rel, "No enrichment found in LLM response", nil, llmResult.ConversationID)
 			result.Failed++
 			continue
 		}
 
 		if err := s.relationshipRepo.UpdateDescription(batchCtx, rel.ID, description); err != nil {
-			s.logRelationshipFailure(rel, "Failed to update database", err, llmResult.ConversationID)
+			s.logRelationshipFailure(batchCtx, rel, "Failed to update database", err, llmResult.ConversationID)
 			result.Failed++
 			continue
 		}
@@ -353,12 +376,10 @@ type relationshipEnrichmentResponse struct {
 }
 
 // relationshipEnrichment is the LLM response structure for a single relationship.
+// Uses numeric ID to avoid table/column format parsing errors from smaller models.
 type relationshipEnrichment struct {
-	SourceTable  string `json:"source_table"`
-	SourceColumn string `json:"source_column"`
-	TargetTable  string `json:"target_table"`
-	TargetColumn string `json:"target_column"`
-	Description  string `json:"description"`
+	ID          int    `json:"id"`
+	Description string `json:"description"`
 }
 
 func (s *relationshipEnrichmentService) relationshipEnrichmentSystemMessage() string {
@@ -394,12 +415,12 @@ func (s *relationshipEnrichmentService) buildRelationshipEnrichmentPrompt(
 		}
 	}
 
-	// Relationships to describe
+	// Relationships to describe (with numeric IDs for reliable matching)
 	sb.WriteString("\n## Relationships\n")
-	sb.WriteString("| Source | Target | Detection | Confidence |\n")
-	sb.WriteString("|--------|--------|-----------|------------|\n")
+	sb.WriteString("| ID | Source | Target | Detection | Confidence |\n")
+	sb.WriteString("|----|--------|--------|-----------|------------|\n")
 
-	for _, rel := range relationships {
+	for i, rel := range relationships {
 		sourceEntity := ""
 		targetEntity := ""
 		if e, ok := entityByID[rel.SourceEntityID]; ok {
@@ -409,7 +430,8 @@ func (s *relationshipEnrichmentService) buildRelationshipEnrichmentPrompt(
 			targetEntity = e.Name
 		}
 
-		sb.WriteString(fmt.Sprintf("| %s.%s (%s) | %s.%s (%s) | %s | %.0f%% |\n",
+		sb.WriteString(fmt.Sprintf("| %d | %s.%s (%s) | %s.%s (%s) | %s | %.0f%% |\n",
+			i+1, // 1-indexed ID
 			rel.SourceColumnTable, rel.SourceColumnName, sourceEntity,
 			rel.TargetColumnTable, rel.TargetColumnName, targetEntity,
 			rel.DetectionMethod, rel.Confidence*100))
@@ -424,16 +446,12 @@ func (s *relationshipEnrichmentService) buildRelationshipEnrichmentPrompt(
 
 	// Response format
 	sb.WriteString("\n## Response Format (JSON object)\n")
+	sb.WriteString("Return a JSON object with the relationship ID and description for each relationship:\n")
 	sb.WriteString("```json\n")
 	sb.WriteString("{\n")
 	sb.WriteString("  \"relationships\": [\n")
-	sb.WriteString("    {\n")
-	sb.WriteString("      \"source_table\": \"orders\",\n")
-	sb.WriteString("      \"source_column\": \"user_id\",\n")
-	sb.WriteString("      \"target_table\": \"users\",\n")
-	sb.WriteString("      \"target_column\": \"id\",\n")
-	sb.WriteString("      \"description\": \"Links each order to the user who placed it. A user can place many orders.\"\n")
-	sb.WriteString("    }\n")
+	sb.WriteString("    {\"id\": 1, \"description\": \"Links each order to the user who placed it. A user can place many orders.\"},\n")
+	sb.WriteString("    {\"id\": 2, \"description\": \"...\"}\n")
 	sb.WriteString("  ]\n")
 	sb.WriteString("}\n")
 	sb.WriteString("```\n")
@@ -480,9 +498,11 @@ func (s *relationshipEnrichmentService) validateRelationships(
 	return valid
 }
 
-// logRelationshipFailure logs detailed information about a failed relationship enrichment.
+// logRelationshipFailure logs detailed information about a failed relationship enrichment
+// and updates the conversation status in the database.
 // conversationID allows correlating with LLM debug logs (zero UUID if not applicable).
 func (s *relationshipEnrichmentService) logRelationshipFailure(
+	ctx context.Context,
 	rel *models.EntityRelationship,
 	reason string,
 	err error,
@@ -506,6 +526,19 @@ func (s *relationshipEnrichmentService) logRelationshipFailure(
 	}
 
 	s.logger.Error("Relationship enrichment failed", fields...)
+
+	// Update conversation status in database if we have a conversation ID
+	if conversationID != uuid.Nil && s.conversationRepo != nil {
+		errorMessage := reason
+		if err != nil {
+			errorMessage = fmt.Sprintf("%s: %s", reason, err.Error())
+		}
+		if updateErr := s.conversationRepo.UpdateStatus(ctx, conversationID, models.LLMConversationStatusError, errorMessage); updateErr != nil {
+			s.logger.Warn("Failed to update conversation status",
+				zap.String("conversation_id", conversationID.String()),
+				zap.Error(updateErr))
+		}
+	}
 }
 
 // truncateString truncates a string to a maximum length for logging.

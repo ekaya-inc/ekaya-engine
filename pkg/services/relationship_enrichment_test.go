@@ -179,7 +179,7 @@ func TestRelationshipEnrichmentService_ValidationFiltersInvalid(t *testing.T) {
 	mockFactory := llm.NewMockClientFactory()
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -227,13 +227,13 @@ func TestRelationshipEnrichmentService_RetryOnTransientError(t *testing.T) {
 			return nil, llm.NewError(llm.ErrorTypeEndpoint, "timeout", true, errors.New("timeout"))
 		}
 		return &llm.GenerateResponseResult{
-			Content: `{"relationships": [{"source_table": "orders", "source_column": "user_id", "target_table": "users", "target_column": "id", "description": "Test desc"}]}`,
+			Content: `{"relationships": [{"id": 1, "description": "Test desc"}]}`,
 		}, nil
 	}
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -280,7 +280,7 @@ func TestRelationshipEnrichmentService_NonRetryableError(t *testing.T) {
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -329,7 +329,7 @@ func TestRelationshipEnrichmentService_InvalidJSONResponse(t *testing.T) {
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
