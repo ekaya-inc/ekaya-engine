@@ -234,7 +234,7 @@ func TestGlossaryRepository_Update_Success(t *testing.T) {
 	originalCreatedAt := original.CreatedAt
 
 	// Wait to ensure updated_at will be different (PostgreSQL NOW() has millisecond precision)
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	// Update the term
 	original.Definition = "Updated: Total cost to acquire a new customer"
