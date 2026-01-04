@@ -80,8 +80,9 @@ var ontologyToolNames = map[string]bool{
 }
 
 // agentToolNames lists tools available to agents when agent_tools is enabled.
-// Agents can only access approved_queries tools, not developer tools.
+// Agents can access echo for testing and approved_queries tools for data access.
 var agentToolNames = map[string]bool{
+	"echo":                   true,
 	"list_approved_queries":  true,
 	"execute_approved_query": true,
 }

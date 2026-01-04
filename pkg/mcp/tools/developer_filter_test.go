@@ -780,10 +780,10 @@ func TestFilterAgentTools_Disabled(t *testing.T) {
 func TestFilterAgentTools_Enabled(t *testing.T) {
 	tools := createTestTools()
 
-	// When agent_tools is enabled, health + approved_queries tools should be available
+	// When agent_tools is enabled, health + echo + approved_queries tools should be available
 	filtered := filterAgentTools(tools, true)
 
-	expectedTools := []string{"health", "list_approved_queries", "execute_approved_query"}
+	expectedTools := []string{"health", "echo", "list_approved_queries", "execute_approved_query"}
 	if len(filtered) != len(expectedTools) {
 		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
 	}
@@ -877,8 +877,8 @@ func TestNewToolFilter_AgentAuth_AgentToolsEnabled(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 
-	// Agent should only see health + approved_queries tools
-	expectedTools := []string{"health", "list_approved_queries", "execute_approved_query"}
+	// Agent should only see health + echo + approved_queries tools
+	expectedTools := []string{"health", "echo", "list_approved_queries", "execute_approved_query"}
 	if len(filtered) != len(expectedTools) {
 		t.Errorf("expected %d tools for agent, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
 	}

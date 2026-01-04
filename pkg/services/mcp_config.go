@@ -119,6 +119,21 @@ func (s *mcpConfigService) Update(ctx context.Context, projectID uuid.UUID, req 
 		}
 	}
 
+	// Enforce mutual exclusivity: agent_tools enabled = other tools disabled
+	if agentConfig, ok := config.ToolGroups[ToolGroupAgentTools]; ok && agentConfig.Enabled {
+		// Disable developer tools
+		if devConfig, ok := config.ToolGroups["developer"]; ok {
+			devConfig.Enabled = false
+			devConfig.EnableExecute = false
+		}
+		// Disable approved_queries
+		if aqConfig, ok := config.ToolGroups[ToolGroupApprovedQueries]; ok {
+			aqConfig.Enabled = false
+			aqConfig.ForceMode = false
+			aqConfig.AllowClientSuggestions = false
+		}
+	}
+
 	// Persist changes
 	if err := s.configRepo.Upsert(ctx, config); err != nil {
 		return nil, fmt.Errorf("failed to save MCP config: %w", err)

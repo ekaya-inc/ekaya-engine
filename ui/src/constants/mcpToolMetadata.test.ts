@@ -28,7 +28,8 @@ describe('mcpToolMetadata', () => {
       }
       expect(metadata.name).toBe('Developer Tools');
       expect(metadata.description).toBeTruthy();
-      expect(metadata.warning).toBeTruthy();
+      // Warning removed - replaced with Pro Tip in component
+      expect(metadata.warning).toBeUndefined();
       expect(metadata.subOptions).toBeDefined();
       expect(metadata.subOptions?.enableExecute).toBeDefined();
     });
@@ -53,7 +54,8 @@ describe('mcpToolMetadata', () => {
       expect(metadata.name).toBe('Agent Tools');
       expect(metadata.description).toContain('AI Agents');
       expect(metadata.description).toContain('Pre-Approved Queries');
-      expect(metadata.warning).toContain('API key authentication');
+      // Warning is now rendered inline in the component, not in metadata
+      expect(metadata.warning).toBeUndefined();
     });
 
     it('agent tools has no subOptions', () => {

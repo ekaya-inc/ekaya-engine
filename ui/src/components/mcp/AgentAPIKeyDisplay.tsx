@@ -75,6 +75,13 @@ export default function AgentAPIKeyDisplay({ projectId }: AgentAPIKeyDisplayProp
     }
   };
 
+  // Mask key on blur
+  const handleBlur = () => {
+    if (!masked) {
+      setMasked(true);
+    }
+  };
+
   // Copy to clipboard
   const handleCopy = async () => {
     try {
@@ -113,15 +120,15 @@ export default function AgentAPIKeyDisplay({ projectId }: AgentAPIKeyDisplayProp
         setKey(response.data.key);
         setMasked(false);
         toast({
-          title: 'Key Regenerated',
-          description: 'Agent API key has been regenerated',
+          title: 'Key Rotated',
+          description: 'Agent API key has been rotated',
           variant: 'success',
         });
       }
     } catch {
       toast({
         title: 'Error',
-        description: 'Failed to regenerate API key',
+        description: 'Failed to rotate API key',
         variant: 'destructive',
       });
     } finally {
@@ -129,18 +136,28 @@ export default function AgentAPIKeyDisplay({ projectId }: AgentAPIKeyDisplayProp
     }
   };
 
+  // Generate a masked display value that matches the full key length
+  const MASKED_KEY_LENGTH = 64; // Standard key length
+  const maskedDisplay = '*'.repeat(MASKED_KEY_LENGTH);
+
   if (loading) {
     return <div className="text-sm text-text-secondary">Loading...</div>;
   }
 
   return (
-    <div className="space-y-2">
-      <label className="text-sm font-medium text-text-primary">Agent API Key</label>
+    <div className="space-y-3">
+      <div>
+        <h4 className="text-sm font-medium text-text-primary">AI Agent API Key</h4>
+        <p className="text-xs text-text-secondary mt-0.5">
+          This API Key enables AI Agents to access Pre-Approved Queries.
+        </p>
+      </div>
       <div className="flex items-center gap-2">
         <Input
           type="text"
-          value={key}
+          value={masked ? maskedDisplay : key}
           onFocus={handleFocus}
+          onBlur={handleBlur}
           readOnly
           className="flex-1 font-mono text-sm"
         />
@@ -157,28 +174,20 @@ export default function AgentAPIKeyDisplay({ projectId }: AgentAPIKeyDisplayProp
           variant="outline"
           onClick={() => setConfirmDialogOpen(true)}
           disabled={regenerating}
-          title="Regenerate key"
+          title="Rotate key"
         >
           <RefreshCw className={`h-4 w-4 ${regenerating ? 'animate-spin' : ''}`} />
         </Button>
       </div>
       <p className="text-xs text-text-secondary">
-        Click the key to reveal. Use this key for agent authentication.
+        Click the key to reveal.
       </p>
-      <details className="text-xs text-text-secondary mt-2">
-        <summary className="cursor-pointer hover:text-text-primary">Usage example</summary>
-        <pre className="mt-1 p-2 bg-bg-secondary rounded text-xs overflow-x-auto">
-{`# Use the X-API-Key header for agent authentication
-curl -H "X-API-Key: <your-key>" \\
-  https://your-server/mcp/${projectId}`}
-        </pre>
-      </details>
 
       {/* Confirmation Dialog */}
       <Dialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Regenerate API Key?</DialogTitle>
+            <DialogTitle>Rotate API Key?</DialogTitle>
             <DialogDescription>
               This will reset the API key. All previously configured Agents will fail to authenticate until updated with the new key.
             </DialogDescription>
@@ -188,7 +197,7 @@ curl -H "X-API-Key: <your-key>" \\
               Cancel
             </Button>
             <Button variant="destructive" onClick={handleRegenerate}>
-              Regenerate Key
+              Rotate Key
             </Button>
           </DialogFooter>
         </DialogContent>

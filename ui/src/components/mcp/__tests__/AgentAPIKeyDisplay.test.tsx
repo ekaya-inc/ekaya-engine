@@ -50,6 +50,7 @@ Object.defineProperty(navigator, 'clipboard', {
 describe('AgentAPIKeyDisplay', () => {
   const projectId = 'test-project-id';
   const maskedKey = '************************************************************';
+  const displayMask = '*'.repeat(64); // Component uses fixed 64-char display mask
   const revealedKey = 'abcd1234efgh5678ijkl9012mnop3456qrst7890uvwx1234yzab5678';
 
   beforeEach(() => {
@@ -79,7 +80,7 @@ describe('AgentAPIKeyDisplay', () => {
     });
 
     const input = screen.getByRole('textbox');
-    expect(input).toHaveValue(maskedKey);
+    expect(input).toHaveValue(displayMask);
     expect(input).toHaveClass('font-mono');
   });
 
@@ -205,12 +206,12 @@ describe('AgentAPIKeyDisplay', () => {
     // Dialog should not be visible initially
     expect(screen.queryByTestId('dialog-root')).not.toBeInTheDocument();
 
-    const regenerateButton = screen.getByTitle('Regenerate key');
+    const regenerateButton = screen.getByTitle('Rotate key');
     fireEvent.click(regenerateButton);
 
     // Dialog should now be visible
     expect(screen.getByTestId('dialog-root')).toBeInTheDocument();
-    expect(screen.getByText('Regenerate API Key?')).toBeInTheDocument();
+    expect(screen.getByText('Rotate API Key?')).toBeInTheDocument();
     expect(screen.getByText(/This will reset the API key/)).toBeInTheDocument();
   });
 
@@ -227,7 +228,7 @@ describe('AgentAPIKeyDisplay', () => {
     });
 
     // Open dialog
-    const regenerateButton = screen.getByTitle('Regenerate key');
+    const regenerateButton = screen.getByTitle('Rotate key');
     fireEvent.click(regenerateButton);
 
     expect(screen.getByTestId('dialog-root')).toBeInTheDocument();
@@ -260,12 +261,12 @@ describe('AgentAPIKeyDisplay', () => {
     });
 
     // Open dialog
-    const regenerateButton = screen.getByTitle('Regenerate key');
+    const regenerateButton = screen.getByTitle('Rotate key');
     fireEvent.click(regenerateButton);
 
     // Confirm regeneration - find button within dialog
     const dialogFooter = screen.getByTestId('dialog-footer');
-    const confirmButton = within(dialogFooter).getByRole('button', { name: /regenerate key/i });
+    const confirmButton = within(dialogFooter).getByRole('button', { name: /rotate key/i });
     fireEvent.click(confirmButton);
 
     await waitFor(() => {
@@ -279,8 +280,8 @@ describe('AgentAPIKeyDisplay', () => {
     });
 
     expect(mockToast).toHaveBeenCalledWith({
-      title: 'Key Regenerated',
-      description: 'Agent API key has been regenerated',
+      title: 'Key Rotated',
+      description: 'Agent API key has been rotated',
       variant: 'success',
     });
   });
@@ -299,18 +300,18 @@ describe('AgentAPIKeyDisplay', () => {
     });
 
     // Open dialog
-    const regenerateButton = screen.getByTitle('Regenerate key');
+    const regenerateButton = screen.getByTitle('Rotate key');
     fireEvent.click(regenerateButton);
 
     // Confirm regeneration - find button within dialog
     const dialogFooter = screen.getByTestId('dialog-footer');
-    const confirmButton = within(dialogFooter).getByRole('button', { name: /regenerate key/i });
+    const confirmButton = within(dialogFooter).getByRole('button', { name: /rotate key/i });
     fireEvent.click(confirmButton);
 
     await waitFor(() => {
       expect(mockToast).toHaveBeenCalledWith({
         title: 'Error',
-        description: 'Failed to regenerate API key',
+        description: 'Failed to rotate API key',
         variant: 'destructive',
       });
     });
@@ -336,12 +337,12 @@ describe('AgentAPIKeyDisplay', () => {
     });
 
     // Open dialog and confirm
-    const regenerateButton = screen.getByTitle('Regenerate key');
+    const regenerateButton = screen.getByTitle('Rotate key');
     fireEvent.click(regenerateButton);
 
     // Find button within dialog
     const dialogFooter = screen.getByTestId('dialog-footer');
-    const confirmButton = within(dialogFooter).getByRole('button', { name: /regenerate key/i });
+    const confirmButton = within(dialogFooter).getByRole('button', { name: /rotate key/i });
     fireEvent.click(confirmButton);
 
     // Should show spinning animation
@@ -369,7 +370,6 @@ describe('AgentAPIKeyDisplay', () => {
       expect(screen.queryByText('Loading...')).not.toBeInTheDocument();
     });
 
-    expect(screen.getByText('Click the key to reveal. Use this key for agent authentication.')).toBeInTheDocument();
-    expect(screen.getByText('Agent API Key')).toBeInTheDocument();
+    expect(screen.getByText('Click the key to reveal.')).toBeInTheDocument();
   });
 });

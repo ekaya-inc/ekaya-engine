@@ -1,4 +1,4 @@
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
@@ -42,12 +42,14 @@ const MCPServerPage = () => {
   const [updating, setUpdating] = useState(false);
   const [enabledQueryCount, setEnabledQueryCount] = useState(0);
   const [secureAdhocEnabled, setSecureAdhocEnabled] = useState(false);
+  const [agentApiKey, setAgentApiKey] = useState<string>('');
 
   // Read approved_queries config from backend (now flat state structure)
   const approvedQueriesState = config?.toolGroups[TOOL_GROUP_IDS.APPROVED_QUERIES];
   const isApprovedQueriesEnabled = approvedQueriesState?.enabled ?? false;
   const forceMode = approvedQueriesState?.forceMode ?? false;
   const allowClientSuggestions = approvedQueriesState?.allowClientSuggestions ?? false;
+  const isAgentToolsEnabled = config?.toolGroups[TOOL_GROUP_IDS.AGENT_TOOLS]?.enabled ?? false;
 
   // Get metadata for approved_queries
   const approvedQueriesMetadata = TOOL_GROUP_METADATA[TOOL_GROUP_IDS.APPROVED_QUERIES];
@@ -97,6 +99,24 @@ const MCPServerPage = () => {
 
     fetchEnabledQueryCount();
   }, [pid, selectedDatasource?.datasourceId]);
+
+  // Fetch agent API key when Agent Tools is enabled (for Agent Setup Example display)
+  useEffect(() => {
+    const fetchAgentKey = async () => {
+      if (!pid || !isAgentToolsEnabled) return;
+
+      try {
+        const response = await engineApi.getAgentAPIKey(pid, true);
+        if (response.success && response.data) {
+          setAgentApiKey(response.data.key);
+        }
+      } catch (error) {
+        console.error('Failed to fetch agent API key:', error);
+      }
+    };
+
+    fetchAgentKey();
+  }, [pid, isAgentToolsEnabled]);
 
   const handleToggleApprovedQueriesSubOption = async (subOptionName: string, enabled: boolean) => {
     if (!pid || !config) return;
@@ -155,6 +175,16 @@ const MCPServerPage = () => {
   const handleToggleApprovedQueries = async (enabled: boolean) => {
     if (!pid || !config) return;
 
+    // Block enabling when Agent Tools is active
+    if (enabled && isAgentToolsEnabled) {
+      toast({
+        title: 'Not allowed',
+        description: 'Business User Tools cannot be enabled while Agent Tools is active.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (!enabled && enabledQueryCount === 0) {
       toast({
         title: 'No enabled queries',
@@ -198,6 +228,16 @@ const MCPServerPage = () => {
   };
 
   const handleToggleDevTools = async (enabled: boolean) => {
+    // Block enabling when Agent Tools is active
+    if (enabled && isAgentToolsEnabled) {
+      toast({
+        title: 'Not allowed',
+        description: 'Developer Tools cannot be enabled while Agent Tools is active.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (enabled && forceMode) {
       toast({
         title: 'Not allowed',
@@ -207,6 +247,31 @@ const MCPServerPage = () => {
       return;
     }
     await handleToggleToolGroup(TOOL_GROUP_IDS.DEVELOPER, enabled);
+  };
+
+  const handleToggleAgentTools = async (enabled: boolean) => {
+    if (!pid || !config) return;
+
+    if (enabled) {
+      // Auto-disable Business User Tools and Developer Tools when enabling Agent Tools
+      if (config.toolGroups[TOOL_GROUP_IDS.APPROVED_QUERIES]?.enabled) {
+        await handleToggleToolGroup(TOOL_GROUP_IDS.APPROVED_QUERIES, false);
+      }
+      if (config.toolGroups[TOOL_GROUP_IDS.DEVELOPER]?.enabled) {
+        await handleToggleToolGroup(TOOL_GROUP_IDS.DEVELOPER, false);
+      }
+      // Fetch revealed API key for the setup example
+      try {
+        const response = await engineApi.getAgentAPIKey(pid, true);
+        if (response.success && response.data) {
+          setAgentApiKey(response.data.key);
+        }
+      } catch (error) {
+        console.error('Failed to fetch agent API key:', error);
+      }
+    }
+
+    await handleToggleToolGroup(TOOL_GROUP_IDS.AGENT_TOOLS, enabled);
   };
 
   const handleToggleToolGroup = async (groupName: string, enabled: boolean) => {
@@ -351,6 +416,8 @@ const MCPServerPage = () => {
             <MCPServerURL
               serverUrl={config.serverUrl}
               docsUrl="https://docs.ekaya.ai/mcp-setup"
+              agentMode={isAgentToolsEnabled}
+              agentApiKey={agentApiKey}
             />
 
             {/* Tool Configuration Section */}
@@ -380,26 +447,21 @@ const MCPServerPage = () => {
                 {config.toolGroups[TOOL_GROUP_IDS.AGENT_TOOLS] && TOOL_GROUP_METADATA[TOOL_GROUP_IDS.AGENT_TOOLS] && (
                   <MCPToolGroup
                     name={TOOL_GROUP_METADATA[TOOL_GROUP_IDS.AGENT_TOOLS]!.name}
-                    description={TOOL_GROUP_METADATA[TOOL_GROUP_IDS.AGENT_TOOLS]!.description}
-                    warning={TOOL_GROUP_METADATA[TOOL_GROUP_IDS.AGENT_TOOLS]!.warning}
+                    description={<>Enable AI Agents to access the database safely and securely with logging and auditing capabilities. AI Agents can only use the enabled <Link to={`/projects/${pid}/queries`} className="text-brand-purple hover:underline">Pre-Approved Queries</Link> so that you have full control over access.</>}
                     enabled={config.toolGroups[TOOL_GROUP_IDS.AGENT_TOOLS]!.enabled}
-                    onToggle={(enabled) => handleToggleToolGroup(TOOL_GROUP_IDS.AGENT_TOOLS, enabled)}
+                    onToggle={handleToggleAgentTools}
                     disabled={updating}
-                  />
-                )}
-                {/* Agent API Key Display - shown below the Agent Tools toggle when enabled */}
-                {config.toolGroups[TOOL_GROUP_IDS.AGENT_TOOLS]?.enabled && (
-                  <div className="ml-6 -mt-2">
-                    <div className="rounded-md border border-border-light bg-surface-secondary p-4">
+                  >
+                    {/* API Key section rendered inside the card */}
+                    <div className="mt-4 border-t border-border-light pt-4 pl-4">
                       <AgentAPIKeyDisplay projectId={pid!} />
-                      {/* Warning when agent tools enabled but approved queries disabled */}
-                      {!isApprovedQueriesEnabled && (
-                        <p className="mt-3 text-sm text-yellow-600">
-                          Note: Agent Tools require Business User Tools to be enabled for agents to access queries.
-                        </p>
-                      )}
+                      {/* Warning at bottom */}
+                      <div className="mt-3 flex items-start gap-2 rounded-md bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <span>Distribute keys carefully and rotate them periodically.</span>
+                      </div>
                     </div>
-                  </div>
+                  </MCPToolGroup>
                 )}
 
                 {/* Other Tool Groups (excluding approved_queries and agent_tools which are handled above) */}
@@ -432,6 +494,19 @@ const MCPServerPage = () => {
                       }
                     }
 
+                    // Pro Tip for Developer Tools
+                    const developerToolsTip = groupName === TOOL_GROUP_IDS.DEVELOPER ? (
+                      <div>
+                        <span className="font-semibold">Pro Tip:</span> Use Developer Tools to help you answer questions about your Ontology{' '}
+                        <details className="inline">
+                          <summary className="inline cursor-pointer underline">(more info)</summary>
+                          <p className="mt-2 font-normal">
+                            After you have extracted your Ontology there might be questions that Ekaya cannot answer from the database schema and values alone. Connect your IDE to the MCP Server so that your LLM can answer questions by reviewing your codebase or other project documents saving you time.
+                          </p>
+                        </details>
+                      </div>
+                    ) : undefined;
+
                     const props = {
                       name: metadata.name,
                       description: metadata.description,
@@ -439,6 +514,7 @@ const MCPServerPage = () => {
                       onToggle,
                       disabled: updating,
                       ...(metadata.warning != null ? { warning: metadata.warning } : {}),
+                      ...(developerToolsTip != null ? { tip: developerToolsTip } : {}),
                       ...(subOptions != null ? { subOptions } : {}),
                       onSubOptionToggle: (subOptionName: string, enabled: boolean) =>
                         handleToggleSubOption(groupName, subOptionName, enabled),
