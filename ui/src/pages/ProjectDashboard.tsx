@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Boxes,
   Brain,
+  BrainCircuit,
   Check,
   ChevronDown,
   Database,
@@ -425,6 +426,13 @@ const ProjectDashboard = () => {
   ];
 
   const applicationTiles: Tile[] = [
+    {
+      title: 'AI Data Liaison',
+      icon: BrainCircuit,
+      path: `/projects/${pid}/ai-data-liaison`,
+      disabled: !isConnected || !hasSelectedTables,
+      color: 'blue',
+    },
     {
       title: 'MCP Server',
       icon: Server,

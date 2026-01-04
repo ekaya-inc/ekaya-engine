@@ -110,11 +110,19 @@ const handleInstall = (app: ApplicationInfo) => {
   - Back button navigation
   - Coming Soon text for disabled tiles
 
-### 5. Add AI Data Liaison Tile to Project Dashboard
+### 5. [x] Add AI Data Liaison Tile to Project Dashboard
+
+**Status:** COMPLETE
 
 **File:** `ui/src/pages/ProjectDashboard.tsx`
 
-Add a new tile at the **beginning** of the `applicationTiles` array (before MCP Server):
+**What was done:**
+- Added `BrainCircuit` icon import from `lucide-react` (line 5)
+- Added new "AI Data Liaison" tile at the beginning of `applicationTiles` array (lines 428-435)
+- Tile uses: icon `BrainCircuit`, path `/projects/${pid}/ai-data-liaison`, color `blue`
+- Tile disabled state matches MCP Server: `!isConnected || !hasSelectedTables`
+
+**Original task:** Add a new tile at the **beginning** of the `applicationTiles` array (before MCP Server):
 
 ```typescript
 const applicationTiles: Tile[] = [
