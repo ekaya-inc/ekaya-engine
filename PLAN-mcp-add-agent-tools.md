@@ -46,106 +46,45 @@ Add a new "Agent Tools" section to the MCP Server configuration page, positioned
 
 ---
 
-### Step 3: Update Repository
+### Step 3: Update Repository [x] COMPLETED
 
-**File:** `pkg/repositories/mcp_config_repository.go`
+**Files Modified:**
+- `pkg/repositories/mcp_config_repository.go` - Extended interface and implementation for agent API key storage
+- `pkg/services/mcp_config_test.go` - Updated mock to implement new interface methods
 
-Update interface:
+**What Was Done:**
+1. Extended `MCPConfigRepository` interface with:
+   - `GetAgentAPIKey(ctx, projectID) (string, error)` - retrieves encrypted key
+   - `SetAgentAPIKey(ctx, projectID, encryptedKey) error` - stores encrypted key
 
-```go
-type MCPConfigRepository interface {
-    Get(ctx context.Context, projectID uuid.UUID) (*models.MCPConfig, error)
-    Upsert(ctx context.Context, config *models.MCPConfig) error
+2. Updated `Get` method:
+   - Added `agent_api_key_encrypted` to SELECT query
+   - Scans nullable column via `*string` intermediate variable
+   - Copies to `config.AgentAPIKeyEncrypted` when non-nil
 
-    // Agent API Key operations
-    GetAgentAPIKey(ctx context.Context, projectID uuid.UUID) (string, error)
-    SetAgentAPIKey(ctx context.Context, projectID uuid.UUID, encryptedKey string) error
-}
-```
+3. Updated `Upsert` method:
+   - Includes `agent_api_key_encrypted` in INSERT/UPDATE
+   - Converts empty string to nil for nullable column storage
 
-Update `Get` query (line 40):
+4. Added `GetAgentAPIKey` method:
+   - Returns empty string (not error) when key doesn't exist or is null
+   - Uses nullable `*string` scan to handle NULL values
 
-```sql
-SELECT project_id, tool_groups, agent_api_key_encrypted, created_at, updated_at
-FROM engine_mcp_config
-WHERE project_id = $1
-```
+5. Added `SetAgentAPIKey` method:
+   - Uses UPSERT pattern with default tool_groups for INSERT case
+   - Only updates `agent_api_key_encrypted` and `updated_at` on conflict
 
-Update `Get` scan (line 47):
+6. Updated mock in test file:
+   - Added `agentAPIKeyByProject map[uuid.UUID]string` field
+   - Implemented `GetAgentAPIKey` and `SetAgentAPIKey` methods
 
-```go
-err := scope.Conn.QueryRow(ctx, query, projectID).Scan(
-    &config.ProjectID,
-    &toolGroupsJSON,
-    &config.AgentAPIKeyEncrypted,
-    &config.CreatedAt,
-    &config.UpdatedAt,
-)
-```
-
-Update `Upsert` query (line 80):
-
-```sql
-INSERT INTO engine_mcp_config (project_id, tool_groups, agent_api_key_encrypted, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $4)
-ON CONFLICT (project_id)
-DO UPDATE SET tool_groups = $2, agent_api_key_encrypted = $3, updated_at = $4
-```
-
-Update `Upsert` exec (line 86):
-
-```go
-_, err = scope.Conn.Exec(ctx, query, config.ProjectID, toolGroupsJSON, config.AgentAPIKeyEncrypted, now)
-```
-
-Add new methods:
-
-```go
-// GetAgentAPIKey retrieves the encrypted agent API key for a project.
-func (r *mcpConfigRepository) GetAgentAPIKey(ctx context.Context, projectID uuid.UUID) (string, error) {
-    scope, ok := database.GetTenantScope(ctx)
-    if !ok {
-        return "", fmt.Errorf("no tenant scope in context")
-    }
-
-    query := `SELECT agent_api_key_encrypted FROM engine_mcp_config WHERE project_id = $1`
-
-    var encryptedKey string
-    err := scope.Conn.QueryRow(ctx, query, projectID).Scan(&encryptedKey)
-    if err != nil {
-        if err == pgx.ErrNoRows {
-            return "", nil // Not found, return empty string
-        }
-        return "", fmt.Errorf("failed to get agent API key: %w", err)
-    }
-
-    return encryptedKey, nil
-}
-
-// SetAgentAPIKey updates the encrypted agent API key for a project.
-func (r *mcpConfigRepository) SetAgentAPIKey(ctx context.Context, projectID uuid.UUID, encryptedKey string) error {
-    scope, ok := database.GetTenantScope(ctx)
-    if !ok {
-        return fmt.Errorf("no tenant scope in context")
-    }
-
-    now := time.Now()
-    query := `
-        INSERT INTO engine_mcp_config (project_id, tool_groups, agent_api_key_encrypted, created_at, updated_at)
-        VALUES ($1, '{"developer": {"enabled": false}}'::jsonb, $2, $3, $3)
-        ON CONFLICT (project_id)
-        DO UPDATE SET agent_api_key_encrypted = $2, updated_at = $3`
-
-    _, err := scope.Conn.Exec(ctx, query, projectID, encryptedKey, now)
-    if err != nil {
-        return fmt.Errorf("failed to set agent API key: %w", err)
-    }
-
-    return nil
-}
-```
-
-**Pattern reference:** `pkg/repositories/mcp_config_repository.go:34-97`
+**Code Locations:**
+- `pkg/repositories/mcp_config_repository.go:24-26` - New interface methods
+- `pkg/repositories/mcp_config_repository.go:44-47` - Get query with new column
+- `pkg/repositories/mcp_config_repository.go:51-55,66-68` - Get scan with nullable handling
+- `pkg/repositories/mcp_config_repository.go:90-103` - Upsert with agent key column
+- `pkg/repositories/mcp_config_repository.go:116-160` - New GetAgentAPIKey and SetAgentAPIKey methods
+- `pkg/services/mcp_config_test.go:19-47` - Updated mock implementation
 
 ---
 
