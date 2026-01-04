@@ -42,6 +42,7 @@ type columnEnrichmentService struct {
 	entityRepo       repositories.OntologyEntityRepository
 	relationshipRepo repositories.EntityRelationshipRepository
 	schemaRepo       repositories.SchemaRepository
+	conversationRepo repositories.ConversationRepository
 	dsSvc            DatasourceService
 	adapterFactory   datasource.DatasourceAdapterFactory
 	llmFactory       llm.LLMClientFactory
@@ -57,6 +58,7 @@ func NewColumnEnrichmentService(
 	entityRepo repositories.OntologyEntityRepository,
 	relationshipRepo repositories.EntityRelationshipRepository,
 	schemaRepo repositories.SchemaRepository,
+	conversationRepo repositories.ConversationRepository,
 	dsSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
@@ -70,6 +72,7 @@ func NewColumnEnrichmentService(
 		entityRepo:       entityRepo,
 		relationshipRepo: relationshipRepo,
 		schemaRepo:       schemaRepo,
+		conversationRepo: conversationRepo,
 		dsSvc:            dsSvc,
 		adapterFactory:   adapterFactory,
 		llmFactory:       llmFactory,
@@ -598,7 +601,18 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 			zap.String("table", entity.PrimaryTable),
 			zap.Int("column_count", len(columns)),
 			zap.String("response_preview", truncateString(result.Content, 200)),
+			zap.String("conversation_id", result.ConversationID.String()),
 			zap.Error(err))
+
+		// Update conversation status for parse failure
+		if s.conversationRepo != nil {
+			errorMessage := fmt.Sprintf("parse_failure: %s", err.Error())
+			if updateErr := s.conversationRepo.UpdateStatus(ctx, result.ConversationID, models.LLMConversationStatusError, errorMessage); updateErr != nil {
+				s.logger.Warn("Failed to update conversation status",
+					zap.String("conversation_id", result.ConversationID.String()),
+					zap.Error(updateErr))
+			}
+		}
 		return nil, fmt.Errorf("parse LLM response: %w", err)
 	}
 
@@ -670,8 +684,9 @@ func (s *columnEnrichmentService) buildColumnEnrichmentPrompt(
 	sb.WriteString("3. **role**: dimension (for grouping/filtering) | measure (for aggregation) | identifier (unique IDs) | attribute (descriptive)\n")
 	sb.WriteString("4. **synonyms**: alternative names users might use (optional array)\n")
 	sb.WriteString("5. **enum_values**: if status/type column, array of {value, label, description}\n")
-	sb.WriteString("6. **fk_role**: if FK column and another column references same table, what role does this FK represent?\n")
-	sb.WriteString("   (e.g., payer_user_id -> \"payer\", payee_user_id -> \"payee\")\n")
+	sb.WriteString("6. **fk_role**: for FK columns, what semantic role does this reference represent?\n")
+	sb.WriteString("   Examples: \"owner\", \"creator\", \"assignee\", \"payer\", \"payee\", \"host\", \"visitor\"\n")
+	sb.WriteString("   Set to null if it's a generic reference with no special semantic role.\n")
 
 	// Response format
 	sb.WriteString("\n## Response Format (JSON object)\n")
