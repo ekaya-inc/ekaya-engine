@@ -44,129 +44,28 @@ The section renders using `renderApplicationTile()` (lines 436-508) which create
 - Icon does NOT use `mr-2` margin - the Button component handles icon spacing internally
 - The button appears below the existing MCP Server tile
 
-### 2. Create Applications Catalog Page
+### 2. [x] Create Applications Catalog Page
+
+**Status:** COMPLETE
 
 **New File:** `ui/src/pages/ApplicationsPage.tsx`
 
-Create a new page that displays available applications as tiles. The tiles should be **small-ish** to imply more applications are coming.
+**What was done:**
+- Created `ui/src/pages/ApplicationsPage.tsx` with a 3-column responsive grid of application tiles
+- Implemented 4 application tiles: AI Data Liaison (blue), Product Kit (purple), On-Premise Chat (green), More Coming (gray/disabled)
+- Added back button navigation to project dashboard
+- Used `getColorClasses()` helper function instead of template literals (Tailwind JIT requires explicit class names)
+- Used `text-text-secondary` instead of `text-muted-foreground` to match existing codebase patterns
+- Responsive grid: `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3`
+- Component exports as default export
 
-**Application Data:**
+**Implementation notes:**
+- Icons used: `BrainCircuit`, `Package`, `MessageSquare`, `Sparkles` from lucide-react
+- `handleInstall()` navigates to app-specific routes (e.g., `/projects/${pid}/ai-data-liaison`)
+- Disabled tiles (`available: false`) have `opacity-60` and `cursor-not-allowed`
+- The route still needs to be added to `ui/src/App.tsx` (Task 3)
 
-```typescript
-interface ApplicationInfo {
-  id: string;
-  title: string;
-  subtitle: string;
-  description: string;
-  icon: LucideIcon;
-  color: string;
-  available: boolean;  // false for "Coming Soon"
-}
-
-const applications: ApplicationInfo[] = [
-  {
-    id: 'ai-data-liaison',
-    title: 'AI Data Liaison',
-    subtitle: 'Make Better Business Decisions 10x Faster',
-    description: 'AI-powered data analysis and insights for faster, smarter business decisions.',
-    icon: BrainCircuit,  // or Lightbulb, TrendingUp from lucide-react
-    color: 'blue',
-    available: true,
-  },
-  {
-    id: 'product-kit',
-    title: 'Product Kit',
-    subtitle: 'Enable AI Features in your existing SaaS Product',
-    description: 'Integrate AI capabilities directly into your product with pre-built components and APIs.',
-    icon: Package,  // or Boxes, Blocks from lucide-react
-    color: 'purple',
-    available: true,
-  },
-  {
-    id: 'on-premise-chat',
-    title: 'On-Premise Chat',
-    subtitle: 'Deploy AI Chat where data never leaves your data boundary',
-    description: 'Self-hosted chat solution for maximum data privacy and compliance.',
-    icon: MessageSquare,  // or ShieldCheck, Lock
-    color: 'green',
-    available: true,
-  },
-  {
-    id: 'more-coming',
-    title: 'More Coming!',
-    subtitle: 'Additional applications in development',
-    description: 'We are building more applications to help you leverage your data.',
-    icon: Sparkles,  // or Clock, Rocket
-    color: 'gray',
-    available: false,
-  },
-];
-```
-
-**Page Structure:**
-
-```tsx
-export function ApplicationsPage() {
-  const navigate = useNavigate();
-  const { pid } = useParams();
-
-  return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      {/* Header with back button */}
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate(`/projects/${pid}`)}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div>
-          <h1 className="text-2xl font-bold">Install Application</h1>
-          <p className="text-muted-foreground">Choose an application to add to your project</p>
-        </div>
-      </div>
-
-      {/* Application tiles - 3 column grid with smaller tiles */}
-      <div className="grid grid-cols-3 gap-4">
-        {applications.map((app) => (
-          <Card
-            key={app.id}
-            className={cn(
-              "cursor-pointer transition-all hover:shadow-md",
-              !app.available && "opacity-60 cursor-not-allowed"
-            )}
-            onClick={() => app.available && handleInstall(app.id)}
-          >
-            <CardHeader className="pb-2">
-              <div className={cn(
-                "h-12 w-12 rounded-lg flex items-center justify-center mb-2",
-                `bg-${app.color}-500/10`
-              )}>
-                <app.icon className={cn("h-6 w-6", `text-${app.color}-500`)} />
-              </div>
-              <CardTitle className="text-base">{app.title}</CardTitle>
-              <CardDescription className="text-xs line-clamp-2">
-                {app.subtitle}
-              </CardDescription>
-            </CardHeader>
-            {!app.available && (
-              <CardFooter className="pt-0">
-                <span className="text-xs text-muted-foreground">Coming Soon</span>
-              </CardFooter>
-            )}
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
-}
-```
-
-**Tile Sizing Notes:**
-- Use `grid-cols-3` to fit 3 tiles per row (smaller feeling)
-- Icon container: `h-12 w-12` (smaller than dashboard's h-24 w-24)
-- Icon size: `h-6 w-6` (smaller than dashboard)
-- Title: `text-base` instead of `text-2xl`
-- Description: `text-xs` for compact look
-
-### 3. Add Route for Applications Page
+### 3. [ ] Add Route for Applications Page
 
 **File:** `ui/src/App.tsx`
 
