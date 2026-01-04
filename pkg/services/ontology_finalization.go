@@ -25,6 +25,7 @@ type ontologyFinalizationService struct {
 	entityRepo       repositories.OntologyEntityRepository
 	relationshipRepo repositories.EntityRelationshipRepository
 	schemaRepo       repositories.SchemaRepository
+	conversationRepo repositories.ConversationRepository
 	llmFactory       llm.LLMClientFactory
 	getTenantCtx     TenantContextFunc
 	logger           *zap.Logger
@@ -36,6 +37,7 @@ func NewOntologyFinalizationService(
 	entityRepo repositories.OntologyEntityRepository,
 	relationshipRepo repositories.EntityRelationshipRepository,
 	schemaRepo repositories.SchemaRepository,
+	conversationRepo repositories.ConversationRepository,
 	llmFactory llm.LLMClientFactory,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
@@ -45,6 +47,7 @@ func NewOntologyFinalizationService(
 		entityRepo:       entityRepo,
 		relationshipRepo: relationshipRepo,
 		schemaRepo:       schemaRepo,
+		conversationRepo: conversationRepo,
 		llmFactory:       llmFactory,
 		getTenantCtx:     getTenantCtx,
 		logger:           logger.Named("ontology-finalization"),
@@ -76,10 +79,12 @@ func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uu
 	// Aggregate unique domains from entity.Domain fields
 	primaryDomains := s.aggregateUniqueDomains(entities)
 
-	// Build entity name lookup for relationship display
+	// Build entity lookups for relationship display and graph building
 	entityNameByID := make(map[uuid.UUID]string, len(entities))
+	entityByID := make(map[uuid.UUID]*models.OntologyEntity, len(entities))
 	for _, e := range entities {
 		entityNameByID[e.ID] = e.Name
+		entityByID[e.ID] = e
 	}
 
 	// Generate domain description via LLM
@@ -95,13 +100,52 @@ func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uu
 		// Non-fatal - continue without conventions
 	}
 
+	// Build relationship graph from confirmed/pending relationships
+	var relationshipGraph []models.RelationshipEdge
+	for _, rel := range relationships {
+		if rel.Status == models.RelationshipStatusRejected {
+			continue
+		}
+		source := entityByID[rel.SourceEntityID]
+		target := entityByID[rel.TargetEntityID]
+		if source != nil && target != nil {
+			edge := models.RelationshipEdge{
+				From: source.Name,
+				To:   target.Name,
+			}
+			if rel.Description != nil && *rel.Description != "" {
+				edge.Label = *rel.Description
+			}
+			relationshipGraph = append(relationshipGraph, edge)
+		}
+	}
+
+	// Build and save entity summaries
+	entitySummaries, err := s.buildEntitySummaries(ctx, projectID, entities, relationships, entityByID)
+	if err != nil {
+		return fmt.Errorf("build entity summaries: %w", err)
+	}
+
+	if err := s.ontologyRepo.UpdateEntitySummaries(ctx, projectID, entitySummaries); err != nil {
+		return fmt.Errorf("update entity summaries: %w", err)
+	}
+
+	// TODO: Re-enable once relationship algorithm is improved
+	// The sample questions generated are powerful but require accurate relationships to answer
+	// sampleQuestions, err := s.generateSampleQuestions(ctx, projectID, entities, relationships, entityNameByID)
+	// if err != nil {
+	// 	s.logger.Debug("Failed to generate sample questions, continuing without", zap.Error(err))
+	// 	// Non-fatal - continue without sample questions
+	// }
+	var sampleQuestions []string // Empty for now
+
 	// Save to domain_summary JSONB
 	domainSummary := &models.DomainSummary{
-		Description: description,
-		Domains:     primaryDomains,
-		Conventions: conventions,
-		// RelationshipGraph: nil - redundant, GetDomainContext builds from normalized tables
-		// SampleQuestions: nil - not generating per user decision
+		Description:       description,
+		Domains:           primaryDomains,
+		Conventions:       conventions,
+		RelationshipGraph: relationshipGraph,
+		SampleQuestions:   sampleQuestions,
 	}
 
 	if err := s.ontologyRepo.UpdateDomainSummary(ctx, projectID, domainSummary); err != nil {
@@ -135,6 +179,196 @@ func (s *ontologyFinalizationService) aggregateUniqueDomains(entities []*models.
 	return domains
 }
 
+// buildEntitySummaries creates entity summaries from entities, their key columns, aliases, and relationships.
+func (s *ontologyFinalizationService) buildEntitySummaries(
+	ctx context.Context,
+	projectID uuid.UUID,
+	entities []*models.OntologyEntity,
+	relationships []*models.EntityRelationship,
+	entityByID map[uuid.UUID]*models.OntologyEntity,
+) (map[string]*models.EntitySummary, error) {
+	// Get all aliases by entity ID
+	aliasesByEntity, err := s.entityRepo.GetAllAliasesByProject(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("get aliases: %w", err)
+	}
+
+	// Get all key columns by entity ID
+	keyColumnsByEntity, err := s.entityRepo.GetAllKeyColumnsByProject(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("get key columns: %w", err)
+	}
+
+	// Get table names for column count lookup
+	tableNames := make([]string, 0, len(entities))
+	for _, e := range entities {
+		tableNames = append(tableNames, e.PrimaryTable)
+	}
+
+	// Get column counts per table
+	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames)
+	if err != nil {
+		return nil, fmt.Errorf("get columns by tables: %w", err)
+	}
+
+	// Build relationship targets by source entity ID
+	relationshipTargets := make(map[uuid.UUID][]string)
+	for _, rel := range relationships {
+		if rel.Status == models.RelationshipStatusRejected {
+			continue
+		}
+		targetEntity := entityByID[rel.TargetEntityID]
+		if targetEntity != nil {
+			relationshipTargets[rel.SourceEntityID] = append(relationshipTargets[rel.SourceEntityID], targetEntity.Name)
+		}
+	}
+
+	// Build entity summaries
+	summaries := make(map[string]*models.EntitySummary, len(entities))
+	for _, e := range entities {
+		// Get aliases as synonyms
+		var synonyms []string
+		if aliases, ok := aliasesByEntity[e.ID]; ok {
+			for _, alias := range aliases {
+				synonyms = append(synonyms, alias.Alias)
+			}
+		}
+
+		// Get key columns
+		var keyColumns []models.KeyColumn
+		if kcs, ok := keyColumnsByEntity[e.ID]; ok {
+			for _, kc := range kcs {
+				keyColumns = append(keyColumns, models.KeyColumn{
+					Name:     kc.ColumnName,
+					Synonyms: kc.Synonyms,
+				})
+			}
+		}
+
+		// Get column count
+		columnCount := 0
+		if cols, ok := columnsByTable[e.PrimaryTable]; ok {
+			columnCount = len(cols)
+		}
+
+		// Get relationship targets
+		var rels []string
+		if targets, ok := relationshipTargets[e.ID]; ok {
+			rels = targets
+		}
+
+		summaries[e.Name] = &models.EntitySummary{
+			TableName:     e.PrimaryTable,
+			BusinessName:  e.Name,
+			Description:   e.Description,
+			Domain:        e.Domain,
+			Synonyms:      synonyms,
+			KeyColumns:    keyColumns,
+			ColumnCount:   columnCount,
+			Relationships: rels,
+		}
+	}
+
+	return summaries, nil
+}
+
+// generateSampleQuestions calls the LLM to generate sample business questions.
+func (s *ontologyFinalizationService) generateSampleQuestions(
+	ctx context.Context,
+	projectID uuid.UUID,
+	entities []*models.OntologyEntity,
+	relationships []*models.EntityRelationship,
+	entityNameByID map[uuid.UUID]string,
+) ([]string, error) {
+	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("create LLM client: %w", err)
+	}
+
+	systemMessage := `You are a data analyst expert. Generate sample business questions that could be answered using the given database schema.`
+	prompt := s.buildSampleQuestionsPrompt(entities, relationships, entityNameByID)
+
+	result, err := llmClient.GenerateResponse(ctx, prompt, systemMessage, 0.5, false)
+	if err != nil {
+		return nil, fmt.Errorf("LLM generate response: %w", err)
+	}
+
+	s.logger.Debug("Sample questions LLM response received",
+		zap.String("project_id", projectID.String()),
+		zap.Int("prompt_tokens", result.PromptTokens),
+		zap.Int("completion_tokens", result.CompletionTokens),
+	)
+
+	// Parse the response
+	parsed, err := s.parseSampleQuestionsResponse(result.Content)
+	if err != nil {
+		s.logger.Warn("Failed to parse sample questions response, continuing without",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return nil, nil // Non-fatal - continue without sample questions
+	}
+
+	return parsed.Questions, nil
+}
+
+func (s *ontologyFinalizationService) buildSampleQuestionsPrompt(
+	entities []*models.OntologyEntity,
+	relationships []*models.EntityRelationship,
+	entityNameByID map[uuid.UUID]string,
+) string {
+	var sb strings.Builder
+
+	sb.WriteString("# Database Schema for Question Generation\n\n")
+	sb.WriteString("Generate 5-10 sample business questions that a user might ask about this database.\n")
+	sb.WriteString("Questions should be practical, specific, and answerable with SQL queries.\n\n")
+
+	sb.WriteString("## Entities\n\n")
+	for _, e := range entities {
+		sb.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", e.Name, e.PrimaryTable, e.Description))
+	}
+
+	if len(relationships) > 0 {
+		sb.WriteString("\n## Relationships\n\n")
+		for _, rel := range relationships {
+			if rel.Status == models.RelationshipStatusRejected {
+				continue
+			}
+			sourceName := entityNameByID[rel.SourceEntityID]
+			targetName := entityNameByID[rel.TargetEntityID]
+			if sourceName == "" || targetName == "" {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("- %s → %s\n", sourceName, targetName))
+		}
+	}
+
+	sb.WriteString("\n## Response Format\n\n")
+	sb.WriteString("Respond with a JSON object:\n")
+	sb.WriteString("```json\n")
+	sb.WriteString("{\n")
+	sb.WriteString("  \"questions\": [\n")
+	sb.WriteString("    \"How many active users signed up last month?\",\n")
+	sb.WriteString("    \"What is the total revenue by product category?\",\n")
+	sb.WriteString("    \"...\"\n")
+	sb.WriteString("  ]\n")
+	sb.WriteString("}\n")
+	sb.WriteString("```\n")
+
+	return sb.String()
+}
+
+type sampleQuestionsResponse struct {
+	Questions []string `json:"questions"`
+}
+
+func (s *ontologyFinalizationService) parseSampleQuestionsResponse(content string) (*sampleQuestionsResponse, error) {
+	parsed, err := llm.ParseJSONResponse[sampleQuestionsResponse](content)
+	if err != nil {
+		return nil, fmt.Errorf("parse sample questions JSON: %w", err)
+	}
+	return &parsed, nil
+}
+
 // generateDomainDescription calls the LLM to generate a business description.
 func (s *ontologyFinalizationService) generateDomainDescription(
 	ctx context.Context,
@@ -165,6 +399,20 @@ func (s *ontologyFinalizationService) generateDomainDescription(
 	// Parse the response
 	parsed, err := s.parseDomainDescriptionResponse(result.Content)
 	if err != nil {
+		s.logger.Error("Failed to parse domain description response",
+			zap.String("project_id", projectID.String()),
+			zap.String("conversation_id", result.ConversationID.String()),
+			zap.Error(err))
+
+		// Update conversation status for parse failure
+		if s.conversationRepo != nil {
+			errorMessage := fmt.Sprintf("parse_failure: %s", err.Error())
+			if updateErr := s.conversationRepo.UpdateStatus(ctx, result.ConversationID, models.LLMConversationStatusError, errorMessage); updateErr != nil {
+				s.logger.Warn("Failed to update conversation status",
+					zap.String("conversation_id", result.ConversationID.String()),
+					zap.Error(updateErr))
+			}
+		}
 		return "", fmt.Errorf("parse domain description response: %w", err)
 	}
 

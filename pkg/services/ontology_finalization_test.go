@@ -419,7 +419,7 @@ func TestOntologyFinalization_AggregatesDomains(t *testing.T) {
 	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: map[string][]*models.SchemaColumn{}}
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, entityRepo, relationshipRepo, schemaRepo,
+		ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil,
 		llmFactory, nil, logger,
 	)
 
@@ -473,7 +473,7 @@ func TestOntologyFinalization_GeneratesDomainDescription(t *testing.T) {
 	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: map[string][]*models.SchemaColumn{}}
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, entityRepo, relationshipRepo, schemaRepo,
+		ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil,
 		llmFactory, nil, logger,
 	)
 
@@ -498,7 +498,7 @@ func TestOntologyFinalization_SkipsIfNoEntities(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, entityRepo, relationshipRepo, schemaRepo,
+		ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil,
 		llmFactory, nil, logger,
 	)
 
@@ -539,7 +539,7 @@ func TestOntologyFinalization_HandlesEmptyDomains(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, entityRepo, relationshipRepo, schemaRepo,
+		ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil,
 		llmFactory, nil, logger,
 	)
 
@@ -589,7 +589,7 @@ func TestOntologyFinalization_HandlesRelationshipDisplay(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, entityRepo, relationshipRepo, schemaRepo,
+		ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil,
 		llmFactory, nil, logger,
 	)
 
@@ -630,7 +630,7 @@ func TestOntologyFinalization_LLMFailure(t *testing.T) {
 	logger := zap.NewNop()
 
 	svc := NewOntologyFinalizationService(
-		ontologyRepo, entityRepo, relationshipRepo, schemaRepo,
+		ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil,
 		llmFactory, nil, logger,
 	)
 
@@ -681,7 +681,7 @@ func TestOntologyFinalization_DiscoversSoftDelete_Timestamp(t *testing.T) {
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -729,7 +729,7 @@ func TestOntologyFinalization_DiscoversSoftDelete_Boolean(t *testing.T) {
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -773,7 +773,7 @@ func TestOntologyFinalization_DiscoversSoftDelete_Coverage(t *testing.T) {
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -813,7 +813,7 @@ func TestOntologyFinalization_DiscoversCurrency_Cents(t *testing.T) {
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -855,7 +855,7 @@ func TestOntologyFinalization_DiscoversCurrency_Dollars(t *testing.T) {
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -902,7 +902,7 @@ func TestOntologyFinalization_DiscoversAuditColumns_WithCoverage(t *testing.T) {
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
@@ -959,7 +959,7 @@ func TestOntologyFinalization_NoConventions(t *testing.T) {
 	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
 	logger := zap.NewNop()
 
-	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, llmFactory, nil, logger)
+	svc := NewOntologyFinalizationService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, llmFactory, nil, logger)
 
 	err := svc.Finalize(ctx, projectID)
 	require.NoError(t, err)
