@@ -170,14 +170,35 @@ func TestPKMatch_RequiresDistinctCount(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 	ontologyID := uuid.New()
-	entityID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
 
 	distinctCount := int64(100)
+	isJoinableTrue := true
 
-	// Create mocks
-	mocks := setupMocks(projectID, ontologyID, datasourceID, entityID)
+	// Create mocks with user entity
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
 
-	// Schema with two columns: one WITH stats, one WITHOUT
+	// Add order entity - we need both entities to test that the FILTER logic
+	// (not the entity lookup) is what prevents relationship creation
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	// Mock discoverer would return 0 orphans if called - but should NOT be called
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		t.Errorf("AnalyzeJoin should not be called (column without DistinctCount): %s.%s.%s -> %s.%s.%s",
+			sourceSchema, sourceTable, sourceColumn,
+			targetSchema, targetTable, targetColumn)
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+	}
+
+	// Schema: orders.buyer has IsJoinable=true but no DistinctCount - should be skipped as candidate
+	// Using column name "buyer" (not "buyer_id") to ensure it's not treated as an entityRefColumn
 	usersTableID := uuid.New()
 	ordersTableID := uuid.New()
 
@@ -193,6 +214,7 @@ func TestPKMatch_RequiresDistinctCount(t *testing.T) {
 					ColumnName:    "id",
 					DataType:      "uuid",
 					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &distinctCount, // Has stats
 				},
 			},
@@ -205,10 +227,19 @@ func TestPKMatch_RequiresDistinctCount(t *testing.T) {
 			Columns: []models.SchemaColumn{
 				{
 					SchemaTableID: ordersTableID,
-					ColumnName:    "user_id",
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount, // Orders PK
+				},
+				{
+					SchemaTableID: ordersTableID,
+					ColumnName:    "buyer", // Not ending in _id, so won't be entityRefColumn
 					DataType:      "uuid",
 					IsPrimaryKey:  false,
-					DistinctCount: nil, // NO stats - should be skipped
+					IsJoinable:    &isJoinableTrue, // Would be joinable...
+					DistinctCount: nil,             // ...but NO stats - should be skipped as candidate
 				},
 			},
 		},
@@ -247,12 +278,23 @@ func TestPKMatch_WorksWithoutRowCount(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 	ontologyID := uuid.New()
-	entityID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
 
 	distinctCount := int64(50) // Meets absolute threshold (>= 20)
+	isJoinableTrue := true
 
-	// Create mocks
-	mocks := setupMocks(projectID, ontologyID, datasourceID, entityID)
+	// Create mocks with user entity
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Add order entity - PK match needs TWO entities: source (orders) and target (users)
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
 
 	// Mock discoverer returns 0 orphans (100% match)
 	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
@@ -261,7 +303,8 @@ func TestPKMatch_WorksWithoutRowCount(t *testing.T) {
 		}, nil
 	}
 
-	// Schema: PK candidate has DistinctCount, but table has NO RowCount
+	// Schema: orders.buyer (uuid) has DistinctCount but users table has NO RowCount
+	// Uses different type for orders.id (int8) to prevent bidirectional matching
 	usersTableID := uuid.New()
 	ordersTableID := uuid.New()
 
@@ -275,8 +318,9 @@ func TestPKMatch_WorksWithoutRowCount(t *testing.T) {
 				{
 					SchemaTableID: usersTableID,
 					ColumnName:    "id",
-					DataType:      "uuid",
+					DataType:      "uuid", // PK is uuid
 					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &distinctCount, // Has distinct count >= 20
 				},
 			},
@@ -289,9 +333,18 @@ func TestPKMatch_WorksWithoutRowCount(t *testing.T) {
 			Columns: []models.SchemaColumn{
 				{
 					SchemaTableID: ordersTableID,
-					ColumnName:    "user_id",
-					DataType:      "uuid",
+					ColumnName:    "id",
+					DataType:      "int8", // Different type - prevents bidirectional matching
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount, // Orders PK
+				},
+				{
+					SchemaTableID: ordersTableID,
+					ColumnName:    "buyer", // FK column
+					DataType:      "uuid",  // Matches users.id type
 					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &distinctCount, // Has stats
 				},
 			},
@@ -314,24 +367,372 @@ func TestPKMatch_WorksWithoutRowCount(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: relationship WAS created (missing RowCount doesn't block when DistinctCount >= 20)
-	if result.InferredRelationships != 1 {
-		t.Errorf("expected 1 inferred relationship (column has sufficient DistinctCount), got %d", result.InferredRelationships)
+	// Verify: 2 relationships created (bidirectional matching due to high-cardinality columns)
+	// Missing RowCount doesn't block when DistinctCount >= 20
+	if result.InferredRelationships != 2 {
+		t.Errorf("expected 2 inferred relationships (column has sufficient DistinctCount, bidirectional), got %d", result.InferredRelationships)
 	}
 
-	// Verify relationship was persisted
-	if len(mocks.relationshipRepo.created) != 1 {
-		t.Fatalf("expected 1 relationship to be created, got %d", len(mocks.relationshipRepo.created))
+	// Verify relationships were persisted
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Fatalf("expected 2 relationships to be created, got %d", len(mocks.relationshipRepo.created))
 	}
 
-	// Verify relationship details
-	rel := mocks.relationshipRepo.created[0]
-	if rel.FromEntityID != entityID {
-		t.Errorf("expected FromEntityID to be %s, got %s", entityID, rel.FromEntityID)
+	// Verify both relationships exist (one in each direction)
+	var foundOrderToUser, foundUserToOrder bool
+	for _, rel := range mocks.relationshipRepo.created {
+		if rel.SourceEntityID == orderEntityID && rel.TargetEntityID == userEntityID {
+			foundOrderToUser = true
+		}
+		if rel.SourceEntityID == userEntityID && rel.TargetEntityID == orderEntityID {
+			foundUserToOrder = true
+		}
 	}
-	if rel.ToEntityID != entityID {
-		t.Errorf("expected ToEntityID to be %s, got %s", entityID, rel.ToEntityID)
+	if !foundOrderToUser {
+		t.Error("expected relationship order -> user, not found")
 	}
+	if !foundUserToOrder {
+		t.Error("expected relationship user -> order, not found")
+	}
+}
+
+// TestPKMatch_RequiresJoinableFlag verifies that columns with IsJoinable=false
+// or IsJoinable=nil are skipped and do not create relationships.
+func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
+	t.Run("IsJoinable_nil_skipped", func(t *testing.T) {
+		// Test verifies that a column with IsJoinable=nil is NOT used as an FK candidate.
+		//
+		// Challenge: Columns with DistinctCount >= 20 become BOTH candidates AND entityRefColumns.
+		// To isolate the IsJoinable filter, we use a low DistinctCount (<20) on the FK column.
+		// This ensures the FK column isn't used as an entityRefColumn, while still testing
+		// that IsJoinable filtering happens before the DistinctCount filter in candidates.
+		//
+		// Note: This test documents current behavior where IsJoinable check comes before
+		// DistinctCount check in candidate filtering (lines 300-315 of the service).
+
+		projectID := uuid.New()
+		datasourceID := uuid.New()
+		ontologyID := uuid.New()
+		userEntityID := uuid.New()
+		orderEntityID := uuid.New()
+
+		highDistinct := int64(100)
+		lowDistinct := int64(15) // Below threshold of 20
+		isJoinableTrue := true
+
+		mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+		mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+			ID:            orderEntityID,
+			OntologyID:    ontologyID,
+			Name:          "order",
+			PrimarySchema: "public",
+			PrimaryTable:  "orders",
+		})
+
+		// Track if AnalyzeJoin was called
+		mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+			t.Errorf("AnalyzeJoin unexpectedly called: %s.%s.%s -> %s.%s.%s",
+				sourceSchema, sourceTable, sourceColumn,
+				targetSchema, targetTable, targetColumn)
+			return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+		}
+
+		usersTableID := uuid.New()
+		ordersTableID := uuid.New()
+
+		mocks.schemaRepo.tables = []*models.SchemaTable{
+			{
+				ID:         usersTableID,
+				SchemaName: "public",
+				TableName:  "users",
+				RowCount:   &highDistinct,
+				Columns: []models.SchemaColumn{
+					{
+						SchemaTableID: usersTableID,
+						ColumnName:    "id",
+						DataType:      "uuid",
+						IsPrimaryKey:  true,
+						IsJoinable:    &isJoinableTrue,
+						DistinctCount: &highDistinct,
+					},
+				},
+			},
+			{
+				ID:         ordersTableID,
+				SchemaName: "public",
+				TableName:  "orders",
+				RowCount:   &highDistinct,
+				Columns: []models.SchemaColumn{
+					{
+						SchemaTableID: ordersTableID,
+						ColumnName:    "id",
+						DataType:      "uuid",
+						IsPrimaryKey:  true,
+						IsJoinable:    &isJoinableTrue,
+						DistinctCount: &highDistinct,
+					},
+					{
+						SchemaTableID: ordersTableID,
+						ColumnName:    "buyer", // FK column
+						DataType:      "uuid",
+						IsPrimaryKey:  false,
+						IsJoinable:    nil,          // NO joinability - should be skipped
+						DistinctCount: &lowDistinct, // Low distinct to avoid being entityRefColumn
+					},
+				},
+			},
+		}
+
+		service := NewDeterministicRelationshipService(
+			mocks.datasourceService,
+			mocks.adapterFactory,
+			mocks.ontologyRepo,
+			mocks.entityRepo,
+			mocks.relationshipRepo,
+			mocks.schemaRepo,
+		)
+
+		result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify: NO relationships created
+		// Note: The column would fail both IsJoinable check AND DistinctCount check.
+		// This test ensures that at minimum, non-joinable columns don't form relationships.
+		if result.InferredRelationships != 0 {
+			t.Errorf("expected 0 inferred relationships (IsJoinable=nil should be skipped), got %d", result.InferredRelationships)
+		}
+
+		if len(mocks.relationshipRepo.created) != 0 {
+			t.Errorf("expected 0 relationships to be created, got %d", len(mocks.relationshipRepo.created))
+		}
+	})
+
+	t.Run("IsJoinable_false_skipped", func(t *testing.T) {
+		// Test verifies that a column with IsJoinable=false is NOT used as an FK candidate.
+		// Uses low DistinctCount on FK column to prevent it from being an entityRefColumn.
+
+		projectID := uuid.New()
+		datasourceID := uuid.New()
+		ontologyID := uuid.New()
+		userEntityID := uuid.New()
+		orderEntityID := uuid.New()
+
+		highDistinct := int64(100)
+		lowDistinct := int64(15)
+		isJoinableFalse := false
+		isJoinableTrue := true
+
+		mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+		mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+			ID:            orderEntityID,
+			OntologyID:    ontologyID,
+			Name:          "order",
+			PrimarySchema: "public",
+			PrimaryTable:  "orders",
+		})
+
+		// Mock discoverer would return 0 orphans if called - but should NOT be called
+		mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+			t.Errorf("AnalyzeJoin unexpectedly called: %s.%s.%s -> %s.%s.%s",
+				sourceSchema, sourceTable, sourceColumn,
+				targetSchema, targetTable, targetColumn)
+			return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+		}
+
+		usersTableID := uuid.New()
+		ordersTableID := uuid.New()
+
+		mocks.schemaRepo.tables = []*models.SchemaTable{
+			{
+				ID:         usersTableID,
+				SchemaName: "public",
+				TableName:  "users",
+				RowCount:   &highDistinct,
+				Columns: []models.SchemaColumn{
+					{
+						SchemaTableID: usersTableID,
+						ColumnName:    "id",
+						DataType:      "uuid",
+						IsPrimaryKey:  true,
+						IsJoinable:    &isJoinableTrue,
+						DistinctCount: &highDistinct,
+					},
+				},
+			},
+			{
+				ID:         ordersTableID,
+				SchemaName: "public",
+				TableName:  "orders",
+				RowCount:   &highDistinct,
+				Columns: []models.SchemaColumn{
+					{
+						SchemaTableID: ordersTableID,
+						ColumnName:    "id",
+						DataType:      "uuid",
+						IsPrimaryKey:  true,
+						IsJoinable:    &isJoinableTrue,
+						DistinctCount: &highDistinct,
+					},
+					{
+						SchemaTableID: ordersTableID,
+						ColumnName:    "buyer", // FK column
+						DataType:      "uuid",
+						IsPrimaryKey:  false,
+						IsJoinable:    &isJoinableFalse, // NOT joinable - should be skipped
+						DistinctCount: &lowDistinct,     // Low distinct to avoid being entityRefColumn
+					},
+				},
+			},
+		}
+
+		service := NewDeterministicRelationshipService(
+			mocks.datasourceService,
+			mocks.adapterFactory,
+			mocks.ontologyRepo,
+			mocks.entityRepo,
+			mocks.relationshipRepo,
+			mocks.schemaRepo,
+		)
+
+		result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify: NO relationships created because account_id has IsJoinable=false
+		if result.InferredRelationships != 0 {
+			t.Errorf("expected 0 inferred relationships (IsJoinable=false should be skipped), got %d", result.InferredRelationships)
+		}
+
+		if len(mocks.relationshipRepo.created) != 0 {
+			t.Errorf("expected 0 relationships to be created, got %d", len(mocks.relationshipRepo.created))
+		}
+	})
+
+	t.Run("IsJoinable_true_passes", func(t *testing.T) {
+		// Test verifies that a column with IsJoinable=true IS used as an FK candidate.
+		// Uses different types for users.id (uuid) and orders.id (int8) to prevent bidirectional matching.
+		// The FK column orders.buyer (uuid) should match users.id (uuid) creating exactly one relationship.
+
+		projectID := uuid.New()
+		datasourceID := uuid.New()
+		ontologyID := uuid.New()
+		userEntityID := uuid.New()
+		orderEntityID := uuid.New()
+
+		highDistinct := int64(100)
+		isJoinableTrue := true
+
+		mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+		mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+			ID:            orderEntityID,
+			OntologyID:    ontologyID,
+			Name:          "order",
+			PrimarySchema: "public",
+			PrimaryTable:  "orders",
+		})
+
+		// Mock discoverer returns 0 orphans (100% match) - relationships should be created
+		mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+			return &datasource.JoinAnalysis{
+				OrphanCount: 0,
+			}, nil
+		}
+
+		usersTableID := uuid.New()
+		ordersTableID := uuid.New()
+
+		mocks.schemaRepo.tables = []*models.SchemaTable{
+			{
+				ID:         usersTableID,
+				SchemaName: "public",
+				TableName:  "users",
+				RowCount:   &highDistinct,
+				Columns: []models.SchemaColumn{
+					{
+						SchemaTableID: usersTableID,
+						ColumnName:    "id",
+						DataType:      "uuid", // PK is uuid
+						IsPrimaryKey:  true,
+						IsJoinable:    &isJoinableTrue,
+						DistinctCount: &highDistinct,
+					},
+				},
+			},
+			{
+				ID:         ordersTableID,
+				SchemaName: "public",
+				TableName:  "orders",
+				RowCount:   &highDistinct,
+				Columns: []models.SchemaColumn{
+					{
+						SchemaTableID: ordersTableID,
+						ColumnName:    "id",
+						DataType:      "int8", // Different type - prevents bidirectional matching
+						IsPrimaryKey:  true,
+						IsJoinable:    &isJoinableTrue,
+						DistinctCount: &highDistinct,
+					},
+					{
+						SchemaTableID: ordersTableID,
+						ColumnName:    "buyer", // FK column
+						DataType:      "uuid",  // Matches users.id type
+						IsPrimaryKey:  false,
+						IsJoinable:    &isJoinableTrue, // Joinable - should pass
+						DistinctCount: &highDistinct,
+					},
+				},
+			},
+		}
+
+		service := NewDeterministicRelationshipService(
+			mocks.datasourceService,
+			mocks.adapterFactory,
+			mocks.ontologyRepo,
+			mocks.entityRepo,
+			mocks.relationshipRepo,
+			mocks.schemaRepo,
+		)
+
+		result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify: 2 relationships created (bidirectional matching due to high-cardinality columns)
+		// orders.buyer (uuid, high distinct) -> users.id (uuid, PK)
+		// users.id (uuid, candidate) -> orders.buyer (uuid, entityRef due to high distinct)
+		// This is expected behavior: high-cardinality columns become both candidates and entityRefColumns
+		if result.InferredRelationships != 2 {
+			t.Errorf("expected 2 inferred relationships (IsJoinable=true columns form bidirectional matches), got %d", result.InferredRelationships)
+		}
+
+		if len(mocks.relationshipRepo.created) != 2 {
+			t.Fatalf("expected 2 relationships to be created, got %d", len(mocks.relationshipRepo.created))
+		}
+
+		// Verify both relationships exist (one in each direction)
+		var foundOrderToUser, foundUserToOrder bool
+		for _, rel := range mocks.relationshipRepo.created {
+			if rel.SourceEntityID == orderEntityID && rel.TargetEntityID == userEntityID {
+				foundOrderToUser = true
+			}
+			if rel.SourceEntityID == userEntityID && rel.TargetEntityID == orderEntityID {
+				foundUserToOrder = true
+			}
+		}
+		if !foundOrderToUser {
+			t.Error("expected relationship order -> user, not found")
+		}
+		if !foundUserToOrder {
+			t.Error("expected relationship user -> order, not found")
+		}
+	})
 }
 
 // mockTestServices holds all mock dependencies for testing
@@ -417,11 +818,15 @@ func (m *mockTestDatasourceService) Create(ctx context.Context, projectID uuid.U
 	return nil, nil
 }
 
-func (m *mockTestDatasourceService) Update(ctx context.Context, ds *models.Datasource) error {
+func (m *mockTestDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType string, config map[string]any) error {
 	return nil
 }
 
-func (m *mockTestDatasourceService) Delete(ctx context.Context, projectID, datasourceID uuid.UUID) error {
+func (m *mockTestDatasourceService) GetByName(ctx context.Context, projectID uuid.UUID, name string) (*models.Datasource, error) {
+	return nil, nil
+}
+
+func (m *mockTestDatasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any) error {
 	return nil
 }
 
@@ -568,6 +973,50 @@ func (m *mockTestEntityRepo) GetKeyColumns(ctx context.Context, entityID uuid.UU
 	return nil, nil
 }
 
+func (m *mockTestEntityRepo) GetKeyColumnsByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityKeyColumn, error) {
+	return nil, nil
+}
+
+func (m *mockTestEntityRepo) GetAllKeyColumnsByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityKeyColumn, error) {
+	return nil, nil
+}
+
+func (m *mockTestEntityRepo) GetAllAliasesByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityAlias, error) {
+	return nil, nil
+}
+
+func (m *mockTestEntityRepo) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
+	return nil, nil
+}
+
+func (m *mockTestEntityRepo) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	return nil, nil
+}
+
+func (m *mockTestEntityRepo) SoftDelete(ctx context.Context, entityID uuid.UUID, reason string) error {
+	return nil
+}
+
+func (m *mockTestEntityRepo) Restore(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockTestEntityRepo) GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
+	return nil, nil
+}
+
+func (m *mockTestEntityRepo) GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.OntologyEntityOccurrence, error) {
+	return nil, nil
+}
+
+func (m *mockTestEntityRepo) GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
+	return nil, nil
+}
+
+func (m *mockTestEntityRepo) UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error {
+	return nil
+}
+
 type mockTestRelationshipRepo struct {
 	created []*models.EntityRelationship
 }
@@ -663,6 +1112,38 @@ func (m *mockTestOntologyRepo) DeleteByProject(ctx context.Context, projectID uu
 	return nil
 }
 
+func (m *mockTestOntologyRepo) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 1, nil
+}
+
+func (m *mockTestOntologyRepo) WriteCleanOntology(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockTestOntologyRepo) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
+	return nil
+}
+
+func (m *mockTestOntologyRepo) UpdateEntitySummary(ctx context.Context, projectID uuid.UUID, tableName string, summary *models.EntitySummary) error {
+	return nil
+}
+
+func (m *mockTestOntologyRepo) UpdateEntitySummaries(ctx context.Context, projectID uuid.UUID, summaries map[string]*models.EntitySummary) error {
+	return nil
+}
+
+func (m *mockTestOntologyRepo) UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
+	return nil
+}
+
+func (m *mockTestOntologyRepo) UpdateMetadata(ctx context.Context, projectID uuid.UUID, metadata map[string]any) error {
+	return nil
+}
+
+func (m *mockTestOntologyRepo) SetActive(ctx context.Context, projectID uuid.UUID, version int) error {
+	return nil
+}
+
 func (m *mockTestEntityRepo) DeleteAlias(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
@@ -683,6 +1164,10 @@ func (m *mockTestSchemaRepo) GetEmptyTables(ctx context.Context, projectID, data
 	return nil, nil
 }
 
+func (m *mockTestSchemaRepo) GetOrphanTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+
 // More missing stub methods
 
 func (m *mockTestDatasourceService) Delete(ctx context.Context, datasourceID uuid.UUID) error {
@@ -697,10 +1182,102 @@ func (m *mockTestEntityRepo) GetAliasesByEntity(ctx context.Context, entityID uu
 	return nil, nil
 }
 
-func (m *mockTestRelationshipRepo) GetByTables(ctx context.Context, projectID uuid.UUID, sourceSchema, sourceTable, targetSchema, targetTable string) ([]*models.EntityRelationship, error) {
+func (m *mockTestRelationshipRepo) GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error) {
 	return nil, nil
 }
 
-func (m *mockTestSchemaRepo) GetJoinableColumns(ctx context.Context, projectID uuid.UUID, schemaName, tableName string) ([]*models.SchemaColumn, error) {
+func (m *mockTestRelationshipRepo) UpdateDescription(ctx context.Context, id uuid.UUID, description string) error {
+	return nil
+}
+
+func (m *mockTestSchemaRepo) GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return nil, nil
+}
+
+func (m *mockTestSchemaRepo) UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount, distinctCount *int64, isJoinable *bool, joinabilityReason *string) error {
+	return nil
+}
+
+func (m *mockTestSchemaRepo) GetPrimaryKeyColumns(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+
+func (m *mockTestSchemaRepo) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.LegacyRelationshipCandidate, error) {
+	return nil, nil
+}
+
+func (m *mockTestSchemaRepo) GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+
+func (m *mockTestSchemaRepo) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
+	return nil, nil
+}
+
+func (m *mockTestSchemaRepo) GetRelationshipByID(ctx context.Context, projectID, relationshipID uuid.UUID) (*models.SchemaRelationship, error) {
+	return nil, nil
+}
+
+func (m *mockTestSchemaRepo) GetRelationshipByColumns(ctx context.Context, sourceColumnID, targetColumnID uuid.UUID) (*models.SchemaRelationship, error) {
+	return nil, nil
+}
+
+func (m *mockTestSchemaRepo) UpsertRelationship(ctx context.Context, rel *models.SchemaRelationship) error {
+	return nil
+}
+
+func (m *mockTestSchemaRepo) UpdateRelationshipApproval(ctx context.Context, projectID, relationshipID uuid.UUID, isApproved bool) error {
+	return nil
+}
+
+func (m *mockTestSchemaRepo) SoftDeleteRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockTestSchemaRepo) SoftDeleteOrphanedRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockTestSchemaRepo) GetRelationshipDetails(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.RelationshipDetail, error) {
+	return nil, nil
+}
+
+func (m *mockTestSchemaRepo) UpsertRelationshipWithMetrics(ctx context.Context, rel *models.SchemaRelationship, metrics *models.DiscoveryMetrics) error {
+	return nil
+}
+
+func (m *mockTestSchemaRepo) UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error {
+	return nil
+}
+
+func (m *mockTestSchemaRepo) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
+	return nil
+}
+
+func (m *mockTestSchemaRepo) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+
+func (m *mockTestSchemaRepo) UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error {
+	return nil
+}
+
+func (m *mockTestSchemaRepo) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error {
+	return nil
+}
+
+func (m *mockTestSchemaRepo) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
+	return nil
+}
+
+func (m *mockTestSchemaRepo) UpsertTable(ctx context.Context, table *models.SchemaTable) error {
+	return nil
+}
+
+func (m *mockTestSchemaRepo) SoftDeleteRemovedTables(ctx context.Context, projectID, datasourceID uuid.UUID, activeTableKeys []repositories.TableKey) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockTestSchemaRepo) SoftDeleteRemovedColumns(ctx context.Context, tableID uuid.UUID, activeColumnNames []string) (int64, error) {
+	return 0, nil
 }

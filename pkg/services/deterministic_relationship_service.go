@@ -297,7 +297,15 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			continue
 		}
 
+		// Require explicit joinability determination
+		if col.IsJoinable == nil || !*col.IsJoinable {
+			continue
+		}
+
 		// Require stats to exist (fail-fast on missing data)
+		// Note: While IsJoinable=true typically implies stats exist (from classifyJoinability),
+		// PK columns can be marked joinable without stats. This defensive check prevents
+		// nil pointer access during cardinality filtering.
 		if col.DistinctCount == nil {
 			continue // No stats = cannot evaluate = skip
 		}
