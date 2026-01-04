@@ -31,6 +31,8 @@ const getSubOptionEnabled = (state: ToolGroupState | undefined, subOptionName: s
   }
 };
 
+const SHOW_AI_DATA_LIAISON = false;
+
 const MCPServerPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
@@ -422,9 +424,12 @@ const MCPServerPage = () => {
 
             {/* Tool Configuration Section */}
             <div className="border-t border-border-light pt-6">
-              <h2 className="mb-4 text-xl font-semibold text-text-primary">
+              <h2 className="mb-2 text-xl font-semibold text-text-primary">
                 Tool Configuration
               </h2>
+              <p className="mb-4 text-sm text-text-secondary">
+                Configure the tools exposed to the MCP Client. If you need multiple configurations then create a separate project for each configuration. This ensures that only those project members and agents will have access to their intended tools. This is the safest way to isolate access to your datasource.
+              </p>
               <div className="space-y-4">
                 {/* Business User Tools - Pre-Approved Queries */}
                 <MCPToolGroup
@@ -437,11 +442,26 @@ const MCPServerPage = () => {
                   enabled={enabledQueryCount > 0 && isApprovedQueriesEnabled}
                   onToggle={handleToggleApprovedQueries}
                   disabled={updating || enabledQueryCount === 0}
-                  {...(enabledQueryCount > 0 && isApprovedQueriesEnabled ? {
-                    subOptions: buildApprovedQueriesSubOptions(),
-                    onSubOptionToggle: handleToggleApprovedQueriesSubOption,
-                  } : {})}
                 />
+
+                {/* AI Data Liaison */}
+                {SHOW_AI_DATA_LIAISON && (
+                  <MCPToolGroup
+                    name="AI Data Liaison"
+                    description={
+                      enabledQueryCount > 0
+                        ? <>Enable access to <Link to={`/projects/${pid}/queries`} className="text-brand-purple hover:underline">Pre-Approved Queries</Link>. The MCP Client will use the Pre-Approved Queries if they match the Business User&apos;s request and fall back on using the Ontology to craft new SQL queries to answer their questions. This offers the most flexibility in terms of answering ad-hoc requests.</>
+                        : <>No enabled queries. <Link to={`/projects/${pid}/queries`} className="text-brand-purple hover:underline">Create Pre-Approved Queries</Link> to enable this tool.</>
+                    }
+                    enabled={enabledQueryCount > 0 && isApprovedQueriesEnabled}
+                    onToggle={handleToggleApprovedQueries}
+                    disabled={updating || enabledQueryCount === 0}
+                    {...(enabledQueryCount > 0 && isApprovedQueriesEnabled ? {
+                      subOptions: buildApprovedQueriesSubOptions(),
+                      onSubOptionToggle: handleToggleApprovedQueriesSubOption,
+                    } : {})}
+                  />
+                )}
 
                 {/* Agent Tools Section */}
                 {config.toolGroups[TOOL_GROUP_IDS.AGENT_TOOLS] && TOOL_GROUP_METADATA[TOOL_GROUP_IDS.AGENT_TOOLS] && (
