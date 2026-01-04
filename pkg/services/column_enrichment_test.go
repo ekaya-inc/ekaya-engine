@@ -299,7 +299,7 @@ func (r *testColEnrichmentSchemaRepo) GetJoinableColumns(ctx context.Context, pr
 	return nil, nil
 }
 
-func (r *testColEnrichmentSchemaRepo) UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount *int64, isJoinable *bool, joinabilityReason *string) error {
+func (r *testColEnrichmentSchemaRepo) UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount, distinctCount *int64, isJoinable *bool, joinabilityReason *string) error {
 	return nil
 }
 

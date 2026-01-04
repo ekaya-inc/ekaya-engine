@@ -312,7 +312,7 @@ func (m *mockSchemaRepoForFinalization) UpsertRelationshipWithMetrics(ctx contex
 func (m *mockSchemaRepoForFinalization) GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
-func (m *mockSchemaRepoForFinalization) UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount *int64, isJoinable *bool, joinabilityReason *string) error {
+func (m *mockSchemaRepoForFinalization) UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount, distinctCount *int64, isJoinable *bool, joinabilityReason *string) error {
 	return nil
 }
 func (m *mockSchemaRepoForFinalization) GetPrimaryKeyColumns(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {

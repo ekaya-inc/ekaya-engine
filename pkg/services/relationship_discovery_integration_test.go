@@ -397,10 +397,11 @@ func TestSchemaRepository_UpdateColumnJoinability_Integration(t *testing.T) {
 	// Update joinability
 	rowCount := int64(1000)
 	nonNullCount := int64(980)
+	distinctCount := int64(950)
 	isJoinable := true
 	reason := models.JoinabilityUniqueValues
 
-	err := tc.repo.UpdateColumnJoinability(ctx, column.ID, &rowCount, &nonNullCount, &isJoinable, &reason)
+	err := tc.repo.UpdateColumnJoinability(ctx, column.ID, &rowCount, &nonNullCount, &distinctCount, &isJoinable, &reason)
 	if err != nil {
 		t.Fatalf("UpdateColumnJoinability failed: %v", err)
 	}

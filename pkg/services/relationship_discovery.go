@@ -198,13 +198,14 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 			isJoinable, reason := s.classifyJoinability(col, st, tableRowCount)
 
 			// Update column joinability in database
-			var rowCount, nonNullCount *int64
+			var rowCount, nonNullCount, distinctCount *int64
 			if st != nil {
 				rowCount = &st.RowCount
 				nonNullCount = &st.NonNullCount
+				distinctCount = &st.DistinctCount
 			}
 
-			if err := s.schemaRepo.UpdateColumnJoinability(ctx, col.ID, rowCount, nonNullCount, &isJoinable, &reason); err != nil {
+			if err := s.schemaRepo.UpdateColumnJoinability(ctx, col.ID, rowCount, nonNullCount, distinctCount, &isJoinable, &reason); err != nil {
 				s.logger.Error("Failed to update column joinability",
 					zap.String("column", col.ColumnName),
 					zap.Error(err))

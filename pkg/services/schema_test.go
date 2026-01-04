@@ -340,7 +340,7 @@ func (m *mockSchemaRepository) GetJoinableColumns(ctx context.Context, projectID
 	return nil, nil
 }
 
-func (m *mockSchemaRepository) UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount *int64, isJoinable *bool, joinabilityReason *string) error {
+func (m *mockSchemaRepository) UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount, distinctCount *int64, isJoinable *bool, joinabilityReason *string) error {
 	return nil
 }
 

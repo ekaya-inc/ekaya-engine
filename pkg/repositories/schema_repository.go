@@ -62,7 +62,7 @@ type SchemaRepository interface {
 	GetOrphanTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error)
 	UpsertRelationshipWithMetrics(ctx context.Context, rel *models.SchemaRelationship, metrics *models.DiscoveryMetrics) error
 	GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error)
-	UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount *int64, isJoinable *bool, joinabilityReason *string) error
+	UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount, distinctCount *int64, isJoinable *bool, joinabilityReason *string) error
 	GetPrimaryKeyColumns(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error)
 	GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.LegacyRelationshipCandidate, error)
 	// GetNonPKColumnsByExactType returns non-primary-key columns with exact data type match for review candidate discovery.
@@ -1382,7 +1382,7 @@ func (r *schemaRepository) GetJoinableColumns(ctx context.Context, projectID, ta
 	return columns, nil
 }
 
-func (r *schemaRepository) UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount *int64, isJoinable *bool, joinabilityReason *string) error {
+func (r *schemaRepository) UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount, distinctCount *int64, isJoinable *bool, joinabilityReason *string) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return fmt.Errorf("no tenant scope in context")
@@ -1392,13 +1392,14 @@ func (r *schemaRepository) UpdateColumnJoinability(ctx context.Context, columnID
 		UPDATE engine_schema_columns
 		SET row_count = $2,
 		    non_null_count = $3,
-		    is_joinable = $4,
-		    joinability_reason = $5,
+		    distinct_count = $4,
+		    is_joinable = $5,
+		    joinability_reason = $6,
 		    stats_updated_at = NOW(),
 		    updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL`
 
-	result, err := scope.Conn.Exec(ctx, query, columnID, rowCount, nonNullCount, isJoinable, joinabilityReason)
+	result, err := scope.Conn.Exec(ctx, query, columnID, rowCount, nonNullCount, distinctCount, isJoinable, joinabilityReason)
 	if err != nil {
 		return fmt.Errorf("failed to update column joinability: %w", err)
 	}

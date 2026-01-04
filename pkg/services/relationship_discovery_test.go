@@ -51,7 +51,7 @@ func (m *rdMockSchemaRepository) ListColumnsByTable(ctx context.Context, project
 	return []*models.SchemaColumn{}, nil
 }
 
-func (m *rdMockSchemaRepository) UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount *int64, isJoinable *bool, joinabilityReason *string) error {
+func (m *rdMockSchemaRepository) UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount, distinctCount *int64, isJoinable *bool, joinabilityReason *string) error {
 	return nil
 }
 
