@@ -1,8 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ToastProviderComponent } from '../../hooks/useToast';
 import ApplicationsPage from '../ApplicationsPage';
 
 // Mock react-router-dom hooks
@@ -16,22 +15,48 @@ vi.mock('react-router-dom', async () => {
 });
 
 describe('ApplicationsPage', () => {
+  const mockClick = vi.fn();
+  let capturedHref = '';
+
+  // Save original createElement before any tests run
+  const originalCreateElement = document.createElement.bind(document);
+
   beforeEach(() => {
     vi.clearAllMocks();
+    capturedHref = '';
+
+    // Mock document.createElement for anchor elements only
+    vi.spyOn(document, 'createElement').mockImplementation(
+      (tagName: string) => {
+        if (tagName === 'a') {
+          const mockAnchor = {
+            href: '',
+            click: () => {
+              capturedHref = mockAnchor.href;
+              mockClick();
+            },
+          };
+          return mockAnchor as unknown as HTMLAnchorElement;
+        }
+        return originalCreateElement(tagName);
+      }
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   const renderPage = () => {
     return render(
-      <ToastProviderComponent>
-        <MemoryRouter initialEntries={['/projects/proj-1/applications']}>
-          <Routes>
-            <Route
-              path="/projects/:pid/applications"
-              element={<ApplicationsPage />}
-            />
-          </Routes>
-        </MemoryRouter>
-      </ToastProviderComponent>
+      <MemoryRouter initialEntries={['/projects/proj-1/applications']}>
+        <Routes>
+          <Route
+            path="/projects/:pid/applications"
+            element={<ApplicationsPage />}
+          />
+        </Routes>
+      </MemoryRouter>
     );
   };
 
@@ -53,50 +78,66 @@ describe('ApplicationsPage', () => {
     expect(screen.getByText('More Coming!')).toBeInTheDocument();
   });
 
-  it('shows coming soon toast when clicking on available application', () => {
+  it('renders Contact Sales buttons for available applications', () => {
     renderPage();
 
-    const aiDataLiaisonCard = screen.getByTestId('app-card-ai-data-liaison');
-    fireEvent.click(aiDataLiaisonCard);
-
-    // Toast should appear with the application name
-    expect(
-      screen.getByText('AI Data Liaison installation coming soon!')
-    ).toBeInTheDocument();
+    const contactSalesButtons = screen.getAllByRole('button', {
+      name: 'Contact Sales',
+    });
+    // Should have 3 Contact Sales buttons (one for each available app)
+    expect(contactSalesButtons).toHaveLength(3);
   });
 
-  it('shows coming soon toast for Product Kit', () => {
+  it('opens mailto link when clicking Contact Sales on AI Data Liaison', () => {
     renderPage();
 
-    const productKitCard = screen.getByTestId('app-card-product-kit');
-    fireEvent.click(productKitCard);
+    const contactSalesButtons = screen.getAllByRole('button', {
+      name: 'Contact Sales',
+    });
+    fireEvent.click(contactSalesButtons[0] as HTMLElement);
 
-    expect(
-      screen.getByText('Product Kit installation coming soon!')
-    ).toBeInTheDocument();
+    expect(mockClick).toHaveBeenCalled();
+    expect(capturedHref).toBe(
+      'mailto:sales@ekaya.ai?subject=Interest%20in%20AI%20Data%20Liaison%20for%20my%20Ekaya%20project'
+    );
   });
 
-  it('shows coming soon toast for On-Premise Chat', () => {
+  it('opens mailto link when clicking Contact Sales on Product Kit', () => {
     renderPage();
 
-    const onPremiseChatCard = screen.getByTestId('app-card-on-premise-chat');
-    fireEvent.click(onPremiseChatCard);
+    const contactSalesButtons = screen.getAllByRole('button', {
+      name: 'Contact Sales',
+    });
+    fireEvent.click(contactSalesButtons[1] as HTMLElement);
 
-    expect(
-      screen.getByText('On-Premise Chat installation coming soon!')
-    ).toBeInTheDocument();
+    expect(mockClick).toHaveBeenCalled();
+    expect(capturedHref).toBe(
+      'mailto:sales@ekaya.ai?subject=Interest%20in%20Product%20Kit%20for%20my%20Ekaya%20project'
+    );
   });
 
-  it('does not show toast for disabled More Coming tile', () => {
+  it('opens mailto link when clicking Contact Sales on On-Premise Chat', () => {
+    renderPage();
+
+    const contactSalesButtons = screen.getAllByRole('button', {
+      name: 'Contact Sales',
+    });
+    fireEvent.click(contactSalesButtons[2] as HTMLElement);
+
+    expect(mockClick).toHaveBeenCalled();
+    expect(capturedHref).toBe(
+      'mailto:sales@ekaya.ai?subject=Interest%20in%20On-Premise%20Chat%20for%20my%20Ekaya%20project'
+    );
+  });
+
+  it('does not render Contact Sales button for disabled More Coming tile', () => {
     renderPage();
 
     const moreComingCard = screen.getByTestId('app-card-more-coming');
-    fireEvent.click(moreComingCard);
-
-    // No toast should appear
-    expect(
-      screen.queryByText(/installation coming soon!/i)
-    ).not.toBeInTheDocument();
+    const contactSalesButton = moreComingCard.querySelector(
+      'button[name="Contact Sales"]'
+    );
+    expect(contactSalesButton).toBeNull();
   });
 
   it('navigates back when clicking back button', () => {

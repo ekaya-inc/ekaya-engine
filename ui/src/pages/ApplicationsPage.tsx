@@ -16,7 +16,6 @@ import {
   CardHeader,
   CardTitle,
 } from '../components/ui/Card';
-import { useToast } from '../hooks/useToast';
 import { cn } from '../utils/cn';
 
 type AppColor = 'blue' | 'purple' | 'green' | 'gray';
@@ -78,15 +77,14 @@ const getColorClasses = (color: AppColor): { bg: string; text: string } => {
 const ApplicationsPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
-  const { toast } = useToast();
 
-  const handleInstall = (app: ApplicationInfo) => {
-    // MVP: Show coming soon toast for apps without dedicated pages yet
-    toast({
-      title: app.title,
-      description: `${app.title} installation coming soon!`,
-      variant: 'default',
-    });
+  const handleContactSales = (app: ApplicationInfo) => {
+    const subject = encodeURIComponent(
+      `Interest in ${app.title} for my Ekaya project`,
+    );
+    const link = document.createElement('a');
+    link.href = `mailto:sales@ekaya.ai?subject=${subject}`;
+    link.click();
   };
 
   return (
@@ -120,12 +118,11 @@ const ApplicationsPage = () => {
               key={app.id}
               data-testid={`app-card-${app.id}`}
               className={cn(
-                'transition-all',
+                'group relative transition-all',
                 app.available
-                  ? 'cursor-pointer hover:shadow-md'
+                  ? 'hover:shadow-md'
                   : 'cursor-not-allowed border-dashed opacity-60',
               )}
-              onClick={() => app.available && handleInstall(app)}
             >
               <CardHeader className="pb-2">
                 <div
@@ -141,7 +138,18 @@ const ApplicationsPage = () => {
                   {app.subtitle}
                 </CardDescription>
               </CardHeader>
-              {!app.available && (
+              {app.available ? (
+                <CardFooter className="pt-0">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full opacity-0 transition-opacity group-hover:opacity-100"
+                    onClick={() => handleContactSales(app)}
+                  >
+                    Contact Sales
+                  </Button>
+                </CardFooter>
+              ) : (
                 <CardFooter className="pt-0">
                   <span className="text-xs text-text-secondary">
                     Coming Soon
