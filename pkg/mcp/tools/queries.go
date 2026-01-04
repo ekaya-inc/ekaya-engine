@@ -40,8 +40,12 @@ func RegisterApprovedQueriesTools(s *server.MCPServer, deps *QueryToolDeps) {
 	registerExecuteApprovedQueryTool(s, deps)
 }
 
-// checkApprovedQueriesEnabled verifies the approved_queries tool group is enabled for the project.
-// Returns the project ID and a tenant-scoped context if enabled, or an error if not.
+// checkApprovedQueriesEnabled verifies the caller is authorized to use approved queries tools.
+// Authorization is granted if:
+//   - approved_queries tool group is enabled (for user authentication), OR
+//   - agent_tools is enabled AND caller is an agent (claims.Subject == "agent")
+//
+// Returns the project ID and a tenant-scoped context if authorized, or an error if not.
 func checkApprovedQueriesEnabled(ctx context.Context, deps *QueryToolDeps) (uuid.UUID, context.Context, func(), error) {
 	// Get claims from context
 	claims, ok := auth.GetClaims(ctx)
@@ -63,8 +67,11 @@ func checkApprovedQueriesEnabled(ctx context.Context, deps *QueryToolDeps) (uuid
 	// Set tenant context for the query
 	tenantCtx := database.SetTenantScope(ctx, scope)
 
-	// Check if approved_queries tool group is enabled
-	enabled, err := deps.MCPConfigService.IsToolGroupEnabled(tenantCtx, projectID, approvedQueriesToolGroup)
+	// Check if caller is an agent (API key authentication)
+	isAgent := claims.Subject == "agent"
+
+	// Check if approved_queries tool group is enabled (for users)
+	approvedQueriesEnabled, err := deps.MCPConfigService.IsToolGroupEnabled(tenantCtx, projectID, approvedQueriesToolGroup)
 	if err != nil {
 		scope.Close()
 		deps.Logger.Error("Failed to check approved queries tool group",
@@ -73,12 +80,30 @@ func checkApprovedQueriesEnabled(ctx context.Context, deps *QueryToolDeps) (uuid
 		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool group configuration: %w", err)
 	}
 
-	if !enabled {
-		scope.Close()
-		return uuid.Nil, nil, nil, fmt.Errorf("approved queries tools are not enabled for this project")
+	// If approved_queries is enabled, allow access (for both users and agents)
+	if approvedQueriesEnabled {
+		return projectID, tenantCtx, func() { scope.Close() }, nil
 	}
 
-	return projectID, tenantCtx, func() { scope.Close() }, nil
+	// For agents, also check if agent_tools is enabled
+	if isAgent {
+		agentToolsEnabled, err := deps.MCPConfigService.IsToolGroupEnabled(tenantCtx, projectID, services.ToolGroupAgentTools)
+		if err != nil {
+			scope.Close()
+			deps.Logger.Error("Failed to check agent_tools tool group",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool group configuration: %w", err)
+		}
+
+		if agentToolsEnabled {
+			return projectID, tenantCtx, func() { scope.Close() }, nil
+		}
+	}
+
+	// Neither approved_queries nor agent_tools (for agents) is enabled
+	scope.Close()
+	return uuid.Nil, nil, nil, fmt.Errorf("approved queries tools are not enabled for this project")
 }
 
 // listApprovedQueriesResult is the response structure for list_approved_queries.

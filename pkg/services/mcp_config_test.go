@@ -17,8 +17,9 @@ import (
 // Mock implementations for testing
 
 type mockMCPConfigRepository struct {
-	config *models.MCPConfig
-	err    error
+	config               *models.MCPConfig
+	err                  error
+	agentAPIKeyByProject map[uuid.UUID]string
 }
 
 func (m *mockMCPConfigRepository) Get(ctx context.Context, projectID uuid.UUID) (*models.MCPConfig, error) {
@@ -27,6 +28,21 @@ func (m *mockMCPConfigRepository) Get(ctx context.Context, projectID uuid.UUID) 
 
 func (m *mockMCPConfigRepository) Upsert(ctx context.Context, config *models.MCPConfig) error {
 	m.config = config
+	return m.err
+}
+
+func (m *mockMCPConfigRepository) GetAgentAPIKey(ctx context.Context, projectID uuid.UUID) (string, error) {
+	if m.agentAPIKeyByProject == nil {
+		return "", m.err
+	}
+	return m.agentAPIKeyByProject[projectID], m.err
+}
+
+func (m *mockMCPConfigRepository) SetAgentAPIKey(ctx context.Context, projectID uuid.UUID, encryptedKey string) error {
+	if m.agentAPIKeyByProject == nil {
+		m.agentAPIKeyByProject = make(map[uuid.UUID]string)
+	}
+	m.agentAPIKeyByProject[projectID] = encryptedKey
 	return m.err
 }
 

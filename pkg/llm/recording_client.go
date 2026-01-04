@@ -53,6 +53,9 @@ func (c *RecordingClient) GenerateResponse(
 		Status:          models.LLMConversationStatusPending,
 	}
 
+	// Write request file before LLM call (debug builds only)
+	debugPrefix := debugWriteRequest(conv.ID, conv.Model, systemMessage, prompt)
+
 	// Insert pending record synchronously (enables in-flight tracking)
 	// If this fails, we still proceed with the LLM call - recording is best-effort
 	pendingSaved := c.recorder.SavePending(ctx, conv) == nil
@@ -70,13 +73,20 @@ func (c *RecordingClient) GenerateResponse(
 	if err != nil {
 		conv.Status = models.LLMConversationStatusError
 		conv.ErrorMessage = err.Error()
+		// Write error file (debug builds only)
+		debugWriteError(debugPrefix, conv.ID.String(), conv.Model, err.Error(), int64(conv.DurationMs))
+		// Return partial result with conversation ID for debugging
+		result = &GenerateResponseResult{ConversationID: conv.ID}
 	} else {
 		conv.Status = models.LLMConversationStatusSuccess
 		if result != nil {
+			result.ConversationID = conv.ID
 			conv.ResponseContent = result.Content
 			conv.PromptTokens = &result.PromptTokens
 			conv.CompletionTokens = &result.CompletionTokens
 			conv.TotalTokens = &result.TotalTokens
+			// Write response file (debug builds only)
+			debugWriteResponse(debugPrefix, conv.ID.String(), conv.Model, result.Content, int64(conv.DurationMs))
 		}
 	}
 

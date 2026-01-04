@@ -79,6 +79,14 @@ var ontologyToolNames = map[string]bool{
 	"get_glossary": true,
 }
 
+// agentToolNames lists tools available to agents when agent_tools is enabled.
+// Agents can access echo for testing and approved_queries tools for data access.
+var agentToolNames = map[string]bool{
+	"echo":                   true,
+	"list_approved_queries":  true,
+	"execute_approved_query": true,
+}
+
 // RegisterDeveloperTools registers the developer tool group tools.
 // These tools are only accessible when the developer tool group is enabled.
 func RegisterDeveloperTools(s *server.MCPServer, deps *DeveloperToolDeps) {
@@ -93,6 +101,7 @@ func RegisterDeveloperTools(s *server.MCPServer, deps *DeveloperToolDeps) {
 // It filters out developer tools when the developer group is disabled, filters out
 // the execute tool when EnableExecute is false, and filters out approved_queries tools
 // when the approved_queries group is disabled or no enabled queries exist.
+// For agent authentication, it restricts access to only approved_queries tools when agent_tools is enabled.
 func NewToolFilter(deps *DeveloperToolDeps) func(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
 	return func(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
 		// Get claims from context
@@ -123,6 +132,27 @@ func NewToolFilter(deps *DeveloperToolDeps) func(ctx context.Context, tools []mc
 		// Set tenant context for the config query
 		tenantCtx := database.SetTenantScope(ctx, scope)
 
+		// Check if this is agent authentication (Subject = "agent" set by MCP auth middleware)
+		isAgent := claims.Subject == "agent"
+
+		if isAgent {
+			// Agent authentication - only allow approved_queries tools when agent_tools is enabled
+			agentEnabled, err := deps.MCPConfigService.IsToolGroupEnabled(tenantCtx, projectID, services.ToolGroupAgentTools)
+			if err != nil {
+				deps.Logger.Error("Tool filter: failed to check agent_tools config",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+				return filterAgentTools(tools, false)
+			}
+
+			deps.Logger.Debug("Tool filter: agent authentication, filtering to agent tools only",
+				zap.String("project_id", projectID.String()),
+				zap.Bool("agent_tools_enabled", agentEnabled))
+
+			return filterAgentTools(tools, agentEnabled)
+		}
+
+		// User authentication - apply normal tool group filtering
 		// Check developer tools config
 		devConfig, err := deps.MCPConfigService.GetToolGroupConfig(tenantCtx, projectID, developerToolGroup)
 		if err != nil {
@@ -199,6 +229,31 @@ func filterTools(tools []mcp.Tool, showDeveloper, showExecute, showApprovedQueri
 		}
 
 		filtered = append(filtered, tool)
+	}
+	return filtered
+}
+
+// filterAgentTools filters tools for agent authentication.
+// When agent_tools is enabled, only approved_queries tools (list_approved_queries, execute_approved_query) are allowed.
+// When disabled, no tools are available (except health which is always available).
+func filterAgentTools(tools []mcp.Tool, agentToolsEnabled bool) []mcp.Tool {
+	filtered := make([]mcp.Tool, 0, len(tools))
+	for _, tool := range tools {
+		// Health is always available
+		if tool.Name == "health" {
+			filtered = append(filtered, tool)
+			continue
+		}
+
+		// When agent_tools disabled, filter out everything except health
+		if !agentToolsEnabled {
+			continue
+		}
+
+		// When agent_tools enabled, only allow approved_queries tools
+		if agentToolNames[tool.Name] {
+			filtered = append(filtered, tool)
+		}
 	}
 	return filtered
 }
@@ -293,6 +348,72 @@ func checkExecuteEnabled(ctx context.Context, deps *DeveloperToolDeps) (uuid.UUI
 	return projectID, tenantCtx, cleanup, nil
 }
 
+// checkEchoEnabled verifies the caller is authorized to use the echo tool.
+// Authorization is granted if:
+//   - developer tool group is enabled (for user authentication), OR
+//   - agent_tools is enabled AND caller is an agent (claims.Subject == "agent")
+//
+// Returns the project ID and a tenant-scoped context if authorized, or an error if not.
+func checkEchoEnabled(ctx context.Context, deps *DeveloperToolDeps) (uuid.UUID, context.Context, func(), error) {
+	// Get claims from context
+	claims, ok := auth.GetClaims(ctx)
+	if !ok {
+		return uuid.Nil, nil, nil, fmt.Errorf("authentication required")
+	}
+
+	projectID, err := uuid.Parse(claims.ProjectID)
+	if err != nil {
+		return uuid.Nil, nil, nil, fmt.Errorf("invalid project ID: %w", err)
+	}
+
+	// Acquire connection with tenant scope
+	scope, err := deps.DB.WithTenant(ctx, projectID)
+	if err != nil {
+		return uuid.Nil, nil, nil, fmt.Errorf("failed to acquire database connection: %w", err)
+	}
+
+	// Set tenant context for the query
+	tenantCtx := database.SetTenantScope(ctx, scope)
+
+	// Check if caller is an agent (API key authentication)
+	isAgent := claims.Subject == "agent"
+
+	// Check if developer tool group is enabled (for users)
+	developerEnabled, err := deps.MCPConfigService.IsToolGroupEnabled(tenantCtx, projectID, developerToolGroup)
+	if err != nil {
+		scope.Close()
+		deps.Logger.Error("Failed to check developer tool group",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool group configuration: %w", err)
+	}
+
+	// If developer tools is enabled, allow access (for both users and agents)
+	if developerEnabled {
+		return projectID, tenantCtx, func() { scope.Close() }, nil
+	}
+
+	// For agents, also check if agent_tools is enabled
+	if isAgent {
+		agentToolsEnabled, err := deps.MCPConfigService.IsToolGroupEnabled(tenantCtx, projectID, services.ToolGroupAgentTools)
+		if err != nil {
+			scope.Close()
+			deps.Logger.Error("Failed to check agent_tools tool group",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool group configuration: %w", err)
+		}
+
+		if agentToolsEnabled {
+			return projectID, tenantCtx, func() { scope.Close() }, nil
+		}
+	}
+
+	// Neither developer tools nor agent_tools (for agents) is enabled
+	scope.Close()
+	return uuid.Nil, nil, nil, fmt.Errorf("echo tool is not enabled for this project")
+}
+
 // registerEchoTool adds a simple echo tool for testing the developer tool group.
 // This tool verifies that authentication and tool group configuration work correctly.
 func registerEchoTool(s *server.MCPServer, deps *DeveloperToolDeps) {
@@ -311,8 +432,8 @@ func registerEchoTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Check if developer tools are enabled
-		_, _, cleanup, err := checkDeveloperEnabled(ctx, deps)
+		// Check if echo tool is enabled (developer tools OR agent_tools for agents)
+		_, _, cleanup, err := checkEchoEnabled(ctx, deps)
 		if err != nil {
 			return nil, err
 		}
@@ -325,8 +446,7 @@ func registerEchoTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 		}
 
 		result, err := json.Marshal(map[string]string{
-			"echo":   message,
-			"status": "developer tools enabled",
+			"echo": message,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal result: %w", err)

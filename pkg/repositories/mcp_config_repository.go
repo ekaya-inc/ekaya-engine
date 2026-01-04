@@ -20,6 +20,10 @@ type MCPConfigRepository interface {
 
 	// Upsert creates or updates the MCP config for a project.
 	Upsert(ctx context.Context, config *models.MCPConfig) error
+
+	// Agent API Key operations
+	GetAgentAPIKey(ctx context.Context, projectID uuid.UUID) (string, error)
+	SetAgentAPIKey(ctx context.Context, projectID uuid.UUID, encryptedKey string) error
 }
 
 // mcpConfigRepository implements MCPConfigRepository using PostgreSQL.
@@ -38,15 +42,17 @@ func (r *mcpConfigRepository) Get(ctx context.Context, projectID uuid.UUID) (*mo
 	}
 
 	query := `
-		SELECT project_id, tool_groups, created_at, updated_at
+		SELECT project_id, tool_groups, agent_api_key_encrypted, created_at, updated_at
 		FROM engine_mcp_config
 		WHERE project_id = $1`
 
 	var config models.MCPConfig
 	var toolGroupsJSON []byte
+	var agentAPIKeyEncrypted *string
 	err := scope.Conn.QueryRow(ctx, query, projectID).Scan(
 		&config.ProjectID,
 		&toolGroupsJSON,
+		&agentAPIKeyEncrypted,
 		&config.CreatedAt,
 		&config.UpdatedAt,
 	)
@@ -55,6 +61,10 @@ func (r *mcpConfigRepository) Get(ctx context.Context, projectID uuid.UUID) (*mo
 			return nil, nil // Not found, return nil without error
 		}
 		return nil, fmt.Errorf("failed to get MCP config: %w", err)
+	}
+
+	if agentAPIKeyEncrypted != nil {
+		config.AgentAPIKeyEncrypted = *agentAPIKeyEncrypted
 	}
 
 	if err := json.Unmarshal(toolGroupsJSON, &config.ToolGroups); err != nil {
@@ -77,13 +87,20 @@ func (r *mcpConfigRepository) Upsert(ctx context.Context, config *models.MCPConf
 	}
 
 	now := time.Now()
-	query := `
-		INSERT INTO engine_mcp_config (project_id, tool_groups, created_at, updated_at)
-		VALUES ($1, $2, $3, $3)
-		ON CONFLICT (project_id)
-		DO UPDATE SET tool_groups = $2, updated_at = $3`
 
-	_, err = scope.Conn.Exec(ctx, query, config.ProjectID, toolGroupsJSON, now)
+	// Convert empty string to nil for nullable column
+	var agentAPIKeyEncrypted *string
+	if config.AgentAPIKeyEncrypted != "" {
+		agentAPIKeyEncrypted = &config.AgentAPIKeyEncrypted
+	}
+
+	query := `
+		INSERT INTO engine_mcp_config (project_id, tool_groups, agent_api_key_encrypted, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $4)
+		ON CONFLICT (project_id)
+		DO UPDATE SET tool_groups = $2, agent_api_key_encrypted = $3, updated_at = $4`
+
+	_, err = scope.Conn.Exec(ctx, query, config.ProjectID, toolGroupsJSON, agentAPIKeyEncrypted, now)
 	if err != nil {
 		return fmt.Errorf("failed to upsert MCP config: %w", err)
 	}
@@ -91,6 +108,52 @@ func (r *mcpConfigRepository) Upsert(ctx context.Context, config *models.MCPConf
 	config.UpdatedAt = now
 	if config.CreatedAt.IsZero() {
 		config.CreatedAt = now
+	}
+
+	return nil
+}
+
+// GetAgentAPIKey retrieves the encrypted agent API key for a project.
+func (r *mcpConfigRepository) GetAgentAPIKey(ctx context.Context, projectID uuid.UUID) (string, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return "", fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `SELECT agent_api_key_encrypted FROM engine_mcp_config WHERE project_id = $1`
+
+	var encryptedKey *string
+	err := scope.Conn.QueryRow(ctx, query, projectID).Scan(&encryptedKey)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return "", nil // Not found, return empty string
+		}
+		return "", fmt.Errorf("failed to get agent API key: %w", err)
+	}
+
+	if encryptedKey == nil {
+		return "", nil
+	}
+	return *encryptedKey, nil
+}
+
+// SetAgentAPIKey updates the encrypted agent API key for a project.
+func (r *mcpConfigRepository) SetAgentAPIKey(ctx context.Context, projectID uuid.UUID, encryptedKey string) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	now := time.Now()
+	query := `
+		INSERT INTO engine_mcp_config (project_id, tool_groups, agent_api_key_encrypted, created_at, updated_at)
+		VALUES ($1, '{"developer": {"enabled": false}}'::jsonb, $2, $3, $3)
+		ON CONFLICT (project_id)
+		DO UPDATE SET agent_api_key_encrypted = $2, updated_at = $3`
+
+	_, err := scope.Conn.Exec(ctx, query, projectID, encryptedKey, now)
+	if err != nil {
+		return fmt.Errorf("failed to set agent API key: %w", err)
 	}
 
 	return nil

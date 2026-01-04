@@ -132,6 +132,12 @@ func main() {
 	// MCP config repository
 	mcpConfigRepo := repositories.NewMCPConfigRepository()
 
+	// Agent API key service (needed for MCP auth middleware)
+	agentAPIKeyService, err := services.NewAgentAPIKeyService(mcpConfigRepo, logger)
+	if err != nil {
+		logger.Fatal("Failed to create agent API key service", zap.Error(err))
+	}
+
 	// Ontology repositories
 	ontologyRepo := repositories.NewOntologyRepository()
 	ontologyChatRepo := repositories.NewOntologyChatRepository()
@@ -309,7 +315,8 @@ func main() {
 	mcptools.RegisterOntologyTools(mcpServer.MCP(), ontologyToolDeps)
 
 	mcpHandler := handlers.NewMCPHandler(mcpServer, logger)
-	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, logger)
+	tenantScopeProvider := database.NewTenantScopeProvider(db)
+	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, agentAPIKeyService, tenantScopeProvider, logger)
 	mcpHandler.RegisterRoutes(mux, mcpAuthMiddleware)
 
 	// Register MCP OAuth token endpoint (public - for MCP clients)
@@ -347,6 +354,10 @@ func main() {
 	// Register MCP config handler (protected)
 	mcpConfigHandler := handlers.NewMCPConfigHandler(mcpConfigService, logger)
 	mcpConfigHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register agent API key handler (protected)
+	agentAPIKeyHandler := handlers.NewAgentAPIKeyHandler(agentAPIKeyService, logger)
+	agentAPIKeyHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register ontology handlers (protected)
 	ontologyQuestionsHandler := handlers.NewOntologyQuestionsHandler(ontologyQuestionService, logger)

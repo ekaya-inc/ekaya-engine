@@ -761,3 +761,294 @@ func TestFilterTools_OntologyToolsFilteredWithApprovedQueries(t *testing.T) {
 		t.Error("get_ontology should be present when approved_queries enabled, regardless of developer tools")
 	}
 }
+
+// Test filterAgentTools function directly
+func TestFilterAgentTools_Disabled(t *testing.T) {
+	tools := createTestTools()
+
+	// When agent_tools is disabled, only health should be available
+	filtered := filterAgentTools(tools, false)
+
+	if len(filtered) != 1 {
+		t.Errorf("expected 1 tool (health only), got %d: %v", len(filtered), toolNames(filtered))
+	}
+	if !containsTool(filtered, "health") {
+		t.Error("health tool should always be present")
+	}
+}
+
+func TestFilterAgentTools_Enabled(t *testing.T) {
+	tools := createTestTools()
+
+	// When agent_tools is enabled, health + echo + approved_queries tools should be available
+	filtered := filterAgentTools(tools, true)
+
+	expectedTools := []string{"health", "echo", "list_approved_queries", "execute_approved_query"}
+	if len(filtered) != len(expectedTools) {
+		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
+	}
+
+	for _, name := range expectedTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present", name)
+		}
+	}
+
+	// Developer tools should NOT be present
+	if containsTool(filtered, "query") {
+		t.Error("developer tool 'query' should not be available to agents")
+	}
+	if containsTool(filtered, "execute") {
+		t.Error("developer tool 'execute' should not be available to agents")
+	}
+	if containsTool(filtered, "get_schema") {
+		t.Error("schema tool 'get_schema' should not be available to agents")
+	}
+	if containsTool(filtered, "get_ontology") {
+		t.Error("ontology tool 'get_ontology' should not be available to agents")
+	}
+}
+
+// setupTestConfigWithAgentTools creates a project and MCP config with agent_tools enabled.
+func setupTestConfigWithAgentTools(t *testing.T, db *database.DB, projectID uuid.UUID, agentToolsEnabled bool) {
+	t.Helper()
+
+	ctx := context.Background()
+	scope, err := db.WithTenant(ctx, projectID)
+	if err != nil {
+		t.Fatalf("failed to get tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	tenantCtx := database.SetTenantScope(ctx, scope)
+
+	// Create project first (MCP config has FK to projects)
+	_, err = scope.Conn.Exec(tenantCtx, `
+		INSERT INTO engine_projects (id, name, created_at, updated_at)
+		VALUES ($1, 'Test Project', NOW(), NOW())
+		ON CONFLICT (id) DO NOTHING`, projectID)
+	if err != nil {
+		t.Fatalf("failed to create test project: %v", err)
+	}
+
+	mcpConfig := &models.MCPConfig{
+		ProjectID: projectID,
+		ToolGroups: map[string]*models.ToolGroupConfig{
+			"agent_tools": {Enabled: agentToolsEnabled},
+		},
+	}
+
+	repo := repositories.NewMCPConfigRepository()
+	if err := repo.Upsert(tenantCtx, mcpConfig); err != nil {
+		t.Fatalf("failed to create test config: %v", err)
+	}
+
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		cleanupScope, err := db.WithTenant(cleanupCtx, projectID)
+		if err != nil {
+			return
+		}
+		defer cleanupScope.Close()
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_mcp_config WHERE project_id = $1", projectID)
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_projects WHERE id = $1", projectID)
+	})
+}
+
+func TestNewToolFilter_AgentAuth_AgentToolsEnabled(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Create config with agent_tools enabled
+	setupTestConfigWithAgentTools(t, engineDB.DB, projectID, true)
+
+	deps := &DeveloperToolDeps{
+		DB:               engineDB.DB,
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, "http://localhost", zap.NewNop()),
+		Logger:           zap.NewNop(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestTools()
+
+	// Agent authentication - claims.Subject = "agent"
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	claims.Subject = "agent"
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	filtered := filter(ctx, tools)
+
+	// Agent should only see health + echo + approved_queries tools
+	expectedTools := []string{"health", "echo", "list_approved_queries", "execute_approved_query"}
+	if len(filtered) != len(expectedTools) {
+		t.Errorf("expected %d tools for agent, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
+	}
+
+	for _, name := range expectedTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present for agent", name)
+		}
+	}
+
+	// Developer tools should NOT be present
+	if containsTool(filtered, "query") {
+		t.Error("developer tool 'query' should not be available to agents")
+	}
+	if containsTool(filtered, "get_schema") {
+		t.Error("schema tool 'get_schema' should not be available to agents")
+	}
+}
+
+func TestNewToolFilter_AgentAuth_AgentToolsDisabled(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Create config with agent_tools disabled
+	setupTestConfigWithAgentTools(t, engineDB.DB, projectID, false)
+
+	deps := &DeveloperToolDeps{
+		DB:               engineDB.DB,
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, "http://localhost", zap.NewNop()),
+		Logger:           zap.NewNop(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestTools()
+
+	// Agent authentication - claims.Subject = "agent"
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	claims.Subject = "agent"
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	filtered := filter(ctx, tools)
+
+	// Agent should only see health when agent_tools is disabled
+	if len(filtered) != 1 {
+		t.Errorf("expected 1 tool (health only), got %d: %v", len(filtered), toolNames(filtered))
+	}
+	if !containsTool(filtered, "health") {
+		t.Error("health tool should always be present")
+	}
+}
+
+func TestNewToolFilter_AgentAuth_NoConfig(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Create project but no MCP config - should default to disabled
+	ctx := context.Background()
+	scope, err := engineDB.DB.WithTenant(ctx, projectID)
+	if err != nil {
+		t.Fatalf("failed to get tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	tenantCtx := database.SetTenantScope(ctx, scope)
+	_, err = scope.Conn.Exec(tenantCtx, `
+		INSERT INTO engine_projects (id, name, created_at, updated_at)
+		VALUES ($1, 'Test Project', NOW(), NOW())
+		ON CONFLICT (id) DO NOTHING`, projectID)
+	if err != nil {
+		t.Fatalf("failed to create test project: %v", err)
+	}
+
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		cleanupScope, err := engineDB.DB.WithTenant(cleanupCtx, projectID)
+		if err != nil {
+			return
+		}
+		defer cleanupScope.Close()
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_projects WHERE id = $1", projectID)
+	})
+
+	deps := &DeveloperToolDeps{
+		DB:               engineDB.DB,
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, "http://localhost", zap.NewNop()),
+		Logger:           zap.NewNop(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestTools()
+
+	// Agent authentication - claims.Subject = "agent"
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	claims.Subject = "agent"
+	ctx = context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	filtered := filter(ctx, tools)
+
+	// Agent should only see health when no config (defaults to disabled)
+	if len(filtered) != 1 {
+		t.Errorf("expected 1 tool (health only), got %d: %v", len(filtered), toolNames(filtered))
+	}
+	if !containsTool(filtered, "health") {
+		t.Error("health tool should always be present")
+	}
+}
+
+func TestNewToolFilter_UserAuth_AgentToolsEnabledDoesNotAffectUsers(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Create config with agent_tools enabled but developer tools disabled
+	ctx := context.Background()
+	scope, err := engineDB.DB.WithTenant(ctx, projectID)
+	if err != nil {
+		t.Fatalf("failed to get tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	tenantCtx := database.SetTenantScope(ctx, scope)
+	_, err = scope.Conn.Exec(tenantCtx, `
+		INSERT INTO engine_projects (id, name, created_at, updated_at)
+		VALUES ($1, 'Test Project', NOW(), NOW())
+		ON CONFLICT (id) DO NOTHING`, projectID)
+	if err != nil {
+		t.Fatalf("failed to create test project: %v", err)
+	}
+
+	mcpConfig := &models.MCPConfig{
+		ProjectID: projectID,
+		ToolGroups: map[string]*models.ToolGroupConfig{
+			"agent_tools": {Enabled: true},
+			"developer":   {Enabled: true, EnableExecute: true},
+		},
+	}
+
+	repo := repositories.NewMCPConfigRepository()
+	if err := repo.Upsert(tenantCtx, mcpConfig); err != nil {
+		t.Fatalf("failed to create test config: %v", err)
+	}
+
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		cleanupScope, err := engineDB.DB.WithTenant(cleanupCtx, projectID)
+		if err != nil {
+			return
+		}
+		defer cleanupScope.Close()
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_mcp_config WHERE project_id = $1", projectID)
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_projects WHERE id = $1", projectID)
+	})
+
+	deps := &DeveloperToolDeps{
+		DB:               engineDB.DB,
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, "http://localhost", zap.NewNop()),
+		Logger:           zap.NewNop(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestTools()
+
+	// User authentication - claims.Subject is NOT "agent"
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	claims.Subject = "user-123" // Normal user
+	ctx = context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	filtered := filter(ctx, tools)
+
+	// User should see all developer tools (agent_tools config doesn't affect users)
+	expectedDeveloperTools := []string{"health", "echo", "query", "sample", "execute", "validate", "get_schema"}
+	for _, name := range expectedDeveloperTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected developer tool %s to be present for user", name)
+		}
+	}
+}

@@ -1,4 +1,4 @@
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Lightbulb } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import type { SubOptionInfo } from '../../types';
@@ -9,22 +9,26 @@ interface MCPToolGroupProps {
   name: string;
   description: ReactNode;
   warning?: string | undefined;
+  tip?: ReactNode | undefined;
   enabled: boolean;
   onToggle: (enabled: boolean) => void;
   disabled?: boolean | undefined;
   subOptions?: Record<string, SubOptionInfo> | undefined;
   onSubOptionToggle?: ((subOptionName: string, enabled: boolean) => void) | undefined;
+  children?: ReactNode;
 }
 
 export default function MCPToolGroup({
   name,
   description,
   warning,
+  tip,
   enabled,
   onToggle,
   disabled = false,
   subOptions,
   onSubOptionToggle,
+  children,
 }: MCPToolGroupProps) {
   return (
     <Card>
@@ -44,6 +48,12 @@ export default function MCPToolGroup({
               <div className="flex items-start gap-2 rounded-md bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{warning}</span>
+              </div>
+            )}
+            {tip && (
+              <div className="flex items-start gap-2 rounded-md bg-brand-purple/10 p-3 text-sm text-brand-purple dark:bg-brand-purple/20">
+                <Lightbulb className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>{tip}</div>
               </div>
             )}
             {enabled && subOptions && Object.entries(subOptions).map(([subName, subOption]) => (
@@ -67,6 +77,7 @@ export default function MCPToolGroup({
                 )}
               </div>
             ))}
+            {enabled && children}
           </div>
         </div>
       </CardContent>

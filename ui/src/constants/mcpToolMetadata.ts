@@ -19,6 +19,7 @@ export interface ToolGroupMetadata {
 export const TOOL_GROUP_IDS = {
   DEVELOPER: 'developer',
   APPROVED_QUERIES: 'approved_queries',
+  AGENT_TOOLS: 'agent_tools',
 } as const;
 
 export const TOOL_GROUP_METADATA: Record<string, ToolGroupMetadata> = {
@@ -26,7 +27,6 @@ export const TOOL_GROUP_METADATA: Record<string, ToolGroupMetadata> = {
     name: 'Developer Tools',
     description:
       'Enable raw access to the Datasource and Schema. This is intended for developers building applications or data engineers building ETL pipelines.',
-    warning: 'This setting is NOT recommended for business end users doing analytics.',
     subOptions: {
       enableExecute: {
         name: 'Enable Execute',
@@ -52,6 +52,11 @@ export const TOOL_GROUP_METADATA: Record<string, ToolGroupMetadata> = {
           'Allow the MCP Client to suggest new Queries to be added to the Pre-Approved list after your review.',
       },
     },
+  },
+  [TOOL_GROUP_IDS.AGENT_TOOLS]: {
+    name: 'Agent Tools',
+    description:
+      'Enable AI Agents to access the database safely and securely with logging and auditing capabilities. AI Agents can only use the enabled Pre-Approved Queries so that you have full control over access.',
   },
 };
 

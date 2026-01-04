@@ -1,11 +1,14 @@
 package mcpauth
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
@@ -35,10 +38,60 @@ func (m *mockAuthService) ValidateProjectIDMatch(claims *auth.Claims, urlProject
 	return m.validateMatchErr
 }
 
+// mockAgentKeyService is a mock implementation of services.AgentAPIKeyService for testing.
+type mockAgentKeyService struct {
+	validKeys  map[uuid.UUID]string // map of project ID to valid key
+	validateFn func(ctx context.Context, projectID uuid.UUID, providedKey string) (bool, error)
+}
+
+func newMockAgentKeyService() *mockAgentKeyService {
+	return &mockAgentKeyService{
+		validKeys: make(map[uuid.UUID]string),
+	}
+}
+
+func (m *mockAgentKeyService) GenerateKey(ctx context.Context, projectID uuid.UUID) (string, error) {
+	key := "generated-key-" + projectID.String()[:8]
+	m.validKeys[projectID] = key
+	return key, nil
+}
+
+func (m *mockAgentKeyService) GetKey(ctx context.Context, projectID uuid.UUID) (string, error) {
+	return m.validKeys[projectID], nil
+}
+
+func (m *mockAgentKeyService) RegenerateKey(ctx context.Context, projectID uuid.UUID) (string, error) {
+	return m.GenerateKey(ctx, projectID)
+}
+
+func (m *mockAgentKeyService) ValidateKey(ctx context.Context, projectID uuid.UUID, providedKey string) (bool, error) {
+	if m.validateFn != nil {
+		return m.validateFn(ctx, projectID, providedKey)
+	}
+	storedKey, ok := m.validKeys[projectID]
+	if !ok {
+		return false, nil
+	}
+	return storedKey == providedKey, nil
+}
+
+// mockTenantScopeProvider is a mock implementation of TenantScopeProvider for testing.
+type mockTenantScopeProvider struct {
+	err error
+}
+
+func (m *mockTenantScopeProvider) WithTenantScope(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {
+	if m.err != nil {
+		return nil, nil, m.err
+	}
+	// Return the same context with a no-op cleanup function
+	return ctx, func() {}, nil
+}
+
 func TestMiddleware_RequireAuth_Success(t *testing.T) {
 	claims := &auth.Claims{ProjectID: "project-123"}
 	authService := &mockAuthService{claims: claims, token: "test-token"}
-	middleware := NewMiddleware(authService, zap.NewNop())
+	middleware := NewMiddleware(authService, nil, nil, zap.NewNop())
 
 	var handlerCalled bool
 	var ctxClaims *auth.Claims
@@ -78,7 +131,7 @@ func TestMiddleware_RequireAuth_Success(t *testing.T) {
 
 func TestMiddleware_RequireAuth_InvalidToken(t *testing.T) {
 	authService := &mockAuthService{validateErr: auth.ErrMissingAuthorization}
-	middleware := NewMiddleware(authService, zap.NewNop())
+	middleware := NewMiddleware(authService, nil, nil, zap.NewNop())
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("handler should not be called")
@@ -115,7 +168,7 @@ func TestMiddleware_RequireAuth_MissingProjectID(t *testing.T) {
 		token:             "test-token",
 		requireProjectErr: auth.ErrMissingProjectID,
 	}
-	middleware := NewMiddleware(authService, zap.NewNop())
+	middleware := NewMiddleware(authService, nil, nil, zap.NewNop())
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("handler should not be called")
@@ -142,7 +195,7 @@ func TestMiddleware_RequireAuth_MissingProjectID(t *testing.T) {
 func TestMiddleware_RequireAuth_MissingURLProjectID(t *testing.T) {
 	claims := &auth.Claims{ProjectID: "project-123"}
 	authService := &mockAuthService{claims: claims, token: "test-token"}
-	middleware := NewMiddleware(authService, zap.NewNop())
+	middleware := NewMiddleware(authService, nil, nil, zap.NewNop())
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("handler should not be called")
@@ -174,7 +227,7 @@ func TestMiddleware_RequireAuth_ProjectMismatch(t *testing.T) {
 		token:            "test-token",
 		validateMatchErr: auth.ErrProjectIDMismatch,
 	}
-	middleware := NewMiddleware(authService, zap.NewNop())
+	middleware := NewMiddleware(authService, nil, nil, zap.NewNop())
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("handler should not be called")
@@ -226,7 +279,7 @@ func TestMiddleware_WWWAuthenticateFormat(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			middleware := NewMiddleware(tc.authService, zap.NewNop())
+			middleware := NewMiddleware(tc.authService, nil, nil, zap.NewNop())
 
 			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				t.Error("handler should not be called")
@@ -257,6 +310,533 @@ func TestMiddleware_WWWAuthenticateFormat(t *testing.T) {
 
 			if !strings.Contains(wwwAuth, `error_description="`) {
 				t.Errorf("expected error_description in %q", wwwAuth)
+			}
+		})
+	}
+}
+
+// --- Agent API Key Authentication Tests ---
+
+func TestMiddleware_RequireAuth_AgentAPIKey_AuthorizationHeader(t *testing.T) {
+	projectID := uuid.New()
+	apiKey := "test-api-key-12345"
+
+	agentKeyService := newMockAgentKeyService()
+	agentKeyService.validKeys[projectID] = apiKey
+	tenantProvider := &mockTenantScopeProvider{}
+
+	middleware := NewMiddleware(nil, agentKeyService, tenantProvider, zap.NewNop())
+
+	var handlerCalled bool
+	var ctxClaims *auth.Claims
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		ctxClaims, _ = auth.GetClaims(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+projectID.String(), nil)
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Authorization", "api-key:"+apiKey)
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if !handlerCalled {
+		t.Error("expected handler to be called")
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+
+	if ctxClaims == nil {
+		t.Fatal("expected claims to be set in context")
+	}
+
+	if ctxClaims.ProjectID != projectID.String() {
+		t.Errorf("expected project ID %q, got %q", projectID.String(), ctxClaims.ProjectID)
+	}
+
+	if ctxClaims.Subject != "agent" {
+		t.Errorf("expected Subject 'agent', got %q", ctxClaims.Subject)
+	}
+}
+
+func TestMiddleware_RequireAuth_AgentAPIKey_XAPIKeyHeader(t *testing.T) {
+	projectID := uuid.New()
+	apiKey := "test-api-key-67890"
+
+	agentKeyService := newMockAgentKeyService()
+	agentKeyService.validKeys[projectID] = apiKey
+	tenantProvider := &mockTenantScopeProvider{}
+
+	middleware := NewMiddleware(nil, agentKeyService, tenantProvider, zap.NewNop())
+
+	var handlerCalled bool
+	var ctxClaims *auth.Claims
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		ctxClaims, _ = auth.GetClaims(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+projectID.String(), nil)
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("X-API-Key", apiKey)
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if !handlerCalled {
+		t.Error("expected handler to be called")
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+
+	if ctxClaims == nil {
+		t.Fatal("expected claims to be set in context")
+	}
+
+	if ctxClaims.Subject != "agent" {
+		t.Errorf("expected Subject 'agent', got %q", ctxClaims.Subject)
+	}
+}
+
+func TestMiddleware_RequireAuth_AgentAPIKey_InvalidKey(t *testing.T) {
+	projectID := uuid.New()
+
+	agentKeyService := newMockAgentKeyService()
+	agentKeyService.validKeys[projectID] = "correct-key"
+	tenantProvider := &mockTenantScopeProvider{}
+
+	middleware := NewMiddleware(nil, agentKeyService, tenantProvider, zap.NewNop())
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+projectID.String(), nil)
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Authorization", "api-key:wrong-key")
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected status 401, got %d", rec.Code)
+	}
+
+	wwwAuth := rec.Header().Get("WWW-Authenticate")
+	if !strings.Contains(wwwAuth, `error="invalid_token"`) {
+		t.Errorf("expected error=invalid_token in WWW-Authenticate, got %q", wwwAuth)
+	}
+}
+
+func TestMiddleware_RequireAuth_AgentAPIKey_NoKeyConfigured(t *testing.T) {
+	projectID := uuid.New()
+
+	agentKeyService := newMockAgentKeyService()
+	// No key configured for this project
+	tenantProvider := &mockTenantScopeProvider{}
+
+	middleware := NewMiddleware(nil, agentKeyService, tenantProvider, zap.NewNop())
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+projectID.String(), nil)
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Authorization", "api-key:some-key")
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected status 401, got %d", rec.Code)
+	}
+}
+
+func TestMiddleware_RequireAuth_AgentAPIKey_InvalidProjectID(t *testing.T) {
+	agentKeyService := newMockAgentKeyService()
+	tenantProvider := &mockTenantScopeProvider{}
+
+	middleware := NewMiddleware(nil, agentKeyService, tenantProvider, zap.NewNop())
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp/not-a-uuid", nil)
+	req.SetPathValue("pid", "not-a-uuid")
+	req.Header.Set("Authorization", "api-key:some-key")
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", rec.Code)
+	}
+
+	wwwAuth := rec.Header().Get("WWW-Authenticate")
+	if !strings.Contains(wwwAuth, `error="invalid_request"`) {
+		t.Errorf("expected error=invalid_request in WWW-Authenticate, got %q", wwwAuth)
+	}
+}
+
+func TestMiddleware_RequireAuth_AgentAPIKey_ServiceError(t *testing.T) {
+	projectID := uuid.New()
+
+	agentKeyService := newMockAgentKeyService()
+	agentKeyService.validateFn = func(ctx context.Context, pid uuid.UUID, key string) (bool, error) {
+		return false, errors.New("database error")
+	}
+	tenantProvider := &mockTenantScopeProvider{}
+
+	middleware := NewMiddleware(nil, agentKeyService, tenantProvider, zap.NewNop())
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+projectID.String(), nil)
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Authorization", "api-key:some-key")
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d", rec.Code)
+	}
+
+	wwwAuth := rec.Header().Get("WWW-Authenticate")
+	if !strings.Contains(wwwAuth, `error="server_error"`) {
+		t.Errorf("expected error=server_error in WWW-Authenticate, got %q", wwwAuth)
+	}
+}
+
+func TestMiddleware_RequireAuth_AgentAPIKey_NoService(t *testing.T) {
+	// Test when agentKeyService is nil but API key is provided
+	middleware := NewMiddleware(nil, nil, nil, zap.NewNop())
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	projectID := uuid.New()
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+projectID.String(), nil)
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Authorization", "api-key:some-key")
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d", rec.Code)
+	}
+
+	wwwAuth := rec.Header().Get("WWW-Authenticate")
+	if !strings.Contains(wwwAuth, `error="server_error"`) {
+		t.Errorf("expected error=server_error in WWW-Authenticate, got %q", wwwAuth)
+	}
+}
+
+func TestMiddleware_RequireAuth_AgentAPIKey_NoTenantProvider(t *testing.T) {
+	// Test when tenantProvider is nil but API key is provided
+	projectID := uuid.New()
+	agentKeyService := newMockAgentKeyService()
+	agentKeyService.validKeys[projectID] = "test-key"
+
+	middleware := NewMiddleware(nil, agentKeyService, nil, zap.NewNop())
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+projectID.String(), nil)
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Authorization", "api-key:test-key")
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d", rec.Code)
+	}
+
+	wwwAuth := rec.Header().Get("WWW-Authenticate")
+	if !strings.Contains(wwwAuth, `error="server_error"`) {
+		t.Errorf("expected error=server_error in WWW-Authenticate, got %q", wwwAuth)
+	}
+}
+
+func TestMiddleware_RequireAuth_AgentAPIKey_TenantScopeError(t *testing.T) {
+	// Test when tenant scope creation fails
+	projectID := uuid.New()
+	apiKey := "test-api-key"
+
+	agentKeyService := newMockAgentKeyService()
+	agentKeyService.validKeys[projectID] = apiKey
+	tenantProvider := &mockTenantScopeProvider{err: errors.New("database connection failed")}
+
+	middleware := NewMiddleware(nil, agentKeyService, tenantProvider, zap.NewNop())
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+projectID.String(), nil)
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Authorization", "api-key:"+apiKey)
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d", rec.Code)
+	}
+
+	wwwAuth := rec.Header().Get("WWW-Authenticate")
+	if !strings.Contains(wwwAuth, `error="server_error"`) {
+		t.Errorf("expected error=server_error in WWW-Authenticate, got %q", wwwAuth)
+	}
+}
+
+func TestMiddleware_RequireAuth_AgentAPIKey_ExtractProjectFromPath(t *testing.T) {
+	// Test when path value is not set but URL path contains project ID
+	projectID := uuid.New()
+	apiKey := "test-api-key"
+
+	agentKeyService := newMockAgentKeyService()
+	agentKeyService.validKeys[projectID] = apiKey
+	tenantProvider := &mockTenantScopeProvider{}
+
+	middleware := NewMiddleware(nil, agentKeyService, tenantProvider, zap.NewNop())
+
+	var handlerCalled bool
+	var ctxClaims *auth.Claims
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		ctxClaims, _ = auth.GetClaims(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	// Request without SetPathValue - should fall back to extractProjectIDFromPath
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+projectID.String(), nil)
+	// Note: Not setting req.SetPathValue("pid", ...)
+	req.Header.Set("Authorization", "api-key:"+apiKey)
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if !handlerCalled {
+		t.Error("expected handler to be called")
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+
+	if ctxClaims == nil {
+		t.Fatal("expected claims to be set in context")
+	}
+
+	if ctxClaims.ProjectID != projectID.String() {
+		t.Errorf("expected project ID %q, got %q", projectID.String(), ctxClaims.ProjectID)
+	}
+}
+
+func TestMiddleware_RequireAuth_AgentAPIKey_BearerToken(t *testing.T) {
+	projectID := uuid.New()
+	apiKey := "8b9bc7dce2de106351ba7f7712dfbfb16d010a2478a094a8c328cdafd21f468b"
+
+	agentKeyService := newMockAgentKeyService()
+	agentKeyService.validKeys[projectID] = apiKey
+	tenantProvider := &mockTenantScopeProvider{}
+
+	middleware := NewMiddleware(nil, agentKeyService, tenantProvider, zap.NewNop())
+
+	var handlerCalled bool
+	var ctxClaims *auth.Claims
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		ctxClaims, _ = auth.GetClaims(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	wrappedHandler := middleware.RequireAuth("pid")(handler)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+projectID.String(), nil)
+	req.SetPathValue("pid", projectID.String())
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	rec := httptest.NewRecorder()
+
+	wrappedHandler.ServeHTTP(rec, req)
+
+	if !handlerCalled {
+		t.Error("expected handler to be called")
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+
+	if ctxClaims == nil {
+		t.Fatal("expected claims in context")
+	}
+
+	if ctxClaims.ProjectID != projectID.String() {
+		t.Errorf("expected project ID %q, got %q", projectID.String(), ctxClaims.ProjectID)
+	}
+
+	if ctxClaims.Subject != "agent" {
+		t.Errorf("expected subject 'agent', got %q", ctxClaims.Subject)
+	}
+}
+
+func TestIsJWT(t *testing.T) {
+	testCases := []struct {
+		name     string
+		token    string
+		expected bool
+	}{
+		{
+			name:     "valid JWT format",
+			token:    "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature",
+			expected: true,
+		},
+		{
+			name:     "API key (hex string)",
+			token:    "8b9bc7dce2de106351ba7f7712dfbfb16d010a2478a094a8c328cdafd21f468b",
+			expected: false,
+		},
+		{
+			name:     "two segments",
+			token:    "header.payload",
+			expected: false,
+		},
+		{
+			name:     "four segments",
+			token:    "a.b.c.d",
+			expected: false,
+		},
+		{
+			name:     "empty string",
+			token:    "",
+			expected: false,
+		},
+		{
+			name:     "no dots",
+			token:    "simpletokenwithnodots",
+			expected: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := isJWT(tc.token)
+			if result != tc.expected {
+				t.Errorf("isJWT(%q) = %v, expected %v", tc.token, result, tc.expected)
+			}
+		})
+	}
+}
+
+func TestExtractProjectIDFromPath(t *testing.T) {
+	testCases := []struct {
+		name        string
+		path        string
+		expectedID  string
+		expectError bool
+	}{
+		{
+			name:       "valid path with project ID",
+			path:       "/mcp/550e8400-e29b-41d4-a716-446655440000",
+			expectedID: "550e8400-e29b-41d4-a716-446655440000",
+		},
+		{
+			name:       "valid path with trailing slash",
+			path:       "/mcp/550e8400-e29b-41d4-a716-446655440000/",
+			expectedID: "550e8400-e29b-41d4-a716-446655440000",
+		},
+		{
+			name:       "valid path with additional segments",
+			path:       "/mcp/550e8400-e29b-41d4-a716-446655440000/tools/list",
+			expectedID: "550e8400-e29b-41d4-a716-446655440000",
+		},
+		{
+			name:        "invalid - missing mcp prefix",
+			path:        "/api/550e8400-e29b-41d4-a716-446655440000",
+			expectError: true,
+		},
+		{
+			name:        "invalid - no project ID",
+			path:        "/mcp/",
+			expectError: true,
+		},
+		{
+			name:        "invalid - just mcp",
+			path:        "/mcp",
+			expectError: true,
+		},
+		{
+			name:        "invalid - empty path",
+			path:        "",
+			expectError: true,
+		},
+		{
+			name:        "invalid - not a UUID",
+			path:        "/mcp/not-a-uuid",
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			projectID, err := extractProjectIDFromPath(tc.path)
+
+			if tc.expectError {
+				if err == nil {
+					t.Errorf("expected error for path %q, got nil", tc.path)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error for path %q: %v", tc.path, err)
+				return
+			}
+
+			if projectID.String() != tc.expectedID {
+				t.Errorf("expected ID %q, got %q", tc.expectedID, projectID.String())
 			}
 		})
 	}

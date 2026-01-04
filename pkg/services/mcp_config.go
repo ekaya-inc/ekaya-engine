@@ -15,11 +15,15 @@ import (
 // ToolGroupApprovedQueries is the identifier for the pre-approved queries tool group.
 const ToolGroupApprovedQueries = "approved_queries"
 
+// ToolGroupAgentTools is the identifier for the agent tools group.
+const ToolGroupAgentTools = "agent_tools"
+
 // validToolGroups defines the known tool group identifiers for validation.
 // UI metadata (names, descriptions, warnings) is defined in the frontend.
 var validToolGroups = map[string]bool{
 	"developer":              true,
 	ToolGroupApprovedQueries: true,
+	ToolGroupAgentTools:      true,
 }
 
 // MCPConfigResponse is the API response format for MCP configuration.
@@ -112,6 +116,21 @@ func (s *mcpConfigService) Update(ctx context.Context, projectID uuid.UUID, req 
 				config.ToolGroups = make(map[string]*models.ToolGroupConfig)
 			}
 			config.ToolGroups[groupName] = groupConfig
+		}
+	}
+
+	// Enforce mutual exclusivity: agent_tools enabled = other tools disabled
+	if agentConfig, ok := config.ToolGroups[ToolGroupAgentTools]; ok && agentConfig.Enabled {
+		// Disable developer tools
+		if devConfig, ok := config.ToolGroups["developer"]; ok {
+			devConfig.Enabled = false
+			devConfig.EnableExecute = false
+		}
+		// Disable approved_queries
+		if aqConfig, ok := config.ToolGroups[ToolGroupApprovedQueries]; ok {
+			aqConfig.Enabled = false
+			aqConfig.ForceMode = false
+			aqConfig.AllowClientSuggestions = false
 		}
 	}
 
