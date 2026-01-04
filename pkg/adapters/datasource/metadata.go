@@ -49,8 +49,9 @@ type ValueOverlapResult struct {
 
 // JoinAnalysis contains results from join analysis.
 type JoinAnalysis struct {
-	JoinCount     int64
-	SourceMatched int64
-	TargetMatched int64
-	OrphanCount   int64
+	JoinCount      int64
+	SourceMatched  int64
+	TargetMatched  int64
+	OrphanCount    int64
+	MaxSourceValue *int64 // Maximum value in source column (for semantic validation)
 }

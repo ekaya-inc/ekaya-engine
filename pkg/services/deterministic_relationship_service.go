@@ -370,6 +370,26 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			if joinResult.OrphanCount > 0 {
 				continue
 			}
+
+			// Semantic validation: If ALL source values are very small integers (1-10),
+			// likely not a real FK relationship (e.g., rating, score, level columns)
+			if joinResult.MaxSourceValue != nil && *joinResult.MaxSourceValue <= 10 {
+				// Only valid if target table also has <= 10 rows (small lookup table)
+				if candidate.column.DistinctCount != nil && *candidate.column.DistinctCount > 10 {
+					continue // Source values too small for a real FK to this table
+				}
+			}
+
+			// Semantic validation: If source column has very low cardinality relative to row count,
+			// it's likely a status/type column, not a FK
+			table := tableByID[ref.column.SchemaTableID]
+			if ref.column.DistinctCount != nil && table.RowCount != nil && *table.RowCount > 0 {
+				ratio := float64(*ref.column.DistinctCount) / float64(*table.RowCount)
+				if ratio < 0.01 { // Less than 1% unique values
+					continue // Likely a status/type column, not a FK
+				}
+			}
+
 			status := models.RelationshipStatusConfirmed
 			confidence := 0.9
 

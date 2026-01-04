@@ -1351,3 +1351,326 @@ func (m *mockTestSchemaRepo) SoftDeleteRemovedTables(ctx context.Context, projec
 func (m *mockTestSchemaRepo) SoftDeleteRemovedColumns(ctx context.Context, tableID uuid.UUID, activeColumnNames []string) (int64, error) {
 	return 0, nil
 }
+
+// TestPKMatch_SmallIntegerValues tests that columns with all small integer values (1-10)
+// are rejected unless the target table is also small (lookup table scenario)
+func TestPKMatch_SmallIntegerValues(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	accountEntityID := uuid.New()
+	reviewEntityID := uuid.New()
+
+	distinctCount := int64(100)
+	smallDistinctCount := int64(5)
+	rowCount := int64(1000)
+	isJoinableTrue := true
+
+	// Create mocks with account and review entities
+	mocks := setupMocks(projectID, ontologyID, datasourceID, accountEntityID)
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            reviewEntityID,
+		OntologyID:    ontologyID,
+		Name:          "review",
+		PrimarySchema: "public",
+		PrimaryTable:  "reviews",
+	})
+
+	// Mock discoverer: if called, returns 0 orphans (all small values exist in accounts.id)
+	maxSourceValue := int64(5) // Rating is 1-5
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		return &datasource.JoinAnalysis{
+			OrphanCount:    0,
+			MaxSourceValue: &maxSourceValue,
+		}, nil
+	}
+
+	accountsTableID := uuid.New()
+	reviewsTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         accountsTableID,
+			SchemaName: "public",
+			TableName:  "accounts",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: accountsTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+			},
+		},
+		{
+			ID:         reviewsTableID,
+			SchemaName: "public",
+			TableName:  "reviews",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: reviewsTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+				{
+					SchemaTableID: reviewsTableID,
+					ColumnName:    "rating", // 1-5 rating - should be rejected
+					DataType:      "bigint",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &smallDistinctCount, // Only 5 distinct values
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+	)
+
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: NO relationships created because rating has max value of 5
+	if result.InferredRelationships != 0 {
+		t.Errorf("expected 0 inferred relationships (small integer column should be rejected), got %d", result.InferredRelationships)
+	}
+
+	if len(mocks.relationshipRepo.created) != 0 {
+		t.Errorf("expected no relationships in repo, got %d", len(mocks.relationshipRepo.created))
+	}
+}
+
+// TestPKMatch_SmallIntegerValues_LookupTable tests that small integer values ARE allowed
+// when the target table is also small (lookup table scenario)
+func TestPKMatch_SmallIntegerValues_LookupTable(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	statusEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	candidateDistinctCount := int64(25) // 25 distinct in candidate (PK) column - passes pre-join filter (>= 20)
+	refDistinctCount := int64(15)        // 15 distinct in ref (FK) column - passes cardinality check (15/100 = 15% > 1%)
+	refTableRowCount := int64(100)       // Smaller FK table so cardinality ratio is acceptable
+	isJoinableTrue := true
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, statusEntityID)
+	mocks.entityRepo.entities[0] = &models.OntologyEntity{
+		ID:            statusEntityID,
+		OntologyID:    ontologyID,
+		Name:          "status",
+		PrimarySchema: "public",
+		PrimaryTable:  "order_statuses",
+	}
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	// Mock discoverer: returns 0 orphans, max FK value is 20 (all FK values reference valid PKs)
+	// This tests that small-ish FK values (20) are allowed when PK table is also small-ish (25 distinct)
+	maxSourceValue := int64(20)
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		return &datasource.JoinAnalysis{
+			OrphanCount:    0,
+			MaxSourceValue: &maxSourceValue,
+		}, nil
+	}
+
+	statusTableID := uuid.New()
+	ordersTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         statusTableID,
+			SchemaName: "public",
+			TableName:  "order_statuses",
+			RowCount:   &candidateDistinctCount, // 60 rows in lookup table
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: statusTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &candidateDistinctCount, // 60 distinct values - passes pre-join filter (>= 20)
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			RowCount:   &refTableRowCount,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: ordersTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &refTableRowCount,
+				},
+				{
+					SchemaTableID: ordersTableID,
+					ColumnName:    "status_id", // FK to lookup table
+					DataType:      "bigint",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &refDistinctCount, // 15 distinct values (passes cardinality check: 15/100 = 15% > 1%)
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+	)
+
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: relationship IS created because target table is also small (lookup table)
+	if result.InferredRelationships != 1 {
+		t.Errorf("expected 1 inferred relationship (small FK to small lookup table is valid), got %d", result.InferredRelationships)
+	}
+
+	if len(mocks.relationshipRepo.created) != 1 {
+		t.Fatalf("expected 1 relationship in repo, got %d", len(mocks.relationshipRepo.created))
+	}
+
+	rel := mocks.relationshipRepo.created[0]
+	// Relationship is stored as: PK (source) -> FK (target)
+	if rel.SourceColumnName != "id" || rel.TargetColumnName != "status_id" {
+		t.Errorf("unexpected relationship: %s.%s -> %s.%s", rel.SourceColumnTable, rel.SourceColumnName, rel.TargetColumnTable, rel.TargetColumnName)
+	}
+}
+
+// TestPKMatch_LowCardinalityRatio tests that columns with very low cardinality
+// relative to row count are rejected (status/type columns)
+func TestPKMatch_LowCardinalityRatio(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	accountEntityID := uuid.New()
+	userEntityID := uuid.New()
+
+	distinctCount := int64(100)
+	lowDistinctCount := int64(5)    // Only 5 distinct values
+	rowCount := int64(10000)         // 10,000 rows -> ratio = 0.0005 (0.05%)
+	isJoinableTrue := true
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, accountEntityID)
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            userEntityID,
+		OntologyID:    ontologyID,
+		Name:          "user",
+		PrimarySchema: "public",
+		PrimaryTable:  "users",
+	})
+
+	// Mock discoverer: if called, returns 0 orphans
+	maxSourceValue := int64(5)
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		return &datasource.JoinAnalysis{
+			OrphanCount:    0,
+			MaxSourceValue: &maxSourceValue,
+		}, nil
+	}
+
+	accountsTableID := uuid.New()
+	usersTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         accountsTableID,
+			SchemaName: "public",
+			TableName:  "accounts",
+			RowCount:   &distinctCount,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: accountsTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+			},
+		},
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &rowCount, // 10,000 rows
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &rowCount,
+				},
+				{
+					SchemaTableID: usersTableID,
+					ColumnName:    "mod_level", // Only 5 values in 10k rows = 0.05% unique
+					DataType:      "bigint",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &lowDistinctCount, // Very low cardinality
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+	)
+
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: NO relationships created due to low cardinality ratio (< 1%)
+	if result.InferredRelationships != 0 {
+		t.Errorf("expected 0 inferred relationships (low cardinality ratio should be rejected), got %d", result.InferredRelationships)
+	}
+
+	if len(mocks.relationshipRepo.created) != 0 {
+		t.Errorf("expected no relationships in repo, got %d", len(mocks.relationshipRepo.created))
+	}
+}

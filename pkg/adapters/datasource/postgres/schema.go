@@ -329,15 +329,27 @@ func (d *SchemaDiscoverer) AnalyzeJoin(ctx context.Context,
 			FROM %s.%s s
 			LEFT JOIN %s.%s t ON s.%s::text = t.%s::text
 			WHERE t.%s IS NULL AND s.%s IS NOT NULL
+		),
+		max_target AS (
+			SELECT MAX(
+				CASE
+					WHEN t.%s::text ~ '^-?[0-9]+(\.[0-9]+)?$'
+					THEN (t.%s::text)::numeric
+					ELSE NULL
+				END
+			) as max_source_value
+			FROM %s.%s t
+			WHERE t.%s IS NOT NULL
 		)
-		SELECT join_count, source_matched, target_matched, orphan_count
-		FROM join_stats, orphan_stats
+		SELECT join_count, source_matched, target_matched, orphan_count, max_source_value
+		FROM join_stats, orphan_stats, max_target
 	`, srcCol, tgtCol, srcSchema, srcTable, tgtSchema, tgtTable, srcCol, tgtCol,
-		srcSchema, srcTable, tgtSchema, tgtTable, srcCol, tgtCol, tgtCol, srcCol)
+		srcSchema, srcTable, tgtSchema, tgtTable, srcCol, tgtCol, tgtCol, srcCol,
+		tgtCol, tgtCol, tgtSchema, tgtTable, tgtCol)
 
 	var result datasource.JoinAnalysis
 	row := d.pool.QueryRow(ctx, query)
-	if err := row.Scan(&result.JoinCount, &result.SourceMatched, &result.TargetMatched, &result.OrphanCount); err != nil {
+	if err := row.Scan(&result.JoinCount, &result.SourceMatched, &result.TargetMatched, &result.OrphanCount, &result.MaxSourceValue); err != nil {
 		return nil, fmt.Errorf("analyze join: %w", err)
 	}
 

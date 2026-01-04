@@ -317,7 +317,19 @@ func TestPKMatch_NoGarbageRelationships(t *testing.T) {
     - Tests edge cases (document_id vs _amount suffix, internal vs num_ prefix)
   - **Impact**: These patterns prevent the algorithm from considering aggregate/metric columns as FK candidates, even if their values happen to match PKs in other tables
   - All tests pass, production code builds successfully
-- [ ] **Task 5: Add semantic validation** - Detect suspiciously small values and low cardinality ratios
+- [x] **Task 5: Add semantic validation** - Detect suspiciously small values and low cardinality ratios
+  - **Status**: Complete - prevents garbage relationships from columns with suspicious small values or low cardinality
+  - Extended `JoinAnalysis` struct in `pkg/adapters/datasource/metadata.go:51-57` to include `MaxSourceValue *int64`
+  - Updated `AnalyzeJoin()` in `pkg/adapters/datasource/postgres/schema.go:305-351` to compute and return max source value
+  - Added semantic validation in `pkg/services/deterministic_relationship_service.go:374-391`:
+    - Small integer check: If `MaxSourceValue <= 10` and target table has `> 10` rows, reject (prevents rating/score/level columns)
+    - Low cardinality check: If source column has `< 1%` unique values relative to row count, reject (prevents status/type columns)
+  - Comprehensive test coverage added:
+    - `TestPKMatch_SmallIntegerValues` - Verifies small integer columns (rating 1-5) are rejected when targeting large tables
+    - `TestPKMatch_SmallIntegerValues_LookupTable` - Verifies small values ARE allowed when targeting small lookup tables
+    - `TestPKMatch_LowCardinalityRatio` - Verifies columns with < 1% cardinality ratio are rejected
+  - All tests pass, production code builds successfully
+  - **Impact**: Semantic validation catches garbage relationships that pass syntactic checks but have suspicious data patterns
 - [ ] **Task 6: Write tests** - All tests should FAIL before fixes, PASS after
 
 ## Files to Modify
