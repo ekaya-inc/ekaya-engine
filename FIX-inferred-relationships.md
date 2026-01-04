@@ -330,7 +330,23 @@ func TestPKMatch_NoGarbageRelationships(t *testing.T) {
     - `TestPKMatch_LowCardinalityRatio` - Verifies columns with < 1% cardinality ratio are rejected
   - All tests pass, production code builds successfully
   - **Impact**: Semantic validation catches garbage relationships that pass syntactic checks but have suspicious data patterns
-- [ ] **Task 6: Write tests** - All tests should FAIL before fixes, PASS after
+- [x] **Task 6: Write tests** - All tests should FAIL before fixes, PASS after
+  - **Status**: Complete - comprehensive test suite validates all fixes
+  - Test file: `pkg/services/deterministic_relationship_service_test.go`
+  - Tests cover all 6 required scenarios from the plan:
+    1. `TestPKMatch_RequiresDistinctCount` - Columns without stats are skipped
+    2. `TestPKMatch_LowCardinality_Excluded` - Low cardinality columns (DistinctCount < 20) excluded
+    3. `TestPKMatch_CountColumns_NeverJoined` - Count columns (num_*, *_count, total_*) excluded by name
+    4. `TestPKMatch_RatingColumns_NeverJoined` - Rating/score/level columns excluded by name
+    5. `TestPKMatch_RequiresJoinableFlag` - Columns with IsJoinable=false/nil excluded
+    6. `TestPKMatch_NoGarbageRelationships` - Golden test: accounts.num_users never creates relationship
+  - Additional test coverage:
+    - `TestPKMatch_WorksWithoutRowCount` - Graceful degradation when RowCount is nil
+    - `TestPKMatch_SmallIntegerValues` - Semantic validation rejects small integer columns
+    - `TestPKMatch_SmallIntegerValues_LookupTable` - Small integers allowed for lookup tables
+    - `TestPKMatch_LowCardinalityRatio` - Cardinality ratio < 1% excluded
+    - `TestIsPKMatchExcludedName` - Unit test for name exclusion patterns (76 test cases)
+  - All 10+ tests pass, validating the complete fix chain
 
 ## Files to Modify
 

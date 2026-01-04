@@ -807,13 +807,13 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 
 // mockTestServices holds all mock dependencies for testing
 type mockTestServices struct {
-	datasourceService  *mockTestDatasourceService
-	adapterFactory     *mockTestAdapterFactory
-	discoverer         *mockTestSchemaDiscoverer
-	ontologyRepo       *mockTestOntologyRepo
-	entityRepo         *mockTestEntityRepo
-	relationshipRepo   *mockTestRelationshipRepo
-	schemaRepo         *mockTestSchemaRepo
+	datasourceService *mockTestDatasourceService
+	adapterFactory    *mockTestAdapterFactory
+	discoverer        *mockTestSchemaDiscoverer
+	ontologyRepo      *mockTestOntologyRepo
+	entityRepo        *mockTestEntityRepo
+	relationshipRepo  *mockTestRelationshipRepo
+	schemaRepo        *mockTestSchemaRepo
 }
 
 // setupMocks creates all mock dependencies with sensible defaults
@@ -1465,8 +1465,8 @@ func TestPKMatch_SmallIntegerValues_LookupTable(t *testing.T) {
 	orderEntityID := uuid.New()
 
 	candidateDistinctCount := int64(25) // 25 distinct in candidate (PK) column - passes pre-join filter (>= 20)
-	refDistinctCount := int64(15)        // 15 distinct in ref (FK) column - passes cardinality check (15/100 = 15% > 1%)
-	refTableRowCount := int64(100)       // Smaller FK table so cardinality ratio is acceptable
+	refDistinctCount := int64(15)       // 15 distinct in ref (FK) column - passes cardinality check (15/100 = 15% > 1%)
+	refTableRowCount := int64(100)      // Smaller FK table so cardinality ratio is acceptable
 	isJoinableTrue := true
 
 	// Create mocks
@@ -1572,6 +1572,472 @@ func TestPKMatch_SmallIntegerValues_LookupTable(t *testing.T) {
 	}
 }
 
+// TestPKMatch_LowCardinality_Excluded tests that columns with DistinctCount < 20
+// are excluded from being FK candidates (absolute threshold check)
+func TestPKMatch_LowCardinality_Excluded(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	distinctCount := int64(100)
+	lowDistinctCount := int64(5) // Below threshold of 20
+	rowCount := int64(1000)
+	isJoinableTrue := true
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	// Mock discoverer should NOT be called because column is filtered by cardinality
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		t.Errorf("AnalyzeJoin should not be called (column has DistinctCount < 20): %s.%s.%s -> %s.%s.%s",
+			sourceSchema, sourceTable, sourceColumn,
+			targetSchema, targetTable, targetColumn)
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+	}
+
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &distinctCount,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: ordersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+				{
+					SchemaTableID: ordersTableID,
+					ColumnName:    "status_code", // Low cardinality column
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &lowDistinctCount, // Only 5 distinct values - should be excluded
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+	)
+
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: NO relationships created because status_code has DistinctCount < 20
+	if result.InferredRelationships != 0 {
+		t.Errorf("expected 0 inferred relationships (DistinctCount < 20 should be excluded), got %d", result.InferredRelationships)
+	}
+
+	if len(mocks.relationshipRepo.created) != 0 {
+		t.Errorf("expected 0 relationships to be created, got %d", len(mocks.relationshipRepo.created))
+	}
+}
+
+// TestPKMatch_CountColumns_NeverJoined tests that columns with count/aggregate names
+// are excluded from being FK candidates (they should not try to join TO entity PKs)
+func TestPKMatch_CountColumns_NeverJoined(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	accountEntityID := uuid.New()
+
+	highDistinct := int64(100)
+	candidateDistinct := int64(30) // Above cardinality threshold (>= 20) BUT below ratio threshold
+	rowCount := int64(10000)       // High row count means ratio will be 30/10000 = 0.003 (< 0.05)
+	isJoinableTrue := true
+
+	// Create mocks with user entity
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            accountEntityID,
+		OntologyID:    ontologyID,
+		Name:          "account",
+		PrimarySchema: "public",
+		PrimaryTable:  "accounts",
+	})
+
+	// Mock discoverer should NOT be called because count columns are filtered by name BEFORE cardinality ratio check
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		t.Errorf("AnalyzeJoin should not be called (count columns should be excluded by name): %s.%s.%s -> %s.%s.%s",
+			sourceSchema, sourceTable, sourceColumn,
+			targetSchema, targetTable, targetColumn)
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+	}
+
+	usersTableID := uuid.New()
+	accountsTableID := uuid.New()
+
+	// Schema: users.id is a PK (entityRefColumn), accounts has count columns
+	// Count columns should NOT be FK candidates - they are excluded by NAME filter
+	// before the cardinality ratio check would exclude them
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &highDistinct,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+		{
+			ID:         accountsTableID,
+			SchemaName: "public",
+			TableName:  "accounts",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: accountsTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+				{
+					SchemaTableID: accountsTableID,
+					ColumnName:    "num_users", // Count column with num_ prefix
+					DataType:      "bigint",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &candidateDistinct, // Has sufficient absolute distinct count (>= 20)
+				},
+				{
+					SchemaTableID: accountsTableID,
+					ColumnName:    "user_count", // Count column with _count suffix
+					DataType:      "bigint",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &candidateDistinct,
+				},
+				{
+					SchemaTableID: accountsTableID,
+					ColumnName:    "total_items", // Count column with total_ prefix
+					DataType:      "bigint",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &candidateDistinct,
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+	)
+
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: NO relationships created because count columns are excluded by name filter
+	// Even though they have sufficient DistinctCount, the name filter should prevent them
+	// from being FK candidates
+	if result.InferredRelationships != 0 {
+		t.Errorf("expected 0 inferred relationships (count columns should be excluded), got %d", result.InferredRelationships)
+	}
+
+	if len(mocks.relationshipRepo.created) != 0 {
+		t.Errorf("expected 0 relationships to be created, got %d", len(mocks.relationshipRepo.created))
+	}
+}
+
+// TestPKMatch_RatingColumns_NeverJoined tests that columns with rating/score/level names
+// are excluded from being FK candidates (they should not try to join TO entity PKs)
+func TestPKMatch_RatingColumns_NeverJoined(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	reviewEntityID := uuid.New()
+
+	highDistinct := int64(100)
+	candidateDistinct := int64(30) // Above cardinality threshold (>= 20) BUT below ratio threshold
+	rowCount := int64(10000)       // High row count means ratio will be 30/10000 = 0.003 (< 0.05)
+	isJoinableTrue := true
+
+	// Create mocks with user entity
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            reviewEntityID,
+		OntologyID:    ontologyID,
+		Name:          "review",
+		PrimarySchema: "public",
+		PrimaryTable:  "reviews",
+	})
+
+	// Mock discoverer should NOT be called because rating/score/level columns are filtered by name BEFORE cardinality ratio check
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		t.Errorf("AnalyzeJoin should not be called (rating/score/level columns should be excluded by name): %s.%s.%s -> %s.%s.%s",
+			sourceSchema, sourceTable, sourceColumn,
+			targetSchema, targetTable, targetColumn)
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+	}
+
+	usersTableID := uuid.New()
+	reviewsTableID := uuid.New()
+
+	// Schema: users.id is a PK (entityRefColumn), reviews has rating/score/level columns
+	// Rating/score/level columns should NOT be FK candidates - they are excluded by NAME filter
+	// before the cardinality ratio check would exclude them
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &highDistinct,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+		{
+			ID:         reviewsTableID,
+			SchemaName: "public",
+			TableName:  "reviews",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: reviewsTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+				{
+					SchemaTableID: reviewsTableID,
+					ColumnName:    "rating", // Rating column
+					DataType:      "bigint",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &candidateDistinct, // Has sufficient absolute distinct count (>= 20)
+				},
+				{
+					SchemaTableID: reviewsTableID,
+					ColumnName:    "mod_level", // Level column
+					DataType:      "bigint",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &candidateDistinct,
+				},
+				{
+					SchemaTableID: reviewsTableID,
+					ColumnName:    "score", // Score column
+					DataType:      "bigint",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &candidateDistinct,
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+	)
+
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: NO relationships created because rating/score/level columns are excluded by name filter
+	// Even though they have sufficient DistinctCount, the name filter should prevent them
+	// from being FK candidates
+	if result.InferredRelationships != 0 {
+		t.Errorf("expected 0 inferred relationships (rating/score/level columns should be excluded), got %d", result.InferredRelationships)
+	}
+
+	if len(mocks.relationshipRepo.created) != 0 {
+		t.Errorf("expected 0 relationships to be created, got %d", len(mocks.relationshipRepo.created))
+	}
+}
+
+// TestPKMatch_NoGarbageRelationships is the golden end-to-end test that verifies
+// the complete fix prevents garbage relationships in real-ish scenarios.
+// This test uses a realistic schema with accounts.num_users (a COUNT column)
+// and payout_accounts.id (a PK), verifying that no relationship is inferred
+// between them even though the values might overlap.
+func TestPKMatch_NoGarbageRelationships(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	accountEntityID := uuid.New()
+	payoutAccountEntityID := uuid.New()
+
+	highDistinct := int64(1000)
+	lowDistinct := int64(3) // num_users only has values 1, 2, 3
+	rowCount := int64(5000)
+	isJoinableTrue := true
+	isJoinableFalse := false // num_users should be marked NOT joinable
+
+	// Create mocks with both entities
+	mocks := setupMocks(projectID, ontologyID, datasourceID, accountEntityID)
+	mocks.entityRepo.entities[0].Name = "account"
+	mocks.entityRepo.entities[0].PrimaryTable = "accounts"
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            payoutAccountEntityID,
+		OntologyID:    ontologyID,
+		Name:          "payout_account",
+		PrimarySchema: "public",
+		PrimaryTable:  "payout_accounts",
+	})
+
+	// Mock discoverer: if called, it would return 0 orphans (small integers exist in any PK sequence)
+	// But this should NEVER be called because num_users should be filtered out
+	maxSourceValue := int64(3)
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		t.Errorf("AnalyzeJoin should not be called (num_users should be filtered out): %s.%s.%s -> %s.%s.%s",
+			sourceSchema, sourceTable, sourceColumn,
+			targetSchema, targetTable, targetColumn)
+		return &datasource.JoinAnalysis{
+			OrphanCount:    0, // Would match if we got here
+			MaxSourceValue: &maxSourceValue,
+		}, nil
+	}
+
+	accountsTableID := uuid.New()
+	payoutAccountsTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         accountsTableID,
+			SchemaName: "public",
+			TableName:  "accounts",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: accountsTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+				{
+					SchemaTableID: accountsTableID,
+					ColumnName:    "num_users", // COUNT column - should NOT be a FK candidate
+					DataType:      "bigint",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableFalse, // Should be marked as NOT joinable
+					DistinctCount: &lowDistinct,     // Only 3 distinct values
+				},
+			},
+		},
+		{
+			ID:         payoutAccountsTableID,
+			SchemaName: "public",
+			TableName:  "payout_accounts",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: payoutAccountsTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+	)
+
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: NO relationships created
+	// This is the key assertion: accounts.num_users should NEVER create a relationship
+	// with payout_accounts.id, even though their values might overlap
+	if result.InferredRelationships != 0 {
+		t.Errorf("GOLDEN TEST FAILED: expected 0 inferred relationships (num_users should not match payout_accounts.id), got %d", result.InferredRelationships)
+	}
+
+	if len(mocks.relationshipRepo.created) != 0 {
+		t.Errorf("GOLDEN TEST FAILED: expected 0 relationships to be created, got %d relationships", len(mocks.relationshipRepo.created))
+		for i, rel := range mocks.relationshipRepo.created {
+			t.Logf("  Relationship %d: %s.%s -> %s.%s", i+1, rel.SourceColumnTable, rel.SourceColumnName, rel.TargetColumnTable, rel.TargetColumnName)
+		}
+	}
+}
+
 // TestPKMatch_LowCardinalityRatio tests that columns with very low cardinality
 // relative to row count are rejected (status/type columns)
 func TestPKMatch_LowCardinalityRatio(t *testing.T) {
@@ -1582,8 +2048,8 @@ func TestPKMatch_LowCardinalityRatio(t *testing.T) {
 	userEntityID := uuid.New()
 
 	distinctCount := int64(100)
-	lowDistinctCount := int64(5)    // Only 5 distinct values
-	rowCount := int64(10000)         // 10,000 rows -> ratio = 0.0005 (0.05%)
+	lowDistinctCount := int64(5) // Only 5 distinct values
+	rowCount := int64(10000)     // 10,000 rows -> ratio = 0.0005 (0.05%)
 	isJoinableTrue := true
 
 	// Create mocks

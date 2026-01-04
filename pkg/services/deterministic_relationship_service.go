@@ -269,6 +269,11 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 				continue
 			}
 
+			// Exclude names unlikely to be join keys (count, rating, score, etc.)
+			if isPKMatchExcludedName(col.ColumnName) {
+				continue
+			}
+
 			entityRefColumns = append(entityRefColumns, entityRefColumn{
 				entity: entity,
 				column: col,
