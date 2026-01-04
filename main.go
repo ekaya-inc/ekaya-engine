@@ -315,7 +315,8 @@ func main() {
 	mcptools.RegisterOntologyTools(mcpServer.MCP(), ontologyToolDeps)
 
 	mcpHandler := handlers.NewMCPHandler(mcpServer, logger)
-	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, agentAPIKeyService, logger)
+	tenantScopeProvider := database.NewTenantScopeProvider(db)
+	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, agentAPIKeyService, tenantScopeProvider, logger)
 	mcpHandler.RegisterRoutes(mux, mcpAuthMiddleware)
 
 	// Register MCP OAuth token endpoint (public - for MCP clients)

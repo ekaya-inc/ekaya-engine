@@ -38,7 +38,7 @@ func newTestMCPAuthMiddleware() *mcpauth.Middleware {
 		claims: &auth.Claims{ProjectID: "test-project"},
 		token:  "test-token",
 	}
-	return mcpauth.NewMiddleware(authService, nil, zap.NewNop())
+	return mcpauth.NewMiddleware(authService, nil, nil, zap.NewNop())
 }
 
 func TestNewMCPHandler(t *testing.T) {

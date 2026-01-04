@@ -16,6 +16,13 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
+// TenantScopeProvider creates tenant-scoped contexts for database operations.
+type TenantScopeProvider interface {
+	// WithTenantScope returns a context with tenant scope set for the given project.
+	// The cleanup function must be called when the scope is no longer needed.
+	WithTenantScope(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error)
+}
+
 // Middleware provides MCP-specific authentication middleware.
 // Unlike the general auth middleware, this returns RFC 6750 WWW-Authenticate
 // headers for OAuth 2.0 Bearer token authentication errors.
@@ -23,23 +30,25 @@ import (
 type Middleware struct {
 	authService     auth.AuthService
 	agentKeyService services.AgentAPIKeyService
+	tenantProvider  TenantScopeProvider
 	logger          *zap.Logger
 }
 
 // NewMiddleware creates a new MCP auth middleware.
-// agentKeyService can be nil if agent API key authentication is not needed.
-func NewMiddleware(authService auth.AuthService, agentKeyService services.AgentAPIKeyService, logger *zap.Logger) *Middleware {
+// agentKeyService and tenantProvider can be nil if agent API key authentication is not needed.
+func NewMiddleware(authService auth.AuthService, agentKeyService services.AgentAPIKeyService, tenantProvider TenantScopeProvider, logger *zap.Logger) *Middleware {
 	return &Middleware{
 		authService:     authService,
 		agentKeyService: agentKeyService,
+		tenantProvider:  tenantProvider,
 		logger:          logger,
 	}
 }
 
 // RequireAuth validates authentication and requires project ID to match URL path.
 // It supports two authentication methods:
-//  1. JWT (Bearer): Authorization: Bearer <jwt>
-//  2. Agent API Key: Authorization: api-key:<key> OR X-API-Key: <key>
+//  1. JWT (Bearer): Authorization: Bearer <jwt> (3 dot-separated segments)
+//  2. Agent API Key: Authorization: Bearer <key>, Authorization: api-key:<key>, or X-API-Key: <key>
 //
 // The pathParamName is the name used in r.PathValue() (e.g., "pid").
 // Returns RFC 6750 WWW-Authenticate headers on authentication failures.
@@ -51,9 +60,18 @@ func (m *Middleware) RequireAuth(pathParamName string) func(http.Handler) http.H
 			apiKey := ""
 
 			if strings.HasPrefix(authHeader, "api-key:") {
+				// Explicit api-key: prefix
 				apiKey = strings.TrimPrefix(authHeader, "api-key:")
 			} else if key := r.Header.Get("X-API-Key"); key != "" {
+				// X-API-Key header
 				apiKey = key
+			} else if strings.HasPrefix(authHeader, "Bearer ") {
+				// Bearer token - determine if it's a JWT or API key
+				token := strings.TrimPrefix(authHeader, "Bearer ")
+				if !isJWT(token) {
+					// Not a JWT (no 3 dot-separated segments), treat as API key
+					apiKey = token
+				}
 			}
 
 			if apiKey != "" {
@@ -67,12 +85,25 @@ func (m *Middleware) RequireAuth(pathParamName string) func(http.Handler) http.H
 	}
 }
 
+// isJWT checks if a token looks like a JWT (3 dot-separated segments).
+// JWTs have the format: header.payload.signature
+func isJWT(token string) bool {
+	parts := strings.Split(token, ".")
+	return len(parts) == 3
+}
+
 // handleAgentKeyAuth handles Agent API key authentication.
 func (m *Middleware) handleAgentKeyAuth(w http.ResponseWriter, r *http.Request, next http.Handler, pathParamName string, apiKey string) {
 	ctx := r.Context()
 
 	if m.agentKeyService == nil {
 		m.logger.Error("MCP auth failed: agent key service not configured")
+		m.writeWWWAuthenticate(w, http.StatusInternalServerError, "server_error", "Agent authentication not configured")
+		return
+	}
+
+	if m.tenantProvider == nil {
+		m.logger.Error("MCP auth failed: tenant provider not configured")
 		m.writeWWWAuthenticate(w, http.StatusInternalServerError, "server_error", "Agent authentication not configured")
 		return
 	}
@@ -103,8 +134,20 @@ func (m *Middleware) handleAgentKeyAuth(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	// Create tenant-scoped context for API key validation
+	tenantCtx, cleanup, err := m.tenantProvider.WithTenantScope(ctx, projectID)
+	if err != nil {
+		m.logger.Error("MCP agent auth failed: could not create tenant scope",
+			zap.String("path", r.URL.Path),
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		m.writeWWWAuthenticate(w, http.StatusInternalServerError, "server_error", "Authentication failed")
+		return
+	}
+	defer cleanup()
+
 	// Validate API key
-	valid, err := m.agentKeyService.ValidateKey(ctx, projectID, apiKey)
+	valid, err := m.agentKeyService.ValidateKey(tenantCtx, projectID, apiKey)
 	if err != nil {
 		m.logger.Error("MCP agent auth failed: key validation error",
 			zap.String("path", r.URL.Path),

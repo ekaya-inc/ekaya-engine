@@ -81,7 +81,7 @@ func (s *authService) ValidateRequest(r *http.Request) (*Claims, string, error) 
 
 	claims, err := s.jwksClient.ValidateToken(tokenString)
 	if err != nil {
-		s.logger.Debug("JWT validation failed",
+		s.logger.Error("JWT validation failed",
 			zap.Error(err),
 			zap.String("path", r.URL.Path),
 			zap.String("token_source", tokenSource))
