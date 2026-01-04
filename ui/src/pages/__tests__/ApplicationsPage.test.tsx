@@ -56,8 +56,8 @@ describe('ApplicationsPage', () => {
   it('shows coming soon toast when clicking on available application', () => {
     renderPage();
 
-    const aiDataLiaisonCard = screen.getByText('AI Data Liaison').closest('div');
-    fireEvent.click(aiDataLiaisonCard!);
+    const aiDataLiaisonCard = screen.getByTestId('app-card-ai-data-liaison');
+    fireEvent.click(aiDataLiaisonCard);
 
     // Toast should appear with the application name
     expect(
@@ -68,8 +68,8 @@ describe('ApplicationsPage', () => {
   it('shows coming soon toast for Product Kit', () => {
     renderPage();
 
-    const productKitCard = screen.getByText('Product Kit').closest('div');
-    fireEvent.click(productKitCard!);
+    const productKitCard = screen.getByTestId('app-card-product-kit');
+    fireEvent.click(productKitCard);
 
     expect(
       screen.getByText('Product Kit installation coming soon!')
@@ -79,10 +79,8 @@ describe('ApplicationsPage', () => {
   it('shows coming soon toast for On-Premise Chat', () => {
     renderPage();
 
-    const onPremiseChatCard = screen
-      .getByText('On-Premise Chat')
-      .closest('div');
-    fireEvent.click(onPremiseChatCard!);
+    const onPremiseChatCard = screen.getByTestId('app-card-on-premise-chat');
+    fireEvent.click(onPremiseChatCard);
 
     expect(
       screen.getByText('On-Premise Chat installation coming soon!')
@@ -92,9 +90,8 @@ describe('ApplicationsPage', () => {
   it('does not show toast for disabled More Coming tile', () => {
     renderPage();
 
-    // Find the More Coming! card and click it
-    const moreComingCard = screen.getByText('More Coming!').closest('div');
-    fireEvent.click(moreComingCard!);
+    const moreComingCard = screen.getByTestId('app-card-more-coming');
+    fireEvent.click(moreComingCard);
 
     // No toast should appear
     expect(
@@ -105,8 +102,9 @@ describe('ApplicationsPage', () => {
   it('navigates back when clicking back button', () => {
     renderPage();
 
-    // Find and click the back button (button with ArrowLeft icon)
-    const backButton = screen.getByRole('button', { name: '' });
+    const backButton = screen.getByRole('button', {
+      name: 'Back to project dashboard',
+    });
     fireEvent.click(backButton);
 
     expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1');

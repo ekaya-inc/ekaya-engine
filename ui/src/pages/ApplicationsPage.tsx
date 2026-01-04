@@ -25,7 +25,6 @@ interface ApplicationInfo {
   id: string;
   title: string;
   subtitle: string;
-  description: string;
   icon: LucideIcon;
   color: AppColor;
   available: boolean;
@@ -36,8 +35,6 @@ const applications: ApplicationInfo[] = [
     id: 'ai-data-liaison',
     title: 'AI Data Liaison',
     subtitle: 'Make Better Business Decisions 10x Faster',
-    description:
-      'AI-powered data analysis and insights for faster, smarter business decisions.',
     icon: BrainCircuit,
     color: 'blue',
     available: true,
@@ -46,8 +43,6 @@ const applications: ApplicationInfo[] = [
     id: 'product-kit',
     title: 'Product Kit',
     subtitle: 'Enable AI Features in your existing SaaS Product',
-    description:
-      'Integrate AI capabilities directly into your product with pre-built components and APIs.',
     icon: Package,
     color: 'purple',
     available: true,
@@ -56,8 +51,6 @@ const applications: ApplicationInfo[] = [
     id: 'on-premise-chat',
     title: 'On-Premise Chat',
     subtitle: 'Deploy AI Chat where data never leaves your data boundary',
-    description:
-      'Self-hosted chat solution for maximum data privacy and compliance.',
     icon: MessageSquare,
     color: 'green',
     available: true,
@@ -66,8 +59,6 @@ const applications: ApplicationInfo[] = [
     id: 'more-coming',
     title: 'More Coming!',
     subtitle: 'Additional applications in development',
-    description:
-      'We are building more applications to help you leverage your data.',
     icon: Sparkles,
     color: 'gray',
     available: false,
@@ -105,6 +96,7 @@ const ApplicationsPage = () => {
         <Button
           variant="ghost"
           size="icon"
+          aria-label="Back to project dashboard"
           onClick={() => navigate(`/projects/${pid}`)}
         >
           <ArrowLeft className="h-4 w-4" />
@@ -117,8 +109,8 @@ const ApplicationsPage = () => {
         </div>
       </div>
 
-      {/* Application tiles - 3 column grid with smaller tiles */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {/* Application tiles - 2 column grid with smaller tiles */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {applications.map((app) => {
           const Icon = app.icon;
           const colors = getColorClasses(app.color);
@@ -126,11 +118,12 @@ const ApplicationsPage = () => {
           return (
             <Card
               key={app.id}
+              data-testid={`app-card-${app.id}`}
               className={cn(
                 'transition-all',
                 app.available
                   ? 'cursor-pointer hover:shadow-md'
-                  : 'cursor-not-allowed opacity-60',
+                  : 'cursor-not-allowed border-dashed opacity-60',
               )}
               onClick={() => app.available && handleInstall(app)}
             >
