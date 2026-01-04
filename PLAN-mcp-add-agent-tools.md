@@ -659,22 +659,30 @@ export const AgentAPIKeyDisplay = ({ projectId }: AgentAPIKeyDisplayProps) => {
 
 ---
 
-### Step 12: Update TypeScript Types
+### Step 12: Update TypeScript Types [x] COMPLETED
 
-**File:** `ui/src/types/index.ts` (or types file)
+**File:** `ui/src/types/mcp.ts`
 
-Ensure `ToolGroupState` includes agent_tools:
+**What Was Found:**
+
+The TypeScript types already support `agent_tools` through the existing `Record<string, ToolGroupState>` type:
 
 ```typescript
 export interface MCPConfigResponse {
   serverUrl: string;
-  toolGroups: {
-    developer?: ToolGroupState;
-    approved_queries?: ToolGroupState;
-    agent_tools?: ToolGroupState; // Add this
-  };
+  toolGroups: Record<string, ToolGroupState>;
 }
 ```
+
+**Why This Is Already Complete:**
+
+The `Record<string, ToolGroupState>` type is **more flexible** than the originally planned explicit property approach:
+1. Automatically supports any tool group key including `agent_tools`
+2. Doesn't require type updates when new tool groups are added
+3. `config.toolGroups['agent_tools']` is properly typed as `ToolGroupState | undefined`
+4. Already being used correctly in `MCPServerPage.tsx` (lines 380-401)
+
+**No changes required** - the existing type definition already handles `agent_tools` properly.
 
 ---
 
