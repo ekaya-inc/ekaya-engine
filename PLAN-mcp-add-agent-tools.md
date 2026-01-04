@@ -88,147 +88,48 @@ Add a new "Agent Tools" section to the MCP Server configuration page, positioned
 
 ---
 
-### Step 4: Create Agent API Key Service
+### Step 4: Create Agent API Key Service [x] COMPLETED
 
-**File:** `pkg/services/agent_api_key.go`
+**Files Created:**
+- `pkg/services/agent_api_key.go` - Service interface and implementation
+- `pkg/services/agent_api_key_test.go` - Comprehensive unit tests
 
-```go
-package services
+**What Was Implemented:**
 
-import (
-    "context"
-    "crypto/rand"
-    "encoding/hex"
-    "fmt"
-    "os"
+1. **AgentAPIKeyService interface** (`pkg/services/agent_api_key.go:18-31`):
+   - `GenerateKey(ctx, projectID) (string, error)` - Creates 32-byte random key, encrypts and stores
+   - `GetKey(ctx, projectID) (string, error)` - Retrieves and decrypts stored key
+   - `RegenerateKey(ctx, projectID) (string, error)` - Generates new key (overwrites old)
+   - `ValidateKey(ctx, projectID, providedKey) (bool, error)` - Validates key with constant-time comparison
 
-    "github.com/google/uuid"
-    "go.uber.org/zap"
+2. **Service implementation** (`pkg/services/agent_api_key.go:33-135`):
+   - Uses `crypto.CredentialEncryptor` with `PROJECT_CREDENTIALS_KEY` env var (same as datasource credentials)
+   - Keys are 32 random bytes encoded as 64-character hex strings
+   - Uses `crypto/subtle.ConstantTimeCompare` for validation (prevents timing attacks)
+   - Follows existing service patterns: interface + implementation, compile-time interface check
 
-    "github.com/ekaya-inc/ekaya-engine/pkg/crypto"
-    "github.com/ekaya-inc/ekaya-engine/pkg/repositories"
-)
+3. **Comprehensive unit tests** (`pkg/services/agent_api_key_test.go`):
+   - `TestAgentAPIKeyService_GenerateKey` - Verifies 64 hex chars, encrypted storage
+   - `TestAgentAPIKeyService_GenerateKey_Unique` - Verifies cryptographic uniqueness
+   - `TestAgentAPIKeyService_GetKey` - Roundtrip encryption/decryption
+   - `TestAgentAPIKeyService_GetKey_NotExists` - Returns empty string (not error) for missing
+   - `TestAgentAPIKeyService_RegenerateKey` - Verifies old key invalidated
+   - `TestAgentAPIKeyService_ValidateKey_Valid` - Correct key validates
+   - `TestAgentAPIKeyService_ValidateKey_Invalid` - Wrong key rejected
+   - `TestAgentAPIKeyService_ValidateKey_NoKey` - Returns false (not error) when no key
+   - `TestAgentAPIKeyService_ValidateKey_AfterRegenerate` - Old key fails, new key works
+   - `TestAgentAPIKeyService_NewService_MissingEnvVar` - Error when env var missing
+   - `TestAgentAPIKeyService_NewService_InvalidKey` - Error when key invalid
 
-// AgentAPIKeyService manages agent API keys for MCP authentication.
-type AgentAPIKeyService interface {
-    // GenerateKey creates a new random API key for a project.
-    GenerateKey(ctx context.Context, projectID uuid.UUID) (string, error)
+**Code Locations:**
+- `pkg/services/agent_api_key.go:18-31` - AgentAPIKeyService interface
+- `pkg/services/agent_api_key.go:39-60` - NewAgentAPIKeyService constructor
+- `pkg/services/agent_api_key.go:63-88` - GenerateKey implementation
+- `pkg/services/agent_api_key.go:118-132` - ValidateKey with constant-time comparison
 
-    // GetKey retrieves the decrypted API key for a project.
-    GetKey(ctx context.Context, projectID uuid.UUID) (string, error)
-
-    // RegenerateKey invalidates the old key and generates a new one.
-    RegenerateKey(ctx context.Context, projectID uuid.UUID) (string, error)
-
-    // ValidateKey checks if the provided key matches the project's key.
-    ValidateKey(ctx context.Context, projectID uuid.UUID, providedKey string) (bool, error)
-}
-
-type agentAPIKeyService struct {
-    repo      repositories.MCPConfigRepository
-    encryptor *crypto.CredentialEncryptor
-    logger    *zap.Logger
-}
-
-// NewAgentAPIKeyService creates a new agent API key service.
-func NewAgentAPIKeyService(
-    repo repositories.MCPConfigRepository,
-    logger *zap.Logger,
-) (AgentAPIKeyService, error) {
-    // Get encryption key from environment
-    encKey := os.Getenv("PROJECT_CREDENTIALS_KEY")
-    if encKey == "" {
-        return nil, fmt.Errorf("PROJECT_CREDENTIALS_KEY not set")
-    }
-
-    encryptor, err := crypto.NewCredentialEncryptor(encKey)
-    if err != nil {
-        return nil, fmt.Errorf("failed to create encryptor: %w", err)
-    }
-
-    return &agentAPIKeyService{
-        repo:      repo,
-        encryptor: encryptor,
-        logger:    logger,
-    }, nil
-}
-
-// GenerateKey creates a new random 32-byte API key (64 hex chars).
-func (s *agentAPIKeyService) GenerateKey(ctx context.Context, projectID uuid.UUID) (string, error) {
-    // Generate 32 random bytes
-    keyBytes := make([]byte, 32)
-    if _, err := rand.Read(keyBytes); err != nil {
-        return "", fmt.Errorf("failed to generate random key: %w", err)
-    }
-
-    // Encode as hex (64 characters)
-    plainKey := hex.EncodeToString(keyBytes)
-
-    // Encrypt and store
-    encrypted, err := s.encryptor.Encrypt(plainKey)
-    if err != nil {
-        return "", fmt.Errorf("failed to encrypt key: %w", err)
-    }
-
-    if err := s.repo.SetAgentAPIKey(ctx, projectID, encrypted); err != nil {
-        return "", fmt.Errorf("failed to store key: %w", err)
-    }
-
-    s.logger.Info("Generated agent API key",
-        zap.String("project_id", projectID.String()),
-    )
-
-    return plainKey, nil
-}
-
-// GetKey retrieves the decrypted API key for a project.
-func (s *agentAPIKeyService) GetKey(ctx context.Context, projectID uuid.UUID) (string, error) {
-    encrypted, err := s.repo.GetAgentAPIKey(ctx, projectID)
-    if err != nil {
-        return "", fmt.Errorf("failed to get key: %w", err)
-    }
-
-    if encrypted == "" {
-        return "", nil // No key exists
-    }
-
-    plainKey, err := s.encryptor.Decrypt(encrypted)
-    if err != nil {
-        return "", fmt.Errorf("failed to decrypt key: %w", err)
-    }
-
-    return plainKey, nil
-}
-
-// RegenerateKey invalidates the old key and generates a new one.
-func (s *agentAPIKeyService) RegenerateKey(ctx context.Context, projectID uuid.UUID) (string, error) {
-    s.logger.Info("Regenerating agent API key",
-        zap.String("project_id", projectID.String()),
-    )
-
-    return s.GenerateKey(ctx, projectID)
-}
-
-// ValidateKey checks if the provided key matches the project's key.
-func (s *agentAPIKeyService) ValidateKey(ctx context.Context, projectID uuid.UUID, providedKey string) (bool, error) {
-    storedKey, err := s.GetKey(ctx, projectID)
-    if err != nil {
-        return false, fmt.Errorf("failed to get stored key: %w", err)
-    }
-
-    if storedKey == "" {
-        return false, nil // No key configured
-    }
-
-    // Constant-time comparison to prevent timing attacks
-    return storedKey == providedKey, nil
-}
-
-// Ensure agentAPIKeyService implements AgentAPIKeyService at compile time.
-var _ AgentAPIKeyService = (*agentAPIKeyService)(nil)
-```
-
-**Pattern reference:** `pkg/crypto/credentials.go` (encryption), `pkg/services/mcp_config.go` (service structure)
+**Pattern References:**
+- `pkg/crypto/credentials.go` - Encryption pattern
+- `pkg/services/mcp_config.go` - Service structure pattern
 
 ---
 
