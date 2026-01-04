@@ -419,9 +419,52 @@ async regenerateAgentAPIKey(
 
 ---
 
-### Step 10: Frontend - Create Agent API Key Display Component
+### Step 10: Frontend - Create Agent API Key Display Component [x] COMPLETED
 
-**File:** `ui/src/components/mcp/AgentAPIKeyDisplay.tsx`
+**Files Created:**
+- `ui/src/components/mcp/AgentAPIKeyDisplay.tsx` - Component implementation
+- `ui/src/components/mcp/__tests__/AgentAPIKeyDisplay.test.tsx` - Comprehensive unit tests (12 tests)
+
+**What Was Done:**
+
+1. **Created AgentAPIKeyDisplay component** (`ui/src/components/mcp/AgentAPIKeyDisplay.tsx`):
+   - Displays agent API key in a monospace input field
+   - Shows loading state during initial fetch
+   - Fetches masked key on mount via `engineApi.getAgentAPIKey(projectId, false)`
+   - Reveals full key on input focus via `engineApi.getAgentAPIKey(projectId, true)`
+   - Auto-selects text when focusing for easy copying
+   - Copy to clipboard with success/error toast notifications
+   - Regenerate key with proper confirmation dialog (using Radix UI Dialog, not `window.confirm`)
+   - Shows spinning RefreshCw icon during regeneration
+   - Disables regenerate button while in progress
+
+2. **Created comprehensive test suite** (12 tests):
+   - Shows loading state initially
+   - Displays masked key after loading
+   - Reveals key on input focus
+   - Copies masked key by fetching revealed key first
+   - Copies already revealed key without additional fetch
+   - Shows error toast when copy fails
+   - Opens confirmation dialog when regenerate button is clicked
+   - Closes confirmation dialog when cancel is clicked
+   - Regenerates key when confirmed
+   - Shows error toast when regeneration fails
+   - Shows spinning icon while regenerating
+   - Displays helper text
+
+3. **Implementation notes:**
+   - Used Dialog component instead of `window.confirm` for better UX
+   - Follows existing patterns from MCPServerURL.tsx and other MCP components
+   - Uses `default export` pattern consistent with other MCP components
+   - Properly styled with Tailwind CSS and consistent with design system
+
+**Code Locations:**
+- `ui/src/components/mcp/AgentAPIKeyDisplay.tsx` - Component (default export)
+- `ui/src/components/mcp/__tests__/AgentAPIKeyDisplay.test.tsx` - Tests
+
+**Original Plan File:**
+
+`ui/src/components/mcp/AgentAPIKeyDisplay.tsx`
 
 ```typescript
 import { Copy, RefreshCw } from 'lucide-react';
