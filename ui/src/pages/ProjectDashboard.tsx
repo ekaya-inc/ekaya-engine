@@ -10,6 +10,7 @@ import {
   Loader2,
   MessageCircleQuestion,
   Network,
+  Plus,
   Search,
   Server,
 } from 'lucide-react';
@@ -19,6 +20,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import MCPLogo from '../components/icons/MCPLogo';
 // TEMPORARY: Import commented out for MVP launch - Coming Soon UI replaces full panels
 // import ManagedAIOptionPanel from '../components/ManagedAIOptionPanel';
+import { Button } from '../components/ui/Button';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import {
   Dialog,
@@ -432,8 +434,8 @@ const ProjectDashboard = () => {
     },
   ];
 
-    const handleTileClick = (tile: Tile): void => {
-      if (!tile.disabled) {
+  const handleTileClick = (tile: Tile): void => {
+    if (!tile.disabled) {
       navigate(tile.path);
     }
   };
@@ -551,9 +553,19 @@ const ProjectDashboard = () => {
     <div className="mx-auto max-w-6xl space-y-8">
       {/* Applications Section */}
       <section>
-        <h1 className="text-2xl font-semibold mb-2">Applications</h1>
+        <div className="flex items-center justify-between mb-2">
+          <h1 className="text-2xl font-semibold">Applications</h1>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate(`/projects/${pid}/applications`)}
+          >
+            <Plus className="h-4 w-4" />
+            Install Application
+          </Button>
+        </div>
         <p className="text-text-secondary mb-4">
-          Deploy applications that connect to your data through secure, governed interfaces.
+          Install applications that safely connect to your data through secure interfaces.
         </p>
         <div className="grid gap-6 md:grid-cols-2">
           {applicationTiles.map(renderApplicationTile)}
