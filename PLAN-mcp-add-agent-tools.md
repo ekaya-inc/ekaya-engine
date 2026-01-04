@@ -334,32 +334,39 @@ var approvedQueryToolNames = map[string]bool{
 
 ---
 
-### Step 8: Frontend - Add UI Metadata
+### Step 8: Frontend - Add UI Metadata [x] COMPLETED
 
-**File:** `ui/src/constants/mcpToolMetadata.ts`
+**Files Modified:**
+- `ui/src/constants/mcpToolMetadata.ts` - Added `AGENT_TOOLS` constant and metadata entry
 
-Add to `TOOL_GROUP_IDS`:
+**Files Created:**
+- `ui/src/constants/mcpToolMetadata.test.ts` - Comprehensive unit tests for the metadata module
 
-```typescript
-export const TOOL_GROUP_IDS = {
-  DEVELOPER: 'developer',
-  APPROVED_QUERIES: 'approved_queries',
-  AGENT_TOOLS: 'agent_tools', // Add this
-} as const;
-```
+**What Was Done:**
 
-Add to `TOOL_GROUP_METADATA`:
+1. **Added AGENT_TOOLS to TOOL_GROUP_IDS** (`ui/src/constants/mcpToolMetadata.ts:22`):
+   ```typescript
+   AGENT_TOOLS: 'agent_tools',
+   ```
 
-```typescript
-[TOOL_GROUP_IDS.AGENT_TOOLS]: {
-  name: 'Agent Tools',
-  description:
-    'Enable AI Agents to access the database safely and securely with logging and auditing capabilities. AI Agents can only use the enabled Pre-Approved Queries so that you have full control over access.',
-  warning: 'Agent access requires API key authentication. Generate and distribute keys carefully.',
-},
-```
+2. **Added metadata for agent tools** (`ui/src/constants/mcpToolMetadata.ts:57-63`):
+   - Name: "Agent Tools"
+   - Description emphasizes safe/secure access and Pre-Approved Queries restriction
+   - Warning about API key authentication requirements
+   - No subOptions (unlike developer and approved_queries)
 
-**Pattern reference:** `ui/src/constants/mcpToolMetadata.ts:19-56`
+3. **Added comprehensive test coverage** (`ui/src/constants/mcpToolMetadata.test.ts`):
+   - Tests for TOOL_GROUP_IDS values and count
+   - Tests for each tool group's metadata (developer, approved_queries, agent_tools)
+   - Tests that agent_tools has no subOptions (intentional design choice)
+   - Tests that all tool group IDs have corresponding metadata entries
+   - Tests for getToolGroupMetadata helper function
+
+**Code Locations:**
+- `ui/src/constants/mcpToolMetadata.ts:22` - AGENT_TOOLS constant
+- `ui/src/constants/mcpToolMetadata.ts:57-63` - Agent tools metadata entry
+
+**Pattern reference:** `ui/src/constants/mcpToolMetadata.ts:19-56` (existing tool group patterns)
 
 ---
 
