@@ -55,6 +55,14 @@ func ParseQueryID(w http.ResponseWriter, r *http.Request, logger *zap.Logger) (u
 	return parseUUID(w, r, "qid", "invalid_query_id", "Invalid query ID format", logger)
 }
 
+// ParseTermID extracts and validates the glossary term ID from the request path.
+// Returns the parsed UUID and true on success, or uuid.Nil and false on error
+// (after writing an error response).
+// Expects path parameter: tid
+func ParseTermID(w http.ResponseWriter, r *http.Request, logger *zap.Logger) (uuid.UUID, bool) {
+	return parseUUID(w, r, "tid", "invalid_term_id", "Invalid term ID format", logger)
+}
+
 // ParseProjectAndDatasourceIDs extracts and validates both project and datasource IDs.
 // Returns both UUIDs and true on success, or uuid.Nil values and false on error.
 // Expects path parameters: pid, dsid

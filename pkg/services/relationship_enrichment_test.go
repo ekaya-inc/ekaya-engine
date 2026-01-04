@@ -139,6 +139,10 @@ func (r *testRelEnrichmentEntityRepo) GetAllOccurrencesByProject(ctx context.Con
 	return nil, nil
 }
 
+func (r *testRelEnrichmentEntityRepo) UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error {
+	return nil
+}
+
 // Tests for task 2 changes: validation, retry logic, error handling
 
 func TestRelationshipEnrichmentService_ValidationFiltersInvalid(t *testing.T) {

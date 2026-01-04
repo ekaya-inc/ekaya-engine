@@ -361,3 +361,63 @@ func TestMCPConfigService_Get_NoDatasourceFallsBackToDisabled(t *testing.T) {
 	require.True(t, ok)
 	assert.False(t, approvedQueries.Enabled, "approved_queries should be disabled when no datasource exists")
 }
+
+func TestMCPConfigService_Get_ServerURLConstruction(t *testing.T) {
+	// Test that ServerURL is constructed correctly regardless of trailing slash on baseURL
+	projectID := uuid.MustParse("12345678-1234-1234-1234-123456789abc")
+	datasourceID := uuid.New()
+
+	tests := []struct {
+		name        string
+		baseURL     string
+		expectedURL string
+	}{
+		{
+			name:        "base URL without trailing slash",
+			baseURL:     "http://localhost:3443",
+			expectedURL: "http://localhost:3443/mcp/12345678-1234-1234-1234-123456789abc",
+		},
+		{
+			name:        "base URL with trailing slash",
+			baseURL:     "http://localhost:3443/",
+			expectedURL: "http://localhost:3443/mcp/12345678-1234-1234-1234-123456789abc",
+		},
+		{
+			name:        "base URL with path",
+			baseURL:     "https://example.com/api/v1",
+			expectedURL: "https://example.com/api/v1/mcp/12345678-1234-1234-1234-123456789abc",
+		},
+		{
+			name:        "base URL with path and trailing slash",
+			baseURL:     "https://example.com/api/v1/",
+			expectedURL: "https://example.com/api/v1/mcp/12345678-1234-1234-1234-123456789abc",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			configRepo := &mockMCPConfigRepository{
+				config: models.DefaultMCPConfig(projectID),
+			}
+			queryService := &mockQueryServiceForMCP{
+				hasEnabledQueries: false,
+			}
+			projectService := &mockProjectServiceForMCP{
+				defaultDatasourceID: datasourceID,
+			}
+
+			svc := NewMCPConfigService(
+				configRepo,
+				queryService,
+				projectService,
+				tt.baseURL,
+				zap.NewNop(),
+			)
+
+			resp, err := svc.Get(context.Background(), projectID)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			assert.Equal(t, tt.expectedURL, resp.ServerURL, "ServerURL should be properly constructed")
+		})
+	}
+}

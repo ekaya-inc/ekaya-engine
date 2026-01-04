@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -235,8 +236,19 @@ func (s *mcpConfigService) buildResponse(ctx context.Context, projectID uuid.UUI
 		toolGroups[groupName] = groupConfig
 	}
 
+	serverURL, err := url.JoinPath(s.baseURL, "mcp", projectID.String())
+	if err != nil {
+		s.logger.Error("failed to build server URL",
+			zap.String("base_url", s.baseURL),
+			zap.String("project_id", projectID.String()),
+			zap.Error(err),
+		)
+		// Fall back to simple concatenation if URL parsing fails
+		serverURL = s.baseURL + "/mcp/" + projectID.String()
+	}
+
 	return &MCPConfigResponse{
-		ServerURL:  fmt.Sprintf("%s/mcp/%s", s.baseURL, projectID.String()),
+		ServerURL:  serverURL,
 		ToolGroups: toolGroups,
 	}
 }

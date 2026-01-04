@@ -214,6 +214,14 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 		return fmt.Errorf("save column details: %w", err)
 	}
 
+	// Update occurrence roles from FK role enrichments
+	if err := s.updateOccurrenceRoles(ctx, projectID, tableName, enrichments, fkInfo); err != nil {
+		// Log but don't fail - occurrence roles are supplementary
+		s.logger.Warn("Failed to update occurrence roles",
+			zap.String("table", tableName),
+			zap.Error(err))
+	}
+
 	s.logger.Info("Enriched columns for table",
 		zap.String("table", tableName),
 		zap.Int("column_count", len(columnDetails)))
@@ -757,6 +765,82 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 	}
 
 	return details
+}
+
+// updateOccurrenceRoles updates entity occurrence roles based on FK role enrichments.
+// For FK columns that have an FKRole (e.g., "host", "visitor"), this updates the
+// corresponding occurrence in engine_ontology_entity_occurrences.
+func (s *columnEnrichmentService) updateOccurrenceRoles(
+	ctx context.Context,
+	projectID uuid.UUID,
+	tableName string,
+	enrichments []columnEnrichment,
+	fkInfo map[string]string,
+) error {
+	// Build map of FK columns with roles
+	fkRoles := make(map[string]string) // columnName -> role
+	for _, e := range enrichments {
+		if e.FKRole != nil && *e.FKRole != "" {
+			fkRoles[e.Name] = *e.FKRole
+		}
+	}
+
+	if len(fkRoles) == 0 {
+		return nil // No FK roles to update
+	}
+
+	// Get all entities to map target tables to entity IDs
+	entities, err := s.entityRepo.GetByProject(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("get entities: %w", err)
+	}
+
+	entityByPrimaryTable := make(map[string]*models.OntologyEntity)
+	for _, e := range entities {
+		entityByPrimaryTable[e.PrimaryTable] = e
+	}
+
+	// Update occurrence role for each FK column with a role
+	for columnName, role := range fkRoles {
+		targetTable, hasFKInfo := fkInfo[columnName]
+		if !hasFKInfo {
+			s.logger.Debug("FK role without FK info, skipping",
+				zap.String("table", tableName),
+				zap.String("column", columnName),
+				zap.String("role", role))
+			continue
+		}
+
+		targetEntity, hasEntity := entityByPrimaryTable[targetTable]
+		if !hasEntity {
+			s.logger.Debug("FK target table has no entity, skipping",
+				zap.String("table", tableName),
+				zap.String("column", columnName),
+				zap.String("target_table", targetTable),
+				zap.String("role", role))
+			continue
+		}
+
+		// Update the occurrence role
+		rolePtr := &role
+		if err := s.entityRepo.UpdateOccurrenceRole(ctx, targetEntity.ID, tableName, columnName, rolePtr); err != nil {
+			s.logger.Warn("Failed to update occurrence role",
+				zap.String("table", tableName),
+				zap.String("column", columnName),
+				zap.String("entity", targetEntity.Name),
+				zap.String("role", role),
+				zap.Error(err))
+			// Continue with other columns
+		} else {
+			s.logger.Debug("Updated occurrence role",
+				zap.String("table", tableName),
+				zap.String("column", columnName),
+				zap.String("entity", targetEntity.Name),
+				zap.String("role", role))
+		}
+	}
+
+	return nil
 }
 
 // logTableFailure logs detailed information about a failed table enrichment.

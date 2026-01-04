@@ -98,6 +98,7 @@ type ColumnOverview struct {
 	Entity        *string `json:"entity,omitempty"`
 	EntityRole    *string `json:"entity_role,omitempty"`
 	HasEnumValues bool    `json:"has_enum_values"`
+	FKRole        string  `json:"fk_role,omitempty"` // semantic role: host, visitor, payer, payee, etc.
 }
 
 // TableRelationship represents a relationship at table level.

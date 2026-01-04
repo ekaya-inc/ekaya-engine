@@ -145,6 +145,10 @@ func (m *mockOntologyEntityRepository) GetAllOccurrencesByProject(ctx context.Co
 	return m.occurrences, nil
 }
 
+func (m *mockOntologyEntityRepository) UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error {
+	return nil
+}
+
 func (m *mockOntologyEntityRepository) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {
 	return nil
 }
@@ -614,6 +618,106 @@ func TestGetTablesContext_AllTables(t *testing.T) {
 	assert.Len(t, result.Tables, 2)
 }
 
+func TestGetTablesContext_FKRoles(t *testing.T) {
+	// Tests that FK roles and analytical roles from enriched column_details are exposed at tables depth
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	entityID1 := uuid.New()
+	tableID := uuid.New()
+
+	// Ontology with enriched column_details containing FK roles and analytical roles
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"billing_engagements": {
+				{Name: "id", IsPrimaryKey: true, Role: models.ColumnRoleIdentifier},
+				{Name: "host_id", IsForeignKey: true, ForeignTable: "users", FKRole: "host", Role: models.ColumnRoleDimension},
+				{Name: "visitor_id", IsForeignKey: true, ForeignTable: "users", FKRole: "visitor", Role: models.ColumnRoleDimension},
+				{Name: "status", EnumValues: []models.EnumValue{{Value: "active"}, {Value: "completed"}}, Role: models.ColumnRoleDimension},
+				{Name: "amount", Role: models.ColumnRoleMeasure},
+			},
+		},
+	}
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:            entityID1,
+			ProjectID:     projectID,
+			OntologyID:    ontologyID,
+			Name:          "billing_engagement",
+			Description:   "A paid session between host and visitor",
+			PrimarySchema: "public",
+			PrimaryTable:  "billing_engagements",
+			PrimaryColumn: "id",
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
+	entityRepo := &mockOntologyEntityRepository{entities: entities}
+	relationshipRepo := &mockEntityRelationshipRepository{}
+
+	// Mock schema columns for the table
+	schemaRepo := &mockSchemaRepository{
+		columnsByTable: map[string][]*models.SchemaColumn{
+			"billing_engagements": {
+				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "host_id", DataType: "uuid", IsPrimaryKey: false},
+				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "visitor_id", DataType: "uuid", IsPrimaryKey: false},
+				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "status", DataType: "varchar", IsPrimaryKey: false},
+				{ID: uuid.New(), SchemaTableID: tableID, ColumnName: "amount", DataType: "numeric", IsPrimaryKey: false},
+			},
+		},
+	}
+	projectService := &mockProjectServiceForOntology{}
+
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+
+	result, err := svc.GetTablesContext(ctx, projectID, []string{"billing_engagements"})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result.Tables, 1)
+
+	table := result.Tables["billing_engagements"]
+	assert.Equal(t, "billing_engagement", table.BusinessName)
+	assert.Len(t, table.Columns, 5)
+
+	// Verify FK roles and analytical roles are exposed
+	columnByName := make(map[string]models.ColumnOverview)
+	for _, col := range table.Columns {
+		columnByName[col.Name] = col
+	}
+
+	// host_id should have FKRole = "host" and Role = "dimension"
+	hostCol := columnByName["host_id"]
+	assert.Equal(t, "host", hostCol.FKRole, "host_id should have FK role 'host'")
+	assert.Equal(t, models.ColumnRoleDimension, hostCol.Role, "host_id should have analytical role 'dimension'")
+
+	// visitor_id should have FKRole = "visitor" and Role = "dimension"
+	visitorCol := columnByName["visitor_id"]
+	assert.Equal(t, "visitor", visitorCol.FKRole, "visitor_id should have FK role 'visitor'")
+	assert.Equal(t, models.ColumnRoleDimension, visitorCol.Role, "visitor_id should have analytical role 'dimension'")
+
+	// id should have Role = "identifier" but no FKRole (it's a PK, not FK)
+	idCol := columnByName["id"]
+	assert.Empty(t, idCol.FKRole, "primary key should not have FK role")
+	assert.Equal(t, models.ColumnRoleIdentifier, idCol.Role, "id should have analytical role 'identifier'")
+
+	// status should have HasEnumValues = true and Role = "dimension"
+	statusCol := columnByName["status"]
+	assert.True(t, statusCol.HasEnumValues, "status should have enum values")
+	assert.Empty(t, statusCol.FKRole, "status should not have FK role")
+	assert.Equal(t, models.ColumnRoleDimension, statusCol.Role, "status should have analytical role 'dimension'")
+
+	// amount should have Role = "measure"
+	amountCol := columnByName["amount"]
+	assert.Equal(t, models.ColumnRoleMeasure, amountCol.Role, "amount should have analytical role 'measure'")
+	assert.Empty(t, amountCol.FKRole, "amount should not have FK role")
+}
+
 func TestGetColumnsContext(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
@@ -734,4 +838,164 @@ func TestGetColumnsContext_TooManyTables(t *testing.T) {
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "too many tables requested")
 	assert.Contains(t, err.Error(), fmt.Sprintf("maximum %d tables allowed", MaxColumnsDepthTables))
+}
+
+func TestGetDomainContext_DeduplicatesRelationships(t *testing.T) {
+	// Tests that duplicate relationships (same source→target pair) are deduplicated,
+	// keeping the relationship with the longest description for more context.
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	entityID1 := uuid.New() // user
+	entityID2 := uuid.New() // billing_engagement
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+	}
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:            entityID1,
+			Name:          "user",
+			PrimarySchema: "public",
+			PrimaryTable:  "users",
+			PrimaryColumn: "id",
+		},
+		{
+			ID:            entityID2,
+			Name:          "billing_engagement",
+			PrimarySchema: "public",
+			PrimaryTable:  "billing_engagements",
+			PrimaryColumn: "id",
+		},
+	}
+
+	occurrences := []*models.OntologyEntityOccurrence{
+		{ID: uuid.New(), EntityID: entityID1, TableName: "users", ColumnName: "id"},
+		{ID: uuid.New(), EntityID: entityID2, TableName: "billing_engagements", ColumnName: "id"},
+	}
+
+	// Create duplicate relationships: same user→billing_engagement pair via host_id and visitor_id
+	// This simulates the scenario where both FKs create separate relationship rows
+	shortDesc := "via FK"
+	longDesc := "User participates in billing engagement as either host or visitor"
+	relationships := []*models.EntityRelationship{
+		{
+			ID:                uuid.New(),
+			SourceEntityID:    entityID1,
+			TargetEntityID:    entityID2,
+			SourceColumnTable: "users",
+			SourceColumnName:  "id",
+			TargetColumnTable: "billing_engagements",
+			TargetColumnName:  "host_id",
+			Description:       &shortDesc, // Short description
+		},
+		{
+			ID:                uuid.New(),
+			SourceEntityID:    entityID1,
+			TargetEntityID:    entityID2,
+			SourceColumnTable: "users",
+			SourceColumnName:  "id",
+			TargetColumnTable: "billing_engagements",
+			TargetColumnName:  "visitor_id",
+			Description:       &longDesc, // Longer, more descriptive - should be kept
+		},
+		{
+			ID:                uuid.New(),
+			SourceEntityID:    entityID1,
+			TargetEntityID:    entityID2,
+			SourceColumnTable: "users",
+			SourceColumnName:  "id",
+			TargetColumnTable: "billing_engagements",
+			TargetColumnName:  "created_by",
+			Description:       nil, // No description
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
+	entityRepo := &mockOntologyEntityRepository{
+		entities:    entities,
+		occurrences: occurrences,
+	}
+	relationshipRepo := &mockEntityRelationshipRepository{relationships: relationships}
+	schemaRepo := &mockSchemaRepository{}
+	projectService := &mockProjectServiceForOntology{}
+
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+
+	result, err := svc.GetDomainContext(ctx, projectID)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+
+	// Should only have 1 relationship (deduplicated from 3)
+	assert.Len(t, result.Relationships, 1, "Expected 3 duplicate relationships to be deduplicated to 1")
+
+	// Should keep the longest description
+	assert.Equal(t, "user", result.Relationships[0].From)
+	assert.Equal(t, "billing_engagement", result.Relationships[0].To)
+	assert.Equal(t, longDesc, result.Relationships[0].Label, "Should keep the longest description for more context")
+}
+
+func TestGetDomainContext_DeduplicatesRelationships_FirstWinsWhenSameLength(t *testing.T) {
+	// When descriptions have the same length, the first one encountered should be kept
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	entityID1 := uuid.New()
+	entityID2 := uuid.New()
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+	}
+
+	entities := []*models.OntologyEntity{
+		{ID: entityID1, Name: "user", PrimaryTable: "users"},
+		{ID: entityID2, Name: "order", PrimaryTable: "orders"},
+	}
+
+	occurrences := []*models.OntologyEntityOccurrence{
+		{ID: uuid.New(), EntityID: entityID1, TableName: "users", ColumnName: "id"},
+		{ID: uuid.New(), EntityID: entityID2, TableName: "orders", ColumnName: "id"},
+	}
+
+	// Same-length descriptions
+	desc1 := "first"
+	desc2 := "later"
+	relationships := []*models.EntityRelationship{
+		{
+			ID:             uuid.New(),
+			SourceEntityID: entityID1,
+			TargetEntityID: entityID2,
+			Description:    &desc1,
+		},
+		{
+			ID:             uuid.New(),
+			SourceEntityID: entityID1,
+			TargetEntityID: entityID2,
+			Description:    &desc2,
+		},
+	}
+
+	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
+	entityRepo := &mockOntologyEntityRepository{
+		entities:    entities,
+		occurrences: occurrences,
+	}
+	relationshipRepo := &mockEntityRelationshipRepository{relationships: relationships}
+	schemaRepo := &mockSchemaRepository{}
+	projectService := &mockProjectServiceForOntology{}
+
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+
+	result, err := svc.GetDomainContext(ctx, projectID)
+
+	assert.NoError(t, err)
+	assert.Len(t, result.Relationships, 1)
+	// When same length, first one wins (no update happens)
+	assert.Equal(t, "first", result.Relationships[0].Label)
 }

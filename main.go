@@ -368,6 +368,21 @@ func main() {
 	ontologyDAGHandler := handlers.NewOntologyDAGHandler(ontologyDAGService, projectService, logger)
 	ontologyDAGHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
+	// Register glossary handler (protected) - business glossary for MCP clients
+	glossaryRepo := repositories.NewGlossaryRepository()
+	glossaryService := services.NewGlossaryService(glossaryRepo, ontologyRepo, ontologyEntityRepo, llmFactory, logger)
+	glossaryHandler := handlers.NewGlossaryHandler(glossaryService, logger)
+	glossaryHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register glossary MCP tools (uses glossaryService for get_glossary tool)
+	glossaryToolDeps := &mcptools.GlossaryToolDeps{
+		DB:               db,
+		MCPConfigService: mcpConfigService,
+		GlossaryService:  glossaryService,
+		Logger:           logger,
+	}
+	mcptools.RegisterGlossaryTools(mcpServer.MCP(), glossaryToolDeps)
+
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"
 	fileServer := http.FileServer(http.Dir(uiDir))

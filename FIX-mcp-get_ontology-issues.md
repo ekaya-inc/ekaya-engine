@@ -1,380 +1,302 @@
-# MCP get_ontology - Complete Implementation Plan
+# MCP get_ontology - Issues and Remaining Work
 
-Investigation date: 2026-01-02
-**Last updated:** 2026-01-02 (Phase 4 + 5 complete)
+**Last updated:** 2026-01-04 (Issue 3 enhancement: analytical roles at tables depth)
 
 ## Status
 
-| Phase | Status | Date Completed | Notes |
-|-------|--------|----------------|-------|
-| Phase 1: Service Layer | ✅ **COMPLETE** | 2026-01-02 | Reads from normalized tables |
-| Phase 2: Entity Extraction | ✅ **COMPLETE** | 2026-01-02 | Domain, key columns (with synonyms), aliases |
-| Phase 3: Ontology Finalization | ✅ **COMPLETE** | 2026-01-02 | Domain description via LLM, auto-triggered |
-| Phase 4: Column Workflow | ✅ **COMPLETE** | 2026-01-02 | Column semantics, enum values, FK roles |
-| Phase 5: Project Conventions | ✅ **COMPLETE** | 2026-01-02 | Soft delete, timestamps, currency (bundled with Phase 3) |
-| Phase 6: Business Glossary | 📋 **READY** | - | Metric definitions - see detailed spec below |
-
-### Priority for Query Accuracy
-
-| Phase | Impact | Cost | Recommendation |
-|-------|--------|------|----------------|
-| Phase 4 | **HIGH** | Medium (~$1 for 38 tables) | ✅ Complete |
-| Phase 5 | **HIGH** | Low (no LLM calls) | ✅ Complete (bundled with Phase 3) |
-| Phase 6 | Medium | Low | Ready to implement when needed |
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 1: Service Layer | ✅ COMPLETE | Reads from normalized tables |
+| Phase 2: Entity Extraction | ✅ COMPLETE | Domain, key columns, aliases |
+| Phase 3: Ontology Finalization | ✅ COMPLETE | Domain description, auto-triggered |
+| Phase 4: Column Workflow | ✅ COMPLETE | Column semantics, enum values, FK roles |
+| Phase 5: Project Conventions | ✅ COMPLETE | Soft delete, currency (bundled with Phase 3) |
+| Phase 6: Business Glossary | ✅ COMPLETE | All steps (1-7) complete |
 
 ---
 
-## What Works Now (After All Phases Complete)
+## Issues Discovered During MCP Client Testing (2026-01-03)
 
-| Depth | Data Returned | Source |
-|-------|---------------|--------|
-| `domain` | Entity count, column count, relationship graph, **description**, **primary domains**, **conventions** | Normalized tables + DomainSummary |
-| `entities` | Names, descriptions, occurrences, aliases, **key columns with synonyms** | Normalized tables |
-| `tables` | Business names, descriptions, columns, relationships, aliases, **domain** | Normalized tables |
-| `columns` | **Full semantic metadata**: descriptions, semantic types, roles, FK roles, enum values, synonyms | Schema + `column_details` JSONB |
+Tested by using Claude Code as an MCP client against ekaya-engine with a fully extracted ontology.
 
-**Remaining Optional Enhancement:**
+### What Worked Well
 
-| Gap | Impact | Phase |
-|-----|--------|-------|
-| Business metric definitions | MEDIUM - Agent may calculate revenue wrong | Phase 6 (optional) |
-
----
-
-## Phase 1 Accomplishments ✅
-
-**Problem Solved:** MCP `get_ontology` tool was returning empty data because service read from unpopulated JSONB columns.
-
-**Solution:** Modified service to read from existing normalized tables.
-
-**Key Changes:**
-- `GetDomainContext`: Reads from `engine_ontology_entities`, `engine_entity_relationships`, `engine_schema_columns`
-- `GetEntitiesContext`: Batch-fetches aliases via `GetAllAliasesByProject` (fixes N+1 query)
-- `GetTablesContext`: Reads from normalized entity and schema tables
-- `GetColumnsContext`: Returns structural metadata from `engine_schema_columns`
-
-**Files Modified:**
-- `pkg/services/ontology_context.go` - Service implementation
-- `pkg/repositories/ontology_entity_repository.go` - Added `GetAllAliasesByProject`
-- `pkg/repositories/entity_relationship_repository.go` - Added `GetByProject`, `GetByTables`
-- `pkg/repositories/schema_repository.go` - Added `GetColumnCountByProject`, `GetColumnsByTables`
+| Feature | Value Delivered |
+|---------|-----------------|
+| Domain summary | Immediate business context - understood platform purpose |
+| Conventions | Knew to filter `deleted_at IS NULL` and divide currency by 100 |
+| Entity descriptions | Distinguished Billing Engagement vs Billing Transaction |
+| Table/column counts | Gauged schema complexity (38 tables, 564 columns) |
+| Progressive disclosure | `domain` → `tables` → `columns` is sensible flow |
 
 ---
 
-## Phase 2 Accomplishments ✅
+## Issue 1: Relationships on `users` table are incorrect ✅ COMPLETED
 
-**Goal:** Add domain categorization, key columns, and aliases during entity extraction.
+**Priority:** HIGH (actively misleading - worse than no data)
 
-### Database Migration
-**File:** `migrations/022_entity_extraction_fields.up.sql`
-```sql
--- Add domain column to entities
-ALTER TABLE engine_ontology_entities ADD COLUMN domain VARCHAR(100);
+**Status:** Fixed in commit on 2026-01-03
 
--- Create key columns table
-CREATE TABLE engine_ontology_entity_key_columns (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    entity_id UUID NOT NULL REFERENCES engine_ontology_entities(id) ON DELETE CASCADE,
-    column_name TEXT NOT NULL,
-    synonyms JSONB DEFAULT '[]',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(entity_id, column_name)
-);
-CREATE INDEX idx_entity_key_columns_entity_id ON engine_ontology_entity_key_columns(entity_id);
-```
+### What Was Fixed
 
-### Model Updates
-**File:** `pkg/models/ontology_entity.go`
-- Added `Domain string` field to `OntologyEntity` struct
-- Added `OntologyEntityKeyColumn` struct with `ID`, `EntityID`, `ColumnName`, `Synonyms`, `CreatedAt`
+Changed `pkg/services/deterministic_relationship_service.go` to use `entityByPrimaryTable` instead of `occByTable`:
 
-### Repository Updates
-**File:** `pkg/repositories/ontology_entity_repository.go`
-- All SELECT queries updated to include `domain` column
-- `scanOntologyEntity` updated to handle nullable `domain`
-- Added methods:
-  - `CreateKeyColumn(ctx, keyColumn)` - Creates a key column record
-  - `GetKeyColumnsByEntity(ctx, entityID)` - Gets key columns for one entity
-  - `GetAllKeyColumnsByProject(ctx, projectID)` - Batch fetch all key columns (avoids N+1)
+1. **Removed** the occurrence-based lookup (`occByTable`) that used "first occurrence wins" logic
+2. **Added** `entityByPrimaryTable` map that uses `entity.PrimarySchema/PrimaryTable` to correctly identify which entity owns each table
+3. **Updated** all three usages (Phase 1 FK relationships: source lookup, target lookup; Phase 2: PK-match inference)
 
-### LLM Prompt Updates
-**File:** `pkg/services/entity_discovery_service.go`
+The fix ensures that when looking up the entity for a table (e.g., `billing_engagements`), we get the entity that **owns** that table (`billing_engagement`) rather than an entity that merely has occurrences in it (`user` via host_id/visitor_id columns).
 
-Extended structs for key column synonyms:
-```go
-type keyColumnEnrichment struct {
-    Name     string   `json:"name"`
-    Synonyms []string `json:"synonyms,omitempty"`
-}
+### Test Coverage Added
 
-type entityEnrichment struct {
-    TableName        string                `json:"table_name"`
-    EntityName       string                `json:"entity_name"`
-    Description      string                `json:"description"`
-    Domain           string                `json:"domain"`
-    KeyColumns       []keyColumnEnrichment `json:"key_columns"`
-    AlternativeNames []string              `json:"alternative_names"`
-}
-```
+New test file `pkg/services/deterministic_relationship_service_test.go`:
+- `TestEntityByPrimaryTableMapping` - Verifies the new PrimaryTable-based mapping works correctly
+- `TestOldOccByTableBehaviorWasBroken` - Documents the bug in the old occurrence-based approach
 
-Extended `buildEntityEnrichmentPrompt()` to request:
-1. Entity Name (existing)
-2. Description (existing)
-3. Domain - free-form business domain (e.g., "billing", "hospitality", "logistics")
-4. Key Columns - 2-3 important business columns with synonyms per column
-5. Alternative Names - synonyms users might use for the entity
+### Original Problem
 
-Updated `enrichEntitiesWithLLM()` to:
-1. Set `entity.Domain` from LLM response
-2. Create key column records via `entityRepo.CreateKeyColumn()` **with synonyms**
-3. Create alias records via `entityRepo.CreateAlias()` with `source="discovery"`
-
-### Service Layer Updates
-**File:** `pkg/services/ontology_context.go`
-
-- `GetTablesContext`: Changed `Domain: ""` to `Domain: entity.Domain`
-- `GetEntitiesContext`: Added call to `GetAllKeyColumnsByProject()` and converts to `KeyColumnInfo` in response
-
-### Test Updates
-**Files:** `pkg/services/ontology_context_test.go`, `pkg/services/relationship_workflow_test.go`
-- Added mock implementations for new repository methods
-- Updated `mockOntologyEntityRepository` with `keyColumns` field
-
----
-
-## Phase 3 Accomplishments ✅
-
-**Goal:** Generate domain-level summary after Entity and Relationship extraction complete.
-
-### New Service
-**File:** `pkg/services/ontology_finalization.go`
-
-```go
-type OntologyFinalizationService interface {
-    Finalize(ctx context.Context, projectID uuid.UUID) error
-}
-```
-
-Key implementation details:
-- Auto-triggered from `relationshipWorkflowService.finalizeWorkflow()` after workflow completes
-- Generates domain description via LLM (2-3 sentence summary)
-- Aggregates primary domains from entity.Domain fields (sorted alphabetically for deterministic output)
-- Stores in `engine_ontologies.domain_summary` JSONB column
-- Debug logging for skipped relationships with missing entity names
-
-### Integration
-**File:** `pkg/services/relationship_workflow.go`
-- Added `finalizationSvc OntologyFinalizationService` to service struct
-- Auto-triggers `finalizationSvc.Finalize()` in `finalizeWorkflow()` after workflow completes
-- Non-blocking: workflow still marked complete even if finalization fails
-
-### Wiring
-**File:** `main.go`
-- Creates `ontologyFinalizationService` with required dependencies
-- Passes to `NewRelationshipWorkflowService()` constructor
-
-### Tests
-**File:** `pkg/services/ontology_finalization_test.go`
-- `TestOntologyFinalization_AggregatesDomains` - Verifies unique domain extraction
-- `TestOntologyFinalization_GeneratesDomainDescription` - Mocks LLM, verifies storage
-- `TestOntologyFinalization_SkipsIfNoEntities` - Empty project case
-- `TestOntologyFinalization_HandlesEmptyDomains` - Graceful handling
-- `TestOntologyFinalization_HandlesRelationshipDisplay` - Relationship formatting
-- `TestOntologyFinalization_LLMFailure` - Verifies error propagation when LLM fails
-
-### LLM Prompt
-- System: "You are a data modeling expert..."
-- Prompt includes entities (name, domain, description) and relationships
-- Response format: `{"description": "2-3 sentence business summary"}`
-- Temperature: 0.3 (analytical task)
-
----
-
-## Phase 4 Accomplishments ✅
-
-**Goal:** Generate semantic column information that enables AI agents to write accurate SQL queries.
-
-### What Phase 4 Added
-
-| Field | Description | Example | Query Impact |
-|-------|-------------|---------|--------------|
-| Description | Business meaning | "Total charged in cents" | Knows what to SELECT |
-| Synonyms | Alternative names | ["price", "cost"] | Understands user intent |
-| Semantic Type | Business classification | "currency_cents" | Knows to divide by 100 |
-| Role | Analytical function | "dimension", "measure" | Correct aggregations |
-| FKRole | FK disambiguation | "payer", "payee" | Correct JOIN conditions |
-| Enum Values | Valid values + meanings | [{"value": "completed", "label": "Completed", "description": "..."}] | Correct WHERE filters |
-
-### New Endpoint
-
-`POST /api/projects/:id/ontology/enrich-columns`
-
-Request:
+When drilling into `users` table at `depth: tables`, relationships showed:
 ```json
-{"tables": ["users", "billing_transactions"]}  // optional filter
+{"column":"user_id","references":"accounts.account_id","cardinality":""}
+{"column":"user_id","references":"channels.channel_id","cardinality":""}
 ```
 
-Response:
-```json
-{
-  "tables_enriched": ["users", "billing_transactions"],
-  "tables_failed": {},
-  "duration_ms": 12500
+`user_id` does not FK to `accounts.account_id` or `channels.channel_id` - these are different ID spaces. The root cause was that the `occByTable` map was built with "first occurrence wins" logic, which could associate a table with the wrong entity.
+
+---
+
+## Issue 2: Column roles are empty ✅ COMPLETED
+
+**Priority:** MEDIUM (missing context, but survivable)
+
+**Status:** Fixed on 2026-01-03
+
+### What Was Fixed
+
+Implemented **Option A** - Update occurrences during column enrichment. After the LLM enriches columns with FK roles (e.g., "host", "visitor"), we now update the corresponding `engine_ontology_entity_occurrences.role` field.
+
+**Changes Made:**
+
+1. **Repository layer** (`pkg/repositories/ontology_entity_repository.go`):
+   - Added `UpdateOccurrenceRole(ctx, entityID, tableName, columnName, role)` method to the `OntologyEntityRepository` interface
+   - Implemented the method with a simple UPDATE query targeting the occurrence by entity_id, table_name, and column_name
+
+2. **Service layer** (`pkg/services/column_enrichment.go`):
+   - Added `updateOccurrenceRoles()` helper method that:
+     - Extracts FK roles from LLM enrichment results
+     - Maps FK target tables to entity IDs using `entityByPrimaryTable` (same pattern as relationship fix)
+     - Updates each occurrence's role in the database
+   - Called from `EnrichTable()` after saving column details to JSONB
+   - Failures are logged but don't fail the enrichment (roles are supplementary data)
+
+**Test Coverage:**
+
+- Added `TestColumnEnrichmentService_UpdateOccurrenceRoles` - verifies roles are extracted from LLM response and passed to repository
+- Updated mock implementations in related test files to satisfy the new interface method
+
+### Original Problem
+
+Every column showed `"role": ""` at `depth: tables`. The LLM correctly enriched columns with roles like "host" and "visitor", but this data was only stored in `column_details` JSONB and not propagated to `engine_ontology_entity_occurrences.role`.
+
+---
+
+## Issue 3: FK semantic roles not visible ✅ COMPLETED
+
+**Priority:** MEDIUM (would help with multi-FK tables)
+
+**Status:** Fixed on 2026-01-03
+
+### What Was Fixed
+
+Added `FKRole` field to `ColumnOverview` struct and updated `GetTablesContext()` to load enriched column data from `ontology.ColumnDetails` and merge FK roles. Also added `HasEnumValues` from enriched data.
+
+**Changes Made:**
+
+1. **Model layer** (`pkg/models/ontology_context.go`):
+   - Added `FKRole string` field to `ColumnOverview` struct with `json:"fk_role,omitempty"` tag
+
+2. **Service layer** (`pkg/services/ontology_context.go`):
+   - Updated `GetTablesContext()` to build enriched column lookup from `ontology.ColumnDetails`
+   - Merged `FKRole` and `HasEnumValues` from enriched data into `ColumnOverview`
+   - **2026-01-04 enhancement:** Also merge `Role` (dimension/measure/identifier) from enriched data so analytical roles are visible at tables depth
+
+**Test Coverage:**
+
+- Added `TestGetTablesContext_FKRoles` - verifies FK roles (host, visitor), analytical roles (dimension/measure/identifier), and enum values are exposed at tables depth
+
+### Observed Behavior
+`billing_engagements` has `host_id` and `visitor_id` - both reference `users`. The approved query showed this pattern, but `get_ontology` didn't expose which FK plays which role.
+
+**What would help:** At table level, show `fk_role` for columns (e.g., `host_id → users (role: host)`).
+
+### Root Cause Analysis
+
+**Location:** `pkg/models/ontology_context.go:92-101`
+
+The `ColumnOverview` struct used at tables depth does NOT have `FKRole`:
+```go
+type ColumnOverview struct {
+    Name          string  `json:"name"`
+    Type          string  `json:"type"`
+    Role          string  `json:"role"`         // ← General role (dimension/measure)
+    IsPrimaryKey  bool    `json:"is_primary_key"`
+    Entity        *string `json:"entity,omitempty"`
+    EntityRole    *string `json:"entity_role,omitempty"`
+    HasEnumValues bool    `json:"has_enum_values"`
+    // ← NO FKRole field!
 }
 ```
 
-### Key Implementation Details
-
-1. **One LLM call per table** (not per column) - reduces cost
-2. **Enum sampling via `GetDistinctValues()`** - up to 50 values per column
-3. **Heuristic enum detection** - columns with `status`, `state`, `type`, `kind`, `category` in name
-4. **Schema overlay** - PK/FK info always comes from current schema, enriched data from JSONB
-5. **Continue on failure** - returns partial results if some tables fail
-
-### LLM Prompt Structure
-
-```
-# Table: billing_transactions
-Entity: "Billing Transaction" - Records financial transactions between users
-
-## Columns to Analyze
-| Column | Type | PK | FK | Sample Values |
-|--------|------|----|----|---------------|
-| transaction_state | text | no | no | completed, pending, failed, refunded |
-| payer_user_id | uuid | no | yes→users | - |
-| payee_user_id | uuid | no | yes→users | - |
-
-## FK Role Context
-These columns reference the same entity - identify what role each FK represents:
-- users (payer_user_id, payee_user_id)
-
-## For Each Column Provide:
-1. description: 1 sentence explaining business meaning
-2. semantic_type: identifier, currency_cents, timestamp_utc, status, etc.
-3. role: dimension | measure | identifier | attribute
-4. synonyms: alternative names users might use
-5. enum_values: array of {value, label, description}
-6. fk_role: if FK to same table as another column, what role does this FK represent?
-
-## Response Format (JSON array)
-```
-
-### Storage
-
-Uses existing `engine_ontologies.column_details` JSONB column (no migration needed).
-
-Structure: `{"table_name": [ColumnDetail, ...]}`
-
-### Model Update
-
-Added `FKRole` field to `ColumnDetail` struct in `pkg/models/ontology.go`:
-
+But `ColumnDetail` (used at columns depth) DOES have `FKRole`:
 ```go
 type ColumnDetail struct {
-    Name         string      `json:"name"`
-    Description  string      `json:"description,omitempty"`
-    Synonyms     []string    `json:"synonyms,omitempty"`
-    SemanticType string      `json:"semantic_type,omitempty"`
-    Role         string      `json:"role,omitempty"`    // dimension, measure, identifier, attribute
-    FKRole       string      `json:"fk_role,omitempty"` // payer, payee, host, visitor, etc.
-    EnumValues   []EnumValue `json:"enum_values,omitempty"`
-    IsPrimaryKey bool        `json:"is_primary_key"`
-    IsForeignKey bool        `json:"is_foreign_key"`
-    ForeignTable string      `json:"foreign_table,omitempty"`
+    // ...
+    FKRole string `json:"fk_role,omitempty"` // payer, payee, host, visitor, etc.
+    // ...
 }
 ```
 
-### Files Created/Modified
+**In `GetTablesContext()`** (`pkg/services/ontology_context.go:326-334`), only schema data is used:
+```go
+columns := make([]models.ColumnOverview, 0, len(schemaColumns))
+for _, col := range schemaColumns {
+    columns = append(columns, models.ColumnOverview{
+        Name:          col.ColumnName,
+        Type:          col.DataType,
+        IsPrimaryKey:  col.IsPrimaryKey,
+        HasEnumValues: false,  // ← Doesn't load enriched data at all
+    })
+}
+```
 
-| File | Action | Purpose |
-|------|--------|---------|
-| `pkg/services/column_enrichment.go` | **NEW** | LLM enrichment + enum sampling |
-| `pkg/models/ontology.go` | MODIFY | Added `FKRole` field |
-| `pkg/services/ontology_context.go` | MODIFY | Merge enriched data with schema |
-| `pkg/handlers/ontology.go` | MODIFY | Add `/enrich-columns` endpoint |
-| `main.go` | MODIFY | Wire `ColumnEnrichmentService` |
+The enriched `column_details` JSONB (which contains `FKRole`) is NOT loaded at tables depth.
 
-### Cost Estimate (Actual)
+### Fix Required
 
-| Tables | LLM Calls | Est. Tokens | Est. Cost (GPT-4) |
-|--------|-----------|-------------|-------------------|
-| 38 (Ekaya) | 38 | ~30,000 | ~$1.00 |
+1. Add `FKRole` field to `ColumnOverview` struct
+2. In `GetTablesContext()`, load `ontology.ColumnDetails` (same as `GetColumnsContext()` does)
+3. Merge `FKRole` from enriched data into `ColumnOverview`
 
-### How to Trigger Enrichment
+### Files to Modify
 
-```bash
-curl -X POST https://localhost:3443/api/projects/{pid}/ontology/enrich-columns \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"tables": ["users", "billing_transactions"]}'  # optional
+| File | Lines | Change |
+|------|-------|--------|
+| `pkg/models/ontology_context.go` | 92-101 | Add `FKRole string` to `ColumnOverview` |
+| `pkg/services/ontology_context.go` | 247-367 | Load column_details and merge FKRole |
+
+---
+
+## Issue 4: Duplicate relationships at domain level ✅ COMPLETED
+
+**Priority:** LOW (cosmetic, doesn't break queries)
+
+**Status:** Fixed on 2026-01-03
+
+### What Was Fixed
+
+Added deduplication logic in `GetDomainContext()` to prevent duplicate relationships (same source→target entity pair) from appearing multiple times. When duplicates exist, the implementation keeps the relationship with the longest description to provide more context.
+
+**Changes Made:**
+
+1. **Service layer** (`pkg/services/ontology_context.go:129-160`):
+   - Added `seen` map to track source→target pairs by key (e.g., "user→billing_engagement")
+   - When a duplicate is found, compare label lengths and keep the longer one
+   - This handles cases where the same entity pair has multiple FK columns (e.g., `host_id` and `visitor_id` both → `users`)
+
+**Test Coverage:**
+
+- Added `TestGetDomainContext_DeduplicatesRelationships` - verifies 3 duplicate relationships are deduplicated to 1, keeping the longest label
+- Added `TestGetDomainContext_DeduplicatesRelationships_FirstWinsWhenSameLength` - verifies first relationship wins when labels have same length
+
+### Original Problem
+
+"Offer → Engagement Payment Intent" appeared 3+ times with slightly different labels because:
+- Same entity pair can have multiple FK columns
+- Same FK detected by multiple methods (FK constraint + PK-match inference)
+- Different descriptions for same logical relationship
+
+---
+
+## Additional Feedback
+
+**Approved query suggestion:** The "Get all engagements for a username" query only filters by host. Consider adding a version that searches by host OR visitor, with case-insensitive matching:
+```sql
+WHERE LOWER(h.username) = LOWER({{username}}) OR LOWER(v.username) = LOWER({{username}})
 ```
 
 ---
 
-## Phase 5 Accomplishments ✅
-
-**Note:** Phase 5 was bundled with Phase 3 (Ontology Finalization). Convention discovery runs automatically after relationship workflow completes.
-
-### What Phase 5 Added
-
-| Convention | Description | Query Impact |
-|------------|-------------|--------------|
-| Soft Delete | Detected via `deleted_at IS NULL` pattern | Agent adds filter to all queries |
-| Currency | Detected via `*_amount` column pattern | Agent knows to divide by 100 |
-| Audit Columns | Detected: `created_at`, `updated_at`, `deleted_at` | Agent excludes from SELECT * |
-
-### Implementation
-
-Convention discovery implemented in `pkg/services/ontology_finalization.go`:
-
-```go
-func (s *ontologyFinalizationService) discoverConventions(ctx context.Context, projectID uuid.UUID, entities []*models.OntologyEntity) (*models.ProjectConventions, error)
-```
-
-Key detection logic:
-- **Soft Delete**: Looks for `deleted_at` column that is nullable
-- **Currency**: Checks `*_amount` column values to detect cents vs dollars
-- **Audit Columns**: Scans for common patterns (`created_at`, `updated_at`, `deleted_at`)
-
-### Storage
-
-Stored in `engine_ontologies.domain_summary` JSONB as part of `DomainSummary`:
-
-```go
-type DomainSummary struct {
-    Description  string              `json:"description"`
-    Domains      []string            `json:"domains"`
-    Conventions  *ProjectConventions `json:"conventions,omitempty"`
-}
-```
-
-### Exposure in get_ontology
-
-Returned in `domain` depth response via `OntologyDomainContext`:
-
-```json
-{
-  "domain": {
-    "description": "...",
-    "primary_domains": ["billing", "hospitality"],
-    "conventions": {
-      "soft_delete": {"enabled": true, "column": "deleted_at", "filter": "deleted_at IS NULL"},
-      "currency": {"default_currency": "USD", "format": "cents"}
-    }
-  }
-}
-```
-
----
-
-## Phase 6: Business Glossary (Ready to Implement)
+## Phase 6: Business Glossary (In Progress)
 
 **Goal:** Define business metrics and calculations for executive reporting.
 
-**Why This Matters:** When asked "What's our revenue?", the agent needs to know:
+### Task Checklist
+
+- [x] **Step 1: Database Migration** - Created `migrations/025_business_glossary.{up,down}.sql` with table, RLS, indexes, and trigger. Added integration test `migrations/025_business_glossary_test.go`.
+- [x] **Step 2: Model** - Created `pkg/models/glossary.go` with `BusinessGlossaryTerm` and `Filter` structs. Model includes all fields from the spec: ID, ProjectID, Term, Definition, SQLPattern, BaseTable, ColumnsUsed ([]string), Filters ([]Filter), Aggregation, Source, CreatedBy, CreatedAt, UpdatedAt. Filter struct has Column, Operator, and Values fields. JSON tags include omitempty where appropriate.
+- [x] **Step 3: Repository** ✅ COMPLETED
+  - **File:** `pkg/repositories/glossary_repository.go`
+  - **Interface:** `GlossaryRepository` with 6 methods: Create, Update, Delete, GetByProject, GetByTerm, GetByID
+  - **Pattern:** Follows `ontology_entity_repository.go` - uses `database.GetTenantScope(ctx)`, RETURNING clause, proper JSONB handling
+  - **Helper functions:** `nullString()`, `jsonbValue()`, `jsonUnmarshal()`, `scanGlossaryTerm()` for database field handling
+  - **Tests:** `pkg/repositories/glossary_repository_test.go` (19 integration tests) covering CRUD, JSONB fields, edge cases, and RLS enforcement
+  - **Key implementation notes:**
+    - Uses `pgx.Row` interface pattern for scanning to support both QueryRow and Rows iteration
+    - GetByTerm and GetByID return `nil, nil` for not-found (not an error), consistent with other repos
+    - Delete and Update return error for not-found records
+    - JSONB fields properly handle empty slices → NULL and NULL → empty slices
+- [x] **Step 4: Service** ✅ COMPLETED
+  - **File:** `pkg/services/glossary_service.go`
+  - **Interface:** `GlossaryService` with 6 methods: CreateTerm, UpdateTerm, DeleteTerm, GetTerms, GetTerm, SuggestTerms
+  - **Dependencies:** GlossaryRepository, OntologyRepository, OntologyEntityRepository, LLMClientFactory
+  - **SuggestTerms implementation:**
+    - Loads active ontology and entities for context
+    - Builds LLM prompt with domain summary, conventions, entities, and column details
+    - Uses `llm.ParseJSONResponse` to extract structured suggestions
+    - Returns terms with source="suggested" (not persisted until user accepts)
+  - **Validation:** CreateTerm/UpdateTerm validate term name and definition required
+  - **Default source:** CreateTerm sets source="user" if not provided
+  - **Tests:** `pkg/services/glossary_service_test.go` (13 tests) covering CRUD operations, validation, and SuggestTerms with various scenarios (success, no ontology, no entities, LLM errors, conventions, column details)
+- [x] **Step 5: Handler** ✅ COMPLETED (2026-01-04)
+  - **File:** `pkg/handlers/glossary_handler.go`
+  - **Endpoints:** GET/POST `/glossary`, GET/PUT/DELETE `/glossary/{tid}`, POST `/glossary/suggest`
+  - **Pattern:** Follows `entity_handler.go` with RegisterRoutes, uses ApiResponse wrapper
+  - **Helper added:** `ParseTermID` in `pkg/handlers/params.go` for term ID extraction
+  - **Tests:** `pkg/handlers/glossary_integration_test.go` (11 integration tests) covering all CRUD endpoints, validation, suggest, and error cases
+  - **Implementation notes for next session:**
+    - Request/response types defined: `GlossaryListResponse`, `CreateGlossaryTermRequest`, `UpdateGlossaryTermRequest`
+    - All handlers follow thin pattern: parse params → call service → format response
+    - Validation errors (missing term/definition) return 400, not found returns 404
+    - Suggest endpoint checks for ontology and returns 400 if none exists
+    - Uses same auth/tenant middleware pattern as other handlers
+- [x] **Step 6: Register in main.go** ✅ COMPLETED (2026-01-04)
+  - **File:** `main.go` (lines 367-371)
+  - Added glossary repository, service, and handler wiring after ontologyDAGHandler registration
+  - Dependencies: glossaryRepo, ontologyRepo, ontologyEntityRepo, llmFactory, logger
+  - Routes registered with authMiddleware and tenantMiddleware
+  - **Working endpoints:**
+    - `GET /api/projects/{pid}/glossary` - List all terms
+    - `POST /api/projects/{pid}/glossary` - Create term
+    - `GET /api/projects/{pid}/glossary/{tid}` - Get single term
+    - `PUT /api/projects/{pid}/glossary/{tid}` - Update term
+    - `DELETE /api/projects/{pid}/glossary/{tid}` - Delete term
+    - `POST /api/projects/{pid}/glossary/suggest` - LLM suggests terms based on ontology
+- [x] **Step 7: Expose in get_ontology** - Add `get_glossary` MCP tool ✅ COMPLETED (2026-01-04)
+  - **File:** `pkg/mcp/tools/glossary.go`
+  - **Tool:** `get_glossary` - Returns all business glossary terms for MCP clients
+  - **Visibility:** Tied to `approved_queries` visibility (same as `get_ontology`)
+  - **Implementation:**
+    1. Created `pkg/mcp/tools/glossary.go` with `GlossaryToolDeps` struct and `RegisterGlossaryTools()` function
+    2. Added `get_glossary` to `ontologyToolNames` map in `pkg/mcp/tools/developer.go` for tool filtering
+    3. Registered glossary tools in `main.go` after glossary service creation
+  - **Tests:** `pkg/mcp/tools/glossary_test.go` (6 tests) covering deps structure, registration, auth checks, and response conversion
+
+**Why This Matters for MCP Clients:** When asked "What's our revenue?", the agent needs to know:
 - Revenue = `SUM(earned_amount)` not `SUM(total_amount)`
 - Only include `transaction_state = 'completed'`
 - Exclude refunds or subtract them
+
+The glossary provides **reverse lookup** from business term → schema/SQL pattern, which cannot be inferred from schema alone.
 
 ### What Phase 6 Adds
 
@@ -385,36 +307,56 @@ Returned in `domain` depth response via `OntologyDomainContext`:
 | Active User | User with recent activity | `WHERE last_active_at > NOW() - INTERVAL '30 days'` |
 | Host | User who provides service | `WHERE user_id IN (SELECT DISTINCT host_id FROM sessions)` |
 
----
-
-### Implementation Spec for New Session
+### Implementation Spec
 
 #### Step 1: Database Migration
 
-**File:** `migrations/024_business_glossary.up.sql`
+**File:** `migrations/025_business_glossary.up.sql`
+
+> Note: Migration 024 already exists (`024_add_missing_rls.up.sql`), so use 025.
 
 ```sql
+-- Business glossary for metric definitions and business term → schema mapping
 CREATE TABLE engine_business_glossary (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES engine_projects(id) ON DELETE CASCADE,
     term TEXT NOT NULL,
     definition TEXT NOT NULL,
-    sql_pattern TEXT,           -- SQL template (optional)
-    base_table TEXT,            -- Primary table for this metric
-    columns_used JSONB,         -- ["earned_amount", "transaction_state"]
-    filters JSONB,              -- {"transaction_state": ["completed"]}
-    aggregation TEXT,           -- "SUM", "COUNT", "AVG"
-    source TEXT DEFAULT 'user', -- 'user', 'llm_suggested', 'learned'
+    sql_pattern TEXT,
+    base_table TEXT,
+    columns_used JSONB,
+    filters JSONB,
+    aggregation TEXT,
+    source TEXT NOT NULL DEFAULT 'user',
     created_by UUID,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(project_id, term)
 );
 
+-- Index for project-scoped queries
 CREATE INDEX idx_business_glossary_project ON engine_business_glossary(project_id);
+
+-- Row level security
+ALTER TABLE engine_business_glossary ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY business_glossary_access ON engine_business_glossary
+    FOR ALL USING (
+        current_setting('app.current_project_id', true) IS NULL
+        OR project_id = current_setting('app.current_project_id', true)::uuid
+    )
+    WITH CHECK (
+        current_setting('app.current_project_id', true) IS NULL
+        OR project_id = current_setting('app.current_project_id', true)::uuid
+    );
+
+-- Auto-update timestamp trigger
+CREATE TRIGGER update_business_glossary_updated_at
+    BEFORE UPDATE ON engine_business_glossary
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 ```
 
-**File:** `migrations/024_business_glossary.down.sql`
+**File:** `migrations/025_business_glossary.down.sql`
 
 ```sql
 DROP TABLE IF EXISTS engine_business_glossary;
@@ -432,21 +374,28 @@ import (
     "github.com/google/uuid"
 )
 
-// BusinessGlossaryTerm represents a defined business metric or concept.
+// BusinessGlossaryTerm represents a business term with its technical mapping.
 type BusinessGlossaryTerm struct {
-    ID          uuid.UUID        `json:"id"`
-    ProjectID   uuid.UUID        `json:"project_id"`
-    Term        string           `json:"term"`
-    Definition  string           `json:"definition"`
-    SQLPattern  string           `json:"sql_pattern,omitempty"`
-    BaseTable   string           `json:"base_table,omitempty"`
-    ColumnsUsed []string         `json:"columns_used,omitempty"`
-    Filters     map[string][]string `json:"filters,omitempty"`  // column -> allowed values
-    Aggregation string           `json:"aggregation,omitempty"` // SUM, COUNT, AVG
-    Source      string           `json:"source"`               // user, llm_suggested, learned
-    CreatedBy   *uuid.UUID       `json:"created_by,omitempty"`
-    CreatedAt   time.Time        `json:"created_at"`
-    UpdatedAt   time.Time        `json:"updated_at"`
+    ID          uuid.UUID   `json:"id"`
+    ProjectID   uuid.UUID   `json:"project_id"`
+    Term        string      `json:"term"`
+    Definition  string      `json:"definition"`
+    SQLPattern  string      `json:"sql_pattern,omitempty"`
+    BaseTable   string      `json:"base_table,omitempty"`
+    ColumnsUsed []string    `json:"columns_used,omitempty"`
+    Filters     []Filter    `json:"filters,omitempty"`
+    Aggregation string      `json:"aggregation,omitempty"`
+    Source      string      `json:"source"` // "user" or "suggested"
+    CreatedBy   *uuid.UUID  `json:"created_by,omitempty"`
+    CreatedAt   time.Time   `json:"created_at"`
+    UpdatedAt   time.Time   `json:"updated_at"`
+}
+
+// Filter represents a condition in the glossary term definition.
+type Filter struct {
+    Column   string   `json:"column"`
+    Operator string   `json:"operator"` // =, IN, >, <, etc.
+    Values   []string `json:"values"`
 }
 ```
 
@@ -454,14 +403,43 @@ type BusinessGlossaryTerm struct {
 
 **File:** `pkg/repositories/glossary_repository.go`
 
+Follow the established pattern from `ontology_entity_repository.go`:
+
 ```go
+package repositories
+
+import (
+    "context"
+    "fmt"
+    "github.com/google/uuid"
+    "github.com/jackc/pgx/v5"
+    "github.com/ekaya-inc/ekaya-engine/pkg/database"
+    "github.com/ekaya-inc/ekaya-engine/pkg/models"
+)
+
 type GlossaryRepository interface {
     Create(ctx context.Context, term *models.BusinessGlossaryTerm) error
     Update(ctx context.Context, term *models.BusinessGlossaryTerm) error
     Delete(ctx context.Context, termID uuid.UUID) error
     GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error)
     GetByTerm(ctx context.Context, projectID uuid.UUID, term string) (*models.BusinessGlossaryTerm, error)
+    GetByID(ctx context.Context, termID uuid.UUID) (*models.BusinessGlossaryTerm, error)
 }
+
+type glossaryRepository struct{}
+
+func NewGlossaryRepository() GlossaryRepository {
+    return &glossaryRepository{}
+}
+
+var _ GlossaryRepository = (*glossaryRepository)(nil)
+
+// Implement CRUD methods following pattern in ontology_entity_repository.go
+// Key SQL patterns:
+// - Use database.GetTenantScope(ctx) for connection
+// - Use RETURNING clause for Create
+// - Use ON CONFLICT for upsert if needed
+// - Scan JSONB columns with pgx JSON support
 ```
 
 #### Step 4: Service
@@ -469,202 +447,177 @@ type GlossaryRepository interface {
 **File:** `pkg/services/glossary_service.go`
 
 ```go
+package services
+
+import (
+    "context"
+    "github.com/google/uuid"
+    "go.uber.org/zap"
+    "github.com/ekaya-inc/ekaya-engine/pkg/models"
+    "github.com/ekaya-inc/ekaya-engine/pkg/repositories"
+)
+
 type GlossaryService interface {
-    // CRUD operations
     CreateTerm(ctx context.Context, projectID uuid.UUID, term *models.BusinessGlossaryTerm) error
     UpdateTerm(ctx context.Context, term *models.BusinessGlossaryTerm) error
     DeleteTerm(ctx context.Context, termID uuid.UUID) error
     GetTerms(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error)
-
-    // LLM suggestion (optional)
+    GetTerm(ctx context.Context, termID uuid.UUID) (*models.BusinessGlossaryTerm, error)
     SuggestTerms(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error)
 }
-```
 
-**LLM Suggestion Prompt:**
+type glossaryService struct {
+    glossaryRepo repositories.GlossaryRepository
+    ontologyRepo repositories.OntologyRepository  // For SuggestTerms - needs schema context
+    logger       *zap.Logger
+}
 
-```
-Given this database schema with semantic column information:
+func NewGlossaryService(
+    glossaryRepo repositories.GlossaryRepository,
+    ontologyRepo repositories.OntologyRepository,
+    logger *zap.Logger,
+) GlossaryService {
+    return &glossaryService{
+        glossaryRepo: glossaryRepo,
+        ontologyRepo: ontologyRepo,
+        logger:       logger.Named("glossary-service"),
+    }
+}
 
-Tables:
-- billing_transactions: total_amount (currency_cents), earned_amount (currency_cents), transaction_state (status: completed, pending, failed, refunded)
-- users: is_host (boolean), last_active_at (timestamp)
-
-Suggest business metrics that executives might ask about. For each metric provide:
-1. term: The business term (e.g., "Revenue", "GMV", "Active Users")
-2. definition: Human-readable definition
-3. base_table: Which table to query
-4. columns_used: Which columns are involved
-5. filters: Required WHERE conditions
-6. aggregation: SUM, COUNT, AVG
-
-Response as JSON array.
+// SuggestTerms uses LLM to analyze ontology and suggest business terms
+// Implementation: Load ontology, send to LLM with prompt asking for metric definitions
 ```
 
 #### Step 5: Handler
 
 **File:** `pkg/handlers/glossary_handler.go`
 
-Endpoints:
-- `GET /api/projects/:id/glossary` - List all terms
-- `POST /api/projects/:id/glossary` - Create term
-- `PUT /api/projects/:id/glossary/:termId` - Update term
-- `DELETE /api/projects/:id/glossary/:termId` - Delete term
-- `POST /api/projects/:id/glossary/suggest` - LLM suggests terms
+Follow pattern from `entity_handler.go`:
 
-#### Step 6: Expose in get_ontology
+```go
+package handlers
+
+// Endpoints:
+// GET    /api/projects/{pid}/glossary           - List all terms
+// POST   /api/projects/{pid}/glossary           - Create term
+// GET    /api/projects/{pid}/glossary/{termId}  - Get single term
+// PUT    /api/projects/{pid}/glossary/{termId}  - Update term
+// DELETE /api/projects/{pid}/glossary/{termId}  - Delete term
+// POST   /api/projects/{pid}/glossary/suggest   - LLM suggests terms
+
+// RegisterRoutes pattern:
+// func (h *GlossaryHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.Middleware, tenantMiddleware TenantMiddleware)
+```
+
+#### Step 6: Register in main.go
+
+**File:** `main.go`
+
+Add after other handler registrations (around line 360):
+
+```go
+// Glossary handler
+glossaryRepo := repositories.NewGlossaryRepository()
+glossaryService := services.NewGlossaryService(glossaryRepo, ontologyRepo, logger)
+glossaryHandler := handlers.NewGlossaryHandler(glossaryService, logger)
+glossaryHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+```
+
+#### Step 7: Expose in get_ontology
 
 **Option A: New MCP tool** (Recommended)
 
-Add new tool `get_glossary` in `pkg/mcp/tools/ontology.go`:
-
-```go
-mcpServer.AddTool(mcp.NewTool("get_glossary",
-    mcp.WithDescription("Get business metric definitions for a project"),
-    mcp.WithHandler(func(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
-        // Return all glossary terms
-    }),
-))
-```
+Add `get_glossary` tool in `pkg/mcp/tools/ontology.go` that returns all terms for the project.
 
 **Option B: Include in domain depth**
 
-Add to `OntologyDomainContext.DomainInfo`:
+Add `Glossary []GlossaryTermBrief` to `OntologyDomainContext.DomainInfo`:
 
 ```go
 type DomainInfo struct {
-    // ...existing fields
+    // ... existing fields ...
     Glossary []GlossaryTermBrief `json:"glossary,omitempty"`
 }
 
 type GlossaryTermBrief struct {
     Term       string `json:"term"`
     Definition string `json:"definition"`
-    BaseTable  string `json:"base_table"`
+    SQLPattern string `json:"sql_pattern,omitempty"`
 }
-```
-
-#### Step 7: Wire in main.go
-
-```go
-// Repository
-glossaryRepo := repositories.NewGlossaryRepository()
-
-// Service
-glossaryService := services.NewGlossaryService(glossaryRepo, llmFactory, logger)
-
-// Handler
-glossaryHandler := handlers.NewGlossaryHandler(glossaryService, logger)
-glossaryHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 ```
 
 ### Files to Create
 
 | File | Purpose |
 |------|---------|
-| `migrations/024_business_glossary.up.sql` | Database table |
-| `migrations/024_business_glossary.down.sql` | Rollback |
+| `migrations/025_business_glossary.up.sql` | Database table |
+| `migrations/025_business_glossary.down.sql` | Rollback |
 | `pkg/models/glossary.go` | Model struct |
 | `pkg/repositories/glossary_repository.go` | CRUD operations |
 | `pkg/services/glossary_service.go` | Business logic + LLM suggestion |
 | `pkg/handlers/glossary_handler.go` | HTTP endpoints |
-| `pkg/mcp/tools/glossary.go` | MCP tool (optional) |
 
-### Test Strategy
+### Files to Modify
 
-1. **Unit tests** for repository with mock DB
-2. **Unit tests** for service with mock repo and mock LLM
-3. **Integration test** with test container
-4. **Manual test** via MCP `get_glossary` tool
-
-### UI Considerations (Future)
-
-Admin page at `/projects/:id/glossary`:
-- Table of defined terms
-- Add/Edit/Delete buttons
-- "Suggest Metrics" button to trigger LLM
-
-### Priority
-
-Medium priority - implement after validating Phase 4 (column semantics) works well in production. Glossary provides incremental value for executive reporting use cases.
+| File | Change |
+|------|--------|
+| `main.go` | Add handler registration (around line 360) |
+| `pkg/mcp/tools/ontology.go` | Add `get_glossary` tool OR include in domain |
+| `pkg/models/ontology_context.go` | (If Option B) Add Glossary to DomainInfo |
 
 ---
 
-## Current Repository Method Summary
+## Important Notes
 
-### OntologyEntityRepository (`pkg/repositories/ontology_entity_repository.go`)
-| Method | Status | Notes |
-|--------|--------|-------|
-| `Create` | ✅ | Includes `domain` |
-| `Update` | ✅ | Includes `domain` |
-| `GetByProject` | ✅ | Includes `domain` |
-| `GetByOntology` | ✅ | Includes `domain` |
-| `GetByID` | ✅ | Includes `domain` |
-| `GetByName` | ✅ | Includes `domain` |
-| `GetAllAliasesByProject` | ✅ | Batch fetch, fixes N+1 |
-| `CreateAlias` | ✅ | Used for alternative names |
-| `CreateKeyColumn` | ✅ | **NEW in Phase 2** |
-| `GetKeyColumnsByEntity` | ✅ | **NEW in Phase 2** |
-| `GetAllKeyColumnsByProject` | ✅ | **NEW in Phase 2** - Batch fetch |
+1. **Column enrichment is manual:** Requires `POST /api/projects/:id/ontology/enrich-columns` to control LLM costs (~$1 for 38 tables).
 
-### EntityRelationshipRepository (`pkg/repositories/entity_relationship_repository.go`)
-| Method | Status |
-|--------|--------|
-| `GetByProject` | ✅ |
-| `GetByTables` | ✅ |
-
-### SchemaRepository (`pkg/repositories/schema_repository.go`)
-| Method | Status |
-|--------|--------|
-| `GetColumnCountByProject` | ✅ |
-| `GetColumnsByTables` | ✅ |
-
-### OntologyRepository (`pkg/repositories/ontology_repository.go`)
-| Method | Status | Notes |
-|--------|--------|-------|
-| `UpdateDomainSummary` | ✅ | Used by Phase 3 finalization |
-| `UpdateColumnDetails` | ✅ | Used by Phase 4 column enrichment |
-
-### ColumnEnrichmentService (`pkg/services/column_enrichment.go`) - NEW in Phase 4
-| Method | Purpose |
-|--------|---------|
-| `EnrichTable` | Enrich all columns for a single table |
-| `EnrichProject` | Enrich all tables in a project |
-
----
-
-## Important Notes for Future Sessions
-
-1. **Existing projects need re-extraction:** Entity extraction must be re-run for existing projects to populate `domain`, key columns, and aliases. The migration only adds the columns - it doesn't populate data.
-
-2. **Domain is free-form:** We chose free-form domain classification (not a fixed enum) to allow domain-specific terminology like "hospitality", "fintech", etc.
-
-3. **Key columns stored in normalized table with synonyms:** Key columns are stored in `engine_ontology_entity_key_columns` with per-column synonyms in JSONB. The LLM generates synonyms for each key column during entity extraction.
-
-4. **Phase 3 auto-triggers:** Ontology finalization runs automatically after relationship workflow completes. It's non-blocking - workflow still marked complete even if finalization fails.
-
-5. **Phase 4 is manual:** Column enrichment requires explicit API call to `POST /api/projects/:id/ontology/enrich-columns`. This is intentional to control LLM costs (~$1 for 38 tables).
-
-6. **Phase 5 bundled with Phase 3:** Convention discovery runs as part of ontology finalization - no separate step needed.
-
-7. **Test mocks updated:** `ontology_context_test.go`, `relationship_workflow_test.go`, and `ontology_finalization_test.go` have updated mocks. Any new tests should follow these patterns.
-
-8. **All checks pass:** `make check` passes including format, lint, typecheck, and all tests.
-
-9. **To test Phase 4 manually:**
-   ```bash
-   # First run entity + relationship extraction via UI
-   # Then trigger column enrichment:
-   curl -X POST https://localhost:3443/api/projects/{pid}/ontology/enrich-columns \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "Content-Type: application/json"
-
-   # Verify via MCP get_ontology depth=columns
+2. **To clear ontology data for re-testing:**
+   ```sql
+   DELETE FROM engine_ontologies WHERE project_id = '<project-id>';
+   DELETE FROM engine_ontology_dag WHERE project_id = '<project-id>';
+   DELETE FROM engine_llm_conversations WHERE project_id = '<project-id>';
+   DELETE FROM engine_project_knowledge WHERE project_id = '<project-id>';
    ```
 
-10. **To clear ontology data for re-testing:**
-    ```sql
-    DELETE FROM engine_ontology_workflows WHERE project_id = '<project-id>';
-    DELETE FROM engine_ontologies WHERE project_id = '<project-id>';
-    DELETE FROM engine_workflow_state WHERE project_id = '<project-id>';
-    ```
+---
+
+## Implementation Order (Recommended)
+
+1. **Issue 1 (wrong relationships)** - HIGH priority, simple fix
+2. **Issue 4 (duplicates)** - LOW priority but quick win
+3. **Issue 3 (FK roles)** - MEDIUM priority, requires model change
+4. **Issue 2 (empty roles)** - MEDIUM priority, requires investigation of enrichment flow
+5. **Phase 6 (Glossary)** - New feature, implement after bugs fixed
+
+---
+
+## Code Quality: Minor Nitpicks
+
+### URL Construction Should Use net/url Package ✅ COMPLETED
+
+**Location:** `pkg/services/mcp_config.go:239`
+
+**Status:** Fixed on 2026-01-04
+
+**What Was Fixed:**
+
+Changed URL construction from fragile `fmt.Sprintf` to `url.JoinPath` (Go 1.19+):
+
+```go
+// Before
+ServerURL: fmt.Sprintf("%s/mcp/%s", s.baseURL, projectID.String())
+
+// After
+serverURL, err := url.JoinPath(s.baseURL, "mcp", projectID.String())
+if err != nil {
+    // Log error and fall back to simple concatenation
+}
+```
+
+**Test Coverage Added:**
+
+`TestMCPConfigService_Get_ServerURLConstruction` - Table-driven test verifying:
+- Base URL without trailing slash
+- Base URL with trailing slash
+- Base URL with path
+- Base URL with path and trailing slash

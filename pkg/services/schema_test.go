@@ -42,6 +42,7 @@ type mockSchemaRepository struct {
 	// Columns
 	columns            []*models.SchemaColumn
 	columnByName       *models.SchemaColumn
+	columnsByTable     map[string][]*models.SchemaColumn
 	upsertColumnErr    error
 	softDeletedColumns int64
 
@@ -356,6 +357,9 @@ func (m *mockSchemaRepository) GetNonPKColumnsByExactType(ctx context.Context, p
 }
 
 func (m *mockSchemaRepository) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
+	if m.columnsByTable != nil {
+		return m.columnsByTable, nil
+	}
 	return make(map[string][]*models.SchemaColumn), nil
 }
 
