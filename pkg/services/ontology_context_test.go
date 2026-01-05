@@ -184,6 +184,14 @@ func (m *mockEntityRelationshipRepository) GetByOntology(ctx context.Context, on
 	return m.relationships, nil
 }
 
+func (m *mockEntityRelationshipRepository) GetByOntologyGroupedByTarget(ctx context.Context, ontologyID uuid.UUID) (map[uuid.UUID][]*models.EntityRelationship, error) {
+	result := make(map[uuid.UUID][]*models.EntityRelationship)
+	for _, rel := range m.relationships {
+		result[rel.TargetEntityID] = append(result[rel.TargetEntityID], rel)
+	}
+	return result, nil
+}
+
 func (m *mockEntityRelationshipRepository) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error) {
 	if m.getByProjectErr != nil {
 		return nil, m.getByProjectErr
@@ -547,11 +555,11 @@ func TestGetEntitiesContext(t *testing.T) {
 	// First occurrence: users.id -> users.id (no association)
 	assert.Equal(t, "users", userEntity.Occurrences[0].Table)
 	assert.Equal(t, "id", userEntity.Occurrences[0].Column)
-	assert.Nil(t, userEntity.Occurrences[0].Role)
+	assert.Nil(t, userEntity.Occurrences[0].Association)
 	// Second occurrence: orders.user_id -> users.id (with "customer" association)
 	assert.Equal(t, "orders", userEntity.Occurrences[1].Table)
 	assert.Equal(t, "user_id", userEntity.Occurrences[1].Column)
-	assert.Equal(t, "customer", *userEntity.Occurrences[1].Role)
+	assert.Equal(t, "customer", *userEntity.Occurrences[1].Association)
 }
 
 func TestGetTablesContext(t *testing.T) {
@@ -683,8 +691,8 @@ func TestGetTablesContext_FKRoles(t *testing.T) {
 		ColumnDetails: map[string][]models.ColumnDetail{
 			"billing_engagements": {
 				{Name: "id", IsPrimaryKey: true, Role: models.ColumnRoleIdentifier},
-				{Name: "host_id", IsForeignKey: true, ForeignTable: "users", FKRole: "host", Role: models.ColumnRoleDimension},
-				{Name: "visitor_id", IsForeignKey: true, ForeignTable: "users", FKRole: "visitor", Role: models.ColumnRoleDimension},
+				{Name: "host_id", IsForeignKey: true, ForeignTable: "users", FKAssociation: "host", Role: models.ColumnRoleDimension},
+				{Name: "visitor_id", IsForeignKey: true, ForeignTable: "users", FKAssociation: "visitor", Role: models.ColumnRoleDimension},
 				{Name: "status", EnumValues: []models.EnumValue{{Value: "active"}, {Value: "completed"}}, Role: models.ColumnRoleDimension},
 				{Name: "amount", Role: models.ColumnRoleMeasure},
 			},
@@ -740,31 +748,31 @@ func TestGetTablesContext_FKRoles(t *testing.T) {
 		columnByName[col.Name] = col
 	}
 
-	// host_id should have FKRole = "host" and Role = "dimension"
+	// host_id should have FKAssociation = "host" and Role = "dimension"
 	hostCol := columnByName["host_id"]
-	assert.Equal(t, "host", hostCol.FKRole, "host_id should have FK role 'host'")
+	assert.Equal(t, "host", hostCol.FKAssociation, "host_id should have FK association 'host'")
 	assert.Equal(t, models.ColumnRoleDimension, hostCol.Role, "host_id should have analytical role 'dimension'")
 
-	// visitor_id should have FKRole = "visitor" and Role = "dimension"
+	// visitor_id should have FKAssociation = "visitor" and Role = "dimension"
 	visitorCol := columnByName["visitor_id"]
-	assert.Equal(t, "visitor", visitorCol.FKRole, "visitor_id should have FK role 'visitor'")
+	assert.Equal(t, "visitor", visitorCol.FKAssociation, "visitor_id should have FK association 'visitor'")
 	assert.Equal(t, models.ColumnRoleDimension, visitorCol.Role, "visitor_id should have analytical role 'dimension'")
 
-	// id should have Role = "identifier" but no FKRole (it's a PK, not FK)
+	// id should have Role = "identifier" but no FKAssociation (it's a PK, not FK)
 	idCol := columnByName["id"]
-	assert.Empty(t, idCol.FKRole, "primary key should not have FK role")
+	assert.Empty(t, idCol.FKAssociation, "primary key should not have FK association")
 	assert.Equal(t, models.ColumnRoleIdentifier, idCol.Role, "id should have analytical role 'identifier'")
 
 	// status should have HasEnumValues = true and Role = "dimension"
 	statusCol := columnByName["status"]
 	assert.True(t, statusCol.HasEnumValues, "status should have enum values")
-	assert.Empty(t, statusCol.FKRole, "status should not have FK role")
+	assert.Empty(t, statusCol.FKAssociation, "status should not have FK association")
 	assert.Equal(t, models.ColumnRoleDimension, statusCol.Role, "status should have analytical role 'dimension'")
 
 	// amount should have Role = "measure"
 	amountCol := columnByName["amount"]
 	assert.Equal(t, models.ColumnRoleMeasure, amountCol.Role, "amount should have analytical role 'measure'")
-	assert.Empty(t, amountCol.FKRole, "amount should not have FK role")
+	assert.Empty(t, amountCol.FKAssociation, "amount should not have FK association")
 }
 
 func TestGetColumnsContext(t *testing.T) {

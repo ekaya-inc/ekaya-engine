@@ -377,13 +377,13 @@ type columnEnrichmentResponse struct {
 
 // columnEnrichment is the LLM response structure for a single column.
 type columnEnrichment struct {
-	Name         string             `json:"name"`
-	Description  string             `json:"description"`
-	SemanticType string             `json:"semantic_type"`
-	Role         string             `json:"role"`
-	Synonyms     []string           `json:"synonyms,omitempty"`
-	EnumValues   []models.EnumValue `json:"enum_values,omitempty"`
-	FKRole       *string            `json:"fk_role"`
+	Name          string             `json:"name"`
+	Description   string             `json:"description"`
+	SemanticType  string             `json:"semantic_type"`
+	Role          string             `json:"role"`
+	Synonyms      []string           `json:"synonyms,omitempty"`
+	EnumValues    []models.EnumValue `json:"enum_values,omitempty"`
+	FKAssociation *string            `json:"fk_association"`
 }
 
 // enrichColumnsWithLLM uses the LLM to generate semantic metadata for columns.
@@ -676,9 +676,9 @@ func (s *columnEnrichmentService) buildColumnEnrichmentPrompt(
 	sb.WriteString("3. **role**: dimension (for grouping/filtering) | measure (for aggregation) | identifier (unique IDs) | attribute (descriptive)\n")
 	sb.WriteString("4. **synonyms**: alternative names users might use (optional array)\n")
 	sb.WriteString("5. **enum_values**: if status/type column, array of {value, label, description}\n")
-	sb.WriteString("6. **fk_role**: for FK columns, what semantic role does this reference represent?\n")
+	sb.WriteString("6. **fk_association**: for FK columns, what association does this reference represent?\n")
 	sb.WriteString("   Examples: \"owner\", \"creator\", \"assignee\", \"payer\", \"payee\", \"host\", \"visitor\"\n")
-	sb.WriteString("   Set to null if it's a generic reference with no special semantic role.\n")
+	sb.WriteString("   Set to null if it's a generic reference with no special association.\n")
 
 	// Response format
 	sb.WriteString("\n## Response Format (JSON object)\n")
@@ -694,7 +694,7 @@ func (s *columnEnrichmentService) buildColumnEnrichmentPrompt(
 	sb.WriteString("      \"enum_values\": [\n")
 	sb.WriteString("        {\"value\": \"active\", \"label\": \"Active\", \"description\": \"Entity is currently active\"}\n")
 	sb.WriteString("      ],\n")
-	sb.WriteString("      \"fk_role\": null\n")
+	sb.WriteString("      \"fk_association\": null\n")
 	sb.WriteString("    }\n")
 	sb.WriteString("  ]\n")
 	sb.WriteString("}\n")
@@ -763,8 +763,8 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 			detail.Role = enrichment.Role
 			detail.Synonyms = enrichment.Synonyms
 			detail.EnumValues = enrichment.EnumValues
-			if enrichment.FKRole != nil {
-				detail.FKRole = *enrichment.FKRole
+			if enrichment.FKAssociation != nil {
+				detail.FKAssociation = *enrichment.FKAssociation
 			}
 		}
 

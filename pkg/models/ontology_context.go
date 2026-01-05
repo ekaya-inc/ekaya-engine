@@ -55,9 +55,9 @@ type KeyColumnInfo struct {
 
 // EntityOccurrence describes where an entity appears in the schema.
 type EntityOccurrence struct {
-	Table  string  `json:"table"`
-	Column string  `json:"column"`
-	Role   *string `json:"role,omitempty"`
+	Table       string  `json:"table"`
+	Column      string  `json:"column"`
+	Association *string `json:"association,omitempty"`
 }
 
 // OntologyEntityRelationship represents a relationship between entities in the ontology context.
@@ -91,14 +91,14 @@ type TableSummary struct {
 
 // ColumnOverview provides basic column information for table summary.
 type ColumnOverview struct {
-	Name          string  `json:"name"`
-	Type          string  `json:"type"`
-	Role          string  `json:"role"`
-	IsPrimaryKey  bool    `json:"is_primary_key"`
-	Entity        *string `json:"entity,omitempty"`
-	EntityRole    *string `json:"entity_role,omitempty"`
-	HasEnumValues bool    `json:"has_enum_values"`
-	FKRole        string  `json:"fk_role,omitempty"` // semantic role: host, visitor, payer, payee, etc.
+	Name              string  `json:"name"`
+	Type              string  `json:"type"`
+	Role              string  `json:"role"`
+	IsPrimaryKey      bool    `json:"is_primary_key"`
+	Entity            *string `json:"entity,omitempty"`
+	EntityAssociation *string `json:"entity_association,omitempty"`
+	HasEnumValues     bool    `json:"has_enum_values"`
+	FKAssociation     string  `json:"fk_association,omitempty"` // e.g., host, visitor, payer, payee
 }
 
 // TableRelationship represents a relationship at table level.

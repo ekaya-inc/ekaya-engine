@@ -317,10 +317,10 @@ type DiscoveredEntity struct {
 
 // EntityOccurrence represents a single occurrence of an entity in a table.
 type EntityOccurrence struct {
-	SchemaName string  `json:"schema_name"`
-	TableName  string  `json:"table_name"`
-	ColumnName string  `json:"column_name"`
-	Role       *string `json:"role"`
+	SchemaName  string  `json:"schema_name"`
+	TableName   string  `json:"table_name"`
+	ColumnName  string  `json:"column_name"`
+	Association *string `json:"association"`
 }
 
 // parseEntityDiscoveryOutput parses the LLM's JSON response.

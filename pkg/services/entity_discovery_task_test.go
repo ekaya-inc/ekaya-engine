@@ -30,7 +30,7 @@ func TestParseEntityDiscoveryOutput(t *testing.T) {
 								"schema_name": "public",
 								"table_name": "orders",
 								"column_name": "user_id",
-								"role": null
+								"association": null
 							}
 						]
 					}

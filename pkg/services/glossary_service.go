@@ -283,10 +283,10 @@ func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntolog
 	if ontology.ColumnDetails != nil && len(ontology.ColumnDetails) > 0 {
 		sb.WriteString("## Key Columns\n\n")
 		for tableName, columns := range ontology.ColumnDetails {
-			// Only show columns with roles (measures, dimensions) or FK roles
+			// Only show columns with roles (measures, dimensions) or FK associations
 			relevantCols := make([]models.ColumnDetail, 0)
 			for _, col := range columns {
-				if col.Role == "measure" || col.Role == "dimension" || col.FKRole != "" {
+				if col.Role == "measure" || col.Role == "dimension" || col.FKAssociation != "" {
 					relevantCols = append(relevantCols, col)
 				}
 			}

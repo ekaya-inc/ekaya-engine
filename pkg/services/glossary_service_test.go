@@ -702,7 +702,7 @@ func TestGlossaryService_SuggestTerms_WithColumnDetails(t *testing.T) {
 			ColumnDetails: map[string][]models.ColumnDetail{
 				"transactions": {
 					{Name: "amount", Role: "measure", Description: "Transaction amount in cents"},
-					{Name: "user_id", Role: "dimension", FKRole: "payer"},
+					{Name: "user_id", Role: "dimension", FKAssociation: "payer"},
 				},
 			},
 		},

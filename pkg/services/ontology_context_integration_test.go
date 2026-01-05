@@ -552,8 +552,8 @@ func TestOntologyContextService_Integration_GetEntitiesContext(t *testing.T) {
 	occ := userEntity.Occurrences[0]
 	assert.Equal(t, "orders", occ.Table)
 	assert.Equal(t, "id", occ.Column)
-	// Role comes from relationship.Association (which is nil in this test data)
-	assert.Nil(t, occ.Role)
+	// Association comes from relationship.Association (which is nil in this test data)
+	assert.Nil(t, occ.Association)
 }
 
 func TestOntologyContextService_Integration_GetTablesContext(t *testing.T) {

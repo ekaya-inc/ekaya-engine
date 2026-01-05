@@ -177,6 +177,10 @@ func (r *testColEnrichmentRelRepo) GetByOntology(ctx context.Context, ontologyID
 	return nil, nil
 }
 
+func (r *testColEnrichmentRelRepo) GetByOntologyGroupedByTarget(ctx context.Context, ontologyID uuid.UUID) (map[uuid.UUID][]*models.EntityRelationship, error) {
+	return make(map[uuid.UUID][]*models.EntityRelationship), nil
+}
+
 func (r *testColEnrichmentRelRepo) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error) {
 	return nil, nil
 }
@@ -471,14 +475,14 @@ func TestColumnEnrichmentService_EnrichProject_Success(t *testing.T) {
 				"description": "Unique identifier for the user",
 				"semantic_type": "identifier",
 				"role": "identifier",
-				"fk_role": null
+				"fk_association": null
 			},
 			{
 				"name": "email",
 				"description": "User's email address",
 				"semantic_type": "email",
 				"role": "attribute",
-				"fk_role": null
+				"fk_association": null
 			}
 		]
 	}`
@@ -554,7 +558,7 @@ func TestColumnEnrichmentService_EnrichProject_WithRetryOnTransientError(t *test
 				"description": "User ID",
 				"semantic_type": "identifier",
 				"role": "identifier",
-				"fk_role": null
+				"fk_association": null
 			}
 		]
 	}`
@@ -688,7 +692,7 @@ func TestColumnEnrichmentService_EnrichProject_LargeTable(t *testing.T) {
 			"description": "Column %d",
 			"semantic_type": "text",
 			"role": "attribute",
-			"fk_role": null
+			"fk_association": null
 		}`, colName, i+1)
 	}
 
@@ -753,7 +757,7 @@ func TestColumnEnrichmentService_EnrichProject_ProgressCallback(t *testing.T) {
 
 	llmResponse := `{
 		"columns": [
-			{"name": "id", "description": "ID", "semantic_type": "identifier", "role": "identifier", "fk_role": null}
+			{"name": "id", "description": "ID", "semantic_type": "identifier", "role": "identifier", "fk_association": null}
 		]
 	}`
 
@@ -860,7 +864,7 @@ func TestColumnEnrichmentService_EnrichProject_PartialFailure(t *testing.T) {
 
 	llmResponse := `{
 		"columns": [
-			{"name": "id", "description": "ID", "semantic_type": "identifier", "role": "identifier", "fk_role": null}
+			{"name": "id", "description": "ID", "semantic_type": "identifier", "role": "identifier", "fk_association": null}
 		]
 	}`
 
@@ -961,14 +965,14 @@ func TestColumnEnrichmentService_EnrichTable_WithForeignKeys(t *testing.T) {
 				"description": "Order identifier",
 				"semantic_type": "identifier",
 				"role": "identifier",
-				"fk_role": null
+				"fk_association": null
 			},
 			{
 				"name": "user_id",
 				"description": "User who placed the order",
 				"semantic_type": "identifier",
 				"role": "dimension",
-				"fk_role": "customer"
+				"fk_association": "customer"
 			}
 		]
 	}`
@@ -1008,7 +1012,7 @@ func TestColumnEnrichmentService_EnrichTable_WithForeignKeys(t *testing.T) {
 	// Check FK role was captured
 	userIDCol := details[1]
 	assert.Equal(t, "user_id", userIDCol.Name)
-	assert.Equal(t, "customer", userIDCol.FKRole)
+	assert.Equal(t, "customer", userIDCol.FKAssociation)
 }
 
 func TestColumnEnrichmentService_EnrichTable_WithEnumValues(t *testing.T) {
@@ -1032,7 +1036,7 @@ func TestColumnEnrichmentService_EnrichTable_WithEnumValues(t *testing.T) {
 				"description": "Order identifier",
 				"semantic_type": "identifier",
 				"role": "identifier",
-				"fk_role": null
+				"fk_association": null
 			},
 			{
 				"name": "status",
@@ -1045,7 +1049,7 @@ func TestColumnEnrichmentService_EnrichTable_WithEnumValues(t *testing.T) {
 					{"value": "shipped", "label": "Shipped", "description": "Order has been shipped"},
 					{"value": "delivered", "label": "Delivered", "description": "Order has been delivered"}
 				],
-				"fk_role": null
+				"fk_association": null
 			}
 		]
 	}`
@@ -1216,7 +1220,7 @@ func TestColumnEnrichmentService_EnrichProject_ContinuesOnFailure(t *testing.T) 
 
 	llmResponse := `{
 		"columns": [
-			{"name": "id", "description": "ID", "semantic_type": "identifier", "role": "identifier", "fk_role": null}
+			{"name": "id", "description": "ID", "semantic_type": "identifier", "role": "identifier", "fk_association": null}
 		]
 	}`
 
@@ -1367,7 +1371,7 @@ func TestColumnEnrichmentService_EnrichColumnsInChunks_ParallelProcessing(t *tes
 						"description": "Column %d",
 						"semantic_type": "text",
 						"role": "attribute",
-						"fk_role": null
+						"fk_association": null
 					}`, i, i))
 				}
 			}
@@ -1478,7 +1482,7 @@ func TestColumnEnrichmentService_EnrichColumnsInChunks_ChunkFailure(t *testing.T
 						"description": "Column %d",
 						"semantic_type": "text",
 						"role": "attribute",
-						"fk_role": null
+						"fk_association": null
 					}`, i, i))
 				}
 			}
