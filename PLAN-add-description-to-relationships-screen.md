@@ -47,17 +47,20 @@ Display LLM-generated relationship descriptions on the Relationships page.
 - Used `omitempty` tag so empty descriptions don't clutter the JSON response
 - All tests passing, validates correct API contract
 
-### 2. Frontend: Add Description to Type
+### 2. Frontend: Add Description to Type ✅
 
-**File**: `ui/src/types/schema.ts`
+**Status**: COMPLETE
 
-Add to `RelationshipDetail` interface (around line 104):
-```typescript
-export interface RelationshipDetail {
-  // ... existing fields ...
-  description?: string;  // ADD THIS
-}
-```
+**File Modified**: `ui/src/types/schema.ts`
+
+**Changes Made**:
+- Added optional `description?: string` field to `RelationshipDetail` interface (line 118)
+- Field is optional to handle relationships that don't have descriptions yet
+- Positioned after `is_approved` field, before `created_at`
+
+**Implementation Notes**:
+- Used optional field (`?`) since descriptions are only populated after DAG stage 6 completes
+- TypeScript type now matches the API response from backend
 
 ### 3. Frontend: Display Description in UI
 
