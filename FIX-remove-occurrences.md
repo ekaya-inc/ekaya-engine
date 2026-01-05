@@ -54,7 +54,14 @@ After migration, drop `engine_ontology_entity_occurrences` entirely.
 
 ### Phase 1: Schema Changes
 
-#### 1.1 Add `association` column to relationships
+#### 1.1 Add `association` column to relationships ✅ COMPLETED
+
+**Implementation Notes:**
+- Migration 027 created: `migrations/027_add_relationship_association.up.sql`
+- Down migration created: `migrations/027_add_relationship_association.down.sql`
+- Integration test added: `pkg/repositories/entity_relationship_migration_test.go`
+- Test verifies column exists, has correct type (VARCHAR 100), and has comment
+- Column is nullable to support existing relationships (will be populated during enrichment)
 
 ```sql
 -- Migration: add_relationship_association.up.sql
