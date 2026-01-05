@@ -168,11 +168,22 @@ The investigation revealed that the OLD relationship discovery service (`relatio
 - Task 3: Old garbage pk_match relationships should be purged from database
 - The stats collection is working; no DAG changes needed for that aspect
 
-### Task 2: Fix Schema/Ontology Lifecycle
+### Task 2: Fix Schema/Ontology Lifecycle [x]
 
-When a datasource is deleted or reconfigured:
-1. Clear the associated ontology data
-2. OR re-run schema import automatically
+**Problem:** When a datasource is deleted, CASCADE deletes schema tables/columns but ontology entities remain orphaned.
+
+**Solution Implemented:**
+1. Added `GetProjectID()` method to `DatasourceRepository` to retrieve project_id before deletion
+2. Modified `DatasourceService.Delete()` to call `OntologyRepository.DeleteByProject()` after deleting datasource
+3. This clears all ontology data (CASCADE deletes entities, relationships, etc.)
+
+**Files Modified:**
+- `pkg/services/datasource.go` - Added ontology cleanup to Delete method
+- `pkg/repositories/datasource_repository.go` - Added GetProjectID method
+- Updated all NewDatasourceService call sites to inject OntologyRepository dependency
+
+**Tests Added:**
+- `TestDatasourcesIntegration_DeleteClearsOntology` - Integration test verifying ontology cleanup on datasource deletion
 
 ### Task 3: Purge Garbage pk_match Relationships
 

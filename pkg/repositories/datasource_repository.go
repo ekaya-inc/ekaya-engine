@@ -35,6 +35,9 @@ type DatasourceRepository interface {
 
 	// Delete removes a datasource by ID.
 	Delete(ctx context.Context, id uuid.UUID) error
+
+	// GetProjectID retrieves the project_id for a datasource by ID.
+	GetProjectID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 }
 
 // datasourceRepository implements DatasourceRepository using PostgreSQL.
@@ -260,6 +263,27 @@ func (r *datasourceRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 
 	return nil
+}
+
+// GetProjectID retrieves the project_id for a datasource by ID.
+func (r *datasourceRepository) GetProjectID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return uuid.Nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `SELECT project_id FROM engine_datasources WHERE id = $1`
+
+	var projectID uuid.UUID
+	err := scope.Conn.QueryRow(ctx, query, id).Scan(&projectID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return uuid.Nil, fmt.Errorf("datasource not found")
+		}
+		return uuid.Nil, fmt.Errorf("failed to get project_id: %w", err)
+	}
+
+	return projectID, nil
 }
 
 // Ensure datasourceRepository implements DatasourceRepository at compile time.
