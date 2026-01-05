@@ -25,35 +25,27 @@ Display LLM-generated relationship descriptions on the Relationships page.
 
 ## Implementation
 
-### 1. Backend: Add Description to API Response
+### 1. Backend: Add Description to API Response ✅
 
-**File**: `pkg/handlers/entity_relationship_handler.go`
+**Status**: COMPLETE
 
-Add `Description` to response struct (around line 18):
-```go
-type EntityRelationshipResponse struct {
-    // ... existing fields ...
-    Description      string  `json:"description,omitempty"`  // ADD THIS
-}
-```
+**Files Modified**:
+- `pkg/handlers/entity_relationship_handler.go` - Added `Description` field to `EntityRelationshipResponse` struct, mapped it in `List` handler, added `deref` helper function
+- `pkg/handlers/entity_relationship_handler_test.go` - Added comprehensive tests for description mapping including null handling
 
-Map description in `List` handler (around line 169):
-```go
-relResponses = append(relResponses, EntityRelationshipResponse{
-    // ... existing fields ...
-    Description:      deref(rel.Description),  // ADD THIS
-})
-```
+**Changes Made**:
+1. Added `Description string` field to `EntityRelationshipResponse` struct (line 34)
+2. Mapped `rel.Description` to response in `List` handler using `deref` helper (line 183)
+3. Created `deref` helper function to safely handle nil string pointers (lines 202-206)
+4. Added test `TestEntityRelationshipHandler_List_DescriptionMapping` covering:
+   - Description present case
+   - Description null case (returns empty string)
+   - Multiple relationships with different descriptions
 
-Add helper if needed:
-```go
-func deref(s *string) string {
-    if s == nil {
-        return ""
-    }
-    return *s
-}
-```
+**Implementation Notes**:
+- The `deref` helper converts `nil` to empty string, making it safe for JSON serialization
+- Used `omitempty` tag so empty descriptions don't clutter the JSON response
+- All tests passing, validates correct API contract
 
 ### 2. Frontend: Add Description to Type
 

@@ -176,3 +176,171 @@ func TestEntityRelationshipHandler_List_DetectionMethodMapping(t *testing.T) {
 		})
 	}
 }
+
+// TestEntityRelationshipHandler_List_DescriptionMapping tests that relationship descriptions
+// are correctly included in the API response.
+func TestEntityRelationshipHandler_List_DescriptionMapping(t *testing.T) {
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	description1 := "Links a user to their account"
+	description2 := "Links a user to the channels they own"
+
+	testCases := []struct {
+		name               string
+		description        *string
+		expectedInResponse string
+	}{
+		{
+			name:               "description present",
+			description:        &description1,
+			expectedInResponse: description1,
+		},
+		{
+			name:               "description null",
+			description:        nil,
+			expectedInResponse: "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockService := &mockDeterministicRelationshipService{
+				relationships: []*models.EntityRelationship{
+					{
+						ID:                uuid.New(),
+						OntologyID:        ontologyID,
+						SourceEntityID:    uuid.New(),
+						TargetEntityID:    uuid.New(),
+						SourceColumnTable: "users",
+						SourceColumnName:  "id",
+						TargetColumnTable: "orders",
+						TargetColumnName:  "user_id",
+						DetectionMethod:   models.DetectionMethodForeignKey,
+						Status:            "confirmed",
+						Confidence:        1.0,
+						Description:       tc.description,
+					},
+				},
+			}
+
+			handler := NewEntityRelationshipHandler(mockService, zap.NewNop())
+
+			// Create request with project ID in path
+			req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/relationships", nil)
+			req.SetPathValue("pid", projectID.String())
+
+			rec := httptest.NewRecorder()
+			handler.List(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+			}
+
+			var response ApiResponse
+			if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+
+			if !response.Success {
+				t.Fatal("expected success=true")
+			}
+
+			dataBytes, err := json.Marshal(response.Data)
+			if err != nil {
+				t.Fatalf("failed to marshal data: %v", err)
+			}
+
+			var listResponse EntityRelationshipListResponse
+			if err := json.Unmarshal(dataBytes, &listResponse); err != nil {
+				t.Fatalf("failed to unmarshal list response: %v", err)
+			}
+
+			if len(listResponse.Relationships) != 1 {
+				t.Fatalf("expected 1 relationship, got %d", len(listResponse.Relationships))
+			}
+
+			rel := listResponse.Relationships[0]
+
+			// Verify description mapping
+			if rel.Description != tc.expectedInResponse {
+				t.Errorf("expected Description=%q, got %q", tc.expectedInResponse, rel.Description)
+			}
+		})
+	}
+
+	// Test with multiple relationships having different descriptions
+	t.Run("multiple relationships with descriptions", func(t *testing.T) {
+		mockService := &mockDeterministicRelationshipService{
+			relationships: []*models.EntityRelationship{
+				{
+					ID:                uuid.New(),
+					OntologyID:        ontologyID,
+					SourceEntityID:    uuid.New(),
+					TargetEntityID:    uuid.New(),
+					SourceColumnTable: "users",
+					SourceColumnName:  "account_id",
+					TargetColumnTable: "accounts",
+					TargetColumnName:  "id",
+					DetectionMethod:   models.DetectionMethodForeignKey,
+					Status:            "confirmed",
+					Confidence:        1.0,
+					Description:       &description1,
+				},
+				{
+					ID:                uuid.New(),
+					OntologyID:        ontologyID,
+					SourceEntityID:    uuid.New(),
+					TargetEntityID:    uuid.New(),
+					SourceColumnTable: "users",
+					SourceColumnName:  "id",
+					TargetColumnTable: "channels",
+					TargetColumnName:  "owner_id",
+					DetectionMethod:   models.DetectionMethodPKMatch,
+					Status:            "pending",
+					Confidence:        0.85,
+					Description:       &description2,
+				},
+			},
+		}
+
+		handler := NewEntityRelationshipHandler(mockService, zap.NewNop())
+
+		req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/relationships", nil)
+		req.SetPathValue("pid", projectID.String())
+
+		rec := httptest.NewRecorder()
+		handler.List(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var response ApiResponse
+		if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		dataBytes, err := json.Marshal(response.Data)
+		if err != nil {
+			t.Fatalf("failed to marshal data: %v", err)
+		}
+
+		var listResponse EntityRelationshipListResponse
+		if err := json.Unmarshal(dataBytes, &listResponse); err != nil {
+			t.Fatalf("failed to unmarshal list response: %v", err)
+		}
+
+		if len(listResponse.Relationships) != 2 {
+			t.Fatalf("expected 2 relationships, got %d", len(listResponse.Relationships))
+		}
+
+		// Verify both descriptions are present
+		if listResponse.Relationships[0].Description != description1 {
+			t.Errorf("expected first relationship Description=%q, got %q", description1, listResponse.Relationships[0].Description)
+		}
+		if listResponse.Relationships[1].Description != description2 {
+			t.Errorf("expected second relationship Description=%q, got %q", description2, listResponse.Relationships[1].Description)
+		}
+	})
+}

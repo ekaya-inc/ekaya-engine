@@ -31,6 +31,7 @@ type EntityRelationshipResponse struct {
 	IsValidated      bool    `json:"is_validated"`
 	IsApproved       *bool   `json:"is_approved,omitempty"`
 	Status           string  `json:"status,omitempty"` // "confirmed" or "pending"
+	Description      string  `json:"description,omitempty"`
 }
 
 // EntityRelationshipListResponse for GET /relationships
@@ -179,6 +180,7 @@ func (h *EntityRelationshipHandler) List(w http.ResponseWriter, r *http.Request)
 			IsValidated:      rel.Status == "confirmed",
 			IsApproved:       isApproved,
 			Status:           rel.Status,
+			Description:      deref(rel.Description),
 		})
 	}
 
@@ -190,4 +192,16 @@ func (h *EntityRelationshipHandler) List(w http.ResponseWriter, r *http.Request)
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+// deref safely dereferences a string pointer, returning empty string if nil.
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
