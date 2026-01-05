@@ -41,6 +41,7 @@ type DatasourceService interface {
 // datasourceService implements DatasourceService.
 type datasourceService struct {
 	repo           repositories.DatasourceRepository
+	ontologyRepo   repositories.OntologyRepository
 	encryptor      *crypto.CredentialEncryptor
 	adapterFactory datasource.DatasourceAdapterFactory
 	projectService ProjectService
@@ -50,6 +51,7 @@ type datasourceService struct {
 // NewDatasourceService creates a new datasource service with dependencies.
 func NewDatasourceService(
 	repo repositories.DatasourceRepository,
+	ontologyRepo repositories.OntologyRepository,
 	encryptor *crypto.CredentialEncryptor,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	projectService ProjectService,
@@ -57,6 +59,7 @@ func NewDatasourceService(
 ) DatasourceService {
 	return &datasourceService{
 		repo:           repo,
+		ontologyRepo:   ontologyRepo,
 		encryptor:      encryptor,
 		adapterFactory: adapterFactory,
 		projectService: projectService,
@@ -210,14 +213,34 @@ func (s *datasourceService) Update(ctx context.Context, id uuid.UUID, name, dsTy
 	return nil
 }
 
-// Delete removes a datasource.
+// Delete removes a datasource and clears associated ontology data.
+// When a datasource is deleted, CASCADE deletes schema tables/columns,
+// but ontology entities would remain orphaned. This method explicitly
+// clears the ontology to prevent stale data.
 func (s *datasourceService) Delete(ctx context.Context, id uuid.UUID) error {
+	// Get project_id before deletion
+	projectID, err := s.repo.GetProjectID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to get datasource project_id: %w", err)
+	}
+
+	// Delete the datasource (CASCADE deletes schema tables/columns)
 	if err := s.repo.Delete(ctx, id); err != nil {
 		return err
 	}
 
-	s.logger.Info("Deleted datasource",
+	// Clear ontology data for the project (CASCADE deletes entities, relationships, etc.)
+	if err := s.ontologyRepo.DeleteByProject(ctx, projectID); err != nil {
+		s.logger.Error("Failed to delete ontology after datasource deletion",
+			zap.String("datasource_id", id.String()),
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return fmt.Errorf("failed to clear ontology data: %w", err)
+	}
+
+	s.logger.Info("Deleted datasource and cleared ontology",
 		zap.String("id", id.String()),
+		zap.String("project_id", projectID.String()),
 	)
 
 	return nil

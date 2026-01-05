@@ -176,9 +176,163 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 		fkCount++
 	}
 
+	// Collect column stats for pk_match discovery
+	// This must happen after FK discovery but before pk_match runs
+	if err := s.collectColumnStats(ctx, projectID, datasourceID, tables, columns); err != nil {
+		return nil, fmt.Errorf("collect column stats: %w", err)
+	}
+
 	return &FKDiscoveryResult{
 		FKRelationships: fkCount,
 	}, nil
+}
+
+// collectColumnStats analyzes column statistics from the target database
+// and determines joinability for each column. This is required for pk_match discovery.
+func (s *deterministicRelationshipService) collectColumnStats(
+	ctx context.Context,
+	projectID, datasourceID uuid.UUID,
+	tables []*models.SchemaTable,
+	columns []*models.SchemaColumn,
+) error {
+	// Get datasource to create schema discoverer
+	ds, err := s.datasourceService.Get(ctx, projectID, datasourceID)
+	if err != nil {
+		return fmt.Errorf("get datasource: %w", err)
+	}
+
+	discoverer, err := s.adapterFactory.NewSchemaDiscoverer(ctx, ds.DatasourceType, ds.Config, projectID, datasourceID, "")
+	if err != nil {
+		return fmt.Errorf("create schema discoverer: %w", err)
+	}
+	defer discoverer.Close()
+
+	// Build table lookup and group columns by table
+	tableByID := make(map[uuid.UUID]*models.SchemaTable)
+	columnsByTable := make(map[uuid.UUID][]*models.SchemaColumn)
+	for _, t := range tables {
+		tableByID[t.ID] = t
+	}
+	for _, c := range columns {
+		columnsByTable[c.SchemaTableID] = append(columnsByTable[c.SchemaTableID], c)
+	}
+
+	// Process each table
+	for tableID, tableCols := range columnsByTable {
+		table := tableByID[tableID]
+		if table == nil {
+			continue
+		}
+
+		// Get row count for the table (needed for joinability classification)
+		var tableRowCount int64
+		if table.RowCount != nil {
+			tableRowCount = *table.RowCount
+		}
+
+		// Get column names for stats query
+		columnNames := make([]string, len(tableCols))
+		for i, c := range tableCols {
+			columnNames[i] = c.ColumnName
+		}
+
+		// Analyze column stats from target database
+		stats, err := discoverer.AnalyzeColumnStats(ctx, table.SchemaName, table.TableName, columnNames)
+		if err != nil {
+			// Log warning but continue with other tables
+			continue
+		}
+
+		// Build stats lookup
+		statsMap := make(map[string]*datasource.ColumnStats)
+		for i := range stats {
+			statsMap[stats[i].ColumnName] = &stats[i]
+		}
+
+		// Classify joinability and update columns
+		for _, col := range tableCols {
+			st := statsMap[col.ColumnName]
+
+			isJoinable, reason := classifyJoinability(col, st, tableRowCount)
+
+			// Prepare stats for update
+			var rowCount, nonNullCount, distinctCount *int64
+			if st != nil {
+				rowCount = &st.RowCount
+				nonNullCount = &st.NonNullCount
+				distinctCount = &st.DistinctCount
+			}
+
+			// Update column joinability in database
+			if err := s.schemaRepo.UpdateColumnJoinability(ctx, col.ID, rowCount, nonNullCount, distinctCount, &isJoinable, &reason); err != nil {
+				// Log warning but continue
+				continue
+			}
+		}
+	}
+
+	return nil
+}
+
+// classifyJoinability determines if a column is suitable for join key consideration.
+func classifyJoinability(col *models.SchemaColumn, stats *datasource.ColumnStats, tableRowCount int64) (bool, string) {
+	// Primary keys are always joinable
+	if col.IsPrimaryKey {
+		return true, models.JoinabilityPK
+	}
+
+	// Exclude certain data types
+	baseType := normalizeTypeForJoin(col.DataType)
+	if isExcludedJoinType(baseType) {
+		return false, models.JoinabilityTypeExcluded
+	}
+
+	// Need stats for further classification
+	if stats == nil || tableRowCount == 0 {
+		return false, models.JoinabilityNoStats
+	}
+
+	// Check for unique values (potential FK target)
+	if stats.DistinctCount == stats.NonNullCount && stats.NonNullCount > 0 {
+		return true, models.JoinabilityUniqueValues
+	}
+
+	// Check for low cardinality (< 1% distinct)
+	distinctRatio := float64(stats.DistinctCount) / float64(tableRowCount)
+	if distinctRatio < 0.01 {
+		return false, models.JoinabilityLowCardinality
+	}
+
+	// Default: joinable if it has reasonable cardinality
+	return true, models.JoinabilityCardinalityOK
+}
+
+// normalizeTypeForJoin normalizes a column type for join type comparison.
+func normalizeTypeForJoin(t string) string {
+	t = strings.ToLower(t)
+	// Strip length/precision info
+	if idx := strings.Index(t, "("); idx > 0 {
+		t = t[:idx]
+	}
+	return strings.TrimSpace(t)
+}
+
+// isExcludedJoinType checks if a column type should be excluded from join consideration.
+func isExcludedJoinType(baseType string) bool {
+	excludedTypes := map[string]bool{
+		// Temporal types - dates/times don't represent relationships
+		"timestamp": true, "timestamptz": true, "date": true,
+		"time": true, "timetz": true, "interval": true,
+		// Boolean - too few values, causes false positives
+		"boolean": true, "bool": true,
+		// Binary/LOB types - not comparable
+		"bytea": true, "blob": true, "binary": true,
+		// Structured data types - not comparable
+		"json": true, "jsonb": true, "xml": true,
+		// Geometry types - spatial data not suitable for FK inference
+		"point": true, "line": true, "polygon": true, "geometry": true,
+	}
+	return excludedTypes[baseType]
 }
 
 func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*PKMatchDiscoveryResult, error) {
