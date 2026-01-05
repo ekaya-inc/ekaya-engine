@@ -24,6 +24,8 @@ Expected: No hits.
 
 ### 3. `pkg/services/ontology_builder.go` - Extract `ProcessAnswer` Only
 
+✅ **Completed:** Refactored to keep only ProcessAnswer and helpers. Deleted ~1,500 lines of dead code, removed unused repository dependencies, deleted test files that tested removed methods. Build and tests verified.
+
 **Why:** ~1,800 line file where ~75% is dead code. Only `ProcessAnswer()` is still actively used.
 
 **What calls `ProcessAnswer()`:**
