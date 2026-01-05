@@ -185,15 +185,23 @@ The investigation revealed that the OLD relationship discovery service (`relatio
 **Tests Added:**
 - `TestDatasourcesIntegration_DeleteClearsOntology` - Integration test verifying ontology cleanup on datasource deletion
 
-### Task 3: Purge Garbage pk_match Relationships
+### Task 3: Purge Garbage pk_match Relationships [x]
 
-Delete invalid pk_match relationships from old extraction runs:
-```sql
-DELETE FROM engine_entity_relationships
-WHERE detection_method = 'pk_match'
-AND source_column_name IN ('cost', 'app_launches', 'engagements',
-                           'reviewee_rating', 'reporter_mod_level', ...);
-```
+**Problem:** 882 invalid pk_match relationships existed from old extraction runs before defensive filtering was added. These incorrectly identified metric columns (costs, counts, ratings, levels) as foreign keys.
+
+**Solution Implemented:**
+- Created `scripts/purge-garbage-pk-match.sh` to delete all garbage relationships
+- Script removes pk_match relationships where source_column_name matches known metric/aggregate patterns:
+  - Metric columns: `cost`, `total_revenue`
+  - Count columns: `app_launches`, `visits`, `profile_views`, `sign_ins`, `asset_views`, `engagements`, `profile_updates`, `redirects`
+  - Rating columns: `rating`, `reviewee_rating`
+  - Level columns: `mod_level`, `reporter_mod_level`
+  - Aggregate columns: `num_users`, `visible_days_trigger_days`
+
+**Result:**
+- Successfully deleted all 882 garbage pk_match relationships
+- Verified: 0 remaining pk_match relationships in database
+- Database is now clean for fresh extraction runs with proper defensive filtering
 
 ### Task 4: Add Integration Test
 
