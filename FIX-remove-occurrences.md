@@ -72,7 +72,22 @@ COMMENT ON COLUMN engine_entity_relationships.association IS
     'Semantic association describing this direction of the relationship (e.g., "placed_by", "contains", "as host")';
 ```
 
-#### 1.2 Create reverse rows for existing relationships
+#### 1.2 Create reverse rows for existing relationships ✅ COMPLETED
+
+**Implementation Notes:**
+- Migration 028 created: `migrations/028_fix_relationship_unique_constraint.up.sql`
+  - Fixed unique constraint to include target column names (source_column_name AND target_column_name)
+  - Previous constraint caused collisions when multiple FKs from same source table referenced same target table
+  - New constraint: `engine_entity_relationships_unique_relationship` includes all 9 key columns
+- Migration 029 created: `migrations/029_create_reverse_relationships.up.sql`
+  - Creates reverse rows for all existing relationships by swapping source/target entities and columns
+  - Uses NOT EXISTS check to avoid creating duplicates
+  - Sets association and description to NULL for new reverse rows (will be populated during enrichment)
+  - Down migration removes reverse rows while keeping one direction
+- Integration test added: `pkg/repositories/reverse_relationships_migration_test.go`
+  - TestMigration028_FixRelationshipUniqueConstraint verifies constraint was updated
+  - TestMigration029_ReverseRelationships verifies reverse rows are created correctly
+  - Test validates entity/column swapping and bidirectional pair existence
 
 For each existing relationship, create a reverse row:
 - Source and target entities are swapped
