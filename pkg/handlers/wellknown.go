@@ -1,15 +1,24 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/config"
 )
+
+// ProjectAuthLookup provides auth server URL lookup for projects.
+// This interface allows the well-known handler to look up per-project auth URLs
+// without depending on the full ProjectService interface.
+type ProjectAuthLookup interface {
+	GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error)
+}
 
 // uuidPattern matches valid UUID v4 format
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -42,15 +51,17 @@ var supportedScopes = []string{"project:access"}
 
 // WellKnownHandler handles /.well-known/* endpoints.
 type WellKnownHandler struct {
-	cfg    *config.Config
-	logger *zap.Logger
+	cfg               *config.Config
+	projectAuthLookup ProjectAuthLookup
+	logger            *zap.Logger
 }
 
 // NewWellKnownHandler creates a new WellKnownHandler.
-func NewWellKnownHandler(cfg *config.Config, logger *zap.Logger) *WellKnownHandler {
+func NewWellKnownHandler(cfg *config.Config, projectAuthLookup ProjectAuthLookup, logger *zap.Logger) *WellKnownHandler {
 	return &WellKnownHandler{
-		cfg:    cfg,
-		logger: logger,
+		cfg:               cfg,
+		projectAuthLookup: projectAuthLookup,
+		logger:            logger,
 	}
 }
 
@@ -120,6 +131,20 @@ func (h *WellKnownHandler) OAuthDiscovery(w http.ResponseWriter, r *http.Request
 			}
 		}
 	}
+
+	// Look up project-specific auth URL if project_id is present and no auth_url was provided
+	if authURL == "" && projectID != "" && h.projectAuthLookup != nil {
+		pid, err := uuid.Parse(projectID)
+		if err == nil {
+			if projectAuthURL, err := h.projectAuthLookup.GetAuthServerURL(r.Context(), pid); err == nil && projectAuthURL != "" {
+				authURL = projectAuthURL
+				h.logger.Debug("Using project-specific auth server URL",
+					zap.String("project_id", projectID),
+					zap.String("auth_server_url", projectAuthURL))
+			}
+		}
+	}
+
 	validatedAuthURL, errMsg := h.cfg.ValidateAuthURL(authURL)
 
 	if errMsg != "" {
@@ -165,7 +190,13 @@ func (h *WellKnownHandler) OAuthDiscovery(w http.ResponseWriter, r *http.Request
 	}
 
 	// Build local MCP endpoints
-	tokenEndpoint, err := joinPath(baseURL.String(), "mcp", "oauth", "token")
+	// Include project ID in token endpoint if available so token exchange can look up project-specific auth URL
+	var tokenEndpoint string
+	if projectID != "" {
+		tokenEndpoint, err = joinPath(baseURL.String(), "mcp", projectID, "oauth", "token")
+	} else {
+		tokenEndpoint, err = joinPath(baseURL.String(), "mcp", "oauth", "token")
+	}
 	if err != nil {
 		h.logger.Error("Failed to build token endpoint URL", zap.Error(err))
 		if err := ErrorResponse(w, http.StatusInternalServerError, "server_error", "Failed to build OAuth URLs"); err != nil {

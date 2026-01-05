@@ -140,6 +140,10 @@ func (m *mockProjectServiceForMCP) SyncFromCentralAsync(projectID uuid.UUID, pap
 	// No-op for tests
 }
 
+func (m *mockProjectServiceForMCP) GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error) {
+	return "", nil
+}
+
 // Tests
 
 func TestMCPConfigService_Get_ApprovedQueriesDisabledWhenNoEnabledQueries(t *testing.T) {

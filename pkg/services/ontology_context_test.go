@@ -269,6 +269,10 @@ func (m *mockProjectServiceForOntology) SyncFromCentralAsync(projectID uuid.UUID
 	// No-op for tests
 }
 
+func (m *mockProjectServiceForOntology) GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error) {
+	return "", nil
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

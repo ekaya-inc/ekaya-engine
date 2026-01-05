@@ -74,6 +74,10 @@ func (m *mockProjectServiceForIntegration) SyncFromCentralAsync(projectID uuid.U
 	// No-op for tests
 }
 
+func (m *mockProjectServiceForIntegration) GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error) {
+	return "", nil
+}
+
 // setupOntologyContextTest creates a test context with real database.
 func setupOntologyContextTest(t *testing.T) *ontologyContextTestContext {
 	t.Helper()

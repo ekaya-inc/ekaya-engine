@@ -158,6 +158,10 @@ func (m *mockProjectService) SyncFromCentralAsync(projectID uuid.UUID, papiURL, 
 	// No-op for tests
 }
 
+func (m *mockProjectService) GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error) {
+	return "", nil
+}
+
 // mockDatasourceService implements services.DatasourceService for testing.
 type mockDatasourceService struct {
 	datasource      *models.Datasource

@@ -38,6 +38,7 @@ type ProjectService interface {
 	GetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error)
 	SetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID, datasourceID uuid.UUID) error
 	SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string)
+	GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error)
 }
 
 // projectService implements ProjectService.
@@ -249,6 +250,31 @@ func (s *projectService) SetDefaultDatasourceID(ctx context.Context, projectID u
 	return nil
 }
 
+// GetAuthServerURL retrieves the auth server URL from project parameters.
+// Returns empty string if not configured. Uses WithoutTenant since this is called
+// from OAuth discovery before authentication.
+func (s *projectService) GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error) {
+	scope, err := s.db.WithoutTenant(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to acquire connection: %w", err)
+	}
+	defer scope.Close()
+
+	ctx = database.SetTenantScope(ctx, scope)
+
+	project, err := s.projectRepo.Get(ctx, projectID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get project: %w", err)
+	}
+
+	if project.Parameters == nil {
+		return "", nil
+	}
+
+	authServerURL, _ := project.Parameters["auth_server_url"].(string)
+	return authServerURL, nil
+}
+
 // cacheProjectConfig caches project configuration in Redis.
 func (s *projectService) cacheProjectConfig(ctx context.Context, project *models.Project) {
 	configKey := fmt.Sprintf("project:%s:config", project.ID)
@@ -348,6 +374,9 @@ func (s *projectService) ProvisionFromClaims(ctx context.Context, claims *auth.C
 	}
 	if projectInfo.URLs.ProjectPage != "" {
 		params["project_page_url"] = projectInfo.URLs.ProjectPage
+	}
+	if projectInfo.URLs.AuthServerURL != "" {
+		params["auth_server_url"] = projectInfo.URLs.AuthServerURL
 	}
 
 	s.logger.Info("Provisioning project from claims",

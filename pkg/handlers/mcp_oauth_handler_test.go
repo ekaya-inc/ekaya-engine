@@ -16,7 +16,7 @@ import (
 
 func TestMCPOAuthHandler_TokenExchange_Success(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-access-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
@@ -53,7 +53,7 @@ func TestMCPOAuthHandler_TokenExchange_Success(t *testing.T) {
 
 func TestMCPOAuthHandler_TokenExchange_MissingCode(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-access-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
@@ -83,7 +83,7 @@ func TestMCPOAuthHandler_TokenExchange_MissingCode(t *testing.T) {
 
 func TestMCPOAuthHandler_TokenExchange_MissingCodeVerifier(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-access-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
@@ -113,7 +113,7 @@ func TestMCPOAuthHandler_TokenExchange_MissingCodeVerifier(t *testing.T) {
 
 func TestMCPOAuthHandler_TokenExchange_MissingRedirectURI(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-access-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
@@ -147,7 +147,7 @@ func TestMCPOAuthHandler_TokenExchange_MissingRedirectURI(t *testing.T) {
 
 func TestMCPOAuthHandler_TokenExchange_MissingClientID(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-access-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
@@ -181,7 +181,7 @@ func TestMCPOAuthHandler_TokenExchange_MissingClientID(t *testing.T) {
 
 func TestMCPOAuthHandler_TokenExchange_UnsupportedGrantType(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-access-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	form := url.Values{}
 	form.Set("grant_type", "client_credentials")
@@ -231,7 +231,7 @@ func (m *mockOAuthServiceWithAuthURLError) ValidateAuthURL(authURL string) (stri
 
 func TestMCPOAuthHandler_TokenExchange_InvalidAuthURL(t *testing.T) {
 	oauthService := &mockOAuthServiceWithAuthURLError{invalidURL: "https://malicious.example.com"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
@@ -263,7 +263,7 @@ func TestMCPOAuthHandler_TokenExchange_InvalidAuthURL(t *testing.T) {
 
 func TestMCPOAuthHandler_TokenExchange_ServiceError(t *testing.T) {
 	oauthService := &mockOAuthService{err: services.ErrTokenExchangeFailed}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
@@ -294,7 +294,7 @@ func TestMCPOAuthHandler_TokenExchange_ServiceError(t *testing.T) {
 
 func TestMCPOAuthHandler_RegisterRoutes(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
@@ -323,7 +323,7 @@ func TestMCPOAuthHandler_RegisterRoutes(t *testing.T) {
 
 func TestMCPOAuthHandler_DCR_Success(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	reqBody := `{"redirect_uris":["http://localhost:8080/callback"],"client_name":"Claude Code"}`
 	req := httptest.NewRequest(http.MethodPost, "/mcp/oauth/register", strings.NewReader(reqBody))
@@ -384,7 +384,7 @@ func TestMCPOAuthHandler_DCR_Success(t *testing.T) {
 
 func TestMCPOAuthHandler_DCR_WithCustomValues(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	reqBody := `{
 		"redirect_uris":["http://localhost:8080/callback","http://localhost:9090/callback"],
@@ -422,7 +422,7 @@ func TestMCPOAuthHandler_DCR_WithCustomValues(t *testing.T) {
 
 func TestMCPOAuthHandler_DCR_MissingRedirectURIs(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	reqBody := `{"client_name":"Test Client"}`
 	req := httptest.NewRequest(http.MethodPost, "/mcp/oauth/register", strings.NewReader(reqBody))
@@ -447,7 +447,7 @@ func TestMCPOAuthHandler_DCR_MissingRedirectURIs(t *testing.T) {
 
 func TestMCPOAuthHandler_DCR_EmptyRedirectURIs(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	reqBody := `{"redirect_uris":[],"client_name":"Test Client"}`
 	req := httptest.NewRequest(http.MethodPost, "/mcp/oauth/register", strings.NewReader(reqBody))
@@ -472,7 +472,7 @@ func TestMCPOAuthHandler_DCR_EmptyRedirectURIs(t *testing.T) {
 
 func TestMCPOAuthHandler_DCR_InvalidJSON(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodPost, "/mcp/oauth/register", strings.NewReader("{invalid json"))
 	req.Header.Set("Content-Type", "application/json")
@@ -496,7 +496,7 @@ func TestMCPOAuthHandler_DCR_InvalidJSON(t *testing.T) {
 
 func TestMCPOAuthHandler_DCR_AllRegistrationsReturnSameClientID(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	reqBody := `{"redirect_uris":["http://localhost:8080/callback"]}`
 
@@ -533,7 +533,7 @@ func TestMCPOAuthHandler_DCR_AllRegistrationsReturnSameClientID(t *testing.T) {
 
 func TestMCPOAuthHandler_RegisterRoutes_IncludesDCR(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
@@ -552,7 +552,7 @@ func TestMCPOAuthHandler_RegisterRoutes_IncludesDCR(t *testing.T) {
 
 func TestMCPOAuthHandler_DCR_ValidHTTPSRedirectURI(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	// HTTPS is valid for non-localhost
 	reqBody := `{"redirect_uris":["https://example.com/callback"],"client_name":"Test Client"}`
@@ -569,7 +569,7 @@ func TestMCPOAuthHandler_DCR_ValidHTTPSRedirectURI(t *testing.T) {
 
 func TestMCPOAuthHandler_DCR_InvalidHTTPRedirectURI(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	// HTTP is NOT valid for non-localhost
 	reqBody := `{"redirect_uris":["http://example.com/callback"],"client_name":"Test Client"}`
@@ -595,7 +595,7 @@ func TestMCPOAuthHandler_DCR_InvalidHTTPRedirectURI(t *testing.T) {
 
 func TestMCPOAuthHandler_DCR_MalformedRedirectURI(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	// Missing scheme and host
 	reqBody := `{"redirect_uris":["/callback"],"client_name":"Test Client"}`
@@ -621,7 +621,7 @@ func TestMCPOAuthHandler_DCR_MalformedRedirectURI(t *testing.T) {
 
 func TestMCPOAuthHandler_DCR_LocalhostVariants(t *testing.T) {
 	oauthService := &mockOAuthService{token: "test-token"}
-	handler := NewMCPOAuthHandler(oauthService, zap.NewNop())
+	handler := NewMCPOAuthHandler(oauthService, nil, zap.NewNop())
 
 	// All localhost variants should be accepted with HTTP
 	testCases := []string{
