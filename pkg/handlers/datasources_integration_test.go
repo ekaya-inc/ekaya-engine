@@ -769,8 +769,8 @@ func TestDatasourcesIntegration_DeleteClearsOntology(t *testing.T) {
 	}
 
 	var createResp struct {
-		Success bool                   `json:"success"`
-		Data    DatasourceResponse     `json:"data"`
+		Success bool               `json:"success"`
+		Data    DatasourceResponse `json:"data"`
 	}
 	if err := json.Unmarshal(createRec.Body.Bytes(), &createResp); err != nil {
 		t.Fatalf("failed to parse create response: %v", err)
