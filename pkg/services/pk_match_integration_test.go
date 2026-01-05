@@ -127,17 +127,8 @@ func TestPKMatchDiscovery_ChannelsOwnerToUsersUserID(t *testing.T) {
 		t.Fatalf("Failed to create channel entity: %v", err)
 	}
 
-	// Create entity occurrences (needed for pk_match to identify entity reference columns)
-	userIDOccurrence := &models.OntologyEntityOccurrence{
-		EntityID:    userEntity.ID,
-		SchemaName:  "public",
-		TableName:   "users",
-		ColumnName:  "user_id",
-		Association: nil, // Primary key, no association
-	}
-	if err := entityRepo.CreateOccurrence(ctx, userIDOccurrence); err != nil {
-		t.Fatalf("Failed to create user_id occurrence: %v", err)
-	}
+	// Note: Entity occurrences are now computed at runtime from relationships (task 2.5)
+	// PK match discovery no longer depends on pre-created occurrence records
 
 	// Step 3: Create mock datasource service and adapter factory for pk_match
 	// Get mapped port for test database
@@ -293,7 +284,7 @@ func setupPKMatchTestContext(t *testing.T, engineDB *testhelpers.EngineDB, proje
 
 		// Delete in order: relationships, entities, ontology, schema, datasource
 		cleanupScope.Conn.Exec(context.Background(), `DELETE FROM engine_entity_relationships WHERE project_id = $1`, projectID)
-		cleanupScope.Conn.Exec(context.Background(), `DELETE FROM engine_ontology_entity_occurrences WHERE project_id = $1`, projectID)
+		// Note: engine_ontology_entity_occurrences table was dropped in migration 030
 		cleanupScope.Conn.Exec(context.Background(), `DELETE FROM engine_ontology_entities WHERE project_id = $1`, projectID)
 		cleanupScope.Conn.Exec(context.Background(), `DELETE FROM engine_ontologies WHERE project_id = $1`, projectID)
 		cleanupScope.Conn.Exec(context.Background(), `DELETE FROM engine_schema_relationships WHERE project_id = $1`, projectID)

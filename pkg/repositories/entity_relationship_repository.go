@@ -52,7 +52,9 @@ func (r *entityRelationshipRepository) Create(ctx context.Context, rel *models.E
 			target_column_schema, target_column_table, target_column_name,
 			detection_method, confidence, status, description, association, created_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-		ON CONFLICT (ontology_id, source_entity_id, target_entity_id, source_column_schema, source_column_table, source_column_name)
+		ON CONFLICT (ontology_id, source_entity_id, target_entity_id,
+			source_column_schema, source_column_table, source_column_name,
+			target_column_schema, target_column_table, target_column_name)
 		DO NOTHING`
 
 	_, err := scope.Conn.Exec(ctx, query,
