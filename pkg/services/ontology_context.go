@@ -72,12 +72,6 @@ func (s *ontologyContextService) GetDomainContext(ctx context.Context, projectID
 		return nil, fmt.Errorf("failed to get entities: %w", err)
 	}
 
-	// Get all entity occurrences for counting
-	occurrences, err := s.entityRepo.GetAllOccurrencesByProject(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get entity occurrences: %w", err)
-	}
-
 	// Get entity relationships from normalized table
 	entityRelationships, err := s.relationshipRepo.GetByProject(ctx, projectID)
 	if err != nil {
@@ -90,10 +84,12 @@ func (s *ontologyContextService) GetDomainContext(ctx context.Context, projectID
 		return nil, fmt.Errorf("failed to get column count: %w", err)
 	}
 
-	// Build occurrence count map
+	// Build occurrence count map from inbound relationships
+	// Each inbound relationship = one occurrence at the source column location
 	occurrenceCountByEntityID := make(map[uuid.UUID]int)
-	for _, occ := range occurrences {
-		occurrenceCountByEntityID[occ.EntityID]++
+	for _, rel := range entityRelationships {
+		// Count inbound relationships (where entity is the target)
+		occurrenceCountByEntityID[rel.TargetEntityID]++
 	}
 
 	// Build entity ID to name map for relationship edges
@@ -183,12 +179,6 @@ func (s *ontologyContextService) GetEntitiesContext(ctx context.Context, project
 		return nil, fmt.Errorf("failed to get entities: %w", err)
 	}
 
-	// Get all entity occurrences
-	occurrences, err := s.entityRepo.GetAllOccurrencesByProject(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get entity occurrences: %w", err)
-	}
-
 	// Get all entity aliases in one query (avoids N+1)
 	allAliases, err := s.entityRepo.GetAllAliasesByProject(ctx, projectID)
 	if err != nil {
@@ -211,14 +201,31 @@ func (s *ontologyContextService) GetEntitiesContext(ctx context.Context, project
 		return nil, fmt.Errorf("failed to get entity key columns: %w", err)
 	}
 
-	// Build occurrence map by entity ID
+	// Get all relationships once (avoids N+1)
+	allRelationships, err := s.relationshipRepo.GetByProject(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get relationships: %w", err)
+	}
+
+	// Group by target entity ID
+	relationshipsByTarget := make(map[uuid.UUID][]*models.EntityRelationship)
+	for _, rel := range allRelationships {
+		relationshipsByTarget[rel.TargetEntityID] = append(relationshipsByTarget[rel.TargetEntityID], rel)
+	}
+
+	// Build occurrence map by entity ID from grouped relationships
 	occurrencesByEntityID := make(map[uuid.UUID][]models.EntityOccurrence)
-	for _, occ := range occurrences {
-		occurrencesByEntityID[occ.EntityID] = append(occurrencesByEntityID[occ.EntityID], models.EntityOccurrence{
-			Table:  occ.TableName,
-			Column: occ.ColumnName,
-			Role:   occ.Role,
-		})
+	for _, entity := range entities {
+		rels := relationshipsByTarget[entity.ID]
+		entityOccurrences := make([]models.EntityOccurrence, 0, len(rels))
+		for _, rel := range rels {
+			entityOccurrences = append(entityOccurrences, models.EntityOccurrence{
+				Table:  rel.SourceColumnTable,
+				Column: rel.SourceColumnName,
+				Role:   rel.Association,
+			})
+		}
+		occurrencesByEntityID[entity.ID] = entityOccurrences
 	}
 
 	// Build entity details map
@@ -523,6 +530,36 @@ func (s *ontologyContextService) GetColumnsContext(ctx context.Context, projectI
 	return &models.OntologyColumnsContext{
 		Tables: tables,
 	}, nil
+}
+
+// computeEntityOccurrences derives entity occurrences from inbound relationships.
+// Each inbound relationship represents an occurrence of this entity at the source column location.
+func (s *ontologyContextService) computeEntityOccurrences(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
+	// Get all inbound relationships (where this entity is the target)
+	relationships, err := s.relationshipRepo.GetByTargetEntity(ctx, entityID)
+	if err != nil {
+		s.logger.Error("Failed to get relationships by target entity",
+			zap.String("entity_id", entityID.String()),
+			zap.Error(err))
+		return nil, fmt.Errorf("get relationships by target entity: %w", err)
+	}
+
+	// Convert relationships to occurrences
+	occurrences := make([]*models.OntologyEntityOccurrence, 0, len(relationships))
+	for _, rel := range relationships {
+		occurrences = append(occurrences, &models.OntologyEntityOccurrence{
+			ID:         rel.ID, // Use relationship ID as occurrence ID
+			EntityID:   entityID,
+			SchemaName: rel.SourceColumnSchema,
+			TableName:  rel.SourceColumnTable,
+			ColumnName: rel.SourceColumnName,
+			Role:       rel.Association, // Association becomes the role
+			Confidence: rel.Confidence,
+			CreatedAt:  rel.CreatedAt,
+		})
+	}
+
+	return occurrences, nil
 }
 
 // Ensure ontologyContextService implements OntologyContextService at compile time.

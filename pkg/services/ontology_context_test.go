@@ -194,9 +194,11 @@ func (m *mockOntologyEntityRepository) GetAllKeyColumnsByProject(ctx context.Con
 
 // mockEntityRelationshipRepository is a mock for EntityRelationshipRepository.
 type mockEntityRelationshipRepository struct {
-	relationships   []*models.EntityRelationship
-	getByProjectErr error
-	getByTablesErr  error
+	relationships         []*models.EntityRelationship
+	getByProjectErr       error
+	getByTablesErr        error
+	getByTargetEntityErr  error
+	relationshipsByTarget map[uuid.UUID][]*models.EntityRelationship
 }
 
 func (m *mockEntityRelationshipRepository) Create(ctx context.Context, rel *models.EntityRelationship) error {
@@ -234,7 +236,13 @@ func (m *mockEntityRelationshipRepository) DeleteByOntology(ctx context.Context,
 }
 
 func (m *mockEntityRelationshipRepository) GetByTargetEntity(ctx context.Context, entityID uuid.UUID) ([]*models.EntityRelationship, error) {
-	return nil, nil
+	if m.getByTargetEntityErr != nil {
+		return nil, m.getByTargetEntityErr
+	}
+	if m.relationshipsByTarget != nil {
+		return m.relationshipsByTarget[entityID], nil
+	}
+	return []*models.EntityRelationship{}, nil
 }
 
 // mockProjectServiceForOntology is a mock for ProjectService in ontology context tests.
@@ -334,24 +342,41 @@ func TestGetDomainContext(t *testing.T) {
 		},
 	}
 
-	occurrences := []*models.OntologyEntityOccurrence{
-		{ID: uuid.New(), EntityID: entityID1, TableName: "users", ColumnName: "id"},
-		{ID: uuid.New(), EntityID: entityID1, TableName: "orders", ColumnName: "user_id"},
-		{ID: uuid.New(), EntityID: entityID2, TableName: "orders", ColumnName: "id"},
-	}
-
-	// Create relationship for testing
-	desc := "user places order"
+	// Create relationships for testing
+	// For occurrence counts: each inbound relationship = 1 occurrence
+	// entityID1 (user) should have 2 occurrences:
+	//   1. orders.user_id -> users.id (user is target)
+	//   2. visits.visitor_id -> users.id (user is target)
+	desc1 := "order placed by user"
+	desc2 := "visit by visitor"
+	relID1 := uuid.New()
+	relID2 := uuid.New()
 	relationships := []*models.EntityRelationship{
 		{
-			ID:                uuid.New(),
-			SourceEntityID:    entityID1,
-			TargetEntityID:    entityID2,
-			SourceColumnTable: "users",
-			SourceColumnName:  "id",
-			TargetColumnTable: "orders",
-			TargetColumnName:  "user_id",
-			Description:       &desc,
+			ID:                 relID1,
+			SourceEntityID:     entityID2,
+			TargetEntityID:     entityID1,
+			SourceColumnSchema: "public",
+			SourceColumnTable:  "orders",
+			SourceColumnName:   "user_id",
+			TargetColumnSchema: "public",
+			TargetColumnTable:  "users",
+			TargetColumnName:   "id",
+			Description:        &desc1,
+			Confidence:         1.0,
+		},
+		{
+			ID:                 relID2,
+			SourceEntityID:     entityID1, // visits -> users (for display in relationship graph)
+			TargetEntityID:     entityID1,
+			SourceColumnSchema: "public",
+			SourceColumnTable:  "visits",
+			SourceColumnName:   "visitor_id",
+			TargetColumnSchema: "public",
+			TargetColumnTable:  "users",
+			TargetColumnName:   "id",
+			Description:        &desc2,
+			Confidence:         1.0,
 		},
 	}
 
@@ -359,8 +384,7 @@ func TestGetDomainContext(t *testing.T) {
 		activeOntology: ontology,
 	}
 	entityRepo := &mockOntologyEntityRepository{
-		entities:    entities,
-		occurrences: occurrences,
+		entities: entities,
 	}
 	relationshipRepo := &mockEntityRelationshipRepository{
 		relationships: relationships,
@@ -394,13 +418,18 @@ func TestGetDomainContext(t *testing.T) {
 	assert.Equal(t, "user", result.Entities[0].Name)
 	assert.Equal(t, "Platform user", result.Entities[0].Description)
 	assert.Equal(t, "users", result.Entities[0].PrimaryTable)
-	assert.Equal(t, 2, result.Entities[0].OccurrenceCount)
+	assert.Equal(t, 2, result.Entities[0].OccurrenceCount) // 2 inbound relationships to user
 
 	// Verify relationships from normalized table
-	assert.Len(t, result.Relationships, 1)
-	assert.Equal(t, "user", result.Relationships[0].From)
-	assert.Equal(t, "order", result.Relationships[0].To)
-	assert.Equal(t, "user places order", result.Relationships[0].Label)
+	assert.Len(t, result.Relationships, 2)
+	// First relationship: order -> user
+	assert.Equal(t, "order", result.Relationships[0].From)
+	assert.Equal(t, "user", result.Relationships[0].To)
+	assert.Equal(t, "order placed by user", result.Relationships[0].Label)
+	// Second relationship: user -> user (self-reference from visits)
+	assert.Equal(t, "user", result.Relationships[1].From)
+	assert.Equal(t, "user", result.Relationships[1].To)
+	assert.Equal(t, "visit by visitor", result.Relationships[1].Label)
 }
 
 func TestGetDomainContext_NoActiveOntology(t *testing.T) {
@@ -455,10 +484,39 @@ func TestGetEntitiesContext(t *testing.T) {
 		},
 	}
 
-	role := "customer"
-	occurrences := []*models.OntologyEntityOccurrence{
-		{ID: uuid.New(), EntityID: entityID1, TableName: "users", ColumnName: "id"},
-		{ID: uuid.New(), EntityID: entityID1, TableName: "orders", ColumnName: "user_id", Role: &role},
+	// Create relationships for testing occurrences
+	// entityID1 (user) has 2 inbound relationships:
+	//   1. orders.user_id -> users.id (no role/association)
+	//   2. orders.customer_id -> users.id (with "customer" association)
+	customerAssoc := "customer"
+	rel1ID := uuid.New()
+	rel2ID := uuid.New()
+	relationships := []*models.EntityRelationship{
+		{
+			ID:                 rel1ID,
+			SourceEntityID:     uuid.New(), // order entity
+			TargetEntityID:     entityID1,
+			SourceColumnSchema: "public",
+			SourceColumnTable:  "users",
+			SourceColumnName:   "id",
+			TargetColumnSchema: "public",
+			TargetColumnTable:  "users",
+			TargetColumnName:   "id",
+			Confidence:         1.0,
+		},
+		{
+			ID:                 rel2ID,
+			SourceEntityID:     uuid.New(), // order entity
+			TargetEntityID:     entityID1,
+			SourceColumnSchema: "public",
+			SourceColumnTable:  "orders",
+			SourceColumnName:   "user_id",
+			TargetColumnSchema: "public",
+			TargetColumnTable:  "users",
+			TargetColumnName:   "id",
+			Association:        &customerAssoc,
+			Confidence:         1.0,
+		},
 	}
 
 	aliases := map[uuid.UUID][]*models.OntologyEntityAlias{
@@ -477,12 +535,16 @@ func TestGetEntitiesContext(t *testing.T) {
 
 	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
 	entityRepo := &mockOntologyEntityRepository{
-		entities:    entities,
-		occurrences: occurrences,
-		aliases:     aliases,
-		keyColumns:  keyColumns,
+		entities:   entities,
+		aliases:    aliases,
+		keyColumns: keyColumns,
 	}
-	relationshipRepo := &mockEntityRelationshipRepository{}
+	relationshipRepo := &mockEntityRelationshipRepository{
+		relationships: relationships,
+		relationshipsByTarget: map[uuid.UUID][]*models.EntityRelationship{
+			entityID1: relationships,
+		},
+	}
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
@@ -505,11 +567,15 @@ func TestGetEntitiesContext(t *testing.T) {
 	assert.Equal(t, "id", userEntity.KeyColumns[0].Name)
 	assert.Equal(t, []string{"user_id"}, userEntity.KeyColumns[0].Synonyms)
 
-	// Verify occurrences
+	// Verify occurrences - computed from inbound relationships
 	assert.Len(t, userEntity.Occurrences, 2)
+	// First occurrence: users.id -> users.id (no association)
 	assert.Equal(t, "users", userEntity.Occurrences[0].Table)
 	assert.Equal(t, "id", userEntity.Occurrences[0].Column)
 	assert.Nil(t, userEntity.Occurrences[0].Role)
+	// Second occurrence: orders.user_id -> users.id (with "customer" association)
+	assert.Equal(t, "orders", userEntity.Occurrences[1].Table)
+	assert.Equal(t, "user_id", userEntity.Occurrences[1].Column)
 	assert.Equal(t, "customer", *userEntity.Occurrences[1].Role)
 }
 
@@ -880,11 +946,6 @@ func TestGetDomainContext_DeduplicatesRelationships(t *testing.T) {
 		},
 	}
 
-	occurrences := []*models.OntologyEntityOccurrence{
-		{ID: uuid.New(), EntityID: entityID1, TableName: "users", ColumnName: "id"},
-		{ID: uuid.New(), EntityID: entityID2, TableName: "billing_engagements", ColumnName: "id"},
-	}
-
 	// Create duplicate relationships: same user→billing_engagement pair via host_id and visitor_id
 	// This simulates the scenario where both FKs create separate relationship rows
 	shortDesc := "via FK"
@@ -924,8 +985,7 @@ func TestGetDomainContext_DeduplicatesRelationships(t *testing.T) {
 
 	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
 	entityRepo := &mockOntologyEntityRepository{
-		entities:    entities,
-		occurrences: occurrences,
+		entities: entities,
 	}
 	relationshipRepo := &mockEntityRelationshipRepository{relationships: relationships}
 	schemaRepo := &mockSchemaRepository{}
@@ -966,11 +1026,6 @@ func TestGetDomainContext_DeduplicatesRelationships_FirstWinsWhenSameLength(t *t
 		{ID: entityID2, Name: "order", PrimaryTable: "orders"},
 	}
 
-	occurrences := []*models.OntologyEntityOccurrence{
-		{ID: uuid.New(), EntityID: entityID1, TableName: "users", ColumnName: "id"},
-		{ID: uuid.New(), EntityID: entityID2, TableName: "orders", ColumnName: "id"},
-	}
-
 	// Same-length descriptions
 	desc1 := "first"
 	desc2 := "later"
@@ -991,8 +1046,7 @@ func TestGetDomainContext_DeduplicatesRelationships_FirstWinsWhenSameLength(t *t
 
 	ontologyRepo := &mockOntologyRepository{activeOntology: ontology}
 	entityRepo := &mockOntologyEntityRepository{
-		entities:    entities,
-		occurrences: occurrences,
+		entities: entities,
 	}
 	relationshipRepo := &mockEntityRelationshipRepository{relationships: relationships}
 	schemaRepo := &mockSchemaRepository{}

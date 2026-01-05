@@ -199,15 +199,46 @@ The `association` field is now generated alongside `description` during the exis
 - Occurrence count reflects actual FK references to the entity (inbound relationships)
 - Entities with no inbound relationships show 0 occurrences (semantically correct)
 
-#### 2.6 Update OntologyContextService
+#### 2.6 Update OntologyContextService ✅ COMPLETED
 
-**Files to modify:**
-- `pkg/services/ontology_context.go:59-167` (GetDomainContext)
-  - Replace: `s.entityRepo.GetAllOccurrencesByProject(ctx, projectID)`
-  - With: Compute occurrence counts from relationships
+**Implementation Notes:**
+- Updated `GetDomainContext()` in `pkg/services/ontology_context.go` (lines 59-167):
+  - Removed `entityRepo.GetAllOccurrencesByProject()` call
+  - Compute occurrence counts from inbound relationships: each inbound relationship = 1 occurrence
+  - Count inbound relationships by iterating over `entityRelationships` and incrementing `occurrenceCountByEntityID[rel.TargetEntityID]`
+  - This makes the domain view show accurate entity occurrence counts without a separate table
+- Updated `GetEntitiesContext()` in `pkg/services/ontology_context.go` (lines 169-256):
+  - Removed `entityRepo.GetAllOccurrencesByProject()` call
+  - Added relationship query and grouping by target entity ID
+  - For each entity, iterate over its inbound relationships and convert to `EntityOccurrence` structs
+  - Maps `relationship.Association` to `occurrence.Role` for UI display consistency
+  - Occurrence table/column comes from `relationship.SourceColumnTable/SourceColumnName`
+- Added new helper method `computeEntityOccurrences()` (lines 535-562):
+  - Queries inbound relationships via `relationshipRepo.GetByTargetEntity()`
+  - Converts relationships to `OntologyEntityOccurrence` structs
+  - Uses relationship ID as occurrence ID for consistency
+  - Currently unused but available for future refactoring
+- Updated unit tests in `pkg/services/ontology_context_test.go`:
+  - Removed all `occurrences` data from mock setup
+  - Added `relationshipsByTarget` map to mock relationship repository
+  - Added `GetByTargetEntity` mock implementation
+  - Updated test expectations to compute occurrence counts from relationships
+  - Fixed test assertions: occurrence count = number of inbound relationships
+  - All tests now verify runtime computation instead of pre-stored occurrences
+- All tests pass (`make check` succeeds)
 
-- `pkg/services/ontology_context.go:169-256` (GetEntitiesContext)
-  - Replace occurrence fetching with relationship-based computation
+**Key Design Decisions:**
+- Occurrence counts in domain context are computed by counting inbound relationships (where entity is target)
+- Occurrence details in entities context are derived by iterating over inbound relationships per entity
+- The relationship's source column location becomes the occurrence location
+- The relationship's `association` field becomes the occurrence's `role` field for UI compatibility
+- No database queries for occurrences - all computed from existing relationship data
+
+**Impact:**
+- Domain context view (entity graph) shows accurate occurrence counts
+- Entities context view shows detailed occurrence lists with associations
+- Both views now reflect actual FK references without needing a separate occurrences table
+- Relationships are the single source of truth for entity locations
 
 #### 2.7 Remove occurrence repository methods
 
