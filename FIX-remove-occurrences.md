@@ -329,13 +329,21 @@ The `association` field is now generated alongside `description` during the exis
 
 ### Phase 3: Model Changes
 
-#### 3.1 Update EntityRelationship model
+#### 3.1 Update EntityRelationship model ✅ COMPLETED
+
+**Implementation Notes:**
+- The `Association` field has already been added to the `EntityRelationship` struct in `pkg/models/entity_relationship.go` (line 41)
+- Field type: `*string` (nullable pointer to string)
+- JSON tag: `json:"association,omitempty"`
+- Comment: "Semantic association for this direction (e.g., "placed_by", "contains")"
+- This field stores the semantic association for one direction of a bidirectional relationship
+- The field is populated during Relationship Enrichment (see task 2.2)
 
 **File:** `pkg/models/entity_relationship.go`
 ```go
 type EntityRelationship struct {
     // ... existing fields ...
-    Association *string `json:"association,omitempty"` // NEW: semantic association for this direction
+    Association *string `json:"association,omitempty"` // Semantic association for this direction
 }
 ```
 
