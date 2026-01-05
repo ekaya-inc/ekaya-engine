@@ -312,12 +312,20 @@ The `association` field is now generated alongside `description` during the exis
 - Occurrences are computed at runtime from relationships (task 2.5, 2.6)
 - Next steps: Task 2.9 may already be complete (GetByTargetEntity added in 2.5), verify before implementing
 
-#### 2.9 Update relationship repository
+#### 2.9 Update relationship repository ✅ COMPLETED
 
-**Files to modify:**
-- `pkg/repositories/entity_relationship_repository.go`
-  - Add: `GetByTargetEntity(ctx, entityID uuid.UUID) ([]*models.EntityRelationship, error)`
-  - This returns all relationships where the entity is the target (inbound)
+**Implementation Notes:**
+- This task was completed as part of task 2.5 (Compute occurrences at runtime in Entity Service)
+- Added `GetByTargetEntity(ctx, entityID uuid.UUID) ([]*models.EntityRelationship, error)` method to `EntityRelationshipRepository` interface (line 21)
+- Implemented method in `pkg/repositories/entity_relationship_repository.go` (lines 189-224)
+- Method queries relationships where `target_entity_id = entityID` (inbound relationships)
+- Returns relationships ordered by source table/column for consistent UI display
+- Method is used by Entity Service's `computeOccurrences()` helper to derive occurrences at runtime
+- The method is tested indirectly through Entity Service unit tests and integration tests
+
+**Key Design Decision:**
+- The method was implemented earlier than originally planned because it was needed for the occurrence computation feature
+- This is a good example of the plan being a guide, not a strict sequence - dependencies drove the actual implementation order
 
 ### Phase 3: Model Changes
 
