@@ -68,6 +68,8 @@ type SchemaService interface {
 type schemaService struct {
 	schemaRepo     repositories.SchemaRepository
 	entityRepo     repositories.OntologyEntityRepository
+	ontologyRepo   repositories.OntologyRepository
+	entityRelRepo  repositories.EntityRelationshipRepository
 	datasourceSvc  DatasourceService
 	adapterFactory datasource.DatasourceAdapterFactory
 	logger         *zap.Logger
@@ -77,6 +79,8 @@ type schemaService struct {
 func NewSchemaService(
 	schemaRepo repositories.SchemaRepository,
 	entityRepo repositories.OntologyEntityRepository,
+	ontologyRepo repositories.OntologyRepository,
+	entityRelRepo repositories.EntityRelationshipRepository,
 	datasourceSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	logger *zap.Logger,
@@ -84,6 +88,8 @@ func NewSchemaService(
 	return &schemaService{
 		schemaRepo:     schemaRepo,
 		entityRepo:     entityRepo,
+		ontologyRepo:   ontologyRepo,
+		entityRelRepo:  entityRelRepo,
 		datasourceSvc:  datasourceSvc,
 		adapterFactory: adapterFactory,
 		logger:         logger,
@@ -583,7 +589,96 @@ func (s *schemaService) AddManualRelationship(ctx context.Context, projectID, da
 		zap.String("target", req.TargetTableName+"."+req.TargetColumnName),
 	)
 
+	// If ontology exists, also create entity relationship for immediate visibility
+	if s.ontologyRepo != nil && s.entityRelRepo != nil && s.entityRepo != nil {
+		s.createEntityRelationshipForManual(ctx, projectID, sourceTable, sourceColumn, targetTable, targetColumn)
+	}
+
 	return rel, nil
+}
+
+// createEntityRelationshipForManual creates an entity relationship for a manual schema relationship.
+// This is best-effort - if ontology or entities don't exist, it silently skips.
+func (s *schemaService) createEntityRelationshipForManual(
+	ctx context.Context,
+	projectID uuid.UUID,
+	sourceTable *models.SchemaTable,
+	sourceColumn *models.SchemaColumn,
+	targetTable *models.SchemaTable,
+	targetColumn *models.SchemaColumn,
+) {
+	// Get active ontology
+	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	if err != nil || ontology == nil {
+		s.logger.Debug("No active ontology for manual relationship, will be created on next extraction",
+			zap.String("project_id", projectID.String()))
+		return
+	}
+
+	// Get entities for source and target tables
+	entities, err := s.entityRepo.GetByProject(ctx, projectID)
+	if err != nil {
+		s.logger.Debug("Failed to get entities for manual relationship",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return
+	}
+
+	// Build entity lookup by primary table
+	entityByTable := make(map[string]*models.OntologyEntity)
+	for _, e := range entities {
+		if e.PrimaryTable != "" {
+			entityByTable[e.PrimaryTable] = e
+		}
+	}
+
+	// Find source and target entities
+	sourceKey := fmt.Sprintf("%s.%s", sourceTable.SchemaName, sourceTable.TableName)
+	targetKey := fmt.Sprintf("%s.%s", targetTable.SchemaName, targetTable.TableName)
+	sourceEntity := entityByTable[sourceKey]
+	targetEntity := entityByTable[targetKey]
+
+	if sourceEntity == nil || targetEntity == nil {
+		s.logger.Debug("Entities not found for manual relationship tables",
+			zap.String("source_table", sourceKey),
+			zap.String("target_table", targetKey),
+			zap.Bool("source_entity_found", sourceEntity != nil),
+			zap.Bool("target_entity_found", targetEntity != nil))
+		return
+	}
+
+	// Don't create self-referencing relationships
+	if sourceEntity.ID == targetEntity.ID {
+		return
+	}
+
+	// Create entity relationship
+	entityRel := &models.EntityRelationship{
+		OntologyID:         ontology.ID,
+		SourceEntityID:     sourceEntity.ID,
+		TargetEntityID:     targetEntity.ID,
+		SourceColumnSchema: sourceTable.SchemaName,
+		SourceColumnTable:  sourceTable.TableName,
+		SourceColumnName:   sourceColumn.ColumnName,
+		TargetColumnSchema: targetTable.SchemaName,
+		TargetColumnTable:  targetTable.TableName,
+		TargetColumnName:   targetColumn.ColumnName,
+		DetectionMethod:    models.DetectionMethodManual,
+		Confidence:         1.0,
+		Status:             models.RelationshipStatusConfirmed,
+	}
+
+	if err := s.entityRelRepo.Create(ctx, entityRel); err != nil {
+		s.logger.Debug("Failed to create entity relationship for manual relationship (may already exist)",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return
+	}
+
+	s.logger.Info("Created entity relationship for manual relationship",
+		zap.String("project_id", projectID.String()),
+		zap.String("source_entity", sourceEntity.Name),
+		zap.String("target_entity", targetEntity.Name))
 }
 
 // RemoveRelationship marks a relationship as removed (is_approved=false).

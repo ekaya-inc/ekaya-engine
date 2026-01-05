@@ -152,8 +152,11 @@ func (h *EntityRelationshipHandler) List(w http.ResponseWriter, r *http.Request)
 	for _, rel := range relationships {
 		// Map detection_method to relationship_type
 		relType := "inferred"
-		if rel.DetectionMethod == "foreign_key" {
+		switch rel.DetectionMethod {
+		case "foreign_key":
 			relType = "fk"
+		case "manual":
+			relType = "manual"
 		}
 
 		// Map status to is_approved

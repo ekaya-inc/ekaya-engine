@@ -33,7 +33,7 @@ func setupDiscoveryTest(t *testing.T) *discoveryTestContext {
 	repo := repositories.NewSchemaRepository()
 	logger := zap.NewNop()
 
-	service := NewSchemaService(repo, nil, nil, nil, logger)
+	service := NewSchemaService(repo, nil, nil, nil, nil, nil, logger)
 
 	// Use fixed IDs for consistent testing
 	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000201")
