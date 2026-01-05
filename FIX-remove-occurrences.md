@@ -569,10 +569,10 @@ The ON CONFLICT clause was referencing the old 6-column unique constraint, but m
 
 After implementation:
 
-- [ ] Entities page shows correct occurrence count (derived from relationships)
-- [ ] Entities page expands to show occurrence details with associations
-- [ ] MCP `get_ontology` returns correct entity occurrences
-- [ ] Column enrichment sets associations on relationships
-- [ ] No references to `engine_ontology_entity_occurrences` table remain
-- [ ] All tests pass
-- [ ] Build succeeds
+- [x] Entities page shows correct occurrence count (derived from relationships)
+- [x] Entities page expands to show occurrence details with associations
+- [x] MCP `get_ontology` returns correct entity occurrences
+- [x] Relationship Enrichment generates associations (Column Enrichment no longer handles this)
+- [x] No references to `engine_ontology_entity_occurrences` table remain in code
+- [x] All tests pass
+- [x] Build succeeds
