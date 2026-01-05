@@ -435,9 +435,35 @@ type OntologyEntityOccurrence struct {
 
 ### Phase 5: UI Changes
 
-#### 5.1 Rename "role" to "association" in types
+#### 5.1 Rename "role" to "association" in UI types ✅ COMPLETED (2026-01-05)
 
-**File:** `ui/src/types/entity.ts`
+**Implementation Notes:**
+- Updated `EntityOccurrence` interface in `ui/src/types/entity.ts`:
+  - Renamed `role: string | null` field to `association: string | null` (line 14)
+  - This aligns frontend types with backend API which already returns `association` field (see task 3.2)
+- Updated `EntitiesPage.tsx` to use `occ.association` instead of `occ.role` (lines 295-297):
+  - Conditional rendering: `{occ.association && ...}`
+  - Display: `<span>{occ.association}</span>`
+- TypeScript compilation succeeds with no errors
+- All tests pass (`make check` succeeds)
+
+**Key Design Decision:**
+- Simple find-and-replace of field name - no logic changes
+- Completes the terminology migration from "role" to "association" across the entire stack
+- Backend already returns `association` field in API responses (completed in task 3.2)
+- This change makes the frontend consume the correct field name
+
+**Files modified:**
+- `ui/src/types/entity.ts:14` - Renamed field in `EntityOccurrence` interface
+- `ui/src/pages/EntitiesPage.tsx:295,297` - Updated display logic to use `occ.association`
+
+**Context for Next Session:**
+- The UI now correctly displays association values from the backend API
+- Associations come from bidirectional relationships (see task 2.2)
+- Occurrences are computed at runtime from inbound relationships (see task 2.5)
+- Next task (5.2) is already complete - EntitiesPage display was updated as part of this task
+
+**File:** `ui/src/types/entity.ts:14`
 ```typescript
 export interface EntityOccurrence {
   // ...
@@ -446,7 +472,7 @@ export interface EntityOccurrence {
 }
 ```
 
-#### 5.2 Update EntitiesPage display
+#### 5.2 Update EntitiesPage display ✅ COMPLETED (as part of 5.1)
 
 **File:** `ui/src/pages/EntitiesPage.tsx:296`
 - Change `occ.role` to `occ.association`

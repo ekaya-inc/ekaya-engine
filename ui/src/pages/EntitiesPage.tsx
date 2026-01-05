@@ -292,9 +292,9 @@ const EntitiesPage = () => {
                               {occ.schema_name}.{occ.table_name}.{occ.column_name}
                             </span>
                             <div className="flex items-center gap-2">
-                              {occ.role && (
+                              {occ.association && (
                                 <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
-                                  {occ.role}
+                                  {occ.association}
                                 </span>
                               )}
                               <span className="text-xs text-text-tertiary">

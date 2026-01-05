@@ -11,7 +11,7 @@ export interface EntityOccurrence {
   schema_name: string;
   table_name: string;
   column_name: string;
-  role: string | null;
+  association: string | null;
   confidence: number;
 }
 
