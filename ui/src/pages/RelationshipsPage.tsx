@@ -592,6 +592,13 @@ const RelationshipsPage = () => {
                               ({rel.target_column_type})
                             </span>
                           </div>
+                          {/* Description: React automatically escapes text content, providing XSS protection.
+                              Never use dangerouslySetInnerHTML for LLM-generated content. */}
+                          {rel.description && (
+                            <p className="mt-1 text-sm text-text-secondary">
+                              {rel.description}
+                            </p>
+                          )}
                           {rel.cardinality && (
                             <div className="mt-1 text-xs text-text-secondary">
                               Cardinality: {rel.cardinality}

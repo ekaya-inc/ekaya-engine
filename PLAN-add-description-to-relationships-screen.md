@@ -62,34 +62,22 @@ Display LLM-generated relationship descriptions on the Relationships page.
 - Used optional field (`?`) since descriptions are only populated after DAG stage 6 completes
 - TypeScript type now matches the API response from backend
 
-### 3. Frontend: Display Description in UI
+### 3. Frontend: Display Description in UI ✅
 
-**File**: `ui/src/pages/RelationshipsPage.tsx`
+**Status**: COMPLETE
 
-In the relationship row (around line 594), add description below the column mapping:
+**File Modified**: `ui/src/pages/RelationshipsPage.tsx`
 
-```typescript
-{/* Relationship Details */}
-<div className="flex-1 min-w-0">
-  <div className="flex items-center gap-2 text-sm">
-    {/* existing column mapping code */}
-  </div>
+**Changes Made**:
+- Added description rendering between column mapping and cardinality display (lines 595-599)
+- Used conditional rendering `{rel.description && ...}` to only show description when present
+- Styled with `text-sm text-text-secondary` classes and `mt-1` margin as specified
+- Description appears as a paragraph element below the relationship column mapping
 
-  {/* ADD THIS: Description */}
-  {rel.description && (
-    <p className="mt-1 text-sm text-text-secondary">
-      {rel.description}
-    </p>
-  )}
-
-  {/* existing cardinality display */}
-  {rel.cardinality && (
-    <div className="mt-1 text-xs text-text-secondary">
-      Cardinality: {rel.cardinality}
-    </div>
-  )}
-</div>
-```
+**Implementation Notes**:
+- Positioned description between column mapping and cardinality for logical flow
+- Conditional rendering ensures graceful handling of relationships without descriptions
+- TypeScript type checking passes without errors
 
 ## UI Design
 
