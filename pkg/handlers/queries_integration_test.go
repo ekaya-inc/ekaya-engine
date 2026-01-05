@@ -57,7 +57,8 @@ func setupQueriesIntegrationTest(t *testing.T) *queriesIntegrationTestContext {
 
 	// Create datasource repository and service
 	dsRepo := repositories.NewDatasourceRepository()
-	dsSvc := services.NewDatasourceService(dsRepo, encryptor, adapterFactory, nil, zap.NewNop())
+	ontologyRepo := repositories.NewOntologyRepository()
+	dsSvc := services.NewDatasourceService(dsRepo, ontologyRepo, encryptor, adapterFactory, nil, zap.NewNop())
 
 	// Create security auditor
 	auditor := audit.NewSecurityAuditor(zap.NewNop())
@@ -83,7 +84,9 @@ func setupQueriesIntegrationTest(t *testing.T) *queriesIntegrationTestContext {
 }
 
 // makeRequest creates an HTTP request with proper context (tenant scope + auth claims).
-func (tc *queriesIntegrationTestContext) makeRequest(method, path string, body any) *http.Request {
+// Returns the request and a cleanup function that MUST be called after the handler returns.
+// This releases the database connection back to the pool immediately.
+func (tc *queriesIntegrationTestContext) makeRequest(method, path string, body any) (*http.Request, func()) {
 	tc.t.Helper()
 
 	var reqBody *bytes.Reader
@@ -119,12 +122,8 @@ func (tc *queriesIntegrationTestContext) makeRequest(method, path string, body a
 
 	req = req.WithContext(ctx)
 
-	// Clean up tenant scope after test
-	tc.t.Cleanup(func() {
-		scope.Close()
-	})
-
-	return req
+	// Return cleanup function to release connection immediately after handler returns
+	return req, func() { scope.Close() }
 }
 
 // ensureTestProject creates the test project if it doesn't exist.
@@ -225,7 +224,7 @@ func TestQueriesIntegration_CreateAndTestSimpleQuery(t *testing.T) {
 		Limit:    10,
 	}
 
-	testReq := tc.makeRequest(http.MethodPost,
+	testReq, testCleanup := tc.makeRequest(http.MethodPost,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/test",
 		testBody)
 	testReq.SetPathValue("pid", tc.projectID.String())
@@ -233,6 +232,7 @@ func TestQueriesIntegration_CreateAndTestSimpleQuery(t *testing.T) {
 
 	testRec := httptest.NewRecorder()
 	tc.queriesHandler.Test(testRec, testReq)
+	testCleanup()
 
 	if testRec.Code != http.StatusOK {
 		t.Fatalf("Test query failed with status %d: %s", testRec.Code, testRec.Body.String())
@@ -265,7 +265,7 @@ func TestQueriesIntegration_CreateAndTestSimpleQuery(t *testing.T) {
 		OutputColumns:         []models.OutputColumn{{Name: "result", Type: "INT4"}},
 	}
 
-	createReq := tc.makeRequest(http.MethodPost,
+	createReq, createCleanup := tc.makeRequest(http.MethodPost,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 		createBody)
 	createReq.SetPathValue("pid", tc.projectID.String())
@@ -273,6 +273,7 @@ func TestQueriesIntegration_CreateAndTestSimpleQuery(t *testing.T) {
 
 	createRec := httptest.NewRecorder()
 	tc.queriesHandler.Create(createRec, createReq)
+	createCleanup()
 
 	if createRec.Code != http.StatusCreated {
 		t.Fatalf("Create query failed with status %d: %s", createRec.Code, createRec.Body.String())
@@ -324,7 +325,7 @@ func TestQueriesIntegration_ExecuteSavedQuery(t *testing.T) {
 		OutputColumns:         []models.OutputColumn{{Name: "sum", Type: "INT4"}},
 	}
 
-	createReq := tc.makeRequest(http.MethodPost,
+	createReq, createCleanup := tc.makeRequest(http.MethodPost,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 		createBody)
 	createReq.SetPathValue("pid", tc.projectID.String())
@@ -332,6 +333,7 @@ func TestQueriesIntegration_ExecuteSavedQuery(t *testing.T) {
 
 	createRec := httptest.NewRecorder()
 	tc.queriesHandler.Create(createRec, createReq)
+	createCleanup()
 
 	if createRec.Code != http.StatusCreated {
 		t.Fatalf("Create query failed with status %d: %s", createRec.Code, createRec.Body.String())
@@ -348,7 +350,7 @@ func TestQueriesIntegration_ExecuteSavedQuery(t *testing.T) {
 	// Execute the saved query
 	execBody := ExecuteQueryRequest{Limit: 100}
 
-	execReq := tc.makeRequest(http.MethodPost,
+	execReq, execCleanup := tc.makeRequest(http.MethodPost,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/"+queryID+"/execute",
 		execBody)
 	execReq.SetPathValue("pid", tc.projectID.String())
@@ -357,6 +359,7 @@ func TestQueriesIntegration_ExecuteSavedQuery(t *testing.T) {
 
 	execRec := httptest.NewRecorder()
 	tc.queriesHandler.Execute(execRec, execReq)
+	execCleanup()
 
 	if execRec.Code != http.StatusOK {
 		t.Fatalf("Execute query failed with status %d: %s", execRec.Code, execRec.Body.String())
@@ -409,7 +412,7 @@ func TestQueriesIntegration_ValidateQuery(t *testing.T) {
 		SQLQuery: "SELECT * FROM users LIMIT 1",
 	}
 
-	validReq := tc.makeRequest(http.MethodPost,
+	validReq, validCleanup := tc.makeRequest(http.MethodPost,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/validate",
 		validBody)
 	validReq.SetPathValue("pid", tc.projectID.String())
@@ -417,6 +420,7 @@ func TestQueriesIntegration_ValidateQuery(t *testing.T) {
 
 	validRec := httptest.NewRecorder()
 	tc.queriesHandler.Validate(validRec, validReq)
+	validCleanup()
 
 	if validRec.Code != http.StatusOK {
 		t.Fatalf("Validate query failed with status %d: %s", validRec.Code, validRec.Body.String())
@@ -437,7 +441,7 @@ func TestQueriesIntegration_ValidateQuery(t *testing.T) {
 		SQLQuery: "SELEC * FROM users", // Missing 'T' in SELECT
 	}
 
-	invalidReq := tc.makeRequest(http.MethodPost,
+	invalidReq, invalidCleanup := tc.makeRequest(http.MethodPost,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/validate",
 		invalidBody)
 	invalidReq.SetPathValue("pid", tc.projectID.String())
@@ -445,6 +449,7 @@ func TestQueriesIntegration_ValidateQuery(t *testing.T) {
 
 	invalidRec := httptest.NewRecorder()
 	tc.queriesHandler.Validate(invalidRec, invalidReq)
+	invalidCleanup()
 
 	if invalidRec.Code != http.StatusOK {
 		t.Fatalf("Validate query failed with status %d: %s", invalidRec.Code, invalidRec.Body.String())
@@ -476,7 +481,7 @@ func TestQueriesIntegration_QueryAgainstTestData(t *testing.T) {
 		Limit:    10,
 	}
 
-	testReq := tc.makeRequest(http.MethodPost,
+	testReq, testCleanup := tc.makeRequest(http.MethodPost,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/test",
 		testBody)
 	testReq.SetPathValue("pid", tc.projectID.String())
@@ -484,6 +489,7 @@ func TestQueriesIntegration_QueryAgainstTestData(t *testing.T) {
 
 	testRec := httptest.NewRecorder()
 	tc.queriesHandler.Test(testRec, testReq)
+	testCleanup()
 
 	if testRec.Code != http.StatusOK {
 		t.Fatalf("Test query failed with status %d: %s", testRec.Code, testRec.Body.String())
@@ -524,7 +530,7 @@ func TestQueriesIntegration_TrailingSemicolonNormalization(t *testing.T) {
 		Limit:    10,
 	}
 
-	testReq := tc.makeRequest(http.MethodPost,
+	testReq, testCleanup := tc.makeRequest(http.MethodPost,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/test",
 		testBody)
 	testReq.SetPathValue("pid", tc.projectID.String())
@@ -532,6 +538,7 @@ func TestQueriesIntegration_TrailingSemicolonNormalization(t *testing.T) {
 
 	testRec := httptest.NewRecorder()
 	tc.queriesHandler.Test(testRec, testReq)
+	testCleanup()
 
 	if testRec.Code != http.StatusOK {
 		t.Fatalf("Test query with semicolon failed with status %d: %s", testRec.Code, testRec.Body.String())
@@ -554,7 +561,7 @@ func TestQueriesIntegration_TrailingSemicolonNormalization(t *testing.T) {
 		OutputColumns:         []models.OutputColumn{{Name: "result", Type: "INT4"}},
 	}
 
-	createReq := tc.makeRequest(http.MethodPost,
+	createReq, createCleanup := tc.makeRequest(http.MethodPost,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 		createBody)
 	createReq.SetPathValue("pid", tc.projectID.String())
@@ -562,6 +569,7 @@ func TestQueriesIntegration_TrailingSemicolonNormalization(t *testing.T) {
 
 	createRec := httptest.NewRecorder()
 	tc.queriesHandler.Create(createRec, createReq)
+	createCleanup()
 
 	if createRec.Code != http.StatusCreated {
 		t.Fatalf("Create query failed with status %d: %s", createRec.Code, createRec.Body.String())
@@ -591,7 +599,7 @@ func TestQueriesIntegration_RejectMultipleStatements(t *testing.T) {
 		Limit:    10,
 	}
 
-	testReq := tc.makeRequest(http.MethodPost,
+	testReq, testCleanup := tc.makeRequest(http.MethodPost,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/test",
 		testBody)
 	testReq.SetPathValue("pid", tc.projectID.String())
@@ -599,6 +607,7 @@ func TestQueriesIntegration_RejectMultipleStatements(t *testing.T) {
 
 	testRec := httptest.NewRecorder()
 	tc.queriesHandler.Test(testRec, testReq)
+	testCleanup()
 
 	// Should return 400 Bad Request for multiple statements
 	if testRec.Code != http.StatusBadRequest {
@@ -626,7 +635,7 @@ func TestQueriesIntegration_RejectMultipleStatements(t *testing.T) {
 		OutputColumns:         []models.OutputColumn{{Name: "col", Type: "INT4"}},
 	}
 
-	createReq := tc.makeRequest(http.MethodPost,
+	createReq, createCleanup := tc.makeRequest(http.MethodPost,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 		createBody)
 	createReq.SetPathValue("pid", tc.projectID.String())
@@ -634,6 +643,7 @@ func TestQueriesIntegration_RejectMultipleStatements(t *testing.T) {
 
 	createRec := httptest.NewRecorder()
 	tc.queriesHandler.Create(createRec, createReq)
+	createCleanup()
 
 	if createRec.Code != http.StatusBadRequest {
 		t.Fatalf("Expected status 400 for multiple statements on create, got %d: %s", createRec.Code, createRec.Body.String())
@@ -644,7 +654,7 @@ func TestQueriesIntegration_RejectMultipleStatements(t *testing.T) {
 		SQLQuery: "SELECT 1; SELECT 2; SELECT 3",
 	}
 
-	validateReq := tc.makeRequest(http.MethodPost,
+	validateReq, validateCleanup := tc.makeRequest(http.MethodPost,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/validate",
 		validateBody)
 	validateReq.SetPathValue("pid", tc.projectID.String())
@@ -652,6 +662,7 @@ func TestQueriesIntegration_RejectMultipleStatements(t *testing.T) {
 
 	validateRec := httptest.NewRecorder()
 	tc.queriesHandler.Validate(validateRec, validateReq)
+	validateCleanup()
 
 	// Validate endpoint returns 200 with valid=false, not 400
 	if validateRec.Code != http.StatusOK {
@@ -682,7 +693,7 @@ func TestQueriesIntegration_ListQueries(t *testing.T) {
 	}
 
 	for _, q := range queries {
-		req := tc.makeRequest(http.MethodPost,
+		req, cleanup := tc.makeRequest(http.MethodPost,
 			"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 			q)
 		req.SetPathValue("pid", tc.projectID.String())
@@ -690,6 +701,7 @@ func TestQueriesIntegration_ListQueries(t *testing.T) {
 
 		rec := httptest.NewRecorder()
 		tc.queriesHandler.Create(rec, req)
+		cleanup()
 
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("Create query failed with status %d: %s", rec.Code, rec.Body.String())
@@ -697,7 +709,7 @@ func TestQueriesIntegration_ListQueries(t *testing.T) {
 	}
 
 	// List all queries
-	listReq := tc.makeRequest(http.MethodGet,
+	listReq, listCleanup := tc.makeRequest(http.MethodGet,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries",
 		nil)
 	listReq.SetPathValue("pid", tc.projectID.String())
@@ -705,6 +717,7 @@ func TestQueriesIntegration_ListQueries(t *testing.T) {
 
 	listRec := httptest.NewRecorder()
 	tc.queriesHandler.List(listRec, listReq)
+	listCleanup()
 
 	if listRec.Code != http.StatusOK {
 		t.Fatalf("List queries failed with status %d: %s", listRec.Code, listRec.Body.String())
@@ -723,7 +736,7 @@ func TestQueriesIntegration_ListQueries(t *testing.T) {
 	}
 
 	// List only enabled queries
-	enabledReq := tc.makeRequest(http.MethodGet,
+	enabledReq, enabledCleanup := tc.makeRequest(http.MethodGet,
 		"/api/projects/"+tc.projectID.String()+"/datasources/"+tc.createdDsID.String()+"/queries/enabled",
 		nil)
 	enabledReq.SetPathValue("pid", tc.projectID.String())
@@ -731,6 +744,7 @@ func TestQueriesIntegration_ListQueries(t *testing.T) {
 
 	enabledRec := httptest.NewRecorder()
 	tc.queriesHandler.ListEnabled(enabledRec, enabledReq)
+	enabledCleanup()
 
 	if enabledRec.Code != http.StatusOK {
 		t.Fatalf("List enabled queries failed with status %d: %s", enabledRec.Code, enabledRec.Body.String())

@@ -77,12 +77,14 @@ func setupIntegrationTest(t *testing.T) *integrationTestContext {
 		t.Fatalf("Failed to create encryptor: %v", err)
 	}
 
-	// Create real repository
+	// Create real repositories
 	repo := repositories.NewDatasourceRepository()
+	ontologyRepo := repositories.NewOntologyRepository()
 
 	// Create service with mock adapter factory
 	service := services.NewDatasourceService(
 		repo,
+		ontologyRepo,
 		encryptor,
 		&integrationMockAdapterFactory{},
 		nil, // No project service for tests
@@ -732,5 +734,125 @@ func TestDatasourcesIntegration_OneDatasourcePerProject(t *testing.T) {
 
 	if resp["message"] != "Only one datasource per project is currently supported" {
 		t.Errorf("expected message about datasource limit, got %q", resp["message"])
+	}
+}
+
+// TestDatasourcesIntegration_DeleteClearsOntology verifies that when a datasource
+// is deleted, the associated ontology data is also cleared.
+func TestDatasourcesIntegration_DeleteClearsOntology(t *testing.T) {
+	tc := setupIntegrationTest(t)
+	tc.cleanupDatasources()
+
+	// Create a datasource
+	createBody := CreateDatasourceRequest{
+		ProjectID: tc.projectID.String(),
+		Name:      "Test Datasource for Ontology",
+		Type:      "postgres",
+		Config: map[string]any{
+			"host":     "localhost",
+			"port":     5432,
+			"user":     "test",
+			"password": "secret",
+			"database": "testdb",
+			"ssl_mode": "disable",
+		},
+	}
+
+	createReq := tc.makeRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/datasources", createBody)
+	createReq.SetPathValue("pid", tc.projectID.String())
+
+	createRec := httptest.NewRecorder()
+	tc.handler.Create(createRec, createReq)
+
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create datasource failed: %d - %s", createRec.Code, createRec.Body.String())
+	}
+
+	var createResp struct {
+		Success bool               `json:"success"`
+		Data    DatasourceResponse `json:"data"`
+	}
+	if err := json.Unmarshal(createRec.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("failed to parse create response: %v", err)
+	}
+	datasourceID := createResp.Data.DatasourceID
+
+	// Create ontology data for this project
+	// We'll insert directly into engine_ontologies table via raw SQL
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("failed to create tenant scope: %v", err)
+	}
+	ctx = database.SetTenantScope(ctx, scope)
+
+	ontologyID := uuid.New()
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_ontologies (id, project_id, version, is_active, domain_summary, entity_summaries, column_details, metadata, created_at, updated_at)
+		VALUES ($1, $2, 1, true, '{"domain":"test"}'::jsonb, '{"users":{"name":"users"}}'::jsonb, '{}'::jsonb, '{}'::jsonb, NOW(), NOW())
+	`, ontologyID, tc.projectID)
+	if err != nil {
+		t.Fatalf("failed to create test ontology: %v", err)
+	}
+
+	// Create an entity that references this ontology
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_ontology_entities (id, project_id, ontology_id, name, primary_schema, primary_table, primary_column, created_at, updated_at)
+		VALUES ($1, $2, $3, 'user', 'public', 'users', 'user_id', NOW(), NOW())
+	`, uuid.New(), tc.projectID, ontologyID)
+	if err != nil {
+		t.Fatalf("failed to create test entity: %v", err)
+	}
+
+	// Verify ontology exists
+	var countBefore int
+	err = scope.Conn.QueryRow(ctx, `SELECT COUNT(*) FROM engine_ontologies WHERE project_id = $1`, tc.projectID).Scan(&countBefore)
+	if err != nil {
+		t.Fatalf("failed to count ontologies before delete: %v", err)
+	}
+	if countBefore != 1 {
+		t.Fatalf("expected 1 ontology before delete, got %d", countBefore)
+	}
+
+	// Verify entity exists
+	var entityCountBefore int
+	err = scope.Conn.QueryRow(ctx, `SELECT COUNT(*) FROM engine_ontology_entities WHERE project_id = $1`, tc.projectID).Scan(&entityCountBefore)
+	if err != nil {
+		t.Fatalf("failed to count entities before delete: %v", err)
+	}
+	if entityCountBefore != 1 {
+		t.Fatalf("expected 1 entity before delete, got %d", entityCountBefore)
+	}
+
+	// Delete the datasource
+	deleteReq := tc.makeRequest(http.MethodDelete, "/api/projects/"+tc.projectID.String()+"/datasources/"+datasourceID, nil)
+	deleteReq.SetPathValue("pid", tc.projectID.String())
+	deleteReq.SetPathValue("id", datasourceID)
+
+	deleteRec := httptest.NewRecorder()
+	tc.handler.Delete(deleteRec, deleteReq)
+
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete datasource failed: %d - %s", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	// Verify ontology is gone
+	var countAfter int
+	err = scope.Conn.QueryRow(ctx, `SELECT COUNT(*) FROM engine_ontologies WHERE project_id = $1`, tc.projectID).Scan(&countAfter)
+	if err != nil {
+		t.Fatalf("failed to count ontologies after delete: %v", err)
+	}
+	if countAfter != 0 {
+		t.Errorf("expected 0 ontologies after delete, got %d", countAfter)
+	}
+
+	// Verify entities are gone (CASCADE)
+	var entityCountAfter int
+	err = scope.Conn.QueryRow(ctx, `SELECT COUNT(*) FROM engine_ontology_entities WHERE project_id = $1`, tc.projectID).Scan(&entityCountAfter)
+	if err != nil {
+		t.Fatalf("failed to count entities after delete: %v", err)
+	}
+	if entityCountAfter != 0 {
+		t.Errorf("expected 0 entities after delete (CASCADE), got %d", entityCountAfter)
 	}
 }

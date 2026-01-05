@@ -79,6 +79,11 @@ func (m *mockDatasourceRepository) Delete(ctx context.Context, id uuid.UUID) err
 	return m.deleteErr
 }
 
+func (m *mockDatasourceRepository) GetProjectID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	// For tests, return a fixed UUID
+	return uuid.MustParse("00000000-0000-0000-0000-000000000001"), nil
+}
+
 // mockConnectionTester is a mock implementation of datasource.ConnectionTester.
 type mockConnectionTester struct {
 	testErr error
@@ -122,11 +127,69 @@ func (m *mockAdapterFactory) ListTypes() []datasource.DatasourceAdapterInfo {
 	}
 }
 
+// mockDatasourceTestOntologyRepo is a minimal mock for ontology cleanup in datasource tests.
+type mockDatasourceTestOntologyRepo struct {
+	deleteErr error
+}
+
+func (m *mockDatasourceTestOntologyRepo) Create(ctx context.Context, ontology *models.TieredOntology) error {
+	return errors.New("not implemented in mock")
+}
+
+func (m *mockDatasourceTestOntologyRepo) GetActive(ctx context.Context, projectID uuid.UUID) (*models.TieredOntology, error) {
+	return nil, errors.New("not implemented in mock")
+}
+
+func (m *mockDatasourceTestOntologyRepo) GetByVersion(ctx context.Context, projectID uuid.UUID, version int) (*models.TieredOntology, error) {
+	return nil, errors.New("not implemented in mock")
+}
+
+func (m *mockDatasourceTestOntologyRepo) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
+	return errors.New("not implemented in mock")
+}
+
+func (m *mockDatasourceTestOntologyRepo) UpdateEntitySummary(ctx context.Context, projectID uuid.UUID, tableName string, summary *models.EntitySummary) error {
+	return errors.New("not implemented in mock")
+}
+
+func (m *mockDatasourceTestOntologyRepo) UpdateEntitySummaries(ctx context.Context, projectID uuid.UUID, summaries map[string]*models.EntitySummary) error {
+	return errors.New("not implemented in mock")
+}
+
+func (m *mockDatasourceTestOntologyRepo) UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
+	return errors.New("not implemented in mock")
+}
+
+func (m *mockDatasourceTestOntologyRepo) UpdateMetadata(ctx context.Context, projectID uuid.UUID, metadata map[string]any) error {
+	return errors.New("not implemented in mock")
+}
+
+func (m *mockDatasourceTestOntologyRepo) SetActive(ctx context.Context, projectID uuid.UUID, version int) error {
+	return errors.New("not implemented in mock")
+}
+
+func (m *mockDatasourceTestOntologyRepo) DeactivateAll(ctx context.Context, projectID uuid.UUID) error {
+	return errors.New("not implemented in mock")
+}
+
+func (m *mockDatasourceTestOntologyRepo) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 0, errors.New("not implemented in mock")
+}
+
+func (m *mockDatasourceTestOntologyRepo) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
+	return m.deleteErr
+}
+
+func (m *mockDatasourceTestOntologyRepo) WriteCleanOntology(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
 func newTestService(repo *mockDatasourceRepository) (DatasourceService, *crypto.CredentialEncryptor) {
 	encryptor, _ := crypto.NewCredentialEncryptor(testEncryptionKey)
 	factory := &mockAdapterFactory{}
+	ontologyRepo := &mockDatasourceTestOntologyRepo{}
 	// Pass nil for projectService in tests - auto-set default datasource is tested separately
-	return NewDatasourceService(repo, encryptor, factory, nil, zap.NewNop()), encryptor
+	return NewDatasourceService(repo, ontologyRepo, encryptor, factory, nil, zap.NewNop()), encryptor
 }
 
 func TestDatasourceService_Create_Success(t *testing.T) {
@@ -456,7 +519,8 @@ func TestDatasourceService_TestConnection_Success(t *testing.T) {
 	factory := &mockAdapterFactory{
 		tester: &mockConnectionTester{},
 	}
-	service := NewDatasourceService(repo, encryptor, factory, nil, zap.NewNop())
+	ontologyRepo := &mockDatasourceTestOntologyRepo{}
+	service := NewDatasourceService(repo, ontologyRepo, encryptor, factory, nil, zap.NewNop())
 
 	config := map[string]any{
 		"host":     "localhost",
@@ -476,7 +540,8 @@ func TestDatasourceService_TestConnection_FactoryError(t *testing.T) {
 	factory := &mockAdapterFactory{
 		factoryErr: errors.New("unsupported datasource type"),
 	}
-	service := NewDatasourceService(repo, encryptor, factory, nil, zap.NewNop())
+	ontologyRepo := &mockDatasourceTestOntologyRepo{}
+	service := NewDatasourceService(repo, ontologyRepo, encryptor, factory, nil, zap.NewNop())
 
 	err := service.TestConnection(context.Background(), "unknown", nil)
 	if err == nil {
@@ -492,7 +557,8 @@ func TestDatasourceService_TestConnection_ConnectionError(t *testing.T) {
 			testErr: errors.New("connection refused"),
 		},
 	}
-	service := NewDatasourceService(repo, encryptor, factory, nil, zap.NewNop())
+	ontologyRepo := &mockDatasourceTestOntologyRepo{}
+	service := NewDatasourceService(repo, ontologyRepo, encryptor, factory, nil, zap.NewNop())
 
 	config := map[string]any{
 		"host":     "localhost",
