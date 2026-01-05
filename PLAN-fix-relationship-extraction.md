@@ -203,12 +203,26 @@ The investigation revealed that the OLD relationship discovery service (`relatio
 - Verified: 0 remaining pk_match relationships in database
 - Database is now clean for fresh extraction runs with proper defensive filtering
 
-### Task 4: Add Integration Test
+### Task 4: Add Integration Test [x]
 
 Create test that verifies `channels.owner_id → users.user_id` is discovered:
 1. Import schema with stats
 2. Run pk_match discovery
 3. Assert relationship exists
+
+**Solution Implemented:**
+- Created `pkg/services/pk_match_integration_test.go` with end-to-end test `TestPKMatchDiscovery_ChannelsOwnerToUsersUserID`
+- Test imports real schema from test database (users and channels tables)
+- Collects column stats (distinct_count, non_null_count) and determines joinability
+- Creates ontology entities for users and channels with proper occurrences
+- Runs pk_match discovery using real database adapter for join analysis
+- Verifies that channels.owner_id → users.user_id relationship is discovered
+- Validates detection_method is "pk_match" and status is not "rejected"
+
+**Test Coverage:**
+- Complete pipeline validation: schema import → stats collection → entity creation → pk_match discovery → relationship verification
+- Uses real test database with actual data for authentic join analysis
+- Confirms the defensive filtering allows valid FK relationships while blocking garbage relationships
 
 ## Files to Investigate
 
