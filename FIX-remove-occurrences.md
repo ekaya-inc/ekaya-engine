@@ -347,11 +347,42 @@ type EntityRelationship struct {
 }
 ```
 
-#### 3.2 Keep OntologyEntityOccurrence as a derived type
+#### 3.2 Keep OntologyEntityOccurrence as a derived type ✅ COMPLETED
+
+**Implementation Summary:**
+This task completed the terminology shift from "role" to "association" across the entire codebase. The `OntologyEntityOccurrence` model is now properly aligned with the bidirectional relationship model where associations describe semantic connections.
+
+**Implementation Notes:**
+- Updated `OntologyEntityOccurrence` struct in `pkg/models/ontology_entity.go`:
+  - Renamed `Role` field to `Association` (type: `*string`, JSON tag: `json:"association,omitempty"`)
+  - Updated struct comment to indicate it's "computed" and "no longer stored in database - derived from relationships at runtime"
+- Updated all usages of the `Role` field to `Association` throughout the codebase:
+  - `pkg/services/entity_service.go:182` - Runtime occurrence computation maps relationship.Association to occurrence.Association
+  - `pkg/services/ontology_context.go:556` - Context generation for MCP and UI
+  - `pkg/services/schema.go:986-988, 1021-1022, 1045-1046` - Schema annotation display shows association in comments
+  - `pkg/handlers/entity_handler.go:401` - API response mapping for GET /entities/:id
+  - `pkg/handlers/entity_handler.go:44` - EntityOccurrenceResponse struct field renamed to Association
+  - `pkg/services/entity_service_test.go:279, 288, 320, 476` - Test assertions verify association values
+  - `pkg/services/pk_match_integration_test.go:136` - Integration test creates expected occurrence with association
+  - `pkg/services/ontology_context_integration_test.go:342` - Integration test verifies context generation includes associations
+- Updated `EntityOccurrenceResponse` handler struct to use `Association` instead of `Role` for API consistency
+- All tests pass (`make test` succeeds)
+
+**Key Design Decision:**
+- The model now uses "association" consistently with the `EntityRelationship` model
+- Occurrences are pure runtime views of relationships - no persistence layer exists
+- API responses maintain backward compatibility via JSON field name (association instead of role)
+- The terminology better reflects the semantic meaning: "placed_by", "contains", "manages" vs ambiguous "role"
+
+**Context for Next Session:**
+- The backend API now returns `association` field in entity occurrence responses
+- Frontend UI still expects `role` field (see Phase 5 tasks)
+- Integration tests verify association propagation from relationships → occurrences → API responses
+- All backend occurrence generation is working correctly with new terminology
 
 **File:** `pkg/models/ontology_entity.go`
 
-Keep `OntologyEntityOccurrence` struct but rename `Role` to `Association`:
+The `OntologyEntityOccurrence` struct is now:
 ```go
 // OntologyEntityOccurrence represents a computed occurrence of an entity.
 // No longer stored in database - derived from relationships at runtime.

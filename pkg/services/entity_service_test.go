@@ -276,7 +276,7 @@ func TestComputeOccurrences_WithRelationships(t *testing.T) {
 	assert.Equal(t, "public", occurrences[0].SchemaName)
 	assert.Equal(t, "orders", occurrences[0].TableName)
 	assert.Equal(t, "user_id", occurrences[0].ColumnName)
-	assert.Equal(t, &association1, occurrences[0].Role)
+	assert.Equal(t, &association1, occurrences[0].Association)
 	assert.Equal(t, 0.95, occurrences[0].Confidence)
 
 	// Check second occurrence
@@ -285,7 +285,7 @@ func TestComputeOccurrences_WithRelationships(t *testing.T) {
 	assert.Equal(t, "public", occurrences[1].SchemaName)
 	assert.Equal(t, "accounts", occurrences[1].TableName)
 	assert.Equal(t, "owner_id", occurrences[1].ColumnName)
-	assert.Equal(t, &association2, occurrences[1].Role)
+	assert.Equal(t, &association2, occurrences[1].Association)
 	assert.Equal(t, 1.0, occurrences[1].Confidence)
 }
 
@@ -317,7 +317,7 @@ func TestComputeOccurrences_WithNullAssociation(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, occurrences, 1)
-	assert.Nil(t, occurrences[0].Role, "expected nil role when association is nil")
+	assert.Nil(t, occurrences[0].Association, "expected nil association when association is nil")
 }
 
 func TestComputeOccurrences_RepositoryError(t *testing.T) {
@@ -473,5 +473,5 @@ func TestGetByID_ComputesOccurrences(t *testing.T) {
 	assert.Equal(t, 1, result.OccurrenceCount)
 	assert.Len(t, result.Occurrences, 1)
 	assert.Equal(t, "orders", result.Occurrences[0].TableName)
-	assert.Equal(t, &association, result.Occurrences[0].Role)
+	assert.Equal(t, &association, result.Occurrences[0].Association)
 }

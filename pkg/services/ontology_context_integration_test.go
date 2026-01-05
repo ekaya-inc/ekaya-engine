@@ -322,7 +322,7 @@ func (tc *ontologyContextTestContext) createTestOntology(ctx context.Context) uu
 	require.NoError(tc.t, err, "Failed to create order entity")
 
 	// Create entity occurrences
-	customerRole := "customer"
+	customerAssociation := "customer"
 	err = tc.entityRepo.CreateOccurrence(ctx, &models.OntologyEntityOccurrence{
 		ID:         uuid.New(),
 		EntityID:   userEntityID,
@@ -334,13 +334,13 @@ func (tc *ontologyContextTestContext) createTestOntology(ctx context.Context) uu
 	require.NoError(tc.t, err)
 
 	err = tc.entityRepo.CreateOccurrence(ctx, &models.OntologyEntityOccurrence{
-		ID:         uuid.New(),
-		EntityID:   userEntityID,
-		SchemaName: "public",
-		TableName:  "orders",
-		ColumnName: "user_id",
-		Role:       &customerRole,
-		Confidence: 1.0,
+		ID:          uuid.New(),
+		EntityID:    userEntityID,
+		SchemaName:  "public",
+		TableName:   "orders",
+		ColumnName:  "user_id",
+		Association: &customerAssociation,
+		Confidence:  1.0,
 	})
 	require.NoError(tc.t, err)
 

@@ -548,14 +548,14 @@ func (s *ontologyContextService) computeEntityOccurrences(ctx context.Context, e
 	occurrences := make([]*models.OntologyEntityOccurrence, 0, len(relationships))
 	for _, rel := range relationships {
 		occurrences = append(occurrences, &models.OntologyEntityOccurrence{
-			ID:         rel.ID, // Use relationship ID as occurrence ID
-			EntityID:   entityID,
-			SchemaName: rel.SourceColumnSchema,
-			TableName:  rel.SourceColumnTable,
-			ColumnName: rel.SourceColumnName,
-			Role:       rel.Association, // Association becomes the role
-			Confidence: rel.Confidence,
-			CreatedAt:  rel.CreatedAt,
+			ID:          rel.ID, // Use relationship ID as occurrence ID
+			EntityID:    entityID,
+			SchemaName:  rel.SourceColumnSchema,
+			TableName:   rel.SourceColumnTable,
+			ColumnName:  rel.SourceColumnName,
+			Association: rel.Association,
+			Confidence:  rel.Confidence,
+			CreatedAt:   rel.CreatedAt,
 		})
 	}
 

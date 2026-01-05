@@ -129,11 +129,11 @@ func TestPKMatchDiscovery_ChannelsOwnerToUsersUserID(t *testing.T) {
 
 	// Create entity occurrences (needed for pk_match to identify entity reference columns)
 	userIDOccurrence := &models.OntologyEntityOccurrence{
-		EntityID:   userEntity.ID,
-		SchemaName: "public",
-		TableName:  "users",
-		ColumnName: "user_id",
-		Role:       nil, // Primary key, no role
+		EntityID:    userEntity.ID,
+		SchemaName:  "public",
+		TableName:   "users",
+		ColumnName:  "user_id",
+		Association: nil, // Primary key, no association
 	}
 	if err := entityRepo.CreateOccurrence(ctx, userIDOccurrence); err != nil {
 		t.Fatalf("Failed to create user_id occurrence: %v", err)

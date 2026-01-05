@@ -37,12 +37,12 @@ type EntityDetailResponse struct {
 
 // EntityOccurrenceResponse represents an occurrence of an entity in the schema.
 type EntityOccurrenceResponse struct {
-	ID         string  `json:"id"`
-	SchemaName string  `json:"schema_name"`
-	TableName  string  `json:"table_name"`
-	ColumnName string  `json:"column_name"`
-	Role       *string `json:"role,omitempty"`
-	Confidence float64 `json:"confidence"`
+	ID          string  `json:"id"`
+	SchemaName  string  `json:"schema_name"`
+	TableName   string  `json:"table_name"`
+	ColumnName  string  `json:"column_name"`
+	Association *string `json:"association,omitempty"`
+	Confidence  float64 `json:"confidence"`
 }
 
 // EntityAliasResponse represents an alias for an entity.
@@ -394,12 +394,12 @@ func (h *EntityHandler) toEntityDetailResponse(e *services.EntityWithDetails) En
 	occurrences := make([]EntityOccurrenceResponse, 0, len(e.Occurrences))
 	for _, occ := range e.Occurrences {
 		occurrences = append(occurrences, EntityOccurrenceResponse{
-			ID:         occ.ID.String(),
-			SchemaName: occ.SchemaName,
-			TableName:  occ.TableName,
-			ColumnName: occ.ColumnName,
-			Role:       occ.Role,
-			Confidence: occ.Confidence,
+			ID:          occ.ID.String(),
+			SchemaName:  occ.SchemaName,
+			TableName:   occ.TableName,
+			ColumnName:  occ.ColumnName,
+			Association: occ.Association,
+			Confidence:  occ.Confidence,
 		})
 	}
 

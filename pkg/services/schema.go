@@ -983,9 +983,9 @@ func (s *schemaService) GetDatasourceSchemaWithEntities(ctx context.Context, pro
 				entityAnnotations := make([]string, 0, len(occs))
 				for _, occ := range occs {
 					if entity, found := entityByID[occ.EntityID]; found {
-						if occ.Role != nil && *occ.Role != "" {
+						if occ.Association != nil && *occ.Association != "" {
 							entityAnnotations = append(entityAnnotations,
-								fmt.Sprintf("%s (role: %s)", entity.Name, *occ.Role))
+								fmt.Sprintf("%s (association: %s)", entity.Name, *occ.Association))
 						} else {
 							entityAnnotations = append(entityAnnotations, entity.Name)
 						}
@@ -1018,8 +1018,8 @@ func (s *schemaService) GetDatasourceSchemaWithEntities(ctx context.Context, pro
 
 			if occs, ok := occurrencesByColumn[sourceKey]; ok && len(occs) > 0 {
 				if entity, found := entityByID[occs[0].EntityID]; found {
-					if occs[0].Role != nil && *occs[0].Role != "" {
-						sb.WriteString(fmt.Sprintf(" [%s as %s]", entity.Name, *occs[0].Role))
+					if occs[0].Association != nil && *occs[0].Association != "" {
+						sb.WriteString(fmt.Sprintf(" [%s as %s]", entity.Name, *occs[0].Association))
 					} else {
 						sb.WriteString(fmt.Sprintf(" [%s]", entity.Name))
 					}
@@ -1042,8 +1042,8 @@ func (s *schemaService) GetDatasourceSchemaWithEntities(ctx context.Context, pro
 
 			if occs, ok := occurrencesByColumn[targetKey]; ok && len(occs) > 0 {
 				if entity, found := entityByID[occs[0].EntityID]; found {
-					if occs[0].Role != nil && *occs[0].Role != "" {
-						sb.WriteString(fmt.Sprintf(" [%s as %s]", entity.Name, *occs[0].Role))
+					if occs[0].Association != nil && *occs[0].Association != "" {
+						sb.WriteString(fmt.Sprintf(" [%s as %s]", entity.Name, *occs[0].Association))
 					} else {
 						sb.WriteString(fmt.Sprintf(" [%s]", entity.Name))
 					}

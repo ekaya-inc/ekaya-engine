@@ -25,18 +25,18 @@ type OntologyEntity struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-// OntologyEntityOccurrence represents a single occurrence of an entity in a specific
-// schema.table.column location, optionally with a semantic role (visitor, host, owner).
-// Stored in engine_ontology_entity_occurrences table.
+// OntologyEntityOccurrence represents a computed occurrence of an entity in a specific
+// schema.table.column location, optionally with a semantic association.
+// No longer stored in database - derived from relationships at runtime.
 type OntologyEntityOccurrence struct {
-	ID         uuid.UUID `json:"id"`
-	EntityID   uuid.UUID `json:"entity_id"`
-	SchemaName string    `json:"schema_name"`
-	TableName  string    `json:"table_name"`
-	ColumnName string    `json:"column_name"`
-	Role       *string   `json:"role,omitempty"` // e.g., "visitor", "host", "owner", null for generic
-	Confidence float64   `json:"confidence"`     // 0.0 to 1.0, default 1.0
-	CreatedAt  time.Time `json:"created_at"`
+	ID          uuid.UUID `json:"id"`
+	EntityID    uuid.UUID `json:"entity_id"`
+	SchemaName  string    `json:"schema_name"`
+	TableName   string    `json:"table_name"`
+	ColumnName  string    `json:"column_name"`
+	Association *string   `json:"association,omitempty"` // e.g., "placed_by", "contains", "as host"
+	Confidence  float64   `json:"confidence"`            // 0.0 to 1.0, default 1.0
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // OntologyEntityAlias represents an alternative name for an entity.
