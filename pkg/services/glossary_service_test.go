@@ -197,26 +197,6 @@ func (m *mockEntityRepoForGlossary) Restore(ctx context.Context, entityID uuid.U
 	return nil
 }
 
-func (m *mockEntityRepoForGlossary) CreateOccurrence(ctx context.Context, occ *models.OntologyEntityOccurrence) error {
-	return nil
-}
-
-func (m *mockEntityRepoForGlossary) GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (m *mockEntityRepoForGlossary) GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (m *mockEntityRepoForGlossary) GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (m *mockEntityRepoForGlossary) UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error {
-	return nil
-}
-
 func (m *mockEntityRepoForGlossary) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {
 	return nil
 }

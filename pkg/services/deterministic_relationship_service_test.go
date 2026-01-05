@@ -933,14 +933,6 @@ func setupMocks(projectID, ontologyID, datasourceID, entityID uuid.UUID) *mockTe
 					PrimaryTable:  "users",
 				},
 			},
-			occurrences: []*models.OntologyEntityOccurrence{
-				{
-					EntityID:   entityID,
-					SchemaName: "public",
-					TableName:  "users",
-					ColumnName: "id",
-				},
-			},
 		},
 		relationshipRepo: &mockTestRelationshipRepo{
 			created: []*models.EntityRelationship{},
@@ -1080,8 +1072,7 @@ func (m *mockTestOntologyRepo) List(ctx context.Context, projectID uuid.UUID, li
 }
 
 type mockTestEntityRepo struct {
-	entities    []*models.OntologyEntity
-	occurrences []*models.OntologyEntityOccurrence
+	entities []*models.OntologyEntity
 }
 
 func (m *mockTestEntityRepo) Create(ctx context.Context, entity *models.OntologyEntity) error {
@@ -1102,10 +1093,6 @@ func (m *mockTestEntityRepo) Update(ctx context.Context, entity *models.Ontology
 
 func (m *mockTestEntityRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
-}
-
-func (m *mockTestEntityRepo) GetOccurrences(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return m.occurrences, nil
 }
 
 func (m *mockTestEntityRepo) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {

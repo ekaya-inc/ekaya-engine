@@ -129,26 +129,6 @@ func (m *mockEntityRepoForFinalization) Restore(ctx context.Context, entityID uu
 	return nil
 }
 
-func (m *mockEntityRepoForFinalization) CreateOccurrence(ctx context.Context, occ *models.OntologyEntityOccurrence) error {
-	return nil
-}
-
-func (m *mockEntityRepoForFinalization) GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (m *mockEntityRepoForFinalization) GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (m *mockEntityRepoForFinalization) GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (m *mockEntityRepoForFinalization) UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error {
-	return nil
-}
-
 func (m *mockEntityRepoForFinalization) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {
 	return nil
 }

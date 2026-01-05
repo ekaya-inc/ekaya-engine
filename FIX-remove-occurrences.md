@@ -498,13 +498,27 @@ export interface EntityOccurrence {
 **Key Fix:**
 The ON CONFLICT clause was referencing the old 6-column unique constraint, but migration 028 changed it to 9 columns (adding `target_column_schema`, `target_column_table`, `target_column_name`). This caused all relationship creation to fail with "no unique or exclusion constraint matching the ON CONFLICT specification".
 
-#### 6.2 Update unit tests
+#### 6.2 Update unit tests ✅ COMPLETED (2026-01-05)
 
-**Files to modify:**
-- `pkg/services/entity_discovery_service_test.go` (if exists)
-- `pkg/services/column_enrichment_test.go` - Update mock to remove occurrence methods
-- `pkg/services/ontology_context_test.go` - Update mock
-- Various mock implementations that implement `OntologyEntityRepository`
+**Implementation Notes:**
+- Removed all occurrence-related methods from mock `OntologyEntityRepository` implementations across 5 test files
+- Cleaned up test setup code that created or referenced occurrences
+- All unit tests now align with the cleaned repository interface from task 2.7
+- All tests pass (`make check` succeeds)
+
+**Files modified:**
+- `pkg/services/deterministic_relationship_service_test.go` - Removed `GetOccurrences` method and `occurrences` field from `mockTestEntityRepo`
+- `pkg/services/ontology_finalization_test.go` - Removed 5 occurrence methods from `mockEntityRepoForFinalization`
+- `pkg/services/relationship_enrichment_test.go` - Removed 4 occurrence methods from `testRelEnrichmentEntityRepo`
+- `pkg/services/glossary_service_test.go` - Removed 5 occurrence methods from `mockEntityRepoForGlossary`
+- `pkg/mcp/tools/ontology_performance_test.go` - Removed occurrence creation loop (24 lines) from `createTestOntology`
+
+**Context for Next Session:**
+- This completes Phase 6 (Test Updates) - all tests now reflect the new occurrence-free architecture
+- All mock implementations align with the cleaned `OntologyEntityRepository` interface
+- Tests focus on entity persistence without occurrence side effects
+- Runtime occurrence computation is tested through integration tests (task 6.1)
+- Note: `entity_discovery_service_test.go`, `column_enrichment_test.go`, and `ontology_context_test.go` were already cleaned up in task 6.1
 
 ---
 

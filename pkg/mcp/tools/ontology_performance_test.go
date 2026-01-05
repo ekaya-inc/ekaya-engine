@@ -453,24 +453,6 @@ func (tc *ontologyPerformanceTestContext) createTestOntology() {
 		if err != nil {
 			tc.t.Fatalf("Failed to create test entity %s: %v", entity.Name, err)
 		}
-
-		// Create entity occurrences
-		occurrences := []*models.OntologyEntityOccurrence{
-			{
-				ID:         uuid.New(),
-				EntityID:   entity.ID,
-				SchemaName: entity.PrimarySchema,
-				TableName:  entity.PrimaryTable,
-				ColumnName: entity.PrimaryColumn,
-			},
-		}
-
-		for _, occ := range occurrences {
-			err = tc.deps.EntityRepo.CreateOccurrence(ctx, occ)
-			if err != nil {
-				tc.t.Fatalf("Failed to create occurrence: %v", err)
-			}
-		}
 	}
 }
 
