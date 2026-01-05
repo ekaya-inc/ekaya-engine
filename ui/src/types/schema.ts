@@ -115,6 +115,7 @@ export interface RelationshipDetail {
   inference_method: string | null;
   is_validated: boolean;
   is_approved: boolean | null; // null = pending, true = approved, false = rejected
+  description?: string;
   created_at: string;
   updated_at: string;
 }

@@ -186,6 +186,12 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 			continue
 		}
 
+		// Determine detection method based on schema relationship type
+		detectionMethod := models.DetectionMethodForeignKey
+		if schemaRel.RelationshipType == models.RelationshipTypeManual {
+			detectionMethod = models.DetectionMethodManual
+		}
+
 		// Create bidirectional relationship (both forward and reverse)
 		rel := &models.EntityRelationship{
 			OntologyID:         ontology.ID,
@@ -197,7 +203,7 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 			TargetColumnSchema: targetTable.SchemaName,
 			TargetColumnTable:  targetTable.TableName,
 			TargetColumnName:   targetCol.ColumnName,
-			DetectionMethod:    models.DetectionMethodForeignKey,
+			DetectionMethod:    detectionMethod,
 			Confidence:         1.0,
 			Status:             models.RelationshipStatusConfirmed,
 		}

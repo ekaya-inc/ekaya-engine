@@ -1165,8 +1165,9 @@ func (m *mockTestRelationshipRepo) Delete(ctx context.Context, id uuid.UUID) err
 }
 
 type mockTestSchemaRepo struct {
-	tables  []*models.SchemaTable
-	columns []*models.SchemaColumn
+	tables        []*models.SchemaTable
+	columns       []*models.SchemaColumn
+	relationships []*models.SchemaRelationship
 }
 
 func (m *mockTestSchemaRepo) GetTables(ctx context.Context, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
@@ -1345,7 +1346,7 @@ func (m *mockTestSchemaRepo) GetNonPKColumnsByExactType(ctx context.Context, pro
 }
 
 func (m *mockTestSchemaRepo) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
-	return nil, nil
+	return m.relationships, nil
 }
 
 func (m *mockTestSchemaRepo) GetRelationshipByID(ctx context.Context, projectID, relationshipID uuid.UUID) (*models.SchemaRelationship, error) {
@@ -2113,6 +2114,222 @@ func TestPKMatch_NoGarbageRelationships(t *testing.T) {
 		for i, rel := range mocks.relationshipRepo.created {
 			t.Logf("  Relationship %d: %s.%s -> %s.%s", i+1, rel.SourceColumnTable, rel.SourceColumnName, rel.TargetColumnTable, rel.TargetColumnName)
 		}
+	}
+}
+
+// TestFKDiscovery_ManualRelationshipType tests that schema relationships with
+// relationship_type="manual" create entity relationships with detection_method="manual"
+func TestFKDiscovery_ManualRelationshipType(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	channelEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Add channel entity
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            channelEntityID,
+		OntologyID:    ontologyID,
+		Name:          "channel",
+		PrimarySchema: "public",
+		PrimaryTable:  "channels",
+	})
+
+	usersTableID := uuid.New()
+	channelsTableID := uuid.New()
+	userIDColumnID := uuid.New()
+	ownerIDColumnID := uuid.New()
+
+	// Setup tables with columns
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            userIDColumnID,
+					SchemaTableID: usersTableID,
+					ColumnName:    "user_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+				},
+			},
+		},
+		{
+			ID:         channelsTableID,
+			SchemaName: "public",
+			TableName:  "channels",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            ownerIDColumnID,
+					SchemaTableID: channelsTableID,
+					ColumnName:    "owner_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+				},
+			},
+		},
+	}
+
+	// Add manual schema relationship
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
+		{
+			ID:               uuid.New(),
+			ProjectID:        projectID,
+			SourceTableID:    usersTableID,
+			SourceColumnID:   userIDColumnID,
+			TargetTableID:    channelsTableID,
+			TargetColumnID:   ownerIDColumnID,
+			RelationshipType: models.RelationshipTypeManual, // Manual relationship
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+	)
+
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: 1 FK relationship discovered (creates 2 rows: forward + reverse)
+	if result.FKRelationships != 1 {
+		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
+	}
+
+	// Bidirectional: 2 relationships created (forward + reverse)
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	}
+
+	// Verify: forward relationship has detection_method="manual"
+	forwardRel := mocks.relationshipRepo.created[0]
+	if forwardRel.DetectionMethod != models.DetectionMethodManual {
+		t.Errorf("expected forward DetectionMethod=%q, got %q", models.DetectionMethodManual, forwardRel.DetectionMethod)
+	}
+
+	// Verify: reverse relationship also has detection_method="manual"
+	reverseRel := mocks.relationshipRepo.created[1]
+	if reverseRel.DetectionMethod != models.DetectionMethodManual {
+		t.Errorf("expected reverse DetectionMethod=%q, got %q", models.DetectionMethodManual, reverseRel.DetectionMethod)
+	}
+}
+
+// TestFKDiscovery_ForeignKeyRelationshipType tests that schema relationships with
+// relationship_type="fk" create entity relationships with detection_method="foreign_key"
+func TestFKDiscovery_ForeignKeyRelationshipType(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Add order entity
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	userIDColumnID := uuid.New()
+	buyerIDColumnID := uuid.New()
+
+	// Setup tables with columns
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            userIDColumnID,
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            buyerIDColumnID,
+					SchemaTableID: ordersTableID,
+					ColumnName:    "buyer_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+				},
+			},
+		},
+	}
+
+	// Add FK schema relationship
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
+		{
+			ID:               uuid.New(),
+			ProjectID:        projectID,
+			SourceTableID:    ordersTableID,
+			SourceColumnID:   buyerIDColumnID,
+			TargetTableID:    usersTableID,
+			TargetColumnID:   userIDColumnID,
+			RelationshipType: models.RelationshipTypeFK, // FK from DDL
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+	)
+
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: 1 FK relationship discovered (creates 2 rows: forward + reverse)
+	if result.FKRelationships != 1 {
+		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
+	}
+
+	// Bidirectional: 2 relationships created (forward + reverse)
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	}
+
+	// Verify: forward relationship has detection_method="foreign_key"
+	forwardRel := mocks.relationshipRepo.created[0]
+	if forwardRel.DetectionMethod != models.DetectionMethodForeignKey {
+		t.Errorf("expected forward DetectionMethod=%q, got %q", models.DetectionMethodForeignKey, forwardRel.DetectionMethod)
+	}
+
+	// Verify: reverse relationship also has detection_method="foreign_key"
+	reverseRel := mocks.relationshipRepo.created[1]
+	if reverseRel.DetectionMethod != models.DetectionMethodForeignKey {
+		t.Errorf("expected reverse DetectionMethod=%q, got %q", models.DetectionMethodForeignKey, reverseRel.DetectionMethod)
 	}
 }
 
