@@ -2,8 +2,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import RelationshipsPage from '../RelationshipsPage';
+import engineApi from '../../services/engineApi';
 import type { RelationshipDetail, DatasourceSchema } from '../../types';
+import RelationshipsPage from '../RelationshipsPage';
 
 // Mock the DatasourceConnectionContext
 const mockUseDatasourceConnection = vi.fn();
@@ -29,58 +30,64 @@ vi.mock('../../services/engineApi', () => ({
   },
 }));
 
-import engineApi from '../../services/engineApi';
-
 describe('RelationshipsPage - Description Rendering', () => {
   const mockSchema: DatasourceSchema = {
     tables: [
       {
-        name: 'users',
+        table_name: 'users',
         columns: [
-          { name: 'id', type: 'integer', nullable: false },
-          { name: 'name', type: 'varchar', nullable: false },
+          { column_name: 'id', data_type: 'integer' },
+          { column_name: 'name', data_type: 'varchar' },
         ],
       },
       {
-        name: 'orders',
+        table_name: 'orders',
         columns: [
-          { name: 'id', type: 'integer', nullable: false },
-          { name: 'user_id', type: 'integer', nullable: false },
+          { column_name: 'id', data_type: 'integer' },
+          { column_name: 'user_id', data_type: 'integer' },
         ],
       },
     ],
+    total_tables: 2,
+    relationships: [],
   };
 
   const mockRelationshipWithDescription: RelationshipDetail = {
-    source_entity_id: 'entity-1',
-    source_entity: 'User',
+    id: 'rel-1',
     source_table_name: 'users',
     source_column_name: 'id',
     source_column_type: 'integer',
-    target_entity_id: 'entity-2',
-    target_entity: 'Order',
     target_table_name: 'orders',
     target_column_name: 'user_id',
     target_column_type: 'integer',
-    relationship_type: 'foreign_key',
-    cardinality: 'one_to_many',
+    relationship_type: 'fk',
+    cardinality: '1:N',
+    confidence: 1.0,
+    inference_method: null,
+    is_validated: true,
+    is_approved: true,
     description: 'Orders belong to users. Each order is placed by exactly one user.',
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-01-01T00:00:00Z',
   };
 
   const mockRelationshipWithoutDescription: RelationshipDetail = {
-    source_entity_id: 'entity-3',
-    source_entity: 'Product',
+    id: 'rel-2',
     source_table_name: 'products',
     source_column_name: 'id',
     source_column_type: 'integer',
-    target_entity_id: 'entity-4',
-    target_entity: 'OrderItem',
     target_table_name: 'order_items',
     target_column_name: 'product_id',
     target_column_type: 'integer',
-    relationship_type: 'foreign_key',
-    cardinality: 'one_to_many',
-    description: undefined,
+    relationship_type: 'fk',
+    cardinality: '1:N',
+    confidence: 1.0,
+    inference_method: null,
+    is_validated: true,
+    is_approved: true,
+    // description intentionally omitted to test absence case
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-01-01T00:00:00Z',
   };
 
   beforeEach(() => {
@@ -92,7 +99,10 @@ describe('RelationshipsPage - Description Rendering', () => {
       },
     });
 
-    vi.mocked(engineApi.getSchema).mockResolvedValue({ data: mockSchema });
+    vi.mocked(engineApi.getSchema).mockResolvedValue({
+      success: true,
+      data: mockSchema,
+    });
   });
 
   const renderPage = () => {
@@ -107,8 +117,10 @@ describe('RelationshipsPage - Description Rendering', () => {
 
   it('renders description when present', async () => {
     vi.mocked(engineApi.getRelationships).mockResolvedValue({
+      success: true,
       data: {
         relationships: [mockRelationshipWithDescription],
+        total_count: 1,
         empty_tables: [],
         orphan_tables: [],
       },
@@ -123,8 +135,10 @@ describe('RelationshipsPage - Description Rendering', () => {
 
   it('does not render description when absent', async () => {
     vi.mocked(engineApi.getRelationships).mockResolvedValue({
+      success: true,
       data: {
         relationships: [mockRelationshipWithoutDescription],
+        total_count: 1,
         empty_tables: [],
         orphan_tables: [],
       },
@@ -143,8 +157,10 @@ describe('RelationshipsPage - Description Rendering', () => {
 
   it('renders multiple relationships with mixed descriptions', async () => {
     vi.mocked(engineApi.getRelationships).mockResolvedValue({
+      success: true,
       data: {
         relationships: [mockRelationshipWithDescription, mockRelationshipWithoutDescription],
+        total_count: 2,
         empty_tables: [],
         orphan_tables: [],
       },
@@ -168,8 +184,10 @@ describe('RelationshipsPage - Description Rendering', () => {
     };
 
     vi.mocked(engineApi.getRelationships).mockResolvedValue({
+      success: true,
       data: {
         relationships: [maliciousRelationship],
+        total_count: 1,
         empty_tables: [],
         orphan_tables: [],
       },
