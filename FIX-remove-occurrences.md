@@ -142,12 +142,24 @@ For each existing relationship, create a reverse row:
 
 The `association` field is now generated alongside `description` during the existing Relationship Enrichment DAG step.
 
-#### 2.3 Remove Column Enrichment occurrence role updates
+#### 2.3 Remove Column Enrichment occurrence role updates ✅ COMPLETED
 
-**Files to modify:**
-- `pkg/services/column_enrichment.go:788-859`
-  - Remove `updateOccurrenceRoles()` entirely
-  - Associations are now set during Relationship Enrichment, not Column Enrichment
+**Implementation Notes:**
+- Removed `updateOccurrenceRoles()` method and its call from `EnrichTable()` in `pkg/services/column_enrichment.go`
+  - This method attempted to update occurrence roles based on FK role enrichments
+  - It was orphaned code - tried to update occurrence roles that were never created from relationships
+  - Removed 88 lines including the method implementation (lines 785-859)
+  - Removed the method call from `EnrichTable()` (lines 220-228)
+- Removed test `TestColumnEnrichmentService_UpdateOccurrenceRoles` from `pkg/services/column_enrichment_test.go`
+  - Removed 176 lines including test and helper mocks (`testColEnrichmentEntityRepoWithRoleTracking`, `testColEnrichmentRelRepoWithFKs`)
+- Associations are now ONLY set during Relationship Enrichment (task 2.2), not during Column Enrichment
+- This completes the cleanup of occurrence-related code from the column enrichment flow
+- All tests pass (`make check` succeeds)
+
+**Key Design Decision:**
+- Associations belong on relationships, not on column enrichments
+- The FK role enrichment logic in column enrichment was attempting to bridge the gap to occurrences
+- With bidirectional relationships and association generation during Relationship Enrichment, this bridge is no longer needed
 
 #### 2.5 Compute occurrences at runtime in Entity Service
 
