@@ -96,12 +96,26 @@ For each existing relationship, create a reverse row:
 
 ### Phase 2: Code Changes
 
-#### 2.1 Update relationship creation
+#### 2.1 Update relationship creation ✅ COMPLETED
 
-**Files to modify:**
-- `pkg/services/deterministic_relationship_service.go`
-  - When creating a relationship, also create the reverse row
-  - Or: create both in a single transaction
+**Implementation Notes:**
+- Added `createBidirectionalRelationship()` helper method in `pkg/services/deterministic_relationship_service.go`
+  - Creates both forward (FK direction) and reverse relationship rows in sequence
+  - Swaps source/target entities and columns for reverse direction
+  - Sets reverse description to nil (will be populated during Relationship Enrichment)
+- Updated both FK discovery and PK-match discovery to use the new helper
+- Added unit test `TestCreateBidirectionalRelationship` to verify both rows are created
+- Updated existing PK-match tests to expect 2x relationship rows (2 logical relationships x 2 directions = 4 rows)
+
+**Key Design Decision:**
+- Relationships are created sequentially (forward then reverse) rather than in a transaction
+- This is safe because the unique constraint includes all 9 columns (source/target entity + schema + table + column)
+- If the reverse creation fails, the forward row remains (partial state) but subsequent enrichment/discovery will be consistent
+- Future sessions can continue from any partial state
+
+**Files modified:**
+- `pkg/services/deterministic_relationship_service.go` - Added bidirectional creation logic
+- `pkg/services/deterministic_relationship_service_test.go` - Added unit test and updated existing tests
 
 #### 2.2 Generate associations during Relationship Enrichment
 
