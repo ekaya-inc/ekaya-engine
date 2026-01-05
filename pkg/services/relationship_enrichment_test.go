@@ -52,6 +52,14 @@ func (r *testRelEnrichmentRelRepo) GetByOntology(ctx context.Context, ontologyID
 	return r.relationships, nil
 }
 
+func (r *testRelEnrichmentRelRepo) GetByOntologyGroupedByTarget(ctx context.Context, ontologyID uuid.UUID) (map[uuid.UUID][]*models.EntityRelationship, error) {
+	result := make(map[uuid.UUID][]*models.EntityRelationship)
+	for _, rel := range r.relationships {
+		result[rel.TargetEntityID] = append(result[rel.TargetEntityID], rel)
+	}
+	return result, nil
+}
+
 func (r *testRelEnrichmentRelRepo) GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error) {
 	return r.relationships, nil
 }

@@ -170,6 +170,14 @@ func (m *mockRelationshipRepoForFinalization) GetByOntology(ctx context.Context,
 	return m.relationships, nil
 }
 
+func (m *mockRelationshipRepoForFinalization) GetByOntologyGroupedByTarget(ctx context.Context, ontologyID uuid.UUID) (map[uuid.UUID][]*models.EntityRelationship, error) {
+	result := make(map[uuid.UUID][]*models.EntityRelationship)
+	for _, rel := range m.relationships {
+		result[rel.TargetEntityID] = append(result[rel.TargetEntityID], rel)
+	}
+	return result, nil
+}
+
 func (m *mockRelationshipRepoForFinalization) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error) {
 	if m.getByProjectErr != nil {
 		return nil, m.getByProjectErr

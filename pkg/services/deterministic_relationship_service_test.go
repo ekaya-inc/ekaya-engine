@@ -1282,6 +1282,10 @@ func (m *mockTestRelationshipRepo) GetByOntology(ctx context.Context, ontologyID
 	return nil, nil
 }
 
+func (m *mockTestRelationshipRepo) GetByOntologyGroupedByTarget(ctx context.Context, ontologyID uuid.UUID) (map[uuid.UUID][]*models.EntityRelationship, error) {
+	return make(map[uuid.UUID][]*models.EntityRelationship), nil
+}
+
 func (m *mockTestSchemaRepo) GetEmptyTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error) {
 	return nil, nil
 }

@@ -93,13 +93,32 @@ func (s *entityService) ListByProject(ctx context.Context, projectID uuid.UUID) 
 		return nil, fmt.Errorf("get entities: %w", err)
 	}
 
-	// Fetch occurrences and aliases for each entity
+	// Batch load relationships grouped by target entity (avoids N+1)
+	relationshipsByTarget, err := s.relationshipRepo.GetByOntologyGroupedByTarget(ctx, ontology.ID)
+	if err != nil {
+		s.logger.Error("Failed to get relationships by ontology",
+			zap.String("ontology_id", ontology.ID.String()),
+			zap.Error(err))
+		return nil, fmt.Errorf("get relationships: %w", err)
+	}
+
+	// Build result with occurrences and aliases
 	result := make([]*EntityWithDetails, 0, len(entities))
 	for _, entity := range entities {
-		// Compute occurrences from relationships
-		occurrences, err := s.computeOccurrences(ctx, entity.ID)
-		if err != nil {
-			return nil, fmt.Errorf("compute occurrences for entity %s: %w", entity.ID, err)
+		// Compute occurrences from pre-fetched relationships
+		rels := relationshipsByTarget[entity.ID]
+		occurrences := make([]*models.OntologyEntityOccurrence, 0, len(rels))
+		for _, rel := range rels {
+			occurrences = append(occurrences, &models.OntologyEntityOccurrence{
+				ID:          rel.ID,
+				EntityID:    entity.ID,
+				SchemaName:  rel.SourceColumnSchema,
+				TableName:   rel.SourceColumnTable,
+				ColumnName:  rel.SourceColumnName,
+				Association: rel.Association,
+				Confidence:  rel.Confidence,
+				CreatedAt:   rel.CreatedAt,
+			})
 		}
 
 		aliases, err := s.entityRepo.GetAliasesByEntity(ctx, entity.ID)

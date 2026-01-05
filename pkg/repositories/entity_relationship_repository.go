@@ -16,6 +16,7 @@ import (
 type EntityRelationshipRepository interface {
 	Create(ctx context.Context, rel *models.EntityRelationship) error
 	GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error)
+	GetByOntologyGroupedByTarget(ctx context.Context, ontologyID uuid.UUID) (map[uuid.UUID][]*models.EntityRelationship, error)
 	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error)
 	GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error)
 	GetByTargetEntity(ctx context.Context, entityID uuid.UUID) ([]*models.EntityRelationship, error)
@@ -105,6 +106,43 @@ func (r *entityRelationshipRepository) GetByOntology(ctx context.Context, ontolo
 	}
 
 	return relationships, nil
+}
+
+func (r *entityRelationshipRepository) GetByOntologyGroupedByTarget(ctx context.Context, ontologyID uuid.UUID) (map[uuid.UUID][]*models.EntityRelationship, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT id, ontology_id, source_entity_id, target_entity_id,
+		       source_column_schema, source_column_table, source_column_name,
+		       target_column_schema, target_column_table, target_column_name,
+		       detection_method, confidence, status, description, association, created_at
+		FROM engine_entity_relationships
+		WHERE ontology_id = $1
+		ORDER BY target_entity_id, source_column_table, source_column_name`
+
+	rows, err := scope.Conn.Query(ctx, query, ontologyID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query entity relationships: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[uuid.UUID][]*models.EntityRelationship)
+	for rows.Next() {
+		rel, err := scanEntityRelationship(rows)
+		if err != nil {
+			return nil, err
+		}
+		result[rel.TargetEntityID] = append(result[rel.TargetEntityID], rel)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating entity relationships: %w", err)
+	}
+
+	return result, nil
 }
 
 func (r *entityRelationshipRepository) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error) {

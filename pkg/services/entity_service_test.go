@@ -130,6 +130,9 @@ func (m *mockRelationshipRepo) Create(ctx context.Context, rel *models.EntityRel
 func (m *mockRelationshipRepo) GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
 	return nil, nil
 }
+func (m *mockRelationshipRepo) GetByOntologyGroupedByTarget(ctx context.Context, ontologyID uuid.UUID) (map[uuid.UUID][]*models.EntityRelationship, error) {
+	return m.relationships, nil
+}
 func (m *mockRelationshipRepo) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error) {
 	return nil, nil
 }
