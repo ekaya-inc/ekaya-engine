@@ -6,7 +6,7 @@ When we moved everything to the Ontology DAG workflow, dead code was left behind
 
 ## Files to Delete Entirely
 
-### 1. `ui/src/services/realOntologyService.ts`
+### 1. `ui/src/services/realOntologyService.ts` (DELETED)
 
 **Why:** Near-identical duplicate of `ontologyService.ts`. Never imported or used anywhere.
 
@@ -15,6 +15,8 @@ When we moved everything to the Ontology DAG workflow, dead code was left behind
 grep -r "realOntologyService" --include="*.ts" --include="*.tsx" ui/src/
 ```
 Expected: No hits.
+
+✅ **Completed:** File deleted. UI build verified successful.
 
 ---
 
