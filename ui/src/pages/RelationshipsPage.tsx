@@ -577,9 +577,6 @@ const RelationshipsPage = () => {
                             <span className="font-mono text-text-primary">
                               {rel.source_column_name}
                             </span>
-                            <span className="text-text-tertiary text-xs">
-                              ({rel.source_column_type})
-                            </span>
                             <ArrowRight className="h-3 w-3 text-text-tertiary flex-shrink-0" />
                             <span className="font-medium text-text-primary">
                               {rel.target_table_name}
@@ -587,9 +584,6 @@ const RelationshipsPage = () => {
                             <span className="text-text-tertiary">.</span>
                             <span className="font-mono text-text-primary">
                               {rel.target_column_name}
-                            </span>
-                            <span className="text-text-tertiary text-xs">
-                              ({rel.target_column_type})
                             </span>
                           </div>
                           {/* Description: React automatically escapes text content, providing XSS protection.
