@@ -114,14 +114,6 @@ func (r *testColEnrichmentEntityRepo) Delete(ctx context.Context, entityID uuid.
 	return nil
 }
 
-func (r *testColEnrichmentEntityRepo) CreateOccurrence(ctx context.Context, occurrence *models.OntologyEntityOccurrence) error {
-	return nil
-}
-
-func (r *testColEnrichmentEntityRepo) GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
 func (r *testColEnrichmentEntityRepo) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {
 	return nil
 }
@@ -170,18 +162,6 @@ func (r *testColEnrichmentEntityRepo) Restore(ctx context.Context, entityID uuid
 	return nil
 }
 
-func (r *testColEnrichmentEntityRepo) GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentEntityRepo) GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentEntityRepo) UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error {
-	return nil
-}
-
 type testColEnrichmentRelRepo struct{}
 
 func (r *testColEnrichmentRelRepo) GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error) {
@@ -197,6 +177,10 @@ func (r *testColEnrichmentRelRepo) GetByOntology(ctx context.Context, ontologyID
 	return nil, nil
 }
 
+func (r *testColEnrichmentRelRepo) GetByOntologyGroupedByTarget(ctx context.Context, ontologyID uuid.UUID) (map[uuid.UUID][]*models.EntityRelationship, error) {
+	return make(map[uuid.UUID][]*models.EntityRelationship), nil
+}
+
 func (r *testColEnrichmentRelRepo) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error) {
 	return nil, nil
 }
@@ -205,8 +189,16 @@ func (r *testColEnrichmentRelRepo) UpdateDescription(ctx context.Context, id uui
 	return nil
 }
 
+func (r *testColEnrichmentRelRepo) UpdateDescriptionAndAssociation(ctx context.Context, id uuid.UUID, description string, association string) error {
+	return nil
+}
+
 func (r *testColEnrichmentRelRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
+}
+
+func (r *testColEnrichmentRelRepo) GetByTargetEntity(ctx context.Context, entityID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
 }
 
 type testColEnrichmentSchemaRepo struct {
@@ -483,14 +475,14 @@ func TestColumnEnrichmentService_EnrichProject_Success(t *testing.T) {
 				"description": "Unique identifier for the user",
 				"semantic_type": "identifier",
 				"role": "identifier",
-				"fk_role": null
+				"fk_association": null
 			},
 			{
 				"name": "email",
 				"description": "User's email address",
 				"semantic_type": "email",
 				"role": "attribute",
-				"fk_role": null
+				"fk_association": null
 			}
 		]
 	}`
@@ -566,7 +558,7 @@ func TestColumnEnrichmentService_EnrichProject_WithRetryOnTransientError(t *test
 				"description": "User ID",
 				"semantic_type": "identifier",
 				"role": "identifier",
-				"fk_role": null
+				"fk_association": null
 			}
 		]
 	}`
@@ -700,7 +692,7 @@ func TestColumnEnrichmentService_EnrichProject_LargeTable(t *testing.T) {
 			"description": "Column %d",
 			"semantic_type": "text",
 			"role": "attribute",
-			"fk_role": null
+			"fk_association": null
 		}`, colName, i+1)
 	}
 
@@ -765,7 +757,7 @@ func TestColumnEnrichmentService_EnrichProject_ProgressCallback(t *testing.T) {
 
 	llmResponse := `{
 		"columns": [
-			{"name": "id", "description": "ID", "semantic_type": "identifier", "role": "identifier", "fk_role": null}
+			{"name": "id", "description": "ID", "semantic_type": "identifier", "role": "identifier", "fk_association": null}
 		]
 	}`
 
@@ -872,7 +864,7 @@ func TestColumnEnrichmentService_EnrichProject_PartialFailure(t *testing.T) {
 
 	llmResponse := `{
 		"columns": [
-			{"name": "id", "description": "ID", "semantic_type": "identifier", "role": "identifier", "fk_role": null}
+			{"name": "id", "description": "ID", "semantic_type": "identifier", "role": "identifier", "fk_association": null}
 		]
 	}`
 
@@ -973,14 +965,14 @@ func TestColumnEnrichmentService_EnrichTable_WithForeignKeys(t *testing.T) {
 				"description": "Order identifier",
 				"semantic_type": "identifier",
 				"role": "identifier",
-				"fk_role": null
+				"fk_association": null
 			},
 			{
 				"name": "user_id",
 				"description": "User who placed the order",
 				"semantic_type": "identifier",
 				"role": "dimension",
-				"fk_role": "customer"
+				"fk_association": "customer"
 			}
 		]
 	}`
@@ -1020,7 +1012,7 @@ func TestColumnEnrichmentService_EnrichTable_WithForeignKeys(t *testing.T) {
 	// Check FK role was captured
 	userIDCol := details[1]
 	assert.Equal(t, "user_id", userIDCol.Name)
-	assert.Equal(t, "customer", userIDCol.FKRole)
+	assert.Equal(t, "customer", userIDCol.FKAssociation)
 }
 
 func TestColumnEnrichmentService_EnrichTable_WithEnumValues(t *testing.T) {
@@ -1044,7 +1036,7 @@ func TestColumnEnrichmentService_EnrichTable_WithEnumValues(t *testing.T) {
 				"description": "Order identifier",
 				"semantic_type": "identifier",
 				"role": "identifier",
-				"fk_role": null
+				"fk_association": null
 			},
 			{
 				"name": "status",
@@ -1057,7 +1049,7 @@ func TestColumnEnrichmentService_EnrichTable_WithEnumValues(t *testing.T) {
 					{"value": "shipped", "label": "Shipped", "description": "Order has been shipped"},
 					{"value": "delivered", "label": "Delivered", "description": "Order has been delivered"}
 				],
-				"fk_role": null
+				"fk_association": null
 			}
 		]
 	}`
@@ -1228,7 +1220,7 @@ func TestColumnEnrichmentService_EnrichProject_ContinuesOnFailure(t *testing.T) 
 
 	llmResponse := `{
 		"columns": [
-			{"name": "id", "description": "ID", "semantic_type": "identifier", "role": "identifier", "fk_role": null}
+			{"name": "id", "description": "ID", "semantic_type": "identifier", "role": "identifier", "fk_association": null}
 		]
 	}`
 
@@ -1379,7 +1371,7 @@ func TestColumnEnrichmentService_EnrichColumnsInChunks_ParallelProcessing(t *tes
 						"description": "Column %d",
 						"semantic_type": "text",
 						"role": "attribute",
-						"fk_role": null
+						"fk_association": null
 					}`, i, i))
 				}
 			}
@@ -1490,7 +1482,7 @@ func TestColumnEnrichmentService_EnrichColumnsInChunks_ChunkFailure(t *testing.T
 						"description": "Column %d",
 						"semantic_type": "text",
 						"role": "attribute",
-						"fk_role": null
+						"fk_association": null
 					}`, i, i))
 				}
 			}
@@ -1530,182 +1522,6 @@ func TestColumnEnrichmentService_EnrichColumnsInChunks_ChunkFailure(t *testing.T
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "chunk")
 	assert.Contains(t, err.Error(), "failed")
-}
-
-// testColEnrichmentEntityRepoWithRoleTracking tracks occurrence role updates
-type testColEnrichmentEntityRepoWithRoleTracking struct {
-	testColEnrichmentEntityRepo
-	roleUpdates map[string]string // key: "entityID:table:column", value: role
-	mu          sync.Mutex
-}
-
-func (r *testColEnrichmentEntityRepoWithRoleTracking) UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.roleUpdates == nil {
-		r.roleUpdates = make(map[string]string)
-	}
-	key := fmt.Sprintf("%s:%s:%s", entityID.String(), tableName, columnName)
-	if role != nil {
-		r.roleUpdates[key] = *role
-	}
-	return nil
-}
-
-func TestColumnEnrichmentService_UpdateOccurrenceRoles(t *testing.T) {
-	projectID := uuid.New()
-	userEntityID := uuid.New()
-
-	// Setup: billing_engagements table with host_id and visitor_id both referencing users
-	entities := []*models.OntologyEntity{
-		{
-			ID:           userEntityID,
-			Name:         "User",
-			Description:  "A platform user",
-			PrimaryTable: "users",
-		},
-		{
-			ID:           uuid.New(),
-			Name:         "Billing Engagement",
-			Description:  "A billing engagement between users",
-			PrimaryTable: "billing_engagements",
-		},
-	}
-
-	columns := []*models.SchemaColumn{
-		{ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
-		{ColumnName: "host_id", DataType: "bigint"},
-		{ColumnName: "visitor_id", DataType: "bigint"},
-		{ColumnName: "amount", DataType: "numeric"},
-	}
-
-	// LLM response with FK roles for host_id and visitor_id
-	llmResponse := `{
-		"columns": [
-			{
-				"name": "id",
-				"description": "Unique identifier for the engagement",
-				"semantic_type": "identifier",
-				"role": "identifier",
-				"fk_role": null
-			},
-			{
-				"name": "host_id",
-				"description": "User who is hosting the engagement",
-				"semantic_type": "identifier",
-				"role": "dimension",
-				"fk_role": "host"
-			},
-			{
-				"name": "visitor_id",
-				"description": "User who is visiting",
-				"semantic_type": "identifier",
-				"role": "dimension",
-				"fk_role": "visitor"
-			},
-			{
-				"name": "amount",
-				"description": "Amount of the engagement",
-				"semantic_type": "currency_cents",
-				"role": "measure",
-				"fk_role": null
-			}
-		]
-	}`
-
-	// Setup repos with role tracking
-	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
-	entityRepo := &testColEnrichmentEntityRepoWithRoleTracking{
-		testColEnrichmentEntityRepo: testColEnrichmentEntityRepo{entities: entities},
-		roleUpdates:                 make(map[string]string),
-	}
-	// Relationship repo that returns FK info for host_id and visitor_id -> users
-	relRepo := &testColEnrichmentRelRepoWithFKs{
-		relationships: []*models.EntityRelationship{
-			{
-				SourceColumnTable: "billing_engagements",
-				SourceColumnName:  "host_id",
-				TargetColumnTable: "users",
-				TargetColumnName:  "id",
-			},
-			{
-				SourceColumnTable: "billing_engagements",
-				SourceColumnName:  "visitor_id",
-				TargetColumnTable: "users",
-				TargetColumnName:  "id",
-			},
-		},
-	}
-	schemaRepo := &testColEnrichmentSchemaRepo{
-		columnsByTable: map[string][]*models.SchemaColumn{
-			"billing_engagements": columns,
-		},
-	}
-	llmFactory := &testColEnrichmentLLMFactory{
-		client: &testColEnrichmentLLMClient{response: llmResponse},
-	}
-
-	service := &columnEnrichmentService{
-		ontologyRepo:     ontologyRepo,
-		entityRepo:       entityRepo,
-		relationshipRepo: relRepo,
-		schemaRepo:       schemaRepo,
-		dsSvc:            &testColEnrichmentDatasourceService{},
-		llmFactory:       llmFactory,
-		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
-		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
-		logger:           zap.NewNop(),
-	}
-
-	// Execute
-	err := service.EnrichTable(context.Background(), projectID, "billing_engagements")
-
-	// Verify
-	require.NoError(t, err)
-
-	// Verify column details were saved with FK roles
-	details := ontologyRepo.columnDetails["billing_engagements"]
-	require.Equal(t, 4, len(details))
-
-	hostIDCol := findColumnDetail(details, "host_id")
-	require.NotNil(t, hostIDCol)
-	assert.Equal(t, "host", hostIDCol.FKRole)
-
-	visitorIDCol := findColumnDetail(details, "visitor_id")
-	require.NotNil(t, visitorIDCol)
-	assert.Equal(t, "visitor", visitorIDCol.FKRole)
-
-	// Verify occurrence roles were updated
-	entityRepo.mu.Lock()
-	defer entityRepo.mu.Unlock()
-
-	// Check that UpdateOccurrenceRole was called for host_id -> user entity with "host" role
-	hostKey := fmt.Sprintf("%s:billing_engagements:host_id", userEntityID.String())
-	assert.Equal(t, "host", entityRepo.roleUpdates[hostKey], "host_id occurrence should have role 'host'")
-
-	// Check that UpdateOccurrenceRole was called for visitor_id -> user entity with "visitor" role
-	visitorKey := fmt.Sprintf("%s:billing_engagements:visitor_id", userEntityID.String())
-	assert.Equal(t, "visitor", entityRepo.roleUpdates[visitorKey], "visitor_id occurrence should have role 'visitor'")
-}
-
-// testColEnrichmentRelRepoWithFKs returns specific FK relationships
-type testColEnrichmentRelRepoWithFKs struct {
-	testColEnrichmentRelRepo
-	relationships []*models.EntityRelationship
-}
-
-func (r *testColEnrichmentRelRepoWithFKs) GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error) {
-	// Filter relationships to only include those where source table is in the requested tables
-	var result []*models.EntityRelationship
-	for _, rel := range r.relationships {
-		for _, tableName := range tableNames {
-			if rel.SourceColumnTable == tableName {
-				result = append(result, rel)
-				break
-			}
-		}
-	}
-	return result, nil
 }
 
 // Helper to find a column detail by name

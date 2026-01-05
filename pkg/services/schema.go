@@ -995,16 +995,16 @@ func (s *schemaService) GetDatasourceSchemaWithEntities(ctx context.Context, pro
 		return "", err
 	}
 
-	// Get entities and occurrences for the project (from active ontology)
+	// Get entities for the project (from active ontology)
 	entities, err := s.entityRepo.GetByProject(ctx, projectID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get entities: %w", err)
 	}
 
-	occurrences, err := s.entityRepo.GetAllOccurrencesByProject(ctx, projectID)
-	if err != nil {
-		return "", fmt.Errorf("failed to get entity occurrences: %w", err)
-	}
+	// TODO: Compute occurrences from relationships (task 2.9 or later)
+	// This function needs to be updated to query relationships and compute occurrences at runtime
+	// similar to how entity_service.go and ontology_context.go were updated in tasks 2.5 and 2.6.
+	// For now, entity/role annotations in schema output are disabled.
 
 	// Build entity lookup maps
 	entityByID := make(map[uuid.UUID]*models.OntologyEntity)
@@ -1013,11 +1013,8 @@ func (s *schemaService) GetDatasourceSchemaWithEntities(ctx context.Context, pro
 	}
 
 	// Build occurrence lookup map: schema.table.column -> []occurrence
+	// TODO: Remove this empty map once the function is updated to compute occurrences from relationships
 	occurrencesByColumn := make(map[string][]*models.OntologyEntityOccurrence)
-	for _, occ := range occurrences {
-		key := fmt.Sprintf("%s.%s.%s", occ.SchemaName, occ.TableName, occ.ColumnName)
-		occurrencesByColumn[key] = append(occurrencesByColumn[key], occ)
-	}
 
 	// Build schema context with entity information
 	var sb strings.Builder
@@ -1081,9 +1078,9 @@ func (s *schemaService) GetDatasourceSchemaWithEntities(ctx context.Context, pro
 				entityAnnotations := make([]string, 0, len(occs))
 				for _, occ := range occs {
 					if entity, found := entityByID[occ.EntityID]; found {
-						if occ.Role != nil && *occ.Role != "" {
+						if occ.Association != nil && *occ.Association != "" {
 							entityAnnotations = append(entityAnnotations,
-								fmt.Sprintf("%s (role: %s)", entity.Name, *occ.Role))
+								fmt.Sprintf("%s (association: %s)", entity.Name, *occ.Association))
 						} else {
 							entityAnnotations = append(entityAnnotations, entity.Name)
 						}
@@ -1116,8 +1113,8 @@ func (s *schemaService) GetDatasourceSchemaWithEntities(ctx context.Context, pro
 
 			if occs, ok := occurrencesByColumn[sourceKey]; ok && len(occs) > 0 {
 				if entity, found := entityByID[occs[0].EntityID]; found {
-					if occs[0].Role != nil && *occs[0].Role != "" {
-						sb.WriteString(fmt.Sprintf(" [%s as %s]", entity.Name, *occs[0].Role))
+					if occs[0].Association != nil && *occs[0].Association != "" {
+						sb.WriteString(fmt.Sprintf(" [%s as %s]", entity.Name, *occs[0].Association))
 					} else {
 						sb.WriteString(fmt.Sprintf(" [%s]", entity.Name))
 					}
@@ -1140,8 +1137,8 @@ func (s *schemaService) GetDatasourceSchemaWithEntities(ctx context.Context, pro
 
 			if occs, ok := occurrencesByColumn[targetKey]; ok && len(occs) > 0 {
 				if entity, found := entityByID[occs[0].EntityID]; found {
-					if occs[0].Role != nil && *occs[0].Role != "" {
-						sb.WriteString(fmt.Sprintf(" [%s as %s]", entity.Name, *occs[0].Role))
+					if occs[0].Association != nil && *occs[0].Association != "" {
+						sb.WriteString(fmt.Sprintf(" [%s as %s]", entity.Name, *occs[0].Association))
 					} else {
 						sb.WriteString(fmt.Sprintf(" [%s]", entity.Name))
 					}

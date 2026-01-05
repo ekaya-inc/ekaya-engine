@@ -321,11 +321,11 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 	}
 	enrichments := response.Relationships
 
-	// Build lookup by ID -> description
-	enrichmentByID := make(map[int]string)
+	// Build lookup by ID -> enrichment
+	enrichmentByID := make(map[int]relationshipEnrichment)
 	maxExpectedID := len(relationships)
 	for _, e := range enrichments {
-		enrichmentByID[e.ID] = e.Description
+		enrichmentByID[e.ID] = e
 
 		// Detect hallucinated IDs (LLM returned an ID we didn't ask for)
 		if e.ID < 1 || e.ID > maxExpectedID {
@@ -334,6 +334,7 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 				zap.Int("hallucinated_id", e.ID),
 				zap.Int("max_valid_id", maxExpectedID),
 				zap.String("description", e.Description),
+				zap.String("association", e.Association),
 				zap.String("conversation_id", llmResult.ConversationID.String()))
 
 			// Update conversation status for hallucination
@@ -351,17 +352,27 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 	// Update each relationship by ID (1-indexed)
 	for i, rel := range relationships {
 		id := i + 1 // 1-indexed to match prompt
-		description, ok := enrichmentByID[id]
-		if !ok || description == "" {
+		enrichment, ok := enrichmentByID[id]
+		if !ok || enrichment.Description == "" {
 			s.logRelationshipFailure(batchCtx, rel, "No enrichment found in LLM response", nil, llmResult.ConversationID)
 			result.Failed++
 			continue
 		}
 
-		if err := s.relationshipRepo.UpdateDescription(batchCtx, rel.ID, description); err != nil {
-			s.logRelationshipFailure(batchCtx, rel, "Failed to update database", err, llmResult.ConversationID)
-			result.Failed++
-			continue
+		// Update both description and association
+		if enrichment.Association == "" {
+			// If association is missing, just update description (fallback for incomplete LLM responses)
+			if err := s.relationshipRepo.UpdateDescription(batchCtx, rel.ID, enrichment.Description); err != nil {
+				s.logRelationshipFailure(batchCtx, rel, "Failed to update database", err, llmResult.ConversationID)
+				result.Failed++
+				continue
+			}
+		} else {
+			if err := s.relationshipRepo.UpdateDescriptionAndAssociation(batchCtx, rel.ID, enrichment.Description, enrichment.Association); err != nil {
+				s.logRelationshipFailure(batchCtx, rel, "Failed to update database", err, llmResult.ConversationID)
+				result.Failed++
+				continue
+			}
 		}
 
 		result.Enriched++
@@ -380,6 +391,7 @@ type relationshipEnrichmentResponse struct {
 type relationshipEnrichment struct {
 	ID          int    `json:"id"`
 	Description string `json:"description"`
+	Association string `json:"association"`
 }
 
 func (s *relationshipEnrichmentService) relationshipEnrichmentSystemMessage() string {
@@ -439,19 +451,32 @@ func (s *relationshipEnrichmentService) buildRelationshipEnrichmentPrompt(
 
 	// Instructions
 	sb.WriteString("\n## Guidelines\n")
-	sb.WriteString("- Write 1-2 sentences describing the business meaning of each relationship\n")
-	sb.WriteString("- Use entity names (not table names) when referring to what's connected\n")
-	sb.WriteString("- Describe the nature of the relationship (e.g., 'belongs to', 'created by', 'references')\n")
-	sb.WriteString("- Include cardinality hints if clear (e.g., 'each order can have many items')\n")
+	sb.WriteString("For each relationship, provide:\n")
+	sb.WriteString("1. **description**: A 1-2 sentence explanation of the business meaning of the relationship\n")
+	sb.WriteString("   - Use entity names (not table names) when referring to what's connected\n")
+	sb.WriteString("   - Describe the nature of the relationship (e.g., 'belongs to', 'created by', 'references')\n")
+	sb.WriteString("   - Include cardinality hints if clear (e.g., 'each order can have many items')\n")
+	sb.WriteString("2. **association**: A short verb/label (1-2 words) that describes this direction of the relationship\n")
+	sb.WriteString("   - Examples: \"placed_by\", \"owns\", \"contains\", \"managed_by\", \"belongs_to\", \"created_by\"\n")
+	sb.WriteString("   - Use lowercase with underscores for multi-word associations\n")
+	sb.WriteString("   - Should read naturally: \"Order [association] User\" (e.g., \"Order placed_by User\")\n")
 
 	// Response format
 	sb.WriteString("\n## Response Format (JSON object)\n")
-	sb.WriteString("Return a JSON object with the relationship ID and description for each relationship:\n")
+	sb.WriteString("Return a JSON object with the relationship ID, description, and association for each relationship:\n")
 	sb.WriteString("```json\n")
 	sb.WriteString("{\n")
 	sb.WriteString("  \"relationships\": [\n")
-	sb.WriteString("    {\"id\": 1, \"description\": \"Links each order to the user who placed it. A user can place many orders.\"},\n")
-	sb.WriteString("    {\"id\": 2, \"description\": \"...\"}\n")
+	sb.WriteString("    {\n")
+	sb.WriteString("      \"id\": 1,\n")
+	sb.WriteString("      \"description\": \"Links each order to the user who placed it. A user can place many orders.\",\n")
+	sb.WriteString("      \"association\": \"placed_by\"\n")
+	sb.WriteString("    },\n")
+	sb.WriteString("    {\n")
+	sb.WriteString("      \"id\": 2,\n")
+	sb.WriteString("      \"description\": \"...\",\n")
+	sb.WriteString("      \"association\": \"...\"\n")
+	sb.WriteString("    }\n")
 	sb.WriteString("  ]\n")
 	sb.WriteString("}\n")
 	sb.WriteString("```\n")

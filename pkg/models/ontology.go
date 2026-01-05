@@ -89,16 +89,16 @@ type KeyColumn struct {
 
 // ColumnDetail represents detailed semantic information for a column.
 type ColumnDetail struct {
-	Name         string      `json:"name"`
-	Description  string      `json:"description,omitempty"`
-	Synonyms     []string    `json:"synonyms,omitempty"`
-	SemanticType string      `json:"semantic_type,omitempty"`
-	Role         string      `json:"role,omitempty"`    // dimension, measure, identifier, attribute
-	FKRole       string      `json:"fk_role,omitempty"` // payer, payee, host, visitor, etc.
-	EnumValues   []EnumValue `json:"enum_values,omitempty"`
-	IsPrimaryKey bool        `json:"is_primary_key"`
-	IsForeignKey bool        `json:"is_foreign_key"`
-	ForeignTable string      `json:"foreign_table,omitempty"`
+	Name          string      `json:"name"`
+	Description   string      `json:"description,omitempty"`
+	Synonyms      []string    `json:"synonyms,omitempty"`
+	SemanticType  string      `json:"semantic_type,omitempty"`
+	Role          string      `json:"role,omitempty"`           // dimension, measure, identifier, attribute
+	FKAssociation string      `json:"fk_association,omitempty"` // payer, payee, host, visitor, etc.
+	EnumValues    []EnumValue `json:"enum_values,omitempty"`
+	IsPrimaryKey  bool        `json:"is_primary_key"`
+	IsForeignKey  bool        `json:"is_foreign_key"`
+	ForeignTable  string      `json:"foreign_table,omitempty"`
 }
 
 // EnumValue represents a known value in an enumeration column.

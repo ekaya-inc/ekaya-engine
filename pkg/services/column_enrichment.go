@@ -217,14 +217,6 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 		return fmt.Errorf("save column details: %w", err)
 	}
 
-	// Update occurrence roles from FK role enrichments
-	if err := s.updateOccurrenceRoles(ctx, projectID, tableName, enrichments, fkInfo); err != nil {
-		// Log but don't fail - occurrence roles are supplementary
-		s.logger.Warn("Failed to update occurrence roles",
-			zap.String("table", tableName),
-			zap.Error(err))
-	}
-
 	s.logger.Info("Enriched columns for table",
 		zap.String("table", tableName),
 		zap.Int("column_count", len(columnDetails)))
@@ -385,13 +377,13 @@ type columnEnrichmentResponse struct {
 
 // columnEnrichment is the LLM response structure for a single column.
 type columnEnrichment struct {
-	Name         string             `json:"name"`
-	Description  string             `json:"description"`
-	SemanticType string             `json:"semantic_type"`
-	Role         string             `json:"role"`
-	Synonyms     []string           `json:"synonyms,omitempty"`
-	EnumValues   []models.EnumValue `json:"enum_values,omitempty"`
-	FKRole       *string            `json:"fk_role"`
+	Name          string             `json:"name"`
+	Description   string             `json:"description"`
+	SemanticType  string             `json:"semantic_type"`
+	Role          string             `json:"role"`
+	Synonyms      []string           `json:"synonyms,omitempty"`
+	EnumValues    []models.EnumValue `json:"enum_values,omitempty"`
+	FKAssociation *string            `json:"fk_association"`
 }
 
 // enrichColumnsWithLLM uses the LLM to generate semantic metadata for columns.
@@ -684,9 +676,9 @@ func (s *columnEnrichmentService) buildColumnEnrichmentPrompt(
 	sb.WriteString("3. **role**: dimension (for grouping/filtering) | measure (for aggregation) | identifier (unique IDs) | attribute (descriptive)\n")
 	sb.WriteString("4. **synonyms**: alternative names users might use (optional array)\n")
 	sb.WriteString("5. **enum_values**: if status/type column, array of {value, label, description}\n")
-	sb.WriteString("6. **fk_role**: for FK columns, what semantic role does this reference represent?\n")
+	sb.WriteString("6. **fk_association**: for FK columns, what association does this reference represent?\n")
 	sb.WriteString("   Examples: \"owner\", \"creator\", \"assignee\", \"payer\", \"payee\", \"host\", \"visitor\"\n")
-	sb.WriteString("   Set to null if it's a generic reference with no special semantic role.\n")
+	sb.WriteString("   Set to null if it's a generic reference with no special association.\n")
 
 	// Response format
 	sb.WriteString("\n## Response Format (JSON object)\n")
@@ -702,7 +694,7 @@ func (s *columnEnrichmentService) buildColumnEnrichmentPrompt(
 	sb.WriteString("      \"enum_values\": [\n")
 	sb.WriteString("        {\"value\": \"active\", \"label\": \"Active\", \"description\": \"Entity is currently active\"}\n")
 	sb.WriteString("      ],\n")
-	sb.WriteString("      \"fk_role\": null\n")
+	sb.WriteString("      \"fk_association\": null\n")
 	sb.WriteString("    }\n")
 	sb.WriteString("  ]\n")
 	sb.WriteString("}\n")
@@ -771,8 +763,8 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 			detail.Role = enrichment.Role
 			detail.Synonyms = enrichment.Synonyms
 			detail.EnumValues = enrichment.EnumValues
-			if enrichment.FKRole != nil {
-				detail.FKRole = *enrichment.FKRole
+			if enrichment.FKAssociation != nil {
+				detail.FKAssociation = *enrichment.FKAssociation
 			}
 		}
 
@@ -780,82 +772,6 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 	}
 
 	return details
-}
-
-// updateOccurrenceRoles updates entity occurrence roles based on FK role enrichments.
-// For FK columns that have an FKRole (e.g., "host", "visitor"), this updates the
-// corresponding occurrence in engine_ontology_entity_occurrences.
-func (s *columnEnrichmentService) updateOccurrenceRoles(
-	ctx context.Context,
-	projectID uuid.UUID,
-	tableName string,
-	enrichments []columnEnrichment,
-	fkInfo map[string]string,
-) error {
-	// Build map of FK columns with roles
-	fkRoles := make(map[string]string) // columnName -> role
-	for _, e := range enrichments {
-		if e.FKRole != nil && *e.FKRole != "" {
-			fkRoles[e.Name] = *e.FKRole
-		}
-	}
-
-	if len(fkRoles) == 0 {
-		return nil // No FK roles to update
-	}
-
-	// Get all entities to map target tables to entity IDs
-	entities, err := s.entityRepo.GetByProject(ctx, projectID)
-	if err != nil {
-		return fmt.Errorf("get entities: %w", err)
-	}
-
-	entityByPrimaryTable := make(map[string]*models.OntologyEntity)
-	for _, e := range entities {
-		entityByPrimaryTable[e.PrimaryTable] = e
-	}
-
-	// Update occurrence role for each FK column with a role
-	for columnName, role := range fkRoles {
-		targetTable, hasFKInfo := fkInfo[columnName]
-		if !hasFKInfo {
-			s.logger.Debug("FK role without FK info, skipping",
-				zap.String("table", tableName),
-				zap.String("column", columnName),
-				zap.String("role", role))
-			continue
-		}
-
-		targetEntity, hasEntity := entityByPrimaryTable[targetTable]
-		if !hasEntity {
-			s.logger.Debug("FK target table has no entity, skipping",
-				zap.String("table", tableName),
-				zap.String("column", columnName),
-				zap.String("target_table", targetTable),
-				zap.String("role", role))
-			continue
-		}
-
-		// Update the occurrence role
-		rolePtr := &role
-		if err := s.entityRepo.UpdateOccurrenceRole(ctx, targetEntity.ID, tableName, columnName, rolePtr); err != nil {
-			s.logger.Warn("Failed to update occurrence role",
-				zap.String("table", tableName),
-				zap.String("column", columnName),
-				zap.String("entity", targetEntity.Name),
-				zap.String("role", role),
-				zap.Error(err))
-			// Continue with other columns
-		} else {
-			s.logger.Debug("Updated occurrence role",
-				zap.String("table", tableName),
-				zap.String("column", columnName),
-				zap.String("entity", targetEntity.Name),
-				zap.String("role", role))
-		}
-	}
-
-	return nil
 }
 
 // logTableFailure logs detailed information about a failed table enrichment.
