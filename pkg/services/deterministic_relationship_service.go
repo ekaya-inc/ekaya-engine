@@ -454,13 +454,14 @@ func isPKMatchExcludedType(col *models.SchemaColumn) bool {
 		return true
 	}
 
-	// Text types - allow if uniform length (likely UUID or other ID format)
+	// Text types - only exclude if proven variable length
 	if lower == "text" || strings.Contains(lower, "varchar") || strings.Contains(lower, "char") {
-		// If we have length stats and they're uniform, this could be an ID field
-		if col.MinLength != nil && col.MaxLength != nil && *col.MinLength == *col.MaxLength && *col.MinLength > 0 {
-			return false // Uniform length text - could be UUID, include it
+		// Only exclude if we have stats proving variable length
+		if col.MinLength != nil && col.MaxLength != nil && *col.MinLength != *col.MaxLength {
+			return true // Proven variable length - exclude
 		}
-		return true // Variable length text - exclude
+		// Either uniform length OR unknown stats - include and let join validation decide
+		return false
 	}
 
 	// JSON types
@@ -503,11 +504,11 @@ func isPKMatchExcludedName(columnName string) bool {
 		return true
 	}
 
-	// Rating/score patterns
-	if strings.HasSuffix(lower, "_rating") ||
-		strings.HasSuffix(lower, "_score") ||
-		strings.HasSuffix(lower, "_level") ||
-		lower == "rating" || lower == "score" || lower == "level" {
+	// Rating/score/level patterns - use suffix without underscore to catch all variants
+	// Catches: rating, user_rating, mod_level, credit_score, etc.
+	if strings.HasSuffix(lower, "rating") ||
+		strings.HasSuffix(lower, "score") ||
+		strings.HasSuffix(lower, "level") {
 		return true
 	}
 
