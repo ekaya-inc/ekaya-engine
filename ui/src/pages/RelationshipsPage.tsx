@@ -56,9 +56,26 @@ const RelationshipsPage = () => {
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
   const [relationshipToRemove, setRelationshipToRemove] = useState<RelationshipDetail | null>(null);
 
-  // Handler for when a new relationship is added
-  const handleRelationshipAdded = (newRelationship: RelationshipDetail): void => {
-    setRelationships(prev => [...prev, newRelationship]);
+  // Refetch relationships from server
+  const refetchRelationships = async (): Promise<void> => {
+    if (!pid || !selectedDatasource?.datasourceId) return;
+
+    try {
+      const response = await engineApi.getRelationships(pid, selectedDatasource.datasourceId);
+      if (response.data) {
+        setRelationships(response.data.relationships);
+        setEmptyTables(response.data.empty_tables ?? []);
+        setOrphanTables(response.data.orphan_tables ?? []);
+      }
+    } catch (err) {
+      console.error("Failed to refetch relationships:", err);
+    }
+  };
+
+  // Handler for when a new relationship is added - refetch to get server state
+  // Parameter is ignored since we refetch the full list
+  const handleRelationshipAdded = (_newRelationship: RelationshipDetail): void => {
+    refetchRelationships();
   };
 
   // Handler to open remove confirmation dialog
@@ -466,7 +483,7 @@ const RelationshipsPage = () => {
                 id="type-filter"
                 value={typeFilter}
                 onChange={(e) => setTypeFilter(e.target.value as RelationshipType | 'all')}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="w-full rounded-md border border-border-medium bg-surface-primary px-3 py-2 text-sm text-text-primary"
               >
                 <option value="all">All Types</option>
                 <option value="fk">Foreign Key</option>
@@ -482,7 +499,7 @@ const RelationshipsPage = () => {
                 id="table-filter"
                 value={tableFilter}
                 onChange={(e) => setTableFilter(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="w-full rounded-md border border-border-medium bg-surface-primary px-3 py-2 text-sm text-text-primary"
               >
                 <option value="">All Tables</option>
                 {emptyTableCount > 0 && (
