@@ -12,7 +12,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
-// OntologyEntityRepository provides data access for ontology entities and their occurrences.
+// OntologyEntityRepository provides data access for ontology entities.
 type OntologyEntityRepository interface {
 	// Entity operations
 	Create(ctx context.Context, entity *models.OntologyEntity) error
@@ -26,13 +26,6 @@ type OntologyEntityRepository interface {
 	// Soft delete operations
 	SoftDelete(ctx context.Context, entityID uuid.UUID, reason string) error
 	Restore(ctx context.Context, entityID uuid.UUID) error
-
-	// Occurrence operations
-	CreateOccurrence(ctx context.Context, occ *models.OntologyEntityOccurrence) error
-	GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error)
-	GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.OntologyEntityOccurrence, error)
-	GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntityOccurrence, error)
-	UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error
 
 	// Alias operations
 	CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error
@@ -204,162 +197,6 @@ func (r *ontologyEntityRepository) DeleteByOntology(ctx context.Context, ontolog
 	_, err := scope.Conn.Exec(ctx, query, ontologyID)
 	if err != nil {
 		return fmt.Errorf("failed to delete ontology entities: %w", err)
-	}
-
-	return nil
-}
-
-// ============================================================================
-// Occurrence Operations
-// ============================================================================
-
-func (r *ontologyEntityRepository) CreateOccurrence(ctx context.Context, occ *models.OntologyEntityOccurrence) error {
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		return fmt.Errorf("no tenant scope in context")
-	}
-
-	occ.CreatedAt = time.Now()
-
-	if occ.ID == uuid.Nil {
-		occ.ID = uuid.New()
-	}
-
-	query := `
-		INSERT INTO engine_ontology_entity_occurrences (
-			id, entity_id, schema_name, table_name, column_name, role, confidence, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		ON CONFLICT (entity_id, schema_name, table_name, column_name) DO NOTHING`
-
-	_, err := scope.Conn.Exec(ctx, query,
-		occ.ID, occ.EntityID, occ.SchemaName, occ.TableName, occ.ColumnName, occ.Role, occ.Confidence, occ.CreatedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create ontology entity occurrence: %w", err)
-	}
-
-	return nil
-}
-
-func (r *ontologyEntityRepository) GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		return nil, fmt.Errorf("no tenant scope in context")
-	}
-
-	query := `
-		SELECT id, entity_id, schema_name, table_name, column_name, role, confidence, created_at
-		FROM engine_ontology_entity_occurrences
-		WHERE entity_id = $1
-		ORDER BY schema_name, table_name, column_name`
-
-	rows, err := scope.Conn.Query(ctx, query, entityID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query entity occurrences: %w", err)
-	}
-	defer rows.Close()
-
-	var occurrences []*models.OntologyEntityOccurrence
-	for rows.Next() {
-		occ, err := scanOntologyEntityOccurrence(rows)
-		if err != nil {
-			return nil, err
-		}
-		occurrences = append(occurrences, occ)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating entity occurrences: %w", err)
-	}
-
-	return occurrences, nil
-}
-
-func (r *ontologyEntityRepository) GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.OntologyEntityOccurrence, error) {
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		return nil, fmt.Errorf("no tenant scope in context")
-	}
-
-	query := `
-		SELECT o.id, o.entity_id, o.schema_name, o.table_name, o.column_name, o.role, o.confidence, o.created_at
-		FROM engine_ontology_entity_occurrences o
-		JOIN engine_ontology_entities e ON o.entity_id = e.id
-		WHERE e.ontology_id = $1 AND o.schema_name = $2 AND o.table_name = $3 AND NOT e.is_deleted
-		ORDER BY o.column_name`
-
-	rows, err := scope.Conn.Query(ctx, query, ontologyID, schema, table)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query entity occurrences by table: %w", err)
-	}
-	defer rows.Close()
-
-	var occurrences []*models.OntologyEntityOccurrence
-	for rows.Next() {
-		occ, err := scanOntologyEntityOccurrence(rows)
-		if err != nil {
-			return nil, err
-		}
-		occurrences = append(occurrences, occ)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating entity occurrences: %w", err)
-	}
-
-	return occurrences, nil
-}
-
-func (r *ontologyEntityRepository) GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		return nil, fmt.Errorf("no tenant scope in context")
-	}
-
-	query := `
-		SELECT o.id, o.entity_id, o.schema_name, o.table_name, o.column_name, o.role, o.confidence, o.created_at
-		FROM engine_ontology_entity_occurrences o
-		JOIN engine_ontology_entities e ON o.entity_id = e.id
-		JOIN engine_ontologies ont ON e.ontology_id = ont.id
-		WHERE e.project_id = $1 AND ont.is_active = true AND NOT e.is_deleted
-		ORDER BY o.schema_name, o.table_name, o.column_name`
-
-	rows, err := scope.Conn.Query(ctx, query, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query entity occurrences by project: %w", err)
-	}
-	defer rows.Close()
-
-	var occurrences []*models.OntologyEntityOccurrence
-	for rows.Next() {
-		occ, err := scanOntologyEntityOccurrence(rows)
-		if err != nil {
-			return nil, err
-		}
-		occurrences = append(occurrences, occ)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating entity occurrences: %w", err)
-	}
-
-	return occurrences, nil
-}
-
-func (r *ontologyEntityRepository) UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error {
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		return fmt.Errorf("no tenant scope in context")
-	}
-
-	query := `
-		UPDATE engine_ontology_entity_occurrences
-		SET role = $4
-		WHERE entity_id = $1 AND table_name = $2 AND column_name = $3`
-
-	_, err := scope.Conn.Exec(ctx, query, entityID, tableName, columnName, role)
-	if err != nil {
-		return fmt.Errorf("failed to update occurrence role: %w", err)
 	}
 
 	return nil
@@ -606,22 +443,6 @@ func scanOntologyEntity(row pgx.Row) (*models.OntologyEntity, error) {
 	}
 
 	return &e, nil
-}
-
-func scanOntologyEntityOccurrence(row pgx.Row) (*models.OntologyEntityOccurrence, error) {
-	var o models.OntologyEntityOccurrence
-
-	err := row.Scan(
-		&o.ID, &o.EntityID, &o.SchemaName, &o.TableName, &o.ColumnName, &o.Role, &o.Confidence, &o.CreatedAt,
-	)
-	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, err
-		}
-		return nil, fmt.Errorf("failed to scan ontology entity occurrence: %w", err)
-	}
-
-	return &o, nil
 }
 
 func scanOntologyEntityAlias(row pgx.Row) (*models.OntologyEntityAlias, error) {

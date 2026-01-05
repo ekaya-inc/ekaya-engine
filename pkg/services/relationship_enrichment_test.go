@@ -15,8 +15,9 @@ import (
 
 // Simple mock repositories for testing
 type testRelEnrichmentRelRepo struct {
-	relationships []*models.EntityRelationship
-	updatedDescs  map[uuid.UUID]string
+	relationships       []*models.EntityRelationship
+	updatedDescs        map[uuid.UUID]string
+	updatedAssociations map[uuid.UUID]string
 }
 
 func (r *testRelEnrichmentRelRepo) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error) {
@@ -31,6 +32,18 @@ func (r *testRelEnrichmentRelRepo) UpdateDescription(ctx context.Context, id uui
 	return nil
 }
 
+func (r *testRelEnrichmentRelRepo) UpdateDescriptionAndAssociation(ctx context.Context, id uuid.UUID, description string, association string) error {
+	if r.updatedDescs == nil {
+		r.updatedDescs = make(map[uuid.UUID]string)
+	}
+	if r.updatedAssociations == nil {
+		r.updatedAssociations = make(map[uuid.UUID]string)
+	}
+	r.updatedDescs[id] = description
+	r.updatedAssociations[id] = association
+	return nil
+}
+
 func (r *testRelEnrichmentRelRepo) Create(ctx context.Context, rel *models.EntityRelationship) error {
 	return nil
 }
@@ -39,12 +52,24 @@ func (r *testRelEnrichmentRelRepo) GetByOntology(ctx context.Context, ontologyID
 	return r.relationships, nil
 }
 
+func (r *testRelEnrichmentRelRepo) GetByOntologyGroupedByTarget(ctx context.Context, ontologyID uuid.UUID) (map[uuid.UUID][]*models.EntityRelationship, error) {
+	result := make(map[uuid.UUID][]*models.EntityRelationship)
+	for _, rel := range r.relationships {
+		result[rel.TargetEntityID] = append(result[rel.TargetEntityID], rel)
+	}
+	return result, nil
+}
+
 func (r *testRelEnrichmentRelRepo) GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error) {
 	return r.relationships, nil
 }
 
 func (r *testRelEnrichmentRelRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
+}
+
+func (r *testRelEnrichmentRelRepo) GetByTargetEntity(ctx context.Context, entityID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
 }
 
 type testRelEnrichmentEntityRepo struct {
@@ -73,14 +98,6 @@ func (r *testRelEnrichmentEntityRepo) Update(ctx context.Context, entity *models
 
 func (r *testRelEnrichmentEntityRepo) Delete(ctx context.Context, entityID uuid.UUID) error {
 	return nil
-}
-
-func (r *testRelEnrichmentEntityRepo) CreateOccurrence(ctx context.Context, occurrence *models.OntologyEntityOccurrence) error {
-	return nil
-}
-
-func (r *testRelEnrichmentEntityRepo) GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
 }
 
 func (r *testRelEnrichmentEntityRepo) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {
@@ -128,18 +145,6 @@ func (r *testRelEnrichmentEntityRepo) SoftDelete(ctx context.Context, entityID u
 }
 
 func (r *testRelEnrichmentEntityRepo) Restore(ctx context.Context, entityID uuid.UUID) error {
-	return nil
-}
-
-func (r *testRelEnrichmentEntityRepo) GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (r *testRelEnrichmentEntityRepo) GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (r *testRelEnrichmentEntityRepo) UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error {
 	return nil
 }
 
@@ -227,7 +232,7 @@ func TestRelationshipEnrichmentService_RetryOnTransientError(t *testing.T) {
 			return nil, llm.NewError(llm.ErrorTypeEndpoint, "timeout", true, errors.New("timeout"))
 		}
 		return &llm.GenerateResponseResult{
-			Content: `{"relationships": [{"id": 1, "description": "Test desc"}]}`,
+			Content: `{"relationships": [{"id": 1, "description": "Test desc", "association": "placed_by"}]}`,
 		}, nil
 	}
 
@@ -244,6 +249,7 @@ func TestRelationshipEnrichmentService_RetryOnTransientError(t *testing.T) {
 	assert.Equal(t, 0, result.RelationshipsFailed)
 	assert.Equal(t, 2, callCount, "Should retry once after transient error")
 	assert.Equal(t, "Test desc", relRepo.updatedDescs[relID])
+	assert.Equal(t, "placed_by", relRepo.updatedAssociations[relID])
 }
 
 func TestRelationshipEnrichmentService_NonRetryableError(t *testing.T) {

@@ -62,10 +62,11 @@ func setupEntityTest(t *testing.T) *entityTestContext {
 
 	// Create repositories
 	entityRepo := repositories.NewOntologyEntityRepository()
+	relationshipRepo := repositories.NewEntityRelationshipRepository()
 	ontologyRepo := repositories.NewOntologyRepository()
 
 	// Create service
-	service := services.NewEntityService(entityRepo, ontologyRepo, zap.NewNop())
+	service := services.NewEntityService(entityRepo, relationshipRepo, ontologyRepo, zap.NewNop())
 
 	// Create handler
 	handler := NewEntityHandler(service, zap.NewNop())
@@ -195,7 +196,7 @@ func (tc *entityTestContext) cleanup() {
 
 	// Delete in order respecting foreign keys
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontology_entity_aliases WHERE entity_id IN (SELECT id FROM engine_ontology_entities WHERE project_id = $1)", tc.projectID)
-	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontology_entity_occurrences WHERE entity_id IN (SELECT id FROM engine_ontology_entities WHERE project_id = $1)", tc.projectID)
+	// Note: engine_ontology_entity_occurrences table was dropped in migration 030
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontology_entities WHERE project_id = $1", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontologies WHERE project_id = $1", tc.projectID)
 }
@@ -251,18 +252,8 @@ func TestEntityIntegration_CreateAndList(t *testing.T) {
 		t.Fatalf("Failed to create entity: %v", err)
 	}
 
-	// Add an occurrence
-	occurrence := &models.OntologyEntityOccurrence{
-		EntityID:   entity.ID,
-		SchemaName: "public",
-		TableName:  "users",
-		ColumnName: "id",
-		Confidence: 1.0,
-	}
-	if err := tc.entityRepo.CreateOccurrence(ctx, occurrence); err != nil {
-		scope.Close()
-		t.Fatalf("Failed to create occurrence: %v", err)
-	}
+	// Note: Occurrences are now computed at runtime from relationships (task 2.5)
+	// No need to create occurrence records manually
 
 	// Add an alias
 	source := "discovery"
@@ -301,11 +292,12 @@ func TestEntityIntegration_CreateAndList(t *testing.T) {
 	if e.PrimaryTable != "users" {
 		t.Errorf("expected primary_table 'users', got %q", e.PrimaryTable)
 	}
-	if e.OccurrenceCount != 1 {
-		t.Errorf("expected 1 occurrence, got %d", e.OccurrenceCount)
+	// Occurrences are computed from inbound relationships - no relationships created in this test
+	if e.OccurrenceCount != 0 {
+		t.Errorf("expected 0 occurrences (no inbound relationships), got %d", e.OccurrenceCount)
 	}
-	if len(e.Occurrences) != 1 {
-		t.Errorf("expected 1 occurrence in list, got %d", len(e.Occurrences))
+	if len(e.Occurrences) != 0 {
+		t.Errorf("expected 0 occurrences in list (no inbound relationships), got %d", len(e.Occurrences))
 	}
 	if len(e.Aliases) != 1 {
 		t.Errorf("expected 1 alias, got %d", len(e.Aliases))

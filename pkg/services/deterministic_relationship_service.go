@@ -65,6 +65,40 @@ func NewDeterministicRelationshipService(
 	}
 }
 
+// createBidirectionalRelationship creates both forward and reverse relationship rows.
+// The forward relationship is the FK direction (source → target).
+// The reverse relationship swaps source and target to enable bidirectional navigation.
+func (s *deterministicRelationshipService) createBidirectionalRelationship(ctx context.Context, rel *models.EntityRelationship) error {
+	// Create forward relationship
+	if err := s.relationshipRepo.Create(ctx, rel); err != nil {
+		return fmt.Errorf("create forward relationship: %w", err)
+	}
+
+	// Create reverse relationship by swapping source and target
+	reverse := &models.EntityRelationship{
+		OntologyID:         rel.OntologyID,
+		SourceEntityID:     rel.TargetEntityID,     // swap
+		TargetEntityID:     rel.SourceEntityID,     // swap
+		SourceColumnSchema: rel.TargetColumnSchema, // swap
+		SourceColumnTable:  rel.TargetColumnTable,  // swap
+		SourceColumnName:   rel.TargetColumnName,   // swap
+		TargetColumnSchema: rel.SourceColumnSchema, // swap
+		TargetColumnTable:  rel.SourceColumnTable,  // swap
+		TargetColumnName:   rel.SourceColumnName,   // swap
+		DetectionMethod:    rel.DetectionMethod,
+		Confidence:         rel.Confidence,
+		Status:             rel.Status,
+		Description:        nil, // reverse direction gets its own description during enrichment
+	}
+
+	// Create reverse relationship
+	if err := s.relationshipRepo.Create(ctx, reverse); err != nil {
+		return fmt.Errorf("create reverse relationship: %w", err)
+	}
+
+	return nil
+}
+
 func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*FKDiscoveryResult, error) {
 	// Get active ontology for the project
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
@@ -152,7 +186,7 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 			continue
 		}
 
-		// Create the relationship (DB handles duplicates via ON CONFLICT)
+		// Create bidirectional relationship (both forward and reverse)
 		rel := &models.EntityRelationship{
 			OntologyID:         ontology.ID,
 			SourceEntityID:     sourceEntity.ID,
@@ -168,9 +202,9 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 			Status:             models.RelationshipStatusConfirmed,
 		}
 
-		err := s.relationshipRepo.Create(ctx, rel)
+		err := s.createBidirectionalRelationship(ctx, rel)
 		if err != nil {
-			return nil, fmt.Errorf("create FK relationship: %w", err)
+			return nil, fmt.Errorf("create bidirectional FK relationship: %w", err)
 		}
 
 		fkCount++
@@ -552,7 +586,7 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			status := models.RelationshipStatusConfirmed
 			confidence := 0.9
 
-			// Create the relationship (database handles duplicates via ON CONFLICT)
+			// Create bidirectional relationship (both forward and reverse)
 			rel := &models.EntityRelationship{
 				OntologyID:         ontology.ID,
 				SourceEntityID:     sourceEntity.ID,
@@ -568,9 +602,9 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 				Status:             status,
 			}
 
-			err = s.relationshipRepo.Create(ctx, rel)
+			err = s.createBidirectionalRelationship(ctx, rel)
 			if err != nil {
-				return nil, fmt.Errorf("create pk-match relationship: %w", err)
+				return nil, fmt.Errorf("create bidirectional pk-match relationship: %w", err)
 			}
 
 			inferredCount++

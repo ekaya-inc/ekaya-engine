@@ -11,6 +11,86 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
 
+// TestCreateBidirectionalRelationship verifies that creating a relationship
+// results in both forward and reverse rows being created.
+func TestCreateBidirectionalRelationship(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+	)
+
+	// Create a test relationship
+	rel := &models.EntityRelationship{
+		OntologyID:         ontologyID,
+		SourceEntityID:     orderEntityID,
+		TargetEntityID:     userEntityID,
+		SourceColumnSchema: "public",
+		SourceColumnTable:  "orders",
+		SourceColumnName:   "user_id",
+		TargetColumnSchema: "public",
+		TargetColumnTable:  "users",
+		TargetColumnName:   "id",
+		DetectionMethod:    models.DetectionMethodForeignKey,
+		Confidence:         1.0,
+		Status:             models.RelationshipStatusConfirmed,
+	}
+
+	// Call createBidirectionalRelationship
+	svc := service.(*deterministicRelationshipService)
+	err := svc.createBidirectionalRelationship(context.Background(), rel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: 2 relationships created (forward and reverse)
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Fatalf("expected 2 relationships (forward and reverse), got %d", len(mocks.relationshipRepo.created))
+	}
+
+	// Verify forward relationship
+	forward := mocks.relationshipRepo.created[0]
+	if forward.SourceEntityID != orderEntityID || forward.TargetEntityID != userEntityID {
+		t.Errorf("forward relationship incorrect: source=%v target=%v", forward.SourceEntityID, forward.TargetEntityID)
+	}
+	if forward.SourceColumnName != "user_id" || forward.TargetColumnName != "id" {
+		t.Errorf("forward relationship columns incorrect: source=%s target=%s", forward.SourceColumnName, forward.TargetColumnName)
+	}
+
+	// Verify reverse relationship
+	reverse := mocks.relationshipRepo.created[1]
+	if reverse.SourceEntityID != userEntityID || reverse.TargetEntityID != orderEntityID {
+		t.Errorf("reverse relationship incorrect: source=%v target=%v", reverse.SourceEntityID, reverse.TargetEntityID)
+	}
+	if reverse.SourceColumnName != "id" || reverse.TargetColumnName != "user_id" {
+		t.Errorf("reverse relationship columns incorrect: source=%s target=%s", reverse.SourceColumnName, reverse.TargetColumnName)
+	}
+
+	// Verify reverse has no description (will be set during enrichment)
+	if reverse.Description != nil {
+		t.Errorf("expected reverse description to be nil, got %v", *reverse.Description)
+	}
+}
+
 // TestEntityByPrimaryTableMapping verifies that entityByPrimaryTable uses
 // PrimarySchema/PrimaryTable rather than occurrences.
 //
@@ -367,32 +447,35 @@ func TestPKMatch_WorksWithoutRowCount(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: 2 relationships created (bidirectional matching due to high-cardinality columns)
+	// Verify: 2 logical relationships discovered (bidirectional matching due to high-cardinality columns)
 	// Missing RowCount doesn't block when DistinctCount >= 20
+	// Each logical relationship creates 2 rows (forward + reverse) = 4 total rows
 	if result.InferredRelationships != 2 {
 		t.Errorf("expected 2 inferred relationships (column has sufficient DistinctCount, bidirectional), got %d", result.InferredRelationships)
 	}
 
-	// Verify relationships were persisted
-	if len(mocks.relationshipRepo.created) != 2 {
-		t.Fatalf("expected 2 relationships to be created, got %d", len(mocks.relationshipRepo.created))
+	// Verify relationships were persisted (2 logical x 2 directions = 4 rows)
+	if len(mocks.relationshipRepo.created) != 4 {
+		t.Fatalf("expected 4 relationships to be created (2 logical x 2 directions), got %d", len(mocks.relationshipRepo.created))
 	}
 
-	// Verify both relationships exist (one in each direction)
-	var foundOrderToUser, foundUserToOrder bool
+	// Verify both logical relationships exist (each appears twice: once forward, once reverse)
+	orderToUserCount := 0
+	userToOrderCount := 0
 	for _, rel := range mocks.relationshipRepo.created {
 		if rel.SourceEntityID == orderEntityID && rel.TargetEntityID == userEntityID {
-			foundOrderToUser = true
+			orderToUserCount++
 		}
 		if rel.SourceEntityID == userEntityID && rel.TargetEntityID == orderEntityID {
-			foundUserToOrder = true
+			userToOrderCount++
 		}
 	}
-	if !foundOrderToUser {
-		t.Error("expected relationship order -> user, not found")
+	// Each logical relationship appears twice (forward + reverse)
+	if orderToUserCount != 2 {
+		t.Errorf("expected 2 order -> user relationships (forward + reverse of each logical rel), got %d", orderToUserCount)
 	}
-	if !foundUserToOrder {
-		t.Error("expected relationship user -> order, not found")
+	if userToOrderCount != 2 {
+		t.Errorf("expected 2 user -> order relationships (forward + reverse of each logical rel), got %d", userToOrderCount)
 	}
 }
 
@@ -774,33 +857,35 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		// Verify: 2 relationships created (bidirectional matching due to high-cardinality columns)
+		// Verify: 2 logical relationships discovered (bidirectional matching due to high-cardinality columns)
 		// orders.buyer (uuid, high distinct) -> users.id (uuid, PK)
 		// users.id (uuid, candidate) -> orders.buyer (uuid, entityRef due to high distinct)
 		// This is expected behavior: high-cardinality columns become both candidates and entityRefColumns
+		// Each logical relationship creates 2 rows (forward + reverse) = 4 total rows
 		if result.InferredRelationships != 2 {
 			t.Errorf("expected 2 inferred relationships (IsJoinable=true columns form bidirectional matches), got %d", result.InferredRelationships)
 		}
 
-		if len(mocks.relationshipRepo.created) != 2 {
-			t.Fatalf("expected 2 relationships to be created, got %d", len(mocks.relationshipRepo.created))
+		if len(mocks.relationshipRepo.created) != 4 {
+			t.Fatalf("expected 4 relationships to be created (2 logical x 2 directions), got %d", len(mocks.relationshipRepo.created))
 		}
 
-		// Verify both relationships exist (one in each direction)
-		var foundOrderToUser, foundUserToOrder bool
+		// Verify both logical relationships exist (each appears twice: once forward, once reverse)
+		orderToUserCount := 0
+		userToOrderCount := 0
 		for _, rel := range mocks.relationshipRepo.created {
 			if rel.SourceEntityID == orderEntityID && rel.TargetEntityID == userEntityID {
-				foundOrderToUser = true
+				orderToUserCount++
 			}
 			if rel.SourceEntityID == userEntityID && rel.TargetEntityID == orderEntityID {
-				foundUserToOrder = true
+				userToOrderCount++
 			}
 		}
-		if !foundOrderToUser {
-			t.Error("expected relationship order -> user, not found")
+		if orderToUserCount != 2 {
+			t.Errorf("expected 2 order -> user relationships (forward + reverse of each logical rel), got %d", orderToUserCount)
 		}
-		if !foundUserToOrder {
-			t.Error("expected relationship user -> order, not found")
+		if userToOrderCount != 2 {
+			t.Errorf("expected 2 user -> order relationships (forward + reverse of each logical rel), got %d", userToOrderCount)
 		}
 	})
 }
@@ -846,14 +931,6 @@ func setupMocks(projectID, ontologyID, datasourceID, entityID uuid.UUID) *mockTe
 					Name:          "user",
 					PrimarySchema: "public",
 					PrimaryTable:  "users",
-				},
-			},
-			occurrences: []*models.OntologyEntityOccurrence{
-				{
-					EntityID:   entityID,
-					SchemaName: "public",
-					TableName:  "users",
-					ColumnName: "id",
 				},
 			},
 		},
@@ -995,8 +1072,7 @@ func (m *mockTestOntologyRepo) List(ctx context.Context, projectID uuid.UUID, li
 }
 
 type mockTestEntityRepo struct {
-	entities    []*models.OntologyEntity
-	occurrences []*models.OntologyEntityOccurrence
+	entities []*models.OntologyEntity
 }
 
 func (m *mockTestEntityRepo) Create(ctx context.Context, entity *models.OntologyEntity) error {
@@ -1017,14 +1093,6 @@ func (m *mockTestEntityRepo) Update(ctx context.Context, entity *models.Ontology
 
 func (m *mockTestEntityRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
-}
-
-func (m *mockTestEntityRepo) CreateOccurrence(ctx context.Context, occurrence *models.OntologyEntityOccurrence) error {
-	return nil
-}
-
-func (m *mockTestEntityRepo) GetOccurrences(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return m.occurrences, nil
 }
 
 func (m *mockTestEntityRepo) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {
@@ -1068,22 +1136,6 @@ func (m *mockTestEntityRepo) SoftDelete(ctx context.Context, entityID uuid.UUID,
 }
 
 func (m *mockTestEntityRepo) Restore(ctx context.Context, entityID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockTestEntityRepo) GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (m *mockTestEntityRepo) GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (m *mockTestEntityRepo) GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (m *mockTestEntityRepo) UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error {
 	return nil
 }
 
@@ -1230,6 +1282,10 @@ func (m *mockTestRelationshipRepo) GetByOntology(ctx context.Context, ontologyID
 	return nil, nil
 }
 
+func (m *mockTestRelationshipRepo) GetByOntologyGroupedByTarget(ctx context.Context, ontologyID uuid.UUID) (map[uuid.UUID][]*models.EntityRelationship, error) {
+	return make(map[uuid.UUID][]*models.EntityRelationship), nil
+}
+
 func (m *mockTestSchemaRepo) GetEmptyTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error) {
 	return nil, nil
 }
@@ -1258,6 +1314,14 @@ func (m *mockTestRelationshipRepo) GetByTables(ctx context.Context, projectID uu
 
 func (m *mockTestRelationshipRepo) UpdateDescription(ctx context.Context, id uuid.UUID, description string) error {
 	return nil
+}
+
+func (m *mockTestRelationshipRepo) UpdateDescriptionAndAssociation(ctx context.Context, id uuid.UUID, description string, association string) error {
+	return nil
+}
+
+func (m *mockTestRelationshipRepo) GetByTargetEntity(ctx context.Context, entityID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
 }
 
 func (m *mockTestSchemaRepo) GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
@@ -1556,19 +1620,33 @@ func TestPKMatch_SmallIntegerValues_LookupTable(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: relationship IS created because target table is also small (lookup table)
+	// Verify: 1 logical relationship IS created because target table is also small (lookup table)
+	// Each logical relationship creates 2 rows (forward + reverse) = 2 total rows
 	if result.InferredRelationships != 1 {
 		t.Errorf("expected 1 inferred relationship (small FK to small lookup table is valid), got %d", result.InferredRelationships)
 	}
 
-	if len(mocks.relationshipRepo.created) != 1 {
-		t.Fatalf("expected 1 relationship in repo, got %d", len(mocks.relationshipRepo.created))
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Fatalf("expected 2 relationships in repo (1 logical x 2 directions), got %d", len(mocks.relationshipRepo.created))
 	}
 
-	rel := mocks.relationshipRepo.created[0]
-	// Relationship is stored as: PK (source) -> FK (target)
-	if rel.SourceColumnName != "id" || rel.TargetColumnName != "status_id" {
-		t.Errorf("unexpected relationship: %s.%s -> %s.%s", rel.SourceColumnTable, rel.SourceColumnName, rel.TargetColumnTable, rel.TargetColumnName)
+	// Verify the relationships were created (don't assert on exact order)
+	// The PK match algorithm may discover relationships in either direction
+	hasOrdersToStatuses := false
+	hasStatusesToOrders := false
+	for _, rel := range mocks.relationshipRepo.created {
+		if rel.SourceColumnTable == "orders" && rel.TargetColumnTable == "order_statuses" {
+			hasOrdersToStatuses = true
+		}
+		if rel.SourceColumnTable == "order_statuses" && rel.TargetColumnTable == "orders" {
+			hasStatusesToOrders = true
+		}
+	}
+	if !hasOrdersToStatuses {
+		t.Error("expected orders -> order_statuses relationship")
+	}
+	if !hasStatusesToOrders {
+		t.Error("expected order_statuses -> orders relationship")
 	}
 }
 

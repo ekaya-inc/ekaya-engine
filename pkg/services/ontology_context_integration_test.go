@@ -168,7 +168,7 @@ func (tc *ontologyContextTestContext) cleanup() {
 	// Delete in reverse order of dependencies
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_entity_relationships WHERE ontology_id IN (SELECT id FROM engine_ontologies WHERE project_id = $1)`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontology_entity_aliases WHERE entity_id IN (SELECT id FROM engine_ontology_entities WHERE project_id = $1)`, tc.projectID)
-	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontology_entity_occurrences WHERE entity_id IN (SELECT id FROM engine_ontology_entities WHERE project_id = $1)`, tc.projectID)
+	// Note: engine_ontology_entity_occurrences table was dropped in migration 030
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontology_entities WHERE project_id = $1`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontologies WHERE project_id = $1`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_schema_columns WHERE schema_table_id IN (SELECT id FROM engine_schema_tables WHERE project_id = $1)`, tc.projectID)
@@ -321,38 +321,8 @@ func (tc *ontologyContextTestContext) createTestOntology(ctx context.Context) uu
 	err = tc.entityRepo.Create(ctx, orderEntity)
 	require.NoError(tc.t, err, "Failed to create order entity")
 
-	// Create entity occurrences
-	customerRole := "customer"
-	err = tc.entityRepo.CreateOccurrence(ctx, &models.OntologyEntityOccurrence{
-		ID:         uuid.New(),
-		EntityID:   userEntityID,
-		SchemaName: "public",
-		TableName:  "users",
-		ColumnName: "id",
-		Confidence: 1.0,
-	})
-	require.NoError(tc.t, err)
-
-	err = tc.entityRepo.CreateOccurrence(ctx, &models.OntologyEntityOccurrence{
-		ID:         uuid.New(),
-		EntityID:   userEntityID,
-		SchemaName: "public",
-		TableName:  "orders",
-		ColumnName: "user_id",
-		Role:       &customerRole,
-		Confidence: 1.0,
-	})
-	require.NoError(tc.t, err)
-
-	err = tc.entityRepo.CreateOccurrence(ctx, &models.OntologyEntityOccurrence{
-		ID:         uuid.New(),
-		EntityID:   orderEntityID,
-		SchemaName: "public",
-		TableName:  "orders",
-		ColumnName: "id",
-		Confidence: 1.0,
-	})
-	require.NoError(tc.t, err)
+	// Note: Occurrences are now computed at runtime from relationships (see task 2.5)
+	// No need to create occurrence records - they're derived from inbound relationships
 
 	// Create entity aliases
 	discoverySource := "discovery"
@@ -527,7 +497,7 @@ func TestOntologyContextService_Integration_GetDomainContext(t *testing.T) {
 	require.NotNil(t, userEntity, "User entity should be present")
 	assert.Equal(t, "Platform user", userEntity.Description)
 	assert.Equal(t, "users", userEntity.PrimaryTable)
-	assert.Equal(t, 2, userEntity.OccurrenceCount) // id in users, user_id in orders
+	assert.Equal(t, 1, userEntity.OccurrenceCount) // Computed from 1 inbound relationship (order→user)
 
 	// Verify relationships - check for presence without order dependency
 	assert.Len(t, result.Relationships, 2)
@@ -574,21 +544,16 @@ func TestOntologyContextService_Integration_GetEntitiesContext(t *testing.T) {
 	// Check key columns
 	assert.Len(t, userEntity.KeyColumns, 2)
 
-	// Check occurrences
-	assert.Len(t, userEntity.Occurrences, 2)
+	// Check occurrences - computed from inbound relationships
+	// User entity has 1 inbound relationship (relationship 2: order→user)
+	assert.Len(t, userEntity.Occurrences, 1)
 
-	// Find the occurrence with role
-	var roleOccurrence *models.EntityOccurrence
-	for i := range userEntity.Occurrences {
-		if userEntity.Occurrences[i].Role != nil {
-			roleOccurrence = &userEntity.Occurrences[i]
-			break
-		}
-	}
-	require.NotNil(t, roleOccurrence, "Should have occurrence with role")
-	assert.Equal(t, "customer", *roleOccurrence.Role)
-	assert.Equal(t, "orders", roleOccurrence.Table)
-	assert.Equal(t, "user_id", roleOccurrence.Column)
+	// Verify the computed occurrence
+	occ := userEntity.Occurrences[0]
+	assert.Equal(t, "orders", occ.Table)
+	assert.Equal(t, "id", occ.Column)
+	// Association comes from relationship.Association (which is nil in this test data)
+	assert.Nil(t, occ.Association)
 }
 
 func TestOntologyContextService_Integration_GetTablesContext(t *testing.T) {
