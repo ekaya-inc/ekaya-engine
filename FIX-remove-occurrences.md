@@ -400,26 +400,38 @@ type OntologyEntityOccurrence struct {
 
 ### Phase 4: Migration
 
-#### 4.1 Drop occurrences table
+#### 4.1 Drop occurrences table ✅ COMPLETED (2026-01-05)
 
-```sql
--- Migration: drop_occurrences_table.up.sql
-DROP TABLE IF EXISTS engine_ontology_entity_occurrences;
+**Implementation Notes:**
+- Migration 030 created: `migrations/030_drop_occurrences_table.up.sql`
+  - Drops the `engine_ontology_entity_occurrences` table
+  - Table is no longer needed - occurrences computed at runtime from relationships (see task 2.5, 2.6)
+- Down migration created: `migrations/030_drop_occurrences_table.down.sql`
+  - Recreates table structure from migration 013 (original creation)
+  - Includes all indexes, constraints, comments, and RLS policy from migration 024
+  - Allows rollback if needed for debugging or emergency recovery
+- Integration test added: `pkg/repositories/drop_occurrences_migration_test.go`
+  - Test verifies table no longer exists after migration
+  - Uses standard migration test pattern from other migration tests
+- All tests pass (`make check` succeeds)
 
--- Migration: drop_occurrences_table.down.sql
--- Recreate table (copy from migration 013 or 014)
-CREATE TABLE engine_ontology_entity_occurrences (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    entity_id UUID NOT NULL REFERENCES engine_ontology_entities(id) ON DELETE CASCADE,
-    schema_name VARCHAR(255) NOT NULL,
-    table_name VARCHAR(255) NOT NULL,
-    column_name VARCHAR(255) NOT NULL,
-    role VARCHAR(100),
-    confidence FLOAT NOT NULL DEFAULT 1.0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(entity_id, schema_name, table_name, column_name)
-);
-```
+**Key Design Decision:**
+- Down migration provides full restoration of original table structure
+- Recreates all indexes (entity, table, role), constraints (FK cascade, confidence check), and RLS policy
+- This ensures migrations can be rolled back without data loss or broken references
+- However, occurrence data itself is NOT restored (would require re-running entity discovery)
+
+**Files created:**
+- `migrations/030_drop_occurrences_table.up.sql` - Drop table
+- `migrations/030_drop_occurrences_table.down.sql` - Recreate table with full structure
+- `pkg/repositories/drop_occurrences_migration_test.go` - Integration test
+
+**Context for Next Session:**
+- This completes the backend migration work for occurrences removal
+- The database schema no longer has an occurrences table
+- All occurrence data is now computed at runtime from `engine_entity_relationships`
+- Next steps are frontend UI changes (Phase 5) to update terminology from "role" to "association"
+- The backend API already returns the `association` field in entity occurrence responses
 
 ### Phase 5: UI Changes
 
