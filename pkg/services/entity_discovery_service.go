@@ -174,21 +174,6 @@ func (s *entityDiscoveryService) identifyEntitiesFromDDL(
 			return 0, nil, nil, fmt.Errorf("create entity for table %s: %w", c.tableName, err)
 		}
 
-		// Create primary occurrence with confidence
-		occurrence := &models.OntologyEntityOccurrence{
-			EntityID:   entity.ID,
-			SchemaName: c.schemaName,
-			TableName:  c.tableName,
-			ColumnName: c.columnName,
-			Confidence: c.confidence,
-		}
-		if err := s.entityRepo.CreateOccurrence(tenantCtx, occurrence); err != nil {
-			s.logger.Error("Failed to create primary occurrence",
-				zap.String("table_name", c.tableName),
-				zap.Error(err))
-			// Don't fail the whole process for occurrence creation
-		}
-
 		s.logger.Info("Entity created (pending LLM enrichment)",
 			zap.String("entity_id", entity.ID.String()),
 			zap.String("table_name", c.tableName),

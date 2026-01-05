@@ -199,29 +199,6 @@ func TestBuildPrompt(t *testing.T) {
 	assert.Contains(t, prompt, "Output Format:")
 }
 
-func TestCountTotalOccurrences(t *testing.T) {
-	task := &EntityDiscoveryTask{}
-
-	entities := []DiscoveredEntity{
-		{
-			Name: "user",
-			Occurrences: []EntityOccurrence{
-				{TableName: "orders", ColumnName: "user_id"},
-				{TableName: "visits", ColumnName: "visitor_id"},
-			},
-		},
-		{
-			Name: "product",
-			Occurrences: []EntityOccurrence{
-				{TableName: "order_items", ColumnName: "product_id"},
-			},
-		},
-	}
-
-	count := task.countTotalOccurrences(entities)
-	assert.Equal(t, 3, count)
-}
-
 func TestEntityDiscoveryOutputValidation(t *testing.T) {
 	tests := []struct {
 		name        string

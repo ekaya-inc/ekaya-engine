@@ -78,13 +78,11 @@ func (m *mockOntologyRepository) WriteCleanOntology(ctx context.Context, project
 }
 
 type mockOntologyEntityRepository struct {
-	entities          []*models.OntologyEntity
-	occurrences       []*models.OntologyEntityOccurrence
-	aliases           map[uuid.UUID][]*models.OntologyEntityAlias
-	keyColumns        map[uuid.UUID][]*models.OntologyEntityKeyColumn
-	getByProjectErr   error
-	getOccurrencesErr error
-	getAliasesErr     error
+	entities        []*models.OntologyEntity
+	aliases         map[uuid.UUID][]*models.OntologyEntityAlias
+	keyColumns      map[uuid.UUID][]*models.OntologyEntityKeyColumn
+	getByProjectErr error
+	getAliasesErr   error
 }
 
 func (m *mockOntologyEntityRepository) Create(ctx context.Context, entity *models.OntologyEntity) error {
@@ -123,29 +121,6 @@ func (m *mockOntologyEntityRepository) SoftDelete(ctx context.Context, entityID 
 }
 
 func (m *mockOntologyEntityRepository) Restore(ctx context.Context, entityID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockOntologyEntityRepository) CreateOccurrence(ctx context.Context, occ *models.OntologyEntityOccurrence) error {
-	return nil
-}
-
-func (m *mockOntologyEntityRepository) GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (m *mockOntologyEntityRepository) GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (m *mockOntologyEntityRepository) GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	if m.getOccurrencesErr != nil {
-		return nil, m.getOccurrencesErr
-	}
-	return m.occurrences, nil
-}
-
-func (m *mockOntologyEntityRepository) UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error {
 	return nil
 }
 

@@ -89,21 +89,6 @@ func (m *mockEntityRepo) CreateKeyColumn(ctx context.Context, keyColumn *models.
 func (m *mockEntityRepo) GetKeyColumnsByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityKeyColumn, error) {
 	return nil, nil
 }
-func (m *mockEntityRepo) CreateOccurrence(ctx context.Context, occ *models.OntologyEntityOccurrence) error {
-	return nil
-}
-func (m *mockEntityRepo) GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-func (m *mockEntityRepo) GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-func (m *mockEntityRepo) GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-func (m *mockEntityRepo) UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error {
-	return nil
-}
 func (m *mockEntityRepo) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
 	return nil, nil
 }

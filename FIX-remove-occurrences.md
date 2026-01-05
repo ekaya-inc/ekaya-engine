@@ -271,12 +271,46 @@ The `association` field is now generated alongside `description` during the exis
 - `pkg/repositories/ontology_entity_repository.go` - Removed all occurrence methods
 - `pkg/repositories/ontology_entity_repository_test.go` - Removed all occurrence tests
 
-#### 2.8 Remove occurrence from Entity Discovery
+#### 2.8 Remove occurrence from Entity Discovery ✅ COMPLETED
 
-**Files to modify:**
-- `pkg/services/entity_discovery_service.go:177-198`
-  - Remove: `CreateOccurrence` call after entity creation
-  - The primary location is already stored in the entity itself
+**Implementation Notes:**
+- Removed `CreateOccurrence` call after entity creation in `pkg/services/entity_discovery_service.go` (lines 177-190)
+  - The primary location is already stored in the entity itself via `PrimarySchema`, `PrimaryTable`, and `PrimaryColumn` fields
+  - No need for redundant occurrence record
+- Removed occurrence creation loop in `pkg/services/entity_discovery_task.go` (lines 392-422)
+  - This loop created occurrences for LLM-discovered entities
+  - Occurrences are now derived at runtime from relationships (see task 2.5)
+- Removed `countTotalOccurrences()` method and its call from `entity_discovery_task.go`
+  - This method counted occurrences across discovered entities
+  - Logging now only reports entity count, not occurrence count
+- Removed `TestCountTotalOccurrences` test from `pkg/services/entity_discovery_task_test.go`
+  - Test validated the now-removed `countTotalOccurrences()` method
+- Updated test mocks in `pkg/services/entity_discovery_task_test.go`:
+  - Removed `CreateOccurrence` from `testEntityDiscoveryEntityRepo` mock
+  - This mock is used by multiple test cases for entity discovery validation
+- All tests pass (`make check` succeeds)
+
+**Key Design Decision:**
+- Entity Discovery no longer creates any occurrence records
+- The entity's primary location is stored in the entity itself
+- Additional occurrences (FK references) are computed at runtime from inbound relationships
+- This eliminates the redundant persistence of occurrence data during entity discovery
+
+**Files modified:**
+- `pkg/services/entity_discovery_service.go` - Removed occurrence creation after entity creation
+- `pkg/services/entity_discovery_task.go` - Removed occurrence loop and counting method
+- `pkg/services/entity_discovery_task_test.go` - Removed obsolete test and updated mock
+- `pkg/services/schema.go` - Removed `CreateOccurrence` from mock implementation
+- Multiple test files updated to remove `CreateOccurrence` from mock implementations
+
+**Context for Future Sessions:**
+- This task completes the removal of occurrence persistence from the Entity Discovery phase
+- All occurrence-related code has now been removed from:
+  - Repository layer (task 2.7)
+  - Entity Discovery phase (task 2.8)
+  - Column Enrichment phase (task 2.3)
+- Occurrences are computed at runtime from relationships (task 2.5, 2.6)
+- Next steps: Task 2.9 may already be complete (GetByTargetEntity added in 2.5), verify before implementing
 
 #### 2.9 Update relationship repository
 

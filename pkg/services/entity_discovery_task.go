@@ -146,8 +146,7 @@ func (t *EntityDiscoveryTask) Execute(ctx context.Context, enqueuer workqueue.Ta
 
 	if t.logger != nil {
 		t.logger.Info("Entity discovery completed",
-			zap.Int("entities_discovered", len(output.Entities)),
-			zap.Int("total_occurrences", t.countTotalOccurrences(output.Entities)))
+			zap.Int("entities_discovered", len(output.Entities)))
 	}
 
 	return nil
@@ -388,50 +387,9 @@ func (t *EntityDiscoveryTask) persistEntities(ctx context.Context, output *Entit
 				zap.String("entity_name", entity.Name),
 				zap.String("primary_location", fmt.Sprintf("%s.%s.%s", entity.PrimarySchema, entity.PrimaryTable, entity.PrimaryColumn)))
 		}
-
-		// Create occurrence records
-		for _, occ := range discoveredEntity.Occurrences {
-			occurrence := &models.OntologyEntityOccurrence{
-				EntityID:   entity.ID,
-				SchemaName: occ.SchemaName,
-				TableName:  occ.TableName,
-				ColumnName: occ.ColumnName,
-				Role:       occ.Role,
-				Confidence: 1.0, // Default confidence from LLM discovery
-			}
-
-			if err := t.entityRepo.CreateOccurrence(ctx, occurrence); err != nil {
-				if t.logger != nil {
-					t.logger.Error("Failed to create occurrence",
-						zap.String("entity_name", entity.Name),
-						zap.String("location", fmt.Sprintf("%s.%s.%s", occ.SchemaName, occ.TableName, occ.ColumnName)),
-						zap.Error(err))
-				}
-				return fmt.Errorf("create occurrence for entity %s: %w", entity.Name, err)
-			}
-
-			if t.logger != nil {
-				roleStr := "null"
-				if occ.Role != nil {
-					roleStr = *occ.Role
-				}
-				t.logger.Info("  Occurrence created",
-					zap.String("location", fmt.Sprintf("%s.%s.%s", occ.SchemaName, occ.TableName, occ.ColumnName)),
-					zap.String("role", roleStr))
-			}
-		}
 	}
 
 	return nil
-}
-
-// countTotalOccurrences counts the total number of occurrences across all entities.
-func (t *EntityDiscoveryTask) countTotalOccurrences(entities []DiscoveredEntity) int {
-	total := 0
-	for _, e := range entities {
-		total += len(e.Occurrences)
-	}
-	return total
 }
 
 // extractJSON extracts JSON from text that might be wrapped in markdown code blocks

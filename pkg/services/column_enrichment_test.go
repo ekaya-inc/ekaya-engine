@@ -114,14 +114,6 @@ func (r *testColEnrichmentEntityRepo) Delete(ctx context.Context, entityID uuid.
 	return nil
 }
 
-func (r *testColEnrichmentEntityRepo) CreateOccurrence(ctx context.Context, occurrence *models.OntologyEntityOccurrence) error {
-	return nil
-}
-
-func (r *testColEnrichmentEntityRepo) GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
 func (r *testColEnrichmentEntityRepo) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {
 	return nil
 }
@@ -167,18 +159,6 @@ func (r *testColEnrichmentEntityRepo) SoftDelete(ctx context.Context, entityID u
 }
 
 func (r *testColEnrichmentEntityRepo) Restore(ctx context.Context, entityID uuid.UUID) error {
-	return nil
-}
-
-func (r *testColEnrichmentEntityRepo) GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentEntityRepo) GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (r *testColEnrichmentEntityRepo) UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error {
 	return nil
 }
 

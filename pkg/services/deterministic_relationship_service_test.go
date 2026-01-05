@@ -1104,10 +1104,6 @@ func (m *mockTestEntityRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (m *mockTestEntityRepo) CreateOccurrence(ctx context.Context, occurrence *models.OntologyEntityOccurrence) error {
-	return nil
-}
-
 func (m *mockTestEntityRepo) GetOccurrences(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
 	return m.occurrences, nil
 }
@@ -1153,22 +1149,6 @@ func (m *mockTestEntityRepo) SoftDelete(ctx context.Context, entityID uuid.UUID,
 }
 
 func (m *mockTestEntityRepo) Restore(ctx context.Context, entityID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockTestEntityRepo) GetOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (m *mockTestEntityRepo) GetOccurrencesByTable(ctx context.Context, ontologyID uuid.UUID, schema, table string) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (m *mockTestEntityRepo) GetAllOccurrencesByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-	return nil, nil
-}
-
-func (m *mockTestEntityRepo) UpdateOccurrenceRole(ctx context.Context, entityID uuid.UUID, tableName, columnName string, role *string) error {
 	return nil
 }
 
