@@ -60,6 +60,10 @@ func (r *testRelEnrichmentRelRepo) DeleteByOntology(ctx context.Context, ontolog
 	return nil
 }
 
+func (r *testRelEnrichmentRelRepo) GetByTargetEntity(ctx context.Context, entityID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
+}
+
 type testRelEnrichmentEntityRepo struct {
 	entities []*models.OntologyEntity
 }

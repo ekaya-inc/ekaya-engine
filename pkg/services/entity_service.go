@@ -46,21 +46,24 @@ type EntityService interface {
 }
 
 type entityService struct {
-	entityRepo   repositories.OntologyEntityRepository
-	ontologyRepo repositories.OntologyRepository
-	logger       *zap.Logger
+	entityRepo       repositories.OntologyEntityRepository
+	relationshipRepo repositories.EntityRelationshipRepository
+	ontologyRepo     repositories.OntologyRepository
+	logger           *zap.Logger
 }
 
 // NewEntityService creates a new EntityService.
 func NewEntityService(
 	entityRepo repositories.OntologyEntityRepository,
+	relationshipRepo repositories.EntityRelationshipRepository,
 	ontologyRepo repositories.OntologyRepository,
 	logger *zap.Logger,
 ) EntityService {
 	return &entityService{
-		entityRepo:   entityRepo,
-		ontologyRepo: ontologyRepo,
-		logger:       logger.Named("entity-service"),
+		entityRepo:       entityRepo,
+		relationshipRepo: relationshipRepo,
+		ontologyRepo:     ontologyRepo,
+		logger:           logger.Named("entity-service"),
 	}
 }
 
@@ -93,12 +96,10 @@ func (s *entityService) ListByProject(ctx context.Context, projectID uuid.UUID) 
 	// Fetch occurrences and aliases for each entity
 	result := make([]*EntityWithDetails, 0, len(entities))
 	for _, entity := range entities {
-		occurrences, err := s.entityRepo.GetOccurrencesByEntity(ctx, entity.ID)
+		// Compute occurrences from relationships
+		occurrences, err := s.computeOccurrences(ctx, entity.ID)
 		if err != nil {
-			s.logger.Error("Failed to get occurrences",
-				zap.String("entity_id", entity.ID.String()),
-				zap.Error(err))
-			return nil, fmt.Errorf("get occurrences for entity %s: %w", entity.ID, err)
+			return nil, fmt.Errorf("compute occurrences for entity %s: %w", entity.ID, err)
 		}
 
 		aliases, err := s.entityRepo.GetAliasesByEntity(ctx, entity.ID)
@@ -134,13 +135,10 @@ func (s *entityService) GetByID(ctx context.Context, entityID uuid.UUID) (*Entit
 		return nil, nil
 	}
 
-	// Get occurrences
-	occurrences, err := s.entityRepo.GetOccurrencesByEntity(ctx, entityID)
+	// Compute occurrences from relationships
+	occurrences, err := s.computeOccurrences(ctx, entityID)
 	if err != nil {
-		s.logger.Error("Failed to get occurrences",
-			zap.String("entity_id", entityID.String()),
-			zap.Error(err))
-		return nil, fmt.Errorf("get occurrences: %w", err)
+		return nil, fmt.Errorf("compute occurrences: %w", err)
 	}
 
 	// Get aliases
@@ -158,6 +156,36 @@ func (s *entityService) GetByID(ctx context.Context, entityID uuid.UUID) (*Entit
 		Aliases:         aliases,
 		OccurrenceCount: len(occurrences),
 	}, nil
+}
+
+// computeOccurrences derives entity occurrences from inbound relationships.
+// Each inbound relationship represents an occurrence of this entity at the source column location.
+func (s *entityService) computeOccurrences(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
+	// Get all inbound relationships (where this entity is the target)
+	relationships, err := s.relationshipRepo.GetByTargetEntity(ctx, entityID)
+	if err != nil {
+		s.logger.Error("Failed to get relationships by target entity",
+			zap.String("entity_id", entityID.String()),
+			zap.Error(err))
+		return nil, fmt.Errorf("get relationships by target entity: %w", err)
+	}
+
+	// Convert relationships to occurrences
+	occurrences := make([]*models.OntologyEntityOccurrence, 0, len(relationships))
+	for _, rel := range relationships {
+		occurrences = append(occurrences, &models.OntologyEntityOccurrence{
+			ID:         rel.ID, // Use relationship ID as occurrence ID
+			EntityID:   entityID,
+			SchemaName: rel.SourceColumnSchema,
+			TableName:  rel.SourceColumnTable,
+			ColumnName: rel.SourceColumnName,
+			Role:       rel.Association, // Association becomes the role
+			Confidence: rel.Confidence,
+			CreatedAt:  rel.CreatedAt,
+		})
+	}
+
+	return occurrences, nil
 }
 
 func (s *entityService) Delete(ctx context.Context, entityID uuid.UUID, reason string) error {

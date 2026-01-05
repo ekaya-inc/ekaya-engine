@@ -213,6 +213,10 @@ func (m *mockRelationshipRepoForFinalization) DeleteByOntology(ctx context.Conte
 	return nil
 }
 
+func (m *mockRelationshipRepoForFinalization) GetByTargetEntity(ctx context.Context, entityID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
+}
+
 type mockSchemaRepoForFinalization struct {
 	columnsByTable  map[string][]*models.SchemaColumn
 	getColumnsByErr error

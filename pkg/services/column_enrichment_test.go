@@ -213,6 +213,10 @@ func (r *testColEnrichmentRelRepo) DeleteByOntology(ctx context.Context, ontolog
 	return nil
 }
 
+func (r *testColEnrichmentRelRepo) GetByTargetEntity(ctx context.Context, entityID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
+}
+
 type testColEnrichmentSchemaRepo struct {
 	columnsByTable map[string][]*models.SchemaColumn
 }

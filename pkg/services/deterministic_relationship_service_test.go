@@ -1349,6 +1349,10 @@ func (m *mockTestRelationshipRepo) UpdateDescriptionAndAssociation(ctx context.C
 	return nil
 }
 
+func (m *mockTestRelationshipRepo) GetByTargetEntity(ctx context.Context, entityID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
+}
+
 func (m *mockTestSchemaRepo) GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }

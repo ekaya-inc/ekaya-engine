@@ -62,10 +62,11 @@ func setupEntityTest(t *testing.T) *entityTestContext {
 
 	// Create repositories
 	entityRepo := repositories.NewOntologyEntityRepository()
+	relationshipRepo := repositories.NewEntityRelationshipRepository()
 	ontologyRepo := repositories.NewOntologyRepository()
 
 	// Create service
-	service := services.NewEntityService(entityRepo, ontologyRepo, zap.NewNop())
+	service := services.NewEntityService(entityRepo, relationshipRepo, ontologyRepo, zap.NewNop())
 
 	// Create handler
 	handler := NewEntityHandler(service, zap.NewNop())

@@ -161,42 +161,43 @@ The `association` field is now generated alongside `description` during the exis
 - The FK role enrichment logic in column enrichment was attempting to bridge the gap to occurrences
 - With bidirectional relationships and association generation during Relationship Enrichment, this bridge is no longer needed
 
-#### 2.5 Compute occurrences at runtime in Entity Service
+#### 2.5 Compute occurrences at runtime in Entity Service ✅ COMPLETED
 
-This is the key change that makes the Entities UI show correct occurrence counts. The UI calls `GET /api/projects/{pid}/entities`, which calls `EntityService.ListByProject()`. By computing occurrences from relationships here, the UI automatically displays accurate counts without any frontend changes to data fetching.
+**Implementation Notes:**
+- Added `relationshipRepo` dependency to `entityService` in `pkg/services/entity_service.go`
+- Updated `NewEntityService()` constructor to accept `EntityRelationshipRepository` parameter
+- Replaced `entityRepo.GetOccurrencesByEntity()` calls with new `computeOccurrences()` helper in both:
+  - `ListByProject()` method (line 99-102)
+  - `GetByID()` method (line 138-141)
+- Created new `computeOccurrences()` helper method (lines 161-190) that:
+  - Queries inbound relationships via `relationshipRepo.GetByTargetEntity()`
+  - Converts each relationship to an `OntologyEntityOccurrence` using source column location
+  - Maps `relationship.Association` to `occurrence.Role`
+  - Uses relationship ID as occurrence ID for consistency
+- Added `GetByTargetEntity()` method to `EntityRelationshipRepository` interface and implementation
+  - New method in `pkg/repositories/entity_relationship_repository.go` (lines 189-224)
+  - Queries relationships where `target_entity_id = entityID`
+  - Returns ordered by source table/column for consistent UI display
+- Updated `main.go` to pass `relationshipRepo` when creating EntityService
+- Created comprehensive unit tests in new file `pkg/services/entity_service_test.go`:
+  - Test for successful occurrence computation from relationships
+  - Test for zero occurrences when no inbound relationships exist
+  - Test for error propagation from relationship repository
+  - Mock implementations for all dependencies
+- Updated all test files that create mock EntityRelationshipRepository to include `GetByTargetEntity` method
+- All tests pass (`make check` succeeds)
 
-**Files to modify:**
-- `pkg/services/entity_service.go:69-121` (ListByProject)
-  - Remove: `s.entityRepo.GetOccurrencesByEntity(ctx, entity.ID)`
-  - Add: Query relationships where `target_entity_id = entity.ID`
-  - Build occurrence list from relationship source columns + associations
+**Key Design Decisions:**
+- Entity Service now has a dependency on EntityRelationshipRepository (added to constructor)
+- Occurrences are computed on-demand during entity retrieval (not cached)
+- Each inbound relationship = one occurrence at the source column location
+- The relationship's `association` field becomes the occurrence's `role` field
+- This makes the UI show accurate occurrence counts without frontend changes
 
-- `pkg/services/entity_service.go:123-161` (GetByID)
-  - Same change
-
-**New helper function:**
-```go
-func (s *entityService) computeOccurrences(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
-    // Get inbound relationships for this entity
-    rels, err := s.relationshipRepo.GetByTargetEntity(ctx, entityID)
-    if err != nil {
-        return nil, err
-    }
-
-    var occurrences []*models.OntologyEntityOccurrence
-    for _, rel := range rels {
-        occurrences = append(occurrences, &models.OntologyEntityOccurrence{
-            EntityID:   entityID,
-            SchemaName: rel.SourceColumnSchema,
-            TableName:  rel.SourceColumnTable,
-            ColumnName: rel.SourceColumnName,
-            Role:       rel.Association, // renamed from Role
-            Confidence: rel.Confidence,
-        })
-    }
-    return occurrences, nil
-}
-```
+**Impact:**
+- Entities UI now shows correct occurrence counts derived from bidirectional relationships
+- Occurrence count reflects actual FK references to the entity (inbound relationships)
+- Entities with no inbound relationships show 0 occurrences (semantically correct)
 
 #### 2.6 Update OntologyContextService
 
