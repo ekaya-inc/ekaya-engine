@@ -1345,6 +1345,10 @@ func (m *mockTestRelationshipRepo) UpdateDescription(ctx context.Context, id uui
 	return nil
 }
 
+func (m *mockTestRelationshipRepo) UpdateDescriptionAndAssociation(ctx context.Context, id uuid.UUID, description string, association string) error {
+	return nil
+}
+
 func (m *mockTestSchemaRepo) GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }

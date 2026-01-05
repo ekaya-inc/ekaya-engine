@@ -38,5 +38,6 @@ type EntityRelationship struct {
 	Confidence         float64   `json:"confidence"`            // 1.0 for FK, 0.7-0.95 for pk_match
 	Status             string    `json:"status"`                // "confirmed", "pending", "rejected"
 	Description        *string   `json:"description,omitempty"` // Optional description of the relationship
+	Association        *string   `json:"association,omitempty"` // Semantic association for this direction (e.g., "placed_by", "contains")
 	CreatedAt          time.Time `json:"created_at"`
 }

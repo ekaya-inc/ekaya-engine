@@ -205,6 +205,10 @@ func (r *testColEnrichmentRelRepo) UpdateDescription(ctx context.Context, id uui
 	return nil
 }
 
+func (r *testColEnrichmentRelRepo) UpdateDescriptionAndAssociation(ctx context.Context, id uuid.UUID, description string, association string) error {
+	return nil
+}
+
 func (r *testColEnrichmentRelRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }

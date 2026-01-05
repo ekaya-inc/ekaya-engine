@@ -117,34 +117,30 @@ For each existing relationship, create a reverse row:
 - `pkg/services/deterministic_relationship_service.go` - Added bidirectional creation logic
 - `pkg/services/deterministic_relationship_service_test.go` - Added unit test and updated existing tests
 
-#### 2.2 Generate associations during Relationship Enrichment
+#### 2.2 Generate associations during Relationship Enrichment ✅ COMPLETED
 
-The `association` field should be generated alongside `description` during the existing Relationship Enrichment DAG step.
+**Implementation Notes:**
+- Updated `relationshipEnrichment` struct in `pkg/services/relationship_enrichment.go` to include `Association` field
+- Modified LLM prompt to request both description (full sentence) and association (short verb/label like "placed_by", "owns", "manages")
+- Updated JSON response parsing to extract both `description` and `association` fields
+- Modified `enrichBatchInternal` to save association alongside description via new repository method
+- Added `UpdateDescriptionAndAssociation` in `pkg/repositories/entity_relationship_repository.go` for atomic updates
+- Implemented fallback to `UpdateDescription` if LLM response doesn't include association (backward compatibility)
+- Updated all test mocks in:
+  - `pkg/services/column_enrichment_test.go`
+  - `pkg/services/deterministic_relationship_service_test.go`
+  - `pkg/services/ontology_context_test.go`
+  - `pkg/services/ontology_finalization_test.go`
+  - `pkg/services/relationship_enrichment_test.go`
+  - `pkg/repositories/entity_relationship_migration_test.go`
+- All tests pass and `make check` succeeds
 
-**Files to modify:**
-- `pkg/services/relationship_enrichment.go`
-  - Update LLM prompt to request both `description` (full sentence) and `association` (short label)
-  - Example prompt addition:
-    ```
-    For each relationship, provide:
-    1. description: A 1-2 sentence explanation of the relationship
-    2. association: A short verb/label (e.g., "owns", "placed_by", "manages", "contains")
-    ```
-  - Update response parsing to extract `association` field
-  - Save association when updating relationship
+**Key Design Decisions:**
+- LLM now generates associations for BOTH directions of each relationship during enrichment
+- Associations are nullable to support partial enrichment states and backward compatibility
+- The repository method validates that relationship exists before updating (fail-fast principle)
 
-- Response format change:
-  ```json
-  {
-    "relationships": [
-      {
-        "id": "...",
-        "description": "Each order is placed by a user who...",
-        "association": "placed_by"
-      }
-    ]
-  }
-  ```
+The `association` field is now generated alongside `description` during the existing Relationship Enrichment DAG step.
 
 #### 2.3 Remove Column Enrichment occurrence role updates
 

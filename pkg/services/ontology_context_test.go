@@ -225,6 +225,10 @@ func (m *mockEntityRelationshipRepository) UpdateDescription(ctx context.Context
 	return nil
 }
 
+func (m *mockEntityRelationshipRepository) UpdateDescriptionAndAssociation(ctx context.Context, id uuid.UUID, description string, association string) error {
+	return nil
+}
+
 func (m *mockEntityRelationshipRepository) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }

@@ -15,8 +15,9 @@ import (
 
 // Simple mock repositories for testing
 type testRelEnrichmentRelRepo struct {
-	relationships []*models.EntityRelationship
-	updatedDescs  map[uuid.UUID]string
+	relationships       []*models.EntityRelationship
+	updatedDescs        map[uuid.UUID]string
+	updatedAssociations map[uuid.UUID]string
 }
 
 func (r *testRelEnrichmentRelRepo) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error) {
@@ -28,6 +29,18 @@ func (r *testRelEnrichmentRelRepo) UpdateDescription(ctx context.Context, id uui
 		r.updatedDescs = make(map[uuid.UUID]string)
 	}
 	r.updatedDescs[id] = description
+	return nil
+}
+
+func (r *testRelEnrichmentRelRepo) UpdateDescriptionAndAssociation(ctx context.Context, id uuid.UUID, description string, association string) error {
+	if r.updatedDescs == nil {
+		r.updatedDescs = make(map[uuid.UUID]string)
+	}
+	if r.updatedAssociations == nil {
+		r.updatedAssociations = make(map[uuid.UUID]string)
+	}
+	r.updatedDescs[id] = description
+	r.updatedAssociations[id] = association
 	return nil
 }
 
@@ -227,7 +240,7 @@ func TestRelationshipEnrichmentService_RetryOnTransientError(t *testing.T) {
 			return nil, llm.NewError(llm.ErrorTypeEndpoint, "timeout", true, errors.New("timeout"))
 		}
 		return &llm.GenerateResponseResult{
-			Content: `{"relationships": [{"id": 1, "description": "Test desc"}]}`,
+			Content: `{"relationships": [{"id": 1, "description": "Test desc", "association": "placed_by"}]}`,
 		}, nil
 	}
 
@@ -244,6 +257,7 @@ func TestRelationshipEnrichmentService_RetryOnTransientError(t *testing.T) {
 	assert.Equal(t, 0, result.RelationshipsFailed)
 	assert.Equal(t, 2, callCount, "Should retry once after transient error")
 	assert.Equal(t, "Test desc", relRepo.updatedDescs[relID])
+	assert.Equal(t, "placed_by", relRepo.updatedAssociations[relID])
 }
 
 func TestRelationshipEnrichmentService_NonRetryableError(t *testing.T) {

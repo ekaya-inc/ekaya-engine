@@ -19,6 +19,7 @@ type EntityRelationshipRepository interface {
 	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error)
 	GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error)
 	UpdateDescription(ctx context.Context, id uuid.UUID, description string) error
+	UpdateDescriptionAndAssociation(ctx context.Context, id uuid.UUID, description string, association string) error
 	DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error
 }
 
@@ -48,8 +49,8 @@ func (r *entityRelationshipRepository) Create(ctx context.Context, rel *models.E
 			id, ontology_id, source_entity_id, target_entity_id,
 			source_column_schema, source_column_table, source_column_name,
 			target_column_schema, target_column_table, target_column_name,
-			detection_method, confidence, status, description, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			detection_method, confidence, status, description, association, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		ON CONFLICT (ontology_id, source_entity_id, target_entity_id, source_column_schema, source_column_table, source_column_name)
 		DO NOTHING`
 
@@ -57,7 +58,7 @@ func (r *entityRelationshipRepository) Create(ctx context.Context, rel *models.E
 		rel.ID, rel.OntologyID, rel.SourceEntityID, rel.TargetEntityID,
 		rel.SourceColumnSchema, rel.SourceColumnTable, rel.SourceColumnName,
 		rel.TargetColumnSchema, rel.TargetColumnTable, rel.TargetColumnName,
-		rel.DetectionMethod, rel.Confidence, rel.Status, rel.Description, rel.CreatedAt,
+		rel.DetectionMethod, rel.Confidence, rel.Status, rel.Description, rel.Association, rel.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create entity relationship: %w", err)
@@ -76,7 +77,7 @@ func (r *entityRelationshipRepository) GetByOntology(ctx context.Context, ontolo
 		SELECT id, ontology_id, source_entity_id, target_entity_id,
 		       source_column_schema, source_column_table, source_column_name,
 		       target_column_schema, target_column_table, target_column_name,
-		       detection_method, confidence, status, description, created_at
+		       detection_method, confidence, status, description, association, created_at
 		FROM engine_entity_relationships
 		WHERE ontology_id = $1
 		ORDER BY source_column_table, source_column_name`
@@ -113,7 +114,7 @@ func (r *entityRelationshipRepository) GetByProject(ctx context.Context, project
 		SELECT r.id, r.ontology_id, r.source_entity_id, r.target_entity_id,
 		       r.source_column_schema, r.source_column_table, r.source_column_name,
 		       r.target_column_schema, r.target_column_table, r.target_column_name,
-		       r.detection_method, r.confidence, r.status, r.description, r.created_at
+		       r.detection_method, r.confidence, r.status, r.description, r.association, r.created_at
 		FROM engine_entity_relationships r
 		JOIN engine_ontologies o ON r.ontology_id = o.id
 		WHERE o.project_id = $1 AND o.is_active = true
@@ -155,7 +156,7 @@ func (r *entityRelationshipRepository) GetByTables(ctx context.Context, projectI
 		SELECT r.id, r.ontology_id, r.source_entity_id, r.target_entity_id,
 		       r.source_column_schema, r.source_column_table, r.source_column_name,
 		       r.target_column_schema, r.target_column_table, r.target_column_name,
-		       r.detection_method, r.confidence, r.status, r.description, r.created_at
+		       r.detection_method, r.confidence, r.status, r.description, r.association, r.created_at
 		FROM engine_entity_relationships r
 		JOIN engine_ontologies o ON r.ontology_id = o.id
 		WHERE o.project_id = $1 AND o.is_active = true
@@ -200,6 +201,22 @@ func (r *entityRelationshipRepository) UpdateDescription(ctx context.Context, id
 	return nil
 }
 
+func (r *entityRelationshipRepository) UpdateDescriptionAndAssociation(ctx context.Context, id uuid.UUID, description string, association string) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `UPDATE engine_entity_relationships SET description = $1, association = $2 WHERE id = $3`
+
+	_, err := scope.Conn.Exec(ctx, query, description, association, id)
+	if err != nil {
+		return fmt.Errorf("failed to update entity relationship description and association: %w", err)
+	}
+
+	return nil
+}
+
 func (r *entityRelationshipRepository) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
@@ -223,7 +240,7 @@ func scanEntityRelationship(row pgx.Row) (*models.EntityRelationship, error) {
 		&rel.ID, &rel.OntologyID, &rel.SourceEntityID, &rel.TargetEntityID,
 		&rel.SourceColumnSchema, &rel.SourceColumnTable, &rel.SourceColumnName,
 		&rel.TargetColumnSchema, &rel.TargetColumnTable, &rel.TargetColumnName,
-		&rel.DetectionMethod, &rel.Confidence, &rel.Status, &rel.Description, &rel.CreatedAt,
+		&rel.DetectionMethod, &rel.Confidence, &rel.Status, &rel.Description, &rel.Association, &rel.CreatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
