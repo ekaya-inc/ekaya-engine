@@ -240,15 +240,36 @@ The `association` field is now generated alongside `description` during the exis
 - Both views now reflect actual FK references without needing a separate occurrences table
 - Relationships are the single source of truth for entity locations
 
-#### 2.7 Remove occurrence repository methods
+#### 2.7 Remove occurrence repository methods ✅ COMPLETED
 
-**Files to modify:**
-- `pkg/repositories/ontology_entity_repository.go`
-  - Remove: `CreateOccurrence`, `GetOccurrencesByEntity`, `GetOccurrencesByTable`, `GetAllOccurrencesByProject`, `UpdateOccurrenceRole`
-  - Remove: `scanOntologyEntityOccurrence` helper
+**Implementation Notes:**
+- Removed all occurrence-related methods from `OntologyEntityRepository` interface and implementation in `pkg/repositories/ontology_entity_repository.go`:
+  - Removed `CreateOccurrence` (22 lines)
+  - Removed `GetOccurrencesByEntity` (26 lines)
+  - Removed `GetOccurrencesByTable` (28 lines)
+  - Removed `GetAllOccurrencesByProject` (30 lines)
+  - Removed `UpdateOccurrenceRole` (13 lines)
+  - Removed `scanOntologyEntityOccurrence` helper (16 lines)
+  - Total: ~135 lines of code removed
+- Updated interface documentation comment from "ontology entities and their occurrences" to just "ontology entities"
+- Removed all occurrence method tests from `pkg/repositories/ontology_entity_repository_test.go`:
+  - Removed `TestOntologyEntityRepository_CreateOccurrence_*` tests (3 tests, ~110 lines)
+  - Removed `TestOntologyEntityRepository_GetOccurrencesByEntity_*` tests (2 tests, ~75 lines)
+  - Removed `TestOntologyEntityRepository_GetOccurrencesByTable_*` tests (2 tests, ~90 lines)
+  - Removed `TestOntologyEntityRepository_CascadeDelete_Occurrences` test (~45 lines)
+  - Removed `TestOntologyEntityRepository_NoTenantScope` occurrence assertions (~30 lines)
+  - Total: ~350 lines of test code removed
+- Updated cleanup function comments to reflect that only entities and aliases are cleaned (not occurrences)
+- All remaining tests pass (`make check` succeeds)
 
-- `pkg/repositories/ontology_entity_repository_test.go`
-  - Remove tests for occurrence methods
+**Key Cleanup:**
+- The repository no longer has any knowledge of the occurrences table
+- Occurrence data is now derived at runtime from relationships (see task 2.5)
+- This completes the removal of occurrence persistence logic from the repository layer
+
+**Files modified:**
+- `pkg/repositories/ontology_entity_repository.go` - Removed all occurrence methods
+- `pkg/repositories/ontology_entity_repository_test.go` - Removed all occurrence tests
 
 #### 2.8 Remove occurrence from Entity Discovery
 
