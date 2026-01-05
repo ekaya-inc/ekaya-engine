@@ -479,13 +479,24 @@ export interface EntityOccurrence {
 
 ### Phase 6: Test Updates
 
-#### 6.1 Update integration tests
+#### 6.1 Update integration tests ✅ COMPLETED (2026-01-05)
 
-**Files to modify:**
-- `pkg/services/ontology_context_integration_test.go` - Remove `CreateOccurrence` setup calls
-- `pkg/services/pk_match_integration_test.go` - Remove occurrence assertions
-- `pkg/handlers/entity_integration_test.go` - Update to test computed occurrences
-- `pkg/handlers/glossary_integration_test.go` - Remove occurrence setup
+**Implementation Notes:**
+- Removed all `CreateOccurrence` setup calls from integration tests
+- Updated test expectations to verify computed occurrences from relationships
+- Removed DELETE statements for the dropped `engine_ontology_entity_occurrences` table from cleanup functions
+- Fixed ON CONFLICT clause in `entity_relationship_repository.go` to match migration 028's 9-column unique constraint
+- All integration tests pass with `-tags=integration`
+
+**Files modified:**
+- `pkg/services/ontology_context_integration_test.go` - Removed `CreateOccurrence` calls, updated occurrence count expectations
+- `pkg/services/pk_match_integration_test.go` - Removed `CreateOccurrence` call, removed cleanup of dropped table
+- `pkg/handlers/entity_integration_test.go` - Removed `CreateOccurrence` call, updated expectations to 0 occurrences
+- `pkg/handlers/glossary_integration_test.go` - Removed cleanup of dropped table
+- `pkg/repositories/entity_relationship_repository.go` - Fixed ON CONFLICT clause to include all 9 columns
+
+**Key Fix:**
+The ON CONFLICT clause was referencing the old 6-column unique constraint, but migration 028 changed it to 9 columns (adding `target_column_schema`, `target_column_table`, `target_column_name`). This caused all relationship creation to fail with "no unique or exclusion constraint matching the ON CONFLICT specification".
 
 #### 6.2 Update unit tests
 
