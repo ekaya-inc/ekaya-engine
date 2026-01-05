@@ -2202,19 +2202,26 @@ func TestFKDiscovery_ManualRelationshipType(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: 1 relationship created
+	// Verify: 1 FK relationship discovered (creates 2 rows: forward + reverse)
 	if result.FKRelationships != 1 {
 		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
 	}
 
-	if len(mocks.relationshipRepo.created) != 1 {
-		t.Fatalf("expected 1 relationship to be created, got %d", len(mocks.relationshipRepo.created))
+	// Bidirectional: 2 relationships created (forward + reverse)
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
 	}
 
-	// Verify: detection_method is "manual"
-	rel := mocks.relationshipRepo.created[0]
-	if rel.DetectionMethod != models.DetectionMethodManual {
-		t.Errorf("expected DetectionMethod=%q, got %q", models.DetectionMethodManual, rel.DetectionMethod)
+	// Verify: forward relationship has detection_method="manual"
+	forwardRel := mocks.relationshipRepo.created[0]
+	if forwardRel.DetectionMethod != models.DetectionMethodManual {
+		t.Errorf("expected forward DetectionMethod=%q, got %q", models.DetectionMethodManual, forwardRel.DetectionMethod)
+	}
+
+	// Verify: reverse relationship also has detection_method="manual"
+	reverseRel := mocks.relationshipRepo.created[1]
+	if reverseRel.DetectionMethod != models.DetectionMethodManual {
+		t.Errorf("expected reverse DetectionMethod=%q, got %q", models.DetectionMethodManual, reverseRel.DetectionMethod)
 	}
 }
 
@@ -2303,19 +2310,26 @@ func TestFKDiscovery_ForeignKeyRelationshipType(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: 1 relationship created
+	// Verify: 1 FK relationship discovered (creates 2 rows: forward + reverse)
 	if result.FKRelationships != 1 {
 		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
 	}
 
-	if len(mocks.relationshipRepo.created) != 1 {
-		t.Fatalf("expected 1 relationship to be created, got %d", len(mocks.relationshipRepo.created))
+	// Bidirectional: 2 relationships created (forward + reverse)
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
 	}
 
-	// Verify: detection_method is "foreign_key"
-	rel := mocks.relationshipRepo.created[0]
-	if rel.DetectionMethod != models.DetectionMethodForeignKey {
-		t.Errorf("expected DetectionMethod=%q, got %q", models.DetectionMethodForeignKey, rel.DetectionMethod)
+	// Verify: forward relationship has detection_method="foreign_key"
+	forwardRel := mocks.relationshipRepo.created[0]
+	if forwardRel.DetectionMethod != models.DetectionMethodForeignKey {
+		t.Errorf("expected forward DetectionMethod=%q, got %q", models.DetectionMethodForeignKey, forwardRel.DetectionMethod)
+	}
+
+	// Verify: reverse relationship also has detection_method="foreign_key"
+	reverseRel := mocks.relationshipRepo.created[1]
+	if reverseRel.DetectionMethod != models.DetectionMethodForeignKey {
+		t.Errorf("expected reverse DetectionMethod=%q, got %q", models.DetectionMethodForeignKey, reverseRel.DetectionMethod)
 	}
 }
 
