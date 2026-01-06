@@ -31,7 +31,7 @@ type DatasourceRepository interface {
 	List(ctx context.Context, projectID uuid.UUID) ([]*models.Datasource, []string, error)
 
 	// Update modifies an existing datasource.
-	Update(ctx context.Context, id uuid.UUID, name, dsType, encryptedConfig string) error
+	Update(ctx context.Context, id uuid.UUID, name, dsType, provider, encryptedConfig string) error
 
 	// Delete removes a datasource by ID.
 	Delete(ctx context.Context, id uuid.UUID) error
@@ -79,14 +79,15 @@ func (r *datasourceRepository) Create(ctx context.Context, ds *models.Datasource
 
 	// Insert the new datasource
 	query := `
-		INSERT INTO engine_datasources (project_id, name, datasource_type, datasource_config, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO engine_datasources (project_id, name, datasource_type, provider, datasource_config, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id`
 
 	err = tx.QueryRow(ctx, query,
 		ds.ProjectID,
 		ds.Name,
 		ds.DatasourceType,
+		ds.Provider,
 		encryptedConfig,
 		ds.CreatedAt,
 		ds.UpdatedAt,
@@ -115,21 +116,26 @@ func (r *datasourceRepository) GetByID(ctx context.Context, projectID, id uuid.U
 	}
 
 	query := `
-		SELECT id, project_id, name, datasource_type, datasource_config, created_at, updated_at
+		SELECT id, project_id, name, datasource_type, provider, datasource_config, created_at, updated_at
 		FROM engine_datasources
 		WHERE project_id = $1 AND id = $2`
 
 	var ds models.Datasource
 	var encryptedConfig string
+	var provider *string
 	err := scope.Conn.QueryRow(ctx, query, projectID, id).Scan(
 		&ds.ID,
 		&ds.ProjectID,
 		&ds.Name,
 		&ds.DatasourceType,
+		&provider,
 		&encryptedConfig,
 		&ds.CreatedAt,
 		&ds.UpdatedAt,
 	)
+	if provider != nil {
+		ds.Provider = *provider
+	}
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, "", fmt.Errorf("datasource not found")
@@ -148,21 +154,26 @@ func (r *datasourceRepository) GetByName(ctx context.Context, projectID uuid.UUI
 	}
 
 	query := `
-		SELECT id, project_id, name, datasource_type, datasource_config, created_at, updated_at
+		SELECT id, project_id, name, datasource_type, provider, datasource_config, created_at, updated_at
 		FROM engine_datasources
 		WHERE project_id = $1 AND name = $2`
 
 	var ds models.Datasource
 	var encryptedConfig string
+	var provider *string
 	err := scope.Conn.QueryRow(ctx, query, projectID, name).Scan(
 		&ds.ID,
 		&ds.ProjectID,
 		&ds.Name,
 		&ds.DatasourceType,
+		&provider,
 		&encryptedConfig,
 		&ds.CreatedAt,
 		&ds.UpdatedAt,
 	)
+	if provider != nil {
+		ds.Provider = *provider
+	}
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, "", fmt.Errorf("datasource not found")
@@ -181,7 +192,7 @@ func (r *datasourceRepository) List(ctx context.Context, projectID uuid.UUID) ([
 	}
 
 	query := `
-		SELECT id, project_id, name, datasource_type, datasource_config, created_at, updated_at
+		SELECT id, project_id, name, datasource_type, provider, datasource_config, created_at, updated_at
 		FROM engine_datasources
 		WHERE project_id = $1
 		ORDER BY created_at DESC`
@@ -197,17 +208,22 @@ func (r *datasourceRepository) List(ctx context.Context, projectID uuid.UUID) ([
 	for rows.Next() {
 		var ds models.Datasource
 		var encryptedConfig string
+		var provider *string
 		err := rows.Scan(
 			&ds.ID,
 			&ds.ProjectID,
 			&ds.Name,
 			&ds.DatasourceType,
+			&provider,
 			&encryptedConfig,
 			&ds.CreatedAt,
 			&ds.UpdatedAt,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to scan datasource: %w", err)
+		}
+		if provider != nil {
+			ds.Provider = *provider
 		}
 		datasources = append(datasources, &ds)
 		encryptedConfigs = append(encryptedConfigs, encryptedConfig)
@@ -221,7 +237,7 @@ func (r *datasourceRepository) List(ctx context.Context, projectID uuid.UUID) ([
 }
 
 // Update modifies an existing datasource.
-func (r *datasourceRepository) Update(ctx context.Context, id uuid.UUID, name, dsType, encryptedConfig string) error {
+func (r *datasourceRepository) Update(ctx context.Context, id uuid.UUID, name, dsType, provider, encryptedConfig string) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return fmt.Errorf("no tenant scope in context")
@@ -229,10 +245,10 @@ func (r *datasourceRepository) Update(ctx context.Context, id uuid.UUID, name, d
 
 	query := `
 		UPDATE engine_datasources
-		SET name = $2, datasource_type = $3, datasource_config = $4, updated_at = $5
+		SET name = $2, datasource_type = $3, provider = $4, datasource_config = $5, updated_at = $6
 		WHERE id = $1`
 
-	result, err := scope.Conn.Exec(ctx, query, id, name, dsType, encryptedConfig, time.Now())
+	result, err := scope.Conn.Exec(ctx, query, id, name, dsType, provider, encryptedConfig, time.Now())
 	if err != nil {
 		return fmt.Errorf("failed to update datasource: %w", err)
 	}

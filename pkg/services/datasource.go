@@ -17,7 +17,7 @@ import (
 // DatasourceService defines the interface for datasource operations.
 type DatasourceService interface {
 	// Create creates a new datasource with encrypted config.
-	Create(ctx context.Context, projectID uuid.UUID, name, dsType string, config map[string]any) (*models.Datasource, error)
+	Create(ctx context.Context, projectID uuid.UUID, name, dsType, provider string, config map[string]any) (*models.Datasource, error)
 
 	// Get retrieves a datasource by ID within a project with decrypted config.
 	Get(ctx context.Context, projectID, id uuid.UUID) (*models.Datasource, error)
@@ -29,7 +29,7 @@ type DatasourceService interface {
 	List(ctx context.Context, projectID uuid.UUID) ([]*models.Datasource, error)
 
 	// Update modifies a datasource with encrypted config.
-	Update(ctx context.Context, id uuid.UUID, name, dsType string, config map[string]any) error
+	Update(ctx context.Context, id uuid.UUID, name, dsType, provider string, config map[string]any) error
 
 	// Delete removes a datasource.
 	Delete(ctx context.Context, id uuid.UUID) error
@@ -68,7 +68,7 @@ func NewDatasourceService(
 }
 
 // Create creates a new datasource with encrypted config.
-func (s *datasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType string, config map[string]any) (*models.Datasource, error) {
+func (s *datasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType, provider string, config map[string]any) (*models.Datasource, error) {
 	// Validate inputs
 	if name == "" {
 		return nil, fmt.Errorf("datasource name is required")
@@ -91,6 +91,7 @@ func (s *datasourceService) Create(ctx context.Context, projectID uuid.UUID, nam
 		ProjectID:      projectID,
 		Name:           name,
 		DatasourceType: dsType,
+		Provider:       provider,
 		Config:         config,
 	}
 
@@ -184,7 +185,7 @@ func (s *datasourceService) List(ctx context.Context, projectID uuid.UUID) ([]*m
 }
 
 // Update modifies a datasource with encrypted config.
-func (s *datasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType string, config map[string]any) error {
+func (s *datasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType, provider string, config map[string]any) error {
 	// Validate inputs
 	if name == "" {
 		return fmt.Errorf("datasource name is required")
@@ -202,7 +203,7 @@ func (s *datasourceService) Update(ctx context.Context, id uuid.UUID, name, dsTy
 		return fmt.Errorf("failed to encrypt config: %w", err)
 	}
 
-	if err := s.repo.Update(ctx, id, name, dsType, encryptedConfig); err != nil {
+	if err := s.repo.Update(ctx, id, name, dsType, provider, encryptedConfig); err != nil {
 		return err
 	}
 
