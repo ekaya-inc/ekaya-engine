@@ -718,3 +718,304 @@ func TestGlossaryService_SuggestTerms_WithColumnDetails(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, suggestions, 1)
 }
+
+// ============================================================================
+// Tests - DiscoverGlossaryTerms
+// ============================================================================
+
+func TestGlossaryService_DiscoverGlossaryTerms(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Transaction",
+			Description:  "Financial transactions",
+			Domain:       "billing",
+			PrimaryTable: "billing_transactions",
+		},
+	}
+
+	llmResponse := `[
+		{
+			"term": "Revenue",
+			"definition": "Total earned amount from completed transactions",
+			"sql_pattern": "SUM(earned_amount) WHERE state = 'completed'",
+			"base_table": "billing_transactions",
+			"columns_used": ["earned_amount", "state"],
+			"filters": [{"column": "state", "operator": "=", "values": ["completed"]}],
+			"aggregation": "SUM"
+		}
+	]`
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+			DomainSummary: &models.DomainSummary{
+				Description: "E-commerce platform",
+			},
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	llmClient := &mockLLMClientForGlossary{responseContent: llmResponse}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+	logger := zap.NewNop()
+
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, llmFactory, logger)
+
+	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	// Verify term was saved to database
+	terms, err := svc.GetTerms(ctx, projectID)
+	require.NoError(t, err)
+	require.Len(t, terms, 1)
+	assert.Equal(t, "Revenue", terms[0].Term)
+	assert.Equal(t, "discovered", terms[0].Source)
+	assert.Equal(t, "billing_transactions", terms[0].BaseTable)
+}
+
+func TestGlossaryService_DiscoverGlossaryTerms_SkipsDuplicates(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Transaction",
+			PrimaryTable: "transactions",
+		},
+	}
+
+	llmResponse := `[
+		{
+			"term": "Revenue",
+			"definition": "Total revenue",
+			"base_table": "transactions"
+		}
+	]`
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	llmClient := &mockLLMClientForGlossary{responseContent: llmResponse}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+	logger := zap.NewNop()
+
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, llmFactory, logger)
+
+	// Create existing term with same name
+	existingTerm := &models.BusinessGlossaryTerm{
+		Term:       "Revenue",
+		Definition: "Existing definition",
+		Source:     "user",
+	}
+	err := svc.CreateTerm(ctx, projectID, existingTerm)
+	require.NoError(t, err)
+
+	// Attempt to discover - should skip duplicate
+	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
+	require.NoError(t, err)
+	assert.Equal(t, 0, count) // No new terms discovered
+
+	// Verify only one term exists
+	terms, err := svc.GetTerms(ctx, projectID)
+	require.NoError(t, err)
+	assert.Len(t, terms, 1)
+	assert.Equal(t, "user", terms[0].Source) // Original term unchanged
+}
+
+func TestGlossaryService_DiscoverGlossaryTerms_NoEntities(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: []*models.OntologyEntity{}}
+	llmFactory := &mockLLMFactoryForGlossary{}
+	logger := zap.NewNop()
+
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, llmFactory, logger)
+
+	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
+	require.NoError(t, err)
+	assert.Equal(t, 0, count)
+}
+
+// ============================================================================
+// Tests - EnrichGlossaryTerms
+// ============================================================================
+
+func TestGlossaryService_EnrichGlossaryTerms(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Transaction",
+			PrimaryTable: "transactions",
+		},
+	}
+
+	// LLM response for enrichment
+	enrichmentResponse := `{
+		"sql_pattern": "SUM(amount) WHERE status = 'completed'",
+		"base_table": "transactions",
+		"columns_used": ["amount", "status"],
+		"filters": [{"column": "status", "operator": "=", "values": ["completed"]}],
+		"aggregation": "SUM"
+	}`
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	llmClient := &mockLLMClientForGlossary{responseContent: enrichmentResponse}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+	logger := zap.NewNop()
+
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, llmFactory, logger)
+
+	// Create unenriched term
+	term := &models.BusinessGlossaryTerm{
+		Term:       "Revenue",
+		Definition: "Total revenue",
+		Source:     "discovered",
+		// No SQL pattern - needs enrichment
+	}
+	err := svc.CreateTerm(ctx, projectID, term)
+	require.NoError(t, err)
+
+	// Enrich terms
+	err = svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	require.NoError(t, err)
+
+	// Verify enrichment was applied
+	terms, err := svc.GetTerms(ctx, projectID)
+	require.NoError(t, err)
+	require.Len(t, terms, 1)
+	assert.Equal(t, "SUM(amount) WHERE status = 'completed'", terms[0].SQLPattern)
+	assert.Equal(t, "transactions", terms[0].BaseTable)
+	assert.Equal(t, []string{"amount", "status"}, terms[0].ColumnsUsed)
+	assert.Equal(t, "SUM", terms[0].Aggregation)
+	assert.Len(t, terms[0].Filters, 1)
+	assert.Equal(t, "status", terms[0].Filters[0].Column)
+}
+
+func TestGlossaryService_EnrichGlossaryTerms_OnlyEnrichesUnenrichedTerms(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Transaction",
+			PrimaryTable: "transactions",
+		},
+	}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	llmClient := &mockLLMClientForGlossary{responseContent: "{}"}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+	logger := zap.NewNop()
+
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, llmFactory, logger)
+
+	// Create already-enriched term
+	enrichedTerm := &models.BusinessGlossaryTerm{
+		Term:        "Revenue",
+		Definition:  "Total revenue",
+		Source:      "discovered",
+		SQLPattern:  "SUM(amount)",
+		BaseTable:   "transactions",
+		ColumnsUsed: []string{"amount"},
+	}
+	err := svc.CreateTerm(ctx, projectID, enrichedTerm)
+	require.NoError(t, err)
+
+	// Create user term (should be skipped)
+	userTerm := &models.BusinessGlossaryTerm{
+		Term:       "GMV",
+		Definition: "Gross merchandise value",
+		Source:     "user",
+	}
+	err = svc.CreateTerm(ctx, projectID, userTerm)
+	require.NoError(t, err)
+
+	// Enrich terms - should not process any terms
+	err = svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	require.NoError(t, err)
+
+	// Verify no changes
+	terms, err := svc.GetTerms(ctx, projectID)
+	require.NoError(t, err)
+	assert.Len(t, terms, 2)
+}
+
+func TestGlossaryService_EnrichGlossaryTerms_NoUnenrichedTerms(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{}
+	llmFactory := &mockLLMFactoryForGlossary{}
+	logger := zap.NewNop()
+
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, llmFactory, logger)
+
+	// No terms exist
+	err := svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	require.NoError(t, err)
+}

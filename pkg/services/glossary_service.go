@@ -32,6 +32,16 @@ type GlossaryService interface {
 
 	// SuggestTerms uses LLM to analyze the ontology and suggest business terms.
 	SuggestTerms(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error)
+
+	// DiscoverGlossaryTerms identifies candidate business terms from ontology.
+	// Saves discovered terms to database with source="discovered".
+	// Returns count of terms discovered.
+	DiscoverGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error)
+
+	// EnrichGlossaryTerms adds SQL patterns, filters, and aggregations to discovered terms.
+	// Processes terms in parallel via LLM calls.
+	// Only enriches terms with source="discovered" that lack enrichment.
+	EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error
 }
 
 type glossaryService struct {
@@ -380,4 +390,345 @@ func (s *glossaryService) parseSuggestTermsResponse(content string, projectID uu
 	}
 
 	return terms, nil
+}
+
+func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error) {
+	s.logger.Info("Starting glossary term discovery",
+		zap.String("project_id", projectID.String()),
+		zap.String("ontology_id", ontologyID.String()))
+
+	// Get active ontology for context
+	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	if err != nil {
+		return 0, fmt.Errorf("get active ontology: %w", err)
+	}
+	if ontology == nil {
+		return 0, fmt.Errorf("no active ontology found for project")
+	}
+
+	// Get entities for context
+	entities, err := s.entityRepo.GetByProject(ctx, projectID)
+	if err != nil {
+		return 0, fmt.Errorf("get entities: %w", err)
+	}
+
+	if len(entities) == 0 {
+		s.logger.Info("No entities found, skipping term discovery",
+			zap.String("project_id", projectID.String()))
+		return 0, nil
+	}
+
+	// Build context for LLM
+	prompt := s.buildSuggestTermsPrompt(ontology, entities)
+	systemMessage := s.suggestTermsSystemMessage()
+
+	// Create LLM client
+	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
+	if err != nil {
+		return 0, fmt.Errorf("create LLM client: %w", err)
+	}
+
+	// Call LLM
+	result, err := llmClient.GenerateResponse(ctx, prompt, systemMessage, 0.3, false)
+	if err != nil {
+		return 0, fmt.Errorf("LLM generate response: %w", err)
+	}
+
+	s.logger.Debug("LLM response received",
+		zap.String("project_id", projectID.String()),
+		zap.Int("prompt_tokens", result.PromptTokens),
+		zap.Int("completion_tokens", result.CompletionTokens))
+
+	// Parse response
+	suggestions, err := s.parseSuggestTermsResponse(result.Content, projectID)
+	if err != nil {
+		return 0, fmt.Errorf("parse LLM response: %w", err)
+	}
+
+	// Save discovered terms to database with source="discovered"
+	discoveredCount := 0
+	for _, term := range suggestions {
+		// Check for duplicates
+		existing, err := s.glossaryRepo.GetByTerm(ctx, projectID, term.Term)
+		if err != nil {
+			s.logger.Error("Failed to check for duplicate term",
+				zap.String("project_id", projectID.String()),
+				zap.String("term", term.Term),
+				zap.Error(err))
+			continue
+		}
+
+		if existing != nil {
+			s.logger.Debug("Term already exists, skipping",
+				zap.String("term", term.Term))
+			continue
+		}
+
+		// Set source to "discovered" instead of "suggested"
+		term.Source = "discovered"
+
+		// Create the term
+		if err := s.glossaryRepo.Create(ctx, term); err != nil {
+			s.logger.Error("Failed to create discovered term",
+				zap.String("project_id", projectID.String()),
+				zap.String("term", term.Term),
+				zap.Error(err))
+			continue
+		}
+
+		discoveredCount++
+		s.logger.Debug("Created discovered term",
+			zap.String("term", term.Term),
+			zap.String("term_id", term.ID.String()))
+	}
+
+	s.logger.Info("Completed glossary term discovery",
+		zap.String("project_id", projectID.String()),
+		zap.Int("terms_discovered", discoveredCount),
+		zap.Int("terms_suggested", len(suggestions)))
+
+	return discoveredCount, nil
+}
+
+func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error {
+	s.logger.Info("Starting glossary term enrichment",
+		zap.String("project_id", projectID.String()),
+		zap.String("ontology_id", ontologyID.String()))
+
+	// Get terms that need enrichment (discovered terms without sql_pattern)
+	allTerms, err := s.glossaryRepo.GetByProject(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("get glossary terms: %w", err)
+	}
+
+	// Filter for unenriched discovered terms
+	var unenrichedTerms []*models.BusinessGlossaryTerm
+	for _, term := range allTerms {
+		if term.Source == "discovered" && term.SQLPattern == "" {
+			unenrichedTerms = append(unenrichedTerms, term)
+		}
+	}
+
+	if len(unenrichedTerms) == 0 {
+		s.logger.Info("No unenriched terms found",
+			zap.String("project_id", projectID.String()))
+		return nil
+	}
+
+	s.logger.Info("Found unenriched terms to process",
+		zap.Int("count", len(unenrichedTerms)))
+
+	// Get active ontology for context
+	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("get active ontology: %w", err)
+	}
+	if ontology == nil {
+		return fmt.Errorf("no active ontology found for project")
+	}
+
+	// Get entities for context
+	entities, err := s.entityRepo.GetByProject(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("get entities: %w", err)
+	}
+
+	// Create LLM client
+	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("create LLM client: %w", err)
+	}
+
+	// Process each term (for now, sequentially - can be parallelized later)
+	successCount := 0
+	for _, term := range unenrichedTerms {
+		prompt := s.buildEnrichTermPrompt(term, ontology, entities)
+		systemMessage := s.enrichTermSystemMessage()
+
+		// Call LLM
+		result, err := llmClient.GenerateResponse(ctx, prompt, systemMessage, 0.3, false)
+		if err != nil {
+			s.logger.Error("Failed to enrich term with LLM",
+				zap.String("term_id", term.ID.String()),
+				zap.String("term", term.Term),
+				zap.Error(err))
+			continue
+		}
+
+		// Parse enrichment response
+		enrichment, err := s.parseEnrichTermResponse(result.Content)
+		if err != nil {
+			s.logger.Error("Failed to parse enrichment response",
+				zap.String("term_id", term.ID.String()),
+				zap.String("term", term.Term),
+				zap.Error(err))
+			continue
+		}
+
+		// Update term with enrichment
+		term.SQLPattern = enrichment.SQLPattern
+		term.BaseTable = enrichment.BaseTable
+		term.ColumnsUsed = enrichment.ColumnsUsed
+
+		// Convert filters
+		filters := make([]models.Filter, 0, len(enrichment.Filters))
+		for _, f := range enrichment.Filters {
+			filters = append(filters, models.Filter{
+				Column:   f.Column,
+				Operator: f.Operator,
+				Values:   f.Values,
+			})
+		}
+		term.Filters = filters
+		term.Aggregation = enrichment.Aggregation
+
+		if err := s.glossaryRepo.Update(ctx, term); err != nil {
+			s.logger.Error("Failed to update enriched term",
+				zap.String("term_id", term.ID.String()),
+				zap.String("term", term.Term),
+				zap.Error(err))
+			continue
+		}
+
+		successCount++
+		s.logger.Debug("Enriched term",
+			zap.String("term", term.Term),
+			zap.String("term_id", term.ID.String()))
+	}
+
+	s.logger.Info("Completed glossary term enrichment",
+		zap.String("project_id", projectID.String()),
+		zap.Int("terms_enriched", successCount),
+		zap.Int("terms_processed", len(unenrichedTerms)))
+
+	return nil
+}
+
+func (s *glossaryService) enrichTermSystemMessage() string {
+	return `You are a SQL expert and business analyst. Your task is to generate SQL patterns for calculating business metrics based on database schema context.
+
+For each business term, provide:
+1. A SQL pattern showing how to calculate this metric
+2. The base table(s) to query
+3. The columns involved in the calculation
+4. Any filters that should be applied
+5. The aggregation function used (if any)
+
+Be specific and use exact table/column names from the provided schema.`
+}
+
+func (s *glossaryService) buildEnrichTermPrompt(
+	term *models.BusinessGlossaryTerm,
+	ontology *models.TieredOntology,
+	entities []*models.OntologyEntity,
+) string {
+	var sb strings.Builder
+
+	sb.WriteString("# Schema Context\n\n")
+
+	// Include domain summary
+	if ontology.DomainSummary != nil && ontology.DomainSummary.Description != "" {
+		sb.WriteString("## Domain Overview\n\n")
+		sb.WriteString(ontology.DomainSummary.Description)
+		sb.WriteString("\n\n")
+	}
+
+	// Include conventions
+	if ontology.DomainSummary != nil && ontology.DomainSummary.Conventions != nil {
+		conv := ontology.DomainSummary.Conventions
+		sb.WriteString("## Conventions\n\n")
+
+		if conv.SoftDelete != nil && conv.SoftDelete.Enabled {
+			sb.WriteString(fmt.Sprintf("- Soft delete: Filter with `%s`\n", conv.SoftDelete.Filter))
+		}
+		if conv.Currency != nil {
+			if conv.Currency.Format == "cents" {
+				sb.WriteString("- Currency: Stored in cents, divide by 100 for display\n")
+			} else {
+				sb.WriteString("- Currency: Stored as dollars/decimal\n")
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// List entities
+	sb.WriteString("## Entities\n\n")
+	for _, e := range entities {
+		if e.IsDeleted {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("### %s\n", e.Name))
+		sb.WriteString(fmt.Sprintf("- Table: `%s`\n", e.PrimaryTable))
+		if e.Description != "" {
+			sb.WriteString(fmt.Sprintf("- Description: %s\n", e.Description))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Include column details if available
+	if ontology.ColumnDetails != nil && len(ontology.ColumnDetails) > 0 {
+		sb.WriteString("## Key Columns\n\n")
+		for tableName, columns := range ontology.ColumnDetails {
+			relevantCols := make([]models.ColumnDetail, 0)
+			for _, col := range columns {
+				if col.Role == "measure" || col.Role == "dimension" {
+					relevantCols = append(relevantCols, col)
+				}
+			}
+			if len(relevantCols) > 0 {
+				sb.WriteString(fmt.Sprintf("**%s:**\n", tableName))
+				for _, col := range relevantCols {
+					colInfo := fmt.Sprintf("- `%s`", col.Name)
+					if col.Role != "" {
+						colInfo += fmt.Sprintf(" [%s]", col.Role)
+					}
+					if col.Description != "" {
+						colInfo += fmt.Sprintf(" - %s", col.Description)
+					}
+					sb.WriteString(colInfo + "\n")
+				}
+				sb.WriteString("\n")
+			}
+		}
+	}
+
+	// Add the term to enrich
+	sb.WriteString("## Term to Enrich\n\n")
+	sb.WriteString(fmt.Sprintf("**Term:** %s\n", term.Term))
+	sb.WriteString(fmt.Sprintf("**Definition:** %s\n\n", term.Definition))
+
+	// Response format
+	sb.WriteString("## Response Format\n\n")
+	sb.WriteString("Respond with a JSON object containing the enrichment:\n")
+	sb.WriteString("```json\n")
+	sb.WriteString(`{
+  "sql_pattern": "SUM(amount) WHERE status = 'completed'",
+  "base_table": "transactions",
+  "columns_used": ["amount", "status"],
+  "filters": [
+    {"column": "status", "operator": "=", "values": ["completed"]}
+  ],
+  "aggregation": "SUM"
+}
+`)
+	sb.WriteString("```\n")
+
+	return sb.String()
+}
+
+type termEnrichment struct {
+	SQLPattern  string            `json:"sql_pattern"`
+	BaseTable   string            `json:"base_table"`
+	ColumnsUsed []string          `json:"columns_used"`
+	Filters     []suggestedFilter `json:"filters"`
+	Aggregation string            `json:"aggregation"`
+}
+
+func (s *glossaryService) parseEnrichTermResponse(content string) (*termEnrichment, error) {
+	enrichment, err := llm.ParseJSONResponse[termEnrichment](content)
+	if err != nil {
+		return nil, fmt.Errorf("parse enrichment JSON: %w", err)
+	}
+
+	return &enrichment, nil
 }

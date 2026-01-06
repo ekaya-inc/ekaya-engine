@@ -237,7 +237,16 @@ ontologyDAGService.SetGlossaryEnrichmentMethods(services.NewGlossaryEnrichmentAd
    - Added both nodes to `AllDAGNodes()` return slice
    - Pattern follows existing node definitions (EntityDiscovery, EntityEnrichment, etc.)
    - Backward compatibility maintained for deprecated RelationshipDiscovery node
-2. [ ] Add methods to `pkg/services/glossary_service.go` interface and implementation
+2. [x] Add methods to `pkg/services/glossary_service.go` interface and implementation
+   - **COMPLETED**: Added `DiscoverGlossaryTerms` and `EnrichGlossaryTerms` methods to GlossaryService interface
+   - **DiscoverGlossaryTerms**: Reuses existing `SuggestTerms` logic (prompt building, LLM call, parsing) but saves to database with source="discovered"
+   - Includes duplicate checking via `GetByTerm()` before creating terms
+   - Returns count of newly discovered terms (skips duplicates)
+   - **EnrichGlossaryTerms**: Fetches unenriched terms (source="discovered" + empty sql_pattern), builds enrichment prompts, calls LLM, parses response, updates database
+   - Processes terms sequentially (comment notes parallelization can be added later if needed)
+   - Enrichment response includes: sql_pattern, base_table, columns_used, filters, aggregation
+   - **Testing**: Added comprehensive unit tests covering success cases, duplicate handling, empty states, and filtering logic
+   - Tests verify: term creation with correct source, skipping duplicates, enrichment field population, selective processing of unenriched terms
 3. [ ] Create `pkg/services/dag/glossary_discovery_node.go`
 4. [ ] Create `pkg/services/dag/glossary_enrichment_node.go`
 5. [ ] Update `pkg/services/dag_adapters.go` with two new adapters
