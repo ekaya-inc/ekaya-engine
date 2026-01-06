@@ -104,6 +104,8 @@ const (
 	DAGNodePKMatchDiscovery       DAGNodeName = "PKMatchDiscovery"
 	DAGNodeRelationshipEnrichment DAGNodeName = "RelationshipEnrichment"
 	DAGNodeOntologyFinalization   DAGNodeName = "OntologyFinalization"
+	DAGNodeGlossaryDiscovery      DAGNodeName = "GlossaryDiscovery"
+	DAGNodeGlossaryEnrichment     DAGNodeName = "GlossaryEnrichment"
 
 	// Deprecated: Use DAGNodeFKDiscovery instead. Kept for backward compatibility with existing DAGs.
 	DAGNodeRelationshipDiscovery DAGNodeName = "RelationshipDiscovery"
@@ -118,6 +120,8 @@ var DAGNodeOrder = map[DAGNodeName]int{
 	DAGNodePKMatchDiscovery:       5,
 	DAGNodeRelationshipEnrichment: 6,
 	DAGNodeOntologyFinalization:   7,
+	DAGNodeGlossaryDiscovery:      8,
+	DAGNodeGlossaryEnrichment:     9,
 
 	// Deprecated: mapped to same order as FKDiscovery for backward compatibility
 	DAGNodeRelationshipDiscovery: 3,
@@ -133,6 +137,8 @@ func AllDAGNodes() []DAGNodeName {
 		DAGNodePKMatchDiscovery,
 		DAGNodeRelationshipEnrichment,
 		DAGNodeOntologyFinalization,
+		DAGNodeGlossaryDiscovery,
+		DAGNodeGlossaryEnrichment,
 	}
 }
 
