@@ -112,25 +112,29 @@ Add a new "Glossary" tile to the Intelligence section on the ProjectDashboard. T
 
 **File:** `ui/src/App.tsx` (lines 15, 46)
 
-### Step 5: Add Tile to Dashboard
+### Step 5: Add Tile to Dashboard [x]
 
-In `ui/src/pages/ProjectDashboard.tsx`:
+**Status:** COMPLETE
 
-1. Import `BookOpen` icon from lucide-react (add to existing import ~line 14)
+**Implementation:** Added Glossary tile to ProjectDashboard.tsx:
+- Imported `BookOpen` icon from lucide-react (added to existing imports at line 3)
+- Added Glossary tile to `intelligenceTiles` array after Relationships tile (lines 426-432)
+- Tile configuration:
+  - title: 'Glossary'
+  - icon: BookOpen
+  - path: `/projects/${pid}/glossary`
+  - disabled: !isConnected || !hasSelectedTables
+  - color: 'cyan'
 
-2. Add tile to `intelligenceTiles` array (after Relationships, ~line 425):
+**Disabled logic:** Same as Entities tile - requires datasource and selected tables, but NOT AI config since glossary data is database-derived.
 
-```typescript
-{
-  title: 'Glossary',
-  icon: BookOpen,
-  path: `/projects/${pid}/glossary`,
-  disabled: !isConnected || !hasSelectedTables,
-  color: 'cyan',
-}
-```
+**Files modified:**
+- `ui/src/pages/ProjectDashboard.tsx` - Added BookOpen import and Glossary tile
 
-**Disabled logic:** Same as Entities - requires datasource and tables, but NOT AI config (database-derived data).
+**Verification:**
+- TypeScript typecheck passes
+- All linting passes
+- All tests pass (make check completed successfully)
 
 ## Empty State Behavior
 
