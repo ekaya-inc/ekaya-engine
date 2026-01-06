@@ -74,7 +74,7 @@ COMMENT ON COLUMN engine_business_glossary.aggregation IS
     'Aggregation function used (e.g., "SUM", "COUNT", "AVG")';
 
 COMMENT ON COLUMN engine_business_glossary.source IS
-    'Origin of the term: "user" (manually defined) or "suggested" (LLM-generated)';
+    'Origin of the term: "user" (manually defined), "suggested" (LLM-generated, interactive), or "discovered" (LLM-generated, DAG workflow)';
 
 COMMENT ON COLUMN engine_business_glossary.created_by IS
     'User who created this term (null for suggested terms)';

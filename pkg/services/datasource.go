@@ -217,6 +217,8 @@ func (s *datasourceService) Update(ctx context.Context, id uuid.UUID, name, dsTy
 // When a datasource is deleted, CASCADE deletes schema tables/columns,
 // but ontology entities would remain orphaned. This method explicitly
 // clears the ontology to prevent stale data.
+// If the deleted datasource was the project's default, the default is cleared
+// so that a newly created datasource can become the default.
 func (s *datasourceService) Delete(ctx context.Context, id uuid.UUID) error {
 	// Get project_id before deletion
 	projectID, err := s.repo.GetProjectID(ctx, id)
@@ -236,6 +238,28 @@ func (s *datasourceService) Delete(ctx context.Context, id uuid.UUID) error {
 			zap.String("project_id", projectID.String()),
 			zap.Error(err))
 		return fmt.Errorf("failed to clear ontology data: %w", err)
+	}
+
+	// Clear default_datasource_id if this was the default
+	// This ensures a new datasource can become the default when reconnected
+	if s.projectService != nil {
+		currentDefault, err := s.projectService.GetDefaultDatasourceID(ctx, projectID)
+		if err != nil {
+			s.logger.Warn("Failed to check default datasource during deletion",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		} else if currentDefault == id {
+			if err := s.projectService.SetDefaultDatasourceID(ctx, projectID, uuid.Nil); err != nil {
+				s.logger.Warn("Failed to clear default datasource after deletion",
+					zap.String("project_id", projectID.String()),
+					zap.String("datasource_id", id.String()),
+					zap.Error(err))
+			} else {
+				s.logger.Info("Cleared default datasource after deletion",
+					zap.String("project_id", projectID.String()),
+					zap.String("datasource_id", id.String()))
+			}
+		}
 	}
 
 	s.logger.Info("Deleted datasource and cleared ontology",
