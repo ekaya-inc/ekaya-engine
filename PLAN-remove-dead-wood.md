@@ -35,17 +35,27 @@ After migrating to the DAG-based ontology extraction workflow, several pieces of
 - Added test `TestOntologyFinalization_SampleQuestionsAreEmpty` to verify behavior
 - All tests pass (`make check`)
 
-### 3. Clean up unused repository methods in `pkg/repositories/ontology_repository.go`
+### 3. Clean up unused repository methods in `pkg/repositories/ontology_repository.go` ✅
 
-- [ ] Remove `GetByVersion()` from interface and implementation
-- [ ] Remove `SetActive()` from interface and implementation
-- [ ] Remove `DeactivateAll()` from interface and implementation
-- [ ] Remove `UpdateMetadata()` from interface and implementation
-- [ ] Remove `WriteCleanOntology()` no-op from interface and implementation
-- [ ] Update any test files that reference these methods
-- [ ] Run `make check`
+- [x] Remove `GetByVersion()` from interface and implementation
+- [x] Remove `SetActive()` from interface and implementation
+- [x] Remove `DeactivateAll()` from interface and implementation
+- [x] Remove `UpdateMetadata()` from interface and implementation
+- [x] Remove `WriteCleanOntology()` no-op from interface and implementation
+- [x] Update any test files that reference these methods
+- [x] Run `make check`
 
 **Risk:** Medium - need to verify no tests depend on these methods.
+
+**Completed:** Successfully removed 5 unused repository methods from the `OntologyRepository` interface and implementation:
+- Removed methods: `GetByVersion()`, `SetActive()`, `DeactivateAll()`, `UpdateMetadata()`, and `WriteCleanOntology()`
+- **pkg/repositories/ontology_repository.go:** Removed ~150 lines (method implementations + no-op comment)
+- **pkg/repositories/ontology_repository_test.go:** Removed 8 dedicated test functions for deleted methods, updated remaining tests to use `GetActive()` instead of `GetByVersion()`, removed references from tenant scope tests (~160 lines removed)
+- **Service layer test mocks:** Updated 7 service test files (column_enrichment_test.go, datasource_test.go, deterministic_relationship_service_test.go, entity_service_test.go, glossary_service_test.go, ontology_context_test.go, ontology_finalization_test.go) to remove mock implementations of deleted methods
+- All tests pass (`make check`)
+- **Total impact:** ~310 lines removed across repository and test files
+
+**Context for next session:** The ontology repository now only contains actively used methods. The single-active-version model is enforced at the database level (unique constraint), so versioning methods are no longer needed at the repository layer. Service layer tests only mock the methods they actually use.
 
 ### 4. Remove deprecated LLM tools from `pkg/llm/tool_executor.go`
 

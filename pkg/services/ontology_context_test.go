@@ -33,10 +33,6 @@ func (m *mockOntologyRepository) GetActive(ctx context.Context, projectID uuid.U
 	return m.activeOntology, nil
 }
 
-func (m *mockOntologyRepository) GetByVersion(ctx context.Context, projectID uuid.UUID, version int) (*models.TieredOntology, error) {
-	return nil, nil
-}
-
 func (m *mockOntologyRepository) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
 	return nil
 }
@@ -53,27 +49,11 @@ func (m *mockOntologyRepository) UpdateColumnDetails(ctx context.Context, projec
 	return nil
 }
 
-func (m *mockOntologyRepository) UpdateMetadata(ctx context.Context, projectID uuid.UUID, metadata map[string]any) error {
-	return nil
-}
-
-func (m *mockOntologyRepository) SetActive(ctx context.Context, projectID uuid.UUID, version int) error {
-	return nil
-}
-
-func (m *mockOntologyRepository) DeactivateAll(ctx context.Context, projectID uuid.UUID) error {
-	return nil
-}
-
 func (m *mockOntologyRepository) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 1, nil
 }
 
 func (m *mockOntologyRepository) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockOntologyRepository) WriteCleanOntology(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
 

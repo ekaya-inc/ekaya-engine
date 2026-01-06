@@ -41,10 +41,6 @@ func (r *testColEnrichmentOntologyRepo) GetActive(ctx context.Context, projectID
 	return nil, nil
 }
 
-func (r *testColEnrichmentOntologyRepo) GetByVersion(ctx context.Context, projectID uuid.UUID, version int) (*models.TieredOntology, error) {
-	return nil, nil
-}
-
 func (r *testColEnrichmentOntologyRepo) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
 	return nil
 }
@@ -57,28 +53,12 @@ func (r *testColEnrichmentOntologyRepo) UpdateEntitySummaries(ctx context.Contex
 	return nil
 }
 
-func (r *testColEnrichmentOntologyRepo) UpdateMetadata(ctx context.Context, projectID uuid.UUID, metadata map[string]any) error {
-	return nil
-}
-
-func (r *testColEnrichmentOntologyRepo) SetActive(ctx context.Context, projectID uuid.UUID, version int) error {
-	return nil
-}
-
-func (r *testColEnrichmentOntologyRepo) DeactivateAll(ctx context.Context, projectID uuid.UUID) error {
-	return nil
-}
-
 func (r *testColEnrichmentOntologyRepo) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
 
 func (r *testColEnrichmentOntologyRepo) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 1, nil
-}
-
-func (r *testColEnrichmentOntologyRepo) WriteCleanOntology(ctx context.Context, projectID uuid.UUID) error {
-	return nil
 }
 
 type testColEnrichmentEntityRepo struct {

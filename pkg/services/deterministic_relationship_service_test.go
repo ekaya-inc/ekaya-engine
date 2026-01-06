@@ -1227,20 +1227,12 @@ func (m *mockTestSchemaRepo) UpsertColumn(ctx context.Context, column *models.Sc
 
 // Additional stub methods to satisfy interfaces
 
-func (m *mockTestOntologyRepo) DeactivateAll(ctx context.Context, projectID uuid.UUID) error {
-	return nil
-}
-
 func (m *mockTestOntologyRepo) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
 
 func (m *mockTestOntologyRepo) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 1, nil
-}
-
-func (m *mockTestOntologyRepo) WriteCleanOntology(ctx context.Context, projectID uuid.UUID) error {
-	return nil
 }
 
 func (m *mockTestOntologyRepo) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
@@ -1256,14 +1248,6 @@ func (m *mockTestOntologyRepo) UpdateEntitySummaries(ctx context.Context, projec
 }
 
 func (m *mockTestOntologyRepo) UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
-	return nil
-}
-
-func (m *mockTestOntologyRepo) UpdateMetadata(ctx context.Context, projectID uuid.UUID, metadata map[string]any) error {
-	return nil
-}
-
-func (m *mockTestOntologyRepo) SetActive(ctx context.Context, projectID uuid.UUID, version int) error {
 	return nil
 }
 
@@ -1299,10 +1283,6 @@ func (m *mockTestSchemaRepo) GetOrphanTables(ctx context.Context, projectID, dat
 
 func (m *mockTestDatasourceService) Delete(ctx context.Context, datasourceID uuid.UUID) error {
 	return nil
-}
-
-func (m *mockTestOntologyRepo) GetByVersion(ctx context.Context, projectID uuid.UUID, version int) (*models.TieredOntology, error) {
-	return nil, nil
 }
 
 func (m *mockTestEntityRepo) GetAliasesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityAlias, error) {

@@ -176,9 +176,6 @@ func (m *mockOntologyRepo) GetActive(ctx context.Context, projectID uuid.UUID) (
 func (m *mockOntologyRepo) Create(ctx context.Context, ontology *models.TieredOntology) error {
 	return nil
 }
-func (m *mockOntologyRepo) GetByVersion(ctx context.Context, projectID uuid.UUID, version int) (*models.TieredOntology, error) {
-	return nil, nil
-}
 func (m *mockOntologyRepo) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
 	return nil
 }
@@ -191,23 +188,11 @@ func (m *mockOntologyRepo) UpdateEntitySummaries(ctx context.Context, projectID 
 func (m *mockOntologyRepo) UpdateColumnDetails(ctx context.Context, projectID uuid.UUID, tableName string, columns []models.ColumnDetail) error {
 	return nil
 }
-func (m *mockOntologyRepo) UpdateMetadata(ctx context.Context, projectID uuid.UUID, metadata map[string]any) error {
-	return nil
-}
-func (m *mockOntologyRepo) SetActive(ctx context.Context, projectID uuid.UUID, version int) error {
-	return nil
-}
-func (m *mockOntologyRepo) DeactivateAll(ctx context.Context, projectID uuid.UUID) error {
-	return nil
-}
 func (m *mockOntologyRepo) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
 func (m *mockOntologyRepo) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 1, nil
-}
-func (m *mockOntologyRepo) WriteCleanOntology(ctx context.Context, projectID uuid.UUID) error {
-	return nil
 }
 
 // ============================================================================
