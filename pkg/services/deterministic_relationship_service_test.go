@@ -961,11 +961,11 @@ func (m *mockTestDatasourceService) List(ctx context.Context, projectID uuid.UUI
 	return nil, nil
 }
 
-func (m *mockTestDatasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType string, config map[string]any) (*models.Datasource, error) {
+func (m *mockTestDatasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType, provider string, config map[string]any) (*models.Datasource, error) {
 	return nil, nil
 }
 
-func (m *mockTestDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType string, config map[string]any) error {
+func (m *mockTestDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType, provider string, config map[string]any) error {
 	return nil
 }
 

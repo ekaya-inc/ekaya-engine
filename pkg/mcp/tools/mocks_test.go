@@ -182,7 +182,7 @@ type mockDatasourceService struct {
 	connectionError error
 }
 
-func (m *mockDatasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType string, config map[string]any) (*models.Datasource, error) {
+func (m *mockDatasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType, provider string, config map[string]any) (*models.Datasource, error) {
 	return nil, nil
 }
 
@@ -198,7 +198,7 @@ func (m *mockDatasourceService) List(ctx context.Context, projectID uuid.UUID) (
 	return nil, nil
 }
 
-func (m *mockDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType string, config map[string]any) error {
+func (m *mockDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType, provider string, config map[string]any) error {
 	return nil
 }
 

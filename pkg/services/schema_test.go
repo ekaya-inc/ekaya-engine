@@ -369,7 +369,7 @@ type mockDatasourceService struct {
 	getErr     error
 }
 
-func (m *mockDatasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType string, config map[string]any) (*models.Datasource, error) {
+func (m *mockDatasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType, provider string, config map[string]any) (*models.Datasource, error) {
 	return nil, errors.New("not implemented")
 }
 
@@ -396,7 +396,7 @@ func (m *mockDatasourceService) List(ctx context.Context, projectID uuid.UUID) (
 	return nil, errors.New("not implemented")
 }
 
-func (m *mockDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType string, config map[string]any) error {
+func (m *mockDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType, provider string, config map[string]any) error {
 	return errors.New("not implemented")
 }
 
