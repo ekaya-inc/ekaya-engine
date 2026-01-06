@@ -53,6 +53,9 @@ func FromMap(config map[string]any) (*Config, error) {
 
 	if database, ok := config["database"].(string); ok {
 		cfg.Database = database
+	} else if name, ok := config["name"].(string); ok {
+		// Backward compatibility: existing configs may use "name" instead of "database"
+		cfg.Database = name
 	} else {
 		return nil, fmt.Errorf("database is required")
 	}
