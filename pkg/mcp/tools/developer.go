@@ -65,10 +65,15 @@ func truncateSQL(sql string, maxLen int) string {
 
 // developerToolNames lists all tools in the developer group.
 var developerToolNames = map[string]bool{
-	"echo":     true,
+	"echo":    true,
+	"execute": true,
+}
+
+// businessUserToolNames lists read-only query tools that are part of the approved_queries group.
+// These tools enable business users to answer ad-hoc questions when pre-approved queries don't match.
+var businessUserToolNames = map[string]bool{
 	"query":    true,
 	"sample":   true,
-	"execute":  true,
 	"validate": true,
 }
 
@@ -218,6 +223,11 @@ func filterTools(tools []mcp.Tool, showDeveloper, showExecute, showApprovedQueri
 			continue
 		}
 
+		// Check business user tools (query, sample, validate) - tied to approved_queries visibility
+		if businessUserToolNames[tool.Name] && !showApprovedQueries {
+			continue
+		}
+
 		// Check approved_queries tools
 		if approvedQueriesToolNames[tool.Name] && !showApprovedQueries {
 			continue
@@ -346,6 +356,49 @@ func checkExecuteEnabled(ctx context.Context, deps *DeveloperToolDeps) (uuid.UUI
 	}
 
 	return projectID, tenantCtx, cleanup, nil
+}
+
+// checkBusinessUserToolsEnabled verifies the caller is authorized to use business user tools (query, sample, validate).
+// Authorization is granted if approved_queries tool group is enabled.
+// These are read-only query tools that enable business users to answer ad-hoc questions.
+// Returns the project ID and a tenant-scoped context if authorized, or an error if not.
+func checkBusinessUserToolsEnabled(ctx context.Context, deps *DeveloperToolDeps) (uuid.UUID, context.Context, func(), error) {
+	// Get claims from context
+	claims, ok := auth.GetClaims(ctx)
+	if !ok {
+		return uuid.Nil, nil, nil, fmt.Errorf("authentication required")
+	}
+
+	projectID, err := uuid.Parse(claims.ProjectID)
+	if err != nil {
+		return uuid.Nil, nil, nil, fmt.Errorf("invalid project ID: %w", err)
+	}
+
+	// Acquire connection with tenant scope
+	scope, err := deps.DB.WithTenant(ctx, projectID)
+	if err != nil {
+		return uuid.Nil, nil, nil, fmt.Errorf("failed to acquire database connection: %w", err)
+	}
+
+	// Set tenant context for the query
+	tenantCtx := database.SetTenantScope(ctx, scope)
+
+	// Check if approved_queries tool group is enabled
+	enabled, err := deps.MCPConfigService.IsToolGroupEnabled(tenantCtx, projectID, "approved_queries")
+	if err != nil {
+		scope.Close()
+		deps.Logger.Error("Failed to check approved_queries tool group",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool group configuration: %w", err)
+	}
+
+	if !enabled {
+		scope.Close()
+		return uuid.Nil, nil, nil, fmt.Errorf("business user tools are not enabled for this project")
+	}
+
+	return projectID, tenantCtx, func() { scope.Close() }, nil
 }
 
 // checkEchoEnabled verifies the caller is authorized to use the echo tool.
@@ -495,7 +548,7 @@ func registerQueryTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkDeveloperEnabled(ctx, deps)
+		projectID, tenantCtx, cleanup, err := checkBusinessUserToolsEnabled(ctx, deps)
 		if err != nil {
 			return nil, err
 		}
@@ -599,7 +652,7 @@ func registerSampleTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkDeveloperEnabled(ctx, deps)
+		projectID, tenantCtx, cleanup, err := checkBusinessUserToolsEnabled(ctx, deps)
 		if err != nil {
 			return nil, err
 		}
@@ -802,7 +855,7 @@ func registerValidateTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkDeveloperEnabled(ctx, deps)
+		projectID, tenantCtx, cleanup, err := checkBusinessUserToolsEnabled(ctx, deps)
 		if err != nil {
 			return nil, err
 		}

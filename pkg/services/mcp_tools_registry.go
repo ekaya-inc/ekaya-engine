@@ -19,13 +19,15 @@ const ToolGroupDeveloper = "developer"
 var ToolRegistry = []ToolDefinition{
 	// Developer tools
 	{Name: "echo", Description: "Echo back input message for testing", ToolGroup: ToolGroupDeveloper},
-	{Name: "query", Description: "Execute read-only SQL SELECT statements", ToolGroup: ToolGroupDeveloper},
-	{Name: "sample", Description: "Quick data preview from a table", ToolGroup: ToolGroupDeveloper},
-	{Name: "validate", Description: "Check SQL syntax without executing", ToolGroup: ToolGroupDeveloper},
 	{Name: "execute", Description: "Execute DDL/DML statements", ToolGroup: ToolGroupDeveloper, SubOption: "enableExecute"},
 	{Name: "get_schema", Description: "Get database schema with entity semantics", ToolGroup: ToolGroupDeveloper},
 
-	// Approved queries tools (also visible when agent_tools enabled for agents)
+	// Business user tools (approved_queries group)
+	// These read-only query tools enable business users to answer ad-hoc questions
+	// when pre-approved queries don't match their request.
+	{Name: "query", Description: "Execute read-only SQL SELECT statements", ToolGroup: ToolGroupApprovedQueries},
+	{Name: "sample", Description: "Quick data preview from a table", ToolGroup: ToolGroupApprovedQueries},
+	{Name: "validate", Description: "Check SQL syntax without executing", ToolGroup: ToolGroupApprovedQueries},
 	{Name: "get_ontology", Description: "Get business ontology for query generation", ToolGroup: ToolGroupApprovedQueries},
 	{Name: "get_glossary", Description: "Get business glossary terms", ToolGroup: ToolGroupApprovedQueries},
 	{Name: "list_approved_queries", Description: "List pre-approved SQL queries", ToolGroup: ToolGroupApprovedQueries},

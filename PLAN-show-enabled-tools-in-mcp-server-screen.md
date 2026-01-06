@@ -201,12 +201,15 @@ Option B: Use React context or state management for agent key (heavier solution)
    - **Files created**: `pkg/services/mcp_tools_registry.go`, `pkg/services/mcp_tools_registry_test.go`
    - **NOTE for next session**: The registry currently reflects CURRENT tool groupings. Step 2 will update both the registry AND the MCP tool filter to move query/sample/validate to approved_queries group.
 
-2. [ ] **Move read-only query tools to approved_queries group** (`pkg/mcp/tools/developer.go`, `pkg/mcp/tools/queries.go`)
-   - Move `query`, `sample`, `validate` from `developerToolNames` to `approvedQueriesToolNames` (or create a new `businessUserToolNames` map)
-   - Update `checkDeveloperEnabled` → `checkApprovedQueriesEnabled` for these tools (they should check approved_queries group, not developer)
-   - Update `filterTools()` to show these tools when approved_queries is enabled
-   - **Rationale**: These are read-only tools that enable business users to answer ad-hoc questions when pre-approved queries don't match. They align with the "Business User Tools" intent: "The MCP Client will use the Pre-Approved Queries if they match the Business User's request and fall back on using the Ontology to craft new SQL queries to answer their questions."
-   - Update tests in `pkg/mcp/tools/developer_filter_test.go`
+2. [x] **Move read-only query tools to approved_queries group** (`pkg/mcp/tools/developer.go`, `pkg/mcp/tools/queries.go`) ✅ COMPLETED
+   - Created `businessUserToolNames` map in `developer.go` containing `query`, `sample`, `validate`
+   - Removed these tools from `developerToolNames` (now only contains `echo`, `execute`)
+   - Created `checkBusinessUserToolsEnabled()` function that checks if approved_queries group is enabled
+   - Updated `registerQueryTool`, `registerSampleTool`, `registerValidateTool` to use `checkBusinessUserToolsEnabled` instead of `checkDeveloperEnabled`
+   - Updated `filterTools()` to check `businessUserToolNames` against `showApprovedQueries` flag
+   - Updated `ToolRegistry` in `mcp_tools_registry.go` to show these tools in `ToolGroupApprovedQueries`
+   - Updated all affected tests in `developer_filter_test.go` and `mcp_tools_registry_test.go`
+   - All tests pass (`make check` successful)
 
 3. **Extend state machine** (`pkg/services/mcp_state.go`)
    - Add `EnabledTools` field to `MCPStateResult`

@@ -32,17 +32,20 @@ func TestGetEnabledTools_DeveloperEnabled(t *testing.T) {
 	tools := GetEnabledTools(state)
 
 	// Should include developer tools (minus execute since EnableExecute=false) plus health
+	// Note: query, sample, validate are now in approved_queries group
 	toolNames := extractToolNames(tools)
 
 	assert.Contains(t, toolNames, "echo")
-	assert.Contains(t, toolNames, "query")
-	assert.Contains(t, toolNames, "sample")
-	assert.Contains(t, toolNames, "validate")
 	assert.Contains(t, toolNames, "get_schema")
 	assert.Contains(t, toolNames, "health")
 
 	// execute requires EnableExecute sub-option
 	assert.NotContains(t, toolNames, "execute")
+
+	// Business user tools (query, sample, validate) are now in approved_queries group
+	assert.NotContains(t, toolNames, "query")
+	assert.NotContains(t, toolNames, "sample")
+	assert.NotContains(t, toolNames, "validate")
 
 	// approved_queries tools should not be included
 	assert.NotContains(t, toolNames, "list_approved_queries")
@@ -61,8 +64,12 @@ func TestGetEnabledTools_DeveloperWithExecute(t *testing.T) {
 
 	// execute should now be included
 	assert.Contains(t, toolNames, "execute")
-	assert.Contains(t, toolNames, "query")
+	assert.Contains(t, toolNames, "echo")
+	assert.Contains(t, toolNames, "get_schema")
 	assert.Contains(t, toolNames, "health")
+
+	// query is now in approved_queries group, should not be present
+	assert.NotContains(t, toolNames, "query")
 }
 
 func TestGetEnabledTools_ApprovedQueriesEnabled(t *testing.T) {
@@ -74,6 +81,10 @@ func TestGetEnabledTools_ApprovedQueriesEnabled(t *testing.T) {
 	toolNames := extractToolNames(tools)
 
 	// Should include approved_queries tools plus health
+	// Business user tools (query, sample, validate) are now in approved_queries group
+	assert.Contains(t, toolNames, "query")
+	assert.Contains(t, toolNames, "sample")
+	assert.Contains(t, toolNames, "validate")
 	assert.Contains(t, toolNames, "list_approved_queries")
 	assert.Contains(t, toolNames, "execute_approved_query")
 	assert.Contains(t, toolNames, "get_ontology")
@@ -81,8 +92,9 @@ func TestGetEnabledTools_ApprovedQueriesEnabled(t *testing.T) {
 	assert.Contains(t, toolNames, "health")
 
 	// developer tools should not be included
-	assert.NotContains(t, toolNames, "query")
+	assert.NotContains(t, toolNames, "echo")
 	assert.NotContains(t, toolNames, "execute")
+	assert.NotContains(t, toolNames, "get_schema")
 }
 
 func TestGetEnabledTools_BothGroupsEnabled(t *testing.T) {
@@ -112,11 +124,14 @@ func TestGetEnabledTools_ForceModeHidesDeveloper(t *testing.T) {
 	toolNames := extractToolNames(tools)
 
 	// Force mode should hide developer tools even when enabled
-	assert.NotContains(t, toolNames, "query")
+	assert.NotContains(t, toolNames, "echo")
 	assert.NotContains(t, toolNames, "execute")
 	assert.NotContains(t, toolNames, "get_schema")
 
-	// approved_queries tools should still be visible
+	// approved_queries tools (including business user tools) should still be visible
+	assert.Contains(t, toolNames, "query")
+	assert.Contains(t, toolNames, "sample")
+	assert.Contains(t, toolNames, "validate")
 	assert.Contains(t, toolNames, "list_approved_queries")
 	assert.Contains(t, toolNames, "get_ontology")
 	assert.Contains(t, toolNames, "health")
