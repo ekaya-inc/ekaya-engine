@@ -80,18 +80,22 @@ After migrating to the DAG-based ontology extraction workflow, several pieces of
 
 **Context for next session:** These tools were part of the old workflow state system where the LLM could ask questions and get answers. The DAG-based workflow doesn't use this pattern - questions are now handled differently. No backward compatibility concerns because no persisted DAGs reference these tools.
 
-### 5. Document `DAGNodeRelationshipDiscovery` deprecation timeline ✅
+### 5. Remove `DAGNodeRelationshipDiscovery` deprecated constant ✅
 
-- [x] Add comment with target removal version/date
-- [x] No code removal yet - kept for backward compatibility
+- [x] Remove deprecated constant from `pkg/models/ontology_dag.go`
+- [x] Remove from `DAGNodeOrder` map
+- [x] Update switch case in `pkg/services/ontology_dag_service.go`
+- [x] Update test data in `pkg/services/ontology_dag_service_test.go`
+- [x] Run `make check`
 
-**Risk:** None - documentation only.
+**Risk:** Low - database will be dropped/recreated, no backward compatibility needed.
 
-**Completed:** Added target removal timeline (v1.0.0 or 2025-06-01) to deprecation comments in three locations:
-- `pkg/models/ontology_dag.go`: Updated constant definition comment (lines 108-111) and DAGNodeOrder map comment (lines 124-126)
-- `pkg/services/ontology_dag_service.go`: Updated case handler comment (lines 612-614)
+**Completed:** Removed `DAGNodeRelationshipDiscovery` (the old name for `DAGNodeFKDiscovery`):
+- `pkg/models/ontology_dag.go`: Removed deprecated constant and its entry in `DAGNodeOrder` map
+- `pkg/services/ontology_dag_service.go`: Simplified case to only handle `DAGNodeFKDiscovery`
+- `pkg/services/ontology_dag_service_test.go`: Updated test data to use `DAGNodeFKDiscovery`
 - All tests pass (`make check`)
-- **Impact:** Documentation only, no code changes
+- **Impact:** ~10 lines removed, cleaner code without legacy compatibility
 
 ## Verification
 
@@ -153,7 +157,7 @@ This is a **human-performed verification task** that requires running the dev en
 4. **Verify all 7 DAG stages complete**:
    - EntityDiscovery
    - EntityEnrichment
-   - FKDiscovery (formerly RelationshipDiscovery - verify backward compatibility if old DAGs exist)
+   - FKDiscovery
    - ColumnEnrichment
    - PKMatchDiscovery
    - RelationshipEnrichment
@@ -217,3 +221,75 @@ No issues encountered during ontology extraction.
 ## Estimated Impact
 
 ~450 lines of dead code removed.
+
+---
+
+## Phase 2: Additional Dead Code (Database Drop Opportunity)
+
+With the database being dropped/recreated, additional legacy and backward-compatibility code can be removed.
+
+### 8. Remove Legacy Relationship Candidates Endpoint ✅
+
+The `GET /api/projects/{pid}/datasources/{dsid}/schema/relationships/candidates` endpoint uses deprecated types and is **not called by the UI**.
+
+**Backend files to modify:**
+- [x] `pkg/models/schema.go:325-351` - Delete `LegacyRelationshipCandidate`, `LegacyRelationshipCandidatesResponse` types
+- [x] `pkg/repositories/schema_repository.go:67` - Remove `GetRelationshipCandidates` from interface
+- [x] `pkg/repositories/schema_repository.go:1459-1518` - Delete implementation
+- [x] `pkg/services/schema.go:44` - Remove `GetRelationshipCandidates` from interface
+- [x] `pkg/services/schema.go:748-777` - Delete implementation
+- [x] `pkg/handlers/schema.go:228` - Remove route registration
+- [x] `pkg/handlers/schema.go:698-745` - Delete handler method
+- [x] Update test mocks as needed
+
+**Frontend files to modify:**
+- [x] `ui/src/types/schema.ts:161-204` - Delete `CandidateStatus`, `RelationshipCandidate`, `CandidatesSummary`, `RelationshipCandidatesResponse`
+- [x] `ui/src/services/engineApi.ts:317-327` - Delete `getRelationshipCandidates` method and import
+
+**Risk:** Low - UI grep confirms method is never called.
+
+**Completed:** Successfully removed the deprecated legacy relationship candidates endpoint and all associated types:
+- **Backend:** Removed `LegacyRelationshipCandidate`, `LegacyRelationshipCandidatesResponse`, `CandidatesSummary` types (~30 lines), removed `CandidateStatus` constants (~7 lines), removed repository interface method and 60-line implementation, removed service interface method and 33-line implementation, removed handler route registration and 48-line handler method with 3 response types (~30 lines), removed integration test (~70 lines), updated 5 test mock files
+- **Frontend:** Removed 4 types from `schema.ts` (~47 lines), removed API method from `engineApi.ts` (~13 lines) and import statement
+- All tests pass (`make check`)
+- **Total impact:** ~300 lines removed across backend and frontend
+- The endpoint was never called by the UI, so no breaking changes for users
+
+### 9. Remove Deprecated LLM Context Functions
+
+`WithWorkflowID()` and `GetWorkflowID()` are marked deprecated with "Use WithContext for more flexible context passing."
+
+- [ ] Update `pkg/services/entity_discovery_task.go:92` to use `WithContext` directly
+- [ ] Delete `pkg/llm/context.go:43-62` (`WithWorkflowID` and `GetWorkflowID` functions)
+- [ ] Run `make check`
+
+**Risk:** Low - single caller, straightforward replacement.
+
+### 10. Remove Deprecated Workqueue Constructor
+
+`NewQueueWithStrategy()` is marked deprecated and only used internally.
+
+- [ ] Update `pkg/services/workqueue/queue.go:88` to call `New()` directly
+- [ ] Delete `pkg/services/workqueue/queue.go:91-96` (`NewQueueWithStrategy` function)
+- [ ] Run `make check`
+
+**Risk:** Low - internal only, no external callers.
+
+### 11. Fix Stale Comment in Conversation Recorder
+
+- [ ] Update `pkg/llm/conversation_recorder.go:15` - Remove reference to deleted `workflow.TenantContextFunc`
+
+**Risk:** None - comment only.
+
+### 12. Remove Legacy "name" Field Support (Optional)
+
+`pkg/adapters/datasource/postgres/config.go:56-58` supports legacy config using "name" instead of "database".
+
+- [ ] Verify no existing datasource configs use "name" field
+- [ ] If safe, remove the fallback logic
+
+**Risk:** Medium - requires audit of existing datasource configurations.
+
+## Phase 2 Estimated Impact
+
+~150-200 additional lines of dead code removed.

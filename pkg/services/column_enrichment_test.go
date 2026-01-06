@@ -279,10 +279,6 @@ func (r *testColEnrichmentSchemaRepo) GetPrimaryKeyColumns(ctx context.Context, 
 	return nil, nil
 }
 
-func (r *testColEnrichmentSchemaRepo) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.LegacyRelationshipCandidate, error) {
-	return nil, nil
-}
-
 func (r *testColEnrichmentSchemaRepo) GetOrphanTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error) {
 	return nil, nil
 }

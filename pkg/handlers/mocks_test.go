@@ -341,13 +341,3 @@ func (m *mockSchemaService) GetRelationshipsResponse(ctx context.Context, projec
 		TotalCount:    0,
 	}, nil
 }
-
-func (m *mockSchemaService) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.LegacyRelationshipCandidatesResponse, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	return &models.LegacyRelationshipCandidatesResponse{
-		Candidates: []models.LegacyRelationshipCandidate{},
-		Summary:    models.CandidatesSummary{},
-	}, nil
-}

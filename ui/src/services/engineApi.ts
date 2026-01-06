@@ -25,7 +25,6 @@ import type {
   ListQueriesResponse,
   MCPConfigResponse,
   Query,
-  RelationshipCandidatesResponse,
   RelationshipDetail,
   RelationshipsResponse,
   SaveSelectionsResponse,
@@ -310,20 +309,6 @@ class EngineApiService {
       {
         method: 'POST',
       }
-    );
-  }
-
-  /**
-   * Get relationship candidates (verified and rejected)
-   * Useful for understanding what was discovered and why some candidates were rejected
-   * GET /api/projects/{projectId}/datasources/{datasourceId}/schema/relationships/candidates
-   */
-  async getRelationshipCandidates(
-    projectId: string,
-    datasourceId: string
-  ): Promise<ApiResponse<RelationshipCandidatesResponse>> {
-    return this.makeRequest<RelationshipCandidatesResponse>(
-      `/${projectId}/datasources/${datasourceId}/schema/relationships/candidates`
     );
   }
 
