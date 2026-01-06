@@ -59,7 +59,7 @@ const SettingsPage = () => {
   const handleSignOut = async () => {
     setIsSigningOut(true);
     try {
-      const response = await fetch("/api/auth/logout", {
+      const response = await fetch(`/api/projects/${pid}/auth/logout`, {
         method: "POST",
         credentials: "include",
       });
