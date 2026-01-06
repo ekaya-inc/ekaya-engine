@@ -249,9 +249,26 @@ export const detectProviderFromUrl = (url: string): ProviderInfo | undefined =>
   POSTGRES_PROVIDERS.find(p => p.urlPattern?.test(url));
 ```
 
-#### 1.2 URL Parser Utility
+#### 1.2 URL Parser Utility [x] COMPLETE
 
 **File:** `ui/src/utils/connectionString.ts`
+
+**What was implemented:**
+- Created `ParsedConnectionString` interface with all required fields (host, port, user, password, database, sslMode, provider)
+- Implemented `parsePostgresUrl()` function that handles both `postgresql://` and `postgres://` schemes
+- Extracts and URL-decodes user/password from URL
+- Parses `sslmode` from query parameters, defaults to "require"
+- Auto-detects provider from hostname using `detectProviderFromUrl()` and applies provider-specific default port when port is not explicit in URL
+
+**Tests:** `ui/src/utils/connectionString.test.ts` - 22 tests covering:
+- Standard URL parsing (postgresql:// and postgres:// schemes)
+- SSL mode extraction from query parameters
+- Default port handling (uses provider default when port not specified)
+- URL without port, database, user/password
+- URL-encoded characters in user/password
+- Invalid URL rejection
+- Provider auto-detection for all providers (Supabase, Neon, CockroachDB, YugabyteDB, Aurora, TimescaleDB, Redshift)
+- Edge cases (complex usernames, multiple query parameters, empty password)
 
 ```typescript
 export interface ParsedConnectionString {
@@ -261,7 +278,7 @@ export interface ParsedConnectionString {
   password: string;
   database: string;
   sslMode: string;
-  provider?: string;  // Auto-detected from URL
+  provider: string | undefined;  // Auto-detected from URL
 }
 
 export function parsePostgresUrl(url: string): ParsedConnectionString | null {
@@ -275,18 +292,18 @@ export function parsePostgresUrl(url: string): ParsedConnectionString | null {
   const [, user, password, host, port, database, queryString] = match;
 
   // Parse query parameters for sslmode
-  const params = new URLSearchParams(queryString || "");
-  const sslMode = params.get("sslmode") || "require";
+  const params = new URLSearchParams(queryString ?? '');
+  const sslMode = params.get('sslmode') ?? 'require';
 
   // Auto-detect provider from hostname
   const detectedProvider = detectProviderFromUrl(url);
 
   return {
-    host: host || "",
-    port: port ? parseInt(port, 10) : (detectedProvider?.defaultPort || 5432),
-    user: user || "",
-    password: password || "",
-    database: database || "",
+    host: host ?? '',
+    port: port ? parseInt(port, 10) : (detectedProvider?.defaultPort ?? 5432),
+    user: decodeURIComponent(user ?? ''),
+    password: decodeURIComponent(password ?? ''),
+    database: database ?? '',
     sslMode,
     provider: detectedProvider?.id,
   };
