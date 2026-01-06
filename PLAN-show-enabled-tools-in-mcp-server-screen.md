@@ -211,12 +211,24 @@ Option B: Use React context or state management for agent key (heavier solution)
    - Updated all affected tests in `developer_filter_test.go` and `mcp_tools_registry_test.go`
    - All tests pass (`make check` successful)
 
-3. **Extend state machine** (`pkg/services/mcp_state.go`)
-   - Add `EnabledTools` field to `MCPStateResult`
-   - Update `Apply()` to compute enabled tools from final state
-   - Add tests for tool visibility based on state
+3. [x] **Extend state machine** (`pkg/services/mcp_state.go`, `pkg/services/mcp_state_test.go`) ✅ COMPLETED
+   - Added `EnabledTools []ToolDefinition` field to `MCPStateResult` struct (line 38)
+   - Updated `Apply()` method to call `GetEnabledTools(newState)` and populate `EnabledTools` on success (lines 111-117)
+   - Updated ALL error return paths to include `EnabledTools: GetEnabledTools(originalState)` - this ensures UI always has a consistent tools list even on validation errors (lines 74, 95)
+   - Added `TestMCPStateValidator_EnabledTools` with 7 test cases (lines 454-626):
+     - Empty state returns only health tool
+     - Enabling developer shows developer tools
+     - Enabling developer with execute shows execute tool
+     - Enabling approved_queries shows business user tools
+     - Enabling agent_tools shows only agent-allowed tools
+     - Force mode hides developer tools
+     - Error result includes original state enabled tools
+   - Added `TestMCPStateValidator_EnabledToolsConsistency` (lines 628-699) verifying `EnabledTools` always matches `GetEnabledTools(state)` result
+   - All tests pass (`make check` successful)
+   - **Files created**: `pkg/services/mcp_state.go`, `pkg/services/mcp_state_test.go`
+   - **Key design decision**: Error results include enabled tools from the ORIGINAL state, not the failed transition state. This ensures the UI can always display a valid tools list.
 
-3. **Update API response** (`pkg/services/mcp_config.go`)
+4. **Update API response** (`pkg/services/mcp_config.go`)
    - Add `EnabledTools` to `MCPConfigResponse`
    - Update `buildResponse()` to include enabled tools from state result
 
