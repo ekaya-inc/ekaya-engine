@@ -4,10 +4,14 @@ import {
   BookOpen,
   ChevronDown,
   ChevronRight,
+  Plus,
+  Edit3,
+  Trash2,
 } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
+import { GlossaryTermEditor } from "../components/GlossaryTermEditor";
 import { Button } from "../components/ui/Button";
 import {
   Card,
@@ -16,6 +20,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../components/ui/Card";
+import { useToast } from "../hooks/useToast";
 import engineApi from "../services/engineApi";
 import ontologyService from "../services/ontologyService";
 import type { GlossaryTerm, OntologyWorkflowStatus } from "../types";
@@ -28,6 +33,7 @@ import type { GlossaryTerm, OntologyWorkflowStatus } from "../types";
 const GlossaryPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
+  const { toast } = useToast();
 
   // State for glossary terms
   const [terms, setTerms] = useState<GlossaryTerm[]>([]);
@@ -39,6 +45,11 @@ const GlossaryPage = () => {
 
   // Track which terms have expanded SQL details
   const [expandedTerms, setExpandedTerms] = useState<Set<string>>(new Set());
+
+  // Editor state
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editingTerm, setEditingTerm] = useState<GlossaryTerm | null>(null);
+  const [deletingTermId, setDeletingTermId] = useState<string | null>(null);
 
   // Toggle expanded state for a term
   const toggleExpanded = (termId: string): void => {
@@ -97,6 +108,71 @@ const GlossaryPage = () => {
   useEffect(() => {
     fetchTerms();
   }, [fetchTerms]);
+
+  // Handle add term
+  const handleAddTerm = (): void => {
+    setEditingTerm(null);
+    setEditorOpen(true);
+  };
+
+  // Handle edit term
+  const handleEditTerm = (term: GlossaryTerm): void => {
+    setEditingTerm(term);
+    setEditorOpen(true);
+  };
+
+  // Handle delete term
+  const handleDeleteTerm = async (term: GlossaryTerm): Promise<void> => {
+    if (!pid) return;
+
+    const confirmed = window.confirm(
+      `Are you sure you want to delete the term "${term.term}"? This action cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    setDeletingTermId(term.id);
+
+    try {
+      const response = await engineApi.deleteGlossaryTerm(pid, term.id);
+
+      if (response.success) {
+        toast({
+          title: 'Term deleted',
+          description: `"${term.term}" has been removed from the glossary.`,
+          variant: 'default',
+        });
+        fetchTerms();
+      } else {
+        toast({
+          title: 'Failed to delete term',
+          description: response.error || 'An error occurred while deleting the term.',
+          variant: 'destructive',
+        });
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to delete term';
+      toast({
+        title: 'Failed to delete term',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setDeletingTermId(null);
+    }
+  };
+
+  // Handle save from editor
+  const handleEditorSave = (): void => {
+    toast({
+      title: editingTerm ? 'Term updated' : 'Term created',
+      description: editingTerm
+        ? 'The glossary term has been successfully updated.'
+        : 'The new glossary term has been added.',
+      variant: 'default',
+    });
+    fetchTerms();
+  };
 
   // Check if ontology is complete
   const isOntologyComplete = ontologyStatus?.progress.state === 'complete'
@@ -212,10 +288,16 @@ const GlossaryPage = () => {
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Dashboard
           </Button>
-          <Button variant="outline" onClick={() => navigate(`/projects/${pid}/ontology`)}>
-            Go to Ontology
-            <ArrowRight className="ml-2 h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={handleAddTerm}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Term
+            </Button>
+            <Button variant="outline" onClick={() => navigate(`/projects/${pid}/ontology`)}>
+              Go to Ontology
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          </div>
         </div>
         <h1 className="text-3xl font-bold text-text-primary">
           Glossary
@@ -278,20 +360,40 @@ const GlossaryPage = () => {
                         </p>
                       </div>
 
-                      {/* Expand SQL Details Button */}
-                      {hasSqlDetails && (
-                        <button
-                          onClick={() => toggleExpanded(term.id)}
-                          className="flex items-center gap-1 px-2 py-1 rounded text-sm text-text-secondary hover:bg-surface-secondary/50 transition-colors ml-2"
+                      <div className="flex items-center gap-2 ml-2">
+                        {/* Action Buttons */}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleEditTerm(term)}
+                          disabled={deletingTermId === term.id}
                         >
-                          <span>SQL Details</span>
-                          {expandedTerms.has(term.id) ? (
-                            <ChevronDown className="h-4 w-4" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4" />
-                          )}
-                        </button>
-                      )}
+                          <Edit3 className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeleteTerm(term)}
+                          disabled={deletingTermId === term.id}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+
+                        {/* Expand SQL Details Button */}
+                        {hasSqlDetails && (
+                          <button
+                            onClick={() => toggleExpanded(term.id)}
+                            className="flex items-center gap-1 px-2 py-1 rounded text-sm text-text-secondary hover:bg-surface-secondary/50 transition-colors"
+                          >
+                            <span>SQL Details</span>
+                            {expandedTerms.has(term.id) ? (
+                              <ChevronDown className="h-4 w-4" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4" />
+                            )}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -366,6 +468,17 @@ const GlossaryPage = () => {
           </div>
         </CardContent>
       </Card>
+
+      {/* Glossary Term Editor Modal */}
+      {pid && (
+        <GlossaryTermEditor
+          projectId={pid}
+          term={editingTerm}
+          isOpen={editorOpen}
+          onClose={() => setEditorOpen(false)}
+          onSave={handleEditorSave}
+        />
+      )}
     </div>
   );
 };

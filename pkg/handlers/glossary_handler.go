@@ -42,6 +42,19 @@ type UpdateGlossaryTermRequest struct {
 	Aliases     []string `json:"aliases,omitempty"`
 }
 
+// TestSQLRequest for POST /glossary/test-sql
+type TestSQLRequest struct {
+	SQL string `json:"sql"`
+}
+
+// TestSQLResponse for POST /glossary/test-sql
+type TestSQLResponse struct {
+	Valid         bool                   `json:"valid"`
+	Error         string                 `json:"error,omitempty"`
+	OutputColumns []models.OutputColumn  `json:"output_columns,omitempty"`
+	SampleRow     map[string]interface{} `json:"sample_row,omitempty"`
+}
+
 // ============================================================================
 // Handler
 // ============================================================================
@@ -79,6 +92,8 @@ func (h *GlossaryHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *aut
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Delete)))
 	mux.HandleFunc("POST "+base+"/suggest",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Suggest)))
+	mux.HandleFunc("POST "+base+"/test-sql",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.TestSQL)))
 }
 
 // List handles GET /api/projects/{pid}/glossary
@@ -332,6 +347,51 @@ func (h *GlossaryHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 	response := GlossaryListResponse{
 		Terms: suggestions,
 		Total: len(suggestions),
+	}
+
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// TestSQL handles POST /api/projects/{pid}/glossary/test-sql
+func (h *GlossaryHandler) TestSQL(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	var req TestSQLRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if req.SQL == "" {
+		if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", "SQL is required"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	testResult, err := h.glossaryService.TestSQL(r.Context(), projectID, req.SQL)
+	if err != nil {
+		h.logger.Error("Failed to test SQL",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "test_sql_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	response := TestSQLResponse{
+		Valid:         testResult.Valid,
+		Error:         testResult.Error,
+		OutputColumns: testResult.OutputColumns,
+		SampleRow:     testResult.SampleRow,
 	}
 
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {

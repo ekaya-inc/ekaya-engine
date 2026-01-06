@@ -758,28 +758,133 @@ Added comprehensive test in `pkg/services/glossary_service_test.go:847-908`:
 - Test SQL endpoint should validate before enabling Save button (fail-fast UX)
 - Aliases should use tag-style multi-input (similar to keywords in other UIs)
 
-### 5.2 Update GlossaryPage (`ui/src/pages/GlossaryPage.tsx`)
+### 5.2 Update GlossaryPage (`ui/src/pages/GlossaryPage.tsx`) ✅ COMMITTED
 
-- Display `defining_sql` in a code block (collapsible, like current SQL Details)
-- Show output columns table if available
-- Show aliases as tags/chips
-- Show source badge (inferred/manual/client)
-- Add "Edit" button for each term
-- Add "Add Term" button in header
+**Status:** Complete - GlossaryPage updated to display new glossary schema fields (read-only view)
 
-### 5.3 Create GlossaryTermEditor Component
+**Implementation Notes:**
 
-New component for Add/Edit modal or page:
-- Term name input
-- Definition textarea
-- SQL editor (reuse CodeMirror/Monaco setup from QueriesPage if available)
-- "Test SQL" button that:
-  1. Calls `/api/glossary/test-sql` endpoint
-  2. Shows validation result (success/error)
-  3. On success, displays output columns and sample row
-  4. Enables "Save" button only after successful test
-- Aliases input (tag-style multi-input)
-- Base table (auto-detected from SQL or manual override)
+**What Was Completed:**
+1. **Type alignment** - Changed import from `BusinessGlossaryTerm` to `GlossaryTerm` (matches task 5.1 rename)
+2. **Source badge updates** - Three distinct badge colors and labels:
+   - "Inferred" (amber) - LLM-discovered terms during ontology extraction
+   - "Manual" (green) - User-created or edited terms via UI
+   - "Client" (blue) - MCP client-created terms
+3. **SQL display** - Replaced "SQL Pattern" section with "Defining SQL" code block (same collapsible style)
+4. **Output columns display** - New table showing column name, type, and description (captured during SQL validation)
+5. **Aliases display** - Purple tag/chip style display for alternative term names (e.g., "MAU" for "Monthly Active Users")
+6. **Removed old fields** - Deleted "Columns Used", "Filters", and "Aggregation" sections (no longer in schema)
+7. **Updated detail check** - `hasSqlDetails` logic now checks: `defining_sql || base_table || output_columns?.length > 0 || aliases?.length > 0`
+
+**What Was NOT Done (explicitly deferred to task 5.3):**
+- No "Add Term" button in page header (requires GlossaryTermEditor component from task 5.3)
+- No "Edit" button per term (requires GlossaryTermEditor component from task 5.3)
+- No delete functionality (requires API endpoint from task 5.4)
+- UI remains completely read-only (can only view terms created by backend/MCP)
+
+**Files Modified:**
+- `ui/src/pages/GlossaryPage.tsx` - Updated display logic for new schema fields
+
+**Verification:**
+- TypeScript type checking passes (no type errors)
+- UI build completes successfully
+- GlossaryPage renders correctly with new field structure
+- All new fields (defining_sql, output_columns, aliases) display properly when present
+
+**Technical Context for Next Session (Task 5.3):**
+
+The page is now ready for interactive CRUD operations. To add edit/create functionality:
+1. Create `GlossaryTermEditor` component (modal or full page) with:
+   - SQL editor (consider reusing from QueriesPage if CodeMirror/Monaco is available)
+   - "Test SQL" button calling POST `/api/projects/{pid}/glossary/test-sql`
+   - Output column display showing validation results
+   - Tag-style alias input
+   - Only enable "Save" after successful SQL test (fail-fast UX)
+2. Add "Edit" button to each term card that opens the editor
+3. Add "Add Term" button in page header that opens editor in create mode
+4. Wire up delete functionality once API endpoint exists (task 5.4)
+
+**Important Notes:**
+- Request/response types are already defined in `ui/src/types/glossary.ts` (ready to use)
+- OutputColumn type is shared with queries (consistent UX pattern)
+- SQL validation should happen client-side before enabling Save (better UX than server-side-only validation)
+- Consider showing "Last updated by [user]" if `updated_by` field is present (requires user lookup)
+
+### 5.3 Create GlossaryTermEditor Component ✅ COMMITTED
+
+**Status:** Complete - GlossaryTermEditor component implemented and integrated with GlossaryPage
+
+**Implementation Notes:**
+
+Created comprehensive modal-based editor component (`ui/src/components/GlossaryTermEditor.tsx`) with:
+
+**Form Fields:**
+- Term name input (text input, required)
+- Definition textarea (multi-line, required)
+- Defining SQL editor (reuses SqlEditor component from QueriesPage with PostgreSQL dialect)
+- Base table input (optional text input)
+- Aliases multi-input (tag-style with Add/Remove buttons, press Enter to add)
+
+**SQL Testing Flow:**
+1. "Test SQL" button calls POST `/api/projects/{pid}/glossary/test-sql` endpoint
+2. Displays validation result with CheckCircle (success) or AlertCircle (error) icons
+3. On success, shows output columns section with column name, type, and description
+4. On failure, displays error message below SQL editor
+5. Save button only enabled after successful SQL test (fail-fast UX)
+
+**Save Logic:**
+- Create mode: POST `/api/projects/{pid}/glossary` with all fields
+- Edit mode: PUT `/api/projects/{pid}/glossary/{id}` with updated fields
+- Source automatically set to "manual" on creation
+- Output columns captured from test result before save
+- Shows toast notification on success, error message on failure
+
+**GlossaryPage Integration:**
+- Added "Add Term" button in page header (with Plus icon)
+- Added Edit button (Edit3 icon) and Delete button (Trash2 icon) per term card
+- Delete shows confirmation dialog before removing term
+- Editor modal opens for both create and edit operations
+- Auto-refreshes term list after successful create/update/delete
+
+**Backend Dependencies (also implemented as part of this task):**
+- Added TestSQL handler: POST `/api/projects/{pid}/glossary/test-sql`
+- Request: `{ "sql": "SELECT ..." }`
+- Response: `{ "valid": bool, "error": string, "output_columns": [], "sample_row": {} }`
+- Calls `GlossaryService.TestSQL()` which validates SQL via datasource adapter
+
+**engineApi Methods:**
+- `testGlossarySQL(projectId, sql)` - Test SQL validation
+- `createGlossaryTerm(projectId, request)` - Create new term
+- `updateGlossaryTerm(projectId, termId, request)` - Update existing term
+- `deleteGlossaryTerm(projectId, termId)` - Delete term
+
+**TypeScript Strict Mode:**
+- All code passes TypeScript strict mode with exactOptionalPropertyTypes
+- Properly handles optional fields (base_table, aliases) to avoid undefined assignment
+- Uses explicit conditional assignment for optional properties
+
+**Files Created:**
+- `ui/src/components/GlossaryTermEditor.tsx` - Full editor component (390+ lines)
+
+**Files Modified:**
+- `ui/src/pages/GlossaryPage.tsx` - Added CRUD UI integration (Add/Edit/Delete buttons, modal state, handlers)
+- `ui/src/services/engineApi.ts` - Added glossary API methods (testGlossarySQL, createGlossaryTerm, updateGlossaryTerm, deleteGlossaryTerm)
+- `pkg/handlers/glossary_handler.go` - Added TestSQL handler, TestSQLRequest/Response types, and route registration
+
+**Key Design Decisions:**
+1. **Modal-based editor** - Uses Radix Dialog for accessibility and clean UX
+2. **Fail-fast validation** - Save button disabled until SQL passes test
+3. **Inline SQL testing** - User tests SQL before saving, no backend auto-validation on create
+4. **Tag-style aliases** - Purple chips with X buttons, familiar pattern from other UIs
+5. **Delete confirmation** - Browser confirm() dialog before destructive action
+6. **Toast notifications** - Uses existing toast system for success/error feedback
+
+**Important for Next Session:**
+- All CRUD operations (create, read, update, delete) now work through UI
+- Test SQL endpoint validates syntax and captures output columns
+- No integration tests written yet (task 6.2 is next priority)
+- UI build passes TypeScript strict mode and Vite build succeeds
+- Manual testing verified all create/edit/delete flows work correctly
 
 ### 5.4 API Endpoints
 

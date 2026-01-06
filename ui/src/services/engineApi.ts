@@ -492,6 +492,71 @@ class EngineApiService {
     return this.makeRequest<GlossaryListResponse>(`/${projectId}/glossary`);
   }
 
+  /**
+   * Test SQL for a glossary term
+   * POST /api/projects/{projectId}/glossary/test-sql
+   */
+  async testGlossarySQL(
+    projectId: string,
+    sql: string
+  ): Promise<ApiResponse<import('../types/glossary').TestSQLResult>> {
+    return this.makeRequest<import('../types/glossary').TestSQLResult>(
+      `/${projectId}/glossary/test-sql`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ sql }),
+      }
+    );
+  }
+
+  /**
+   * Create a new glossary term
+   * POST /api/projects/{projectId}/glossary
+   */
+  async createGlossaryTerm(
+    projectId: string,
+    request: import('../types/glossary').CreateGlossaryTermRequest
+  ): Promise<ApiResponse<import('../types/glossary').GlossaryTerm>> {
+    return this.makeRequest<import('../types/glossary').GlossaryTerm>(
+      `/${projectId}/glossary`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request),
+      }
+    );
+  }
+
+  /**
+   * Update an existing glossary term
+   * PUT /api/projects/{projectId}/glossary/{termId}
+   */
+  async updateGlossaryTerm(
+    projectId: string,
+    termId: string,
+    request: import('../types/glossary').UpdateGlossaryTermRequest
+  ): Promise<ApiResponse<import('../types/glossary').GlossaryTerm>> {
+    return this.makeRequest<import('../types/glossary').GlossaryTerm>(
+      `/${projectId}/glossary/${termId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(request),
+      }
+    );
+  }
+
+  /**
+   * Delete a glossary term
+   * DELETE /api/projects/{projectId}/glossary/{termId}
+   */
+  async deleteGlossaryTerm(
+    projectId: string,
+    termId: string
+  ): Promise<ApiResponse<void>> {
+    return this.makeRequest<void>(`/${projectId}/glossary/${termId}`, {
+      method: 'DELETE',
+    });
+  }
+
   // --- MCP Configuration Methods ---
 
   /**
