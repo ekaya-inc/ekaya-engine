@@ -118,9 +118,32 @@ The UI should parse these into individual fields and auto-detect provider from h
 
 ### Phase 1: Frontend Provider Support
 
-#### 1.1 Extend Adapter Constants
+#### 1.1 Extend Adapter Constants [x] COMPLETE
 
 **File:** `ui/src/constants/adapters.ts`
+
+**What was implemented:**
+- Added `ProviderInfo` interface with all specified fields
+- Added `POSTGRES_PROVIDERS` array with 9 providers (postgres, supabase, neon, cockroachdb, yugabytedb, aurora, alloydb, timescale, redshift)
+- Added icon paths to `ADAPTER_ICON_PATHS` for all new providers
+- Added `getProviderById()` and `detectProviderFromUrl()` helper functions
+- Added URL patterns for auto-detection (Supabase, Neon, CockroachDB, YugabyteDB, Aurora, Timescale, Redshift)
+
+**Additional URL patterns added (not in original plan):**
+- YugabyteDB: `.yugabyte.cloud`
+- Aurora: `.rds.amazonaws.com` (covers Aurora PostgreSQL on RDS)
+- Timescale: `.timescaledb.io` and `tsdb.cloud.timescale.com`
+- Redshift: `.redshift.amazonaws.com`
+
+**Tests:** `ui/src/constants/adapters.test.ts` - 23 tests covering:
+- Provider presence and count validation
+- Default port correctness per provider
+- SSL mode validation (cockroachdb uses verify-full, others use require)
+- `getProviderById()` lookups
+- `detectProviderFromUrl()` for all providers with URL patterns
+- Case-insensitive hostname matching
+
+**Note:** Icons are not yet added to `ui/public/icons/adapters/` - this is covered in Phase 2.
 
 ```typescript
 export interface ProviderInfo {
