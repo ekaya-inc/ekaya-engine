@@ -415,13 +415,66 @@ type BusinessGlossaryTerm struct {
 - Enrichment node (task 3.2) may need similar updates or could be deprecated
 - Consider consolidating discovery+enrichment into single phase (as noted in plan)
 
-### 3.2 Update System Message
+### 3.2 Update Enrichment System Message ✅
 
-Emphasize:
-- SQL must be complete and executable (SELECT statement)
-- SQL should be a definition/calculation, not just a fragment
-- Include meaningful aliases that business users might use
-- Base table is the primary table being queried
+**Status:** Complete - Enrichment system message and prompt updated to generate complete SQL with aliases
+
+**Implementation Details:**
+
+**System Message Changes (pkg/services/glossary_service.go:794-810):**
+- Updated `enrichTermSystemMessage()` to emphasize complete, executable SQL definitions
+- Removed references to "SQL patterns" and fragmented fields (sql_pattern, columns_used, filters, aggregation)
+- Added IMPORTANT section with explicit requirements:
+  - SQL must be a complete SELECT statement that can be executed as-is
+  - Must include all necessary FROM, JOIN, WHERE, GROUP BY, ORDER BY clauses
+  - Must be a definition/calculation of the metric, not just a fragment
+  - Must include column aliases that represent the metric
+  - Must return meaningful column names for business users
+
+**Prompt Response Format (pkg/services/glossary_service.go:892-905):**
+- Updated example from old format: `{sql_pattern, columns_used, filters, aggregation}`
+- New format: `{defining_sql, base_table, aliases}`
+- Example now shows complete SELECT statement: `"SELECT SUM(amount) AS total_revenue\nFROM transactions\nWHERE status = 'completed'"`
+
+**Response Parsing (pkg/services/glossary_service.go:907-911):**
+- Updated `termEnrichment` struct:
+  - Removed: `SQLPattern string`, `ColumnsUsed []string`, `Aggregation string`
+  - Added: `DefiningSQL string`, `Aliases []string`
+  - Kept: `BaseTable string`
+- Updated enrichment application (pkg/services/glossary_service.go:767-770):
+  - Sets `term.DefiningSQL = enrichment.DefiningSQL`
+  - Sets `term.BaseTable = enrichment.BaseTable`
+  - Sets `term.Aliases = enrichment.Aliases`
+
+**Test Updates (pkg/services/glossary_service_test.go:1018-1063):**
+- Updated mock LLM response to new format with complete SQL and aliases:
+  ```json
+  {
+    "defining_sql": "SELECT SUM(amount) AS total_revenue\nFROM transactions\nWHERE status = 'completed'",
+    "base_table": "transactions",
+    "aliases": ["Total Revenue", "Gross Revenue"]
+  }
+  ```
+- Fixed test setup: Creates truly unenriched term with empty DefiningSQL (bypasses creation validation)
+- Updated assertions to verify DefiningSQL, BaseTable, and Aliases are all set correctly
+- All enrichment tests pass successfully
+
+**Files Modified:**
+- `pkg/services/glossary_service.go` - System message, prompt builder, response parsing (~850 lines)
+- `pkg/services/glossary_service_test.go` - Mock LLM responses and test assertions
+
+**Key Changes:**
+1. **Alignment with discovery** - Enrichment now uses identical format as discovery (task 3.1)
+2. **Complete SQL requirement** - LLM must generate executable SELECT statements, not fragments or patterns
+3. **Aliases support** - Enrichment captures alternative names for terms (e.g., "MAU" for "Monthly Active Users")
+4. **Simplified structure** - Removed nested filter arrays and aggregation fields, just 3 core fields
+
+**Important Context for Next Session:**
+- Both discovery (task 3.1) and enrichment (task 3.2) now generate the same format
+- Both produce complete, executable SQL with base_table and aliases
+- The two phases could potentially be consolidated since they now serve the same purpose
+- Post-discovery validation (task 3.4) will automatically apply to both phases via service layer SQL validation
+- Any LLM-generated SQL that is invalid will be caught by `TestSQL()` in the service layer
 
 ### 3.3 Update Enrichment Node (if keeping two-phase)
 

@@ -764,10 +764,10 @@ func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, on
 			continue
 		}
 
-		// Update term with enrichment (legacy - DefiningSQL should be provided at creation now)
-		// This method is deprecated and will be updated in Phase 3
-		term.DefiningSQL = enrichment.SQLPattern // Use SQLPattern as DefiningSQL for now
+		// Update term with enrichment
+		term.DefiningSQL = enrichment.DefiningSQL
 		term.BaseTable = enrichment.BaseTable
+		term.Aliases = enrichment.Aliases
 
 		if err := s.glossaryRepo.Update(ctx, term); err != nil {
 			s.logger.Error("Failed to update enriched term",
@@ -792,14 +792,19 @@ func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, on
 }
 
 func (s *glossaryService) enrichTermSystemMessage() string {
-	return `You are a SQL expert and business analyst. Your task is to generate SQL patterns for calculating business metrics based on database schema context.
+	return `You are a SQL expert and business analyst. Your task is to generate complete, executable SQL definitions for business metrics based on database schema context.
 
 For each business term, provide:
-1. A SQL pattern showing how to calculate this metric
-2. The base table(s) to query
-3. The columns involved in the calculation
-4. Any filters that should be applied
-5. The aggregation function used (if any)
+- A complete, executable SQL SELECT statement (defining_sql) that computes the metric
+- The primary table being queried (base_table)
+- Alternative names that business users might use (aliases)
+
+IMPORTANT: The defining_sql must be a complete SELECT statement that can be executed as-is. It should:
+- Start with SELECT and include column aliases that represent the metric
+- Include all necessary FROM, JOIN, WHERE, GROUP BY, ORDER BY clauses
+- Be a definition/calculation of the metric, not just a fragment
+- Be ready to execute without modification
+- Return meaningful column names that business users will understand
 
 Be specific and use exact table/column names from the provided schema.`
 }
@@ -889,13 +894,9 @@ func (s *glossaryService) buildEnrichTermPrompt(
 	sb.WriteString("Respond with a JSON object containing the enrichment:\n")
 	sb.WriteString("```json\n")
 	sb.WriteString(`{
-  "sql_pattern": "SUM(amount) WHERE status = 'completed'",
+  "defining_sql": "SELECT SUM(amount) AS total_revenue\nFROM transactions\nWHERE status = 'completed'",
   "base_table": "transactions",
-  "columns_used": ["amount", "status"],
-  "filters": [
-    {"column": "status", "operator": "=", "values": ["completed"]}
-  ],
-  "aggregation": "SUM"
+  "aliases": ["Total Revenue", "Gross Revenue"]
 }
 `)
 	sb.WriteString("```\n")
@@ -904,11 +905,9 @@ func (s *glossaryService) buildEnrichTermPrompt(
 }
 
 type termEnrichment struct {
-	SQLPattern  string   `json:"sql_pattern"`
+	DefiningSQL string   `json:"defining_sql"`
 	BaseTable   string   `json:"base_table"`
-	ColumnsUsed []string `json:"columns_used"`
-	// Filters field removed - not used in DefiningSQL approach
-	Aggregation string `json:"aggregation"`
+	Aliases     []string `json:"aliases"`
 }
 
 func (s *glossaryService) parseEnrichTermResponse(content string) (*termEnrichment, error) {

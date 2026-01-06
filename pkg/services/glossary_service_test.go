@@ -1017,11 +1017,9 @@ func TestGlossaryService_EnrichGlossaryTerms(t *testing.T) {
 
 	// LLM response for enrichment
 	enrichmentResponse := `{
-		"sql_pattern": "SUM(amount) WHERE status = 'completed'",
+		"defining_sql": "SELECT SUM(amount) AS total_revenue\nFROM transactions\nWHERE status = 'completed'",
 		"base_table": "transactions",
-		"columns_used": ["amount", "status"],
-		"filters": [{"column": "status", "operator": "=", "values": ["completed"]}],
-		"aggregation": "SUM"
+		"aliases": ["Total Revenue", "Gross Revenue"]
 	}`
 
 	glossaryRepo := newMockGlossaryRepo()
@@ -1041,18 +1039,20 @@ func TestGlossaryService_EnrichGlossaryTerms(t *testing.T) {
 	adapterFactory := &mockAdapterFactoryForGlossary{}
 	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, datasourceSvc, adapterFactory, llmFactory, logger)
 
-	// Create unenriched term
+	// Create unenriched term (no DefiningSQL initially)
 	term := &models.BusinessGlossaryTerm{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
 		Term:        "Revenue",
 		Definition:  "Total revenue",
 		Source:      models.GlossarySourceInferred,
-		DefiningSQL: "SELECT SUM(amount) FROM transactions", // Basic SQL, will be enriched
+		DefiningSQL: "", // Empty - will be enriched by LLM
 	}
-	err := svc.CreateTerm(ctx, projectID, term)
-	require.NoError(t, err)
+	// Manually insert to bypass validation that requires DefiningSQL
+	glossaryRepo.terms[term.ID] = term
 
 	// Enrich terms
-	err = svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	err := svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
 	require.NoError(t, err)
 
 	// Verify enrichment was applied
@@ -1060,8 +1060,9 @@ func TestGlossaryService_EnrichGlossaryTerms(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, terms, 1)
 	assert.NotEmpty(t, terms[0].DefiningSQL)
-	// Note: BaseTable might not be set depending on enrichment logic
-	assert.NotEmpty(t, terms[0].OutputColumns)
+	assert.Equal(t, "transactions", terms[0].BaseTable)
+	assert.Contains(t, terms[0].Aliases, "Total Revenue")
+	assert.Contains(t, terms[0].Aliases, "Gross Revenue")
 }
 
 func TestGlossaryService_EnrichGlossaryTerms_OnlyEnrichesUnenrichedTerms(t *testing.T) {
