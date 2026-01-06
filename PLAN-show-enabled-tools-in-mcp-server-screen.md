@@ -266,16 +266,23 @@ Option B: Use React context or state management for agent key (heavier solution)
    - TypeScript type check passes
    - **Integration note for task 7**: The parent `MCPServerPage.tsx` must pass `enabledTools={config.enabledTools}` to `MCPServerURL` for the tools table to display actual data. Currently defaults to empty array.
 
-7. [ ] **Update MCPServerPage** (`ui/src/pages/MCPServerPage.tsx`)
-   - Pass `enabledTools` from config response to `MCPServerURL`
+7. [x] **Update MCPServerPage** (`ui/src/pages/MCPServerPage.tsx`) ✅ COMPLETED
+   - Added `enabledTools={config.enabledTools}` prop to `MCPServerURL` component (line 423)
+   - Updated `MCPConfigResponse` type in `ui/src/types/mcp.ts` to include `enabledTools: EnabledToolInfo[]` (was a prerequisite)
+   - Added `EnabledToolInfo` interface with `name` and `description` fields
+   - TypeScript type check passes
+   - The tools table now displays dynamically based on the API response
+   - **Integration complete**: The enabled tools flow is now end-to-end:
+     - Backend: `GetEnabledTools()` in registry → `MCPStateResult.EnabledTools` → `MCPConfigResponse.enabledTools`
+     - Frontend: `config.enabledTools` → `MCPServerURL` prop → `MCPEnabledTools` component
 
 8. [ ] **Fix agent key rotation bug** (`ui/src/components/mcp/AgentAPIKeyDisplay.tsx`, `ui/src/pages/MCPServerPage.tsx`)
    - Add `onKeyChange` callback prop
    - Lift key state to parent
 
-9. [ ] **Update types** (`ui/src/types/index.ts`)
-   - Add `EnabledToolInfo` type
-   - Update `MCPConfigResponse` type
+9. [x] **Update types** (`ui/src/types/mcp.ts`) ✅ COMPLETED (done as part of task 7)
+   - Added `EnabledToolInfo` interface with `name` and `description` fields
+   - Updated `MCPConfigResponse` to include `enabledTools: EnabledToolInfo[]`
 
 ## Testing
 

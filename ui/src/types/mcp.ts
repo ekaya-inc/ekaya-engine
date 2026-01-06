@@ -18,9 +18,19 @@ export interface ToolGroupState {
   allowClientSuggestions?: boolean;
 }
 
+/**
+ * EnabledToolInfo represents a tool that is currently enabled.
+ * Returned by the API to show which tools are active based on current config.
+ */
+export interface EnabledToolInfo {
+  name: string;
+  description: string;
+}
+
 export interface MCPConfigResponse {
   serverUrl: string;
   toolGroups: Record<string, ToolGroupState>;
+  enabledTools: EnabledToolInfo[];
 }
 
 // API Request Types

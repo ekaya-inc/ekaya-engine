@@ -187,7 +187,7 @@ const MCPServerPage = () => {
       return;
     }
 
-    if (!enabled && enabledQueryCount === 0) {
+    if (enabled && enabledQueryCount === 0) {
       toast({
         title: 'No enabled queries',
         description: 'Create and enable queries first.',
@@ -420,6 +420,7 @@ const MCPServerPage = () => {
               docsUrl={`https://us.ekaya.ai/mcp-setup?mcp_url=${encodeURIComponent(config.serverUrl)}`}
               agentMode={isAgentToolsEnabled}
               agentApiKey={agentApiKey}
+              enabledTools={config.enabledTools}
             />
 
             {/* Tool Configuration Section */}
