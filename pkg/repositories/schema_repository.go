@@ -64,7 +64,6 @@ type SchemaRepository interface {
 	GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error)
 	UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount, distinctCount *int64, isJoinable *bool, joinabilityReason *string) error
 	GetPrimaryKeyColumns(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error)
-	GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.LegacyRelationshipCandidate, error)
 	// GetNonPKColumnsByExactType returns non-primary-key columns with exact data type match for review candidate discovery.
 	GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error)
 }
@@ -1454,68 +1453,6 @@ func (r *schemaRepository) GetPrimaryKeyColumns(ctx context.Context, projectID, 
 	}
 
 	return columns, nil
-}
-
-func (r *schemaRepository) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.LegacyRelationshipCandidate, error) {
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		return nil, fmt.Errorf("no tenant scope in context")
-	}
-
-	// Get all relationships including rejected ones (those with rejection_reason set)
-	query := `
-		SELECT
-			r.id,
-			st.schema_name || '.' || st.table_name as source_table,
-			sc.column_name as source_column,
-			tt.schema_name || '.' || tt.table_name as target_table,
-			tc.column_name as target_column,
-			COALESCE(r.match_rate, 0) as match_rate,
-			CASE
-				WHEN r.rejection_reason IS NOT NULL THEN 'rejected'
-				WHEN r.is_approved = true THEN 'verified'
-				ELSE 'pending'
-			END as status,
-			r.rejection_reason
-		FROM engine_schema_relationships r
-		JOIN engine_schema_columns sc ON r.source_column_id = sc.id
-		JOIN engine_schema_tables st ON r.source_table_id = st.id
-		JOIN engine_schema_columns tc ON r.target_column_id = tc.id
-		JOIN engine_schema_tables tt ON r.target_table_id = tt.id
-		WHERE r.project_id = $1
-		  AND st.datasource_id = $2
-		  AND r.deleted_at IS NULL
-		  AND sc.deleted_at IS NULL
-		  AND st.deleted_at IS NULL
-		  AND tc.deleted_at IS NULL
-		  AND tt.deleted_at IS NULL
-		ORDER BY st.schema_name, st.table_name, sc.column_name`
-
-	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get relationship candidates: %w", err)
-	}
-	defer rows.Close()
-
-	candidates := make([]*models.LegacyRelationshipCandidate, 0)
-	for rows.Next() {
-		var c models.LegacyRelationshipCandidate
-		err := rows.Scan(
-			&c.ID,
-			&c.SourceTable, &c.SourceColumn,
-			&c.TargetTable, &c.TargetColumn,
-			&c.MatchRate, &c.Status, &c.RejectionReason,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan relationship candidate: %w", err)
-		}
-		candidates = append(candidates, &c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating relationship candidates: %w", err)
-	}
-
-	return candidates, nil
 }
 
 func (r *schemaRepository) GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error) {

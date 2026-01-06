@@ -7,73 +7,14 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestWithWorkflowID_AddsIDToContext(t *testing.T) {
-	ctx := context.Background()
-	workflowID := uuid.New()
-
-	newCtx := WithWorkflowID(ctx, workflowID)
-
-	// Verify original context is not modified
-	if GetWorkflowID(ctx) != nil {
-		t.Error("original context should not have workflow ID")
-	}
-
-	// Verify new context has the workflow ID
-	gotID := GetWorkflowID(newCtx)
-	if gotID == nil {
-		t.Fatal("expected workflow ID in context")
-	}
-	if *gotID != workflowID {
-		t.Errorf("expected workflow ID %s, got %s", workflowID, *gotID)
-	}
-}
-
-func TestGetWorkflowID_ReturnsNilForEmptyContext(t *testing.T) {
-	ctx := context.Background()
-
-	gotID := GetWorkflowID(ctx)
-
-	if gotID != nil {
-		t.Errorf("expected nil for empty context, got %s", *gotID)
-	}
-}
-
-func TestGetWorkflowID_ReturnsNilForWrongType(t *testing.T) {
-	// Put an invalid workflow_id in context
-	ctx := WithContext(context.Background(), map[string]any{
-		"workflow_id": "not-a-valid-uuid",
-	})
-
-	gotID := GetWorkflowID(ctx)
-
-	if gotID != nil {
-		t.Error("expected nil when workflow_id is not a valid UUID")
-	}
-}
-
-func TestWithWorkflowID_CanBeOverwritten(t *testing.T) {
-	ctx := context.Background()
-	firstID := uuid.New()
-	secondID := uuid.New()
-
-	ctx = WithWorkflowID(ctx, firstID)
-	ctx = WithWorkflowID(ctx, secondID)
-
-	gotID := GetWorkflowID(ctx)
-	if gotID == nil {
-		t.Fatal("expected workflow ID in context")
-	}
-	if *gotID != secondID {
-		t.Errorf("expected second workflow ID %s, got %s", secondID, *gotID)
-	}
-}
-
 func TestWithContext_MergesValues(t *testing.T) {
 	ctx := context.Background()
 	workflowID := uuid.New()
 
 	// Add workflow ID
-	ctx = WithWorkflowID(ctx, workflowID)
+	ctx = WithContext(ctx, map[string]any{
+		"workflow_id": workflowID.String(),
+	})
 
 	// Add task name (should merge, not replace)
 	ctx = WithContext(ctx, map[string]any{

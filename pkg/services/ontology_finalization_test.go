@@ -37,10 +37,6 @@ func (m *mockOntologyRepoForFinalization) GetActive(ctx context.Context, project
 	return m.activeOntology, nil
 }
 
-func (m *mockOntologyRepoForFinalization) GetByVersion(ctx context.Context, projectID uuid.UUID, version int) (*models.TieredOntology, error) {
-	return nil, nil
-}
-
 func (m *mockOntologyRepoForFinalization) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
 	if m.updateSummaryErr != nil {
 		return m.updateSummaryErr
@@ -61,27 +57,11 @@ func (m *mockOntologyRepoForFinalization) UpdateColumnDetails(ctx context.Contex
 	return nil
 }
 
-func (m *mockOntologyRepoForFinalization) UpdateMetadata(ctx context.Context, projectID uuid.UUID, metadata map[string]any) error {
-	return nil
-}
-
-func (m *mockOntologyRepoForFinalization) SetActive(ctx context.Context, projectID uuid.UUID, version int) error {
-	return nil
-}
-
-func (m *mockOntologyRepoForFinalization) DeactivateAll(ctx context.Context, projectID uuid.UUID) error {
-	return nil
-}
-
 func (m *mockOntologyRepoForFinalization) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 1, nil
 }
 
 func (m *mockOntologyRepoForFinalization) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockOntologyRepoForFinalization) WriteCleanOntology(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
 
@@ -312,9 +292,6 @@ func (m *mockSchemaRepoForFinalization) UpdateColumnJoinability(ctx context.Cont
 	return nil
 }
 func (m *mockSchemaRepoForFinalization) GetPrimaryKeyColumns(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {
-	return nil, nil
-}
-func (m *mockSchemaRepoForFinalization) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.LegacyRelationshipCandidate, error) {
 	return nil, nil
 }
 func (m *mockSchemaRepoForFinalization) GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error) {
@@ -962,4 +939,47 @@ func TestOntologyFinalization_NoConventions(t *testing.T) {
 
 	// Conventions should be nil when nothing detected
 	assert.Nil(t, ontologyRepo.updatedDomainSummary.Conventions)
+}
+
+func TestOntologyFinalization_SampleQuestionsAreEmpty(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	entityID1 := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{ID: entityID1, ProjectID: projectID, OntologyID: ontologyID, Name: "User", Description: "Platform users", Domain: "customer", PrimaryTable: "users"},
+	}
+
+	ontologyRepo := &mockOntologyRepoForFinalization{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+	entityRepo := &mockEntityRepoForFinalization{entities: entities}
+	relationshipRepo := &mockRelationshipRepoForFinalization{}
+	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: map[string][]*models.SchemaColumn{}}
+
+	llmClient := &mockLLMClient{
+		responseContent: `{"description": "A user management system."}`,
+	}
+	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
+
+	logger := zap.NewNop()
+
+	svc := NewOntologyFinalizationService(
+		ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil,
+		llmFactory, nil, logger,
+	)
+
+	err := svc.Finalize(ctx, projectID)
+	require.NoError(t, err)
+
+	// Verify domain summary was updated
+	require.NotNil(t, ontologyRepo.updatedDomainSummary)
+
+	// Verify sample questions are nil/empty (sample question generation code removed)
+	assert.Empty(t, ontologyRepo.updatedDomainSummary.SampleQuestions)
 }

@@ -348,10 +348,6 @@ func (m *mockSchemaRepository) GetPrimaryKeyColumns(ctx context.Context, project
 	return nil, nil
 }
 
-func (m *mockSchemaRepository) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.LegacyRelationshipCandidate, error) {
-	return nil, nil
-}
-
 func (m *mockSchemaRepository) GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }

@@ -256,7 +256,7 @@ func main() {
 	projectConfigHandler.RegisterRoutes(mux, authMiddleware)
 
 	// Register well-known endpoints (public - no auth required)
-	wellKnownHandler := handlers.NewWellKnownHandler(cfg, logger)
+	wellKnownHandler := handlers.NewWellKnownHandler(cfg, projectService, logger)
 	wellKnownHandler.RegisterRoutes(mux)
 
 	// Register MCP server (authenticated - project-scoped)
@@ -318,7 +318,8 @@ func main() {
 	mcpHandler.RegisterRoutes(mux, mcpAuthMiddleware)
 
 	// Register MCP OAuth token endpoint (public - for MCP clients)
-	mcpOAuthHandler := handlers.NewMCPOAuthHandler(oauthService, logger)
+	// Pass projectService for looking up project-specific auth server URLs
+	mcpOAuthHandler := handlers.NewMCPOAuthHandler(oauthService, projectService, logger)
 	mcpOAuthHandler.RegisterRoutes(mux)
 
 	// Create tenant middleware once for all handlers that need it

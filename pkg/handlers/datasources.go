@@ -63,7 +63,7 @@ func (r *TestConnectionRequest) ToConfig() map[string]any {
 		"port":     r.Port,
 		"user":     r.User,
 		"password": r.Password,
-		"name":     r.Name,
+		"database": r.Name,
 		"ssl_mode": r.SSLMode,
 	}
 }

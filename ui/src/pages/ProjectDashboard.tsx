@@ -677,6 +677,10 @@ const ProjectDashboard = () => {
                                 setIsProviderDropdownOpen(false);
                                 // Set URL for presets with URLs, clear for Custom/Azure
                                 updateAiConfig('llmBaseUrl', preset.url);
+                                // Auto-fill model for Anthropic if empty
+                                if (preset.label === 'Anthropic' && !aiConfig.llmModel) {
+                                  updateAiConfig('llmModel', 'claude-haiku-4-5');
+                                }
                               }}
                               className={`w-full px-3 py-2 text-sm text-left hover:bg-surface-hover flex items-center justify-between ${
                                 selectedProvider === preset.label ? 'bg-surface-secondary text-text-primary' : 'text-text-primary'
@@ -729,7 +733,7 @@ const ProjectDashboard = () => {
                     </label>
                     <input
                       type="text"
-                      placeholder="gpt-4o, claude-sonnet-4-5, llama3.1"
+                      placeholder="gpt-4o, claude-haiku-4-5, llama3.1"
                       value={aiConfig.llmModel}
                       onChange={(e) => updateAiConfig('llmModel', e.target.value)}
                       disabled={activeAIConfig === 'byok'}
@@ -834,7 +838,7 @@ const ProjectDashboard = () => {
                   </button>
                   <button
                     onClick={activeAIConfig === 'byok' ? () => setShowRemoveConfirmation(true) : () => handleSaveConfig('byok')}
-                    disabled={isSaving || !canSaveConfig('byok')}
+                    disabled={isSaving || !canSaveConfig('byok') || (!testResult?.success && activeAIConfig !== 'byok')}
                     className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ${
                       activeAIConfig === 'byok'
                         ? 'bg-red-600 text-white hover:bg-red-700'

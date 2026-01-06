@@ -152,32 +152,6 @@ func GetOntologyChatTools() []ToolDefinition {
 			[]string{"table_name", "column_name"},
 		),
 		NewToolDefinition(
-			"answer_question",
-			"Record an answer to a pending ontology question based on what was learned in the conversation",
-			map[string]ParameterProperty{
-				"question_id": {
-					Type:        "string",
-					Description: "The UUID of the question being answered",
-				},
-				"answer": {
-					Type:        "string",
-					Description: "The answer to record",
-				},
-			},
-			[]string{"question_id", "answer"},
-		),
-		NewToolDefinition(
-			"get_pending_questions",
-			"Retrieve the list of pending questions that need answers to improve the ontology",
-			map[string]ParameterProperty{
-				"limit": {
-					Type:        "integer",
-					Description: "Maximum number of questions to return (default 5)",
-				},
-			},
-			[]string{},
-		),
-		NewToolDefinition(
 			"create_domain_entity",
 			"Create a new domain entity that represents a business concept spanning one or more tables",
 			map[string]ParameterProperty{

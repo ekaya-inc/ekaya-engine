@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
@@ -47,27 +48,34 @@ type DCRResponse struct {
 
 // MCPOAuthHandler handles MCP OAuth token exchange.
 type MCPOAuthHandler struct {
-	oauthService services.OAuthService
-	logger       *zap.Logger
+	oauthService      services.OAuthService
+	projectAuthLookup ProjectAuthLookup
+	logger            *zap.Logger
 }
 
 // NewMCPOAuthHandler creates a new MCP OAuth handler.
-func NewMCPOAuthHandler(oauthService services.OAuthService, logger *zap.Logger) *MCPOAuthHandler {
+func NewMCPOAuthHandler(oauthService services.OAuthService, projectAuthLookup ProjectAuthLookup, logger *zap.Logger) *MCPOAuthHandler {
 	return &MCPOAuthHandler{
-		oauthService: oauthService,
-		logger:       logger,
+		oauthService:      oauthService,
+		projectAuthLookup: projectAuthLookup,
+		logger:            logger,
 	}
 }
 
 // RegisterRoutes registers MCP OAuth endpoints.
 func (h *MCPOAuthHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /mcp/oauth/token", h.TokenExchange)
+	mux.HandleFunc("POST /mcp/{pid}/oauth/token", h.TokenExchange)
 	mux.HandleFunc("POST /mcp/oauth/register", h.DynamicClientRegistration)
 }
 
-// TokenExchange handles POST /mcp/oauth/token
+// TokenExchange handles POST /mcp/oauth/token and POST /mcp/{pid}/oauth/token
 // This endpoint exchanges an authorization code for a Bearer token.
 // Unlike the browser OAuth flow, this returns the token as JSON (no cookies).
+//
+// When accessed via /mcp/{pid}/oauth/token, the handler looks up the project-specific
+// auth server URL, enabling a single ekaya-engine instance to serve projects from
+// multiple auth environments (localhost, dev, prod).
 //
 // Request (application/x-www-form-urlencoded):
 //
@@ -94,6 +102,32 @@ func (h *MCPOAuthHandler) TokenExchange(w http.ResponseWriter, r *http.Request) 
 	redirectURI := r.FormValue("redirect_uri")
 	clientID := r.FormValue("client_id")
 	authURL := r.FormValue("auth_url")
+
+	// Extract project ID from path if present (via /mcp/{pid}/oauth/token route)
+	projectIDStr := r.PathValue("pid")
+
+	// Look up project-specific auth URL if project ID is present and no auth_url was provided
+	if authURL == "" && projectIDStr != "" && h.projectAuthLookup != nil {
+		pid, err := uuid.Parse(projectIDStr)
+		if err != nil {
+			h.logger.Warn("Invalid project_id format in token exchange path",
+				zap.String("project_id", projectIDStr))
+			h.writeOAuthError(w, http.StatusBadRequest, "invalid_request", "Invalid project_id format")
+			return
+		}
+		projectAuthURL, err := h.projectAuthLookup.GetAuthServerURL(r.Context(), pid)
+		if err != nil {
+			h.logger.Error("Failed to lookup project auth URL",
+				zap.String("project_id", projectIDStr),
+				zap.Error(err))
+			// Continue with default auth URL - don't fail the request
+		} else if projectAuthURL != "" {
+			authURL = projectAuthURL
+			h.logger.Debug("Using project-specific auth server URL for token exchange",
+				zap.String("project_id", projectIDStr),
+				zap.String("auth_server_url", projectAuthURL))
+		}
+	}
 
 	// Validate grant_type
 	if grantType != "authorization_code" {

@@ -109,10 +109,6 @@ func (m *mockOntologyRepoForGlossary) GetActive(ctx context.Context, projectID u
 	return m.activeOntology, nil
 }
 
-func (m *mockOntologyRepoForGlossary) GetByVersion(ctx context.Context, projectID uuid.UUID, version int) (*models.TieredOntology, error) {
-	return nil, nil
-}
-
 func (m *mockOntologyRepoForGlossary) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
 	return nil
 }
@@ -129,27 +125,11 @@ func (m *mockOntologyRepoForGlossary) UpdateColumnDetails(ctx context.Context, p
 	return nil
 }
 
-func (m *mockOntologyRepoForGlossary) UpdateMetadata(ctx context.Context, projectID uuid.UUID, metadata map[string]any) error {
-	return nil
-}
-
-func (m *mockOntologyRepoForGlossary) SetActive(ctx context.Context, projectID uuid.UUID, version int) error {
-	return nil
-}
-
-func (m *mockOntologyRepoForGlossary) DeactivateAll(ctx context.Context, projectID uuid.UUID) error {
-	return nil
-}
-
 func (m *mockOntologyRepoForGlossary) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 1, nil
 }
 
 func (m *mockOntologyRepoForGlossary) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
-	return nil
-}
-
-func (m *mockOntologyRepoForGlossary) WriteCleanOntology(ctx context.Context, projectID uuid.UUID) error {
 	return nil
 }
 

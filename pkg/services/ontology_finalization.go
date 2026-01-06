@@ -130,22 +130,13 @@ func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uu
 		return fmt.Errorf("update entity summaries: %w", err)
 	}
 
-	// TODO: Re-enable once relationship algorithm is improved
-	// The sample questions generated are powerful but require accurate relationships to answer
-	// sampleQuestions, err := s.generateSampleQuestions(ctx, projectID, entities, relationships, entityNameByID)
-	// if err != nil {
-	// 	s.logger.Debug("Failed to generate sample questions, continuing without", zap.Error(err))
-	// 	// Non-fatal - continue without sample questions
-	// }
-	var sampleQuestions []string // Empty for now
-
 	// Save to domain_summary JSONB
 	domainSummary := &models.DomainSummary{
 		Description:       description,
 		Domains:           primaryDomains,
 		Conventions:       conventions,
 		RelationshipGraph: relationshipGraph,
-		SampleQuestions:   sampleQuestions,
+		SampleQuestions:   nil, // Feature removed, may be reimplemented later
 	}
 
 	if err := s.ontologyRepo.UpdateDomainSummary(ctx, projectID, domainSummary); err != nil {
@@ -270,103 +261,6 @@ func (s *ontologyFinalizationService) buildEntitySummaries(
 	}
 
 	return summaries, nil
-}
-
-// generateSampleQuestions calls the LLM to generate sample business questions.
-func (s *ontologyFinalizationService) generateSampleQuestions(
-	ctx context.Context,
-	projectID uuid.UUID,
-	entities []*models.OntologyEntity,
-	relationships []*models.EntityRelationship,
-	entityNameByID map[uuid.UUID]string,
-) ([]string, error) {
-	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("create LLM client: %w", err)
-	}
-
-	systemMessage := `You are a data analyst expert. Generate sample business questions that could be answered using the given database schema.`
-	prompt := s.buildSampleQuestionsPrompt(entities, relationships, entityNameByID)
-
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMessage, 0.5, false)
-	if err != nil {
-		return nil, fmt.Errorf("LLM generate response: %w", err)
-	}
-
-	s.logger.Debug("Sample questions LLM response received",
-		zap.String("project_id", projectID.String()),
-		zap.Int("prompt_tokens", result.PromptTokens),
-		zap.Int("completion_tokens", result.CompletionTokens),
-	)
-
-	// Parse the response
-	parsed, err := s.parseSampleQuestionsResponse(result.Content)
-	if err != nil {
-		s.logger.Warn("Failed to parse sample questions response, continuing without",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return nil, nil // Non-fatal - continue without sample questions
-	}
-
-	return parsed.Questions, nil
-}
-
-func (s *ontologyFinalizationService) buildSampleQuestionsPrompt(
-	entities []*models.OntologyEntity,
-	relationships []*models.EntityRelationship,
-	entityNameByID map[uuid.UUID]string,
-) string {
-	var sb strings.Builder
-
-	sb.WriteString("# Database Schema for Question Generation\n\n")
-	sb.WriteString("Generate 5-10 sample business questions that a user might ask about this database.\n")
-	sb.WriteString("Questions should be practical, specific, and answerable with SQL queries.\n\n")
-
-	sb.WriteString("## Entities\n\n")
-	for _, e := range entities {
-		sb.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", e.Name, e.PrimaryTable, e.Description))
-	}
-
-	if len(relationships) > 0 {
-		sb.WriteString("\n## Relationships\n\n")
-		for _, rel := range relationships {
-			if rel.Status == models.RelationshipStatusRejected {
-				continue
-			}
-			sourceName := entityNameByID[rel.SourceEntityID]
-			targetName := entityNameByID[rel.TargetEntityID]
-			if sourceName == "" || targetName == "" {
-				continue
-			}
-			sb.WriteString(fmt.Sprintf("- %s → %s\n", sourceName, targetName))
-		}
-	}
-
-	sb.WriteString("\n## Response Format\n\n")
-	sb.WriteString("Respond with a JSON object:\n")
-	sb.WriteString("```json\n")
-	sb.WriteString("{\n")
-	sb.WriteString("  \"questions\": [\n")
-	sb.WriteString("    \"How many active users signed up last month?\",\n")
-	sb.WriteString("    \"What is the total revenue by product category?\",\n")
-	sb.WriteString("    \"...\"\n")
-	sb.WriteString("  ]\n")
-	sb.WriteString("}\n")
-	sb.WriteString("```\n")
-
-	return sb.String()
-}
-
-type sampleQuestionsResponse struct {
-	Questions []string `json:"questions"`
-}
-
-func (s *ontologyFinalizationService) parseSampleQuestionsResponse(content string) (*sampleQuestionsResponse, error) {
-	parsed, err := llm.ParseJSONResponse[sampleQuestionsResponse](content)
-	if err != nil {
-		return nil, fmt.Errorf("parse sample questions JSON: %w", err)
-	}
-	return &parsed, nil
 }
 
 // generateDomainDescription calls the LLM to generate a business description.

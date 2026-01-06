@@ -135,32 +135,6 @@ type DiscoverRelationshipsResponse struct {
 	OrphanTableNames           []string `json:"orphan_table_names,omitempty"`
 }
 
-// RelationshipCandidatesResponse contains candidates with summary statistics.
-type RelationshipCandidatesResponse struct {
-	Candidates []RelationshipCandidateResponse `json:"candidates"`
-	Summary    CandidatesSummaryResponse       `json:"summary"`
-}
-
-// RelationshipCandidateResponse represents a potential or rejected relationship.
-type RelationshipCandidateResponse struct {
-	ID              string  `json:"id"`
-	SourceTable     string  `json:"source_table"`
-	SourceColumn    string  `json:"source_column"`
-	TargetTable     string  `json:"target_table"`
-	TargetColumn    string  `json:"target_column"`
-	MatchRate       float64 `json:"match_rate"`
-	Status          string  `json:"status"`
-	RejectionReason *string `json:"rejection_reason,omitempty"`
-}
-
-// CandidatesSummaryResponse provides aggregate stats for relationship candidates.
-type CandidatesSummaryResponse struct {
-	Total    int `json:"total"`
-	Verified int `json:"verified"`
-	Rejected int `json:"rejected"`
-	Pending  int `json:"pending"`
-}
-
 // --- Handler ---
 
 // SchemaHandler handles schema-related HTTP requests.
@@ -224,8 +198,6 @@ func (h *SchemaHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.
 	// Relationship discovery operations
 	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/schema/relationships/discover",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.DiscoverRelationships)))
-	mux.HandleFunc("GET /api/projects/{pid}/datasources/{dsid}/schema/relationships/candidates",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetRelationshipCandidates)))
 }
 
 // GetSchema handles GET /api/projects/{pid}/datasources/{dsid}/schema
@@ -687,57 +659,6 @@ func (h *SchemaHandler) DiscoverRelationships(w http.ResponseWriter, r *http.Req
 		EmptyTables:                results.EmptyTables,
 		EmptyTableNames:            results.EmptyTableNames,
 		OrphanTableNames:           results.OrphanTableNames,
-	}
-
-	response := ApiResponse{Success: true, Data: data}
-	if err := WriteJSON(w, http.StatusOK, response); err != nil {
-		h.logger.Error("Failed to write response", zap.Error(err))
-	}
-}
-
-// GetRelationshipCandidates handles GET /api/projects/{pid}/datasources/{dsid}/schema/relationships/candidates
-// Returns all relationship candidates including rejected ones with summary statistics.
-func (h *SchemaHandler) GetRelationshipCandidates(w http.ResponseWriter, r *http.Request) {
-	projectID, datasourceID, ok := ParseProjectAndDatasourceIDs(w, r, h.logger)
-	if !ok {
-		return
-	}
-
-	candidatesResponse, err := h.schemaService.GetRelationshipCandidates(r.Context(), projectID, datasourceID)
-	if err != nil {
-		h.logger.Error("Failed to get relationship candidates",
-			zap.String("project_id", projectID.String()),
-			zap.String("datasource_id", datasourceID.String()),
-			zap.Error(err))
-		if err := ErrorResponse(w, http.StatusInternalServerError, "get_candidates_failed", "Failed to get relationship candidates"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
-	// Convert to handler response
-	candidates := make([]RelationshipCandidateResponse, len(candidatesResponse.Candidates))
-	for i, c := range candidatesResponse.Candidates {
-		candidates[i] = RelationshipCandidateResponse{
-			ID:              c.ID.String(),
-			SourceTable:     c.SourceTable,
-			SourceColumn:    c.SourceColumn,
-			TargetTable:     c.TargetTable,
-			TargetColumn:    c.TargetColumn,
-			MatchRate:       c.MatchRate,
-			Status:          c.Status,
-			RejectionReason: c.RejectionReason,
-		}
-	}
-
-	data := RelationshipCandidatesResponse{
-		Candidates: candidates,
-		Summary: CandidatesSummaryResponse{
-			Total:    candidatesResponse.Summary.Total,
-			Verified: candidatesResponse.Summary.Verified,
-			Rejected: candidatesResponse.Summary.Rejected,
-			Pending:  candidatesResponse.Summary.Pending,
-		},
 	}
 
 	response := ApiResponse{Success: true, Data: data}
