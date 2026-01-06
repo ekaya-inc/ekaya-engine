@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
@@ -70,7 +71,7 @@ func (m *mockDatasourceRepository) List(ctx context.Context, projectID uuid.UUID
 	return m.datasources, m.encryptedConfigs, nil
 }
 
-func (m *mockDatasourceRepository) Update(ctx context.Context, id uuid.UUID, name, dsType, encryptedConfig string) error {
+func (m *mockDatasourceRepository) Update(ctx context.Context, id uuid.UUID, name, dsType, provider, encryptedConfig string) error {
 	m.capturedEncryptedConfig = encryptedConfig
 	return m.updateErr
 }
@@ -182,7 +183,7 @@ func TestDatasourceService_Create_Success(t *testing.T) {
 		"database": "testdb",
 	}
 
-	ds, err := service.Create(context.Background(), uuid.New(), "my-postgres", "postgres", config)
+	ds, err := service.Create(context.Background(), uuid.New(), "my-postgres", "postgres", "", config)
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -211,7 +212,7 @@ func TestDatasourceService_Create_EmptyName(t *testing.T) {
 	repo := &mockDatasourceRepository{}
 	service, _ := newTestService(repo)
 
-	_, err := service.Create(context.Background(), uuid.New(), "", "postgres", nil)
+	_, err := service.Create(context.Background(), uuid.New(), "", "postgres", "", nil)
 	if err == nil {
 		t.Fatal("expected error for empty name")
 	}
@@ -224,7 +225,7 @@ func TestDatasourceService_Create_EmptyType(t *testing.T) {
 	repo := &mockDatasourceRepository{}
 	service, _ := newTestService(repo)
 
-	_, err := service.Create(context.Background(), uuid.New(), "my-ds", "", nil)
+	_, err := service.Create(context.Background(), uuid.New(), "my-ds", "", "", nil)
 	if err == nil {
 		t.Fatal("expected error for empty type")
 	}
@@ -237,7 +238,7 @@ func TestDatasourceService_Create_NilConfig(t *testing.T) {
 	repo := &mockDatasourceRepository{}
 	service, _ := newTestService(repo)
 
-	ds, err := service.Create(context.Background(), uuid.New(), "my-ds", "postgres", nil)
+	ds, err := service.Create(context.Background(), uuid.New(), "my-ds", "postgres", "", nil)
 	if err != nil {
 		t.Fatalf("Create with nil config failed: %v", err)
 	}
@@ -252,7 +253,7 @@ func TestDatasourceService_Create_RepoError(t *testing.T) {
 	}
 	service, _ := newTestService(repo)
 
-	_, err := service.Create(context.Background(), uuid.New(), "existing-name", "postgres", nil)
+	_, err := service.Create(context.Background(), uuid.New(), "existing-name", "postgres", "", nil)
 	if err == nil {
 		t.Fatal("expected error from repo")
 	}
@@ -383,7 +384,7 @@ func TestDatasourceService_Update_EncryptsConfig(t *testing.T) {
 	service, _ := newTestService(repo)
 
 	config := map[string]any{"host": "new-host.example.com"}
-	err := service.Update(context.Background(), uuid.New(), "updated-name", "postgres", config)
+	err := service.Update(context.Background(), uuid.New(), "updated-name", "postgres", "", config)
 	if err != nil {
 		t.Fatalf("Update failed: %v", err)
 	}
@@ -402,13 +403,13 @@ func TestDatasourceService_Update_Validation(t *testing.T) {
 	service, _ := newTestService(repo)
 
 	// Empty name
-	err := service.Update(context.Background(), uuid.New(), "", "postgres", nil)
+	err := service.Update(context.Background(), uuid.New(), "", "postgres", "", nil)
 	if err == nil || err.Error() != "datasource name is required" {
 		t.Errorf("expected name validation error, got: %v", err)
 	}
 
 	// Empty type
-	err = service.Update(context.Background(), uuid.New(), "name", "", nil)
+	err = service.Update(context.Background(), uuid.New(), "name", "", "", nil)
 	if err == nil || err.Error() != "datasource type is required" {
 		t.Errorf("expected type validation error, got: %v", err)
 	}
@@ -453,7 +454,7 @@ func TestDatasourceService_EncryptionRoundTrip(t *testing.T) {
 	}
 
 	projectID := uuid.New()
-	_, err := service.Create(context.Background(), projectID, "complex-db", "postgres", originalConfig)
+	_, err := service.Create(context.Background(), projectID, "complex-db", "postgres", "", originalConfig)
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -549,5 +550,101 @@ func TestDatasourceService_TestConnection_ConnectionError(t *testing.T) {
 	err := service.TestConnection(context.Background(), "postgres", config)
 	if err == nil {
 		t.Fatal("expected connection error")
+	}
+}
+
+// mockProjectServiceForDatasource tracks default datasource ID for testing.
+type mockProjectServiceForDatasource struct {
+	defaultDatasourceID uuid.UUID
+}
+
+func (m *mockProjectServiceForDatasource) Provision(ctx context.Context, projectID uuid.UUID, name string, params map[string]interface{}) (*ProvisionResult, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockProjectServiceForDatasource) ProvisionFromClaims(ctx context.Context, claims *auth.Claims) (*ProvisionResult, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockProjectServiceForDatasource) GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockProjectServiceForDatasource) GetByIDWithoutTenant(ctx context.Context, id uuid.UUID) (*models.Project, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockProjectServiceForDatasource) Delete(ctx context.Context, id uuid.UUID) error {
+	return errors.New("not implemented")
+}
+func (m *mockProjectServiceForDatasource) GetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error) {
+	return m.defaultDatasourceID, nil
+}
+func (m *mockProjectServiceForDatasource) SetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID, datasourceID uuid.UUID) error {
+	m.defaultDatasourceID = datasourceID
+	return nil
+}
+func (m *mockProjectServiceForDatasource) SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string) {
+}
+func (m *mockProjectServiceForDatasource) GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error) {
+	return "", errors.New("not implemented")
+}
+
+// TestDatasourceService_Delete_ClearsDefaultDatasourceID verifies that when the default
+// datasource is deleted, the default_datasource_id is cleared so that a new datasource
+// can become the default.
+//
+// Bug scenario:
+// 1. User connects datasource A → default_datasource_id = A
+// 2. User disconnects datasource A → default_datasource_id still = A (BUG: stale!)
+// 3. User connects datasource B → default NOT updated (because currentDefault != uuid.Nil)
+// 4. hasEnabledQueries() queries with datasource A (doesn't exist) → returns false
+// 5. MCP tools are hidden even though approved_queries is enabled with queries on B
+func TestDatasourceService_Delete_ClearsDefaultDatasourceID(t *testing.T) {
+	projectID := uuid.New()
+	projectService := &mockProjectServiceForDatasource{}
+
+	// Create service with project service for auto-default tracking
+	encryptor, _ := crypto.NewCredentialEncryptor(testEncryptionKey)
+	factory := &mockAdapterFactory{}
+	ontologyRepo := &mockDatasourceTestOntologyRepo{}
+
+	// Track created datasources for the mock repo
+	createdDatasources := make(map[uuid.UUID]*models.Datasource)
+
+	repo := &mockDatasourceRepository{}
+	// Override Create to track datasources
+	originalCreate := repo.Create
+	_ = originalCreate // silence unused warning
+	repo.createErr = nil
+
+	service := NewDatasourceService(repo, ontologyRepo, encryptor, factory, projectService, zap.NewNop())
+
+	// Step 1: Create datasource A - should become default
+	dsA, err := service.Create(context.Background(), projectID, "datasource-a", "postgres", "", map[string]any{"host": "a"})
+	if err != nil {
+		t.Fatalf("failed to create datasource A: %v", err)
+	}
+	createdDatasources[dsA.ID] = dsA
+
+	// Verify A is now the default
+	if projectService.defaultDatasourceID != dsA.ID {
+		t.Fatalf("expected datasource A (%s) to be default, got %s", dsA.ID, projectService.defaultDatasourceID)
+	}
+
+	// Step 2: Delete datasource A
+	// Update mock repo to return projectID for GetProjectID
+	err = service.Delete(context.Background(), dsA.ID)
+	if err != nil {
+		t.Fatalf("failed to delete datasource A: %v", err)
+	}
+
+	// Step 3: Create datasource B
+	dsB, err := service.Create(context.Background(), projectID, "datasource-b", "postgres", "", map[string]any{"host": "b"})
+	if err != nil {
+		t.Fatalf("failed to create datasource B: %v", err)
+	}
+
+	// Step 4: Verify B is now the default
+	// THIS IS THE FAILING ASSERTION - currently default will still be A (stale)
+	if projectService.defaultDatasourceID != dsB.ID {
+		t.Errorf("BUG: expected datasource B (%s) to be default after A was deleted, but got stale reference to %s",
+			dsB.ID, projectService.defaultDatasourceID)
 	}
 }

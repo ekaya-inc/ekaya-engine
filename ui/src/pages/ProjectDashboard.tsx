@@ -437,7 +437,7 @@ const ProjectDashboard = () => {
       title: 'MCP Server',
       icon: Server,
       path: `/projects/${pid}/mcp-server`,
-      disabled: !isConnected || !hasSelectedTables, // Requires datasource and schema
+      disabled: !isConnected, // Requires datasource
       color: 'cyan',
     },
   ];
@@ -549,7 +549,7 @@ const ProjectDashboard = () => {
           <CardTitle className="text-2xl">{tile.title}</CardTitle>
           {tile.disabled && (
             <p className="text-sm text-text-tertiary mt-2">
-              Requires a datasource and schema to be configured.
+              Requires a datasource to be configured.
             </p>
           )}
         </CardHeader>

@@ -330,7 +330,7 @@ func (r *testColEnrichmentSchemaRepo) UpdateColumnStats(ctx context.Context, col
 // Mock datasource service for testing
 type testColEnrichmentDatasourceService struct{}
 
-func (s *testColEnrichmentDatasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType string, config map[string]any) (*models.Datasource, error) {
+func (s *testColEnrichmentDatasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType, provider string, config map[string]any) (*models.Datasource, error) {
 	return nil, nil
 }
 
@@ -347,7 +347,7 @@ func (s *testColEnrichmentDatasourceService) List(ctx context.Context, projectID
 	return []*models.Datasource{}, nil
 }
 
-func (s *testColEnrichmentDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType string, config map[string]any) error {
+func (s *testColEnrichmentDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType, provider string, config map[string]any) error {
 	return nil
 }
 

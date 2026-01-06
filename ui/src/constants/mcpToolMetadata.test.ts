@@ -28,10 +28,11 @@ describe('mcpToolMetadata', () => {
       }
       expect(metadata.name).toBe('Developer Tools');
       expect(metadata.description).toBeTruthy();
-      // Warning removed - replaced with Pro Tip in component
-      expect(metadata.warning).toBeUndefined();
-      expect(metadata.subOptions).toBeDefined();
-      expect(metadata.subOptions?.enableExecute).toBeDefined();
+      // Warning is at top level (execute is now always included when developer is enabled)
+      expect(metadata.warning).toBeDefined();
+      expect(metadata.warning).toContain('destructive operations');
+      // No subOptions (enableExecute toggle was removed - execute is always included)
+      expect(metadata.subOptions).toBeUndefined();
     });
 
     it('has metadata for approved queries', () => {

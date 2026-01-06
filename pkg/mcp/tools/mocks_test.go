@@ -50,6 +50,19 @@ func (m *mockMCPConfigService) ShouldShowApprovedQueriesTools(ctx context.Contex
 	return m.shouldShowApprovedQueries, nil
 }
 
+func (m *mockMCPConfigService) GetToolGroupsState(ctx context.Context, projectID uuid.UUID) (map[string]*models.ToolGroupConfig, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	// Return a map with just the configured tool group
+	if m.config != nil {
+		return map[string]*models.ToolGroupConfig{
+			"developer": m.config,
+		}, nil
+	}
+	return map[string]*models.ToolGroupConfig{}, nil
+}
+
 // mockQueryService implements services.QueryService for testing.
 type mockQueryService struct {
 	query          *models.Query
@@ -169,7 +182,7 @@ type mockDatasourceService struct {
 	connectionError error
 }
 
-func (m *mockDatasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType string, config map[string]any) (*models.Datasource, error) {
+func (m *mockDatasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType, provider string, config map[string]any) (*models.Datasource, error) {
 	return nil, nil
 }
 
@@ -185,7 +198,7 @@ func (m *mockDatasourceService) List(ctx context.Context, projectID uuid.UUID) (
 	return nil, nil
 }
 
-func (m *mockDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType string, config map[string]any) error {
+func (m *mockDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType, provider string, config map[string]any) error {
 	return nil
 }
 

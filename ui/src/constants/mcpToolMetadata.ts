@@ -27,13 +27,8 @@ export const TOOL_GROUP_METADATA: Record<string, ToolGroupMetadata> = {
     name: 'Developer Tools',
     description:
       'Enable raw access to the Datasource and Schema. This is intended for developers building applications or data engineers building ETL pipelines.',
-    subOptions: {
-      enableExecute: {
-        name: 'Enable Execute',
-        warning:
-          'The MCP Client will have direct access to the Datasource using the supplied credentials -- this access includes potentially destructive operations. Back up the data before allowing AI to modify it.',
-      },
-    },
+    warning:
+      'The MCP Client will have direct access to the Datasource using the supplied credentials -- this access includes potentially destructive operations. Back up the data before allowing AI to modify it.',
   },
   [TOOL_GROUP_IDS.APPROVED_QUERIES]: {
     name: 'Pre-Approved Queries',

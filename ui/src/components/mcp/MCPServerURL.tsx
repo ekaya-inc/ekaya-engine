@@ -4,11 +4,19 @@ import { useState } from 'react';
 import { Button } from '../ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card';
 
+import MCPEnabledTools from './MCPEnabledTools';
+
+interface EnabledTool {
+  name: string;
+  description: string;
+}
+
 interface MCPServerURLProps {
   serverUrl: string;
   docsUrl?: string;
   agentMode?: boolean;
   agentApiKey?: string;
+  enabledTools?: EnabledTool[];
 }
 
 export default function MCPServerURL({
@@ -16,6 +24,7 @@ export default function MCPServerURL({
   docsUrl,
   agentMode = false,
   agentApiKey,
+  enabledTools = [],
 }: MCPServerURLProps) {
   const [copied, setCopied] = useState(false);
   const [configCopied, setConfigCopied] = useState(false);
@@ -125,6 +134,8 @@ export default function MCPServerURL({
             </div>
           )
         )}
+
+        <MCPEnabledTools tools={enabledTools} />
       </CardContent>
     </Card>
   );

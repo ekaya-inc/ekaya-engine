@@ -177,17 +177,7 @@ const MCPServerPage = () => {
   const handleToggleApprovedQueries = async (enabled: boolean) => {
     if (!pid || !config) return;
 
-    // Block enabling when Agent Tools is active
-    if (enabled && isAgentToolsEnabled) {
-      toast({
-        title: 'Not allowed',
-        description: 'Business User Tools cannot be enabled while Agent Tools is active.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (!enabled && enabledQueryCount === 0) {
+    if (enabled && enabledQueryCount === 0) {
       toast({
         title: 'No enabled queries',
         description: 'Create and enable queries first.',
@@ -210,10 +200,11 @@ const MCPServerPage = () => {
 
       if (response.success && response.data) {
         setConfig(response.data);
-        toast({
-          title: 'Success',
-          description: `Business User Tools ${enabled ? 'enabled' : 'disabled'}`,
-        });
+        if (enabled) {
+          toast({
+            title: 'Business User Tools Selected',
+          });
+        }
       } else {
         throw new Error(response.error ?? 'Failed to update configuration');
       }
@@ -230,24 +221,6 @@ const MCPServerPage = () => {
   };
 
   const handleToggleDevTools = async (enabled: boolean) => {
-    // Block enabling when Agent Tools is active
-    if (enabled && isAgentToolsEnabled) {
-      toast({
-        title: 'Not allowed',
-        description: 'Developer Tools cannot be enabled while Agent Tools is active.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (enabled && forceMode) {
-      toast({
-        title: 'Not allowed',
-        description: 'Only Business User Tools are allowed. Disable FORCE mode first.',
-        variant: 'destructive',
-      });
-      return;
-    }
     await handleToggleToolGroup(TOOL_GROUP_IDS.DEVELOPER, enabled);
   };
 
@@ -255,13 +228,6 @@ const MCPServerPage = () => {
     if (!pid || !config) return;
 
     if (enabled) {
-      // Auto-disable Business User Tools and Developer Tools when enabling Agent Tools
-      if (config.toolGroups[TOOL_GROUP_IDS.APPROVED_QUERIES]?.enabled) {
-        await handleToggleToolGroup(TOOL_GROUP_IDS.APPROVED_QUERIES, false);
-      }
-      if (config.toolGroups[TOOL_GROUP_IDS.DEVELOPER]?.enabled) {
-        await handleToggleToolGroup(TOOL_GROUP_IDS.DEVELOPER, false);
-      }
       // Fetch revealed API key for the setup example
       try {
         const response = await engineApi.getAgentAPIKey(pid, true);
@@ -279,25 +245,23 @@ const MCPServerPage = () => {
   const handleToggleToolGroup = async (groupName: string, enabled: boolean) => {
     if (!pid || !config) return;
 
-    const groupState = config.toolGroups[groupName];
     const metadata = TOOL_GROUP_METADATA[groupName];
-    // Preserve existing sub-option values when toggling the main switch
-    const enableExecute = groupState?.enableExecute ?? false;
 
     try {
       setUpdating(true);
       const response = await engineApi.updateMCPConfig(pid, {
         toolGroups: {
-          [groupName]: { enabled, enableExecute },
+          [groupName]: { enabled },
         },
       });
 
       if (response.success && response.data) {
         setConfig(response.data);
-        toast({
-          title: 'Success',
-          description: `${metadata?.name ?? groupName} ${enabled ? 'enabled' : 'disabled'}`,
-        });
+        if (enabled) {
+          toast({
+            title: `${metadata?.name ?? groupName} Selected`,
+          });
+        }
       } else {
         throw new Error(response.error ?? 'Failed to update configuration');
       }
@@ -313,44 +277,8 @@ const MCPServerPage = () => {
     }
   };
 
-  const handleToggleSubOption = async (groupName: string, subOptionName: string, enabled: boolean) => {
-    if (!pid || !config) return;
-
-    const groupState = config.toolGroups[groupName];
-    const metadata = TOOL_GROUP_METADATA[groupName];
-    const subOptionMeta = metadata?.subOptions?.[subOptionName];
-
-    try {
-      setUpdating(true);
-      const response = await engineApi.updateMCPConfig(pid, {
-        toolGroups: {
-          [groupName]: {
-            enabled: groupState?.enabled ?? false,
-            ...(subOptionName === 'enableExecute' ? { enableExecute: enabled } : {}),
-          },
-        },
-      });
-
-      if (response.success && response.data) {
-        setConfig(response.data);
-        toast({
-          title: 'Success',
-          description: `${subOptionMeta?.name ?? subOptionName} ${enabled ? 'enabled' : 'disabled'}`,
-        });
-      } else {
-        throw new Error(response.error ?? 'Failed to update configuration');
-      }
-    } catch (error) {
-      console.error('Failed to update MCP config:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to update configuration',
-        variant: 'destructive',
-      });
-    } finally {
-      setUpdating(false);
-    }
-  };
+  // Note: handleToggleSubOption is no longer used for developer tools (enableExecute removed).
+  // It remains for approved_queries sub-options which are handled by handleToggleApprovedQueriesSubOption.
 
   // Build sub-options for approved_queries by merging state with frontend metadata
   const buildApprovedQueriesSubOptions = (): Record<string, SubOptionInfo> | undefined => {
@@ -420,6 +348,7 @@ const MCPServerPage = () => {
               docsUrl={`https://us.ekaya.ai/mcp-setup?mcp_url=${encodeURIComponent(config.serverUrl)}`}
               agentMode={isAgentToolsEnabled}
               agentApiKey={agentApiKey}
+              enabledTools={config.enabledTools}
             />
 
             {/* Tool Configuration Section */}
@@ -474,7 +403,7 @@ const MCPServerPage = () => {
                   >
                     {/* API Key section rendered inside the card */}
                     <div className="mt-4 border-t border-border-light pt-4 pl-4">
-                      <AgentAPIKeyDisplay projectId={pid!} />
+                      <AgentAPIKeyDisplay projectId={pid!} onKeyChange={setAgentApiKey} />
                       {/* Warning at bottom */}
                       <div className="mt-3 flex items-start gap-2 rounded-md bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
                         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -495,27 +424,13 @@ const MCPServerPage = () => {
                       return null;
                     }
 
-                    // Use custom handler for developer tools to enforce FORCE mode
+                    // Use custom handler for developer tools
                     const onToggle = groupName === TOOL_GROUP_IDS.DEVELOPER
                       ? handleToggleDevTools
                       : (enabled: boolean) => handleToggleToolGroup(groupName, enabled);
 
-                    // Build sub-options by merging state with metadata
-                    let subOptions: Record<string, SubOptionInfo> | undefined;
-                    if (metadata.subOptions) {
-                      subOptions = {};
-                      for (const [subName, subMeta] of Object.entries(metadata.subOptions)) {
-                        subOptions[subName] = {
-                          enabled: getSubOptionEnabled(groupState, subName),
-                          name: subMeta.name,
-                          description: subMeta.description,
-                          warning: subMeta.warning,
-                        };
-                      }
-                    }
-
-                    // Pro Tip for Developer Tools
-                    const developerToolsTip = groupName === TOOL_GROUP_IDS.DEVELOPER ? (
+                    // Pro Tip for Developer Tools (only show when enabled)
+                    const developerToolsTip = groupName === TOOL_GROUP_IDS.DEVELOPER && groupState.enabled ? (
                       <div>
                         <span className="font-semibold">Pro Tip:</span> Use Developer Tools to help you answer questions about your Ontology{' '}
                         <details className="inline">
@@ -527,17 +442,17 @@ const MCPServerPage = () => {
                       </div>
                     ) : undefined;
 
+                    // Only show warning when the tool group is enabled
+                    const showWarning = groupState.enabled && metadata.warning != null;
+
                     const props = {
                       name: metadata.name,
                       description: metadata.description,
                       enabled: groupState.enabled,
                       onToggle,
                       disabled: updating,
-                      ...(metadata.warning != null ? { warning: metadata.warning } : {}),
+                      ...(showWarning ? { warning: metadata.warning } : {}),
                       ...(developerToolsTip != null ? { tip: developerToolsTip } : {}),
-                      ...(subOptions != null ? { subOptions } : {}),
-                      onSubOptionToggle: (subOptionName: string, enabled: boolean) =>
-                        handleToggleSubOption(groupName, subOptionName, enabled),
                     };
                     return <MCPToolGroup key={groupName} {...props} />;
                   })}

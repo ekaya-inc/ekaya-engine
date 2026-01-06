@@ -1,15 +1,24 @@
-import { ArrowLeft, CheckCircle, XCircle, Loader2, Pencil } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, ExternalLink, AlertTriangle } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 
-import { getAdapterInfo } from "../constants/adapters";
+import { getAdapterInfo, getProviderById, type ProviderInfo } from "../constants/adapters";
 import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext";
 import { useToast } from "../hooks/useToast";
 import engineApi from "../services/engineApi";
 import type { DatasourceType, SSLMode } from "../types";
+import { parsePostgresUrl } from "../utils/connectionString";
 
 import { Button } from "./ui/Button";
 import { Card, CardContent } from "./ui/Card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/Dialog";
 import { Input } from "./ui/Input";
 import { Label } from "./ui/Label";
 import { Switch } from "./ui/Switch";
@@ -26,11 +35,13 @@ interface DatasourceFormConfig {
 
 interface DatasourceConfigurationProps {
   selectedAdapter: string | null;
+  selectedProvider?: ProviderInfo | undefined;
   onBackToSelection: () => void;
 }
 
 const DatasourceConfiguration = ({
   selectedAdapter,
+  selectedProvider,
   onBackToSelection,
 }: DatasourceConfigurationProps) => {
   const { pid } = useParams<{ pid: string }>();
@@ -56,17 +67,27 @@ const DatasourceConfiguration = ({
   const [testingConnection, setTestingConnection] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isDisconnecting, setIsDisconnecting] = useState<boolean>(false);
+  const [showDisconnectDialog, setShowDisconnectDialog] = useState<boolean>(false);
+  const [disconnectConfirmation, setDisconnectConfirmation] = useState<string>("");
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
+  const [connectionString, setConnectionString] = useState<string>("");
+  const [connectionStringError, setConnectionStringError] = useState<string>("");
+  // Track provider (from selection or parsed from connection string)
+  const [activeProvider, setActiveProvider] = useState<ProviderInfo | undefined>(selectedProvider);
   const nameInputRef = useRef<HTMLInputElement>(null);
-  const [config, setConfig] = useState<DatasourceFormConfig>({
+
+  // Use provider info for display if available, otherwise fall back to adapter info
+  // activeProvider takes precedence (can be updated from connection string parsing)
+  const displayInfo = activeProvider ?? selectedProvider ?? adapterInfo;
+  const [config, setConfig] = useState<DatasourceFormConfig>(() => ({
     host: "",
-    port: "5432",
+    port: selectedProvider?.defaultPort?.toString() ?? "5432",
     user: "",
     password: "",
     name: "",
-    useSSL: false,
+    useSSL: selectedProvider?.defaultSSL === "require" || selectedProvider?.defaultSSL === "verify-full",
     displayName: "",
-  });
+  }));
 
   // Determine if this is editing an existing datasource or configuring a new one
   const isEditingExisting = Boolean(
@@ -83,6 +104,69 @@ const DatasourceConfiguration = ({
     }));
   };
 
+  const handleParseConnectionString = (): void => {
+    setConnectionStringError("");
+
+    if (!connectionString.trim()) {
+      setConnectionStringError("Please enter a connection string");
+      return;
+    }
+
+    const parsed = parsePostgresUrl(connectionString.trim());
+
+    if (!parsed) {
+      setConnectionStringError("Invalid connection string format. Expected: postgresql://user:password@host:port/database");
+      return;
+    }
+
+    // Update form fields with parsed values
+    setConfig((prev) => ({
+      ...prev,
+      host: parsed.host || prev.host,
+      port: parsed.port.toString(),
+      user: parsed.user || prev.user,
+      password: parsed.password || prev.password,
+      name: parsed.database || prev.name,
+      useSSL: parsed.sslMode === "require" || parsed.sslMode === "verify-full" || parsed.sslMode === "prefer",
+    }));
+
+    // Update provider if detected from URL
+    if (parsed.provider) {
+      const provider = getProviderById(parsed.provider);
+      if (provider) {
+        setActiveProvider(provider);
+        // Update displayName if it's still the default
+        setConfig((prev) => {
+          const currentDefault = activeProvider?.name ?? selectedProvider?.name ?? adapterInfo.name;
+          if (prev.displayName === currentDefault || !prev.displayName) {
+            return { ...prev, displayName: provider.name };
+          }
+          return prev;
+        });
+      }
+    }
+
+    // Clear the connection string input after successful parse
+    setConnectionString("");
+  };
+
+  // Sync activeProvider when selectedProvider changes
+  useEffect(() => {
+    if (selectedProvider) {
+      setActiveProvider(selectedProvider);
+    }
+  }, [selectedProvider]);
+
+  // Load provider from existing config when editing
+  useEffect(() => {
+    if (connectionDetails?.provider) {
+      const provider = getProviderById(connectionDetails.provider);
+      if (provider) {
+        setActiveProvider(provider);
+      }
+    }
+  }, [connectionDetails?.provider]);
+
   useEffect(() => {
     if (connectionDetails) {
       // Editing existing datasource - load from connectionDetails
@@ -95,18 +179,18 @@ const DatasourceConfiguration = ({
         useSSL:
           connectionDetails.ssl_mode === "require" ||
           connectionDetails.ssl_mode === "prefer",
-        displayName: connectionDetails.displayName ?? adapterInfo.name,
+        displayName: connectionDetails.displayName ?? displayInfo.name,
       };
 
       setConfig(formData);
     } else {
-      // New datasource - set default displayName from adapter type
+      // New datasource - set default displayName from provider/adapter
       setConfig((prev) => ({
         ...prev,
-        displayName: adapterInfo.name,
+        displayName: displayInfo.name,
       }));
     }
-  }, [connectionDetails, adapterInfo.name]);
+  }, [connectionDetails, displayInfo.name]);
 
   // Focus name input when entering edit mode
   useEffect(() => {
@@ -156,6 +240,8 @@ const DatasourceConfiguration = ({
 
       const result = await deleteDataSource(projectId, datasourceId);
       if (result.success) {
+        setShowDisconnectDialog(false);
+        setDisconnectConfirmation("");
         toast({
           title: "Success",
           description: "Datasource disconnected successfully!",
@@ -190,8 +276,11 @@ const DatasourceConfiguration = ({
       const datasourceId =
         connectionDetails?.datasourceId ?? selectedDatasource?.datasourceId;
       const datasourceType = selectedAdapter as DatasourceType;
+      // Include provider for PostgreSQL-compatible variants (e.g., supabase, neon)
+      const currentProvider = activeProvider ?? selectedProvider;
       const apiConfig = {
         type: datasourceType,
+        ...(currentProvider && { provider: currentProvider.id }),
         host: config.host,
         port: parseInt(config.port),
         name: config.name,
@@ -336,8 +425,72 @@ const DatasourceConfiguration = ({
     </div>
   );
 
+  // Get provider-specific help info
+  const currentProviderInfo = activeProvider ?? selectedProvider;
+  const hasConnectionStringHelp = currentProviderInfo?.connectionStringHelp;
+  const hasHelpUrl = currentProviderInfo?.helpUrl;
+
+  const renderConnectionStringSection = () => {
+    // Only show connection string parser for postgres adapters when not editing
+    if (selectedAdapter !== "postgres" || isEditingExisting) {
+      return null;
+    }
+
+    return (
+      <div className="mb-6 pb-6 border-b">
+        <Label htmlFor="connectionString" className="mb-2 block">
+          Quick Setup: Paste Connection String
+        </Label>
+        <div className="flex gap-2">
+          <Input
+            id="connectionString"
+            placeholder="postgresql://user:password@host:port/database"
+            value={connectionString}
+            onChange={(e) => {
+              setConnectionString(e.target.value);
+              setConnectionStringError("");
+            }}
+            className="flex-1 font-mono text-sm"
+          />
+          <Button
+            type="button"
+            onClick={handleParseConnectionString}
+            variant="outline"
+            className="shrink-0"
+          >
+            Parse
+          </Button>
+        </div>
+        {connectionStringError && (
+          <p className="text-sm text-red-600 dark:text-red-400 mt-2">
+            {connectionStringError}
+          </p>
+        )}
+        {(hasConnectionStringHelp !== undefined || hasHelpUrl !== undefined) && (
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-text-secondary">
+            {hasConnectionStringHelp && (
+              <span>{currentProviderInfo.connectionStringHelp}</span>
+            )}
+            {hasHelpUrl && (
+              <a
+                href={currentProviderInfo.helpUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                View documentation
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderDatasourceSetup = () => (
     <div className="space-y-6">
+      {renderConnectionStringSection()}
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="host">Host</Label>
@@ -440,10 +593,10 @@ const DatasourceConfiguration = ({
           Back
         </Button>
         <div className="flex items-center gap-4 mb-4">
-          {adapterInfo?.icon ? (
+          {displayInfo?.icon ? (
             <img
-              src={adapterInfo.icon}
-              alt={adapterInfo.name}
+              src={displayInfo.icon}
+              alt={displayInfo.name}
               className="h-12 w-12 object-contain"
             />
           ) : (
@@ -455,7 +608,7 @@ const DatasourceConfiguration = ({
           )}
           <div>
             <h1 className="text-3xl font-bold text-text-primary">
-              Configure {adapterInfo?.name}
+              Configure {displayInfo?.name}
             </h1>
           </div>
         </div>
@@ -489,7 +642,7 @@ const DatasourceConfiguration = ({
                 onClick={() => setIsEditingName(true)}
                 className="flex items-center gap-2 text-xl font-semibold text-text-primary hover:text-blue-600 transition-colors group"
               >
-                {config.displayName || adapterInfo.name}
+                {config.displayName || displayInfo.name}
                 <Pencil className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
               </button>
             )}
@@ -515,18 +668,10 @@ const DatasourceConfiguration = ({
           {isConnected && connectionDetails && (
             <Button
               variant="outline"
-              onClick={handleDisconnect}
-              disabled={isDisconnecting}
+              onClick={() => setShowDisconnectDialog(true)}
               className="text-red-600 border-red-300 hover:bg-red-50 dark:text-red-400 dark:border-red-700 dark:hover:bg-red-950"
             >
-              {isDisconnecting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Disconnecting...
-                </>
-              ) : (
-                "Disconnect"
-              )}
+              Disconnect
             </Button>
           )}
         </div>
@@ -552,6 +697,67 @@ const DatasourceConfiguration = ({
           )}
         </Button>
       </div>
+
+      {/* Disconnect Confirmation Dialog */}
+      <Dialog
+        open={showDisconnectDialog}
+        onOpenChange={(open) => {
+          if (!isDisconnecting) {
+            setShowDisconnectDialog(open);
+            if (!open) {
+              setDisconnectConfirmation("");
+            }
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-red-500" />
+              Disconnect Datasource?
+            </DialogTitle>
+            <DialogDescription>
+              This will disconnect from the datasource and clear all schema, approved queries,
+              and associated ontology extractions that were attached to this datasource.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <label className="text-sm font-medium text-text-primary">
+              Type <span className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">disconnect</span> to confirm
+            </label>
+            <Input
+              value={disconnectConfirmation}
+              onChange={(e) => setDisconnectConfirmation(e.target.value)}
+              placeholder="disconnect"
+              className="mt-2"
+              disabled={isDisconnecting}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowDisconnectDialog(false)}
+              disabled={isDisconnecting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDisconnect}
+              disabled={disconnectConfirmation !== "disconnect" || isDisconnecting}
+            >
+              {isDisconnecting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Disconnecting...
+                </>
+              ) : (
+                "Disconnect"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

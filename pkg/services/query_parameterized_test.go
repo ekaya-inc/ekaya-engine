@@ -476,7 +476,7 @@ type mockDatasourceSvc struct {
 	getErr     error
 }
 
-func (m *mockDatasourceSvc) Create(ctx context.Context, projectID uuid.UUID, name, dsType string, config map[string]any) (*models.Datasource, error) {
+func (m *mockDatasourceSvc) Create(ctx context.Context, projectID uuid.UUID, name, dsType, provider string, config map[string]any) (*models.Datasource, error) {
 	return nil, nil
 }
 
@@ -502,7 +502,7 @@ func (m *mockDatasourceSvc) List(ctx context.Context, projectID uuid.UUID) ([]*m
 	return nil, nil
 }
 
-func (m *mockDatasourceSvc) Update(ctx context.Context, id uuid.UUID, name, dsType string, config map[string]any) error {
+func (m *mockDatasourceSvc) Update(ctx context.Context, id uuid.UUID, name, dsType, provider string, config map[string]any) error {
 	return nil
 }
 

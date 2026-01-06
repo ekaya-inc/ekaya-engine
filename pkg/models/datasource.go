@@ -14,6 +14,7 @@ type Datasource struct {
 	ProjectID      uuid.UUID      `json:"project_id"`
 	Name           string         `json:"name"`
 	DatasourceType string         `json:"datasource_type"` // "postgres", "clickhouse", "bigquery", etc.
+	Provider       string         `json:"provider"`        // Optional: provider variant (e.g., "supabase", "neon" for postgres)
 	Config         map[string]any `json:"config"`          // Decrypted config, structure varies by type
 	CreatedAt      time.Time      `json:"created_at"`
 	UpdatedAt      time.Time      `json:"updated_at"`
