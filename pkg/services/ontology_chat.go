@@ -467,8 +467,6 @@ Available tools:
 - update_entity: Update descriptions or synonyms for tables
 - update_column: Update descriptions or semantic types for columns
 - store_knowledge: Store business facts and domain knowledge
-- answer_question: Mark ontology questions as answered
-- get_pending_questions: Retrieve pending questions about the schema
 - create_domain_entity: Create a new domain entity (e.g., 'campaign', 'subscription')
 - create_entity_relationship: Create a relationship between domain entities
 

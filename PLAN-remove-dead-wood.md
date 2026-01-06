@@ -57,15 +57,28 @@ After migrating to the DAG-based ontology extraction workflow, several pieces of
 
 **Context for next session:** The ontology repository now only contains actively used methods. The single-active-version model is enforced at the database level (unique constraint), so versioning methods are no longer needed at the repository layer. Service layer tests only mock the methods they actually use.
 
-### 4. Remove deprecated LLM tools from `pkg/llm/tool_executor.go`
+### 4. Remove deprecated LLM tools from `pkg/llm/tool_executor.go` ✅
 
-- [ ] Determine if any persisted DAGs still reference `answer_question` or `get_pending_questions` tools
-- [ ] If safe, remove `answerQuestion()` method (lines 509-530)
-- [ ] If safe, remove `getPendingQuestions()` method (lines 536-558)
-- [ ] Remove tool registrations
-- [ ] Run `make check`
+- [x] Determine if any persisted DAGs still reference `answer_question` or `get_pending_questions` tools
+- [x] If safe, remove `answerQuestion()` method (lines 509-530)
+- [x] If safe, remove `getPendingQuestions()` method (lines 536-558)
+- [x] Remove tool registrations
+- [x] Run `make check`
 
 **Risk:** Medium - old DAGs in the database might reference these tools. May need a database query to verify.
+
+**Completed:** Successfully removed deprecated `answer_question` and `get_pending_questions` LLM tools:
+- Verified no persisted DAGs reference these tools (checked `engine_llm_conversations` and `engine_dag_nodes`)
+- Verified no DAG service code references these tools
+- Removed `answerQuestion()` method (~22 lines) from `pkg/llm/tool_executor.go`
+- Removed `getPendingQuestions()` method (~23 lines) from `pkg/llm/tool_executor.go`
+- Removed tool registrations from ExecuteTool switch (2 case statements)
+- Removed tool definitions from `pkg/llm/tools.go` (~25 lines for both tools)
+- Updated documentation in `pkg/services/ontology_chat.go` (removed 2 tool references)
+- All tests pass (`make check`)
+- **Total impact:** ~72 lines removed across 3 files
+
+**Context for next session:** These tools were part of the old workflow state system where the LLM could ask questions and get answers. The DAG-based workflow doesn't use this pattern - questions are now handled differently. No backward compatibility concerns because no persisted DAGs reference these tools.
 
 ### 5. Document `DAGNodeRelationshipDiscovery` deprecation timeline
 
