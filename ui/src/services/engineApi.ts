@@ -8,6 +8,7 @@ import type {
   ApiResponse,
   ConnectionDetails,
   CreateDatasourceResponse,
+  CreateGlossaryTermRequest,
   CreateQueryRequest,
   CreateRelationshipRequest,
   DAGStatusResponse,
@@ -22,6 +23,7 @@ import type {
   ExecuteQueryResponse,
   GetDatasourceResponse,
   GlossaryListResponse,
+  GlossaryTerm,
   ListDatasourcesResponse,
   ListQueriesResponse,
   MCPConfigResponse,
@@ -33,6 +35,8 @@ import type {
   TestConnectionRequest,
   TestConnectionResponse,
   TestQueryRequest,
+  TestSQLResult,
+  UpdateGlossaryTermRequest,
   UpdateMCPConfigRequest,
   UpdateQueryRequest,
   ValidateQueryRequest,
@@ -499,14 +503,11 @@ class EngineApiService {
   async testGlossarySQL(
     projectId: string,
     sql: string
-  ): Promise<ApiResponse<import('../types/glossary').TestSQLResult>> {
-    return this.makeRequest<import('../types/glossary').TestSQLResult>(
-      `/${projectId}/glossary/test-sql`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ sql }),
-      }
-    );
+  ): Promise<ApiResponse<TestSQLResult>> {
+    return this.makeRequest<TestSQLResult>(`/${projectId}/glossary/test-sql`, {
+      method: 'POST',
+      body: JSON.stringify({ sql }),
+    });
   }
 
   /**
@@ -515,15 +516,12 @@ class EngineApiService {
    */
   async createGlossaryTerm(
     projectId: string,
-    request: import('../types/glossary').CreateGlossaryTermRequest
-  ): Promise<ApiResponse<import('../types/glossary').GlossaryTerm>> {
-    return this.makeRequest<import('../types/glossary').GlossaryTerm>(
-      `/${projectId}/glossary`,
-      {
-        method: 'POST',
-        body: JSON.stringify(request),
-      }
-    );
+    request: CreateGlossaryTermRequest
+  ): Promise<ApiResponse<GlossaryTerm>> {
+    return this.makeRequest<GlossaryTerm>(`/${projectId}/glossary`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
   }
 
   /**
@@ -533,15 +531,12 @@ class EngineApiService {
   async updateGlossaryTerm(
     projectId: string,
     termId: string,
-    request: import('../types/glossary').UpdateGlossaryTermRequest
-  ): Promise<ApiResponse<import('../types/glossary').GlossaryTerm>> {
-    return this.makeRequest<import('../types/glossary').GlossaryTerm>(
-      `/${projectId}/glossary/${termId}`,
-      {
-        method: 'PUT',
-        body: JSON.stringify(request),
-      }
-    );
+    request: UpdateGlossaryTermRequest
+  ): Promise<ApiResponse<GlossaryTerm>> {
+    return this.makeRequest<GlossaryTerm>(`/${projectId}/glossary/${termId}`, {
+      method: 'PUT',
+      body: JSON.stringify(request),
+    });
   }
 
   /**

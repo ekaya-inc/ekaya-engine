@@ -232,7 +232,7 @@ func (h *GlossaryHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	term := &models.BusinessGlossaryTerm{
 		ID:          termID,
-		ProjectID:    projectID,
+		ProjectID:   projectID,
 		Term:        req.Term,
 		Definition:  req.Definition,
 		DefiningSQL: req.DefiningSQL,

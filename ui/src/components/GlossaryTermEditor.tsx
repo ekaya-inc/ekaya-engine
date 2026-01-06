@@ -85,8 +85,9 @@ export function GlossaryTermEditor({
   }, [isOpen, term]);
 
   // Reset SQL tested flag when SQL changes
+  // Only reset if we have actual SQL to compare (skip on initial mount)
   useEffect(() => {
-    if (term && definingSql !== term.defining_sql) {
+    if (term && definingSql && definingSql !== term.defining_sql) {
       setSqlTested(false);
       setTestResult(null);
     } else if (!term && definingSql) {

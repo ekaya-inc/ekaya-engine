@@ -58,7 +58,7 @@ const mockTerm: GlossaryTerm = {
   defining_sql: 'SELECT COUNT(DISTINCT user_id) AS active_users FROM users WHERE last_login > NOW() - INTERVAL \'30 days\'',
   base_table: 'users',
   output_columns: [
-    { name: 'active_users', type: 'integer' },
+    { name: 'active_users', type: 'integer', description: 'Count of active users' },
   ],
   aliases: ['MAU', 'Monthly Active Users'],
   source: 'manual',
@@ -229,7 +229,7 @@ describe('GlossaryTermEditor', () => {
     it('enables save button after successful SQL test', async () => {
       const testResult: TestSQLResult = {
         valid: true,
-        output_columns: [{ name: 'user_id', type: 'integer' }],
+        output_columns: [{ name: 'user_id', type: 'integer', description: '' }],
       };
 
       vi.mocked(engineApi.testGlossarySQL).mockResolvedValue({
@@ -282,7 +282,7 @@ describe('GlossaryTermEditor', () => {
     it('calls testGlossarySQL API when Test SQL button clicked', async () => {
       const testResult: TestSQLResult = {
         valid: true,
-        output_columns: [{ name: 'user_id', type: 'integer' }],
+        output_columns: [{ name: 'user_id', type: 'integer', description: '' }],
       };
 
       vi.mocked(engineApi.testGlossarySQL).mockResolvedValue({
@@ -346,7 +346,7 @@ describe('GlossaryTermEditor', () => {
     it('displays success message when SQL is valid', async () => {
       const testResult: TestSQLResult = {
         valid: true,
-        output_columns: [{ name: 'user_id', type: 'integer' }],
+        output_columns: [{ name: 'user_id', type: 'integer', description: '' }],
       };
 
       vi.mocked(engineApi.testGlossarySQL).mockResolvedValue({
@@ -409,8 +409,8 @@ describe('GlossaryTermEditor', () => {
       const testResult: TestSQLResult = {
         valid: true,
         output_columns: [
-          { name: 'user_id', type: 'integer' },
-          { name: 'email', type: 'varchar' },
+          { name: 'user_id', type: 'integer', description: '' },
+          { name: 'email', type: 'varchar', description: '' },
         ],
       };
 
@@ -446,7 +446,7 @@ describe('GlossaryTermEditor', () => {
     it('resets test state when SQL is modified', async () => {
       const testResult: TestSQLResult = {
         valid: true,
-        output_columns: [{ name: 'user_id', type: 'integer' }],
+        output_columns: [{ name: 'user_id', type: 'integer', description: '' }],
       };
 
       vi.mocked(engineApi.testGlossarySQL).mockResolvedValue({
@@ -538,7 +538,7 @@ describe('GlossaryTermEditor', () => {
       );
 
       if (removeButtons.length > 0) {
-        fireEvent.click(removeButtons[0]);
+        fireEvent.click(removeButtons[0]!);
       }
 
       await waitFor(() => {
@@ -593,7 +593,7 @@ describe('GlossaryTermEditor', () => {
     it('calls createGlossaryTerm API on save', async () => {
       const testResult: TestSQLResult = {
         valid: true,
-        output_columns: [{ name: 'user_id', type: 'integer' }],
+        output_columns: [{ name: 'user_id', type: 'integer', description: '' }],
       };
 
       vi.mocked(engineApi.testGlossarySQL).mockResolvedValue({

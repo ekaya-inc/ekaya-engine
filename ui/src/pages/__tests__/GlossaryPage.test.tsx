@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import engineApi from '../../services/engineApi';
 import ontologyService from '../../services/ontologyService';
@@ -52,7 +52,7 @@ const mockTerms: GlossaryTerm[] = [
     defining_sql: 'SELECT COUNT(DISTINCT user_id) AS active_users FROM users WHERE last_login > NOW() - INTERVAL \'30 days\'',
     base_table: 'users',
     output_columns: [
-      { name: 'active_users', type: 'integer' },
+      { name: 'active_users', type: 'integer', description: 'Count of active users' },
     ],
     aliases: ['MAU', 'Monthly Active Users'],
     source: 'inferred',
@@ -67,7 +67,7 @@ const mockTerms: GlossaryTerm[] = [
     defining_sql: 'SELECT SUM(amount) AS total_revenue FROM transactions WHERE status = \'completed\'',
     base_table: 'transactions',
     output_columns: [
-      { name: 'total_revenue', type: 'numeric' },
+      { name: 'total_revenue', type: 'numeric', description: 'Sum of completed transaction amounts' },
     ],
     source: 'manual',
     created_at: '2024-01-16T00:00:00Z',
@@ -139,7 +139,7 @@ describe('GlossaryPage', () => {
     it('shows empty state when no terms exist', async () => {
       vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
         success: true,
-        data: { terms: [], count: 0 },
+        data: { terms: [], total: 0 },
       });
 
       renderGlossaryPage();
@@ -160,7 +160,7 @@ describe('GlossaryPage', () => {
     it('shows link to ontology page in empty state', async () => {
       vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
         success: true,
-        data: { terms: [], count: 0 },
+        data: { terms: [], total: 0 },
       });
 
       renderGlossaryPage();
@@ -176,7 +176,7 @@ describe('GlossaryPage', () => {
     beforeEach(() => {
       vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
         success: true,
-        data: { terms: mockTerms, count: mockTerms.length },
+        data: { terms: mockTerms, total: mockTerms.length },
       });
     });
 
@@ -226,7 +226,7 @@ describe('GlossaryPage', () => {
     beforeEach(() => {
       vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
         success: true,
-        data: { terms: mockTerms, count: mockTerms.length },
+        data: { terms: mockTerms, total: mockTerms.length },
       });
     });
 
@@ -244,7 +244,7 @@ describe('GlossaryPage', () => {
 
       await waitFor(() => {
         const detailsButtons = screen.getAllByText('SQL Details');
-        fireEvent.click(detailsButtons[0]);
+        fireEvent.click(detailsButtons[0]!);
       });
 
       await waitFor(() => {
@@ -258,7 +258,7 @@ describe('GlossaryPage', () => {
 
       await waitFor(() => {
         const detailsButtons = screen.getAllByText('SQL Details');
-        fireEvent.click(detailsButtons[0]);
+        fireEvent.click(detailsButtons[0]!);
       });
 
       await waitFor(() => {
@@ -272,7 +272,7 @@ describe('GlossaryPage', () => {
 
       await waitFor(() => {
         const detailsButtons = screen.getAllByText('SQL Details');
-        fireEvent.click(detailsButtons[0]);
+        fireEvent.click(detailsButtons[0]!);
       });
 
       await waitFor(() => {
@@ -287,7 +287,7 @@ describe('GlossaryPage', () => {
 
       await waitFor(() => {
         const detailsButtons = screen.getAllByText('SQL Details');
-        fireEvent.click(detailsButtons[0]);
+        fireEvent.click(detailsButtons[0]!);
       });
 
       await waitFor(() => {
@@ -302,7 +302,7 @@ describe('GlossaryPage', () => {
 
       await waitFor(() => {
         const detailsButtons = screen.getAllByText('SQL Details');
-        fireEvent.click(detailsButtons[0]);
+        fireEvent.click(detailsButtons[0]!);
       });
 
       await waitFor(() => {
@@ -310,7 +310,7 @@ describe('GlossaryPage', () => {
       });
 
       const detailsButtons = screen.getAllByText('SQL Details');
-      fireEvent.click(detailsButtons[0]);
+      fireEvent.click(detailsButtons[0]!);
 
       await waitFor(() => {
         expect(screen.queryByText('Defining SQL')).not.toBeInTheDocument();
@@ -322,7 +322,7 @@ describe('GlossaryPage', () => {
     beforeEach(() => {
       vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
         success: true,
-        data: { terms: mockTerms, count: mockTerms.length },
+        data: { terms: mockTerms, total: mockTerms.length },
       });
     });
 
@@ -363,7 +363,7 @@ describe('GlossaryPage', () => {
     beforeEach(() => {
       vi.mocked(engineApi.listGlossaryTerms).mockResolvedValue({
         success: true,
-        data: { terms: mockTerms, count: mockTerms.length },
+        data: { terms: mockTerms, total: mockTerms.length },
       });
     });
 
