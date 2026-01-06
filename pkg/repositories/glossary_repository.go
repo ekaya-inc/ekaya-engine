@@ -19,6 +19,7 @@ type GlossaryRepository interface {
 	Create(ctx context.Context, term *models.BusinessGlossaryTerm) error
 	Update(ctx context.Context, term *models.BusinessGlossaryTerm) error
 	Delete(ctx context.Context, termID uuid.UUID) error
+	DeleteBySource(ctx context.Context, projectID uuid.UUID, source string) error
 	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error)
 	GetByTerm(ctx context.Context, projectID uuid.UUID, term string) (*models.BusinessGlossaryTerm, error)
 	GetByAlias(ctx context.Context, projectID uuid.UUID, alias string) (*models.BusinessGlossaryTerm, error)
@@ -149,6 +150,34 @@ func (r *glossaryRepository) Delete(ctx context.Context, termID uuid.UUID) error
 
 	if result.RowsAffected() == 0 {
 		return apperrors.ErrNotFound
+	}
+
+	return nil
+}
+
+// DeleteBySource deletes all glossary terms for a project with the specified source.
+// This is used to clear inferred terms when ontology is reset while preserving manual terms.
+func (r *glossaryRepository) DeleteBySource(ctx context.Context, projectID uuid.UUID, source string) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	// First delete aliases for terms that will be deleted
+	aliasQuery := `
+		DELETE FROM engine_glossary_aliases
+		WHERE glossary_id IN (
+			SELECT id FROM engine_business_glossary
+			WHERE project_id = $1 AND source = $2
+		)`
+	if _, err := scope.Conn.Exec(ctx, aliasQuery, projectID, source); err != nil {
+		return fmt.Errorf("failed to delete glossary aliases: %w", err)
+	}
+
+	// Then delete the terms
+	query := `DELETE FROM engine_business_glossary WHERE project_id = $1 AND source = $2`
+	if _, err := scope.Conn.Exec(ctx, query, projectID, source); err != nil {
+		return fmt.Errorf("failed to delete glossary terms by source: %w", err)
 	}
 
 	return nil
