@@ -250,21 +250,26 @@ Option B: Use React context or state management for agent key (heavier solution)
    - All tests pass
    - **Key design**: Uses separate `EnabledToolInfo` type for API response to avoid exposing internal `ToolDefinition` details (ToolGroup, SubOption)
 
-5. **Create frontend component** (`ui/src/components/mcp/MCPEnabledTools.tsx`)
-   - Simple table display component
+5. [x] **Create frontend component** (`ui/src/components/mcp/MCPEnabledTools.tsx`) ✅ COMPLETED
+   - Created `MCPEnabledTools` component with `MCPEnabledToolsProps` interface accepting `tools` array
+   - Defined local `EnabledTool` interface with `name` and `description` fields
+   - Empty state shows "No tools enabled. Enable a tool group above." in italic secondary text
+   - Tools displayed in a table with tool name in monospace font (`font-mono`) and description in secondary text
+   - Border styling matches existing component patterns (border-b border-border-light last:border-0)
+   - Component is self-contained and ready to be integrated into `MCPServerURL.tsx`
 
-6. **Update MCPServerURL** (`ui/src/components/mcp/MCPServerURL.tsx`)
+6. [ ] **Update MCPServerURL** (`ui/src/components/mcp/MCPServerURL.tsx`)
    - Add `enabledTools` prop
    - Render `MCPEnabledTools` inside the card
 
-7. **Update MCPServerPage** (`ui/src/pages/MCPServerPage.tsx`)
+7. [ ] **Update MCPServerPage** (`ui/src/pages/MCPServerPage.tsx`)
    - Pass `enabledTools` from config response to `MCPServerURL`
 
-8. **Fix agent key rotation bug** (`ui/src/components/mcp/AgentAPIKeyDisplay.tsx`, `ui/src/pages/MCPServerPage.tsx`)
+8. [ ] **Fix agent key rotation bug** (`ui/src/components/mcp/AgentAPIKeyDisplay.tsx`, `ui/src/pages/MCPServerPage.tsx`)
    - Add `onKeyChange` callback prop
    - Lift key state to parent
 
-9. **Update types** (`ui/src/types/index.ts`)
+9. [ ] **Update types** (`ui/src/types/index.ts`)
    - Add `EnabledToolInfo` type
    - Update `MCPConfigResponse` type
 
