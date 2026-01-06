@@ -273,15 +273,30 @@ The `GET /api/projects/{pid}/datasources/{dsid}/schema/relationships/candidates`
 - **Total impact:** ~80 lines removed
 - No other callers found in codebase
 
-### 10. Remove Deprecated Workqueue Constructor
+### 10. Remove Deprecated Workqueue Constructor ✅
 
 `NewQueueWithStrategy()` is marked deprecated and only used internally.
 
-- [ ] Update `pkg/services/workqueue/queue.go:88` to call `New()` directly
-- [ ] Delete `pkg/services/workqueue/queue.go:91-96` (`NewQueueWithStrategy` function)
-- [ ] Run `make check`
+- [x] Update `pkg/services/workqueue/queue.go:88` to call `New()` directly
+- [x] Delete `pkg/services/workqueue/queue.go:91-96` (`NewQueueWithStrategy` function)
+- [x] Update test usages to use `New()` with `WithStrategy()` option
+- [x] Run `make check`
 
 **Risk:** Low - internal only, no external callers.
+
+**Completed:** Successfully removed deprecated `NewQueueWithStrategy()` constructor:
+- **pkg/services/workqueue/queue.go:88** - Updated `NewQueue()` to call `New()` directly instead of `NewQueueWithStrategy()`
+- **pkg/services/workqueue/queue.go:91-96** - Deleted `NewQueueWithStrategy()` function (~6 lines)
+- **pkg/services/workqueue/queue_test.go** - Updated 5 test functions to use `New(logger, WithStrategy(strategy))` instead of `NewQueueWithStrategy(logger, strategy)`:
+  - `TestParallelLLMStrategy_AllowsConcurrentLLM`
+  - `TestParallelLLMStrategy_StillSerializesDataTasks`
+  - `TestThrottledLLMStrategy_RespectsLimit`
+  - `TestThrottledLLMStrategy_StillSerializesDataTasks`
+  - `TestSerializedStrategy_SerializesLLM`
+- All tests pass (`make check`)
+- **Total impact:** ~6 lines removed, cleaner API surface with option-based constructor pattern
+
+**Context for next session:** The workqueue package now exclusively uses the modern option-based constructor pattern (`New()` with `WithStrategy()`, `WithRetryConfig()`, etc.). This simplifies the API and removes a deprecated backward-compatibility function. All callers (both production and test code) now use the consistent option pattern.
 
 ### 11. Fix Stale Comment in Conversation Recorder ✅
 

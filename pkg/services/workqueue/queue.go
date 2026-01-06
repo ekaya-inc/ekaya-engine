@@ -85,14 +85,7 @@ func WithRetryConfig(config RetryConfig) QueueOption {
 
 // NewQueue creates a new work queue with the default serialized strategy.
 func NewQueue(logger *zap.Logger) *Queue {
-	return NewQueueWithStrategy(logger, nil)
-}
-
-// NewQueueWithStrategy creates a new work queue with a custom concurrency strategy.
-// If strategy is nil, defaults to SerializedStrategy (original behavior).
-// Deprecated: Use New() with WithStrategy() option instead.
-func NewQueueWithStrategy(logger *zap.Logger, strategy ConcurrencyStrategy) *Queue {
-	return New(logger, WithStrategy(strategy))
+	return New(logger)
 }
 
 // New creates a new work queue with the given options.

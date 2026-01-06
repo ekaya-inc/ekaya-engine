@@ -834,7 +834,7 @@ func contains(slice []string, item string) bool {
 // ============================================================================
 
 func TestParallelLLMStrategy_AllowsConcurrentLLM(t *testing.T) {
-	q := NewQueueWithStrategy(zap.NewNop(), NewParallelLLMStrategy())
+	q := New(zap.NewNop(), WithStrategy(NewParallelLLMStrategy()))
 
 	var running int32
 	var maxConcurrent int32
@@ -876,7 +876,7 @@ func TestParallelLLMStrategy_AllowsConcurrentLLM(t *testing.T) {
 }
 
 func TestParallelLLMStrategy_StillSerializesDataTasks(t *testing.T) {
-	q := NewQueueWithStrategy(zap.NewNop(), NewParallelLLMStrategy())
+	q := New(zap.NewNop(), WithStrategy(NewParallelLLMStrategy()))
 
 	var running int32
 	var maxConcurrent int32
@@ -919,7 +919,7 @@ func TestParallelLLMStrategy_StillSerializesDataTasks(t *testing.T) {
 
 func TestThrottledLLMStrategy_RespectsLimit(t *testing.T) {
 	maxConcurrent := 3
-	q := NewQueueWithStrategy(zap.NewNop(), NewThrottledLLMStrategy(maxConcurrent))
+	q := New(zap.NewNop(), WithStrategy(NewThrottledLLMStrategy(maxConcurrent)))
 
 	var running int32
 	var observedMax int32
@@ -965,7 +965,7 @@ func TestThrottledLLMStrategy_RespectsLimit(t *testing.T) {
 }
 
 func TestThrottledLLMStrategy_StillSerializesDataTasks(t *testing.T) {
-	q := NewQueueWithStrategy(zap.NewNop(), NewThrottledLLMStrategy(10))
+	q := New(zap.NewNop(), WithStrategy(NewThrottledLLMStrategy(10)))
 
 	var running int32
 	var maxConcurrent int32
@@ -1007,7 +1007,7 @@ func TestThrottledLLMStrategy_StillSerializesDataTasks(t *testing.T) {
 
 func TestSerializedStrategy_SerializesLLM(t *testing.T) {
 	// Explicitly test SerializedStrategy (same as default NewQueue behavior)
-	q := NewQueueWithStrategy(zap.NewNop(), NewSerializedStrategy())
+	q := New(zap.NewNop(), WithStrategy(NewSerializedStrategy()))
 
 	var running int32
 	var maxConcurrent int32
