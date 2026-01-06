@@ -264,7 +264,7 @@ func main() {
 	wellKnownHandler.RegisterRoutes(mux)
 
 	// Register MCP server (authenticated - project-scoped)
-	developerToolDeps := &mcptools.DeveloperToolDeps{
+	mcpToolDeps := &mcptools.MCPToolDeps{
 		DB:                db,
 		MCPConfigService:  mcpConfigService,
 		DatasourceService: datasourceService,
@@ -274,7 +274,7 @@ func main() {
 		Logger:            logger,
 	}
 	mcpServer := mcp.NewServer("ekaya-engine", cfg.Version, logger,
-		mcp.WithToolFilter(mcptools.NewToolFilter(developerToolDeps)),
+		mcp.WithToolFilter(mcptools.NewToolFilter(mcpToolDeps)),
 	)
 	mcptools.RegisterHealthTool(mcpServer.MCP(), cfg.Version, &mcptools.HealthToolDeps{
 		DB:                db,
@@ -282,7 +282,7 @@ func main() {
 		DatasourceService: datasourceService,
 		Logger:            logger,
 	})
-	mcptools.RegisterDeveloperTools(mcpServer.MCP(), developerToolDeps)
+	mcptools.RegisterMCPTools(mcpServer.MCP(), mcpToolDeps)
 
 	// Register approved queries tools (separate tool group from developer tools)
 	queryToolDeps := &mcptools.QueryToolDeps{

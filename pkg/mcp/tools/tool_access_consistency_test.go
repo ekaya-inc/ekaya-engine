@@ -88,7 +88,7 @@ func TestAgentToolsEnabled_ListAndCallConsistency(t *testing.T) {
 	)
 
 	// Part 1: Verify tool LISTING shows approved queries tools for agent auth
-	filterDeps := &DeveloperToolDeps{
+	filterDeps := &MCPToolDeps{
 		DB:               engineDB.DB,
 		MCPConfigService: mcpConfigService,
 		Logger:           zap.NewNop(),
@@ -160,7 +160,7 @@ func TestApprovedQueriesEnabled_ListAndCallConsistency(t *testing.T) {
 	)
 
 	// Part 1: Verify tool LISTING shows approved queries tools
-	filterDeps := &DeveloperToolDeps{
+	filterDeps := &MCPToolDeps{
 		DB:               engineDB.DB,
 		MCPConfigService: mcpConfigService,
 		Logger:           zap.NewNop(),
@@ -226,7 +226,7 @@ func TestNeitherEnabled_NeitherListedNorCallable(t *testing.T) {
 	)
 
 	// Part 1: Verify tool LISTING does NOT show approved queries tools
-	filterDeps := &DeveloperToolDeps{
+	filterDeps := &MCPToolDeps{
 		DB:               engineDB.DB,
 		MCPConfigService: mcpConfigService,
 		Logger:           zap.NewNop(),
@@ -295,7 +295,7 @@ func TestAgentAuth_AgentToolsDisabled(t *testing.T) {
 	)
 
 	// Part 1: Verify tool LISTING does NOT show tools for agent
-	filterDeps := &DeveloperToolDeps{
+	filterDeps := &MCPToolDeps{
 		DB:               engineDB.DB,
 		MCPConfigService: mcpConfigService,
 		Logger:           zap.NewNop(),
@@ -345,7 +345,7 @@ func TestBothEnabled_UserSeesApprovedQueries(t *testing.T) {
 	)
 
 	// Part 1: Verify user sees approved queries tools
-	filterDeps := &DeveloperToolDeps{
+	filterDeps := &MCPToolDeps{
 		DB:               engineDB.DB,
 		MCPConfigService: mcpConfigService,
 		Logger:           zap.NewNop(),
@@ -414,7 +414,7 @@ func TestAgentToolsEnabled_EchoListAndCallConsistency(t *testing.T) {
 	)
 
 	// Part 1: Verify tool LISTING shows echo for agent auth
-	filterDeps := &DeveloperToolDeps{
+	filterDeps := &MCPToolDeps{
 		DB:               engineDB.DB,
 		MCPConfigService: mcpConfigService,
 		Logger:           zap.NewNop(),
@@ -438,7 +438,7 @@ func TestAgentToolsEnabled_EchoListAndCallConsistency(t *testing.T) {
 	t.Log("LISTING: echo tool is correctly visible for agent auth with agent_tools enabled")
 
 	// Part 2: Verify tool CALLING works (this is where the bug was)
-	devDeps := &DeveloperToolDeps{
+	devDeps := &MCPToolDeps{
 		DB:               engineDB.DB,
 		MCPConfigService: mcpConfigService,
 		ProjectService:   &mockProjectService{defaultDatasourceID: uuid.New()},

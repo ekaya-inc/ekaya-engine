@@ -19,8 +19,9 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
-// DeveloperToolDeps contains dependencies for developer tools.
-type DeveloperToolDeps struct {
+// MCPToolDeps contains dependencies for MCP tools.
+// This includes developer tools, business user tools, and approved query tools.
+type MCPToolDeps struct {
 	DB                *database.DB
 	MCPConfigService  services.MCPConfigService
 	DatasourceService services.DatasourceService
@@ -63,38 +64,76 @@ func truncateSQL(sql string, maxLen int) string {
 	return sql[:maxLen] + "..."
 }
 
-// developerToolNames lists all tools in the developer group.
-var developerToolNames = map[string]bool{
-	"echo":    true,
-	"execute": true,
+// Filter maps are generated from ToolRegistry to prevent drift.
+// These are populated at init time from the single source of truth.
+var (
+	// developerToolNames lists all tools in the developer group.
+	developerToolNames map[string]bool
+
+	// businessUserToolNames lists read-only query tools that are part of the approved_queries group.
+	// These tools enable business users to answer ad-hoc questions when pre-approved queries don't match.
+	businessUserToolNames map[string]bool
+
+	// ontologyToolNames lists all ontology tools (grouped with approved_queries visibility).
+	// This includes get_glossary since business glossary is part of semantic context.
+	ontologyToolNames map[string]bool
+
+	// agentToolNames lists tools available to agents when agent_tools is enabled.
+	// Agents can access echo for testing and approved_queries tools for data access.
+	agentToolNames map[string]bool
+)
+
+func init() {
+	// Build filter maps from ToolRegistry to ensure consistency
+	developerToolNames = buildToolNameMap(services.ToolGroupDeveloper)
+	businessUserToolNames = buildBusinessUserToolMap()
+	ontologyToolNames = buildOntologyToolMap()
+	agentToolNames = buildAgentToolMap()
 }
 
-// businessUserToolNames lists read-only query tools that are part of the approved_queries group.
-// These tools enable business users to answer ad-hoc questions when pre-approved queries don't match.
-var businessUserToolNames = map[string]bool{
-	"query":    true,
-	"sample":   true,
-	"validate": true,
+// buildToolNameMap creates a map of tool names for a given tool group from the registry.
+func buildToolNameMap(group string) map[string]bool {
+	m := make(map[string]bool)
+	for _, t := range services.ToolRegistry {
+		if t.ToolGroup == group {
+			m[t.Name] = true
+		}
+	}
+	return m
 }
 
-// ontologyToolNames lists all ontology tools (grouped with approved_queries visibility).
-// This includes get_glossary since business glossary is part of semantic context.
-var ontologyToolNames = map[string]bool{
-	"get_ontology": true,
-	"get_glossary": true,
+// buildBusinessUserToolMap returns tools from approved_queries group that are business user tools.
+// These are the read-only query tools (query, sample, validate) as opposed to
+// the approved query tools (list_approved_queries, execute_approved_query) or ontology tools.
+func buildBusinessUserToolMap() map[string]bool {
+	return map[string]bool{
+		"query":    true,
+		"sample":   true,
+		"validate": true,
+	}
 }
 
-// agentToolNames lists tools available to agents when agent_tools is enabled.
-// Agents can access echo for testing and approved_queries tools for data access.
-var agentToolNames = map[string]bool{
-	"echo":                   true,
-	"list_approved_queries":  true,
-	"execute_approved_query": true,
+// buildOntologyToolMap returns ontology-related tools from the approved_queries group.
+func buildOntologyToolMap() map[string]bool {
+	return map[string]bool{
+		"get_ontology": true,
+		"get_glossary": true,
+	}
 }
 
-// RegisterDeveloperTools registers the developer tool group tools.
-// These tools are only accessible when the developer tool group is enabled.
-func RegisterDeveloperTools(s *server.MCPServer, deps *DeveloperToolDeps) {
+// buildAgentToolMap returns tools available to agents (from services.agentAllowedTools).
+// Note: health is handled separately in filterAgentTools.
+func buildAgentToolMap() map[string]bool {
+	return map[string]bool{
+		"echo":                   true,
+		"list_approved_queries":  true,
+		"execute_approved_query": true,
+	}
+}
+
+// RegisterMCPTools registers all MCP tools (developer, business user, and query tools).
+// Tool visibility is controlled by the tool filter based on project configuration.
+func RegisterMCPTools(s *server.MCPServer, deps *MCPToolDeps) {
 	registerEchoTool(s, deps)
 	registerQueryTool(s, deps)
 	registerSampleTool(s, deps)
@@ -107,7 +146,7 @@ func RegisterDeveloperTools(s *server.MCPServer, deps *DeveloperToolDeps) {
 // the execute tool when EnableExecute is false, and filters out approved_queries tools
 // when the approved_queries group is disabled or no enabled queries exist.
 // For agent authentication, it restricts access to only approved_queries tools when agent_tools is enabled.
-func NewToolFilter(deps *DeveloperToolDeps) func(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
+func NewToolFilter(deps *MCPToolDeps) func(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
 	return func(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
 		// Get claims from context
 		claims, ok := auth.GetClaims(ctx)
@@ -268,17 +307,6 @@ func filterAgentTools(tools []mcp.Tool, agentToolsEnabled bool) []mcp.Tool {
 	return filtered
 }
 
-// filterOutDeveloperTools removes all developer tools from the list.
-func filterOutDeveloperTools(tools []mcp.Tool, _ bool) []mcp.Tool {
-	filtered := make([]mcp.Tool, 0, len(tools))
-	for _, tool := range tools {
-		if !developerToolNames[tool.Name] {
-			filtered = append(filtered, tool)
-		}
-	}
-	return filtered
-}
-
 // filterOutExecuteTool removes only the execute tool from the list.
 func filterOutExecuteTool(tools []mcp.Tool) []mcp.Tool {
 	filtered := make([]mcp.Tool, 0, len(tools))
@@ -292,7 +320,7 @@ func filterOutExecuteTool(tools []mcp.Tool) []mcp.Tool {
 
 // checkDeveloperEnabled verifies the developer tool group is enabled for the project.
 // Returns the project ID and a tenant-scoped context if enabled, or an error if not.
-func checkDeveloperEnabled(ctx context.Context, deps *DeveloperToolDeps) (uuid.UUID, context.Context, func(), error) {
+func checkDeveloperEnabled(ctx context.Context, deps *MCPToolDeps) (uuid.UUID, context.Context, func(), error) {
 	// Get claims from context
 	claims, ok := auth.GetClaims(ctx)
 	if !ok {
@@ -333,7 +361,7 @@ func checkDeveloperEnabled(ctx context.Context, deps *DeveloperToolDeps) (uuid.U
 
 // checkExecuteEnabled verifies the execute tool is enabled for the project.
 // This checks both the developer tool group and the EnableExecute sub-option.
-func checkExecuteEnabled(ctx context.Context, deps *DeveloperToolDeps) (uuid.UUID, context.Context, func(), error) {
+func checkExecuteEnabled(ctx context.Context, deps *MCPToolDeps) (uuid.UUID, context.Context, func(), error) {
 	// First check if developer tools are enabled
 	projectID, tenantCtx, cleanup, err := checkDeveloperEnabled(ctx, deps)
 	if err != nil {
@@ -362,7 +390,7 @@ func checkExecuteEnabled(ctx context.Context, deps *DeveloperToolDeps) (uuid.UUI
 // Authorization is granted if approved_queries tool group is enabled.
 // These are read-only query tools that enable business users to answer ad-hoc questions.
 // Returns the project ID and a tenant-scoped context if authorized, or an error if not.
-func checkBusinessUserToolsEnabled(ctx context.Context, deps *DeveloperToolDeps) (uuid.UUID, context.Context, func(), error) {
+func checkBusinessUserToolsEnabled(ctx context.Context, deps *MCPToolDeps) (uuid.UUID, context.Context, func(), error) {
 	// Get claims from context
 	claims, ok := auth.GetClaims(ctx)
 	if !ok {
@@ -407,7 +435,7 @@ func checkBusinessUserToolsEnabled(ctx context.Context, deps *DeveloperToolDeps)
 //   - agent_tools is enabled AND caller is an agent (claims.Subject == "agent")
 //
 // Returns the project ID and a tenant-scoped context if authorized, or an error if not.
-func checkEchoEnabled(ctx context.Context, deps *DeveloperToolDeps) (uuid.UUID, context.Context, func(), error) {
+func checkEchoEnabled(ctx context.Context, deps *MCPToolDeps) (uuid.UUID, context.Context, func(), error) {
 	// Get claims from context
 	claims, ok := auth.GetClaims(ctx)
 	if !ok {
@@ -469,7 +497,7 @@ func checkEchoEnabled(ctx context.Context, deps *DeveloperToolDeps) (uuid.UUID, 
 
 // registerEchoTool adds a simple echo tool for testing the developer tool group.
 // This tool verifies that authentication and tool group configuration work correctly.
-func registerEchoTool(s *server.MCPServer, deps *DeveloperToolDeps) {
+func registerEchoTool(s *server.MCPServer, deps *MCPToolDeps) {
 	tool := mcp.NewTool(
 		"echo",
 		mcp.WithDescription("Echo back the input message (developer tool for testing)"),
@@ -510,7 +538,7 @@ func registerEchoTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 }
 
 // getDefaultDatasourceConfig returns the default datasource type and config for a project.
-func getDefaultDatasourceConfig(ctx context.Context, deps *DeveloperToolDeps, projectID uuid.UUID) (string, map[string]any, error) {
+func getDefaultDatasourceConfig(ctx context.Context, deps *MCPToolDeps, projectID uuid.UUID) (string, map[string]any, error) {
 	dsID, err := deps.ProjectService.GetDefaultDatasourceID(ctx, projectID)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to get default datasource: %w", err)
@@ -528,7 +556,7 @@ func getDefaultDatasourceConfig(ctx context.Context, deps *DeveloperToolDeps, pr
 }
 
 // registerQueryTool adds the query tool for executing read-only SQL.
-func registerQueryTool(s *server.MCPServer, deps *DeveloperToolDeps) {
+func registerQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 	tool := mcp.NewTool(
 		"query",
 		mcp.WithDescription("Execute read-only SQL SELECT statements for data analysis."),
@@ -632,7 +660,7 @@ func registerQueryTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 }
 
 // registerSampleTool adds the sample tool for quick data preview.
-func registerSampleTool(s *server.MCPServer, deps *DeveloperToolDeps) {
+func registerSampleTool(s *server.MCPServer, deps *MCPToolDeps) {
 	tool := mcp.NewTool(
 		"sample",
 		mcp.WithDescription("Quick data preview from a table without writing SQL."),
@@ -737,7 +765,7 @@ func registerSampleTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 }
 
 // registerExecuteTool adds the execute tool for DDL/DML statements.
-func registerExecuteTool(s *server.MCPServer, deps *DeveloperToolDeps) {
+func registerExecuteTool(s *server.MCPServer, deps *MCPToolDeps) {
 	tool := mcp.NewTool(
 		"execute",
 		mcp.WithDescription("Execute DDL/DML statements (CREATE, INSERT, UPDATE, DELETE, etc.)"),
@@ -839,7 +867,7 @@ func registerExecuteTool(s *server.MCPServer, deps *DeveloperToolDeps) {
 }
 
 // registerValidateTool adds the validate tool for SQL syntax checking.
-func registerValidateTool(s *server.MCPServer, deps *DeveloperToolDeps) {
+func registerValidateTool(s *server.MCPServer, deps *MCPToolDeps) {
 	tool := mcp.NewTool(
 		"validate",
 		mcp.WithDescription("Check SQL syntax without executing. Uses EXPLAIN for validation. Note: DDL statements (CREATE, ALTER, DROP) cannot be validated this way."),
