@@ -654,11 +654,41 @@ Added comprehensive test in `pkg/services/glossary_service_test.go:847-908`:
 }
 ```
 
-### 4.2 Design for Future Client Updates
+### 4.2 Design for Future Client Updates ✅
 
-Repository and service interfaces should support:
-- `CreateTerm` / `UpdateTerm` / `DeleteTerm` with source parameter
-- These will be exposed as MCP tools later for client-driven updates
+**Status:** Complete - Design document created
+
+**Implementation Notes:**
+- Created comprehensive design document: `DESIGN-glossary-client-updates.md`
+- Documents three MCP tools: `create_glossary_term`, `update_glossary_term`, `delete_glossary_term`
+- Existing repository and service interfaces already support all required operations
+- Service layer validates SQL via `TestSQL` before persistence (no changes needed)
+- Repository layer supports source parameter through `models.BusinessGlossaryTerm` struct
+- Database schema already includes source constraint: `CHECK (source IN ('inferred', 'manual', 'client'))`
+
+**Design includes:**
+- Complete MCP tool specifications with input/output schemas
+- Implementation pseudocode for each tool handler
+- Error handling patterns for validation failures and conflicts
+- Tool registration and filtering logic (developer tools toggle)
+- Authentication/authorization considerations
+- Testing strategy (unit, integration, manual)
+- Migration path for future implementation
+- Open questions and trade-offs
+
+**Key decisions documented:**
+1. Source changes to 'client' when client updates any term (clear attribution)
+2. Clients can delete any term regardless of source (no restrictions)
+3. Write tools gated by developer tools toggle (read-only tools always available)
+4. Client-created terms have `created_by=NULL, updated_by=NULL` (no user association)
+5. Structured error responses (not Go errors) for user-facing failures
+
+**Next implementer should:**
+- Read `DESIGN-glossary-client-updates.md` for full context
+- Implement three tool handlers in `pkg/mcp/tools/glossary.go`
+- Update tool filter map in `pkg/mcp/tools/developer.go`
+- Add comprehensive unit and integration tests
+- Test with Claude Desktop as MCP client
 
 ---
 
