@@ -143,27 +143,20 @@ type filterResponse struct {
 }
 
 // toGlossaryTermResponse converts a model to MCP response format.
+// TODO Phase 4: Update to use two-tool pattern (list_glossary, get_glossary_sql)
 func toGlossaryTermResponse(term *models.BusinessGlossaryTerm) glossaryTermResponse {
 	resp := glossaryTermResponse{
 		Term:        term.Term,
 		Definition:  term.Definition,
-		SQLPattern:  term.SQLPattern,
+		SQLPattern:  term.DefiningSQL, // Map DefiningSQL to SQLPattern for backwards compatibility
 		BaseTable:   term.BaseTable,
-		ColumnsUsed: term.ColumnsUsed,
-		Aggregation: term.Aggregation,
+		ColumnsUsed: []string{},       // Deprecated - now using OutputColumns
+		Aggregation: "",               // Deprecated - SQL is now complete
 		Source:      term.Source,
 	}
 
-	if len(term.Filters) > 0 {
-		resp.Filters = make([]filterResponse, 0, len(term.Filters))
-		for _, f := range term.Filters {
-			resp.Filters = append(resp.Filters, filterResponse{
-				Column:   f.Column,
-				Operator: f.Operator,
-				Values:   f.Values,
-			})
-		}
-	}
+	// Filters are deprecated - SQL is complete now
+	resp.Filters = []filterResponse{}
 
 	return resp
 }

@@ -286,15 +286,79 @@ type BusinessGlossaryTerm struct {
 - Alias lookups work via GetByAlias OR GetByTerm (repository supports both)
 - All CRUD operations properly handle aliases automatically
 
-### 2.3 Update Service (`pkg/services/glossary_service.go`)
+### 2.3 Update Service (`pkg/services/glossary_service.go`) ✅
 
-- Add `TestSQL(ctx, projectID, sql)` method:
-  1. Run EXPLAIN to validate syntax and schema references
-  2. Execute with LIMIT 1 to capture output columns
-  3. Return `{valid: bool, error: string, outputColumns: []OutputColumn}`
-- Update `CreateTerm` to require `defining_sql` and run validation
-- Update `UpdateTerm` to re-validate SQL if changed
-- Add alias management methods
+**Status:** Complete - Service layer fully updated with SQL validation and alias support
+
+**Implementation Details:**
+
+**New Dependencies:**
+- Added `datasourceSvc DatasourceService` - For accessing project datasources
+- Added `adapterFactory datasource.DatasourceAdapterFactory` - For creating query executors
+- Both injected via constructor: `NewGlossaryService(..., datasourceSvc, adapterFactory, ...)`
+- Updated `main.go` wiring to pass these dependencies
+
+**New Methods:**
+- `TestSQL(ctx, projectID, sql)` - Validates SQL and captures output columns:
+  1. Gets datasource for project (uses first datasource)
+  2. Creates query executor adapter
+  3. Executes SQL with LIMIT 1 to validate syntax and capture schema
+  4. Returns `SQLTestResult{Valid, Error, OutputColumns, SampleRow}`
+  - Returns structured error (not Go error) for validation failures
+  - Uses `auth.RequireUserIDFromContext(ctx)` for adapter authentication
+
+- `GetTermByName(ctx, projectID, termName)` - Lookup by term or alias:
+  1. Tries exact term name match via `glossaryRepo.GetByTerm`
+  2. Falls back to alias lookup via `glossaryRepo.GetByAlias`
+  3. Returns nil (not error) if not found
+
+- `CreateAlias(ctx, termID, alias)` - Adds alias to existing term
+- `DeleteAlias(ctx, termID, alias)` - Removes alias from term
+
+**Updated Methods:**
+- `CreateTerm`:
+  - Requires `defining_sql` field (validation added)
+  - Calls `TestSQL` to validate before creation
+  - Returns error if SQL invalid
+  - Sets `output_columns` from test result
+  - Sets default source to `models.GlossarySourceManual`
+
+- `UpdateTerm`:
+  - Requires `defining_sql` field
+  - Compares with existing term to detect SQL changes
+  - Re-validates via `TestSQL` only if SQL changed
+  - Updates `output_columns` if SQL changed
+  - Returns error if new SQL invalid
+
+**Legacy Handling:**
+- `parseSuggestTermsResponse` - Maps old `SQLPattern` to `DefiningSQL` (Phase 3 will update LLM prompts)
+- `EnrichGlossaryTerms` - Still checks for empty `DefiningSQL` on inferred terms (will be updated in Phase 3)
+- Both marked with comments noting Phase 3 updates needed
+
+**Files Modified:**
+- `pkg/services/glossary_service.go` - Service implementation (~850 lines)
+- `main.go` - Updated service wiring to inject datasource dependencies
+- `pkg/handlers/glossary_handler.go` - Request structs updated to use `defining_sql` and `aliases`
+- `pkg/mcp/tools/glossary.go` - Maps `DefiningSQL` to `SQLPattern` for backwards compatibility (Phase 4 will split into two tools)
+
+**Test Coverage:**
+- Unit tests updated in `pkg/services/glossary_service_test.go`
+- Integration tests updated in `pkg/handlers/glossary_integration_test.go`
+- DAG adapter tests updated in `pkg/services/dag_adapters_test.go`
+
+**Key Design Decisions:**
+1. **Validation on write** - SQL must be valid before storing (fail-fast principle)
+2. **Output columns captured automatically** - No manual specification needed
+3. **Conditional re-validation** - Only test SQL if it changed (performance)
+4. **Structured error handling** - TestSQL returns result object, not Go error (allows UI to show validation errors)
+5. **Datasource adapter pattern** - Reuses existing query execution infrastructure
+
+**Important for Next Task (Phase 3 - LLM Prompts):**
+- Service layer is complete and tested
+- Legacy LLM response parsing still works (SQLPattern → DefiningSQL mapping)
+- Next phase should update LLM prompts to generate `defining_sql` directly
+- `SuggestTerms` and `EnrichGlossaryTerms` methods ready for prompt updates
+- SQL validation will automatically apply to LLM-generated terms
 
 ---
 

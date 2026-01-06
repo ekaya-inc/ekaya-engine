@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
@@ -49,8 +50,12 @@ func setupGlossaryTest(t *testing.T) *glossaryTestContext {
 	// Create a mock LLM factory that returns nil (SuggestTerms needs ontology/entities first)
 	mockLLMFactory := &mockLLMClientFactory{}
 
+	// Create mock datasource service and adapter factory
+	mockDatasourceSvc := &mockDatasourceServiceForGlossaryIntegration{}
+	mockAdapterFactory := &mockAdapterFactoryForGlossaryIntegration{}
+
 	// Create service
-	service := services.NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, mockLLMFactory, zap.NewNop())
+	service := services.NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, mockDatasourceSvc, mockAdapterFactory, mockLLMFactory, zap.NewNop())
 
 	// Create handler
 	handler := NewGlossaryHandler(service, zap.NewNop())
@@ -568,4 +573,56 @@ func TestGlossaryIntegration_InvalidTermID(t *testing.T) {
 	if getRec.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d: %s", getRec.Code, getRec.Body.String())
 	}
+}
+
+// ============================================================================
+// Mock implementations for integration tests
+// ============================================================================
+
+type mockDatasourceServiceForGlossaryIntegration struct{}
+
+func (m *mockDatasourceServiceForGlossaryIntegration) Create(ctx context.Context, projectID uuid.UUID, name, dsType string, config map[string]any) (*models.Datasource, error) {
+	return nil, nil
+}
+
+func (m *mockDatasourceServiceForGlossaryIntegration) Get(ctx context.Context, projectID, id uuid.UUID) (*models.Datasource, error) {
+	return nil, nil
+}
+
+func (m *mockDatasourceServiceForGlossaryIntegration) GetByName(ctx context.Context, projectID uuid.UUID, name string) (*models.Datasource, error) {
+	return nil, nil
+}
+
+func (m *mockDatasourceServiceForGlossaryIntegration) List(ctx context.Context, projectID uuid.UUID) ([]*models.Datasource, error) {
+	return []*models.Datasource{}, nil
+}
+
+func (m *mockDatasourceServiceForGlossaryIntegration) Update(ctx context.Context, id uuid.UUID, name, dsType string, config map[string]any) error {
+	return nil
+}
+
+func (m *mockDatasourceServiceForGlossaryIntegration) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (m *mockDatasourceServiceForGlossaryIntegration) TestConnection(ctx context.Context, dsType string, config map[string]any) error {
+	return nil
+}
+
+type mockAdapterFactoryForGlossaryIntegration struct{}
+
+func (m *mockAdapterFactoryForGlossaryIntegration) NewConnectionTester(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.ConnectionTester, error) {
+	return nil, nil
+}
+
+func (m *mockAdapterFactoryForGlossaryIntegration) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.SchemaDiscoverer, error) {
+	return nil, nil
+}
+
+func (m *mockAdapterFactoryForGlossaryIntegration) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.QueryExecutor, error) {
+	return nil, nil
+}
+
+func (m *mockAdapterFactoryForGlossaryIntegration) ListTypes() []datasource.DatasourceAdapterInfo {
+	return []datasource.DatasourceAdapterInfo{}
 }

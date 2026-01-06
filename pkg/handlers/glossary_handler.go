@@ -25,25 +25,21 @@ type GlossaryListResponse struct {
 
 // CreateGlossaryTermRequest for POST /glossary
 type CreateGlossaryTermRequest struct {
-	Term        string          `json:"term"`
-	Definition  string          `json:"definition"`
-	SQLPattern  string          `json:"sql_pattern,omitempty"`
-	BaseTable   string          `json:"base_table,omitempty"`
-	ColumnsUsed []string        `json:"columns_used,omitempty"`
-	Filters     []models.Filter `json:"filters,omitempty"`
-	Aggregation string          `json:"aggregation,omitempty"`
-	Source      string          `json:"source,omitempty"`
+	Term        string   `json:"term"`
+	Definition  string   `json:"definition"`
+	DefiningSQL string   `json:"defining_sql"`
+	BaseTable   string   `json:"base_table,omitempty"`
+	Aliases     []string `json:"aliases,omitempty"`
+	Source      string   `json:"source,omitempty"`
 }
 
 // UpdateGlossaryTermRequest for PUT /glossary/{termId}
 type UpdateGlossaryTermRequest struct {
-	Term        string          `json:"term"`
-	Definition  string          `json:"definition"`
-	SQLPattern  string          `json:"sql_pattern,omitempty"`
-	BaseTable   string          `json:"base_table,omitempty"`
-	ColumnsUsed []string        `json:"columns_used,omitempty"`
-	Filters     []models.Filter `json:"filters,omitempty"`
-	Aggregation string          `json:"aggregation,omitempty"`
+	Term        string   `json:"term"`
+	Definition  string   `json:"definition"`
+	DefiningSQL string   `json:"defining_sql"`
+	BaseTable   string   `json:"base_table,omitempty"`
+	Aliases     []string `json:"aliases,omitempty"`
 }
 
 // ============================================================================
@@ -131,11 +127,9 @@ func (h *GlossaryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	term := &models.BusinessGlossaryTerm{
 		Term:        req.Term,
 		Definition:  req.Definition,
-		SQLPattern:  req.SQLPattern,
+		DefiningSQL: req.DefiningSQL,
 		BaseTable:   req.BaseTable,
-		ColumnsUsed: req.ColumnsUsed,
-		Filters:     req.Filters,
-		Aggregation: req.Aggregation,
+		Aliases:     req.Aliases,
 		Source:      req.Source,
 	}
 
@@ -223,11 +217,9 @@ func (h *GlossaryHandler) Update(w http.ResponseWriter, r *http.Request) {
 		ID:          termID,
 		Term:        req.Term,
 		Definition:  req.Definition,
-		SQLPattern:  req.SQLPattern,
+		DefiningSQL: req.DefiningSQL,
 		BaseTable:   req.BaseTable,
-		ColumnsUsed: req.ColumnsUsed,
-		Filters:     req.Filters,
-		Aggregation: req.Aggregation,
+		Aliases:     req.Aliases,
 	}
 
 	if err := h.glossaryService.UpdateTerm(r.Context(), term); err != nil {

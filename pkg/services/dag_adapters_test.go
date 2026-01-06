@@ -37,6 +37,22 @@ func (m *mockGlossaryService) GetTerm(ctx context.Context, termID uuid.UUID) (*m
 	return nil, nil
 }
 
+func (m *mockGlossaryService) GetTermByName(ctx context.Context, projectID uuid.UUID, termName string) (*models.BusinessGlossaryTerm, error) {
+	return nil, nil
+}
+
+func (m *mockGlossaryService) TestSQL(ctx context.Context, projectID uuid.UUID, sql string) (*SQLTestResult, error) {
+	return nil, nil
+}
+
+func (m *mockGlossaryService) CreateAlias(ctx context.Context, termID uuid.UUID, alias string) error {
+	return nil
+}
+
+func (m *mockGlossaryService) DeleteAlias(ctx context.Context, termID uuid.UUID, alias string) error {
+	return nil
+}
+
 func (m *mockGlossaryService) SuggestTerms(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error) {
 	return nil, nil
 }
