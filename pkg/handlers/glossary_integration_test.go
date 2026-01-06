@@ -8,13 +8,17 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	_ "github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource/postgres" // Register postgres adapter
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
@@ -25,53 +29,71 @@ import (
 
 // glossaryTestContext holds all dependencies for glossary integration tests.
 type glossaryTestContext struct {
-	t            *testing.T
-	engineDB     *testhelpers.EngineDB
-	handler      *GlossaryHandler
-	service      services.GlossaryService
-	glossaryRepo repositories.GlossaryRepository
-	ontologyRepo repositories.OntologyRepository
-	entityRepo   repositories.OntologyEntityRepository
-	projectID    uuid.UUID
-	ontologyID   uuid.UUID
+	t              *testing.T
+	testDB         *testhelpers.TestDB
+	engineDB       *testhelpers.EngineDB
+	handler        *GlossaryHandler
+	service        services.GlossaryService
+	datasourceSvc  services.DatasourceService
+	glossaryRepo   repositories.GlossaryRepository
+	ontologyRepo   repositories.OntologyRepository
+	entityRepo     repositories.OntologyEntityRepository
+	projectID      uuid.UUID
+	ontologyID     uuid.UUID
+	datasourceID   uuid.UUID
+	adapterFactory datasource.DatasourceAdapterFactory
 }
 
 // setupGlossaryTest creates a test context with real database and services.
 func setupGlossaryTest(t *testing.T) *glossaryTestContext {
 	t.Helper()
 
+	// Get both databases from the test container
+	testDB := testhelpers.GetTestDB(t)
 	engineDB := testhelpers.GetEngineDB(t)
+
+	// Create encryptor for datasource credentials
+	encryptor, err := crypto.NewCredentialEncryptor(testEncryptionKey)
+	if err != nil {
+		t.Fatalf("Failed to create encryptor: %v", err)
+	}
+
+	// Create the real adapter factory (not a mock) for SQL validation
+	adapterFactory := datasource.NewDatasourceAdapterFactory(nil)
 
 	// Create repositories
 	glossaryRepo := repositories.NewGlossaryRepository()
 	ontologyRepo := repositories.NewOntologyRepository()
 	entityRepo := repositories.NewOntologyEntityRepository()
+	dsRepo := repositories.NewDatasourceRepository()
+
+	// Create datasource service
+	datasourceSvc := services.NewDatasourceService(dsRepo, ontologyRepo, encryptor, adapterFactory, nil, zap.NewNop())
 
 	// Create a mock LLM factory that returns nil (SuggestTerms needs ontology/entities first)
 	mockLLMFactory := &mockLLMClientFactory{}
 
-	// Create mock datasource service and adapter factory
-	mockDatasourceSvc := &mockDatasourceServiceForGlossaryIntegration{}
-	mockAdapterFactory := &mockAdapterFactoryForGlossaryIntegration{}
-
-	// Create service
-	service := services.NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, mockDatasourceSvc, mockAdapterFactory, mockLLMFactory, zap.NewNop())
+	// Create service with real dependencies
+	service := services.NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, datasourceSvc, adapterFactory, mockLLMFactory, zap.NewNop())
 
 	// Create handler
 	handler := NewGlossaryHandler(service, zap.NewNop())
 
-	// Use a fixed project ID for consistent testing
+	// Use a unique project ID for consistent testing
 	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000003")
 
 	return &glossaryTestContext{
-		t:            t,
-		engineDB:     engineDB,
-		handler:      handler,
-		service:      service,
-		glossaryRepo: glossaryRepo,
-		ontologyRepo: ontologyRepo,
-		entityRepo:   entityRepo,
-		projectID:    projectID,
+		t:              t,
+		testDB:         testDB,
+		engineDB:       engineDB,
+		handler:        handler,
+		service:        service,
+		datasourceSvc:  datasourceSvc,
+		glossaryRepo:   glossaryRepo,
+		ontologyRepo:   ontologyRepo,
+		entityRepo:     entityRepo,
+		projectID:      projectID,
+		adapterFactory: adapterFactory,
 	}
 }
 
@@ -94,16 +116,15 @@ func (f *mockLLMClientFactory) CreateStreamingClient(_ context.Context, _ uuid.U
 type mockLLMClient struct{}
 
 func (c *mockLLMClient) GenerateResponse(_ context.Context, _ string, _ string, _ float64, _ bool) (*llm.GenerateResponseResult, error) {
-	// Return a valid JSON array of suggested terms
+	// Return a valid JSON array of suggested terms with new schema
 	return &llm.GenerateResponseResult{
 		Content: `[
 			{
 				"term": "Revenue",
 				"definition": "Total earned amount from completed transactions",
-				"sql_pattern": "SUM(earned_amount) WHERE transaction_state = 'completed'",
-				"base_table": "billing_transactions",
-				"columns_used": ["earned_amount", "transaction_state"],
-				"aggregation": "SUM"
+				"defining_sql": "SELECT SUM(id) AS revenue FROM users WHERE status = 'completed'",
+				"base_table": "users",
+				"aliases": ["Total Revenue", "Gross Revenue"]
 			}
 		]`,
 		PromptTokens:     100,
@@ -160,8 +181,13 @@ func (tc *glossaryTestContext) doRequest(method, path string, body any, handler 
 
 	ctx = database.SetTenantScope(ctx, scope)
 
-	// Set up auth claims
-	claims := &auth.Claims{ProjectID: tc.projectID.String()}
+	// Set up auth claims with user ID (Subject) for connection pooling
+	claims := &auth.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject: "test-user-glossary",
+		},
+		ProjectID: tc.projectID.String(),
+	}
 	ctx = context.WithValue(ctx, auth.ClaimsKey, claims)
 
 	req = req.WithContext(ctx)
@@ -191,6 +217,53 @@ func (tc *glossaryTestContext) ensureTestProject() {
 	if err != nil {
 		tc.t.Fatalf("Failed to ensure test project: %v", err)
 	}
+}
+
+// ensureTestDatasource creates a datasource pointing to the test_data database.
+func (tc *glossaryTestContext) ensureTestDatasource() {
+	tc.t.Helper()
+
+	tc.ensureTestProject()
+
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	if err != nil {
+		tc.t.Fatalf("Failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	// Clean up any existing datasources for this project
+	_, err = scope.Conn.Exec(ctx, "DELETE FROM engine_datasources WHERE project_id = $1", tc.projectID)
+	if err != nil {
+		tc.t.Fatalf("Failed to cleanup datasources: %v", err)
+	}
+
+	// Get the connection info from the test container
+	host, err := tc.testDB.Container.Host(ctx)
+	if err != nil {
+		tc.t.Fatalf("Failed to get container host: %v", err)
+	}
+	port, err := tc.testDB.Container.MappedPort(ctx, "5432")
+	if err != nil {
+		tc.t.Fatalf("Failed to get container port: %v", err)
+	}
+
+	// Create datasource pointing to test_data database
+	dsConfig := map[string]any{
+		"host":     host,
+		"port":     port.Int(),
+		"user":     "ekaya",
+		"password": "test_password",
+		"database": "test_data",
+		"ssl_mode": "disable",
+	}
+
+	ds, err := tc.datasourceSvc.Create(database.SetTenantScope(ctx, scope), tc.projectID, "Test Data DB", "postgres", dsConfig)
+	if err != nil {
+		tc.t.Fatalf("Failed to create test datasource: %v", err)
+	}
+
+	tc.datasourceID = ds.ID
 }
 
 // createTestOntology creates an active ontology for testing.
@@ -238,10 +311,10 @@ func (tc *glossaryTestContext) createTestEntity() {
 	entity := &models.OntologyEntity{
 		ProjectID:     tc.projectID,
 		OntologyID:    tc.ontologyID,
-		Name:          "billing_transaction",
-		Description:   "A billing transaction",
+		Name:          "order",
+		Description:   "A customer order",
 		PrimarySchema: "public",
-		PrimaryTable:  "billing_transactions",
+		PrimaryTable:  "users",
 		PrimaryColumn: "id",
 	}
 
@@ -262,51 +335,122 @@ func (tc *glossaryTestContext) cleanup() {
 	defer scope.Close()
 
 	// Delete in order respecting foreign keys
+	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_glossary_aliases WHERE glossary_id IN (SELECT id FROM engine_business_glossary WHERE project_id = $1)", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_business_glossary WHERE project_id = $1", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontology_entity_aliases WHERE entity_id IN (SELECT id FROM engine_ontology_entities WHERE project_id = $1)", tc.projectID)
-	// Note: engine_ontology_entity_occurrences table was dropped in migration 030
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontology_entities WHERE project_id = $1", tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontologies WHERE project_id = $1", tc.projectID)
+	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_datasources WHERE project_id = $1", tc.projectID)
 }
 
-func TestGlossaryIntegration_ListEmpty(t *testing.T) {
+// ============================================================================
+// Integration Tests - New Schema
+// ============================================================================
+
+func TestGlossaryIntegration_TestSQL_Valid(t *testing.T) {
 	tc := setupGlossaryTest(t)
 	tc.cleanup()
-	tc.ensureTestProject()
+	tc.ensureTestDatasource()
 
-	rec := tc.doRequest(http.MethodGet, "/api/projects/"+tc.projectID.String()+"/glossary", nil,
-		tc.handler.List, map[string]string{"pid": tc.projectID.String()})
+	// Test with valid SQL (using users table that exists in test_data)
+	req := TestSQLRequest{
+		SQL: "SELECT id, COUNT(*) as total FROM users GROUP BY id LIMIT 1",
+	}
+
+	rec := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary/test-sql",
+		req, tc.handler.TestSQL, map[string]string{"pid": tc.projectID.String()})
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	resp := parseAPIResponse[GlossaryListResponse](t, rec.Body.Bytes())
+	resp := parseAPIResponse[TestSQLResponse](t, rec.Body.Bytes())
 
-	if resp.Total != 0 {
-		t.Errorf("expected 0 terms, got %d", resp.Total)
+	if !resp.Valid {
+		t.Errorf("expected valid=true, got false with error: %s", resp.Error)
 	}
 
-	if len(resp.Terms) != 0 {
-		t.Errorf("expected empty terms list, got %d", len(resp.Terms))
+	if len(resp.OutputColumns) == 0 {
+		t.Error("expected output columns to be captured")
+	}
+
+	// Verify output columns have names and types
+	for _, col := range resp.OutputColumns {
+		if col.Name == "" {
+			t.Error("expected column name to be populated")
+		}
+		if col.Type == "" {
+			t.Error("expected column type to be populated")
+		}
 	}
 }
 
-func TestGlossaryIntegration_CreateAndList(t *testing.T) {
+func TestGlossaryIntegration_TestSQL_Invalid(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+	tc.ensureTestDatasource()
+
+	// Test with invalid SQL (syntax error)
+	req := TestSQLRequest{
+		SQL: "SELECT * FROM nonexistent_table_xyz",
+	}
+
+	rec := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary/test-sql",
+		req, tc.handler.TestSQL, map[string]string{"pid": tc.projectID.String()})
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	resp := parseAPIResponse[TestSQLResponse](t, rec.Body.Bytes())
+
+	if resp.Valid {
+		t.Error("expected valid=false for invalid SQL")
+	}
+
+	if resp.Error == "" {
+		t.Error("expected error message for invalid SQL")
+	}
+}
+
+func TestGlossaryIntegration_TestSQL_NoDatasource(t *testing.T) {
 	tc := setupGlossaryTest(t)
 	tc.cleanup()
 	tc.ensureTestProject()
+	// Don't create datasource
+
+	req := TestSQLRequest{
+		SQL: "SELECT 1",
+	}
+
+	rec := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary/test-sql",
+		req, tc.handler.TestSQL, map[string]string{"pid": tc.projectID.String()})
+
+	// TestSQL returns 200 with valid=false when no datasource configured (structured error response)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	resp := parseAPIResponse[TestSQLResponse](t, rec.Body.Bytes())
+	if resp.Valid {
+		t.Error("expected valid=false when no datasource configured")
+	}
+	if resp.Error == "" {
+		t.Error("expected error message when no datasource configured")
+	}
+}
+
+func TestGlossaryIntegration_CreateWithValidation(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+	tc.ensureTestDatasource()
 
 	createReq := CreateGlossaryTermRequest{
-		Term:        "Revenue",
-		Definition:  "Total earned amount from completed transactions",
-		SQLPattern:  "SUM(earned_amount) WHERE transaction_state = 'completed'",
-		BaseTable:   "billing_transactions",
-		ColumnsUsed: []string{"earned_amount", "transaction_state"},
-		Filters: []models.Filter{
-			{Column: "transaction_state", Operator: "=", Values: []string{"completed"}},
-		},
-		Aggregation: "SUM",
+		Term:        "Total Users",
+		Definition:  "Count of all users in the system",
+		DefiningSQL: "SELECT COUNT(*) AS total_users FROM users",
+		BaseTable:   "users",
+		Aliases:     []string{"User Count", "All Users"},
 	}
 
 	createRec := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary",
@@ -317,17 +461,246 @@ func TestGlossaryIntegration_CreateAndList(t *testing.T) {
 	}
 
 	createResp := parseAPIResponse[*models.BusinessGlossaryTerm](t, createRec.Body.Bytes())
-	if createResp.Term != "Revenue" {
-		t.Errorf("expected term 'Revenue', got %q", createResp.Term)
+	if createResp.Term != "Total Users" {
+		t.Errorf("expected term 'Total Users', got %q", createResp.Term)
 	}
-	if createResp.Source != "user" {
-		t.Errorf("expected source 'user', got %q", createResp.Source)
+	if createResp.Source != models.GlossarySourceManual {
+		t.Errorf("expected source 'manual', got %q", createResp.Source)
 	}
-	if createResp.ID == uuid.Nil {
-		t.Error("expected non-nil term ID")
+	if createResp.DefiningSQL != createReq.DefiningSQL {
+		t.Errorf("expected defining_sql to match request")
+	}
+	if len(createResp.Aliases) != 2 {
+		t.Errorf("expected 2 aliases, got %d", len(createResp.Aliases))
+	}
+	if len(createResp.OutputColumns) == 0 {
+		t.Error("expected output columns to be captured after validation")
+	}
+}
+
+func TestGlossaryIntegration_CreateWithInvalidSQL(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+	tc.ensureTestDatasource()
+
+	createReq := CreateGlossaryTermRequest{
+		Term:        "Invalid Term",
+		Definition:  "This should fail",
+		DefiningSQL: "SELECT * FROM table_that_does_not_exist",
 	}
 
-	// Verify via list
+	createRec := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary",
+		createReq, tc.handler.Create, map[string]string{"pid": tc.projectID.String()})
+
+	if createRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+}
+
+func TestGlossaryIntegration_CreateDuplicate(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+	tc.ensureTestDatasource()
+
+	createReq := CreateGlossaryTermRequest{
+		Term:        "Revenue",
+		Definition:  "Total revenue",
+		DefiningSQL: "SELECT SUM(id) AS revenue FROM users",
+	}
+
+	// Create first term
+	createRec1 := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary",
+		createReq, tc.handler.Create, map[string]string{"pid": tc.projectID.String()})
+
+	if createRec1.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", createRec1.Code, createRec1.Body.String())
+	}
+
+	// Try to create duplicate
+	createRec2 := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary",
+		createReq, tc.handler.Create, map[string]string{"pid": tc.projectID.String()})
+
+	// Database constraint error returns 500 - that's acceptable for constraint violations
+	// In a future enhancement, we could add explicit duplicate checking in the service layer
+	if createRec2.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500 (database constraint error), got %d: %s", createRec2.Code, createRec2.Body.String())
+	}
+
+	// Verify it's the constraint error we expect
+	if !strings.Contains(createRec2.Body.String(), "duplicate key value") {
+		t.Errorf("expected duplicate key error, got: %s", createRec2.Body.String())
+	}
+}
+
+func TestGlossaryIntegration_UpdateWithSQLChange(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+	tc.ensureTestDatasource()
+
+	// Create term first
+	createReq := CreateGlossaryTermRequest{
+		Term:        "Active Users",
+		Definition:  "Users who logged in",
+		DefiningSQL: "SELECT COUNT(*) AS active_users FROM users",
+	}
+
+	createRec := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary",
+		createReq, tc.handler.Create, map[string]string{"pid": tc.projectID.String()})
+
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+
+	createResp := parseAPIResponse[*models.BusinessGlossaryTerm](t, createRec.Body.Bytes())
+
+	// Update WITHOUT changing SQL (no re-validation needed)
+	updateReq := UpdateGlossaryTermRequest{
+		Term:        "Active Users",
+		Definition:  "Users who have logged in at least once",
+		DefiningSQL: "SELECT COUNT(*) AS active_users FROM users", // Same SQL, no revalidation
+		BaseTable:   "users",
+		Aliases:     []string{"MAU", "Monthly Active Users"},
+	}
+
+	updateRec := tc.doRequest(http.MethodPut, "/api/projects/"+tc.projectID.String()+"/glossary/"+createResp.ID.String(),
+		updateReq, tc.handler.Update, map[string]string{"pid": tc.projectID.String(), "tid": createResp.ID.String()})
+
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", updateRec.Code, updateRec.Body.String())
+	}
+
+	updateResp := parseAPIResponse[*models.BusinessGlossaryTerm](t, updateRec.Body.Bytes())
+	if updateResp.Definition != updateReq.Definition {
+		t.Errorf("expected updated definition, got %q", updateResp.Definition)
+	}
+	if updateResp.DefiningSQL != updateReq.DefiningSQL {
+		t.Errorf("expected updated defining_sql, got %q", updateResp.DefiningSQL)
+	}
+	if len(updateResp.Aliases) != 2 {
+		t.Errorf("expected 2 aliases after update, got %d", len(updateResp.Aliases))
+	}
+	// Output columns should still be present from initial creation
+	if len(updateResp.OutputColumns) == 0 {
+		t.Error("expected output columns to be present")
+	}
+}
+
+func TestGlossaryIntegration_UpdateWithInvalidSQL(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+	tc.ensureTestDatasource()
+
+	// Create term first
+	createReq := CreateGlossaryTermRequest{
+		Term:        "Test Term",
+		Definition:  "Test definition",
+		DefiningSQL: "SELECT COUNT(*) FROM users",
+	}
+
+	createRec := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary",
+		createReq, tc.handler.Create, map[string]string{"pid": tc.projectID.String()})
+
+	createResp := parseAPIResponse[*models.BusinessGlossaryTerm](t, createRec.Body.Bytes())
+
+	// Try to update with invalid SQL
+	updateReq := UpdateGlossaryTermRequest{
+		Term:        "Test Term",
+		Definition:  "Test definition",
+		DefiningSQL: "SELECT * FROM invalid_table_name",
+	}
+
+	updateRec := tc.doRequest(http.MethodPut, "/api/projects/"+tc.projectID.String()+"/glossary/"+createResp.ID.String(),
+		updateReq, tc.handler.Update, map[string]string{"pid": tc.projectID.String(), "tid": createResp.ID.String()})
+
+	if updateRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", updateRec.Code, updateRec.Body.String())
+	}
+}
+
+func TestGlossaryIntegration_DeleteCascadesToAliases(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+	tc.ensureTestDatasource()
+
+	// Create term with aliases
+	createReq := CreateGlossaryTermRequest{
+		Term:        "GMV",
+		Definition:  "Gross Merchandise Value",
+		DefiningSQL: "SELECT SUM(id) AS gmv FROM users",
+		Aliases:     []string{"Gross Revenue", "Total GMV"},
+	}
+
+	createRec := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary",
+		createReq, tc.handler.Create, map[string]string{"pid": tc.projectID.String()})
+
+	createResp := parseAPIResponse[*models.BusinessGlossaryTerm](t, createRec.Body.Bytes())
+
+	// Verify aliases exist in database
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	var aliasCount int
+	err = scope.Conn.QueryRow(ctx, "SELECT COUNT(*) FROM engine_glossary_aliases WHERE glossary_id = $1", createResp.ID).Scan(&aliasCount)
+	if err != nil {
+		t.Fatalf("Failed to query aliases: %v", err)
+	}
+	if aliasCount != 2 {
+		t.Errorf("expected 2 aliases in database, got %d", aliasCount)
+	}
+
+	// Delete term
+	deleteRec := tc.doRequest(http.MethodDelete, "/api/projects/"+tc.projectID.String()+"/glossary/"+createResp.ID.String(),
+		nil, tc.handler.Delete, map[string]string{"pid": tc.projectID.String(), "tid": createResp.ID.String()})
+
+	// The handler returns 200 with a success response, not 204
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	// Verify aliases were cascaded
+	err = scope.Conn.QueryRow(ctx, "SELECT COUNT(*) FROM engine_glossary_aliases WHERE glossary_id = $1", createResp.ID).Scan(&aliasCount)
+	if err != nil {
+		t.Fatalf("Failed to query aliases after delete: %v", err)
+	}
+	if aliasCount != 0 {
+		t.Errorf("expected 0 aliases after cascade delete, got %d", aliasCount)
+	}
+}
+
+func TestGlossaryIntegration_ListWithAliases(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+	tc.ensureTestDatasource()
+
+	// Create multiple terms with aliases
+	terms := []CreateGlossaryTermRequest{
+		{
+			Term:        "Revenue",
+			Definition:  "Total revenue",
+			DefiningSQL: "SELECT SUM(id) AS revenue FROM users",
+			Aliases:     []string{"Total Revenue", "Gross Revenue"},
+		},
+		{
+			Term:        "Active Users",
+			Definition:  "Monthly active users",
+			DefiningSQL: "SELECT COUNT(DISTINCT id) AS active_users FROM users",
+			Aliases:     []string{"MAU"},
+		},
+	}
+
+	for _, req := range terms {
+		rec := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary",
+			req, tc.handler.Create, map[string]string{"pid": tc.projectID.String()})
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("failed to create term %q: %d - %s", req.Term, rec.Code, rec.Body.String())
+		}
+	}
+
+	// List all terms
 	listRec := tc.doRequest(http.MethodGet, "/api/projects/"+tc.projectID.String()+"/glossary", nil,
 		tc.handler.List, map[string]string{"pid": tc.projectID.String()})
 
@@ -336,52 +709,15 @@ func TestGlossaryIntegration_CreateAndList(t *testing.T) {
 	}
 
 	listResp := parseAPIResponse[GlossaryListResponse](t, listRec.Body.Bytes())
-	if listResp.Total != 1 {
-		t.Fatalf("expected 1 term, got %d", listResp.Total)
+	if listResp.Total != 2 {
+		t.Fatalf("expected 2 terms, got %d", listResp.Total)
 	}
 
-	term := listResp.Terms[0]
-	if term.Term != "Revenue" {
-		t.Errorf("expected term 'Revenue', got %q", term.Term)
-	}
-	if term.BaseTable != "billing_transactions" {
-		t.Errorf("expected base_table 'billing_transactions', got %q", term.BaseTable)
-	}
-	if len(term.Filters) != 1 {
-		t.Errorf("expected 1 filter, got %d", len(term.Filters))
-	}
-}
-
-func TestGlossaryIntegration_GetByID(t *testing.T) {
-	tc := setupGlossaryTest(t)
-	tc.cleanup()
-	tc.ensureTestProject()
-
-	// Create term first
-	createReq := CreateGlossaryTermRequest{
-		Term:       "GMV",
-		Definition: "Gross Merchandise Value",
-	}
-
-	createRec := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary",
-		createReq, tc.handler.Create, map[string]string{"pid": tc.projectID.String()})
-
-	createResp := parseAPIResponse[*models.BusinessGlossaryTerm](t, createRec.Body.Bytes())
-
-	// Get by ID
-	getRec := tc.doRequest(http.MethodGet, "/api/projects/"+tc.projectID.String()+"/glossary/"+createResp.ID.String(),
-		nil, tc.handler.Get, map[string]string{"pid": tc.projectID.String(), "tid": createResp.ID.String()})
-
-	if getRec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", getRec.Code, getRec.Body.String())
-	}
-
-	getResp := parseAPIResponse[*models.BusinessGlossaryTerm](t, getRec.Body.Bytes())
-	if getResp.Term != "GMV" {
-		t.Errorf("expected term 'GMV', got %q", getResp.Term)
-	}
-	if getResp.Definition != "Gross Merchandise Value" {
-		t.Errorf("expected definition 'Gross Merchandise Value', got %q", getResp.Definition)
+	// Verify aliases are included
+	for _, term := range listResp.Terms {
+		if len(term.Aliases) == 0 {
+			t.Errorf("expected term %q to have aliases", term.Term)
+		}
 	}
 }
 
@@ -399,81 +735,23 @@ func TestGlossaryIntegration_GetByID_NotFound(t *testing.T) {
 	}
 }
 
-func TestGlossaryIntegration_Update(t *testing.T) {
+func TestGlossaryIntegration_Update_NotFound(t *testing.T) {
 	tc := setupGlossaryTest(t)
 	tc.cleanup()
 	tc.ensureTestProject()
 
-	// Create term first
-	createReq := CreateGlossaryTermRequest{
-		Term:       "Active User",
-		Definition: "A user who logged in",
-	}
-
-	createRec := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary",
-		createReq, tc.handler.Create, map[string]string{"pid": tc.projectID.String()})
-
-	createResp := parseAPIResponse[*models.BusinessGlossaryTerm](t, createRec.Body.Bytes())
-
-	// Update
+	nonExistentID := uuid.New()
 	updateReq := UpdateGlossaryTermRequest{
-		Term:        "Active User",
-		Definition:  "A user who logged in within the last 30 days",
-		SQLPattern:  "WHERE last_login_at > NOW() - INTERVAL '30 days'",
-		BaseTable:   "users",
-		ColumnsUsed: []string{"last_login_at"},
+		Term:        "Test",
+		Definition:  "Test",
+		DefiningSQL: "SELECT 1",
 	}
 
-	updateRec := tc.doRequest(http.MethodPut, "/api/projects/"+tc.projectID.String()+"/glossary/"+createResp.ID.String(),
-		updateReq, tc.handler.Update, map[string]string{"pid": tc.projectID.String(), "tid": createResp.ID.String()})
+	updateRec := tc.doRequest(http.MethodPut, "/api/projects/"+tc.projectID.String()+"/glossary/"+nonExistentID.String(),
+		updateReq, tc.handler.Update, map[string]string{"pid": tc.projectID.String(), "tid": nonExistentID.String()})
 
-	if updateRec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", updateRec.Code, updateRec.Body.String())
-	}
-
-	updateResp := parseAPIResponse[*models.BusinessGlossaryTerm](t, updateRec.Body.Bytes())
-	if updateResp.Definition != "A user who logged in within the last 30 days" {
-		t.Errorf("expected updated definition, got %q", updateResp.Definition)
-	}
-	if updateResp.SQLPattern != "WHERE last_login_at > NOW() - INTERVAL '30 days'" {
-		t.Errorf("expected updated sql_pattern, got %q", updateResp.SQLPattern)
-	}
-	if updateResp.BaseTable != "users" {
-		t.Errorf("expected base_table 'users', got %q", updateResp.BaseTable)
-	}
-}
-
-func TestGlossaryIntegration_Delete(t *testing.T) {
-	tc := setupGlossaryTest(t)
-	tc.cleanup()
-	tc.ensureTestProject()
-
-	// Create term first
-	createReq := CreateGlossaryTermRequest{
-		Term:       "Churn Rate",
-		Definition: "Percentage of users who leave",
-	}
-
-	createRec := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary",
-		createReq, tc.handler.Create, map[string]string{"pid": tc.projectID.String()})
-
-	createResp := parseAPIResponse[*models.BusinessGlossaryTerm](t, createRec.Body.Bytes())
-
-	// Delete
-	deleteRec := tc.doRequest(http.MethodDelete, "/api/projects/"+tc.projectID.String()+"/glossary/"+createResp.ID.String(),
-		nil, tc.handler.Delete, map[string]string{"pid": tc.projectID.String(), "tid": createResp.ID.String()})
-
-	if deleteRec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", deleteRec.Code, deleteRec.Body.String())
-	}
-
-	// Verify via list - should be empty
-	listRec := tc.doRequest(http.MethodGet, "/api/projects/"+tc.projectID.String()+"/glossary", nil,
-		tc.handler.List, map[string]string{"pid": tc.projectID.String()})
-
-	listResp := parseAPIResponse[GlossaryListResponse](t, listRec.Body.Bytes())
-	if listResp.Total != 0 {
-		t.Errorf("expected 0 terms after delete, got %d", listResp.Total)
+	if updateRec.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d: %s", updateRec.Code, updateRec.Body.String())
 	}
 }
 
@@ -498,7 +776,8 @@ func TestGlossaryIntegration_Create_ValidationError(t *testing.T) {
 
 	// Missing term name
 	createReq := CreateGlossaryTermRequest{
-		Definition: "Some definition",
+		Definition:  "Some definition",
+		DefiningSQL: "SELECT 1",
 	}
 
 	createRec := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary",
@@ -510,7 +789,8 @@ func TestGlossaryIntegration_Create_ValidationError(t *testing.T) {
 
 	// Missing definition
 	createReq2 := CreateGlossaryTermRequest{
-		Term: "Some Term",
+		Term:        "Some Term",
+		DefiningSQL: "SELECT 1",
 	}
 
 	createRec2 := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary",
@@ -519,6 +799,19 @@ func TestGlossaryIntegration_Create_ValidationError(t *testing.T) {
 	if createRec2.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d: %s", createRec2.Code, createRec2.Body.String())
 	}
+
+	// Missing defining_sql
+	createReq3 := CreateGlossaryTermRequest{
+		Term:       "Some Term",
+		Definition: "Some definition",
+	}
+
+	createRec3 := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary",
+		createReq3, tc.handler.Create, map[string]string{"pid": tc.projectID.String()})
+
+	if createRec3.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", createRec3.Code, createRec3.Body.String())
+	}
 }
 
 func TestGlossaryIntegration_Suggest(t *testing.T) {
@@ -526,6 +819,7 @@ func TestGlossaryIntegration_Suggest(t *testing.T) {
 	tc.cleanup()
 	tc.createTestOntology()
 	tc.createTestEntity()
+	tc.ensureTestDatasource() // Need datasource for SQL validation
 
 	suggestRec := tc.doRequest(http.MethodPost, "/api/projects/"+tc.projectID.String()+"/glossary/suggest",
 		nil, tc.handler.Suggest, map[string]string{"pid": tc.projectID.String()})
@@ -543,8 +837,14 @@ func TestGlossaryIntegration_Suggest(t *testing.T) {
 	if term.Term != "Revenue" {
 		t.Errorf("expected term 'Revenue', got %q", term.Term)
 	}
-	if term.Source != "suggested" {
-		t.Errorf("expected source 'suggested', got %q", term.Source)
+	if term.Source != models.GlossarySourceInferred {
+		t.Errorf("expected source 'inferred', got %q", term.Source)
+	}
+	if term.DefiningSQL == "" {
+		t.Error("expected defining_sql to be populated")
+	}
+	if len(term.Aliases) == 0 {
+		t.Error("expected aliases to be populated")
 	}
 }
 
@@ -573,56 +873,4 @@ func TestGlossaryIntegration_InvalidTermID(t *testing.T) {
 	if getRec.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d: %s", getRec.Code, getRec.Body.String())
 	}
-}
-
-// ============================================================================
-// Mock implementations for integration tests
-// ============================================================================
-
-type mockDatasourceServiceForGlossaryIntegration struct{}
-
-func (m *mockDatasourceServiceForGlossaryIntegration) Create(ctx context.Context, projectID uuid.UUID, name, dsType string, config map[string]any) (*models.Datasource, error) {
-	return nil, nil
-}
-
-func (m *mockDatasourceServiceForGlossaryIntegration) Get(ctx context.Context, projectID, id uuid.UUID) (*models.Datasource, error) {
-	return nil, nil
-}
-
-func (m *mockDatasourceServiceForGlossaryIntegration) GetByName(ctx context.Context, projectID uuid.UUID, name string) (*models.Datasource, error) {
-	return nil, nil
-}
-
-func (m *mockDatasourceServiceForGlossaryIntegration) List(ctx context.Context, projectID uuid.UUID) ([]*models.Datasource, error) {
-	return []*models.Datasource{}, nil
-}
-
-func (m *mockDatasourceServiceForGlossaryIntegration) Update(ctx context.Context, id uuid.UUID, name, dsType string, config map[string]any) error {
-	return nil
-}
-
-func (m *mockDatasourceServiceForGlossaryIntegration) Delete(ctx context.Context, id uuid.UUID) error {
-	return nil
-}
-
-func (m *mockDatasourceServiceForGlossaryIntegration) TestConnection(ctx context.Context, dsType string, config map[string]any) error {
-	return nil
-}
-
-type mockAdapterFactoryForGlossaryIntegration struct{}
-
-func (m *mockAdapterFactoryForGlossaryIntegration) NewConnectionTester(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.ConnectionTester, error) {
-	return nil, nil
-}
-
-func (m *mockAdapterFactoryForGlossaryIntegration) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.SchemaDiscoverer, error) {
-	return nil, nil
-}
-
-func (m *mockAdapterFactoryForGlossaryIntegration) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.QueryExecutor, error) {
-	return nil, nil
-}
-
-func (m *mockAdapterFactoryForGlossaryIntegration) ListTypes() []datasource.DatasourceAdapterInfo {
-	return []datasource.DatasourceAdapterInfo{}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -155,8 +156,9 @@ func (h *GlossaryHandler) Create(w http.ResponseWriter, r *http.Request) {
 			zap.Error(err))
 
 		// Check for validation errors
-		if err.Error() == "term name is required" || err.Error() == "term definition is required" {
-			if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", err.Error()); err != nil {
+		errMsg := err.Error()
+		if errMsg == "term name is required" || errMsg == "term definition is required" || errMsg == "defining_sql is required" || strings.Contains(errMsg, "SQL validation failed") {
+			if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", errMsg); err != nil {
 				h.logger.Error("Failed to write error response", zap.Error(err))
 			}
 			return
@@ -210,7 +212,7 @@ func (h *GlossaryHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // Update handles PUT /api/projects/{pid}/glossary/{tid}
 func (h *GlossaryHandler) Update(w http.ResponseWriter, r *http.Request) {
-	_, ok := ParseProjectID(w, r, h.logger)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -230,11 +232,13 @@ func (h *GlossaryHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	term := &models.BusinessGlossaryTerm{
 		ID:          termID,
+		ProjectID:    projectID,
 		Term:        req.Term,
 		Definition:  req.Definition,
 		DefiningSQL: req.DefiningSQL,
 		BaseTable:   req.BaseTable,
 		Aliases:     req.Aliases,
+		Source:      models.GlossarySourceManual, // Updates via UI are marked as manual
 	}
 
 	if err := h.glossaryService.UpdateTerm(r.Context(), term); err != nil {
@@ -243,8 +247,9 @@ func (h *GlossaryHandler) Update(w http.ResponseWriter, r *http.Request) {
 			zap.Error(err))
 
 		// Check for validation errors
-		if err.Error() == "term name is required" || err.Error() == "term definition is required" {
-			if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", err.Error()); err != nil {
+		errMsg := err.Error()
+		if errMsg == "term name is required" || errMsg == "term definition is required" || errMsg == "defining_sql is required" || strings.Contains(errMsg, "SQL validation failed") {
+			if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", errMsg); err != nil {
 				h.logger.Error("Failed to write error response", zap.Error(err))
 			}
 			return

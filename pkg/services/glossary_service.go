@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
@@ -174,6 +175,10 @@ func (s *glossaryService) UpdateTerm(ctx context.Context, term *models.BusinessG
 		return fmt.Errorf("get existing term: %w", err)
 	}
 
+	if existing == nil {
+		return apperrors.ErrNotFound
+	}
+
 	// If SQL changed, re-validate and update output columns
 	if term.DefiningSQL != existing.DefiningSQL {
 		testResult, err := s.TestSQL(ctx, term.ProjectID, term.DefiningSQL)
@@ -191,6 +196,9 @@ func (s *glossaryService) UpdateTerm(ctx context.Context, term *models.BusinessG
 
 		// Update output columns from test result
 		term.OutputColumns = testResult.OutputColumns
+	} else {
+		// SQL hasn't changed, preserve existing output columns
+		term.OutputColumns = existing.OutputColumns
 	}
 
 	if err := s.glossaryRepo.Update(ctx, term); err != nil {

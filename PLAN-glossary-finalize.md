@@ -1106,17 +1106,94 @@ The integration test file likely already exists and needs verification/updates f
 - PUT `/api/projects/:pid/glossary/:id` - Update term
 - DELETE `/api/projects/:pid/glossary/:id` - Delete term
 
-### 6.2 Integration Tests
+### 6.2 Integration Tests ✅ COMPLETED
 
-- `glossary_integration_test.go`: Full flow from API to database
-- Test SQL validation against real datasource
-- Test alias lookup
+**Status:** Complete - Comprehensive integration test coverage with real database and SQL validation
+
+**Implementation Details:**
+
+Created/updated `pkg/handlers/glossary_integration_test.go` with 17 integration tests covering full API-to-database flows:
+
+**Test Setup:**
+- Uses shared Docker testcontainer via `testhelpers.GetTestDB()` and `testhelpers.GetEngineDB()`
+- Creates real datasource pointing to test_data database (Postgres)
+- Uses postgres adapter (requires `integration,postgres` build tags)
+- Proper tenant scoping and auth claims in all requests
+
+**SQL Validation Tests (POST /api/projects/:pid/glossary/test-sql):**
+1. `TestGlossaryIntegration_TestSQL_Valid` - Valid SQL returns output columns
+2. `TestGlossaryIntegration_TestSQL_Invalid` - Invalid SQL returns validation error
+3. `TestGlossaryIntegration_TestSQL_NoDatasource` - Returns error when no datasource configured
+
+**Create Tests (POST /api/projects/:pid/glossary):**
+4. `TestGlossaryIntegration_CreateWithValidation` - Creates term with SQL validation and output column capture
+5. `TestGlossaryIntegration_CreateWithInvalidSQL` - Rejects term with invalid SQL (400 error)
+6. `TestGlossaryIntegration_CreateDuplicate` - Detects duplicate term constraint violation (500 with constraint error)
+7. `TestGlossaryIntegration_Create_ValidationError` - Validates required fields (term, definition, defining_sql)
+
+**Update Tests (PUT /api/projects/:pid/glossary/:id):**
+8. `TestGlossaryIntegration_UpdateWithSQLChange` - Updates term without changing SQL (preserves output columns)
+9. `TestGlossaryIntegration_UpdateWithInvalidSQL` - Rejects update with invalid SQL (400 error)
+10. `TestGlossaryIntegration_Update_NotFound` - Returns 404 for non-existent term
+
+**Delete Tests (DELETE /api/projects/:pid/glossary/:id):**
+11. `TestGlossaryIntegration_DeleteCascadesToAliases` - Verifies aliases are cascade-deleted from database
+12. `TestGlossaryIntegration_Delete_NotFound` - Returns 404 for non-existent term
+
+**List and Alias Tests:**
+13. `TestGlossaryIntegration_ListWithAliases` - Verifies list endpoint includes aliases for all terms
+14. `TestGlossaryIntegration_GetByID_NotFound` - Returns 404 for non-existent term ID
+15. `TestGlossaryIntegration_InvalidTermID` - Returns 400 for malformed UUID
+
+**LLM Suggestion Tests:**
+16. `TestGlossaryIntegration_Suggest` - Tests term suggestion with ontology and entities
+17. `TestGlossaryIntegration_Suggest_NoOntology` - Returns 400 when ontology not configured
+
+**Key Test Patterns:**
+- All tests use real postgres adapter (not mocked)
+- SQL queries validated against actual test_data database (users table)
+- Proper cleanup between tests to avoid state pollution
+- Tests verify both happy path and error handling
+- Database constraint violations checked (duplicates, source checks)
+- Alias cascade deletion verified via direct database query
+- Output columns captured and verified after SQL validation
+
+**Bug Fixes Made During Testing:**
+1. Added `ProjectID` field to UpdateTerm handler (required for SQL re-validation)
+2. Added `Source` field to UpdateTerm (prevents source constraint violation)
+3. Added nil check in UpdateTerm service (prevents panic when term not found)
+4. Added `strings` import to handler for error message checking
+5. Updated UpdateTerm service to preserve output_columns when SQL doesn't change
+6. Improved error handling to return 400 for validation errors (was 500)
+
+**Files Modified:**
+- `pkg/handlers/glossary_integration_test.go` - Complete rewrite with 17 comprehensive tests (855 lines)
+- `pkg/handlers/glossary_handler.go` - Fixed UpdateTerm handler to set ProjectID and Source
+- `pkg/services/glossary_service.go` - Added nil check in UpdateTerm, preserve output columns
+- `PLAN-glossary-finalize.md` - Updated with implementation notes
+
+**All tests passing** - Verified via `go test -tags="integration,postgres" -v ./pkg/handlers -run "^TestGlossaryIntegration_"`
+
+**Important Context for Next Session (Task 6.3 - UI Tests):**
+
+The backend is fully tested with real database and SQL validation. UI testing (task 6.3) should focus on:
+1. GlossaryPage rendering with new fields (defining_sql, output_columns, aliases)
+2. GlossaryTermEditor form validation and state management
+3. SQL test flow (button click → API call → result display)
+4. Create/Edit/Delete flows through UI
+5. Consider using React Testing Library or Cypress if testing framework available
+
+**Critical Bugs Fixed During Integration Testing:**
+1. **UpdateTerm handler** - Now sets `ProjectID` and `Source` fields (prevents constraint violations)
+2. **UpdateTerm service** - Added nil check to prevent panic when term not found
+3. **UpdateTerm service** - Now preserves output_columns when SQL doesn't change (avoids data loss)
+4. **Error handling** - Validation errors (missing fields, invalid SQL) now return 400 instead of 500
 
 ### 6.3 UI Tests
 
-- GlossaryPage rendering with new fields
-- GlossaryTermEditor form validation
-- SQL test flow
+- [ ] GlossaryPage rendering with new fields
+- [ ] GlossaryTermEditor form validation
+- [ ] SQL test flow
 
 ---
 
