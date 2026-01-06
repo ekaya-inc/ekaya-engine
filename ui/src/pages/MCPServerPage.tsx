@@ -475,7 +475,7 @@ const MCPServerPage = () => {
                   >
                     {/* API Key section rendered inside the card */}
                     <div className="mt-4 border-t border-border-light pt-4 pl-4">
-                      <AgentAPIKeyDisplay projectId={pid!} />
+                      <AgentAPIKeyDisplay projectId={pid!} onKeyChange={setAgentApiKey} />
                       {/* Warning at bottom */}
                       <div className="mt-3 flex items-start gap-2 rounded-md bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
                         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />

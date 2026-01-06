@@ -276,9 +276,13 @@ Option B: Use React context or state management for agent key (heavier solution)
      - Backend: `GetEnabledTools()` in registry → `MCPStateResult.EnabledTools` → `MCPConfigResponse.enabledTools`
      - Frontend: `config.enabledTools` → `MCPServerURL` prop → `MCPEnabledTools` component
 
-8. [ ] **Fix agent key rotation bug** (`ui/src/components/mcp/AgentAPIKeyDisplay.tsx`, `ui/src/pages/MCPServerPage.tsx`)
-   - Add `onKeyChange` callback prop
-   - Lift key state to parent
+8. [x] **Fix agent key rotation bug** (`ui/src/components/mcp/AgentAPIKeyDisplay.tsx`, `ui/src/pages/MCPServerPage.tsx`) ✅ COMPLETED
+   - Added `onKeyChange?: (key: string) => void` optional callback prop to `AgentAPIKeyDisplayProps` interface
+   - Destructured `onKeyChange` in component function signature
+   - Called `onKeyChange?.(response.data.key)` in `handleRegenerate()` after successful key rotation
+   - Updated `MCPServerPage.tsx` to pass `onKeyChange={setAgentApiKey}` to `AgentAPIKeyDisplay`
+   - The parent's `agentApiKey` state is now updated when key is rotated, keeping the JSON config display in sync
+   - TypeScript typecheck passes
 
 9. [x] **Update types** (`ui/src/types/mcp.ts`) ✅ COMPLETED (done as part of task 7)
    - Added `EnabledToolInfo` interface with `name` and `description` fields

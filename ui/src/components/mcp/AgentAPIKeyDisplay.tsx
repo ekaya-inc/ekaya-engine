@@ -16,9 +16,10 @@ import { Input } from '../ui/Input';
 
 interface AgentAPIKeyDisplayProps {
   projectId: string;
+  onKeyChange?: (key: string) => void;
 }
 
-export default function AgentAPIKeyDisplay({ projectId }: AgentAPIKeyDisplayProps) {
+export default function AgentAPIKeyDisplay({ projectId, onKeyChange }: AgentAPIKeyDisplayProps) {
   const { toast } = useToast();
   const [key, setKey] = useState<string>('');
   const [masked, setMasked] = useState(true);
@@ -119,6 +120,7 @@ export default function AgentAPIKeyDisplay({ projectId }: AgentAPIKeyDisplayProp
       if (response.success && response.data) {
         setKey(response.data.key);
         setMasked(false);
+        onKeyChange?.(response.data.key);
         toast({
           title: 'Key Rotated',
           description: 'Agent API key has been rotated',
