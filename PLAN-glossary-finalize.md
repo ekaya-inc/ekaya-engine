@@ -886,27 +886,136 @@ Created comprehensive modal-based editor component (`ui/src/components/GlossaryT
 - UI build passes TypeScript strict mode and Vite build succeeds
 - Manual testing verified all create/edit/delete flows work correctly
 
-### 5.4 API Endpoints
+### 5.4 API Endpoints ✅ COMMITTED
 
-Add to `pkg/handlers/glossary_handler.go`:
+**Status:** Complete - Full-stack glossary CRUD with SQL validation implemented
 
-```
-POST /api/projects/:pid/glossary/test-sql
-  Body: { "sql": "SELECT ..." }
-  Response: { "valid": true, "output_columns": [...], "sample_row": {...} }
-           or { "valid": false, "error": "..." }
+**Implementation Notes:**
 
-POST /api/projects/:pid/glossary
-  Body: { "term": "...", "definition": "...", "defining_sql": "...", "aliases": [...] }
-  Response: GlossaryTerm
+**Backend API Endpoints (`pkg/handlers/glossary_handler.go`):**
 
-PUT /api/projects/:pid/glossary/:id
-  Body: { "term": "...", "definition": "...", "defining_sql": "...", "aliases": [...] }
-  Response: GlossaryTerm
+All four endpoints implemented and integrated:
 
-DELETE /api/projects/:pid/glossary/:id
-  Response: 204 No Content
-```
+1. **POST `/api/projects/:pid/glossary/test-sql`** - SQL validation endpoint
+   - Request: `TestSQLRequest{ SQL string }`
+   - Response: `TestSQLResponse{ Valid bool, Error string, OutputColumns []OutputColumn, SampleRow map[string]any }`
+   - Calls `GlossaryService.TestSQL()` which:
+     - Gets project datasource (uses first available datasource)
+     - Creates query executor adapter
+     - Executes SQL with LIMIT 1 to validate syntax and capture schema
+     - Returns structured result (not Go error) for user-facing validation feedback
+   - Used by UI editor to validate SQL before allowing save
+
+2. **POST `/api/projects/:pid/glossary`** - Create term
+   - Request: `CreateGlossaryTermRequest{ Term, Definition, DefiningSQL, BaseTable, Aliases }`
+   - Response: Full `GlossaryTerm` object
+   - Calls `GlossaryService.CreateTerm()` which validates SQL automatically
+   - Source automatically set to "manual" for UI-created terms
+   - Output columns captured from validation result
+
+3. **PUT `/api/projects/:pid/glossary/:id`** - Update term
+   - Request: `UpdateGlossaryTermRequest{ Term, Definition, DefiningSQL, BaseTable, Aliases }`
+   - Response: Full `GlossaryTerm` object
+   - Calls `GlossaryService.UpdateTerm()` which re-validates if SQL changed
+   - Aliases replaced entirely (DELETE + INSERT pattern in repository)
+
+4. **DELETE `/api/projects/:pid/glossary/:id`** - Delete term
+   - Response: 204 No Content
+   - Calls `GlossaryService.DeleteTerm()` which cascades to aliases table
+
+**Frontend Integration (`ui/src/services/engineApi.ts`):**
+
+Four new API client methods added:
+- `testGlossarySQL(projectId, sql)` - Test SQL validation
+- `createGlossaryTerm(projectId, request)` - Create new term
+- `updateGlossaryTerm(projectId, termId, request)` - Update existing term
+- `deleteGlossaryTerm(projectId, termId)` - Delete term
+
+All methods properly typed with interfaces from `ui/src/types/glossary.ts`.
+
+**UI Components:**
+
+1. **GlossaryTermEditor** (`ui/src/components/GlossaryTermEditor.tsx`) - 483 lines
+   - Modal-based editor using Radix Dialog
+   - SQL editor reuses SqlEditor component from QueriesPage (PostgreSQL dialect)
+   - Test SQL button with inline validation feedback
+   - Output columns display after successful test
+   - Save button disabled until SQL passes validation (fail-fast UX)
+   - Tag-style alias input with Add/Remove buttons
+   - Works for both create and edit modes
+
+2. **GlossaryPage** updates (`ui/src/pages/GlossaryPage.tsx`) - 147 lines added
+   - "Add Term" button in page header (Plus icon)
+   - Edit button (Edit3 icon) per term card
+   - Delete button (Trash2 icon) with confirmation dialog
+   - Modal state management for editor
+   - Auto-refresh after create/update/delete
+   - Toast notifications for success/error feedback
+
+**Key Design Decisions:**
+
+1. **SQL validation before save** - UI enforces testing SQL before allowing save (fail-fast UX)
+2. **Structured error handling** - TestSQL returns result object (not Go error) for user-facing messages
+3. **Datasource dependency** - TestSQL requires project to have at least one datasource configured
+4. **Source tracking** - All UI-created/edited terms get `source = "manual"`
+5. **Delete confirmation** - Browser confirm() dialog prevents accidental deletion
+6. **Modal-based editor** - Cleaner UX than full-page form, familiar pattern in modern web apps
+
+**Files Modified:**
+- `pkg/handlers/glossary_handler.go` - Added 4 new handlers (TestSQL, Create, Update, Delete)
+- `ui/src/services/engineApi.ts` - Added 4 API client methods
+- `ui/src/components/GlossaryTermEditor.tsx` - NEW file (483 lines)
+- `ui/src/pages/GlossaryPage.tsx` - Added CRUD UI integration
+- `PLAN-glossary-finalize.md` - Updated with implementation notes
+
+**Verification:**
+- TypeScript strict mode passes (exactOptionalPropertyTypes enabled)
+- Vite build succeeds (no errors)
+- Backend compiles and runs (`make dev-server`)
+- Manual testing confirmed all CRUD flows work correctly
+
+**Important Context for Next Session (Task 6.1/6.2 - Testing):**
+
+**What's Working:**
+- Full CRUD cycle: Create → Read → Update → Delete all functional through UI
+- SQL validation prevents saving invalid SQL
+- Output columns automatically captured during validation
+- Aliases support with tag-style input
+- Toast notifications for all operations
+- Auto-refresh keeps UI in sync after mutations
+
+**What's NOT Tested Yet (Phase 6 scope):**
+- No integration tests for new API endpoints
+- No unit tests for GlossaryTermEditor component
+- No E2E tests for full CRUD flow
+- Manual testing only (successful but not automated)
+
+**Testing Strategy for Next Session:**
+
+1. **Backend Integration Tests** (`pkg/handlers/glossary_integration_test.go`):
+   - TestSQL endpoint with valid/invalid SQL
+   - Create term with SQL validation
+   - Update term with SQL changes (should re-validate)
+   - Delete term (should cascade to aliases)
+   - Error cases: missing datasource, invalid SQL, duplicate term
+
+2. **UI Component Tests** (if testing framework available):
+   - GlossaryTermEditor form validation
+   - Test SQL button behavior
+   - Save button enable/disable logic
+   - Alias input add/remove
+   - Modal open/close
+
+3. **E2E Flow Tests** (if Playwright/Cypress available):
+   - Full create flow: Open modal → Enter term → Test SQL → Save → See in list
+   - Edit flow: Click edit → Modify SQL → Test → Save → Changes reflected
+   - Delete flow: Click delete → Confirm → Term removed from list
+
+**Known Limitations:**
+- TestSQL uses LIMIT 1 execution - may not catch all runtime errors (e.g., aggregation without GROUP BY)
+- No validation for SQL injection (relies on datasource adapter's prepared statements)
+- No user tracking yet (created_by/updated_by set to NULL for UI-created terms)
+- Requires at least one datasource configured - error message could be clearer if missing
 
 ---
 
