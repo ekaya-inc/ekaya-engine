@@ -65,6 +65,9 @@ func (v *mcpStateValidator) Apply(transition MCPStateTransition, ctx MCPStateCon
 	// Start with a deep copy of current state
 	newState := v.deepCopy(transition.Current)
 
+	// Track which group is being enabled in this transition (for radio button behavior)
+	var newlyEnabledGroup string
+
 	// Validate each update
 	for groupName, updateConfig := range transition.Update {
 		if !validToolGroups[groupName] {
@@ -86,6 +89,11 @@ func (v *mcpStateValidator) Apply(transition MCPStateTransition, ctx MCPStateCon
 			newState[groupName] = currentConfig
 		}
 
+		// Track if this group is being enabled
+		if updateConfig.Enabled && !currentConfig.Enabled {
+			newlyEnabledGroup = groupName
+		}
+
 		// Check if trying to enable this group
 		if updateConfig.Enabled && !currentConfig.Enabled {
 			if err := v.validateEnabling(groupName, newState, ctx); err != nil {
@@ -102,8 +110,8 @@ func (v *mcpStateValidator) Apply(transition MCPStateTransition, ctx MCPStateCon
 		v.applyUpdate(groupName, currentConfig, updateConfig)
 	}
 
-	// Apply mutual exclusivity rules
-	v.applyMutualExclusivity(newState)
+	// Apply mutual exclusivity rules (radio button behavior)
+	v.applyMutualExclusivity(newState, newlyEnabledGroup)
 
 	// Normalize state (reset sub-options when disabled)
 	v.normalizeState(newState)
@@ -119,47 +127,10 @@ func (v *mcpStateValidator) Apply(transition MCPStateTransition, ctx MCPStateCon
 }
 
 // validateEnabling checks if a tool group can be enabled.
+// With radio button behavior, any group can always be enabled (it will disable others).
 func (v *mcpStateValidator) validateEnabling(groupName string, state map[string]*models.ToolGroupConfig, ctx MCPStateContext) *MCPStateError {
-	switch groupName {
-	case ToolGroupAgentTools:
-		// Agent tools can always be enabled (they'll disable others)
-		return nil
-
-	case ToolGroupApprovedQueries:
-		// Check if agent tools is enabled
-		if agentConfig := state[ToolGroupAgentTools]; agentConfig != nil && agentConfig.Enabled {
-			return &MCPStateError{
-				Code:    ErrCodeAgentToolsConflict,
-				Message: "Business User Tools cannot be enabled while Agent Tools is active.",
-			}
-		}
-		// Check if there are enabled queries
-		if !ctx.HasEnabledQueries {
-			return &MCPStateError{
-				Code:    ErrCodeNoEnabledQueries,
-				Message: "Create and enable queries first.",
-			}
-		}
-		return nil
-
-	case "developer":
-		// Check if agent tools is enabled
-		if agentConfig := state[ToolGroupAgentTools]; agentConfig != nil && agentConfig.Enabled {
-			return &MCPStateError{
-				Code:    ErrCodeAgentToolsConflict,
-				Message: "Developer Tools cannot be enabled while Agent Tools is active.",
-			}
-		}
-		// Check if force mode is enabled
-		if aqConfig := state[ToolGroupApprovedQueries]; aqConfig != nil && aqConfig.ForceMode {
-			return &MCPStateError{
-				Code:    ErrCodeForceModeConflict,
-				Message: "Only Business User Tools are allowed. Disable FORCE mode first.",
-			}
-		}
-		return nil
-	}
-
+	// Radio button behavior: any tool group can be enabled at any time.
+	// The mutual exclusivity is handled in applyMutualExclusivity.
 	return nil
 }
 
@@ -171,15 +142,16 @@ func (v *mcpStateValidator) applyUpdate(groupName string, current, update *model
 	current.AllowClientSuggestions = update.AllowClientSuggestions
 }
 
-// applyMutualExclusivity enforces mutual exclusivity rules.
-func (v *mcpStateValidator) applyMutualExclusivity(state map[string]*models.ToolGroupConfig) {
-	// If agent_tools is enabled, disable everything else
-	if agentConfig := state[ToolGroupAgentTools]; agentConfig != nil && agentConfig.Enabled {
-		if devConfig := state["developer"]; devConfig != nil {
-			devConfig.Enabled = false
-		}
-		if aqConfig := state[ToolGroupApprovedQueries]; aqConfig != nil {
-			aqConfig.Enabled = false
+// applyMutualExclusivity enforces radio button behavior - only one tool group can be enabled.
+// When a group is being enabled, all others are disabled.
+// newlyEnabledGroup is the group that was just enabled in this transition (may be empty if none).
+func (v *mcpStateValidator) applyMutualExclusivity(state map[string]*models.ToolGroupConfig, newlyEnabledGroup string) {
+	// If a group was just enabled, disable all others (radio button behavior)
+	if newlyEnabledGroup != "" {
+		for groupName, config := range state {
+			if config != nil && groupName != newlyEnabledGroup {
+				config.Enabled = false
+			}
 		}
 	}
 }

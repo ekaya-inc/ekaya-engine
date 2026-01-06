@@ -17,9 +17,9 @@ const ToolGroupDeveloper = "developer"
 // This is the single source of truth for tool metadata, used by both
 // the UI display (GetEnabledTools) and the MCP tool filter (pkg/mcp/tools).
 var ToolRegistry = []ToolDefinition{
-	// Developer tools
+	// Developer tools - all tools are always available when developer is enabled
 	{Name: "echo", Description: "Echo back input message for testing", ToolGroup: ToolGroupDeveloper},
-	{Name: "execute", Description: "Execute DDL/DML statements", ToolGroup: ToolGroupDeveloper, SubOption: "enableExecute"},
+	{Name: "execute", Description: "Execute DDL/DML statements", ToolGroup: ToolGroupDeveloper},
 	{Name: "get_schema", Description: "Get database schema with entity semantics", ToolGroup: ToolGroupDeveloper},
 
 	// Business user tools (approved_queries group)
@@ -49,6 +49,7 @@ var agentAllowedTools = map[string]bool{
 // GetEnabledTools returns the list of tools enabled based on the current state.
 // This computes which tools would be visible to a user (not an agent) based on
 // the tool group configurations.
+// With radio button behavior, only one tool group can be enabled at a time.
 func GetEnabledTools(state map[string]*models.ToolGroupConfig) []ToolDefinition {
 	if state == nil {
 		// Only health is available with no state
@@ -69,32 +70,21 @@ func GetEnabledTools(state map[string]*models.ToolGroupConfig) []ToolDefinition 
 		return enabled
 	}
 
-	// Normal mode: check each tool group
+	// Normal mode: check each tool group (radio button - only one can be enabled)
 
-	// Check if force mode is active (hides developer tools)
-	aqConfig := state[ToolGroupApprovedQueries]
-	forceMode := aqConfig != nil && aqConfig.ForceMode
-
-	// Developer tools
+	// Developer tools - when enabled, ALL tools are available (full access)
 	devConfig := state[ToolGroupDeveloper]
-	showDeveloper := devConfig != nil && devConfig.Enabled && !forceMode
-	showExecute := showDeveloper && devConfig.EnableExecute
+	if devConfig != nil && devConfig.Enabled {
+		// Developer mode: return all tools
+		return ToolRegistry
+	}
 
 	// Approved queries tools
+	aqConfig := state[ToolGroupApprovedQueries]
 	showApprovedQueries := aqConfig != nil && aqConfig.Enabled
 
 	for _, tool := range ToolRegistry {
 		switch tool.ToolGroup {
-		case ToolGroupDeveloper:
-			if !showDeveloper {
-				continue
-			}
-			// Check sub-option for execute tool
-			if tool.SubOption == "enableExecute" && !showExecute {
-				continue
-			}
-			enabled = append(enabled, tool)
-
 		case ToolGroupApprovedQueries:
 			if showApprovedQueries {
 				enabled = append(enabled, tool)

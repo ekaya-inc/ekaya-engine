@@ -91,13 +91,12 @@ func TestMCPStateValidator_NormalizeState_SubOptionsReset(t *testing.T) {
 }
 
 func TestMCPStateValidator_MutualExclusivity_AgentTools(t *testing.T) {
-	// Agent Tools is mutually exclusive with all other tools
+	// With radio button behavior, enabling any group disables the others.
+	// No errors are returned - the system automatically switches.
 	tests := []struct {
 		name           string
 		current        map[string]*models.ToolGroupConfig
 		update         map[string]*models.ToolGroupConfig
-		expectError    bool
-		errorCode      string
 		expectedStates map[string]bool // groupName -> expectedEnabled
 	}{
 		{
@@ -109,7 +108,6 @@ func TestMCPStateValidator_MutualExclusivity_AgentTools(t *testing.T) {
 			update: map[string]*models.ToolGroupConfig{
 				ToolGroupAgentTools: {Enabled: true},
 			},
-			expectError: false,
 			expectedStates: map[string]bool{
 				"developer":         false,
 				ToolGroupAgentTools: true,
@@ -124,14 +122,13 @@ func TestMCPStateValidator_MutualExclusivity_AgentTools(t *testing.T) {
 			update: map[string]*models.ToolGroupConfig{
 				ToolGroupAgentTools: {Enabled: true},
 			},
-			expectError: false,
 			expectedStates: map[string]bool{
 				ToolGroupApprovedQueries: false,
 				ToolGroupAgentTools:      true,
 			},
 		},
 		{
-			name: "cannot enable developer while agent_tools is active",
+			name: "enabling developer while agent_tools is active - radio button switches",
 			current: map[string]*models.ToolGroupConfig{
 				"developer":         {Enabled: false},
 				ToolGroupAgentTools: {Enabled: true},
@@ -139,11 +136,13 @@ func TestMCPStateValidator_MutualExclusivity_AgentTools(t *testing.T) {
 			update: map[string]*models.ToolGroupConfig{
 				"developer": {Enabled: true},
 			},
-			expectError: true,
-			errorCode:   ErrCodeAgentToolsConflict,
+			expectedStates: map[string]bool{
+				"developer":         true,
+				ToolGroupAgentTools: false, // Radio button disables agent_tools
+			},
 		},
 		{
-			name: "cannot enable approved_queries while agent_tools is active",
+			name: "enabling approved_queries while agent_tools is active - radio button switches",
 			current: map[string]*models.ToolGroupConfig{
 				ToolGroupApprovedQueries: {Enabled: false},
 				ToolGroupAgentTools:      {Enabled: true},
@@ -151,8 +150,10 @@ func TestMCPStateValidator_MutualExclusivity_AgentTools(t *testing.T) {
 			update: map[string]*models.ToolGroupConfig{
 				ToolGroupApprovedQueries: {Enabled: true},
 			},
-			expectError: true,
-			errorCode:   ErrCodeAgentToolsConflict,
+			expectedStates: map[string]bool{
+				ToolGroupApprovedQueries: true,
+				ToolGroupAgentTools:      false, // Radio button disables agent_tools
+			},
 		},
 	}
 
@@ -165,84 +166,51 @@ func TestMCPStateValidator_MutualExclusivity_AgentTools(t *testing.T) {
 				MCPStateContext{HasEnabledQueries: true},
 			)
 
-			if tt.expectError {
-				require.NotNil(t, result.Error, "expected error but got none")
-				assert.Equal(t, tt.errorCode, result.Error.Code)
-				// State should be unchanged on error
-				for groupName, currentConfig := range tt.current {
-					assert.Equal(t, currentConfig.Enabled, result.State[groupName].Enabled,
-						"state should be unchanged on error for %s", groupName)
-				}
-			} else {
-				require.Nil(t, result.Error)
-				for groupName, expectedEnabled := range tt.expectedStates {
-					config := result.State[groupName]
-					require.NotNil(t, config, "group %s should exist", groupName)
-					assert.Equal(t, expectedEnabled, config.Enabled,
-						"group %s: expected enabled=%v", groupName, expectedEnabled)
-				}
+			// Radio button behavior: no errors, just switches
+			require.Nil(t, result.Error, "radio button transitions should not error")
+			for groupName, expectedEnabled := range tt.expectedStates {
+				config := result.State[groupName]
+				require.NotNil(t, config, "group %s should exist", groupName)
+				assert.Equal(t, expectedEnabled, config.Enabled,
+					"group %s: expected enabled=%v", groupName, expectedEnabled)
 			}
 		})
 	}
 }
 
-func TestMCPStateValidator_ForceMode(t *testing.T) {
-	// Force mode prevents enabling developer tools
-	tests := []struct {
-		name        string
-		current     map[string]*models.ToolGroupConfig
-		update      map[string]*models.ToolGroupConfig
-		expectError bool
-		errorCode   string
-	}{
-		{
-			name: "cannot enable developer when force mode is on",
-			current: map[string]*models.ToolGroupConfig{
-				"developer":              {Enabled: false},
-				ToolGroupApprovedQueries: {Enabled: true, ForceMode: true},
-			},
-			update: map[string]*models.ToolGroupConfig{
-				"developer": {Enabled: true},
-			},
-			expectError: true,
-			errorCode:   ErrCodeForceModeConflict,
-		},
-		{
-			name: "can enable developer when force mode is off",
-			current: map[string]*models.ToolGroupConfig{
-				"developer":              {Enabled: false},
-				ToolGroupApprovedQueries: {Enabled: true, ForceMode: false},
-			},
-			update: map[string]*models.ToolGroupConfig{
-				"developer": {Enabled: true},
-			},
-			expectError: false,
-		},
-	}
-
+func TestMCPStateValidator_ForceMode_NoLongerUsed(t *testing.T) {
+	// ForceMode is no longer used with radio button behavior.
+	// This test verifies that ForceMode doesn't block enabling developer tools.
 	validator := NewMCPStateValidator()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := validator.Apply(
-				MCPStateTransition{Current: tt.current, Update: tt.update},
-				MCPStateContext{HasEnabledQueries: true},
-			)
+	t.Run("enabling developer works regardless of force mode", func(t *testing.T) {
+		result := validator.Apply(
+			MCPStateTransition{
+				Current: map[string]*models.ToolGroupConfig{
+					"developer":              {Enabled: false},
+					ToolGroupApprovedQueries: {Enabled: true, ForceMode: true},
+				},
+				Update: map[string]*models.ToolGroupConfig{
+					"developer": {Enabled: true},
+				},
+			},
+			MCPStateContext{HasEnabledQueries: true},
+		)
 
-			if tt.expectError {
-				require.NotNil(t, result.Error)
-				assert.Equal(t, tt.errorCode, result.Error.Code)
-			} else {
-				require.Nil(t, result.Error)
-			}
-		})
-	}
+		// With radio button behavior, enabling developer should work
+		// and disable approved_queries
+		require.Nil(t, result.Error, "ForceMode should not block enabling developer with radio button behavior")
+		assert.True(t, result.State["developer"].Enabled)
+		assert.False(t, result.State[ToolGroupApprovedQueries].Enabled, "approved_queries should be disabled by radio button")
+	})
 }
 
-func TestMCPStateValidator_ApprovedQueries_RequiresEnabledQueries(t *testing.T) {
+func TestMCPStateValidator_ApprovedQueries_NoLongerRequiresEnabledQueries(t *testing.T) {
+	// With radio button behavior, the requirement for enabled queries is removed.
+	// Business users can enable the tool group regardless of query state.
 	validator := NewMCPStateValidator()
 
-	t.Run("cannot enable without enabled queries", func(t *testing.T) {
+	t.Run("can enable without enabled queries", func(t *testing.T) {
 		result := validator.Apply(
 			MCPStateTransition{
 				Current: map[string]*models.ToolGroupConfig{
@@ -255,8 +223,9 @@ func TestMCPStateValidator_ApprovedQueries_RequiresEnabledQueries(t *testing.T) 
 			MCPStateContext{HasEnabledQueries: false},
 		)
 
-		require.NotNil(t, result.Error)
-		assert.Equal(t, ErrCodeNoEnabledQueries, result.Error.Code)
+		// No error - can enable without queries now
+		require.Nil(t, result.Error)
+		assert.True(t, result.State[ToolGroupApprovedQueries].Enabled)
 	})
 
 	t.Run("can enable with enabled queries", func(t *testing.T) {
@@ -294,11 +263,11 @@ func TestMCPStateValidator_UnknownToolGroup(t *testing.T) {
 	assert.Equal(t, ErrCodeUnknownToolGroup, result.Error.Code)
 }
 
-func TestMCPStateValidator_ErrorPreservesOriginalState(t *testing.T) {
-	// CRITICAL: On error, state must be unchanged
+func TestMCPStateValidator_RadioButtonSwitchesState(t *testing.T) {
+	// With radio button behavior, enabling developer while agent_tools is active
+	// should succeed and switch to developer (disable agent_tools).
 	validator := NewMCPStateValidator()
 
-	// Try to enable developer while agent_tools is active (should fail)
 	original := map[string]*models.ToolGroupConfig{
 		"developer":              {Enabled: false},
 		ToolGroupApprovedQueries: {Enabled: false},
@@ -315,12 +284,13 @@ func TestMCPStateValidator_ErrorPreservesOriginalState(t *testing.T) {
 		MCPStateContext{HasEnabledQueries: true},
 	)
 
-	require.NotNil(t, result.Error)
+	// Radio button: no error, just switches
+	require.Nil(t, result.Error)
 
-	// Verify original state is preserved
-	assert.False(t, result.State["developer"].Enabled)
+	// Verify radio button switched the state
+	assert.True(t, result.State["developer"].Enabled, "developer should now be enabled")
 	assert.False(t, result.State[ToolGroupApprovedQueries].Enabled)
-	assert.True(t, result.State[ToolGroupAgentTools].Enabled)
+	assert.False(t, result.State[ToolGroupAgentTools].Enabled, "agent_tools should be disabled by radio button")
 }
 
 func TestMCPStateValidator_DeepCopyPreventsModification(t *testing.T) {
@@ -481,7 +451,7 @@ func TestMCPStateValidator_EnabledTools(t *testing.T) {
 		assert.Equal(t, "health", result.EnabledTools[0].Name)
 	})
 
-	t.Run("enabling developer shows developer tools", func(t *testing.T) {
+	t.Run("enabling developer shows all developer tools including execute", func(t *testing.T) {
 		result := validator.Apply(
 			MCPStateTransition{
 				Current: map[string]*models.ToolGroupConfig{},
@@ -495,27 +465,11 @@ func TestMCPStateValidator_EnabledTools(t *testing.T) {
 		require.Nil(t, result.Error)
 		require.NotNil(t, result.EnabledTools)
 
-		// Should include echo, get_schema, health (but NOT execute without enableExecute)
+		// Should include ALL developer tools (echo, execute, get_schema) plus health
 		assert.NotNil(t, findTool(result.EnabledTools, "echo"), "echo should be enabled")
 		assert.NotNil(t, findTool(result.EnabledTools, "get_schema"), "get_schema should be enabled")
 		assert.NotNil(t, findTool(result.EnabledTools, "health"), "health should be enabled")
-		assert.Nil(t, findTool(result.EnabledTools, "execute"), "execute should NOT be enabled without enableExecute")
-	})
-
-	t.Run("enabling developer with execute shows execute tool", func(t *testing.T) {
-		result := validator.Apply(
-			MCPStateTransition{
-				Current: map[string]*models.ToolGroupConfig{},
-				Update: map[string]*models.ToolGroupConfig{
-					"developer": {Enabled: true, EnableExecute: true},
-				},
-			},
-			MCPStateContext{HasEnabledQueries: true},
-		)
-
-		require.Nil(t, result.Error)
-		require.NotNil(t, result.EnabledTools)
-		assert.NotNil(t, findTool(result.EnabledTools, "execute"), "execute should be enabled with enableExecute")
+		assert.NotNil(t, findTool(result.EnabledTools, "execute"), "execute should be enabled (always included with developer)")
 	})
 
 	t.Run("enabling approved_queries shows business user tools", func(t *testing.T) {
@@ -576,7 +530,10 @@ func TestMCPStateValidator_EnabledTools(t *testing.T) {
 		assert.Nil(t, findTool(result.EnabledTools, "query"), "query should NOT be enabled in agent mode")
 	})
 
-	t.Run("force mode hides developer tools", func(t *testing.T) {
+	t.Run("force mode no longer hides developer tools with radio button", func(t *testing.T) {
+		// Note: With radio button behavior, both developer and approved_queries
+		// cannot be enabled at the same time. This test verifies behavior when
+		// state is manually set (e.g., from database).
 		result := validator.Apply(
 			MCPStateTransition{
 				Current: map[string]*models.ToolGroupConfig{
@@ -591,17 +548,16 @@ func TestMCPStateValidator_EnabledTools(t *testing.T) {
 		require.Nil(t, result.Error)
 		require.NotNil(t, result.EnabledTools)
 
-		// Force mode should hide developer tools even if developer is enabled
-		assert.Nil(t, findTool(result.EnabledTools, "echo"), "echo should NOT be enabled with force mode")
-		assert.Nil(t, findTool(result.EnabledTools, "get_schema"), "get_schema should NOT be enabled with force mode")
-
-		// But approved_queries tools should still be visible
-		assert.NotNil(t, findTool(result.EnabledTools, "query"), "query should be enabled with force mode")
-		assert.NotNil(t, findTool(result.EnabledTools, "list_approved_queries"), "list_approved_queries should be enabled with force mode")
+		// With both enabled in the state (shouldn't happen with radio button,
+		// but GetEnabledTools still shows both groups' tools)
+		assert.NotNil(t, findTool(result.EnabledTools, "echo"), "echo should be enabled")
+		assert.NotNil(t, findTool(result.EnabledTools, "get_schema"), "get_schema should be enabled")
+		assert.NotNil(t, findTool(result.EnabledTools, "query"), "query should be enabled")
 	})
 
-	t.Run("error result includes original state enabled tools", func(t *testing.T) {
-		// Start with agent_tools enabled (developer is disabled by mutual exclusivity)
+	t.Run("radio button switch shows new state enabled tools", func(t *testing.T) {
+		// With radio button, enabling developer while agent_tools is active
+		// should succeed and show ALL tools (developer mode = full access)
 		result := validator.Apply(
 			MCPStateTransition{
 				Current: map[string]*models.ToolGroupConfig{
@@ -609,19 +565,24 @@ func TestMCPStateValidator_EnabledTools(t *testing.T) {
 					ToolGroupAgentTools: {Enabled: true},
 				},
 				Update: map[string]*models.ToolGroupConfig{
-					"developer": {Enabled: true}, // Try to enable developer while agent_tools is active
+					"developer": {Enabled: true}, // Radio button: switch to developer
 				},
 			},
 			MCPStateContext{HasEnabledQueries: true},
 		)
 
-		require.NotNil(t, result.Error)
+		require.Nil(t, result.Error, "radio button switch should not error")
 		require.NotNil(t, result.EnabledTools)
 
-		// Should reflect the original state (agent_tools enabled)
-		// Original state has agent_tools enabled, so should show agent-allowed tools
-		assert.NotNil(t, findTool(result.EnabledTools, "echo"), "echo should be in original state tools")
-		assert.NotNil(t, findTool(result.EnabledTools, "health"), "health should be in original state tools")
+		// Should reflect the new state (developer enabled = ALL tools)
+		assert.NotNil(t, findTool(result.EnabledTools, "echo"), "echo should be enabled")
+		assert.NotNil(t, findTool(result.EnabledTools, "execute"), "execute should be enabled")
+		assert.NotNil(t, findTool(result.EnabledTools, "get_schema"), "get_schema should be enabled")
+		assert.NotNil(t, findTool(result.EnabledTools, "health"), "health should be enabled")
+		assert.NotNil(t, findTool(result.EnabledTools, "query"), "query should be enabled")
+
+		// Developer mode enables all tools from the registry
+		assert.Len(t, result.EnabledTools, len(ToolRegistry))
 	})
 }
 
@@ -696,4 +657,266 @@ func TestMCPStateValidator_EnabledToolsConsistency(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ============================================================================
+// NEW TESTS: Radio Button Behavior for Tool Groups
+// ============================================================================
+// These tests verify the simplified radio-button behavior where only ONE
+// top-level tool group can be enabled at a time.
+
+func TestMCPStateValidator_RadioButton_OnlyOneGroupEnabled(t *testing.T) {
+	// CRITICAL: Only one of business_user, agent_tools, or developer can be
+	// enabled at a time. Enabling one should disable the others.
+	validator := NewMCPStateValidator()
+
+	tests := []struct {
+		name           string
+		current        map[string]*models.ToolGroupConfig
+		update         map[string]*models.ToolGroupConfig
+		expectedStates map[string]bool // groupName -> expectedEnabled
+	}{
+		{
+			name: "enabling business_user disables developer",
+			current: map[string]*models.ToolGroupConfig{
+				"developer":              {Enabled: true},
+				ToolGroupApprovedQueries: {Enabled: false},
+				ToolGroupAgentTools:      {Enabled: false},
+			},
+			update: map[string]*models.ToolGroupConfig{
+				ToolGroupApprovedQueries: {Enabled: true},
+			},
+			expectedStates: map[string]bool{
+				"developer":              false,
+				ToolGroupApprovedQueries: true,
+				ToolGroupAgentTools:      false,
+			},
+		},
+		{
+			name: "enabling business_user disables agent_tools",
+			current: map[string]*models.ToolGroupConfig{
+				"developer":              {Enabled: false},
+				ToolGroupApprovedQueries: {Enabled: false},
+				ToolGroupAgentTools:      {Enabled: true},
+			},
+			update: map[string]*models.ToolGroupConfig{
+				ToolGroupApprovedQueries: {Enabled: true},
+			},
+			expectedStates: map[string]bool{
+				"developer":              false,
+				ToolGroupApprovedQueries: true,
+				ToolGroupAgentTools:      false,
+			},
+		},
+		{
+			name: "enabling developer disables business_user",
+			current: map[string]*models.ToolGroupConfig{
+				"developer":              {Enabled: false},
+				ToolGroupApprovedQueries: {Enabled: true},
+				ToolGroupAgentTools:      {Enabled: false},
+			},
+			update: map[string]*models.ToolGroupConfig{
+				"developer": {Enabled: true},
+			},
+			expectedStates: map[string]bool{
+				"developer":              true,
+				ToolGroupApprovedQueries: false,
+				ToolGroupAgentTools:      false,
+			},
+		},
+		{
+			name: "enabling developer disables agent_tools",
+			current: map[string]*models.ToolGroupConfig{
+				"developer":              {Enabled: false},
+				ToolGroupApprovedQueries: {Enabled: false},
+				ToolGroupAgentTools:      {Enabled: true},
+			},
+			update: map[string]*models.ToolGroupConfig{
+				"developer": {Enabled: true},
+			},
+			expectedStates: map[string]bool{
+				"developer":              true,
+				ToolGroupApprovedQueries: false,
+				ToolGroupAgentTools:      false,
+			},
+		},
+		{
+			name: "enabling agent_tools disables both business_user and developer",
+			current: map[string]*models.ToolGroupConfig{
+				"developer":              {Enabled: true},
+				ToolGroupApprovedQueries: {Enabled: true},
+				ToolGroupAgentTools:      {Enabled: false},
+			},
+			update: map[string]*models.ToolGroupConfig{
+				ToolGroupAgentTools: {Enabled: true},
+			},
+			expectedStates: map[string]bool{
+				"developer":              false,
+				ToolGroupApprovedQueries: false,
+				ToolGroupAgentTools:      true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := validator.Apply(
+				MCPStateTransition{Current: tt.current, Update: tt.update},
+				MCPStateContext{HasEnabledQueries: true}, // Not relevant for radio button behavior
+			)
+
+			require.Nil(t, result.Error, "radio button transitions should never error")
+
+			for groupName, expectedEnabled := range tt.expectedStates {
+				config := result.State[groupName]
+				require.NotNil(t, config, "group %s should exist", groupName)
+				assert.Equal(t, expectedEnabled, config.Enabled,
+					"group %s: expected enabled=%v", groupName, expectedEnabled)
+			}
+		})
+	}
+}
+
+func TestMCPStateValidator_RadioButton_NoQueriesNotBlocking(t *testing.T) {
+	// With radio button behavior, enabling business_user tools should work
+	// even without enabled queries (the restriction is removed)
+	validator := NewMCPStateValidator()
+
+	result := validator.Apply(
+		MCPStateTransition{
+			Current: map[string]*models.ToolGroupConfig{
+				ToolGroupApprovedQueries: {Enabled: false},
+			},
+			Update: map[string]*models.ToolGroupConfig{
+				ToolGroupApprovedQueries: {Enabled: true},
+			},
+		},
+		MCPStateContext{HasEnabledQueries: false}, // No queries exist
+	)
+
+	// Should succeed - no longer blocked by missing queries
+	require.Nil(t, result.Error, "enabling business_user should not require enabled queries")
+	assert.True(t, result.State[ToolGroupApprovedQueries].Enabled)
+}
+
+func TestMCPStateValidator_DeveloperTools_AlwaysIncludesExecute(t *testing.T) {
+	// When developer tools is enabled, ALL developer tools including execute
+	// should be available without needing enableExecute sub-option
+	validator := NewMCPStateValidator()
+
+	findTool := func(tools []ToolDefinition, name string) *ToolDefinition {
+		for _, tool := range tools {
+			if tool.Name == name {
+				return &tool
+			}
+		}
+		return nil
+	}
+
+	result := validator.Apply(
+		MCPStateTransition{
+			Current: map[string]*models.ToolGroupConfig{},
+			Update: map[string]*models.ToolGroupConfig{
+				"developer": {Enabled: true}, // Just enabled, no enableExecute flag
+			},
+		},
+		MCPStateContext{HasEnabledQueries: true},
+	)
+
+	require.Nil(t, result.Error)
+	require.NotNil(t, result.EnabledTools)
+
+	// Execute should be included automatically when developer is enabled
+	assert.NotNil(t, findTool(result.EnabledTools, "execute"),
+		"execute should be enabled when developer is enabled (no enableExecute flag needed)")
+	assert.NotNil(t, findTool(result.EnabledTools, "echo"),
+		"echo should be enabled")
+	assert.NotNil(t, findTool(result.EnabledTools, "get_schema"),
+		"get_schema should be enabled")
+}
+
+func TestMCPStateValidator_RadioButton_DisablingOneDoesNotEnableAnother(t *testing.T) {
+	// Disabling the active group should not automatically enable another
+	validator := NewMCPStateValidator()
+
+	result := validator.Apply(
+		MCPStateTransition{
+			Current: map[string]*models.ToolGroupConfig{
+				"developer":              {Enabled: true},
+				ToolGroupApprovedQueries: {Enabled: false},
+				ToolGroupAgentTools:      {Enabled: false},
+			},
+			Update: map[string]*models.ToolGroupConfig{
+				"developer": {Enabled: false},
+			},
+		},
+		MCPStateContext{HasEnabledQueries: true},
+	)
+
+	require.Nil(t, result.Error)
+
+	// All groups should be disabled now
+	assert.False(t, result.State["developer"].Enabled)
+	assert.False(t, result.State[ToolGroupApprovedQueries].Enabled)
+	assert.False(t, result.State[ToolGroupAgentTools].Enabled)
+}
+
+func TestMCPStateValidator_RadioButton_EnabledToolsReflectSelection(t *testing.T) {
+	// Verify that EnabledTools correctly reflects the radio button selection
+	validator := NewMCPStateValidator()
+
+	findTool := func(tools []ToolDefinition, name string) *ToolDefinition {
+		for _, tool := range tools {
+			if tool.Name == name {
+				return &tool
+			}
+		}
+		return nil
+	}
+
+	t.Run("business_user selected shows business user tools", func(t *testing.T) {
+		result := validator.Apply(
+			MCPStateTransition{
+				Current: map[string]*models.ToolGroupConfig{"developer": {Enabled: true}},
+				Update:  map[string]*models.ToolGroupConfig{ToolGroupApprovedQueries: {Enabled: true}},
+			},
+			MCPStateContext{HasEnabledQueries: true},
+		)
+
+		require.Nil(t, result.Error)
+
+		// Business user tools should be present
+		assert.NotNil(t, findTool(result.EnabledTools, "query"))
+		assert.NotNil(t, findTool(result.EnabledTools, "sample"))
+		assert.NotNil(t, findTool(result.EnabledTools, "list_approved_queries"))
+
+		// Developer tools should NOT be present (radio button disabled them)
+		assert.Nil(t, findTool(result.EnabledTools, "echo"))
+		assert.Nil(t, findTool(result.EnabledTools, "execute"))
+		assert.Nil(t, findTool(result.EnabledTools, "get_schema"))
+	})
+
+	t.Run("developer selected shows all tools (full access)", func(t *testing.T) {
+		result := validator.Apply(
+			MCPStateTransition{
+				Current: map[string]*models.ToolGroupConfig{ToolGroupApprovedQueries: {Enabled: true}},
+				Update:  map[string]*models.ToolGroupConfig{"developer": {Enabled: true}},
+			},
+			MCPStateContext{HasEnabledQueries: true},
+		)
+
+		require.Nil(t, result.Error)
+
+		// Developer mode enables ALL tools (full access)
+		assert.NotNil(t, findTool(result.EnabledTools, "echo"))
+		assert.NotNil(t, findTool(result.EnabledTools, "execute"))
+		assert.NotNil(t, findTool(result.EnabledTools, "get_schema"))
+
+		// Business user tools should also be present in developer mode
+		assert.NotNil(t, findTool(result.EnabledTools, "query"))
+		assert.NotNil(t, findTool(result.EnabledTools, "sample"))
+
+		// All tools from registry should be enabled
+		assert.Len(t, result.EnabledTools, len(ToolRegistry))
+	})
 }

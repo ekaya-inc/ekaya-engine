@@ -31,30 +31,32 @@ func TestGetEnabledTools_DeveloperEnabled(t *testing.T) {
 	}
 	tools := GetEnabledTools(state)
 
-	// Should include developer tools (minus execute since EnableExecute=false) plus health
-	// Note: query, sample, validate are now in approved_queries group
+	// Developer mode enables ALL tools (full access for developers)
 	toolNames := extractToolNames(tools)
 
+	// Developer-specific tools
 	assert.Contains(t, toolNames, "echo")
 	assert.Contains(t, toolNames, "get_schema")
+	assert.Contains(t, toolNames, "execute")
+
+	// Business user tools are also available in developer mode
+	assert.Contains(t, toolNames, "query")
+	assert.Contains(t, toolNames, "sample")
+	assert.Contains(t, toolNames, "validate")
+	assert.Contains(t, toolNames, "list_approved_queries")
+	assert.Contains(t, toolNames, "execute_approved_query")
+	assert.Contains(t, toolNames, "get_ontology")
+	assert.Contains(t, toolNames, "get_glossary")
+
+	// Health is always included
 	assert.Contains(t, toolNames, "health")
 
-	// execute requires EnableExecute sub-option
-	assert.NotContains(t, toolNames, "execute")
-
-	// Business user tools (query, sample, validate) are now in approved_queries group
-	assert.NotContains(t, toolNames, "query")
-	assert.NotContains(t, toolNames, "sample")
-	assert.NotContains(t, toolNames, "validate")
-
-	// approved_queries tools should not be included
-	assert.NotContains(t, toolNames, "list_approved_queries")
-	assert.NotContains(t, toolNames, "execute_approved_query")
-	assert.NotContains(t, toolNames, "get_ontology")
-	assert.NotContains(t, toolNames, "get_glossary")
+	// Should have all tools from the registry
+	assert.Len(t, tools, len(ToolRegistry))
 }
 
 func TestGetEnabledTools_DeveloperWithExecute(t *testing.T) {
+	// Note: EnableExecute flag is now ignored - all tools are available when developer is enabled
 	state := map[string]*models.ToolGroupConfig{
 		ToolGroupDeveloper: {Enabled: true, EnableExecute: true},
 	}
@@ -62,14 +64,15 @@ func TestGetEnabledTools_DeveloperWithExecute(t *testing.T) {
 
 	toolNames := extractToolNames(tools)
 
-	// execute should now be included
+	// Developer mode enables ALL tools
 	assert.Contains(t, toolNames, "execute")
 	assert.Contains(t, toolNames, "echo")
 	assert.Contains(t, toolNames, "get_schema")
 	assert.Contains(t, toolNames, "health")
+	assert.Contains(t, toolNames, "query") // All tools available in developer mode
 
-	// query is now in approved_queries group, should not be present
-	assert.NotContains(t, toolNames, "query")
+	// Should have all tools from the registry
+	assert.Len(t, tools, len(ToolRegistry))
 }
 
 func TestGetEnabledTools_ApprovedQueriesEnabled(t *testing.T) {
@@ -114,21 +117,23 @@ func TestGetEnabledTools_BothGroupsEnabled(t *testing.T) {
 	assert.Contains(t, toolNames, "health")
 }
 
-func TestGetEnabledTools_ForceModeHidesDeveloper(t *testing.T) {
+func TestGetEnabledTools_ForceModeNoLongerHidesDeveloper(t *testing.T) {
+	// Note: ForceMode is no longer used with radio button behavior.
+	// With radio buttons, only one group can be enabled at a time.
+	// This test verifies that ForceMode flag is ignored if present.
 	state := map[string]*models.ToolGroupConfig{
-		ToolGroupDeveloper:       {Enabled: true, EnableExecute: true},
+		ToolGroupDeveloper:       {Enabled: true},
 		ToolGroupApprovedQueries: {Enabled: true, ForceMode: true},
 	}
 	tools := GetEnabledTools(state)
 
 	toolNames := extractToolNames(tools)
 
-	// Force mode should hide developer tools even when enabled
-	assert.NotContains(t, toolNames, "echo")
-	assert.NotContains(t, toolNames, "execute")
-	assert.NotContains(t, toolNames, "get_schema")
-
-	// approved_queries tools (including business user tools) should still be visible
+	// Both groups' tools should be visible (GetEnabledTools doesn't enforce radio button,
+	// that's done by the state machine)
+	assert.Contains(t, toolNames, "echo")
+	assert.Contains(t, toolNames, "execute")
+	assert.Contains(t, toolNames, "get_schema")
 	assert.Contains(t, toolNames, "query")
 	assert.Contains(t, toolNames, "sample")
 	assert.Contains(t, toolNames, "validate")
@@ -225,11 +230,13 @@ func TestToolRegistry_AllToolsHaveValidToolGroup(t *testing.T) {
 	}
 }
 
-func TestToolRegistry_ExecuteHasSubOption(t *testing.T) {
+func TestToolRegistry_ExecuteNoSubOption(t *testing.T) {
+	// With radio button behavior, execute is always included when developer is enabled.
+	// No sub-option is needed.
 	for _, tool := range ToolRegistry {
 		if tool.Name == "execute" {
-			assert.Equal(t, "enableExecute", tool.SubOption,
-				"execute tool should have enableExecute sub-option")
+			assert.Empty(t, tool.SubOption,
+				"execute tool should NOT have a sub-option (always included with developer)")
 			return
 		}
 	}
