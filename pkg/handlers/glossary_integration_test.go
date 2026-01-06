@@ -74,7 +74,7 @@ func setupGlossaryTest(t *testing.T) *glossaryTestContext {
 	mockLLMFactory := &mockLLMClientFactory{}
 
 	// Create service with real dependencies
-	service := services.NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, datasourceSvc, adapterFactory, mockLLMFactory, zap.NewNop())
+	service := services.NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, datasourceSvc, adapterFactory, mockLLMFactory, nil, zap.NewNop())
 
 	// Create handler
 	handler := NewGlossaryHandler(service, zap.NewNop())
@@ -116,17 +116,15 @@ func (f *mockLLMClientFactory) CreateStreamingClient(_ context.Context, _ uuid.U
 type mockLLMClient struct{}
 
 func (c *mockLLMClient) GenerateResponse(_ context.Context, _ string, _ string, _ float64, _ bool) (*llm.GenerateResponseResult, error) {
-	// Return a valid JSON array of suggested terms with new schema
+	// Return a valid JSON object with suggested terms (discovery phase - no SQL)
 	return &llm.GenerateResponseResult{
-		Content: `[
+		Content: `{"terms": [
 			{
 				"term": "Revenue",
 				"definition": "Total earned amount from completed transactions",
-				"defining_sql": "SELECT SUM(id) AS revenue FROM users WHERE status = 'completed'",
-				"base_table": "users",
 				"aliases": ["Total Revenue", "Gross Revenue"]
 			}
-		]`,
+		]}`,
 		PromptTokens:     100,
 		CompletionTokens: 200,
 	}, nil
@@ -840,8 +838,9 @@ func TestGlossaryIntegration_Suggest(t *testing.T) {
 	if term.Source != models.GlossarySourceInferred {
 		t.Errorf("expected source 'inferred', got %q", term.Source)
 	}
-	if term.DefiningSQL == "" {
-		t.Error("expected defining_sql to be populated")
+	// In two-phase workflow, DefiningSQL is empty from SuggestTerms (filled in enrichment)
+	if term.DefiningSQL != "" {
+		t.Errorf("expected defining_sql to be empty (filled in enrichment phase), got %q", term.DefiningSQL)
 	}
 	if len(term.Aliases) == 0 {
 		t.Error("expected aliases to be populated")
