@@ -18,7 +18,7 @@ import {
 } from "../components/ui/Card";
 import engineApi from "../services/engineApi";
 import ontologyService from "../services/ontologyService";
-import type { BusinessGlossaryTerm, OntologyWorkflowStatus } from "../types";
+import type { GlossaryTerm, OntologyWorkflowStatus } from "../types";
 
 /**
  * GlossaryPage - Display business glossary terms with technical mappings
@@ -30,7 +30,7 @@ const GlossaryPage = () => {
   const { pid } = useParams<{ pid: string }>();
 
   // State for glossary terms
-  const [terms, setTerms] = useState<BusinessGlossaryTerm[]>([]);
+  const [terms, setTerms] = useState<GlossaryTerm[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -250,7 +250,7 @@ const GlossaryPage = () => {
         <CardContent>
           <div className="space-y-4">
             {terms.map((term) => {
-              const hasSqlDetails = term.sql_pattern || term.base_table || term.columns_used || term.filters || term.aggregation;
+              const hasSqlDetails = term.defining_sql || term.base_table || (term.output_columns && term.output_columns.length > 0) || (term.aliases && term.aliases.length > 0);
 
               return (
                 <div key={term.id} className="border border-border-light rounded-lg">
@@ -264,11 +264,13 @@ const GlossaryPage = () => {
                           </h3>
                           {/* Source Badge */}
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                            term.source === 'suggested'
+                            term.source === 'inferred'
                               ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-                              : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                              : term.source === 'manual'
+                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                              : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                           }`}>
-                            {term.source === 'suggested' ? 'Suggested' : 'User'}
+                            {term.source === 'inferred' ? 'Inferred' : term.source === 'manual' ? 'Manual' : 'Client'}
                           </span>
                         </div>
                         <p className="mt-1 text-sm text-text-secondary">
@@ -297,13 +299,13 @@ const GlossaryPage = () => {
                   {expandedTerms.has(term.id) && hasSqlDetails && (
                     <div className="border-t border-border-light bg-surface-secondary/30">
                       <div className="p-4 space-y-3">
-                        {term.sql_pattern && (
+                        {term.defining_sql && (
                           <div>
                             <div className="text-xs font-medium text-text-tertiary mb-1">
-                              SQL Pattern
+                              Defining SQL
                             </div>
                             <pre className="text-sm font-mono bg-surface-primary border border-border-light rounded p-2 overflow-x-auto">
-                              {term.sql_pattern}
+                              {term.defining_sql}
                             </pre>
                           </div>
                         )}
@@ -319,46 +321,39 @@ const GlossaryPage = () => {
                           </div>
                         )}
 
-                        {term.columns_used && term.columns_used.length > 0 && (
+                        {term.output_columns && term.output_columns.length > 0 && (
                           <div>
                             <div className="text-xs font-medium text-text-tertiary mb-1">
-                              Columns Used
-                            </div>
-                            <div className="flex flex-wrap gap-1">
-                              {term.columns_used.map((col, idx) => (
-                                <span
-                                  key={idx}
-                                  className="px-2 py-0.5 rounded text-xs font-mono bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
-                                >
-                                  {col}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {term.filters && term.filters.length > 0 && (
-                          <div>
-                            <div className="text-xs font-medium text-text-tertiary mb-1">
-                              Filters
+                              Output Columns
                             </div>
                             <div className="space-y-1">
-                              {term.filters.map((filter, idx) => (
-                                <div key={idx} className="text-sm font-mono text-text-primary">
-                                  {filter.column} {filter.operator} {filter.values.join(', ')}
+                              {term.output_columns.map((col, idx) => (
+                                <div key={idx} className="text-sm">
+                                  <span className="font-mono text-text-primary">{col.name}</span>
+                                  <span className="text-text-tertiary"> ({col.type})</span>
+                                  {col.description && (
+                                    <span className="text-text-secondary"> - {col.description}</span>
+                                  )}
                                 </div>
                               ))}
                             </div>
                           </div>
                         )}
 
-                        {term.aggregation && (
+                        {term.aliases && term.aliases.length > 0 && (
                           <div>
                             <div className="text-xs font-medium text-text-tertiary mb-1">
-                              Aggregation
+                              Aliases
                             </div>
-                            <div className="text-sm font-mono text-text-primary">
-                              {term.aggregation}
+                            <div className="flex flex-wrap gap-1">
+                              {term.aliases.map((alias, idx) => (
+                                <span
+                                  key={idx}
+                                  className="px-2 py-0.5 rounded text-xs font-mono bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
+                                >
+                                  {alias}
+                                </span>
+                              ))}
                             </div>
                           </div>
                         )}

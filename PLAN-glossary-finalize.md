@@ -694,35 +694,69 @@ Added comprehensive test in `pkg/services/glossary_service_test.go:847-908`:
 
 ## Phase 5: UI Updates
 
-### 5.1 Update Types (`ui/src/types/glossary.ts`)
+### 5.1 Update Types (`ui/src/types/glossary.ts`) ✅ COMMITTED
 
-```typescript
-interface OutputColumn {
-  name: string;
-  type: string;
-  description?: string;
-}
+**Status:** Complete - UI types updated and GlossaryPage aligned with new schema
 
-interface GlossaryTerm {
-  id: string;
-  term: string;
-  definition: string;
-  defining_sql: string;
-  base_table?: string;
-  output_columns?: OutputColumn[];
-  aliases?: string[];
-  source: 'inferred' | 'manual' | 'client';
-  created_at: string;
-  updated_at: string;
-}
+**Implementation Notes:**
 
-interface TestSQLResult {
-  valid: boolean;
-  error?: string;
-  output_columns?: OutputColumn[];
-  sample_row?: Record<string, unknown>;
-}
-```
+**Files Modified:**
+1. `ui/src/types/glossary.ts` (complete rewrite with new schema):
+   - Renamed `BusinessGlossaryTerm` → `GlossaryTerm` (matches backend `models.BusinessGlossaryTerm`)
+   - Removed old fragmented fields: `sql_pattern`, `columns_used`, `filters` (object array), `aggregation`
+   - Added new schema fields:
+     - `defining_sql: string` - The complete executable SQL definition
+     - `output_columns?: OutputColumn[]` - Columns returned by the SQL (imported from `ui/src/types/query.ts`)
+     - `aliases?: string[]` - Alternative names for the term
+     - `created_by?: string` - UUID of user who created (null for inferred terms)
+     - `updated_by?: string` - UUID of user who last updated
+   - Changed source type from `'user' | 'suggested'` to `'inferred' | 'manual' | 'client'` (aligned with backend constants)
+   - Added new interfaces for future API operations (not yet used, ready for task 5.4):
+     - `TestSQLResult` - Result from POST /api/projects/{pid}/glossary/test-sql
+     - `CreateGlossaryTermRequest` - Body for POST /api/projects/{pid}/glossary
+     - `UpdateGlossaryTermRequest` - Body for PUT /api/projects/{pid}/glossary/{id}
+     - `TestSQLRequest` - Body for POST /api/projects/{pid}/glossary/test-sql
+
+2. `ui/src/pages/GlossaryPage.tsx` (display logic updated):
+   - Changed import from `BusinessGlossaryTerm` to `GlossaryTerm`
+   - Updated source badge rendering:
+     - Old: "Suggested" (yellow) or "User" (green)
+     - New: "Inferred" (amber), "Manual" (green), or "Client" (blue)
+   - Replaced "SQL Pattern" section with "Defining SQL" (same code block style)
+   - Replaced "Columns Used" with "Output Columns" showing name, type, and description per column
+   - Removed "Filters" and "Aggregation" sections entirely
+   - Added "Aliases" section with purple tag/chip display (matches pattern from other pages)
+   - Updated `hasSqlDetails` logic to check: `defining_sql || base_table || output_columns?.length > 0 || aliases?.length > 0`
+
+**Verification:**
+- TypeScript type checking passes (no type errors)
+- UI build completes successfully (`make dev-ui`)
+- GlossaryPage renders correctly with new field structure
+
+**Important Context for Next Session (Task 5.2):**
+
+**What's Complete:**
+- Frontend types are now 100% aligned with backend schema (matches migration 031 and Go models exactly)
+- GlossaryPage successfully displays all new fields: defining_sql, output_columns, aliases, updated source badges
+- Existing read-only display functionality works correctly
+
+**What's Missing (Task 5.2 scope):**
+- No "Add Term" button in page header
+- No "Edit" button per term
+- No delete functionality
+- UI is completely read-only (can only view terms created by backend/MCP)
+
+**What's Missing (Task 5.3 scope):**
+- No GlossaryTermEditor component yet
+- No SQL editor/tester UI
+- Users cannot create or modify terms through the web interface
+
+**Technical Notes for Implementation:**
+- The request/response interfaces are already defined in `ui/src/types/glossary.ts` and ready to use
+- OutputColumn type is reused from query types (consistent UX pattern)
+- Consider reusing CodeMirror/Monaco editor from QueriesPage for SQL editing (if available)
+- Test SQL endpoint should validate before enabling Save button (fail-fast UX)
+- Aliases should use tag-style multi-input (similar to keywords in other UIs)
 
 ### 5.2 Update GlossaryPage (`ui/src/pages/GlossaryPage.tsx`)
 
