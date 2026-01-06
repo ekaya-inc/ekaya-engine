@@ -101,12 +101,12 @@ func TestNewToolFilter_DeveloperDisabled(t *testing.T) {
 	}
 }
 
-func TestNewToolFilter_DeveloperEnabledExecuteDisabled(t *testing.T) {
+func TestNewToolFilter_DeveloperEnabled_AllToolsAvailable(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Create config with developer tools enabled but execute disabled
-	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, EnableExecute: false})
+	// Create config with developer tools enabled (EnableExecute flag is now ignored)
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true})
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
@@ -117,46 +117,45 @@ func TestNewToolFilter_DeveloperEnabledExecuteDisabled(t *testing.T) {
 	filter := NewToolFilter(deps)
 	tools := createTestTools()
 
-	// Developer tools enabled, execute disabled - should filter out execute
-	// Note: query, sample, validate are now in approved_queries group, not developer
+	// Developer mode = ALL tools available (full access for developers)
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Should have health + echo + get_schema (developer tools minus execute)
-	// query, sample, validate are now part of approved_queries and should be filtered (no queries exist)
-	expectedTools := []string{"health", "echo", "get_schema"}
-	if len(filtered) != len(expectedTools) {
-		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
+	// Should have ALL tools (11 total) when developer is enabled
+	if len(filtered) != 11 {
+		t.Errorf("expected 11 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
-	if containsTool(filtered, "execute") {
-		t.Error("expected execute tool to be filtered out")
+	// Execute should be included (no longer controlled by EnableExecute flag)
+	if !containsTool(filtered, "execute") {
+		t.Error("expected execute tool to be present in developer mode")
 	}
 
-	// Business user tools (query, sample, validate) should be filtered out since approved_queries is not enabled
-	if containsTool(filtered, "query") {
-		t.Error("expected query tool to be filtered (approved_queries not enabled)")
+	// All business user tools should also be present in developer mode
+	if !containsTool(filtered, "query") {
+		t.Error("expected query tool to be present in developer mode")
 	}
-	if containsTool(filtered, "sample") {
-		t.Error("expected sample tool to be filtered (approved_queries not enabled)")
+	if !containsTool(filtered, "sample") {
+		t.Error("expected sample tool to be present in developer mode")
 	}
-	if containsTool(filtered, "validate") {
-		t.Error("expected validate tool to be filtered (approved_queries not enabled)")
+	if !containsTool(filtered, "validate") {
+		t.Error("expected validate tool to be present in developer mode")
 	}
 
-	for _, name := range expectedTools {
+	// All developer-specific tools should be present
+	for _, name := range []string{"health", "echo", "get_schema"} {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present", name)
 		}
 	}
 }
 
-func TestNewToolFilter_AllEnabled(t *testing.T) {
+func TestNewToolFilter_DeveloperEnabled_VerifyAllTools(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Create config with all tools enabled
-	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, EnableExecute: true})
+	// Create config with developer tools enabled
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true})
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
@@ -167,30 +166,21 @@ func TestNewToolFilter_AllEnabled(t *testing.T) {
 	filter := NewToolFilter(deps)
 	tools := createTestTools()
 
-	// All developer tools enabled, but no approved_queries (no queries exist)
-	// Note: query, sample, validate are now in approved_queries group
+	// Developer mode = ALL tools available (full access)
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Should have developer tools (echo, execute, get_schema) + health
-	// query, sample, validate are now part of approved_queries and should be filtered (no queries exist)
-	expectedCount := 4 // health + echo + execute + get_schema
-	if len(filtered) != expectedCount {
-		t.Errorf("expected %d tools, got %d: %v", expectedCount, len(filtered), toolNames(filtered))
+	// Should have ALL 11 tools when developer is enabled
+	if len(filtered) != 11 {
+		t.Errorf("expected 11 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
-	if !containsTool(filtered, "execute") {
-		t.Error("expected execute tool to be present when enabled")
-	}
-
-	// Business user tools (query, sample, validate) should be filtered since approved_queries not enabled
-	if containsTool(filtered, "query") {
-		t.Error("expected query to be filtered (approved_queries not enabled)")
-	}
-
-	// Approved queries tools should be filtered since no queries exist
-	if containsTool(filtered, "list_approved_queries") {
-		t.Error("expected list_approved_queries to be filtered (no enabled queries)")
+	// All tools should be present
+	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "get_glossary"}
+	for _, name := range allTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present in developer mode", name)
+		}
 	}
 }
 
@@ -354,12 +344,13 @@ func setupTestConfigWithApprovedQueries(t *testing.T, db *database.DB, projectID
 	})
 }
 
-func TestNewToolFilter_ApprovedQueriesToggleOff(t *testing.T) {
+func TestNewToolFilter_DeveloperEnabled_ApprovedQueriesOff(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// approved_queries toggle OFF (not in config = defaults to disabled)
-	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, EnableExecute: true})
+	// Developer enabled (radio button: only developer is ON, approved_queries is OFF)
+	// EnableExecute flag is now ignored - developer mode = ALL tools
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true})
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
@@ -373,45 +364,32 @@ func TestNewToolFilter_ApprovedQueriesToggleOff(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// approved_queries tools should be filtered out since toggle is OFF
-	if containsTool(filtered, "list_approved_queries") {
-		t.Error("expected list_approved_queries to be filtered when toggle is OFF")
-	}
-	if containsTool(filtered, "execute_approved_query") {
-		t.Error("expected execute_approved_query to be filtered when toggle is OFF")
+	// Developer mode = ALL tools available (11 total)
+	if len(filtered) != 11 {
+		t.Errorf("expected 11 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
-	// Business user tools (query, sample, validate) are now in approved_queries group, should be filtered
-	if containsTool(filtered, "query") {
-		t.Error("expected query to be filtered when approved_queries toggle is OFF")
-	}
-	if containsTool(filtered, "sample") {
-		t.Error("expected sample to be filtered when approved_queries toggle is OFF")
-	}
-	if containsTool(filtered, "validate") {
-		t.Error("expected validate to be filtered when approved_queries toggle is OFF")
-	}
-
-	// Developer tools should still be present
-	if !containsTool(filtered, "echo") {
-		t.Error("expected developer tools (echo) to be present")
-	}
-	if !containsTool(filtered, "execute") {
-		t.Error("expected developer tools (execute) to be present")
+	// All tools should be present in developer mode
+	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "get_glossary"}
+	for _, name := range allTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present in developer mode", name)
+		}
 	}
 }
 
-func TestNewToolFilter_ApprovedQueriesEnabledNoQueries(t *testing.T) {
+func TestNewToolFilter_ApprovedQueriesOnly_NoQueriesExist(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// approved_queries toggle ON but no queries exist
+	// Radio button behavior: only approved_queries is enabled, developer is OFF
+	// But no queries exist in the database
 	setupTestConfigWithApprovedQueries(t, engineDB.DB, projectID,
-		&models.ToolGroupConfig{Enabled: true, EnableExecute: true},
+		nil, // developer disabled
 		&models.ToolGroupConfig{Enabled: true},
 	)
 
-	// Mock with no queries
+	// Mock with no queries - ShouldShowApprovedQueriesTools will return false
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
 		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: nil}, &mockProjectService{defaultDatasourceID: uuid.New()}, "http://localhost", zap.NewNop()),
@@ -424,24 +402,29 @@ func TestNewToolFilter_ApprovedQueriesEnabledNoQueries(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// approved_queries tools should be filtered since no queries exist
-	// This includes list_approved_queries, execute_approved_query, get_ontology, query, sample, validate
-	if containsTool(filtered, "list_approved_queries") {
-		t.Error("expected list_approved_queries to be filtered when no queries exist")
+	// With approved_queries enabled, all approved_queries tools should be present
+	// (the check for "no queries exist" is handled by the UI, not tool filtering)
+	// GetEnabledTools returns tools based on config, not query count
+	expectedTools := []string{"health", "query", "sample", "validate", "get_ontology", "get_glossary", "list_approved_queries", "execute_approved_query"}
+	if len(filtered) != len(expectedTools) {
+		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
 	}
 
-	// Business user tools (query, sample, validate) are now in approved_queries group
-	// They should also be filtered when no queries exist
-	if containsTool(filtered, "query") {
-		t.Error("expected query to be filtered when no queries exist")
+	for _, name := range expectedTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present when approved_queries is enabled", name)
+		}
 	}
 
-	// Developer tools should still be present
-	if !containsTool(filtered, "echo") {
-		t.Error("expected developer tools (echo) to be present")
+	// Developer tools should NOT be present since developer is disabled
+	if containsTool(filtered, "echo") {
+		t.Error("developer tool 'echo' should be filtered when developer disabled")
 	}
-	if !containsTool(filtered, "execute") {
-		t.Error("expected developer tools (execute) to be present")
+	if containsTool(filtered, "execute") {
+		t.Error("developer tool 'execute' should be filtered when developer disabled")
+	}
+	if containsTool(filtered, "get_schema") {
+		t.Error("developer tool 'get_schema' should be filtered when developer disabled")
 	}
 }
 
@@ -565,14 +548,16 @@ func TestFilterTools(t *testing.T) {
 	}
 }
 
-func TestNewToolFilter_ForceModeDisablesDeveloperTools(t *testing.T) {
+func TestNewToolFilter_ForceModeOnlyShowsApprovedQueriesTools(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
 	// Create config with ForceMode enabled on approved_queries
-	// Even with developer tools enabled, they should be forcibly disabled
+	// With radio button behavior + ForceMode, developer should be disabled
+	// ForceMode is enforced by the state validator during updates, which sets
+	// developer to disabled. We simulate the correct state here.
 	setupTestConfigWithApprovedQueries(t, engineDB.DB, projectID,
-		&models.ToolGroupConfig{Enabled: true, EnableExecute: true},
+		nil, // developer disabled (ForceMode prevents it from being enabled)
 		&models.ToolGroupConfig{Enabled: true, ForceMode: true},
 	)
 
@@ -590,25 +575,24 @@ func TestNewToolFilter_ForceModeDisablesDeveloperTools(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// With ForceMode ON, only approved_queries tools (including business user tools), ontology tools and health should be present
-	// Business user tools (query, sample, validate) are now in approved_queries group
+	// With ForceMode ON and developer disabled, only approved_queries tools should be present
 	expectedTools := []string{"health", "query", "sample", "validate", "list_approved_queries", "execute_approved_query", "get_ontology", "get_glossary"}
 	if len(filtered) != len(expectedTools) {
 		t.Errorf("expected %d tools with ForceMode, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
 	}
 
-	// Developer tools (echo, execute, get_schema) should be filtered out despite being enabled in config
+	// Developer tools should NOT be present (developer is disabled)
 	if containsTool(filtered, "echo") {
-		t.Error("echo should be filtered when ForceMode is enabled")
+		t.Error("echo should be filtered when developer is disabled")
 	}
 	if containsTool(filtered, "execute") {
-		t.Error("execute tool should be filtered when ForceMode is enabled")
+		t.Error("execute tool should be filtered when developer is disabled")
 	}
 	if containsTool(filtered, "get_schema") {
-		t.Error("schema tools should be filtered when ForceMode is enabled")
+		t.Error("schema tools should be filtered when developer is disabled")
 	}
 
-	// Approved queries tools (including business user tools) and ontology tools should be present
+	// Approved queries tools should be present
 	for _, name := range expectedTools {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present with ForceMode", name)
@@ -705,57 +689,15 @@ func TestNewToolFilter_ApprovedQueriesOn_DeveloperOff(t *testing.T) {
 	}
 }
 
-// Test Mode 3 from Appendix: Pre-Approved ON, Developer ON (Execute OFF)
-// Expected: health, list_approved_queries, execute_approved_query, get_schema, query, sample, validate, echo, get_ontology, get_glossary
-func TestNewToolFilter_ApprovedQueriesOn_DeveloperOn_ExecuteOff(t *testing.T) {
+// Test that EnableExecute flag is ignored - developer mode always includes all tools
+// Previously this flag controlled the execute tool, but now developer mode = ALL tools
+func TestNewToolFilter_DeveloperEnabled_EnableExecuteFlagIgnored(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Pre-Approved ON, Developer ON, Execute OFF
-	setupTestConfigWithApprovedQueries(t, engineDB.DB, projectID,
-		&models.ToolGroupConfig{Enabled: true, EnableExecute: false},
-		&models.ToolGroupConfig{Enabled: true, ForceMode: false},
-	)
-
-	// Mock with queries
-	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
-	deps := &MCPToolDeps{
-		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, &mockProjectService{defaultDatasourceID: uuid.New()}, "http://localhost", zap.NewNop()),
-		Logger:           zap.NewNop(),
-	}
-
-	filter := NewToolFilter(deps)
-	tools := createTestTools()
-
-	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
-	filtered := filter(ctx, tools)
-
-	// Expected: health, list_approved_queries, execute_approved_query, get_ontology, get_glossary, get_schema, query, sample, validate, echo (10 tools)
-	expectedTools := []string{"health", "list_approved_queries", "execute_approved_query", "get_ontology", "get_glossary", "get_schema", "query", "sample", "validate", "echo"}
-	if len(filtered) != len(expectedTools) {
-		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
-	}
-
-	for _, name := range expectedTools {
-		if !containsTool(filtered, name) {
-			t.Errorf("expected tool %s to be present", name)
-		}
-	}
-
-	// Execute should be filtered out
-	if containsTool(filtered, "execute") {
-		t.Error("execute tool should be filtered when execute disabled")
-	}
-}
-
-// Test Mode 5 from Appendix: Pre-Approved OFF, Developer ON
-// Expected: health, get_schema, echo (developer tools only)
-func TestNewToolFilter_ApprovedQueriesOff_DeveloperOn(t *testing.T) {
-	engineDB := testhelpers.GetEngineDB(t)
-	projectID := uuid.New()
-
-	// Pre-Approved OFF (not in config), Developer ON, Execute OFF
+	// Developer ON with EnableExecute=false (should be ignored)
+	// Note: With radio button behavior, we shouldn't have both enabled,
+	// but for this test we're specifically testing that EnableExecute is ignored
 	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, EnableExecute: false})
 
 	deps := &MCPToolDeps{
@@ -770,44 +712,57 @@ func TestNewToolFilter_ApprovedQueriesOff_DeveloperOn(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Expected: health, get_schema, echo (3 tools)
-	// query, sample, validate are now in approved_queries group, so they should be filtered out
-	expectedTools := []string{"health", "get_schema", "echo"}
-	if len(filtered) != len(expectedTools) {
-		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
+	// Developer mode = ALL tools (11 total), regardless of EnableExecute flag
+	if len(filtered) != 11 {
+		t.Errorf("expected 11 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
-	for _, name := range expectedTools {
+	// Execute should be present - EnableExecute flag is now ignored
+	if !containsTool(filtered, "execute") {
+		t.Error("execute tool should be present in developer mode (EnableExecute flag is ignored)")
+	}
+
+	// All other tools should also be present
+	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "get_glossary"}
+	for _, name := range allTools {
 		if !containsTool(filtered, name) {
-			t.Errorf("expected tool %s to be present", name)
+			t.Errorf("expected tool %s to be present in developer mode", name)
 		}
 	}
+}
 
-	// Business user tools (query, sample, validate) are now in approved_queries group, should be filtered
-	if containsTool(filtered, "query") {
-		t.Error("query should be filtered when approved_queries disabled")
-	}
-	if containsTool(filtered, "sample") {
-		t.Error("sample should be filtered when approved_queries disabled")
-	}
-	if containsTool(filtered, "validate") {
-		t.Error("validate should be filtered when approved_queries disabled")
+// Test developer mode with minimal config (only developer enabled)
+// Verifies that developer mode = ALL tools regardless of other tool group configs
+func TestNewToolFilter_DeveloperOnly_AllToolsAvailable(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Only developer tools enabled (radio button behavior - only one active)
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true})
+
+	deps := &MCPToolDeps{
+		DB:               engineDB.DB,
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, "http://localhost", zap.NewNop()),
+		Logger:           zap.NewNop(),
 	}
 
-	// Approved queries tools should be filtered out
-	if containsTool(filtered, "list_approved_queries") {
-		t.Error("list_approved_queries should be filtered when approved_queries disabled")
+	filter := NewToolFilter(deps)
+	tools := createTestTools()
+
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
+	filtered := filter(ctx, tools)
+
+	// Developer mode = ALL tools (11 total)
+	if len(filtered) != 11 {
+		t.Errorf("expected 11 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
-	if containsTool(filtered, "execute_approved_query") {
-		t.Error("execute_approved_query should be filtered when approved_queries disabled")
-	}
-	// Ontology tools should be filtered out (tied to approved_queries visibility)
-	if containsTool(filtered, "get_ontology") {
-		t.Error("get_ontology should be filtered when approved_queries disabled")
-	}
-	// Execute should be filtered out
-	if containsTool(filtered, "execute") {
-		t.Error("execute tool should be filtered when execute disabled")
+
+	// All tools should be present in developer mode
+	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "get_glossary"}
+	for _, name := range allTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present in developer mode", name)
+		}
 	}
 }
 
@@ -1073,11 +1028,12 @@ func TestNewToolFilter_AgentAuth_NoConfig(t *testing.T) {
 	}
 }
 
-func TestNewToolFilter_UserAuth_AgentToolsEnabledDoesNotAffectUsers(t *testing.T) {
+func TestNewToolFilter_UserAuth_DeveloperMode_AllTools(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Create config with agent_tools enabled but developer tools disabled
+	// Create config with developer tools enabled
+	// (agent_tools config doesn't affect user authentication)
 	ctx := context.Background()
 	scope, err := engineDB.DB.WithTenant(ctx, projectID)
 	if err != nil {
@@ -1097,8 +1053,7 @@ func TestNewToolFilter_UserAuth_AgentToolsEnabledDoesNotAffectUsers(t *testing.T
 	mcpConfig := &models.MCPConfig{
 		ProjectID: projectID,
 		ToolGroups: map[string]*models.ToolGroupConfig{
-			"agent_tools": {Enabled: true},
-			"developer":   {Enabled: true, EnableExecute: true},
+			"developer": {Enabled: true},
 		},
 	}
 
@@ -1133,24 +1088,16 @@ func TestNewToolFilter_UserAuth_AgentToolsEnabledDoesNotAffectUsers(t *testing.T
 	ctx = context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 
-	// User should see all developer tools (agent_tools config doesn't affect users)
-	// Note: query, sample, validate are now in approved_queries group, not developer
-	// They won't be present since approved_queries is not enabled
-	expectedDeveloperTools := []string{"health", "echo", "execute", "get_schema"}
-	for _, name := range expectedDeveloperTools {
-		if !containsTool(filtered, name) {
-			t.Errorf("expected developer tool %s to be present for user", name)
-		}
+	// User with developer mode = ALL tools (11 total)
+	if len(filtered) != 11 {
+		t.Errorf("expected 11 tools (all) for user in developer mode, got %d: %v", len(filtered), toolNames(filtered))
 	}
 
-	// Business user tools (query, sample, validate) should NOT be present since approved_queries not enabled
-	if containsTool(filtered, "query") {
-		t.Error("query should not be present (approved_queries not enabled)")
-	}
-	if containsTool(filtered, "sample") {
-		t.Error("sample should not be present (approved_queries not enabled)")
-	}
-	if containsTool(filtered, "validate") {
-		t.Error("validate should not be present (approved_queries not enabled)")
+	// All tools should be present in developer mode
+	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "get_glossary"}
+	for _, name := range allTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present in developer mode", name)
+		}
 	}
 }

@@ -63,6 +63,10 @@ type MCPConfigService interface {
 	// ShouldShowApprovedQueriesTools determines if approved queries tools should appear.
 	// Returns true only if the approved_queries tool group is enabled AND there are enabled queries.
 	ShouldShowApprovedQueriesTools(ctx context.Context, projectID uuid.UUID) (bool, error)
+
+	// GetToolGroupsState returns the tool groups configuration state for use with GetEnabledTools.
+	// This is the single source of truth for determining which tools should be enabled.
+	GetToolGroupsState(ctx context.Context, projectID uuid.UUID) (map[string]*models.ToolGroupConfig, error)
 }
 
 type mcpConfigService struct {
@@ -219,6 +223,23 @@ func (s *mcpConfigService) ShouldShowApprovedQueriesTools(ctx context.Context, p
 	}
 
 	return hasQueries, nil
+}
+
+// GetToolGroupsState returns the tool groups configuration state.
+// This is used by the MCP tool filter to determine which tools should be enabled,
+// ensuring consistency with the UI display via GetEnabledTools.
+func (s *mcpConfigService) GetToolGroupsState(ctx context.Context, projectID uuid.UUID) (map[string]*models.ToolGroupConfig, error) {
+	config, err := s.configRepo.Get(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get MCP config: %w", err)
+	}
+
+	// If no config exists, use defaults
+	if config == nil {
+		config = models.DefaultMCPConfig(projectID)
+	}
+
+	return config.ToolGroups, nil
 }
 
 // hasEnabledQueries checks if the project has any enabled queries.

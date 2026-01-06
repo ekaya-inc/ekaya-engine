@@ -142,17 +142,15 @@ func RegisterMCPTools(s *server.MCPServer, deps *MCPToolDeps) {
 }
 
 // NewToolFilter creates a ToolFilterFunc that filters tools based on MCP configuration.
-// It filters out developer tools when the developer group is disabled, filters out
-// the execute tool when EnableExecute is false, and filters out approved_queries tools
-// when the approved_queries group is disabled or no enabled queries exist.
-// For agent authentication, it restricts access to only approved_queries tools when agent_tools is enabled.
+// It uses GetEnabledTools from the services package to ensure consistency with the UI.
+// For agent authentication, it restricts access to only agent-allowed tools.
 func NewToolFilter(deps *MCPToolDeps) func(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
 	return func(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
 		// Get claims from context
 		claims, ok := auth.GetClaims(ctx)
 		if !ok {
-			deps.Logger.Debug("Tool filter: no auth context, filtering all controlled tools")
-			return filterTools(tools, false, false, false)
+			deps.Logger.Debug("Tool filter: no auth context, returning only health")
+			return filterToHealthOnly(tools)
 		}
 
 		projectID, err := uuid.Parse(claims.ProjectID)
@@ -160,7 +158,7 @@ func NewToolFilter(deps *MCPToolDeps) func(ctx context.Context, tools []mcp.Tool
 			deps.Logger.Error("Tool filter: invalid project ID in claims",
 				zap.String("project_id", claims.ProjectID),
 				zap.Error(err))
-			return filterTools(tools, false, false, false)
+			return filterToHealthOnly(tools)
 		}
 
 		// Acquire tenant scope for database access
@@ -169,7 +167,7 @@ func NewToolFilter(deps *MCPToolDeps) func(ctx context.Context, tools []mcp.Tool
 			deps.Logger.Error("Tool filter: failed to acquire tenant scope",
 				zap.String("project_id", projectID.String()),
 				zap.Error(err))
-			return filterTools(tools, false, false, false)
+			return filterToHealthOnly(tools)
 		}
 		defer scope.Close()
 
@@ -180,7 +178,7 @@ func NewToolFilter(deps *MCPToolDeps) func(ctx context.Context, tools []mcp.Tool
 		isAgent := claims.Subject == "agent"
 
 		if isAgent {
-			// Agent authentication - only allow approved_queries tools when agent_tools is enabled
+			// Agent authentication - only allow agent tools when agent_tools is enabled
 			agentEnabled, err := deps.MCPConfigService.IsToolGroupEnabled(tenantCtx, projectID, services.ToolGroupAgentTools)
 			if err != nil {
 				deps.Logger.Error("Tool filter: failed to check agent_tools config",
@@ -196,50 +194,30 @@ func NewToolFilter(deps *MCPToolDeps) func(ctx context.Context, tools []mcp.Tool
 			return filterAgentTools(tools, agentEnabled)
 		}
 
-		// User authentication - apply normal tool group filtering
-		// Check developer tools config
-		devConfig, err := deps.MCPConfigService.GetToolGroupConfig(tenantCtx, projectID, developerToolGroup)
+		// User authentication - use GetEnabledTools for consistent filtering with UI
+		state, err := deps.MCPConfigService.GetToolGroupsState(tenantCtx, projectID)
 		if err != nil {
-			deps.Logger.Error("Tool filter: failed to get developer tool group config",
+			deps.Logger.Error("Tool filter: failed to get tool groups state",
 				zap.String("project_id", projectID.String()),
 				zap.Error(err))
-		}
-		showDeveloper := devConfig != nil && devConfig.Enabled
-		showExecute := showDeveloper && devConfig.EnableExecute
-
-		// Check approved_queries tools config
-		showApprovedQueries, err := deps.MCPConfigService.ShouldShowApprovedQueriesTools(tenantCtx, projectID)
-		if err != nil {
-			deps.Logger.Error("Tool filter: failed to check approved queries visibility",
-				zap.String("project_id", projectID.String()),
-				zap.Error(err))
-			showApprovedQueries = false
+			return filterToHealthOnly(tools)
 		}
 
-		// Check if force mode is enabled (approved_queries only)
-		approvedQueriesConfig, err := deps.MCPConfigService.GetToolGroupConfig(tenantCtx, projectID, "approved_queries")
-		if err != nil {
-			deps.Logger.Error("Tool filter: failed to get approved_queries config",
-				zap.String("project_id", projectID.String()),
-				zap.Error(err))
+		// Get enabled tools using the same function as the UI
+		enabledToolDefs := services.GetEnabledTools(state)
+
+		// Build a set of enabled tool names
+		enabledNames := make(map[string]bool, len(enabledToolDefs))
+		for _, td := range enabledToolDefs {
+			enabledNames[td.Name] = true
 		}
 
-		forceMode := approvedQueriesConfig != nil && approvedQueriesConfig.ForceMode
-
-		// Force mode overrides developer tools
-		if forceMode {
-			showDeveloper = false
-			showExecute = false
-		}
-
-		deps.Logger.Debug("Tool filter: filtering based on config",
+		deps.Logger.Debug("Tool filter: filtering based on GetEnabledTools",
 			zap.String("project_id", projectID.String()),
-			zap.Bool("show_developer", showDeveloper),
-			zap.Bool("show_execute", showExecute),
-			zap.Bool("show_approved_queries", showApprovedQueries),
-			zap.Bool("force_mode", forceMode))
+			zap.Int("enabled_tool_count", len(enabledNames)))
 
-		return filterTools(tools, showDeveloper, showExecute, showApprovedQueries)
+		// Filter MCP tools to only include enabled ones
+		return filterByEnabledNames(tools, enabledNames)
 	}
 }
 
@@ -301,6 +279,30 @@ func filterAgentTools(tools []mcp.Tool, agentToolsEnabled bool) []mcp.Tool {
 
 		// When agent_tools enabled, only allow approved_queries tools
 		if agentToolNames[tool.Name] {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
+}
+
+// filterToHealthOnly returns only the health tool from the list.
+// Used when authentication fails or config cannot be loaded.
+func filterToHealthOnly(tools []mcp.Tool) []mcp.Tool {
+	filtered := make([]mcp.Tool, 0, 1)
+	for _, tool := range tools {
+		if tool.Name == "health" {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
+}
+
+// filterByEnabledNames filters tools to only include those in the enabled names set.
+// This is used with GetEnabledTools to ensure MCP and UI show the same tools.
+func filterByEnabledNames(tools []mcp.Tool, enabledNames map[string]bool) []mcp.Tool {
+	filtered := make([]mcp.Tool, 0, len(enabledNames))
+	for _, tool := range tools {
+		if enabledNames[tool.Name] {
 			filtered = append(filtered, tool)
 		}
 	}
