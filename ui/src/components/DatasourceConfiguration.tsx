@@ -1,12 +1,13 @@
-import { ArrowLeft, CheckCircle, XCircle, Loader2, Pencil } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, ExternalLink } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 
-import { getAdapterInfo, type ProviderInfo } from "../constants/adapters";
+import { getAdapterInfo, getProviderById, type ProviderInfo } from "../constants/adapters";
 import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext";
 import { useToast } from "../hooks/useToast";
 import engineApi from "../services/engineApi";
 import type { DatasourceType, SSLMode } from "../types";
+import { parsePostgresUrl } from "../utils/connectionString";
 
 import { Button } from "./ui/Button";
 import { Card, CardContent } from "./ui/Card";
@@ -55,14 +56,19 @@ const DatasourceConfiguration = ({
     selectedAdapter ?? connectionDetails?.type
   );
 
-  // Use provider info for display if available, otherwise fall back to adapter info
-  const displayInfo = selectedProvider ?? adapterInfo;
-
   const [testingConnection, setTestingConnection] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isDisconnecting, setIsDisconnecting] = useState<boolean>(false);
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
+  const [connectionString, setConnectionString] = useState<string>("");
+  const [connectionStringError, setConnectionStringError] = useState<string>("");
+  // Track provider (from selection or parsed from connection string)
+  const [activeProvider, setActiveProvider] = useState<ProviderInfo | undefined>(selectedProvider);
   const nameInputRef = useRef<HTMLInputElement>(null);
+
+  // Use provider info for display if available, otherwise fall back to adapter info
+  // activeProvider takes precedence (can be updated from connection string parsing)
+  const displayInfo = activeProvider ?? selectedProvider ?? adapterInfo;
   const [config, setConfig] = useState<DatasourceFormConfig>(() => ({
     host: "",
     port: selectedProvider?.defaultPort?.toString() ?? "5432",
@@ -87,6 +93,69 @@ const DatasourceConfiguration = ({
       [field]: value,
     }));
   };
+
+  const handleParseConnectionString = (): void => {
+    setConnectionStringError("");
+
+    if (!connectionString.trim()) {
+      setConnectionStringError("Please enter a connection string");
+      return;
+    }
+
+    const parsed = parsePostgresUrl(connectionString.trim());
+
+    if (!parsed) {
+      setConnectionStringError("Invalid connection string format. Expected: postgresql://user:password@host:port/database");
+      return;
+    }
+
+    // Update form fields with parsed values
+    setConfig((prev) => ({
+      ...prev,
+      host: parsed.host || prev.host,
+      port: parsed.port.toString(),
+      user: parsed.user || prev.user,
+      password: parsed.password || prev.password,
+      name: parsed.database || prev.name,
+      useSSL: parsed.sslMode === "require" || parsed.sslMode === "verify-full" || parsed.sslMode === "prefer",
+    }));
+
+    // Update provider if detected from URL
+    if (parsed.provider) {
+      const provider = getProviderById(parsed.provider);
+      if (provider) {
+        setActiveProvider(provider);
+        // Update displayName if it's still the default
+        setConfig((prev) => {
+          const currentDefault = activeProvider?.name ?? selectedProvider?.name ?? adapterInfo.name;
+          if (prev.displayName === currentDefault || !prev.displayName) {
+            return { ...prev, displayName: provider.name };
+          }
+          return prev;
+        });
+      }
+    }
+
+    // Clear the connection string input after successful parse
+    setConnectionString("");
+  };
+
+  // Sync activeProvider when selectedProvider changes
+  useEffect(() => {
+    if (selectedProvider) {
+      setActiveProvider(selectedProvider);
+    }
+  }, [selectedProvider]);
+
+  // Load provider from existing config when editing
+  useEffect(() => {
+    if (connectionDetails?.provider) {
+      const provider = getProviderById(connectionDetails.provider);
+      if (provider) {
+        setActiveProvider(provider);
+      }
+    }
+  }, [connectionDetails?.provider]);
 
   useEffect(() => {
     if (connectionDetails) {
@@ -195,8 +264,11 @@ const DatasourceConfiguration = ({
       const datasourceId =
         connectionDetails?.datasourceId ?? selectedDatasource?.datasourceId;
       const datasourceType = selectedAdapter as DatasourceType;
+      // Include provider in config - backend ignores it, UI uses it for display
+      const currentProvider = activeProvider ?? selectedProvider;
       const apiConfig = {
         type: datasourceType,
+        ...(currentProvider && { provider: currentProvider.id }),
         host: config.host,
         port: parseInt(config.port),
         name: config.name,
@@ -341,8 +413,72 @@ const DatasourceConfiguration = ({
     </div>
   );
 
+  // Get provider-specific help info
+  const currentProviderInfo = activeProvider ?? selectedProvider;
+  const hasConnectionStringHelp = currentProviderInfo?.connectionStringHelp;
+  const hasHelpUrl = currentProviderInfo?.helpUrl;
+
+  const renderConnectionStringSection = () => {
+    // Only show connection string parser for postgres adapters when not editing
+    if (selectedAdapter !== "postgres" || isEditingExisting) {
+      return null;
+    }
+
+    return (
+      <div className="mb-6 pb-6 border-b">
+        <Label htmlFor="connectionString" className="mb-2 block">
+          Quick Setup: Paste Connection String
+        </Label>
+        <div className="flex gap-2">
+          <Input
+            id="connectionString"
+            placeholder="postgresql://user:password@host:port/database"
+            value={connectionString}
+            onChange={(e) => {
+              setConnectionString(e.target.value);
+              setConnectionStringError("");
+            }}
+            className="flex-1 font-mono text-sm"
+          />
+          <Button
+            type="button"
+            onClick={handleParseConnectionString}
+            variant="outline"
+            className="shrink-0"
+          >
+            Parse
+          </Button>
+        </div>
+        {connectionStringError && (
+          <p className="text-sm text-red-600 dark:text-red-400 mt-2">
+            {connectionStringError}
+          </p>
+        )}
+        {(hasConnectionStringHelp !== undefined || hasHelpUrl !== undefined) && (
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-text-secondary">
+            {hasConnectionStringHelp && (
+              <span>{currentProviderInfo.connectionStringHelp}</span>
+            )}
+            {hasHelpUrl && (
+              <a
+                href={currentProviderInfo.helpUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                View documentation
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderDatasourceSetup = () => (
     <div className="space-y-6">
+      {renderConnectionStringSection()}
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="host">Host</Label>

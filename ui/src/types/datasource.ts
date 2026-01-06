@@ -47,6 +47,7 @@ export interface ConnectionDetails extends DatasourceConfig {
   projectId?: string;
   type: DatasourceType;
   displayName?: string; // User-editable datasource name (separate from config.name which is database name)
+  provider?: string; // UI-only: PostgreSQL provider (supabase, neon, etc.) - backend ignores this
 }
 
 export interface ConnectionStatus {

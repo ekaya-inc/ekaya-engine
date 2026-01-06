@@ -346,26 +346,43 @@ export function parsePostgresUrl(url: string): ParsedConnectionString | null {
 - Disabled state handling with existing datasources (only matching adapter type is clickable)
 - Navigation (back button) and UI elements (title, subtitle, help text)
 
-#### 1.4 Update Configuration Form
+#### 1.4 Update Configuration Form [x] COMPLETE
 
 **File:** `ui/src/components/DatasourceConfiguration.tsx`
 
-Add:
-1. Connection string paste field with "Parse" button
-2. Provider-specific help text and links
-3. Auto-fill port based on provider
+**What was implemented:**
+1. Connection string paste field with "Parse" button at top of form
+   - Only shows for postgres adapters (not when editing existing)
+   - Parses `postgresql://` and `postgres://` URLs
+   - Auto-fills form fields from parsed values
+   - Auto-detects provider from URL hostname and updates display
+   - Shows error messages for invalid URLs
+2. Provider-specific help text and documentation links
+   - Shows `connectionStringHelp` from provider (e.g., "Find in: Project Settings → Database → Connection string" for Supabase)
+   - Shows "View documentation" link with external link icon when `helpUrl` is available
+3. Auto-fill port based on provider (was already partially implemented in 1.3)
+   - Default port comes from `selectedProvider.defaultPort`
 4. Store provider in config when saving
+   - Added `provider` field to `apiConfig` object
+   - Uses `activeProvider` (can be updated by connection string parsing) or falls back to `selectedProvider`
 
-```typescript
-// When saving, include provider in config
-const apiConfig = {
-  provider: selectedProvider.id,  // NEW
-  type: selectedProvider.adapterType,
-  host: config.host,
-  port: parseInt(config.port),
-  // ...
-};
-```
+**Additional changes:**
+- Added `provider?: string` to `ConnectionDetails` interface in `ui/src/types/datasource.ts`
+- Added `activeProvider` state to track provider from selection or connection string parsing
+- Added effects to sync provider from `selectedProvider` prop and load from existing config
+
+**Tests:** `ui/src/components/__tests__/DatasourceConfiguration.test.tsx` - 21 tests covering:
+- Connection string parser rendering (shows for postgres, hides for other adapters)
+- Parsing valid connection strings into form fields
+- Error handling for invalid/empty connection strings
+- Auto-detection of providers (Supabase, Neon) from URLs
+- Provider-specific default ports (Supabase 6543, CockroachDB 26257, YugabyteDB 5433)
+- Provider-specific SSL defaults
+- Provider help text and documentation links display
+- Provider persistence in saved config
+- Page header showing correct provider name
+- Connection string parser hidden when editing existing datasource
+- Loading provider from existing config when editing
 
 ### Phase 2: Provider Icons
 
