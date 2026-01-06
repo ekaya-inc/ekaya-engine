@@ -101,15 +101,16 @@ Add a new "Glossary" tile to the Intelligence section on the ProjectDashboard. T
 
 **File:** `ui/src/pages/GlossaryPage.tsx`
 
-### Step 4: Add Route
+### Step 4: Add Route [x]
 
-In `ui/src/App.tsx`, add route inside the project routes (after Entities route ~line 44):
+**Status:** COMPLETE
 
-```typescript
-<Route path="glossary" element={<GlossaryPage />} />
-```
+**Implementation:** Added glossary route to `ui/src/App.tsx`:
+- Added `GlossaryPage` import at line 15 (alphabetically after EntitiesPage)
+- Added route `<Route path="glossary" element={<GlossaryPage />} />` at line 46 (after entities route, before ontology route)
+- TypeScript typecheck passes
 
-Import `GlossaryPage` at top.
+**File:** `ui/src/App.tsx` (lines 15, 46)
 
 ### Step 5: Add Tile to Dashboard
 
