@@ -356,8 +356,9 @@ func TestDAGRepository_CreateNodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetNodesByDAG failed: %v", err)
 	}
-	if len(retrieved) != 7 {
-		t.Fatalf("expected 7 nodes, got %d", len(retrieved))
+	expectedNodes := len(models.AllDAGNodes())
+	if len(retrieved) != expectedNodes {
+		t.Fatalf("expected %d nodes, got %d", expectedNodes, len(retrieved))
 	}
 
 	// Verify order
