@@ -256,7 +256,15 @@ ontologyDAGService.SetGlossaryEnrichmentMethods(services.NewGlossaryEnrichmentAd
    - Follows existing EntityDiscoveryNode pattern closely
    - **Testing**: Added comprehensive unit tests covering success case, missing ontology ID, discovery errors, progress reporting errors, and node name verification
    - All 5 tests pass successfully
-4. [ ] Create `pkg/services/dag/glossary_enrichment_node.go`
+4. [x] Create `pkg/services/dag/glossary_enrichment_node.go`
+   - **COMPLETED**: Created new file with GlossaryEnrichmentMethods interface, GlossaryEnrichmentNode struct, NewGlossaryEnrichmentNode constructor, and Execute() method
+   - Execute() method reports progress "Enriching glossary terms with SQL patterns..." at start
+   - Validates ontology ID is present before proceeding
+   - Calls EnrichGlossaryTerms() service method
+   - Reports completion with "Glossary enrichment complete" message
+   - Follows existing EntityEnrichmentNode and GlossaryDiscoveryNode patterns closely
+   - **Testing**: Added comprehensive unit tests (5 tests) covering success case, missing ontology ID, enrichment errors, progress reporting errors, and node name verification
+   - All tests pass successfully
 5. [ ] Update `pkg/services/dag_adapters.go` with two new adapters
 6. [ ] Update `pkg/services/ontology_dag_service.go` (fields, setters, getNodeExecutor)
 7. [ ] Wire in `main.go`
