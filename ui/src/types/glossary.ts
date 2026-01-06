@@ -19,6 +19,7 @@ export interface GlossaryFilter {
  */
 export interface BusinessGlossaryTerm {
   id: string;
+  project_id: string;
   term: string;
   definition: string;
   sql_pattern?: string;
@@ -26,7 +27,7 @@ export interface BusinessGlossaryTerm {
   columns_used?: string[];
   filters?: GlossaryFilter[];
   aggregation?: string;
-  source: 'user' | 'suggested' | 'discovered';
+  source: 'user' | 'suggested';
   created_at: string;
   updated_at: string;
 }

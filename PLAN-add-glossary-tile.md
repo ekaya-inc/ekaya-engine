@@ -44,23 +44,26 @@ Add a new "Glossary" tile to the Intelligence section on the ProjectDashboard. T
 - `GlossaryListResponse` - API response shape for listing terms (terms array, total count)
 
 **Key decisions:**
-- Source enum: 'user' | 'suggested' | 'discovered' matches backend model
+- Source enum: 'user' | 'suggested' (note: 'discovered' removed as backend doesn't use it)
+- Added `project_id` field to match backend model
 - All SQL fields (sql_pattern, base_table, columns_used, filters, aggregation) are optional
 - Timestamps as strings (will be parsed by UI components as needed)
 
 **File:** `ui/src/types/glossary.ts`
 
-### Step 2: Add API Method
+### Step 2: Add API Method [x]
 
-In `ui/src/services/engineApi.ts`, add:
+**Status:** COMPLETE
 
-```typescript
-listGlossaryTerms: async (projectId: string): Promise<ApiResponse<GlossaryListResponse>> => {
-  return request<GlossaryListResponse>(`/api/projects/${projectId}/glossary`);
-},
-```
+**Implementation:** Added `listGlossaryTerms` method to `ui/src/services/engineApi.ts`:
+- Method signature: `async listGlossaryTerms(projectId: string): Promise<ApiResponse<GlossaryListResponse>>`
+- Makes GET request to `/api/projects/{projectId}/glossary`
+- Added `GlossaryListResponse` import to the type imports
+- Added `export * from './glossary'` to `ui/src/types/index.ts` for type exports
 
-Import the type at top of file.
+**Files modified:**
+- `ui/src/services/engineApi.ts` - Added method and import
+- `ui/src/types/index.ts` - Added glossary type export
 
 ### Step 3: Create GlossaryPage Component
 
@@ -135,15 +138,14 @@ if (terms.length === 0) {
 ### Term Card Display
 - **Term name:** Bold heading
 - **Definition:** Description text below
-- **Source badge:** Colored badge showing "Discovered", "Suggested", or "User-Defined"
+- **Source badge:** Colored badge showing "Suggested" or "User"
 - **Expandable section:** SQL pattern, base table, columns used, filters, aggregation
 
 ### Color Scheme
 - Tile color: `cyan` (differentiates from Entities green)
 - Source badges:
-  - Discovered: blue
   - Suggested: amber
-  - User-Defined: green
+  - User: green
 
 ## Files to Modify/Create
 

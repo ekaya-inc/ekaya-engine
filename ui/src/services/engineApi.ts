@@ -21,6 +21,7 @@ import type {
   ExecuteQueryRequest,
   ExecuteQueryResponse,
   GetDatasourceResponse,
+  GlossaryListResponse,
   ListDatasourcesResponse,
   ListQueriesResponse,
   MCPConfigResponse,
@@ -477,6 +478,18 @@ class EngineApiService {
     projectId: string
   ): Promise<ApiResponse<EntitiesListResponse>> {
     return this.makeRequest<EntitiesListResponse>(`/${projectId}/entities`);
+  }
+
+  // --- Glossary Methods ---
+
+  /**
+   * List all glossary terms for a project
+   * GET /api/projects/{projectId}/glossary
+   */
+  async listGlossaryTerms(
+    projectId: string
+  ): Promise<ApiResponse<GlossaryListResponse>> {
+    return this.makeRequest<GlossaryListResponse>(`/${projectId}/glossary`);
   }
 
   // --- MCP Configuration Methods ---
