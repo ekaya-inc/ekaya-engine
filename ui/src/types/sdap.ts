@@ -13,6 +13,7 @@ export interface Datasource {
   project_id: string;
   name: string;
   type: DatasourceType;
+  provider?: string;
   config: DatasourceConfig;
   created_at: string;
   updated_at: string;
@@ -25,6 +26,7 @@ export interface DatasourceInput {
   project_id: string;
   name: string;
   type: DatasourceType;
+  provider?: string;
   config: DatasourceConfig;
 }
 

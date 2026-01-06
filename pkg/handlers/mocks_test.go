@@ -127,7 +127,7 @@ type mockDatasourceService struct {
 	err         error
 }
 
-func (m *mockDatasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType string, config map[string]any) (*models.Datasource, error) {
+func (m *mockDatasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType, provider string, config map[string]any) (*models.Datasource, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -139,6 +139,7 @@ func (m *mockDatasourceService) Create(ctx context.Context, projectID uuid.UUID,
 		ProjectID:      projectID,
 		Name:           name,
 		DatasourceType: dsType,
+		Provider:       provider,
 		Config:         config,
 	}, nil
 }
@@ -185,7 +186,7 @@ func (m *mockDatasourceService) List(ctx context.Context, projectID uuid.UUID) (
 	return []*models.Datasource{}, nil
 }
 
-func (m *mockDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType string, config map[string]any) error {
+func (m *mockDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType, provider string, config map[string]any) error {
 	return m.err
 }
 

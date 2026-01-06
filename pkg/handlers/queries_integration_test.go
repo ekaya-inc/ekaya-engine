@@ -187,7 +187,7 @@ func (tc *queriesIntegrationTestContext) ensureTestDatasource() {
 		"ssl_mode": "disable",
 	}
 
-	ds, err := tc.datasourcesSvc.Create(database.SetTenantScope(ctx, scope), tc.projectID, "Test Data DB", "postgres", dsConfig)
+	ds, err := tc.datasourcesSvc.Create(database.SetTenantScope(ctx, scope), tc.projectID, "Test Data DB", "postgres", "", dsConfig)
 	if err != nil {
 		tc.t.Fatalf("Failed to create test datasource: %v", err)
 	}

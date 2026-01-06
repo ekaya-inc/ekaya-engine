@@ -19,6 +19,7 @@ type DatasourceResponse struct {
 	ProjectID    string         `json:"project_id"`
 	Name         string         `json:"name"`
 	Type         string         `json:"type"`
+	Provider     string         `json:"provider,omitempty"`
 	Config       map[string]any `json:"config"`
 	CreatedAt    string         `json:"created_at"`
 	UpdatedAt    string         `json:"updated_at"`
@@ -34,14 +35,16 @@ type CreateDatasourceRequest struct {
 	ProjectID string         `json:"project_id"`
 	Name      string         `json:"name"`
 	Type      string         `json:"type"`
+	Provider  string         `json:"provider,omitempty"`
 	Config    map[string]any `json:"config"`
 }
 
 // UpdateDatasourceRequest for PUT body.
 type UpdateDatasourceRequest struct {
-	Name   string         `json:"name"`
-	Type   string         `json:"type"`
-	Config map[string]any `json:"config"`
+	Name     string         `json:"name"`
+	Type     string         `json:"type"`
+	Provider string         `json:"provider,omitempty"`
+	Config   map[string]any `json:"config"`
 }
 
 // TestConnectionRequest for connection testing.
@@ -152,6 +155,7 @@ func (h *DatasourcesHandler) List(w http.ResponseWriter, r *http.Request) {
 			ProjectID:    ds.ProjectID.String(),
 			Name:         ds.Name,
 			Type:         ds.DatasourceType,
+			Provider:     ds.Provider,
 			Config:       ds.Config,
 			CreatedAt:    ds.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 			UpdatedAt:    ds.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
@@ -199,7 +203,7 @@ func (h *DatasourcesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ds, err := h.datasourceService.Create(r.Context(), projectID, req.Name, req.Type, req.Config)
+	ds, err := h.datasourceService.Create(r.Context(), projectID, req.Name, req.Type, req.Provider, req.Config)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrDatasourceLimitReached) {
 			if err := ErrorResponse(w, http.StatusConflict, "datasource_limit_reached", "Only one datasource per project is currently supported"); err != nil {
@@ -227,6 +231,7 @@ func (h *DatasourcesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ProjectID:    ds.ProjectID.String(),
 		Name:         ds.Name,
 		Type:         ds.DatasourceType,
+		Provider:     ds.Provider,
 		Config:       ds.Config,
 		CreatedAt:    ds.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:    ds.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
@@ -283,6 +288,7 @@ func (h *DatasourcesHandler) Get(w http.ResponseWriter, r *http.Request) {
 		ProjectID:    ds.ProjectID.String(),
 		Name:         ds.Name,
 		Type:         ds.DatasourceType,
+		Provider:     ds.Provider,
 		Config:       ds.Config,
 		CreatedAt:    ds.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:    ds.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
@@ -338,7 +344,7 @@ func (h *DatasourcesHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.datasourceService.Update(r.Context(), datasourceID, req.Name, req.Type, req.Config); err != nil {
+	if err := h.datasourceService.Update(r.Context(), datasourceID, req.Name, req.Type, req.Provider, req.Config); err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			if err := ErrorResponse(w, http.StatusNotFound, "not_found", "Datasource not found"); err != nil {
 				h.logger.Error("Failed to write error response", zap.Error(err))
@@ -359,6 +365,7 @@ func (h *DatasourcesHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"datasource_id": datasourceID.String(),
 		"name":          req.Name,
 		"type":          req.Type,
+		"provider":      req.Provider,
 		"config":        req.Config,
 	}
 

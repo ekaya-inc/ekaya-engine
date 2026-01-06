@@ -393,7 +393,7 @@ func TestDatasourceRepository_Update_Success(t *testing.T) {
 	created := tc.createTestDatasource(ctx, "Original Name", "postgres", "original_config")
 
 	// Update all fields
-	err := tc.repo.Update(ctx, created.ID, "Updated Name", "clickhouse", "updated_config")
+	err := tc.repo.Update(ctx, created.ID, "Updated Name", "clickhouse", "", "updated_config")
 	if err != nil {
 		t.Fatalf("Update failed: %v", err)
 	}
@@ -424,7 +424,7 @@ func TestDatasourceRepository_Update_NotFound(t *testing.T) {
 
 	nonExistentID := uuid.New()
 
-	err := tc.repo.Update(ctx, nonExistentID, "Name", "postgres", "config")
+	err := tc.repo.Update(ctx, nonExistentID, "Name", "postgres", "", "config")
 	if err == nil {
 		t.Fatal("expected error for non-existent datasource")
 	}
@@ -551,7 +551,7 @@ func TestDatasourceRepository_NoTenantScope_AllMethods(t *testing.T) {
 	}
 
 	// Update
-	err = tc.repo.Update(ctx, uuid.New(), "name", "type", "config")
+	err = tc.repo.Update(ctx, uuid.New(), "name", "type", "", "config")
 	if err == nil || err.Error() != expectedErr {
 		t.Errorf("Update: expected %q, got %v", expectedErr, err)
 	}

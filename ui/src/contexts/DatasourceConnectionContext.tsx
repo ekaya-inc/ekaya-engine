@@ -112,6 +112,7 @@ export const DatasourceConnectionProvider = ({
               datasourceId: ds.datasource_id,
               projectId: ds.project_id,
               type: ds.type,
+              ...(ds.provider ? { provider: ds.provider } : {}),
               displayName: ds.name,
               ...ds.config,
             }));
@@ -287,6 +288,7 @@ export const DatasourceConnectionProvider = ({
           datasourceId: result.data.datasource_id,
           projectId: result.data.project_id,
           type: datasourceType,
+          ...(result.data.provider ? { provider: result.data.provider } : {}),
           displayName: result.data.name,
           ...config,
         };
@@ -314,11 +316,12 @@ export const DatasourceConnectionProvider = ({
       const result = await engineApi.getDataSource(projectId, datasourceId);
 
       if (result.success && result.data) {
-        const { datasource_id, project_id, name, type, config } = result.data;
+        const { datasource_id, project_id, name, type, provider, config } = result.data;
         const connectionDetails: ConnectionDetails = {
           datasourceId: datasource_id,
           projectId: project_id,
           type: type,
+          ...(provider ? { provider } : {}),
           displayName: name,
           ...config,
         };
@@ -362,6 +365,7 @@ export const DatasourceConnectionProvider = ({
           datasourceId,
           projectId,
           type: datasourceType,
+          ...(result.data?.provider ? { provider: result.data.provider } : {}),
           displayName,
           ...config,
         };

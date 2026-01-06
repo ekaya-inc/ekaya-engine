@@ -71,7 +71,7 @@ func (m *mockDatasourceRepository) List(ctx context.Context, projectID uuid.UUID
 	return m.datasources, m.encryptedConfigs, nil
 }
 
-func (m *mockDatasourceRepository) Update(ctx context.Context, id uuid.UUID, name, dsType, encryptedConfig string) error {
+func (m *mockDatasourceRepository) Update(ctx context.Context, id uuid.UUID, name, dsType, provider, encryptedConfig string) error {
 	m.capturedEncryptedConfig = encryptedConfig
 	return m.updateErr
 }
@@ -183,7 +183,7 @@ func TestDatasourceService_Create_Success(t *testing.T) {
 		"database": "testdb",
 	}
 
-	ds, err := service.Create(context.Background(), uuid.New(), "my-postgres", "postgres", config)
+	ds, err := service.Create(context.Background(), uuid.New(), "my-postgres", "postgres", "", config)
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestDatasourceService_Create_EmptyName(t *testing.T) {
 	repo := &mockDatasourceRepository{}
 	service, _ := newTestService(repo)
 
-	_, err := service.Create(context.Background(), uuid.New(), "", "postgres", nil)
+	_, err := service.Create(context.Background(), uuid.New(), "", "postgres", "", nil)
 	if err == nil {
 		t.Fatal("expected error for empty name")
 	}
@@ -225,7 +225,7 @@ func TestDatasourceService_Create_EmptyType(t *testing.T) {
 	repo := &mockDatasourceRepository{}
 	service, _ := newTestService(repo)
 
-	_, err := service.Create(context.Background(), uuid.New(), "my-ds", "", nil)
+	_, err := service.Create(context.Background(), uuid.New(), "my-ds", "", "", nil)
 	if err == nil {
 		t.Fatal("expected error for empty type")
 	}
@@ -238,7 +238,7 @@ func TestDatasourceService_Create_NilConfig(t *testing.T) {
 	repo := &mockDatasourceRepository{}
 	service, _ := newTestService(repo)
 
-	ds, err := service.Create(context.Background(), uuid.New(), "my-ds", "postgres", nil)
+	ds, err := service.Create(context.Background(), uuid.New(), "my-ds", "postgres", "", nil)
 	if err != nil {
 		t.Fatalf("Create with nil config failed: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestDatasourceService_Create_RepoError(t *testing.T) {
 	}
 	service, _ := newTestService(repo)
 
-	_, err := service.Create(context.Background(), uuid.New(), "existing-name", "postgres", nil)
+	_, err := service.Create(context.Background(), uuid.New(), "existing-name", "postgres", "", nil)
 	if err == nil {
 		t.Fatal("expected error from repo")
 	}
@@ -384,7 +384,7 @@ func TestDatasourceService_Update_EncryptsConfig(t *testing.T) {
 	service, _ := newTestService(repo)
 
 	config := map[string]any{"host": "new-host.example.com"}
-	err := service.Update(context.Background(), uuid.New(), "updated-name", "postgres", config)
+	err := service.Update(context.Background(), uuid.New(), "updated-name", "postgres", "", config)
 	if err != nil {
 		t.Fatalf("Update failed: %v", err)
 	}
@@ -403,13 +403,13 @@ func TestDatasourceService_Update_Validation(t *testing.T) {
 	service, _ := newTestService(repo)
 
 	// Empty name
-	err := service.Update(context.Background(), uuid.New(), "", "postgres", nil)
+	err := service.Update(context.Background(), uuid.New(), "", "postgres", "", nil)
 	if err == nil || err.Error() != "datasource name is required" {
 		t.Errorf("expected name validation error, got: %v", err)
 	}
 
 	// Empty type
-	err = service.Update(context.Background(), uuid.New(), "name", "", nil)
+	err = service.Update(context.Background(), uuid.New(), "name", "", "", nil)
 	if err == nil || err.Error() != "datasource type is required" {
 		t.Errorf("expected type validation error, got: %v", err)
 	}
@@ -454,7 +454,7 @@ func TestDatasourceService_EncryptionRoundTrip(t *testing.T) {
 	}
 
 	projectID := uuid.New()
-	_, err := service.Create(context.Background(), projectID, "complex-db", "postgres", originalConfig)
+	_, err := service.Create(context.Background(), projectID, "complex-db", "postgres", "", originalConfig)
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -617,7 +617,7 @@ func TestDatasourceService_Delete_ClearsDefaultDatasourceID(t *testing.T) {
 	service := NewDatasourceService(repo, ontologyRepo, encryptor, factory, projectService, zap.NewNop())
 
 	// Step 1: Create datasource A - should become default
-	dsA, err := service.Create(context.Background(), projectID, "datasource-a", "postgres", map[string]any{"host": "a"})
+	dsA, err := service.Create(context.Background(), projectID, "datasource-a", "postgres", "", map[string]any{"host": "a"})
 	if err != nil {
 		t.Fatalf("failed to create datasource A: %v", err)
 	}
@@ -636,7 +636,7 @@ func TestDatasourceService_Delete_ClearsDefaultDatasourceID(t *testing.T) {
 	}
 
 	// Step 3: Create datasource B
-	dsB, err := service.Create(context.Background(), projectID, "datasource-b", "postgres", map[string]any{"host": "b"})
+	dsB, err := service.Create(context.Background(), projectID, "datasource-b", "postgres", "", map[string]any{"host": "b"})
 	if err != nil {
 		t.Fatalf("failed to create datasource B: %v", err)
 	}

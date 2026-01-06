@@ -2,7 +2,11 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
-import { ADAPTER_ICON_PATHS } from "../constants/adapters";
+import {
+  ADAPTER_ICON_PATHS,
+  POSTGRES_PROVIDERS,
+  type ProviderInfo,
+} from "../constants/adapters";
 import type { ConnectionDetails, DatasourceType } from "../types";
 
 import { Button } from "./ui/Button";
@@ -24,7 +28,7 @@ interface DatasourceTypeFromAPI {
 
 interface DatasourceAdapterSelectionProps {
   selectedAdapter: string | null;
-  onAdapterSelect: (adapterId: string) => void;
+  onAdapterSelect: (adapterId: string, provider?: ProviderInfo) => void;
   datasources?: ConnectionDetails[];
 }
 
@@ -35,7 +39,9 @@ const DatasourceAdapterSelection = ({
 }: DatasourceAdapterSelectionProps) => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
-  const [availableAdapters, setAvailableAdapters] = useState<DatasourceAdapter[]>([]);
+  const [availableAdapters, setAvailableAdapters] = useState<
+    DatasourceAdapter[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,7 +62,9 @@ const DatasourceAdapterSelection = ({
         setAvailableAdapters(adapters);
       } catch (err) {
         console.error("Failed to load adapter types:", err);
-        setError(err instanceof Error ? err.message : "Failed to load adapters");
+        setError(
+          err instanceof Error ? err.message : "Failed to load adapters"
+        );
       } finally {
         setLoading(false);
       }
@@ -68,13 +76,28 @@ const DatasourceAdapterSelection = ({
     return new Set(datasources.map((ds) => ds.type));
   };
 
-  const getAdapterDisabledState = (adapter: DatasourceAdapter): boolean => {
+  const getAdapterDisabledState = (adapterType: string): boolean => {
     // If there are existing connections, only allow the same adapter type
     const connectedTypes = getConnectedAdapterTypes();
     if (connectedTypes.size > 0) {
-      return !connectedTypes.has(adapter.id);
+      return !connectedTypes.has(adapterType);
     }
     return false;
+  };
+
+  // Check if postgres adapter is available from the API
+  const hasPostgresAdapter = availableAdapters.some((a) => a.id === "postgres");
+
+  // Get non-postgres adapters for the "Other Databases" section
+  const otherAdapters = availableAdapters.filter((a) => a.id !== "postgres");
+
+  const handleProviderSelect = (provider: ProviderInfo) => {
+    // Pass the provider's adapter type (postgres) and the provider info
+    onAdapterSelect(provider.adapterType, provider);
+  };
+
+  const handleAdapterSelect = (adapter: DatasourceAdapter) => {
+    onAdapterSelect(adapter.id);
   };
 
   if (loading) {
@@ -119,86 +142,147 @@ const DatasourceAdapterSelection = ({
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-text-primary mb-2">
-              Select Your Datasource Adapter
+              Select Your Database
             </h1>
+            <p className="text-text-secondary">
+              Choose your database provider to get started
+            </p>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        {availableAdapters.map((adapter) => {
-          const isDisabled = getAdapterDisabledState(adapter);
-          const isSelected = selectedAdapter === adapter.id;
+      {/* PostgreSQL-Compatible Databases Section */}
+      {hasPostgresAdapter && (
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold text-text-primary mb-4">
+            PostgreSQL-Compatible
+          </h2>
+          <div className="grid gap-4 md:grid-cols-3">
+            {POSTGRES_PROVIDERS.map((provider) => {
+              const isDisabled = getAdapterDisabledState(provider.adapterType);
+              const isSelected = selectedAdapter === provider.adapterType;
 
-          return (
-            <Card
-              key={adapter.id}
-              className={`transition-all ${
-                isDisabled
-                  ? "cursor-not-allowed opacity-50 bg-gray-100 dark:bg-gray-800"
-                  : "cursor-pointer hover:shadow-md"
-              } ${
-                isSelected
-                  ? "ring-2 ring-blue-500 bg-blue-50 dark:bg-blue-950"
-                  : ""
-              }`}
-              onClick={() => !isDisabled && onAdapterSelect(adapter.id)}
-            >
-              <CardContent className="p-6">
-                <div className="flex items-start gap-4">
-                  {adapter.icon ? (
-                    <img
-                      src={adapter.icon}
-                      alt={adapter.name}
-                      className={`h-12 w-12 object-contain ${
-                        isDisabled ? "grayscale" : ""
-                      }`}
-                    />
-                  ) : (
-                    <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-gray-200 dark:bg-gray-700">
-                      <span className="text-xl font-bold text-gray-500 dark:text-gray-400">
-                        ?
-                      </span>
-                    </div>
-                  )}
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3
-                        className={`font-semibold ${
-                          isDisabled
-                            ? "text-text-tertiary"
-                            : "text-text-primary"
-                        }`}
-                      >
-                        {adapter.name}
-                      </h3>
-                      {isDisabled && (
-                        <span className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 px-2 py-1 rounded">
-                          No Connection
-                        </span>
+              return (
+                <Card
+                  key={provider.id}
+                  className={`transition-all ${
+                    isDisabled
+                      ? "cursor-not-allowed opacity-50 bg-gray-100 dark:bg-gray-800"
+                      : "cursor-pointer hover:shadow-md"
+                  } ${
+                    isSelected
+                      ? "ring-2 ring-blue-500 bg-blue-50 dark:bg-blue-950"
+                      : ""
+                  }`}
+                  onClick={() => !isDisabled && handleProviderSelect(provider)}
+                >
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-3">
+                      {provider.icon ? (
+                        <img
+                          src={provider.icon}
+                          alt={provider.name}
+                          className={`h-10 w-10 object-contain ${
+                            isDisabled ? "grayscale" : ""
+                          }`}
+                        />
+                      ) : (
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-200 dark:bg-gray-700">
+                          <span className="text-lg font-bold text-gray-500 dark:text-gray-400">
+                            ?
+                          </span>
+                        </div>
                       )}
+                      <div className="flex-1 min-w-0">
+                        <h3
+                          className={`font-semibold truncate ${
+                            isDisabled
+                              ? "text-text-tertiary"
+                              : "text-text-primary"
+                          }`}
+                        >
+                          {provider.name}
+                        </h3>
+                      </div>
                     </div>
-                    <p
-                      className={`text-sm ${
-                        isDisabled
-                          ? "text-text-tertiary"
-                          : "text-text-secondary"
-                      }`}
-                    >
-                      {adapter.description}
-                    </p>
-                    {isDisabled && (
-                      <p className="text-xs text-text-tertiary mt-2">
-                        No active connections for this adapter
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Other Databases Section */}
+      {otherAdapters.length > 0 && (
+        <div>
+          <h2 className="text-lg font-semibold text-text-primary mb-4">
+            Other Databases
+          </h2>
+          <div className="grid gap-4 md:grid-cols-3">
+            {otherAdapters.map((adapter) => {
+              const isDisabled = getAdapterDisabledState(adapter.id);
+              const isSelected = selectedAdapter === adapter.id;
+
+              return (
+                <Card
+                  key={adapter.id}
+                  className={`transition-all ${
+                    isDisabled
+                      ? "cursor-not-allowed opacity-50 bg-gray-100 dark:bg-gray-800"
+                      : "cursor-pointer hover:shadow-md"
+                  } ${
+                    isSelected
+                      ? "ring-2 ring-blue-500 bg-blue-50 dark:bg-blue-950"
+                      : ""
+                  }`}
+                  onClick={() => !isDisabled && handleAdapterSelect(adapter)}
+                >
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-3">
+                      {adapter.icon ? (
+                        <img
+                          src={adapter.icon}
+                          alt={adapter.name}
+                          className={`h-10 w-10 object-contain ${
+                            isDisabled ? "grayscale" : ""
+                          }`}
+                        />
+                      ) : (
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-200 dark:bg-gray-700">
+                          <span className="text-lg font-bold text-gray-500 dark:text-gray-400">
+                            ?
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <h3
+                          className={`font-semibold truncate ${
+                            isDisabled
+                              ? "text-text-tertiary"
+                              : "text-text-primary"
+                          }`}
+                        >
+                          {adapter.name}
+                        </h3>
+                        <p
+                          className={`text-xs truncate ${
+                            isDisabled
+                              ? "text-text-tertiary"
+                              : "text-text-secondary"
+                          }`}
+                        >
+                          {adapter.description}
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
