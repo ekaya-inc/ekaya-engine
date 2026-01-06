@@ -150,8 +150,8 @@ func toGlossaryTermResponse(term *models.BusinessGlossaryTerm) glossaryTermRespo
 		Definition:  term.Definition,
 		SQLPattern:  term.DefiningSQL, // Map DefiningSQL to SQLPattern for backwards compatibility
 		BaseTable:   term.BaseTable,
-		ColumnsUsed: []string{},       // Deprecated - now using OutputColumns
-		Aggregation: "",               // Deprecated - SQL is now complete
+		ColumnsUsed: []string{}, // Deprecated - now using OutputColumns
+		Aggregation: "",         // Deprecated - SQL is now complete
 		Source:      term.Source,
 	}
 

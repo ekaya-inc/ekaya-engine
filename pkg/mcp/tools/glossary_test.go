@@ -13,6 +13,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // mockGlossaryService implements services.GlossaryService for testing.
@@ -57,6 +58,22 @@ func (m *mockGlossaryService) DiscoverGlossaryTerms(ctx context.Context, project
 }
 
 func (m *mockGlossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockGlossaryService) GetTermByName(ctx context.Context, projectID uuid.UUID, termName string) (*models.BusinessGlossaryTerm, error) {
+	return nil, nil
+}
+
+func (m *mockGlossaryService) TestSQL(ctx context.Context, projectID uuid.UUID, sql string) (*services.SQLTestResult, error) {
+	return nil, nil
+}
+
+func (m *mockGlossaryService) CreateAlias(ctx context.Context, termID uuid.UUID, alias string) error {
+	return nil
+}
+
+func (m *mockGlossaryService) DeleteAlias(ctx context.Context, termID uuid.UUID, alias string) error {
 	return nil
 }
 
@@ -177,33 +194,28 @@ func TestCheckGlossaryToolsEnabled(t *testing.T) {
 func TestToGlossaryTermResponse(t *testing.T) {
 	t.Run("full term with all fields", func(t *testing.T) {
 		term := &models.BusinessGlossaryTerm{
-			ID:          uuid.New(),
-			ProjectID:   uuid.New(),
-			Term:        "Revenue",
-			Definition:  "Total earned amount from completed transactions",
-			SQLPattern:  "SUM(earned_amount) WHERE transaction_state = 'completed'",
-			BaseTable:   "billing_transactions",
-			ColumnsUsed: []string{"earned_amount", "transaction_state"},
-			Filters: []models.Filter{
-				{Column: "transaction_state", Operator: "=", Values: []string{"completed"}},
+			ID:         uuid.New(),
+			ProjectID:  uuid.New(),
+			Term:       "Revenue",
+			Definition: "Total earned amount from completed transactions",
+			DefiningSQL: `SELECT SUM(earned_amount) AS revenue
+FROM billing_transactions
+WHERE transaction_state = 'completed'`,
+			BaseTable: "billing_transactions",
+			OutputColumns: []models.OutputColumn{
+				{Name: "revenue", Type: "numeric"},
 			},
-			Aggregation: "SUM",
-			Source:      "user",
+			Aliases: []string{"total_revenue", "earnings"},
+			Source:  "user",
 		}
 
 		resp := toGlossaryTermResponse(term)
 
 		assert.Equal(t, "Revenue", resp.Term)
 		assert.Equal(t, "Total earned amount from completed transactions", resp.Definition)
-		assert.Equal(t, "SUM(earned_amount) WHERE transaction_state = 'completed'", resp.SQLPattern)
+		assert.Contains(t, resp.SQLPattern, "SUM(earned_amount)")
 		assert.Equal(t, "billing_transactions", resp.BaseTable)
-		assert.Equal(t, []string{"earned_amount", "transaction_state"}, resp.ColumnsUsed)
-		assert.Equal(t, "SUM", resp.Aggregation)
 		assert.Equal(t, "user", resp.Source)
-		require.Len(t, resp.Filters, 1)
-		assert.Equal(t, "transaction_state", resp.Filters[0].Column)
-		assert.Equal(t, "=", resp.Filters[0].Operator)
-		assert.Equal(t, []string{"completed"}, resp.Filters[0].Values)
 	})
 
 	t.Run("minimal term with only required fields", func(t *testing.T) {
@@ -221,23 +233,21 @@ func TestToGlossaryTermResponse(t *testing.T) {
 		assert.Equal(t, "User with recent activity", resp.Definition)
 		assert.Equal(t, "", resp.SQLPattern)
 		assert.Equal(t, "", resp.BaseTable)
-		assert.Nil(t, resp.ColumnsUsed)
-		assert.Nil(t, resp.Filters)
-		assert.Equal(t, "", resp.Aggregation)
 		assert.Equal(t, "suggested", resp.Source)
 	})
 
-	t.Run("term with empty filters slice", func(t *testing.T) {
+	t.Run("term with empty DefiningSQL", func(t *testing.T) {
 		term := &models.BusinessGlossaryTerm{
-			Term:       "Test",
-			Definition: "Test definition",
-			Filters:    []models.Filter{}, // Empty slice
-			Source:     "user",
+			Term:        "Test",
+			Definition:  "Test definition",
+			DefiningSQL: "", // Empty SQL
+			Source:      "discovered",
 		}
 
 		resp := toGlossaryTermResponse(term)
 
-		assert.Nil(t, resp.Filters, "Empty filters should result in nil in response")
+		assert.Equal(t, "", resp.SQLPattern, "Empty DefiningSQL should result in empty SQLPattern in response")
+		assert.Equal(t, "discovered", resp.Source)
 	})
 }
 

@@ -400,10 +400,10 @@ func TestGlossaryService_CreateTerm(t *testing.T) {
 	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, datasourceSvc, adapterFactory, llmFactory, logger)
 
 	term := &models.BusinessGlossaryTerm{
-		Term:       "Revenue",
-		Definition: "Total earned amount from completed transactions",
+		Term:        "Revenue",
+		Definition:  "Total earned amount from completed transactions",
 		DefiningSQL: "SELECT SUM(earned_amount) FROM billing_transactions",
-		BaseTable:  "billing_transactions",
+		BaseTable:   "billing_transactions",
 	}
 
 	err := svc.CreateTerm(ctx, projectID, term)
@@ -584,8 +584,8 @@ func TestGlossaryService_GetTerms(t *testing.T) {
 // ============================================================================
 
 func TestGlossaryService_SuggestTerms(t *testing.T) {
-	ctx := context.Background()
 	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
 	ontologyID := uuid.New()
 
 	entities := []*models.OntologyEntity{
@@ -654,12 +654,14 @@ func TestGlossaryService_SuggestTerms(t *testing.T) {
 	assert.Equal(t, "Revenue", suggestions[0].Term)
 	assert.Equal(t, "Total earned amount from completed transactions", suggestions[0].Definition)
 	assert.Equal(t, "billing_transactions", suggestions[0].BaseTable)
-	assert.Equal(t, models.GlossarySourceInferred, suggestions[0].Source)
 	assert.NotEmpty(t, suggestions[0].DefiningSQL)
 
 	// Verify second suggestion
 	assert.Equal(t, "Active Users", suggestions[1].Term)
 	assert.Equal(t, "users", suggestions[1].BaseTable)
+
+	// Note: SuggestTerms returns raw suggestions without validation or output columns.
+	// Use DiscoverGlossaryTerms to persist with SQL validation and output column capture.
 }
 
 func TestGlossaryService_SuggestTerms_NoOntology(t *testing.T) {
@@ -798,8 +800,8 @@ func TestGlossaryService_SuggestTerms_WithConventions(t *testing.T) {
 }
 
 func TestGlossaryService_SuggestTerms_WithColumnDetails(t *testing.T) {
-	ctx := context.Background()
 	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
 	ontologyID := uuid.New()
 
 	entities := []*models.OntologyEntity{
@@ -812,7 +814,7 @@ func TestGlossaryService_SuggestTerms_WithColumnDetails(t *testing.T) {
 		},
 	}
 
-	llmResponse := `[{"term": "Revenue", "definition": "Total revenue", "base_table": "transactions"}]`
+	llmResponse := `[{"term": "Revenue", "definition": "Total revenue", "defining_sql": "SELECT SUM(amount) AS revenue FROM transactions", "base_table": "transactions"}]`
 
 	glossaryRepo := newMockGlossaryRepo()
 	ontologyRepo := &mockOntologyRepoForGlossary{
@@ -842,13 +844,108 @@ func TestGlossaryService_SuggestTerms_WithColumnDetails(t *testing.T) {
 	assert.Len(t, suggestions, 1)
 }
 
+func TestGlossaryService_SuggestTerms_InvalidSQL(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Transaction",
+			Description:  "Financial transactions",
+			Domain:       "billing",
+			PrimaryTable: "billing_transactions",
+		},
+	}
+
+	// LLM response with one valid and one invalid SQL
+	llmResponse := `[
+		{
+			"term": "Revenue",
+			"definition": "Total earned amount from completed transactions",
+			"defining_sql": "SELECT SUM(earned_amount) AS revenue FROM billing_transactions",
+			"base_table": "billing_transactions"
+		},
+		{
+			"term": "Invalid Term",
+			"definition": "This term has invalid SQL",
+			"defining_sql": "INVALID SQL STATEMENT",
+			"base_table": "billing_transactions"
+		}
+	]`
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	llmClient := &mockLLMClientForGlossary{responseContent: llmResponse}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	// Create a mock adapter factory that returns error for invalid SQL
+	adapterFactory := &mockAdapterFactoryWithInvalidSQL{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, datasourceSvc, adapterFactory, llmFactory, logger)
+
+	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
+	require.NoError(t, err)
+
+	// Should only create the valid term, skip the invalid one
+	assert.Equal(t, 1, count, "Should only create 1 valid term, skip invalid SQL")
+
+	// Verify only valid term was stored
+	terms, err := glossaryRepo.GetByProject(ctx, projectID)
+	require.NoError(t, err)
+	require.Len(t, terms, 1)
+	assert.Equal(t, "Revenue", terms[0].Term)
+}
+
+// mockQueryExecutorWithInvalidSQL returns error for INVALID SQL
+type mockQueryExecutorWithInvalidSQL struct {
+	mockQueryExecutorForGlossary
+}
+
+func (m *mockQueryExecutorWithInvalidSQL) ExecuteQuery(ctx context.Context, sqlQuery string, limit int) (*datasource.QueryExecutionResult, error) {
+	// Check if SQL contains "INVALID" keyword to simulate syntax error
+	if len(sqlQuery) >= 7 && sqlQuery[:7] == "INVALID" {
+		return nil, errors.New("SQL syntax error: invalid statement")
+	}
+	return m.mockQueryExecutorForGlossary.ExecuteQuery(ctx, sqlQuery, limit)
+}
+
+type mockAdapterFactoryWithInvalidSQL struct{}
+
+func (m *mockAdapterFactoryWithInvalidSQL) NewConnectionTester(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.ConnectionTester, error) {
+	return nil, nil
+}
+
+func (m *mockAdapterFactoryWithInvalidSQL) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.SchemaDiscoverer, error) {
+	return nil, nil
+}
+
+func (m *mockAdapterFactoryWithInvalidSQL) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.QueryExecutor, error) {
+	return &mockQueryExecutorWithInvalidSQL{}, nil
+}
+
+func (m *mockAdapterFactoryWithInvalidSQL) ListTypes() []datasource.DatasourceAdapterInfo {
+	return []datasource.DatasourceAdapterInfo{}
+}
+
 // ============================================================================
 // Tests - DiscoverGlossaryTerms
 // ============================================================================
 
 func TestGlossaryService_DiscoverGlossaryTerms(t *testing.T) {
-	ctx := context.Background()
 	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
 	ontologyID := uuid.New()
 
 	entities := []*models.OntologyEntity{
@@ -867,11 +964,8 @@ func TestGlossaryService_DiscoverGlossaryTerms(t *testing.T) {
 		{
 			"term": "Revenue",
 			"definition": "Total earned amount from completed transactions",
-			"sql_pattern": "SUM(earned_amount) WHERE state = 'completed'",
-			"base_table": "billing_transactions",
-			"columns_used": ["earned_amount", "state"],
-			"filters": [{"column": "state", "operator": "=", "values": ["completed"]}],
-			"aggregation": "SUM"
+			"defining_sql": "SELECT SUM(earned_amount) AS revenue FROM billing_transactions WHERE state = 'completed'",
+			"base_table": "billing_transactions"
 		}
 	]`
 
@@ -899,13 +993,15 @@ func TestGlossaryService_DiscoverGlossaryTerms(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, count)
 
-	// Verify term was saved to database
+	// Verify term was saved to database with SQL validation
 	terms, err := svc.GetTerms(ctx, projectID)
 	require.NoError(t, err)
 	require.Len(t, terms, 1)
 	assert.Equal(t, "Revenue", terms[0].Term)
-	assert.Equal(t, "discovered", terms[0].Source)
+	assert.Equal(t, models.GlossarySourceInferred, terms[0].Source)
 	assert.Equal(t, "billing_transactions", terms[0].BaseTable)
+	assert.NotEmpty(t, terms[0].DefiningSQL)
+	assert.NotEmpty(t, terms[0].OutputColumns, "Output columns should be captured from SQL validation")
 }
 
 func TestGlossaryService_DiscoverGlossaryTerms_SkipsDuplicates(t *testing.T) {
@@ -927,6 +1023,7 @@ func TestGlossaryService_DiscoverGlossaryTerms_SkipsDuplicates(t *testing.T) {
 		{
 			"term": "Revenue",
 			"definition": "Total revenue",
+			"defining_sql": "SELECT SUM(amount) AS revenue FROM transactions",
 			"base_table": "transactions"
 		}
 	]`

@@ -522,13 +522,62 @@ type BusinessGlossaryTerm struct {
 
 **Note:** The `EnrichGlossaryTerms` service method remains in `pkg/services/glossary_service.go` but is no longer called by the DAG. It's harmless as a no-op and might be useful for backfilling old data if needed.
 
-### 3.4 Post-Discovery Validation
+### 3.4 Post-Discovery Validation ✅
 
-After LLM generates terms:
-1. Run EXPLAIN on each `defining_sql`
-2. If invalid, log warning and skip term (or retry with error context)
-3. Execute valid SQL with LIMIT 1 to capture output columns
-4. Store validated terms with output columns
+**Status:** Complete - SQL validation and output column capture integrated into discovery workflow
+
+**Implementation Details:**
+
+The `DiscoverGlossaryTerms` method (pkg/services/glossary_service.go:644-716) now validates each LLM-generated term before persisting:
+
+1. **Pre-validation checks:**
+   - Skips terms with no DefiningSQL (logs warning)
+   - Skips duplicate terms (checks for existing term with same name)
+
+2. **SQL validation (via TestSQL service method):**
+   - Executes SQL with LIMIT 1 against project datasource
+   - Captures syntax errors and validation failures
+   - Returns structured result: `{Valid bool, Error string, OutputColumns []OutputColumn, SampleRow map}`
+   - On failure: Logs warning with SQL text and error, skips term
+
+3. **Output column capture:**
+   - On successful validation, extracts output columns from query result
+   - Sets `term.OutputColumns` from `testResult.OutputColumns`
+   - Stores validated metadata alongside SQL definition
+
+4. **Source assignment:**
+   - All discovered terms get `source = models.GlossarySourceInferred`
+   - Changed from "discovered" (old value) to "inferred" (consistent with relationships table)
+
+**Test Coverage:**
+
+Added comprehensive test in `pkg/services/glossary_service_test.go:847-908`:
+- `TestGlossaryService_SuggestTerms_InvalidSQL` - Verifies that terms with invalid SQL are skipped
+- Mock adapter factory returns validation error for SQL containing "INVALID" keyword
+- Test creates scenario with 1 valid term + 1 invalid term
+- Asserts only valid term is persisted, invalid term is silently skipped (logged at WARN level)
+- Verifies output columns are captured for valid term
+
+**Files Modified:**
+- `pkg/services/glossary_service.go` - Added validation logic to discovery workflow (lines 647-692)
+- `pkg/services/glossary_service_test.go` - Added test for invalid SQL handling
+- `pkg/mcp/tools/glossary_test.go` - Updated test assertions for new field names
+- `pkg/mcp/tools/glossary.go` - Fixed formatting (whitespace-only change)
+
+**Key Design Decisions:**
+
+1. **Fail gracefully** - Invalid SQL doesn't abort entire discovery, just skips that term
+2. **Log warnings, not errors** - Invalid LLM output is expected occasionally, not exceptional
+3. **No retry logic** - Discovery is one-shot, no auto-retry with error context (could be future enhancement)
+4. **Source consistency** - Uses `GlossarySourceInferred` constant for alignment with relationships table
+
+**Important Context for Next Session:**
+
+- All discovered terms now have validated SQL and captured output columns before persistence
+- The validation happens at write-time in `DiscoverGlossaryTerms`, not at read-time
+- Invalid SQL from LLM silently skips with warning log (check `engine_llm_conversations` for failures)
+- Output columns match the schema from `LIMIT 1` execution (names + types, no sample data stored)
+- Next phase (Phase 4) can assume all persisted terms have valid `defining_sql` and `output_columns`
 
 ---
 

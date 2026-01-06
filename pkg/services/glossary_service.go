@@ -644,7 +644,7 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 		return 0, fmt.Errorf("parse LLM response: %w", err)
 	}
 
-	// Save discovered terms to database with source="discovered"
+	// Validate and save discovered terms to database with source="inferred"
 	discoveredCount := 0
 	for _, term := range suggestions {
 		// Check for duplicates
@@ -663,8 +663,38 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 			continue
 		}
 
-		// Set source to "discovered" instead of "suggested"
-		term.Source = "discovered"
+		// Validate SQL and capture output columns
+		if term.DefiningSQL == "" {
+			s.logger.Warn("Term has no defining SQL, skipping",
+				zap.String("project_id", projectID.String()),
+				zap.String("term", term.Term))
+			continue
+		}
+
+		testResult, err := s.TestSQL(ctx, projectID, term.DefiningSQL)
+		if err != nil {
+			s.logger.Warn("Failed to test SQL for discovered term, skipping",
+				zap.String("project_id", projectID.String()),
+				zap.String("term", term.Term),
+				zap.String("sql", term.DefiningSQL),
+				zap.Error(err))
+			continue
+		}
+
+		if !testResult.Valid {
+			s.logger.Warn("SQL validation failed for discovered term, skipping",
+				zap.String("project_id", projectID.String()),
+				zap.String("term", term.Term),
+				zap.String("sql", term.DefiningSQL),
+				zap.String("error", testResult.Error))
+			continue
+		}
+
+		// Set output columns from validation
+		term.OutputColumns = testResult.OutputColumns
+
+		// Set source to "inferred" (LLM discovered during ontology extraction)
+		term.Source = models.GlossarySourceInferred
 
 		// Create the term
 		if err := s.glossaryRepo.Create(ctx, term); err != nil {
@@ -676,9 +706,10 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 		}
 
 		discoveredCount++
-		s.logger.Debug("Created discovered term",
+		s.logger.Debug("Created discovered term with validated SQL",
 			zap.String("term", term.Term),
-			zap.String("term_id", term.ID.String()))
+			zap.String("term_id", term.ID.String()),
+			zap.Int("output_columns", len(term.OutputColumns)))
 	}
 
 	s.logger.Info("Completed glossary term discovery",
