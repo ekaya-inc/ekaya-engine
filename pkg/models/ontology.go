@@ -2,10 +2,11 @@ package models
 
 import (
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 )
 
 // ============================================================================
@@ -110,11 +111,10 @@ type EnumValue struct {
 
 // UnmarshalJSON handles LLM responses that return value as number or boolean instead of string.
 func (e *EnumValue) UnmarshalJSON(data []byte) error {
-	// Use a type alias to avoid infinite recursion
-	type enumValueAlias EnumValue
 	type flexibleEnumValue struct {
-		enumValueAlias
-		Value json.RawMessage `json:"value"`
+		Value       json.RawMessage `json:"value"`
+		Label       string          `json:"label,omitempty"`
+		Description string          `json:"description,omitempty"`
 	}
 
 	var flex flexibleEnumValue
@@ -122,44 +122,9 @@ func (e *EnumValue) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	// Copy the other fields
 	e.Label = flex.Label
 	e.Description = flex.Description
-
-	// Handle value: could be string, number, or boolean
-	if len(flex.Value) == 0 {
-		e.Value = ""
-		return nil
-	}
-
-	// Try string first
-	var strVal string
-	if err := json.Unmarshal(flex.Value, &strVal); err == nil {
-		e.Value = strVal
-		return nil
-	}
-
-	// Try number
-	var numVal float64
-	if err := json.Unmarshal(flex.Value, &numVal); err == nil {
-		// Format without decimal if it's a whole number
-		if numVal == float64(int64(numVal)) {
-			e.Value = fmt.Sprintf("%d", int64(numVal))
-		} else {
-			e.Value = fmt.Sprintf("%g", numVal)
-		}
-		return nil
-	}
-
-	// Try boolean
-	var boolVal bool
-	if err := json.Unmarshal(flex.Value, &boolVal); err == nil {
-		e.Value = fmt.Sprintf("%t", boolVal)
-		return nil
-	}
-
-	// Fallback: use raw string representation
-	e.Value = string(flex.Value)
+	e.Value = jsonutil.FlexibleStringValue(flex.Value)
 	return nil
 }
 

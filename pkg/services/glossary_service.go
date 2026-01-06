@@ -2,12 +2,14 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -355,6 +357,32 @@ type suggestedFilter struct {
 	Column   string   `json:"column"`
 	Operator string   `json:"operator"`
 	Values   []string `json:"values"`
+}
+
+// UnmarshalJSON handles LLM responses that return values as numbers or booleans instead of strings.
+func (f *suggestedFilter) UnmarshalJSON(data []byte) error {
+	type filterAlias struct {
+		Column   string            `json:"column"`
+		Operator string            `json:"operator"`
+		Values   []json.RawMessage `json:"values"`
+	}
+
+	var flex filterAlias
+	if err := json.Unmarshal(data, &flex); err != nil {
+		return err
+	}
+
+	f.Column = flex.Column
+	f.Operator = flex.Operator
+	f.Values = make([]string, 0, len(flex.Values))
+
+	for _, rawVal := range flex.Values {
+		if v := jsonutil.FlexibleStringValue(rawVal); v != "" {
+			f.Values = append(f.Values, v)
+		}
+	}
+
+	return nil
 }
 
 func (s *glossaryService) parseSuggestTermsResponse(content string, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error) {
