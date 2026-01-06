@@ -39,29 +39,6 @@ func GetContext(ctx context.Context) map[string]any {
 	return nil
 }
 
-// WithWorkflowID is a convenience function to add workflow_id to context.
-// Deprecated: Use WithContext for more flexible context passing.
-func WithWorkflowID(ctx context.Context, workflowID uuid.UUID) context.Context {
-	return WithContext(ctx, map[string]any{
-		"workflow_id": workflowID.String(),
-	})
-}
-
-// GetWorkflowID retrieves the workflow ID from context, if present.
-// Deprecated: Use GetContext and access "workflow_id" directly.
-func GetWorkflowID(ctx context.Context) *uuid.UUID {
-	c := GetContext(ctx)
-	if c == nil {
-		return nil
-	}
-	if idStr, ok := c["workflow_id"].(string); ok {
-		if id, err := uuid.Parse(idStr); err == nil {
-			return &id
-		}
-	}
-	return nil
-}
-
 // WithTaskContext is a convenience function to add ontology task context.
 func WithTaskContext(ctx context.Context, workflowID uuid.UUID, taskID, taskName, entityName string) context.Context {
 	values := map[string]any{

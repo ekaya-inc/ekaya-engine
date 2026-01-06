@@ -255,15 +255,23 @@ The `GET /api/projects/{pid}/datasources/{dsid}/schema/relationships/candidates`
 - **Total impact:** ~300 lines removed across backend and frontend
 - The endpoint was never called by the UI, so no breaking changes for users
 
-### 9. Remove Deprecated LLM Context Functions
+### 9. Remove Deprecated LLM Context Functions ✅
 
 `WithWorkflowID()` and `GetWorkflowID()` are marked deprecated with "Use WithContext for more flexible context passing."
 
-- [ ] Update `pkg/services/entity_discovery_task.go:92` to use `WithContext` directly
-- [ ] Delete `pkg/llm/context.go:43-62` (`WithWorkflowID` and `GetWorkflowID` functions)
-- [ ] Run `make check`
+- [x] Update `pkg/services/entity_discovery_task.go:92` to use `WithContext` directly
+- [x] Delete `pkg/llm/context.go:43-62` (`WithWorkflowID` and `GetWorkflowID` functions)
+- [x] Run `make check`
 
 **Risk:** Low - single caller, straightforward replacement.
+
+**Completed:** Successfully removed deprecated LLM context functions:
+- **pkg/services/entity_discovery_task.go:92** - Updated to use `WithContext` directly with inline map creation
+- **pkg/llm/context.go** - Removed `WithWorkflowID()` and `GetWorkflowID()` functions (~20 lines)
+- **pkg/llm/context_test.go** - Removed 4 test functions that tested deprecated functions, updated `TestWithContext_MergesValues` to use `WithContext` directly (~60 lines removed)
+- All tests pass (`make check`)
+- **Total impact:** ~80 lines removed
+- No other callers found in codebase
 
 ### 10. Remove Deprecated Workqueue Constructor
 
@@ -275,11 +283,15 @@ The `GET /api/projects/{pid}/datasources/{dsid}/schema/relationships/candidates`
 
 **Risk:** Low - internal only, no external callers.
 
-### 11. Fix Stale Comment in Conversation Recorder
+### 11. Fix Stale Comment in Conversation Recorder ✅
 
-- [ ] Update `pkg/llm/conversation_recorder.go:15` - Remove reference to deleted `workflow.TenantContextFunc`
+- [x] Update `pkg/llm/conversation_recorder.go:15` - Remove reference to deleted `workflow.TenantContextFunc`
 
 **Risk:** None - comment only.
+
+**Completed:** Updated comment in `pkg/llm/conversation_recorder.go` to remove reference to `workflow.TenantContextFunc` (which was removed in task 1). The comment now correctly states that `TenantContextFunc` is identical to `services.TenantContextFunc` and kept separate to avoid import cycles between `llm ← workqueue ← services`. This was a trivial documentation fix with no code changes.
+
+**Context for next session:** This was a follow-up cleanup from task 1 (removal of `pkg/models/ontology_workflow.go` and the entire workflow package). Committed together with task 9 since both are LLM package cleanups.
 
 ### 12. Remove Legacy "name" Field Support (Optional)
 

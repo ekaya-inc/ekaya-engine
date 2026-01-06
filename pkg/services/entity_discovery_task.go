@@ -89,7 +89,9 @@ func (t *EntityDiscoveryTask) Execute(ctx context.Context, enqueuer workqueue.Ta
 	defer cleanup()
 
 	// Add workflow context for conversation recording
-	tenantCtx = llm.WithWorkflowID(tenantCtx, t.workflowID)
+	tenantCtx = llm.WithContext(tenantCtx, map[string]any{
+		"workflow_id": t.workflowID.String(),
+	})
 
 	if t.logger != nil {
 		t.logger.Info("Starting entity discovery with LLM",
