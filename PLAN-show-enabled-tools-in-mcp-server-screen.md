@@ -258,9 +258,13 @@ Option B: Use React context or state management for agent key (heavier solution)
    - Border styling matches existing component patterns (border-b border-border-light last:border-0)
    - Component is self-contained and ready to be integrated into `MCPServerURL.tsx`
 
-6. [ ] **Update MCPServerURL** (`ui/src/components/mcp/MCPServerURL.tsx`)
-   - Add `enabledTools` prop
-   - Render `MCPEnabledTools` inside the card
+6. [x] **Update MCPServerURL** (`ui/src/components/mcp/MCPServerURL.tsx`) ✅ COMPLETED
+   - Added `EnabledTool` interface with `name` and `description` fields (local to component)
+   - Added `enabledTools` prop to `MCPServerURLProps` (optional, defaults to empty array `[]`)
+   - Imported `MCPEnabledTools` component from `./MCPEnabledTools`
+   - Rendered `MCPEnabledTools` at the bottom of `CardContent`, after the JSON config section
+   - TypeScript type check passes
+   - **Integration note for task 7**: The parent `MCPServerPage.tsx` must pass `enabledTools={config.enabledTools}` to `MCPServerURL` for the tools table to display actual data. Currently defaults to empty array.
 
 7. [ ] **Update MCPServerPage** (`ui/src/pages/MCPServerPage.tsx`)
    - Pass `enabledTools` from config response to `MCPServerURL`
