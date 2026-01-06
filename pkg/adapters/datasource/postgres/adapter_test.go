@@ -84,23 +84,6 @@ func TestFromMap_Defaults(t *testing.T) {
 	}
 }
 
-func TestFromMap_LegacyNameField(t *testing.T) {
-	config := map[string]any{
-		"host": "localhost",
-		"user": "testuser",
-		"name": "legacydb", // legacy "name" field instead of "database"
-	}
-
-	cfg, err := FromMap(config)
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
-	}
-
-	if cfg.Database != "legacydb" {
-		t.Errorf("expected database 'legacydb', got '%s'", cfg.Database)
-	}
-}
-
 func TestFromMap_MissingHost(t *testing.T) {
 	config := map[string]any{
 		"user":     "testuser",

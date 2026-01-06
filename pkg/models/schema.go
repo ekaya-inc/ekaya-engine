@@ -196,13 +196,6 @@ const (
 	JoinabilityCardinalityOK  = "cardinality_ok"
 )
 
-// Candidate statuses for relationship discovery
-const (
-	CandidateStatusPending  = "pending"
-	CandidateStatusVerified = "verified"
-	CandidateStatusRejected = "rejected"
-)
-
 // ============================================================================
 // Service Layer Types
 // ============================================================================
@@ -320,34 +313,6 @@ type DiscoveryResults struct {
 	EmptyTables                int      `json:"empty_tables"`
 	EmptyTableNames            []string `json:"empty_table_names,omitempty"`
 	OrphanTableNames           []string `json:"orphan_table_names,omitempty"`
-}
-
-// LegacyRelationshipCandidate represents a potential relationship found during OLD discovery system.
-// Deprecated: This is from the old discovery system. New system uses RelationshipCandidate.
-type LegacyRelationshipCandidate struct {
-	ID              uuid.UUID `json:"id"`
-	SourceTable     string    `json:"source_table"`
-	SourceColumn    string    `json:"source_column"`
-	TargetTable     string    `json:"target_table"`
-	TargetColumn    string    `json:"target_column"`
-	MatchRate       float64   `json:"match_rate"`
-	Status          string    `json:"status"` // "pending", "verified", "rejected"
-	RejectionReason *string   `json:"rejection_reason,omitempty"`
-}
-
-// LegacyRelationshipCandidatesResponse contains candidates with summary statistics (old system).
-// Deprecated: Use new RelationshipCandidate model instead.
-type LegacyRelationshipCandidatesResponse struct {
-	Candidates []LegacyRelationshipCandidate `json:"candidates"`
-	Summary    CandidatesSummary             `json:"summary"`
-}
-
-// CandidatesSummary provides aggregate stats for relationship candidates.
-type CandidatesSummary struct {
-	Total    int `json:"total"`
-	Verified int `json:"verified"`
-	Rejected int `json:"rejected"`
-	Pending  int `json:"pending"`
 }
 
 // DiscoveryMetrics captures metrics during relationship discovery for storage.

@@ -27,9 +27,10 @@ type ProjectInfo struct {
 
 // ProjectURLs contains URLs for navigating to ekaya-central pages.
 type ProjectURLs struct {
-	ProjectsPage string `json:"projectsPage,omitempty"`
-	ProjectPage  string `json:"projectPage,omitempty"`
-	Redirect     string `json:"redirect,omitempty"`
+	ProjectsPage  string `json:"projectsPage,omitempty"`
+	ProjectPage   string `json:"projectPage,omitempty"`
+	Redirect      string `json:"redirect,omitempty"`
+	AuthServerURL string `json:"authServerUrl,omitempty"`
 }
 
 // Client provides access to ekaya-central API.

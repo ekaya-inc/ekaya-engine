@@ -156,9 +156,9 @@ func TestOntologyRepository_Create_Success(t *testing.T) {
 	}
 
 	// Verify by fetching
-	retrieved, err := tc.repo.GetByVersion(ctx, tc.projectID, 1)
+	retrieved, err := tc.repo.GetActive(ctx, tc.projectID)
 	if err != nil {
-		t.Fatalf("GetByVersion failed: %v", err)
+		t.Fatalf("GetActive failed: %v", err)
 	}
 	if retrieved.DomainSummary == nil {
 		t.Error("expected DomainSummary to be set")
@@ -190,9 +190,9 @@ func TestOntologyRepository_Create_WithNilFields(t *testing.T) {
 		t.Fatalf("Create failed: %v", err)
 	}
 
-	retrieved, err := tc.repo.GetByVersion(ctx, tc.projectID, 1)
+	retrieved, err := tc.repo.GetActive(ctx, tc.projectID)
 	if err != nil {
-		t.Fatalf("GetByVersion failed: %v", err)
+		t.Fatalf("GetActive failed: %v", err)
 	}
 	if retrieved.DomainSummary != nil {
 		t.Error("expected nil DomainSummary")
@@ -265,44 +265,6 @@ func TestOntologyRepository_GetActive_Empty(t *testing.T) {
 	}
 	if retrieved != nil {
 		t.Error("expected nil for empty project")
-	}
-}
-
-// ============================================================================
-// GetByVersion Tests
-// ============================================================================
-
-func TestOntologyRepository_GetByVersion_Success(t *testing.T) {
-	tc := setupOntologyTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	tc.createTestOntology(ctx, 1, false)
-	tc.createTestOntology(ctx, 2, true)
-
-	retrieved, err := tc.repo.GetByVersion(ctx, tc.projectID, 1)
-	if err != nil {
-		t.Fatalf("GetByVersion failed: %v", err)
-	}
-	if retrieved.Version != 1 {
-		t.Errorf("expected version 1, got %d", retrieved.Version)
-	}
-}
-
-func TestOntologyRepository_GetByVersion_NotFound(t *testing.T) {
-	tc := setupOntologyTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	tc.createTestOntology(ctx, 1, true)
-
-	_, err := tc.repo.GetByVersion(ctx, tc.projectID, 99)
-	if err == nil {
-		t.Error("expected error for non-existent version")
 	}
 }
 
@@ -519,88 +481,6 @@ func TestOntologyRepository_UpdateColumnDetails_Success(t *testing.T) {
 }
 
 // ============================================================================
-// SetActive Tests
-// ============================================================================
-
-func TestOntologyRepository_SetActive_Success(t *testing.T) {
-	tc := setupOntologyTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	tc.createTestOntology(ctx, 1, true)
-	tc.createTestOntology(ctx, 2, false)
-
-	// Switch active to version 2
-	err := tc.repo.SetActive(ctx, tc.projectID, 2)
-	if err != nil {
-		t.Fatalf("SetActive failed: %v", err)
-	}
-
-	// Verify version 2 is now active
-	active, err := tc.repo.GetActive(ctx, tc.projectID)
-	if err != nil {
-		t.Fatalf("GetActive failed: %v", err)
-	}
-	if active.Version != 2 {
-		t.Errorf("expected version 2 active, got %d", active.Version)
-	}
-
-	// Verify version 1 is now inactive
-	v1, err := tc.repo.GetByVersion(ctx, tc.projectID, 1)
-	if err != nil {
-		t.Fatalf("GetByVersion failed: %v", err)
-	}
-	if v1.IsActive {
-		t.Error("expected version 1 to be inactive")
-	}
-}
-
-func TestOntologyRepository_SetActive_NotFound(t *testing.T) {
-	tc := setupOntologyTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	tc.createTestOntology(ctx, 1, true)
-
-	err := tc.repo.SetActive(ctx, tc.projectID, 99)
-	if err == nil {
-		t.Error("expected error for non-existent version")
-	}
-}
-
-// ============================================================================
-// DeactivateAll Tests
-// ============================================================================
-
-func TestOntologyRepository_DeactivateAll_Success(t *testing.T) {
-	tc := setupOntologyTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	// Create one active ontology
-	tc.createTestOntology(ctx, 1, true)
-
-	err := tc.repo.DeactivateAll(ctx, tc.projectID)
-	if err != nil {
-		t.Fatalf("DeactivateAll failed: %v", err)
-	}
-
-	active, err := tc.repo.GetActive(ctx, tc.projectID)
-	if err != nil {
-		t.Fatalf("GetActive failed: %v", err)
-	}
-	if active != nil {
-		t.Error("expected no active ontology after DeactivateAll")
-	}
-}
-
-// ============================================================================
 // GetNextVersion Tests
 // ============================================================================
 
@@ -667,12 +547,6 @@ func TestOntologyRepository_NoTenantScope(t *testing.T) {
 		t.Error("expected error for GetActive without tenant scope")
 	}
 
-	// GetByVersion should fail
-	_, err = tc.repo.GetByVersion(ctx, tc.projectID, 1)
-	if err == nil {
-		t.Error("expected error for GetByVersion without tenant scope")
-	}
-
 	// UpdateDomainSummary should fail
 	err = tc.repo.UpdateDomainSummary(ctx, tc.projectID, &models.DomainSummary{})
 	if err == nil {
@@ -697,156 +571,9 @@ func TestOntologyRepository_NoTenantScope(t *testing.T) {
 		t.Error("expected error for UpdateColumnDetails without tenant scope")
 	}
 
-	// SetActive should fail
-	err = tc.repo.SetActive(ctx, tc.projectID, 1)
-	if err == nil {
-		t.Error("expected error for SetActive without tenant scope")
-	}
-
-	// DeactivateAll should fail
-	err = tc.repo.DeactivateAll(ctx, tc.projectID)
-	if err == nil {
-		t.Error("expected error for DeactivateAll without tenant scope")
-	}
-
 	// GetNextVersion should fail
 	_, err = tc.repo.GetNextVersion(ctx, tc.projectID)
 	if err == nil {
 		t.Error("expected error for GetNextVersion without tenant scope")
-	}
-}
-
-// ============================================================================
-// WriteCleanOntology Tests
-// ============================================================================
-
-func TestOntologyRepository_WriteCleanOntology_Success(t *testing.T) {
-	tc := setupOntologyTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	// Create ontology with semantic content
-	ontology := &models.TieredOntology{
-		ProjectID: tc.projectID,
-		Version:   1,
-		IsActive:  true,
-		DomainSummary: &models.DomainSummary{
-			Description: "Test domain",
-			Domains:     []string{"sales"},
-		},
-		EntitySummaries: map[string]*models.EntitySummary{
-			"orders": {
-				TableName:    "orders",
-				BusinessName: "Customer Orders",
-				Description:  "All customer purchase orders",
-				Domain:       "sales",
-				Synonyms:     []string{"purchases"},
-			},
-		},
-		ColumnDetails: map[string][]models.ColumnDetail{
-			"orders": {
-				{
-					Name:         "id",
-					Description:  "Order identifier",
-					IsPrimaryKey: true,
-				},
-				{
-					Name:         "status",
-					Description:  "Order status",
-					SemanticType: "order_lifecycle",
-					EnumValues: []models.EnumValue{
-						{Value: "pending", Description: "Awaiting processing"},
-						{Value: "shipped", Description: "Order shipped"},
-					},
-				},
-			},
-		},
-	}
-
-	err := tc.repo.Create(ctx, ontology)
-	if err != nil {
-		t.Fatalf("Create failed: %v", err)
-	}
-
-	// WriteCleanOntology should succeed when active ontology exists
-	err = tc.repo.WriteCleanOntology(ctx, tc.projectID)
-	if err != nil {
-		t.Fatalf("WriteCleanOntology failed: %v", err)
-	}
-
-	// Verify ontology is still accessible
-	retrieved, err := tc.repo.GetActive(ctx, tc.projectID)
-	if err != nil {
-		t.Fatalf("GetActive failed: %v", err)
-	}
-
-	// Verify semantic content is preserved
-	if retrieved.DomainSummary == nil || retrieved.DomainSummary.Description != "Test domain" {
-		t.Error("expected DomainSummary to be preserved")
-	}
-
-	ordersSummary := retrieved.EntitySummaries["orders"]
-	if ordersSummary == nil {
-		t.Fatal("expected orders entity summary")
-	}
-	if ordersSummary.BusinessName != "Customer Orders" {
-		t.Errorf("expected BusinessName 'Customer Orders', got %q", ordersSummary.BusinessName)
-	}
-
-	ordersCols := retrieved.ColumnDetails["orders"]
-	if len(ordersCols) != 2 {
-		t.Fatalf("expected 2 columns, got %d", len(ordersCols))
-	}
-}
-
-func TestOntologyRepository_WriteCleanOntology_NoActiveOntology(t *testing.T) {
-	tc := setupOntologyTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	// No ontology exists
-	err := tc.repo.WriteCleanOntology(ctx, tc.projectID)
-	if err == nil {
-		t.Error("expected error when no active ontology")
-	}
-}
-
-func TestOntologyRepository_WriteCleanOntology_EmptyOntology(t *testing.T) {
-	tc := setupOntologyTest(t)
-	tc.cleanup()
-
-	ctx, cleanup := tc.createTestContext()
-	defer cleanup()
-
-	// Create empty ontology
-	ontology := &models.TieredOntology{
-		ProjectID: tc.projectID,
-		Version:   1,
-		IsActive:  true,
-	}
-
-	err := tc.repo.Create(ctx, ontology)
-	if err != nil {
-		t.Fatalf("Create failed: %v", err)
-	}
-
-	// WriteCleanOntology should handle nil maps gracefully
-	err = tc.repo.WriteCleanOntology(ctx, tc.projectID)
-	if err != nil {
-		t.Fatalf("WriteCleanOntology failed for empty ontology: %v", err)
-	}
-
-	retrieved, err := tc.repo.GetActive(ctx, tc.projectID)
-	if err != nil {
-		t.Fatalf("GetActive failed: %v", err)
-	}
-
-	// Should still be valid with empty maps
-	if retrieved.EntitySummaries == nil {
-		// Empty map after clean write is acceptable
 	}
 }

@@ -140,10 +140,6 @@ func (m *mockDatasourceTestOntologyRepo) GetActive(ctx context.Context, projectI
 	return nil, errors.New("not implemented in mock")
 }
 
-func (m *mockDatasourceTestOntologyRepo) GetByVersion(ctx context.Context, projectID uuid.UUID, version int) (*models.TieredOntology, error) {
-	return nil, errors.New("not implemented in mock")
-}
-
 func (m *mockDatasourceTestOntologyRepo) UpdateDomainSummary(ctx context.Context, projectID uuid.UUID, summary *models.DomainSummary) error {
 	return errors.New("not implemented in mock")
 }
@@ -160,28 +156,12 @@ func (m *mockDatasourceTestOntologyRepo) UpdateColumnDetails(ctx context.Context
 	return errors.New("not implemented in mock")
 }
 
-func (m *mockDatasourceTestOntologyRepo) UpdateMetadata(ctx context.Context, projectID uuid.UUID, metadata map[string]any) error {
-	return errors.New("not implemented in mock")
-}
-
-func (m *mockDatasourceTestOntologyRepo) SetActive(ctx context.Context, projectID uuid.UUID, version int) error {
-	return errors.New("not implemented in mock")
-}
-
-func (m *mockDatasourceTestOntologyRepo) DeactivateAll(ctx context.Context, projectID uuid.UUID) error {
-	return errors.New("not implemented in mock")
-}
-
 func (m *mockDatasourceTestOntologyRepo) GetNextVersion(ctx context.Context, projectID uuid.UUID) (int, error) {
 	return 0, errors.New("not implemented in mock")
 }
 
 func (m *mockDatasourceTestOntologyRepo) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
 	return m.deleteErr
-}
-
-func (m *mockDatasourceTestOntologyRepo) WriteCleanOntology(ctx context.Context, projectID uuid.UUID) error {
-	return nil
 }
 
 func newTestService(repo *mockDatasourceRepository) (DatasourceService, *crypto.CredentialEncryptor) {

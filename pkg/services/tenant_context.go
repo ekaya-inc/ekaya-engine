@@ -6,15 +6,14 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
-	"github.com/ekaya-inc/ekaya-engine/pkg/services/workflow"
 )
 
-// TenantContextFunc is an alias for workflow.TenantContextFunc for backwards compatibility.
-// New code should import from pkg/services/workflow directly.
-type TenantContextFunc = workflow.TenantContextFunc
+// TenantContextFunc acquires a tenant-scoped database connection.
+// Returns the scoped context, a cleanup function (MUST be called), and any error.
+type TenantContextFunc func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error)
 
 // NewTenantContextFunc creates a TenantContextFunc that uses the given database.
-func NewTenantContextFunc(db *database.DB) workflow.TenantContextFunc {
+func NewTenantContextFunc(db *database.DB) TenantContextFunc {
 	return func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {
 		scope, err := db.WithTenant(ctx, projectID)
 		if err != nil {

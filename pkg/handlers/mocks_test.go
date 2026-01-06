@@ -88,6 +88,14 @@ func (m *mockProjectService) SyncFromCentralAsync(projectID uuid.UUID, papiURL, 
 	// No-op for tests
 }
 
+func (m *mockProjectService) GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error) {
+	if m.err != nil {
+		return "", m.err
+	}
+	// Return empty string by default (no project-specific auth URL)
+	return "", nil
+}
+
 // mockAuthService is a mock AuthService for integration testing.
 type mockAuthService struct {
 	claims *auth.Claims
@@ -331,15 +339,5 @@ func (m *mockSchemaService) GetRelationshipsResponse(ctx context.Context, projec
 	return &models.RelationshipsResponse{
 		Relationships: []*models.RelationshipDetail{},
 		TotalCount:    0,
-	}, nil
-}
-
-func (m *mockSchemaService) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.LegacyRelationshipCandidatesResponse, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	return &models.LegacyRelationshipCandidatesResponse{
-		Candidates: []models.LegacyRelationshipCandidate{},
-		Summary:    models.CandidatesSummary{},
 	}, nil
 }

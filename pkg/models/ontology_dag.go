@@ -106,9 +106,6 @@ const (
 	DAGNodeOntologyFinalization   DAGNodeName = "OntologyFinalization"
 	DAGNodeGlossaryDiscovery      DAGNodeName = "GlossaryDiscovery"
 	DAGNodeGlossaryEnrichment     DAGNodeName = "GlossaryEnrichment"
-
-	// Deprecated: Use DAGNodeFKDiscovery instead. Kept for backward compatibility with existing DAGs.
-	DAGNodeRelationshipDiscovery DAGNodeName = "RelationshipDiscovery"
 )
 
 // DAGNodeOrder defines the execution order for each node.
@@ -122,9 +119,6 @@ var DAGNodeOrder = map[DAGNodeName]int{
 	DAGNodeOntologyFinalization:   7,
 	DAGNodeGlossaryDiscovery:      8,
 	DAGNodeGlossaryEnrichment:     9,
-
-	// Deprecated: mapped to same order as FKDiscovery for backward compatibility
-	DAGNodeRelationshipDiscovery: 3,
 }
 
 // AllDAGNodes returns all DAG node names in execution order.

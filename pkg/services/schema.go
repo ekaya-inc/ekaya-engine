@@ -40,9 +40,6 @@ type SchemaService interface {
 	// GetRelationshipsResponse returns enriched relationships with table/column details and empty/orphan tables.
 	GetRelationshipsResponse(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RelationshipsResponse, error)
 
-	// GetRelationshipCandidates returns all relationship candidates including rejected ones with summary stats.
-	GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.LegacyRelationshipCandidatesResponse, error)
-
 	// UpdateTableMetadata updates business_name and/or description for a table.
 	UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error
 
@@ -741,41 +738,6 @@ func (s *schemaService) GetRelationshipsResponse(ctx context.Context, projectID,
 		TotalCount:    len(details),
 		EmptyTables:   emptyTables,
 		OrphanTables:  orphanTables,
-	}, nil
-}
-
-// GetRelationshipCandidates returns all relationship candidates including rejected ones with summary stats.
-func (s *schemaService) GetRelationshipCandidates(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.LegacyRelationshipCandidatesResponse, error) {
-	// Get all candidates including rejected ones
-	candidates, err := s.schemaRepo.GetRelationshipCandidates(ctx, projectID, datasourceID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get relationship candidates: %w", err)
-	}
-
-	// Compute summary statistics
-	summary := models.CandidatesSummary{
-		Total: len(candidates),
-	}
-	for _, c := range candidates {
-		switch c.Status {
-		case models.CandidateStatusVerified:
-			summary.Verified++
-		case models.CandidateStatusRejected:
-			summary.Rejected++
-		case models.CandidateStatusPending:
-			summary.Pending++
-		}
-	}
-
-	// Convert to response type (candidates is already the right type)
-	result := make([]models.LegacyRelationshipCandidate, len(candidates))
-	for i, c := range candidates {
-		result[i] = *c
-	}
-
-	return &models.LegacyRelationshipCandidatesResponse{
-		Candidates: result,
-		Summary:    summary,
 	}, nil
 }
 

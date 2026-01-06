@@ -417,7 +417,7 @@ const MCPServerPage = () => {
           <>
             <MCPServerURL
               serverUrl={config.serverUrl}
-              docsUrl="https://docs.ekaya.ai/mcp-setup"
+              docsUrl={`https://us.ekaya.ai/mcp-setup?mcp_url=${encodeURIComponent(config.serverUrl)}`}
               agentMode={isAgentToolsEnabled}
               agentApiKey={agentApiKey}
             />

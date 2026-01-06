@@ -21,7 +21,7 @@ func TestWellKnownHandler_OAuthDiscovery(t *testing.T) {
 			},
 		},
 	}
-	handler := NewWellKnownHandler(cfg, zap.NewNop())
+	handler := NewWellKnownHandler(cfg, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
 	req.Host = "localhost:3443"
@@ -70,7 +70,7 @@ func TestWellKnownHandler_OAuthDiscovery_WithAuthURL(t *testing.T) {
 			},
 		},
 	}
-	handler := NewWellKnownHandler(cfg, zap.NewNop())
+	handler := NewWellKnownHandler(cfg, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server?auth_url=https://other.example.com", nil)
 	req.Host = "localhost:3443"
@@ -111,7 +111,7 @@ func TestWellKnownHandler_OAuthDiscovery_InvalidAuthURL(t *testing.T) {
 			},
 		},
 	}
-	handler := NewWellKnownHandler(cfg, zap.NewNop())
+	handler := NewWellKnownHandler(cfg, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server?auth_url=https://malicious.example.com", nil)
 	rec := httptest.NewRecorder()
@@ -128,7 +128,7 @@ func TestWellKnownHandler_ProtectedResource(t *testing.T) {
 		BaseURL:       "http://localhost:3443",
 		AuthServerURL: "https://auth.example.com",
 	}
-	handler := NewWellKnownHandler(cfg, zap.NewNop())
+	handler := NewWellKnownHandler(cfg, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-protected-resource", nil)
 	req.Host = "localhost:3443"
@@ -170,7 +170,7 @@ func TestWellKnownHandler_ProtectedResource_MissingAuthServerURL(t *testing.T) {
 		BaseURL:       "http://localhost:3443",
 		AuthServerURL: "", // Empty - not configured
 	}
-	handler := NewWellKnownHandler(cfg, zap.NewNop())
+	handler := NewWellKnownHandler(cfg, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-protected-resource", nil)
 	rec := httptest.NewRecorder()
@@ -192,7 +192,7 @@ func TestWellKnownHandler_RegisterRoutes(t *testing.T) {
 			},
 		},
 	}
-	handler := NewWellKnownHandler(cfg, zap.NewNop())
+	handler := NewWellKnownHandler(cfg, nil, zap.NewNop())
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
@@ -232,7 +232,7 @@ func TestWellKnownHandler_OAuthDiscovery_WithProjectID(t *testing.T) {
 			},
 		},
 	}
-	handler := NewWellKnownHandler(cfg, zap.NewNop())
+	handler := NewWellKnownHandler(cfg, nil, zap.NewNop())
 
 	projectID := "6089f231-1ccb-4ab8-bba1-7e7a03893939"
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server?project_id="+projectID, nil)
@@ -267,7 +267,7 @@ func TestWellKnownHandler_ProtectedResource_WithMCPProjectPath(t *testing.T) {
 		BaseURL:       "http://localhost:3443",
 		AuthServerURL: "https://auth.example.com",
 	}
-	handler := NewWellKnownHandler(cfg, zap.NewNop())
+	handler := NewWellKnownHandler(cfg, nil, zap.NewNop())
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
@@ -317,7 +317,7 @@ func TestWellKnownHandler_OAuthDiscovery_WithPathBasedProjectID(t *testing.T) {
 			},
 		},
 	}
-	handler := NewWellKnownHandler(cfg, zap.NewNop())
+	handler := NewWellKnownHandler(cfg, nil, zap.NewNop())
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
@@ -360,7 +360,7 @@ func TestWellKnownHandler_OAuthDiscovery_InvalidPathProjectID(t *testing.T) {
 			},
 		},
 	}
-	handler := NewWellKnownHandler(cfg, zap.NewNop())
+	handler := NewWellKnownHandler(cfg, nil, zap.NewNop())
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
@@ -382,7 +382,7 @@ func TestWellKnownHandler_ProtectedResource_InvalidProjectID(t *testing.T) {
 		BaseURL:       "http://localhost:3443",
 		AuthServerURL: "https://auth.example.com",
 	}
-	handler := NewWellKnownHandler(cfg, zap.NewNop())
+	handler := NewWellKnownHandler(cfg, nil, zap.NewNop())
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)

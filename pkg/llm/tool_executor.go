@@ -76,10 +76,6 @@ func (e *OntologyToolExecutor) ExecuteTool(ctx context.Context, name string, arg
 		return e.updateEntity(ctx, arguments)
 	case "update_column":
 		return e.updateColumn(ctx, arguments)
-	case "answer_question":
-		return e.answerQuestion(ctx, arguments)
-	case "get_pending_questions":
-		return e.getPendingQuestions(ctx, arguments)
 	case "create_domain_entity":
 		return e.createDomainEntity(ctx, arguments)
 	case "create_entity_relationship":
@@ -492,61 +488,6 @@ func (e *OntologyToolExecutor) updateColumn(ctx context.Context, arguments strin
 		"success":     true,
 		"table_name":  args.TableName,
 		"column_name": args.ColumnName,
-	}
-
-	responseJSON, err := json.Marshal(response)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal response: %w", err)
-	}
-
-	return string(responseJSON), nil
-}
-
-// ============================================================================
-// Tool: answer_question
-// ============================================================================
-
-type answerQuestionArgs struct {
-	QuestionID string `json:"question_id"`
-	Answer     string `json:"answer"`
-}
-
-func (e *OntologyToolExecutor) answerQuestion(ctx context.Context, arguments string) (string, error) {
-	var args answerQuestionArgs
-	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
-
-	if args.QuestionID == "" || args.Answer == "" {
-		return "", fmt.Errorf("question_id and answer are required")
-	}
-
-	// Note: The old workflow state system has been replaced by the DAG-based workflow.
-	// This tool is deprecated and returns a not-found response.
-	e.logger.Info("answerQuestion tool called (deprecated)",
-		zap.String("question_id", args.QuestionID))
-
-	return `{"error": "Question not found - workflow state system has been replaced by DAG-based workflow"}`, nil
-}
-
-// ============================================================================
-// Tool: get_pending_questions
-// ============================================================================
-
-type getPendingQuestionsArgs struct {
-	Limit int `json:"limit"`
-}
-
-func (e *OntologyToolExecutor) getPendingQuestions(ctx context.Context, arguments string) (string, error) {
-	// Note: The old workflow state system has been replaced by the DAG-based workflow.
-	// This tool is deprecated and returns an empty list.
-	e.logger.Info("getPendingQuestions tool called (deprecated)")
-
-	response := map[string]any{
-		"questions":     []any{},
-		"count":         0,
-		"total_pending": 0,
-		"message":       "Workflow state system has been replaced by DAG-based workflow",
 	}
 
 	responseJSON, err := json.Marshal(response)

@@ -25,7 +25,6 @@ import type {
   ListQueriesResponse,
   MCPConfigResponse,
   Query,
-  RelationshipCandidatesResponse,
   RelationshipDetail,
   RelationshipsResponse,
   SaveSelectionsResponse,
@@ -310,20 +309,6 @@ class EngineApiService {
       {
         method: 'POST',
       }
-    );
-  }
-
-  /**
-   * Get relationship candidates (verified and rejected)
-   * Useful for understanding what was discovered and why some candidates were rejected
-   * GET /api/projects/{projectId}/datasources/{datasourceId}/schema/relationships/candidates
-   */
-  async getRelationshipCandidates(
-    projectId: string,
-    datasourceId: string
-  ): Promise<ApiResponse<RelationshipCandidatesResponse>> {
-    return this.makeRequest<RelationshipCandidatesResponse>(
-      `/${projectId}/datasources/${datasourceId}/schema/relationships/candidates`
     );
   }
 
@@ -643,6 +628,22 @@ class EngineApiService {
       `/${projectId}/datasources/${datasourceId}/ontology`,
       { method: 'DELETE' }
     );
+  }
+
+  /**
+   * Delete project and all associated data
+   * DELETE /api/projects/{projectId}
+   */
+  async deleteProject(projectId: string): Promise<void> {
+    const url = `${this.baseURL}/${projectId}`;
+    const response = await fetchWithAuth(url, { method: 'DELETE' });
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(
+        data.error ?? data.message ?? `HTTP ${response.status}: ${response.statusText}`
+      );
+    }
+    // DELETE returns 204 No Content on success
   }
 }
 

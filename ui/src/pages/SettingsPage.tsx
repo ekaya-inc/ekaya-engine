@@ -1,4 +1,4 @@
-import { Settings, ArrowLeft, Moon, Sun, Monitor, LogOut } from "lucide-react";
+import { Settings, ArrowLeft, Moon, Sun, Monitor, LogOut, Trash2, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -11,12 +11,50 @@ import {
   CardHeader,
   CardTitle,
 } from "../components/ui/Card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/Dialog";
+import { Input } from "../components/ui/Input";
+import { useProject } from "../contexts/ProjectContext";
+import engineApi from "../services/engineApi";
 
 const SettingsPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
   const { theme, setTheme } = useTheme();
+  const { projectName, urls } = useProject();
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleDeleteProject = async () => {
+    if (!pid || deleteConfirmation !== "DELETE") return;
+
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      await engineApi.deleteProject(pid);
+      // Redirect to ekaya-central project page
+      if (urls.projectPageUrl) {
+        window.location.href = urls.projectPageUrl;
+      } else {
+        // Fallback: navigate to root which will trigger re-auth
+        window.location.href = "/";
+      }
+    } catch (error) {
+      console.error("Failed to delete project:", error);
+      setDeleteError(error instanceof Error ? error.message : "Failed to delete project");
+      setIsDeleting(false);
+    }
+  };
 
   const handleSignOut = async () => {
     setIsSigningOut(true);
@@ -153,7 +191,96 @@ const SettingsPage = () => {
           </CardContent>
         </Card>
 
+        {/* Danger Zone */}
+        <Card className="border-red-200 dark:border-red-900">
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-500/10">
+                <Trash2 className="h-5 w-5 text-red-500" />
+              </div>
+              <div>
+                <CardTitle className="text-red-600 dark:text-red-400">Danger Zone</CardTitle>
+                <CardDescription>
+                  Permanently delete this project from Ekaya Engine
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-text-secondary mb-4">
+              This will permanently delete all project data from Ekaya Engine, including datasources,
+              schema, ontology, and approved queries. This action cannot be undone.
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => setShowDeleteDialog(true)}
+              className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-300"
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete Project
+            </Button>
+          </CardContent>
+        </Card>
+
       </div>
+
+      {/* Delete Project Confirmation Dialog */}
+      <Dialog open={showDeleteDialog} onOpenChange={(open) => {
+        setShowDeleteDialog(open);
+        if (!open) {
+          setDeleteConfirmation("");
+          setDeleteError(null);
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Project?</DialogTitle>
+            <DialogDescription>
+              This will permanently delete <strong>{projectName ?? "this project"}</strong> and all
+              associated data from Ekaya Engine, including datasources, schema, ontology, and
+              approved queries. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <label className="text-sm font-medium text-text-primary">
+              Type <span className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">DELETE</span> to confirm
+            </label>
+            <Input
+              value={deleteConfirmation}
+              onChange={(e) => setDeleteConfirmation(e.target.value)}
+              placeholder="DELETE"
+              className="mt-2"
+              disabled={isDeleting}
+            />
+            {deleteError && (
+              <p className="mt-2 text-sm text-red-600">{deleteError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowDeleteDialog(false)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteProject}
+              disabled={deleteConfirmation !== "DELETE" || isDeleting}
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete Project"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

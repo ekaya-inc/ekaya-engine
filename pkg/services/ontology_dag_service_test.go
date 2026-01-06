@@ -382,7 +382,7 @@ func TestMarkDAGFailed_StoresErrorOnCurrentNode(t *testing.T) {
 	nodes := []models.DAGNode{
 		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeEntityDiscovery), Status: models.DAGNodeStatusRunning},
 		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeEntityEnrichment), Status: models.DAGNodeStatusPending},
-		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeRelationshipDiscovery), Status: models.DAGNodeStatusPending},
+		{ID: uuid.New(), DAGID: dagID, NodeName: string(models.DAGNodeFKDiscovery), Status: models.DAGNodeStatusPending},
 	}
 
 	dag := &models.OntologyDAG{
