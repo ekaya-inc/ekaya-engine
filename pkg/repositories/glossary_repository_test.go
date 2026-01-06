@@ -85,10 +85,11 @@ func (tc *glossaryTestContext) createTestContext() (context.Context, func()) {
 func (tc *glossaryTestContext) createTestTerm(ctx context.Context, termName, definition string) *models.BusinessGlossaryTerm {
 	tc.t.Helper()
 	term := &models.BusinessGlossaryTerm{
-		ProjectID:  tc.projectID,
-		Term:       termName,
-		Definition: definition,
-		Source:     "user",
+		ProjectID:   tc.projectID,
+		Term:        termName,
+		Definition:  definition,
+		DefiningSQL: "SELECT 1", // Minimal valid SQL
+		Source:      models.GlossarySourceManual,
 	}
 	err := tc.repo.Create(ctx, term)
 	if err != nil {
@@ -112,14 +113,13 @@ func TestGlossaryRepository_Create_Success(t *testing.T) {
 		ProjectID:   tc.projectID,
 		Term:        "Revenue",
 		Definition:  "Earned amount after fees from completed transactions",
-		SQLPattern:  "SUM(earned_amount) WHERE transaction_state = 'completed'",
+		DefiningSQL: "SELECT SUM(earned_amount) AS revenue FROM billing_transactions WHERE transaction_state = 'completed'",
 		BaseTable:   "billing_transactions",
-		ColumnsUsed: []string{"earned_amount", "transaction_state"},
-		Filters: []models.Filter{
-			{Column: "transaction_state", Operator: "=", Values: []string{"completed"}},
+		OutputColumns: []models.OutputColumn{
+			{Name: "revenue", Type: "numeric", Description: "Total revenue"},
 		},
-		Aggregation: "SUM",
-		Source:      "user",
+		Aliases: []string{"Total Revenue", "Earned Revenue"},
+		Source:  models.GlossarySourceManual,
 	}
 
 	err := tc.repo.Create(ctx, term)
@@ -151,14 +151,14 @@ func TestGlossaryRepository_Create_Success(t *testing.T) {
 	if retrieved.Definition != "Earned amount after fees from completed transactions" {
 		t.Errorf("expected definition, got %q", retrieved.Definition)
 	}
-	if len(retrieved.ColumnsUsed) != 2 {
-		t.Errorf("expected 2 columns_used, got %d", len(retrieved.ColumnsUsed))
+	if len(retrieved.OutputColumns) != 1 {
+		t.Errorf("expected 1 output column, got %d", len(retrieved.OutputColumns))
 	}
-	if len(retrieved.Filters) != 1 {
-		t.Errorf("expected 1 filter, got %d", len(retrieved.Filters))
+	if len(retrieved.Aliases) != 2 {
+		t.Errorf("expected 2 aliases, got %d", len(retrieved.Aliases))
 	}
-	if retrieved.Filters[0].Column != "transaction_state" {
-		t.Errorf("expected filter column 'transaction_state', got %q", retrieved.Filters[0].Column)
+	if retrieved.BaseTable != "billing_transactions" {
+		t.Errorf("expected base_table 'billing_transactions', got %q", retrieved.BaseTable)
 	}
 }
 
@@ -170,10 +170,11 @@ func TestGlossaryRepository_Create_MinimalFields(t *testing.T) {
 	defer cleanup()
 
 	term := &models.BusinessGlossaryTerm{
-		ProjectID:  tc.projectID,
-		Term:       "Active User",
-		Definition: "User with recent activity in the last 30 days",
-		Source:     "suggested",
+		ProjectID:   tc.projectID,
+		Term:        "Active User",
+		Definition:  "User with recent activity in the last 30 days",
+		DefiningSQL: "SELECT COUNT(DISTINCT user_id) FROM users WHERE last_active >= NOW() - INTERVAL '30 days'",
+		Source:      models.GlossarySourceInferred,
 	}
 
 	err := tc.repo.Create(ctx, term)
@@ -185,14 +186,14 @@ func TestGlossaryRepository_Create_MinimalFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID failed: %v", err)
 	}
-	if retrieved.SQLPattern != "" {
-		t.Errorf("expected empty sql_pattern, got %q", retrieved.SQLPattern)
+	if retrieved.BaseTable != "" {
+		t.Errorf("expected empty base_table, got %q", retrieved.BaseTable)
 	}
-	if len(retrieved.ColumnsUsed) != 0 {
-		t.Errorf("expected empty columns_used, got %v", retrieved.ColumnsUsed)
+	if len(retrieved.OutputColumns) != 0 {
+		t.Errorf("expected empty output_columns, got %v", retrieved.OutputColumns)
 	}
-	if len(retrieved.Filters) != 0 {
-		t.Errorf("expected empty filters, got %v", retrieved.Filters)
+	if len(retrieved.Aliases) != 0 {
+		t.Errorf("expected empty aliases, got %v", retrieved.Aliases)
 	}
 }
 
@@ -207,10 +208,11 @@ func TestGlossaryRepository_Create_DuplicateTerm(t *testing.T) {
 
 	// Attempt to create duplicate
 	term := &models.BusinessGlossaryTerm{
-		ProjectID:  tc.projectID,
-		Term:       "GMV",
-		Definition: "Different definition",
-		Source:     "user",
+		ProjectID:   tc.projectID,
+		Term:        "GMV",
+		Definition:  "Different definition",
+		DefiningSQL: "SELECT 1",
+		Source:      models.GlossarySourceManual,
 	}
 
 	err := tc.repo.Create(ctx, term)
@@ -238,9 +240,12 @@ func TestGlossaryRepository_Update_Success(t *testing.T) {
 
 	// Update the term
 	original.Definition = "Updated: Total cost to acquire a new customer"
-	original.SQLPattern = "SUM(marketing_spend) / COUNT(new_customers)"
-	original.ColumnsUsed = []string{"marketing_spend"}
-	original.Aggregation = "RATIO"
+	original.DefiningSQL = "SELECT SUM(marketing_spend) / COUNT(new_customers) AS cac FROM campaigns"
+	original.BaseTable = "campaigns"
+	original.Aliases = []string{"Customer Cost", "Acquisition Cost"}
+	original.OutputColumns = []models.OutputColumn{
+		{Name: "cac", Type: "numeric", Description: "Customer acquisition cost"},
+	}
 
 	err := tc.repo.Update(ctx, original)
 	if err != nil {
@@ -260,11 +265,14 @@ func TestGlossaryRepository_Update_Success(t *testing.T) {
 	if retrieved.Definition != "Updated: Total cost to acquire a new customer" {
 		t.Errorf("expected updated definition, got %q", retrieved.Definition)
 	}
-	if retrieved.SQLPattern != "SUM(marketing_spend) / COUNT(new_customers)" {
-		t.Errorf("expected updated sql_pattern, got %q", retrieved.SQLPattern)
+	if retrieved.DefiningSQL != "SELECT SUM(marketing_spend) / COUNT(new_customers) AS cac FROM campaigns" {
+		t.Errorf("expected updated defining_sql, got %q", retrieved.DefiningSQL)
 	}
-	if retrieved.Aggregation != "RATIO" {
-		t.Errorf("expected aggregation 'RATIO', got %q", retrieved.Aggregation)
+	if retrieved.BaseTable != "campaigns" {
+		t.Errorf("expected base_table 'campaigns', got %q", retrieved.BaseTable)
+	}
+	if len(retrieved.Aliases) != 2 {
+		t.Errorf("expected 2 aliases, got %d", len(retrieved.Aliases))
 	}
 }
 
@@ -276,11 +284,12 @@ func TestGlossaryRepository_Update_NotFound(t *testing.T) {
 	defer cleanup()
 
 	term := &models.BusinessGlossaryTerm{
-		ID:         uuid.New(),
-		ProjectID:  tc.projectID,
-		Term:       "NonExistent",
-		Definition: "Does not exist",
-		Source:     "user",
+		ID:          uuid.New(),
+		ProjectID:   tc.projectID,
+		Term:        "NonExistent",
+		Definition:  "Does not exist",
+		DefiningSQL: "SELECT 1",
+		Source:      models.GlossarySourceManual,
 	}
 
 	err := tc.repo.Update(ctx, term)
@@ -501,10 +510,10 @@ func TestGlossaryRepository_GetByID_NotFound(t *testing.T) {
 }
 
 // ============================================================================
-// JSONB Field Tests
+// Alias Tests
 // ============================================================================
 
-func TestGlossaryRepository_JSONBFields_ColumnsUsed(t *testing.T) {
+func TestGlossaryRepository_GetByAlias_Success(t *testing.T) {
 	tc := setupGlossaryTest(t)
 	tc.cleanup()
 
@@ -513,10 +522,11 @@ func TestGlossaryRepository_JSONBFields_ColumnsUsed(t *testing.T) {
 
 	term := &models.BusinessGlossaryTerm{
 		ProjectID:   tc.projectID,
-		Term:        "Profit Margin",
-		Definition:  "Revenue minus costs divided by revenue",
-		ColumnsUsed: []string{"revenue", "costs", "total_amount"},
-		Source:      "user",
+		Term:        "Monthly Active Users",
+		Definition:  "Users who logged in during the last 30 days",
+		DefiningSQL: "SELECT COUNT(DISTINCT user_id) FROM users WHERE last_login >= NOW() - INTERVAL '30 days'",
+		Aliases:     []string{"MAU", "Active Users"},
+		Source:      models.GlossarySourceManual,
 	}
 
 	err := tc.repo.Create(ctx, term)
@@ -524,19 +534,67 @@ func TestGlossaryRepository_JSONBFields_ColumnsUsed(t *testing.T) {
 		t.Fatalf("Create failed: %v", err)
 	}
 
-	retrieved, err := tc.repo.GetByID(ctx, term.ID)
+	// Lookup by alias
+	retrieved, err := tc.repo.GetByAlias(ctx, tc.projectID, "MAU")
 	if err != nil {
-		t.Fatalf("GetByID failed: %v", err)
+		t.Fatalf("GetByAlias failed: %v", err)
 	}
-	if len(retrieved.ColumnsUsed) != 3 {
-		t.Errorf("expected 3 columns, got %d", len(retrieved.ColumnsUsed))
+	if retrieved == nil {
+		t.Fatal("expected term, got nil")
 	}
-	if retrieved.ColumnsUsed[0] != "revenue" {
-		t.Errorf("expected first column 'revenue', got %q", retrieved.ColumnsUsed[0])
+	if retrieved.Term != "Monthly Active Users" {
+		t.Errorf("expected term 'Monthly Active Users', got %q", retrieved.Term)
+	}
+	if len(retrieved.Aliases) != 2 {
+		t.Errorf("expected 2 aliases, got %d", len(retrieved.Aliases))
 	}
 }
 
-func TestGlossaryRepository_JSONBFields_Filters(t *testing.T) {
+func TestGlossaryRepository_GetByAlias_NotFound(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	term, err := tc.repo.GetByAlias(ctx, tc.projectID, "NonExistentAlias")
+	if err != nil {
+		t.Fatalf("GetByAlias should not error for not found: %v", err)
+	}
+	if term != nil {
+		t.Errorf("expected nil for not found alias, got %+v", term)
+	}
+}
+
+func TestGlossaryRepository_CreateAlias_Success(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	term := tc.createTestTerm(ctx, "Revenue", "Total revenue")
+
+	// Add alias
+	err := tc.repo.CreateAlias(ctx, term.ID, "Total Rev")
+	if err != nil {
+		t.Fatalf("CreateAlias failed: %v", err)
+	}
+
+	// Verify alias was added
+	retrieved, err := tc.repo.GetByAlias(ctx, tc.projectID, "Total Rev")
+	if err != nil {
+		t.Fatalf("GetByAlias failed: %v", err)
+	}
+	if retrieved == nil {
+		t.Fatal("expected term, got nil")
+	}
+	if retrieved.Term != "Revenue" {
+		t.Errorf("expected term 'Revenue', got %q", retrieved.Term)
+	}
+}
+
+func TestGlossaryRepository_DeleteAlias_Success(t *testing.T) {
 	tc := setupGlossaryTest(t)
 	tc.cleanup()
 
@@ -544,14 +602,12 @@ func TestGlossaryRepository_JSONBFields_Filters(t *testing.T) {
 	defer cleanup()
 
 	term := &models.BusinessGlossaryTerm{
-		ProjectID:  tc.projectID,
-		Term:       "Completed GMV",
-		Definition: "GMV for completed transactions",
-		Filters: []models.Filter{
-			{Column: "transaction_state", Operator: "=", Values: []string{"completed"}},
-			{Column: "is_refunded", Operator: "=", Values: []string{"false"}},
-		},
-		Source: "user",
+		ProjectID:   tc.projectID,
+		Term:        "Churn Rate",
+		Definition:  "Percentage of customers who cancel",
+		DefiningSQL: "SELECT COUNT(*) FROM cancellations",
+		Aliases:     []string{"Attrition", "Cancel Rate"},
+		Source:      models.GlossarySourceManual,
 	}
 
 	err := tc.repo.Create(ctx, term)
@@ -559,22 +615,51 @@ func TestGlossaryRepository_JSONBFields_Filters(t *testing.T) {
 		t.Fatalf("Create failed: %v", err)
 	}
 
-	retrieved, err := tc.repo.GetByID(ctx, term.ID)
+	// Delete one alias
+	err = tc.repo.DeleteAlias(ctx, term.ID, "Attrition")
 	if err != nil {
-		t.Fatalf("GetByID failed: %v", err)
+		t.Fatalf("DeleteAlias failed: %v", err)
 	}
-	if len(retrieved.Filters) != 2 {
-		t.Errorf("expected 2 filters, got %d", len(retrieved.Filters))
+
+	// Verify alias was deleted
+	retrieved, err := tc.repo.GetByAlias(ctx, tc.projectID, "Attrition")
+	if err != nil {
+		t.Fatalf("GetByAlias failed: %v", err)
 	}
-	if retrieved.Filters[0].Operator != "=" {
-		t.Errorf("expected operator '=', got %q", retrieved.Filters[0].Operator)
+	if retrieved != nil {
+		t.Error("expected alias to be deleted")
 	}
-	if len(retrieved.Filters[0].Values) != 1 || retrieved.Filters[0].Values[0] != "completed" {
-		t.Errorf("expected values ['completed'], got %v", retrieved.Filters[0].Values)
+
+	// Other alias should still exist
+	retrieved, err = tc.repo.GetByAlias(ctx, tc.projectID, "Cancel Rate")
+	if err != nil {
+		t.Fatalf("GetByAlias failed: %v", err)
+	}
+	if retrieved == nil {
+		t.Error("expected other alias to still exist")
 	}
 }
 
-func TestGlossaryRepository_JSONBFields_FilterWithMultipleValues(t *testing.T) {
+func TestGlossaryRepository_DeleteAlias_NotFound(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	term := tc.createTestTerm(ctx, "GMV", "Gross Merchandise Value")
+
+	err := tc.repo.DeleteAlias(ctx, term.ID, "NonExistentAlias")
+	if err != apperrors.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// ============================================================================
+// Output Columns Tests
+// ============================================================================
+
+func TestGlossaryRepository_OutputColumns(t *testing.T) {
 	tc := setupGlossaryTest(t)
 	tc.cleanup()
 
@@ -582,13 +667,15 @@ func TestGlossaryRepository_JSONBFields_FilterWithMultipleValues(t *testing.T) {
 	defer cleanup()
 
 	term := &models.BusinessGlossaryTerm{
-		ProjectID:  tc.projectID,
-		Term:       "Pending or Processing GMV",
-		Definition: "GMV for transactions in progress",
-		Filters: []models.Filter{
-			{Column: "transaction_state", Operator: "IN", Values: []string{"pending", "processing", "confirming"}},
+		ProjectID:   tc.projectID,
+		Term:        "User Stats",
+		Definition:  "User statistics with multiple metrics",
+		DefiningSQL: "SELECT COUNT(*) as total, AVG(age) as avg_age FROM users",
+		OutputColumns: []models.OutputColumn{
+			{Name: "total", Type: "integer", Description: "Total users"},
+			{Name: "avg_age", Type: "numeric", Description: "Average age"},
 		},
-		Source: "user",
+		Source: models.GlossarySourceManual,
 	}
 
 	err := tc.repo.Create(ctx, term)
@@ -600,8 +687,14 @@ func TestGlossaryRepository_JSONBFields_FilterWithMultipleValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID failed: %v", err)
 	}
-	if len(retrieved.Filters[0].Values) != 3 {
-		t.Errorf("expected 3 values, got %d", len(retrieved.Filters[0].Values))
+	if len(retrieved.OutputColumns) != 2 {
+		t.Errorf("expected 2 output columns, got %d", len(retrieved.OutputColumns))
+	}
+	if retrieved.OutputColumns[0].Name != "total" {
+		t.Errorf("expected first column name 'total', got %q", retrieved.OutputColumns[0].Name)
+	}
+	if retrieved.OutputColumns[0].Type != "integer" {
+		t.Errorf("expected first column type 'integer', got %q", retrieved.OutputColumns[0].Type)
 	}
 }
 
@@ -616,10 +709,11 @@ func TestGlossaryRepository_NoTenantScope(t *testing.T) {
 	ctx := context.Background() // No tenant scope
 
 	term := &models.BusinessGlossaryTerm{
-		ProjectID:  tc.projectID,
-		Term:       "Test",
-		Definition: "Test definition",
-		Source:     "user",
+		ProjectID:   tc.projectID,
+		Term:        "Test",
+		Definition:  "Test definition",
+		DefiningSQL: "SELECT 1",
+		Source:      models.GlossarySourceManual,
 	}
 
 	// Create should fail
@@ -640,6 +734,12 @@ func TestGlossaryRepository_NoTenantScope(t *testing.T) {
 		t.Error("expected error for GetByTerm without tenant scope")
 	}
 
+	// GetByAlias should fail
+	_, err = tc.repo.GetByAlias(ctx, tc.projectID, "TestAlias")
+	if err == nil {
+		t.Error("expected error for GetByAlias without tenant scope")
+	}
+
 	// GetByID should fail
 	_, err = tc.repo.GetByID(ctx, uuid.New())
 	if err == nil {
@@ -656,5 +756,17 @@ func TestGlossaryRepository_NoTenantScope(t *testing.T) {
 	err = tc.repo.Delete(ctx, uuid.New())
 	if err == nil {
 		t.Error("expected error for Delete without tenant scope")
+	}
+
+	// CreateAlias should fail
+	err = tc.repo.CreateAlias(ctx, uuid.New(), "Alias")
+	if err == nil {
+		t.Error("expected error for CreateAlias without tenant scope")
+	}
+
+	// DeleteAlias should fail
+	err = tc.repo.DeleteAlias(ctx, uuid.New(), "Alias")
+	if err == nil {
+		t.Error("expected error for DeleteAlias without tenant scope")
 	}
 }

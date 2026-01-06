@@ -212,12 +212,79 @@ type BusinessGlossaryTerm struct {
 - All JSON tags match the database column names (snake_case in DB, automatically mapped by encoding/json)
 - Next step: Update repository layer to work with these new fields
 
-### 2.2 Update Repository (`pkg/repositories/glossary_repository.go`)
+### 2.2 Update Repository (`pkg/repositories/glossary_repository.go`) ✅
 
-- Update CRUD operations for new schema
-- Add `GetByAlias(ctx, projectID, alias)` method for alias lookup
-- Add `CreateAlias(ctx, glossaryID, alias)` and `DeleteAlias(ctx, glossaryID, alias)`
-- Remove all references to old fields (`sql_pattern`, `columns_used`, `filters`, `aggregation`)
+**Status:** Complete - Repository fully aligned with new schema and alias support
+
+**Implementation Details:**
+
+**Interface Changes:**
+- Added `GetByAlias(ctx, projectID, alias)` - Lookup term by alias name
+- Added `CreateAlias(ctx, glossaryID, alias)` - Add alias to existing term
+- Added `DeleteAlias(ctx, glossaryID, alias)` - Remove alias (returns ErrNotFound if not found)
+
+**Create Method:**
+- Uses new fields: `defining_sql`, `output_columns`, `updated_by`
+- Removed old fields: `sql_pattern`, `columns_used`, `filters`, `aggregation`
+- Automatically creates aliases if provided in `term.Aliases` slice
+- Rolls back entire transaction if any alias creation fails
+
+**Update Method:**
+- Uses new schema fields throughout
+- Replaces ALL aliases on update: DELETE all existing, then CREATE new ones
+- This "replace-all" approach prevents orphaned aliases and simplifies logic
+- Sets `updated_by` field
+
+**Get Methods (GetByProject, GetByTerm, GetByID):**
+- All use `LEFT JOIN engine_glossary_aliases` to include aliases
+- Use `jsonb_agg(a.alias) FILTER (WHERE a.alias IS NOT NULL)` to aggregate aliases
+- COALESCE to `'[]'::jsonb` for terms with no aliases
+- GROUP BY all glossary fields (required by PostgreSQL for aggregates)
+- Properly handle null JSONB in scanGlossaryTerm
+
+**GetByAlias Method:**
+- INNER JOIN to find glossary by alias match
+- Second LEFT JOIN to fetch ALL aliases for the found term (not just searched alias)
+- Returns `nil` if alias not found (not an error, consistent with GetByTerm behavior)
+
+**Alias Management Methods:**
+- CreateAlias: Direct INSERT into `engine_glossary_aliases`
+- DeleteAlias: Direct DELETE with RowsAffected check → ErrNotFound if zero rows
+
+**Helper Functions:**
+- scanGlossaryTerm: Scans new fields including JSONB arrays for `output_columns` and `aliases`
+- Handles null/empty JSONB gracefully (checks for "null" and "[]" string literals)
+- jsonbValue: Now handles `[]models.OutputColumn`, returns nil for empty slices
+
+**Test Coverage (23 tests, all passing):**
+- Create: full fields, minimal fields, duplicate term constraint
+- Update: success with alias replacement, not found error
+- Delete: success, not found error
+- GetByProject: returns all terms with aliases, empty result
+- GetByTerm: success with aliases, not found
+- GetByAlias: success (finds term by alias), not found (returns nil)
+- GetByID: success, not found
+- CreateAlias: adds new alias successfully
+- DeleteAlias: removes alias successfully, not found returns ErrNotFound
+- OutputColumns: storage and retrieval of multiple columns with types
+- RLS: enforcement for ALL methods including alias operations
+
+**Files Modified:**
+- `pkg/repositories/glossary_repository.go` - Repository implementation (424 lines)
+- `pkg/repositories/glossary_repository_test.go` - Comprehensive test suite (770 lines)
+
+**Key Design Decisions:**
+1. **Automatic alias management in Create/Update** - Simplifies caller code, ensures consistency
+2. **Replace-all strategy for Update** - DELETE + INSERT instead of diff/merge, simpler and safer
+3. **LEFT JOIN for aliases** - Handles terms without aliases gracefully, returns empty array
+4. **GetByAlias returns nil when not found** - Consistent with GetByTerm (not an error to search for nonexistent term)
+5. **RLS on alias table** - Uses subquery to parent glossary table for project isolation
+
+**Important for Next Task (2.3 - Service Layer):**
+- Repository layer is complete and tested
+- Service layer can now add SQL validation logic (EXPLAIN, LIMIT 1 execution)
+- Alias lookups work via GetByAlias OR GetByTerm (repository supports both)
+- All CRUD operations properly handle aliases automatically
 
 ### 2.3 Update Service (`pkg/services/glossary_service.go`)
 
