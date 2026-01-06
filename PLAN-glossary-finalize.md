@@ -100,7 +100,30 @@ CREATE TRIGGER update_business_glossary_updated_at
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 ```
 
-### 1.2 Create Glossary Aliases Table
+### 1.2 Create Glossary Aliases Table ✅
+
+**Status:** Complete - Included in Migration 031
+
+**Implementation Notes:**
+- Created as part of migration 031 (lines 73-100 in `migrations/031_glossary_defining_sql.up.sql`)
+- Table structure:
+  - `id` UUID PRIMARY KEY with default gen_random_uuid()
+  - `glossary_id` UUID with FK to engine_business_glossary(id) ON DELETE CASCADE
+  - `alias` TEXT NOT NULL
+  - `created_at` TIMESTAMPTZ with default now()
+  - Unique constraint on (glossary_id, alias)
+- Indexes:
+  - `idx_glossary_aliases_glossary` on glossary_id
+  - `idx_glossary_aliases_alias` on alias
+- RLS policy `glossary_aliases_access` that queries parent glossary table for project isolation
+- Comprehensive test coverage in `migrations/031_glossary_defining_sql_test.go`:
+  - Table and column existence
+  - Column types validation
+  - RLS enabled
+  - Indexes presence
+  - Unique constraint
+  - Foreign key relationship
+  - RLS policy existence
 
 ```sql
 CREATE TABLE engine_glossary_aliases (
@@ -127,9 +150,14 @@ CREATE POLICY glossary_aliases_access ON engine_glossary_aliases
     );
 ```
 
-### 1.3 Migration File
+### 1.3 Migration File ✅
 
-Create: `migrations/NNNN_glossary_defining_sql.up.sql` and `.down.sql`
+**Status:** Complete - Migration 031 created
+
+**Implementation Notes:**
+- Created `migrations/031_glossary_defining_sql.up.sql` and `migrations/031_glossary_defining_sql.down.sql`
+- Includes both glossary table recreation and aliases table creation in a single migration
+- Comprehensive test file `migrations/031_glossary_defining_sql_test.go` validates all aspects of the migration
 
 ---
 
