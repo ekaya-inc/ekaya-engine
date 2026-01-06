@@ -264,7 +264,7 @@ const DatasourceConfiguration = ({
       const datasourceId =
         connectionDetails?.datasourceId ?? selectedDatasource?.datasourceId;
       const datasourceType = selectedAdapter as DatasourceType;
-      // Include provider in config - backend ignores it, UI uses it for display
+      // Include provider for PostgreSQL-compatible variants (e.g., supabase, neon)
       const currentProvider = activeProvider ?? selectedProvider;
       const apiConfig = {
         type: datasourceType,
