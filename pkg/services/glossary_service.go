@@ -804,11 +804,20 @@ func (s *glossaryService) enrichSingleTerm(
 	llmClient llm.LLMClient,
 	projectID uuid.UUID,
 ) enrichmentResult {
+	// Acquire own database connection FIRST - this ensures the LLM client's SavePending
+	// uses this goroutine's dedicated connection, avoiding "conn busy" errors when
+	// multiple goroutines share the parent context's connection.
+	tenantCtx, cleanup, err := s.getTenant(ctx, projectID)
+	if err != nil {
+		return enrichmentResult{termName: term.Term, err: fmt.Errorf("get tenant context: %w", err)}
+	}
+	defer cleanup()
+
 	prompt := s.buildEnrichTermPrompt(term, ontology, entities)
 	systemMessage := s.enrichTermSystemMessage()
 
-	// Call LLM to generate SQL
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMessage, 0.3, false)
+	// Call LLM to generate SQL (uses tenantCtx so SavePending has its own connection)
+	result, err := llmClient.GenerateResponse(tenantCtx, prompt, systemMessage, 0.3, false)
 	if err != nil {
 		return enrichmentResult{termName: term.Term, err: fmt.Errorf("LLM generate: %w", err)}
 	}
@@ -822,13 +831,6 @@ func (s *glossaryService) enrichSingleTerm(
 	if enrichment.DefiningSQL == "" {
 		return enrichmentResult{termName: term.Term, err: fmt.Errorf("LLM returned empty SQL")}
 	}
-
-	// Acquire own database connection for this goroutine
-	tenantCtx, cleanup, err := s.getTenant(ctx, projectID)
-	if err != nil {
-		return enrichmentResult{termName: term.Term, err: fmt.Errorf("get tenant context: %w", err)}
-	}
-	defer cleanup()
 
 	// Validate SQL and capture output columns (uses tenantCtx for datasource lookup)
 	testResult, err := s.TestSQL(tenantCtx, projectID, enrichment.DefiningSQL)
