@@ -384,7 +384,7 @@ export function parsePostgresUrl(url: string): ParsedConnectionString | null {
 - Connection string parser hidden when editing existing datasource
 - Loading provider from existing config when editing
 
-### Phase 2: Provider Icons
+### Phase 2: Provider Icons [x] COMPLETE
 
 Add icon files for each provider:
 
