@@ -2,7 +2,7 @@ import { ArrowLeft, CheckCircle, XCircle, Loader2, Pencil } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 
-import { getAdapterInfo } from "../constants/adapters";
+import { getAdapterInfo, type ProviderInfo } from "../constants/adapters";
 import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext";
 import { useToast } from "../hooks/useToast";
 import engineApi from "../services/engineApi";
@@ -26,11 +26,13 @@ interface DatasourceFormConfig {
 
 interface DatasourceConfigurationProps {
   selectedAdapter: string | null;
+  selectedProvider?: ProviderInfo | undefined;
   onBackToSelection: () => void;
 }
 
 const DatasourceConfiguration = ({
   selectedAdapter,
+  selectedProvider,
   onBackToSelection,
 }: DatasourceConfigurationProps) => {
   const { pid } = useParams<{ pid: string }>();
@@ -53,20 +55,23 @@ const DatasourceConfiguration = ({
     selectedAdapter ?? connectionDetails?.type
   );
 
+  // Use provider info for display if available, otherwise fall back to adapter info
+  const displayInfo = selectedProvider ?? adapterInfo;
+
   const [testingConnection, setTestingConnection] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isDisconnecting, setIsDisconnecting] = useState<boolean>(false);
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
-  const [config, setConfig] = useState<DatasourceFormConfig>({
+  const [config, setConfig] = useState<DatasourceFormConfig>(() => ({
     host: "",
-    port: "5432",
+    port: selectedProvider?.defaultPort?.toString() ?? "5432",
     user: "",
     password: "",
     name: "",
-    useSSL: false,
+    useSSL: selectedProvider?.defaultSSL === "require" || selectedProvider?.defaultSSL === "verify-full",
     displayName: "",
-  });
+  }));
 
   // Determine if this is editing an existing datasource or configuring a new one
   const isEditingExisting = Boolean(
@@ -95,18 +100,18 @@ const DatasourceConfiguration = ({
         useSSL:
           connectionDetails.ssl_mode === "require" ||
           connectionDetails.ssl_mode === "prefer",
-        displayName: connectionDetails.displayName ?? adapterInfo.name,
+        displayName: connectionDetails.displayName ?? displayInfo.name,
       };
 
       setConfig(formData);
     } else {
-      // New datasource - set default displayName from adapter type
+      // New datasource - set default displayName from provider/adapter
       setConfig((prev) => ({
         ...prev,
-        displayName: adapterInfo.name,
+        displayName: displayInfo.name,
       }));
     }
-  }, [connectionDetails, adapterInfo.name]);
+  }, [connectionDetails, displayInfo.name]);
 
   // Focus name input when entering edit mode
   useEffect(() => {
@@ -440,10 +445,10 @@ const DatasourceConfiguration = ({
           Back
         </Button>
         <div className="flex items-center gap-4 mb-4">
-          {adapterInfo?.icon ? (
+          {displayInfo?.icon ? (
             <img
-              src={adapterInfo.icon}
-              alt={adapterInfo.name}
+              src={displayInfo.icon}
+              alt={displayInfo.name}
               className="h-12 w-12 object-contain"
             />
           ) : (
@@ -455,7 +460,7 @@ const DatasourceConfiguration = ({
           )}
           <div>
             <h1 className="text-3xl font-bold text-text-primary">
-              Configure {adapterInfo?.name}
+              Configure {displayInfo?.name}
             </h1>
           </div>
         </div>
@@ -489,7 +494,7 @@ const DatasourceConfiguration = ({
                 onClick={() => setIsEditingName(true)}
                 className="flex items-center gap-2 text-xl font-semibold text-text-primary hover:text-blue-600 transition-colors group"
               >
-                {config.displayName || adapterInfo.name}
+                {config.displayName || displayInfo.name}
                 <Pencil className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
               </button>
             )}

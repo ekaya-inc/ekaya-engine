@@ -310,15 +310,41 @@ export function parsePostgresUrl(url: string): ParsedConnectionString | null {
 }
 ```
 
-#### 1.3 Update Adapter Selection UI
+#### 1.3 Update Adapter Selection UI [x] COMPLETE
 
 **File:** `ui/src/components/DatasourceAdapterSelection.tsx`
 
-Add a two-tier selection:
-1. First select adapter type (PostgreSQL, MySQL, etc.)
-2. For PostgreSQL, show provider sub-selection (Supabase, Neon, self-hosted, etc.)
+**What was implemented:**
+- Reorganized adapter selection into two sections: "PostgreSQL-Compatible" and "Other Databases"
+- PostgreSQL-Compatible section displays all 9 providers from `POSTGRES_PROVIDERS` (PostgreSQL, Supabase, Neon, CockroachDB, YugabyteDB, Aurora, AlloyDB, TimescaleDB, Redshift)
+- Other Databases section displays non-postgres adapters from the API (MySQL, ClickHouse, etc.)
+- When a PostgreSQL provider is selected, passes both adapter type (`postgres`) and provider info to configuration
+- Provider cards show name and connection string help text where available (Supabase, Neon have help text)
+- Updated page title to "Select Your Database" with subtitle "Choose your database provider to get started"
+- Updated `onAdapterSelect` callback signature to include optional `ProviderInfo` parameter
 
-Or alternatively, show all providers as flat list with grouping headers.
+**Additional files modified:**
+- `ui/src/pages/DatasourcePage.tsx` - Updated to:
+  - Track `selectedProvider` state alongside `selectedAdapter`
+  - Pass `selectedProvider` to `DatasourceConfiguration` component
+  - Reset provider when returning to selection
+- `ui/src/components/DatasourceConfiguration.tsx` - Updated to:
+  - Accept `selectedProvider` prop (optional `ProviderInfo`)
+  - Use `displayInfo` (provider or adapter fallback) for icon and name in header
+  - Initialize form with provider-specific defaults:
+    - Default port (e.g., 6543 for Supabase, 26257 for CockroachDB, 5433 for YugabyteDB)
+    - Default SSL mode (require for most, verify-full for CockroachDB)
+  - Use provider name as default datasource display name
+
+**Tests:** `ui/src/components/__tests__/DatasourceAdapterSelection.test.tsx` - 14 tests covering:
+- Loading and error states
+- PostgreSQL-Compatible section rendering with all providers
+- Other Databases section rendering
+- Provider selection callbacks with provider info (verifies adapter type "postgres" + provider object)
+- Non-postgres adapter selection callbacks (verifies just adapter ID)
+- Section visibility based on available adapters (no PostgreSQL section if API doesn't return postgres)
+- Disabled state handling with existing datasources (only matching adapter type is clickable)
+- Navigation (back button) and UI elements (title, subtitle, help text)
 
 #### 1.4 Update Configuration Form
 
