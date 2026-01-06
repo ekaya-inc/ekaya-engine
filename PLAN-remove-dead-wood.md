@@ -308,14 +308,22 @@ The `GET /api/projects/{pid}/datasources/{dsid}/schema/relationships/candidates`
 
 **Context for next session:** This was a follow-up cleanup from task 1 (removal of `pkg/models/ontology_workflow.go` and the entire workflow package). Committed together with task 9 since both are LLM package cleanups.
 
-### 12. Remove Legacy "name" Field Support (Optional)
+### 12. Remove Legacy "name" Field Support (Optional) ✅
 
 `pkg/adapters/datasource/postgres/config.go:56-58` supports legacy config using "name" instead of "database".
 
-- [ ] Verify no existing datasource configs use "name" field
-- [ ] If safe, remove the fallback logic
+- [x] Verify no existing datasource configs use "name" field
+- [x] If safe, remove the fallback logic
 
 **Risk:** Medium - requires audit of existing datasource configurations.
+
+**Completed:** Successfully removed the "legacy" name field fallback. Investigation revealed that the API was actually using "name" (not "database") as the primary field, making the "legacy" comment misleading. Fixed by:
+- **pkg/handlers/datasources.go:66** - Updated `ToConfig()` to send `"database"` instead of `"name"` in the config map
+- **pkg/adapters/datasource/postgres/config.go:54-58** - Removed fallback to `config["name"]`, now only accepts `config["database"]`
+- **pkg/adapters/datasource/postgres/adapter_test.go:87-102** - Removed `TestFromMap_LegacyNameField()` test (~16 lines)
+- All tests pass (`make check`)
+- **Total impact:** ~19 lines removed, API now uses correct field name
+- **Note:** Since database is being dropped/recreated (as per plan context), no migration of existing configs needed
 
 ## Phase 2 Estimated Impact
 
