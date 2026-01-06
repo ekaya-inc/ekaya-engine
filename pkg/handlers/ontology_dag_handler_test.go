@@ -95,7 +95,7 @@ func TestOntologyDAGHandler_StartExtraction_Success(t *testing.T) {
 				Nodes: []models.DAGNode{
 					{ID: uuid.New(), NodeName: "EntityDiscovery", NodeOrder: 1, Status: models.DAGNodeStatusRunning},
 					{ID: uuid.New(), NodeName: "EntityEnrichment", NodeOrder: 2, Status: models.DAGNodeStatusPending},
-					{ID: uuid.New(), NodeName: "RelationshipDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusPending},
+					{ID: uuid.New(), NodeName: "FKDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusPending},
 					{ID: uuid.New(), NodeName: "RelationshipEnrichment", NodeOrder: 4, Status: models.DAGNodeStatusPending},
 					{ID: uuid.New(), NodeName: "OntologyFinalization", NodeOrder: 5, Status: models.DAGNodeStatusPending},
 					{ID: uuid.New(), NodeName: "ColumnEnrichment", NodeOrder: 6, Status: models.DAGNodeStatusPending},
@@ -193,7 +193,7 @@ func TestOntologyDAGHandler_GetStatus_Success(t *testing.T) {
 				Nodes: []models.DAGNode{
 					{ID: uuid.New(), NodeName: "EntityDiscovery", NodeOrder: 1, Status: models.DAGNodeStatusCompleted},
 					{ID: uuid.New(), NodeName: "EntityEnrichment", NodeOrder: 2, Status: models.DAGNodeStatusRunning, Progress: &models.DAGNodeProgress{Current: 5, Total: 15, Message: "Processing table users"}},
-					{ID: uuid.New(), NodeName: "RelationshipDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusPending},
+					{ID: uuid.New(), NodeName: "FKDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusPending},
 					{ID: uuid.New(), NodeName: "RelationshipEnrichment", NodeOrder: 4, Status: models.DAGNodeStatusPending},
 					{ID: uuid.New(), NodeName: "OntologyFinalization", NodeOrder: 5, Status: models.DAGNodeStatusPending},
 					{ID: uuid.New(), NodeName: "ColumnEnrichment", NodeOrder: 6, Status: models.DAGNodeStatusPending},
@@ -503,7 +503,7 @@ func TestOntologyDAGHandler_CompletedDAG(t *testing.T) {
 				Nodes: []models.DAGNode{
 					{ID: uuid.New(), NodeName: "EntityDiscovery", NodeOrder: 1, Status: models.DAGNodeStatusCompleted},
 					{ID: uuid.New(), NodeName: "EntityEnrichment", NodeOrder: 2, Status: models.DAGNodeStatusCompleted},
-					{ID: uuid.New(), NodeName: "RelationshipDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusCompleted},
+					{ID: uuid.New(), NodeName: "FKDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusCompleted},
 					{ID: uuid.New(), NodeName: "RelationshipEnrichment", NodeOrder: 4, Status: models.DAGNodeStatusCompleted},
 					{ID: uuid.New(), NodeName: "OntologyFinalization", NodeOrder: 5, Status: models.DAGNodeStatusCompleted},
 					{ID: uuid.New(), NodeName: "ColumnEnrichment", NodeOrder: 6, Status: models.DAGNodeStatusCompleted},
@@ -571,7 +571,7 @@ func TestOntologyDAGHandler_FailedDAG(t *testing.T) {
 				Nodes: []models.DAGNode{
 					{ID: uuid.New(), NodeName: "EntityDiscovery", NodeOrder: 1, Status: models.DAGNodeStatusCompleted},
 					{ID: uuid.New(), NodeName: "EntityEnrichment", NodeOrder: 2, Status: models.DAGNodeStatusFailed, ErrorMessage: &errMsg},
-					{ID: uuid.New(), NodeName: "RelationshipDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusPending},
+					{ID: uuid.New(), NodeName: "FKDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusPending},
 					{ID: uuid.New(), NodeName: "RelationshipEnrichment", NodeOrder: 4, Status: models.DAGNodeStatusPending},
 					{ID: uuid.New(), NodeName: "OntologyFinalization", NodeOrder: 5, Status: models.DAGNodeStatusPending},
 					{ID: uuid.New(), NodeName: "ColumnEnrichment", NodeOrder: 6, Status: models.DAGNodeStatusPending},

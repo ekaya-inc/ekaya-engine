@@ -320,7 +320,7 @@ func TestCancel_MarksNonCompletedNodesAsSkipped(t *testing.T) {
 	nodes := []models.DAGNode{
 		{ID: uuid.New(), DAGID: dagID, NodeName: "EntityDiscovery", Status: models.DAGNodeStatusCompleted},
 		{ID: uuid.New(), DAGID: dagID, NodeName: "EntityEnrichment", Status: models.DAGNodeStatusRunning},
-		{ID: uuid.New(), DAGID: dagID, NodeName: "RelationshipDiscovery", Status: models.DAGNodeStatusPending},
+		{ID: uuid.New(), DAGID: dagID, NodeName: "FKDiscovery", Status: models.DAGNodeStatusPending},
 		{ID: uuid.New(), DAGID: dagID, NodeName: "RelationshipEnrichment", Status: models.DAGNodeStatusPending},
 	}
 
