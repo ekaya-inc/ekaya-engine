@@ -30,6 +30,7 @@ func TestDAGNodes_AllNodesHaveCorrectOrder(t *testing.T) {
 		models.DAGNodeRelationshipEnrichment,
 		models.DAGNodeOntologyFinalization,
 		models.DAGNodeGlossaryDiscovery,
+		models.DAGNodeGlossaryEnrichment,
 	}
 
 	assert.Equal(t, len(expectedOrder), len(allNodes))
