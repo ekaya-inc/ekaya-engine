@@ -364,21 +364,56 @@ type BusinessGlossaryTerm struct {
 
 ## Phase 3: LLM Prompt & Extraction Updates
 
-### 3.1 Update Discovery Prompt (`glossary_service.go:buildSuggestTermsPrompt`)
+### 3.1 Update Discovery Prompt (`glossary_service.go:buildSuggestTermsPrompt`) ✅
 
-Change the response format to generate `defining_sql` instead of bits:
+**Status:** Complete - Prompt and response parsing updated to generate executable SQL
 
+**Implementation Details:**
+
+**Prompt Changes (pkg/services/glossary_service.go:447-464):**
+- Updated system instructions to request complete, executable SQL SELECT statements
+- Emphasized that `defining_sql` must be ready to execute without modification
+- Removed references to `sql_pattern`, `columns_used`, `filters`, `aggregation` (old bits)
+- Added guidance on including all necessary clauses (FROM, JOIN, WHERE, GROUP BY, ORDER BY)
+- Specified that column aliases should represent the business metric
+- Added `aliases` field for alternative names (e.g., "MAU" for "Monthly Active Users")
+
+**Example Format (pkg/services/glossary_service.go:543-552):**
 ```json
 [
   {
-    "term": "Active Users",
-    "definition": "Users who have engaged with the platform within the last 30 days",
-    "defining_sql": "SELECT COUNT(DISTINCT user_id) AS active_users\nFROM users\nWHERE deleted_at IS NULL\n  AND updated_at >= CURRENT_DATE - INTERVAL '30 days'",
-    "base_table": "users",
-    "aliases": ["MAU", "Monthly Active Users"]
+    "term": "Revenue",
+    "definition": "Total earned amount from completed transactions after fees",
+    "defining_sql": "SELECT SUM(earned_amount) AS revenue\nFROM billing_transactions\nWHERE transaction_state = 'completed'",
+    "base_table": "billing_transactions",
+    "aliases": ["Total Revenue", "Gross Revenue"]
   }
 ]
 ```
+
+**Response Parsing (pkg/services/glossary_service.go:563-569):**
+- Updated `suggestedTermResponse` struct:
+  - Removed: `SQLPattern`, `ColumnsUsed`, `Filters` ([]suggestedFilter), `Aggregation`
+  - Added: `DefiningSQL` (string), `Aliases` ([]string)
+  - Kept: `Term`, `Definition`, `BaseTable`
+- Removed `suggestedFilter` struct and its custom UnmarshalJSON (no longer needed)
+- Updated `parseSuggestTermsResponse` to map `DefiningSQL` directly (no legacy conversion)
+- Aliases now automatically stored via repository layer
+
+**Test Updates (pkg/services/glossary_service_test.go:613-627):**
+- Updated mock LLM responses to use new format with `defining_sql` and `aliases`
+- Removed old format fields (`sql_pattern`, `columns_used`, `filters`, `aggregation`)
+- Added realistic SQL examples with proper SELECT statements
+
+**Files Modified:**
+- `pkg/services/glossary_service.go` - Prompt builder and response parser (~850 lines)
+- `pkg/services/glossary_service_test.go` - Test mock responses (770+ lines)
+
+**Important for Next Task (3.2):**
+- Discovery prompt now generates complete SQL definitions
+- SQL validation via `TestSQL` will catch any invalid LLM-generated SQL
+- Enrichment node (task 3.2) may need similar updates or could be deprecated
+- Consider consolidating discovery+enrichment into single phase (as noted in plan)
 
 ### 3.2 Update System Message
 

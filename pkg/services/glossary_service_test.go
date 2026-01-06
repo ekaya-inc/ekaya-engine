@@ -613,20 +613,16 @@ func TestGlossaryService_SuggestTerms(t *testing.T) {
 		{
 			"term": "Revenue",
 			"definition": "Total earned amount from completed transactions",
-			"sql_pattern": "SUM(earned_amount) WHERE state = 'completed'",
+			"defining_sql": "SELECT SUM(earned_amount) AS revenue\nFROM billing_transactions\nWHERE state = 'completed'",
 			"base_table": "billing_transactions",
-			"columns_used": ["earned_amount", "state"],
-			"filters": [{"column": "state", "operator": "=", "values": ["completed"]}],
-			"aggregation": "SUM"
+			"aliases": ["Total Revenue", "Gross Revenue"]
 		},
 		{
 			"term": "Active Users",
 			"definition": "Users with recent activity",
-			"sql_pattern": "COUNT(DISTINCT id) WHERE last_active_at > NOW() - INTERVAL '30 days'",
+			"defining_sql": "SELECT COUNT(DISTINCT id) AS active_users\nFROM users\nWHERE last_active_at > NOW() - INTERVAL '30 days'",
 			"base_table": "users",
-			"columns_used": ["id", "last_active_at"],
-			"filters": [],
-			"aggregation": "COUNT"
+			"aliases": ["MAU", "Monthly Active Users"]
 		}
 	]`
 

@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -11,7 +10,6 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
-	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -453,11 +451,17 @@ Focus on:
 4. Transaction metrics - volume, value, conversion rates, etc.
 
 For each term, provide:
-- A clear business name
+- A clear business name (term)
 - A definition that explains what it measures
-- The SQL pattern or aggregation used to calculate it
-- The base table(s) involved
-- Any filters that should be applied`
+- A complete, executable SQL SELECT statement (defining_sql) that computes the metric
+- The primary table being queried (base_table)
+- Alternative names that business users might use (aliases)
+
+IMPORTANT: The defining_sql must be a complete SELECT statement that can be executed as-is. It should:
+- Start with SELECT and include the column aliases that represent the metric
+- Include all necessary FROM, JOIN, WHERE, GROUP BY, ORDER BY clauses
+- Be ready to execute without modification
+- Return meaningful column names that represent the business metric`
 }
 
 func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntology, entities []*models.OntologyEntity) string {
@@ -543,13 +547,9 @@ func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntolog
   {
     "term": "Revenue",
     "definition": "Total earned amount from completed transactions after fees",
-    "sql_pattern": "SUM(earned_amount) WHERE transaction_state = 'completed'",
+    "defining_sql": "SELECT SUM(earned_amount) AS revenue\nFROM billing_transactions\nWHERE transaction_state = 'completed'",
     "base_table": "billing_transactions",
-    "columns_used": ["earned_amount", "transaction_state"],
-    "filters": [
-      {"column": "transaction_state", "operator": "=", "values": ["completed"]}
-    ],
-    "aggregation": "SUM"
+    "aliases": ["Total Revenue", "Gross Revenue"]
   }
 ]
 `)
@@ -561,45 +561,11 @@ func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntolog
 
 // suggestedTermResponse represents a single term in the LLM response.
 type suggestedTermResponse struct {
-	Term        string            `json:"term"`
-	Definition  string            `json:"definition"`
-	SQLPattern  string            `json:"sql_pattern,omitempty"`
-	BaseTable   string            `json:"base_table,omitempty"`
-	ColumnsUsed []string          `json:"columns_used,omitempty"`
-	Filters     []suggestedFilter `json:"filters,omitempty"`
-	Aggregation string            `json:"aggregation,omitempty"`
-}
-
-type suggestedFilter struct {
-	Column   string   `json:"column"`
-	Operator string   `json:"operator"`
-	Values   []string `json:"values"`
-}
-
-// UnmarshalJSON handles LLM responses that return values as numbers or booleans instead of strings.
-func (f *suggestedFilter) UnmarshalJSON(data []byte) error {
-	type filterAlias struct {
-		Column   string            `json:"column"`
-		Operator string            `json:"operator"`
-		Values   []json.RawMessage `json:"values"`
-	}
-
-	var flex filterAlias
-	if err := json.Unmarshal(data, &flex); err != nil {
-		return err
-	}
-
-	f.Column = flex.Column
-	f.Operator = flex.Operator
-	f.Values = make([]string, 0, len(flex.Values))
-
-	for _, rawVal := range flex.Values {
-		if v := jsonutil.FlexibleStringValue(rawVal); v != "" {
-			f.Values = append(f.Values, v)
-		}
-	}
-
-	return nil
+	Term        string   `json:"term"`
+	Definition  string   `json:"definition"`
+	DefiningSQL string   `json:"defining_sql"`
+	BaseTable   string   `json:"base_table,omitempty"`
+	Aliases     []string `json:"aliases,omitempty"`
 }
 
 func (s *glossaryService) parseSuggestTermsResponse(content string, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error) {
@@ -610,13 +576,13 @@ func (s *glossaryService) parseSuggestTermsResponse(content string, projectID uu
 
 	terms := make([]*models.BusinessGlossaryTerm, 0, len(suggestions))
 	for _, suggestion := range suggestions {
-		// Legacy: Convert SQLPattern to DefiningSQL (Phase 3 will update LLM prompts to generate proper SQL)
 		term := &models.BusinessGlossaryTerm{
 			ProjectID:   projectID,
 			Term:        suggestion.Term,
 			Definition:  suggestion.Definition,
-			DefiningSQL: suggestion.SQLPattern, // Use pattern as SQL for now
+			DefiningSQL: suggestion.DefiningSQL,
 			BaseTable:   suggestion.BaseTable,
+			Aliases:     suggestion.Aliases,
 			Source:      models.GlossarySourceInferred,
 		}
 		terms = append(terms, term)
@@ -938,11 +904,11 @@ func (s *glossaryService) buildEnrichTermPrompt(
 }
 
 type termEnrichment struct {
-	SQLPattern  string            `json:"sql_pattern"`
-	BaseTable   string            `json:"base_table"`
-	ColumnsUsed []string          `json:"columns_used"`
-	Filters     []suggestedFilter `json:"filters"`
-	Aggregation string            `json:"aggregation"`
+	SQLPattern  string   `json:"sql_pattern"`
+	BaseTable   string   `json:"base_table"`
+	ColumnsUsed []string `json:"columns_used"`
+	// Filters field removed - not used in DefiningSQL approach
+	Aggregation string `json:"aggregation"`
 }
 
 func (s *glossaryService) parseEnrichTermResponse(content string) (*termEnrichment, error) {
