@@ -265,7 +265,19 @@ ontologyDAGService.SetGlossaryEnrichmentMethods(services.NewGlossaryEnrichmentAd
    - Follows existing EntityEnrichmentNode and GlossaryDiscoveryNode patterns closely
    - **Testing**: Added comprehensive unit tests (5 tests) covering success case, missing ontology ID, enrichment errors, progress reporting errors, and node name verification
    - All tests pass successfully
-5. [ ] Update `pkg/services/dag_adapters.go` with two new adapters
+5. [x] Update `pkg/services/dag_adapters.go` with two new adapters
+   - **COMPLETED**: Added GlossaryDiscoveryAdapter and GlossaryEnrichmentAdapter types at pkg/services/dag_adapters.go:161-188
+   - **GlossaryDiscoveryAdapter**: Wraps GlossaryService and implements dag.GlossaryDiscoveryMethods interface
+   - Constructor: NewGlossaryDiscoveryAdapter(svc GlossaryService) returns dag.GlossaryDiscoveryMethods
+   - Method: DiscoverGlossaryTerms(ctx, projectID, ontologyID) delegates to service
+   - **GlossaryEnrichmentAdapter**: Wraps GlossaryService and implements dag.GlossaryEnrichmentMethods interface
+   - Constructor: NewGlossaryEnrichmentAdapter(svc GlossaryService) returns dag.GlossaryEnrichmentMethods
+   - Method: EnrichGlossaryTerms(ctx, projectID, ontologyID) delegates to service
+   - Follows exact pattern of existing adapters (EntityDiscoveryAdapter, ColumnEnrichmentAdapter, etc.)
+   - **Testing**: Added comprehensive unit tests in pkg/services/dag_adapters_test.go (6 tests total)
+   - Tests cover: success cases, error handling, zero results, context cancellation
+   - All 6 tests pass successfully
+   - **For next session**: Both adapters are simple delegation wrappers. Ready to wire into ontology_dag_service.go via setter methods.
 6. [ ] Update `pkg/services/ontology_dag_service.go` (fields, setters, getNodeExecutor)
 7. [ ] Wire in `main.go`
 8. [ ] Add unit tests for nodes

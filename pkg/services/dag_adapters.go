@@ -158,3 +158,31 @@ func (a *ColumnEnrichmentAdapter) EnrichProject(ctx context.Context, projectID u
 		DurationMs:     result.DurationMs,
 	}, nil
 }
+
+// GlossaryDiscoveryAdapter adapts GlossaryService for the dag package.
+type GlossaryDiscoveryAdapter struct {
+	svc GlossaryService
+}
+
+// NewGlossaryDiscoveryAdapter creates a new adapter.
+func NewGlossaryDiscoveryAdapter(svc GlossaryService) dag.GlossaryDiscoveryMethods {
+	return &GlossaryDiscoveryAdapter{svc: svc}
+}
+
+func (a *GlossaryDiscoveryAdapter) DiscoverGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error) {
+	return a.svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
+}
+
+// GlossaryEnrichmentAdapter adapts GlossaryService for the dag package.
+type GlossaryEnrichmentAdapter struct {
+	svc GlossaryService
+}
+
+// NewGlossaryEnrichmentAdapter creates a new adapter.
+func NewGlossaryEnrichmentAdapter(svc GlossaryService) dag.GlossaryEnrichmentMethods {
+	return &GlossaryEnrichmentAdapter{svc: svc}
+}
+
+func (a *GlossaryEnrichmentAdapter) EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error {
+	return a.svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+}
