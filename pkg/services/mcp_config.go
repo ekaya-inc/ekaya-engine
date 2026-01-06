@@ -26,11 +26,18 @@ var validToolGroups = map[string]bool{
 	ToolGroupAgentTools:      true,
 }
 
+// EnabledToolInfo represents a tool that is currently enabled for API responses.
+type EnabledToolInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 // MCPConfigResponse is the API response format for MCP configuration.
 // Returns only configuration state; UI strings are defined in the frontend.
 type MCPConfigResponse struct {
-	ServerURL  string                             `json:"serverUrl"`
-	ToolGroups map[string]*models.ToolGroupConfig `json:"toolGroups"`
+	ServerURL    string                             `json:"serverUrl"`
+	ToolGroups   map[string]*models.ToolGroupConfig `json:"toolGroups"`
+	EnabledTools []EnabledToolInfo                  `json:"enabledTools"`
 }
 
 // UpdateMCPConfigRequest is the API request format for updating MCP configuration.
@@ -62,6 +69,7 @@ type mcpConfigService struct {
 	configRepo     repositories.MCPConfigRepository
 	queryService   QueryService
 	projectService ProjectService
+	stateValidator MCPStateValidator
 	baseURL        string
 	logger         *zap.Logger
 }
@@ -78,6 +86,7 @@ func NewMCPConfigService(
 		configRepo:     configRepo,
 		queryService:   queryService,
 		projectService: projectService,
+		stateValidator: NewMCPStateValidator(),
 		baseURL:        baseURL,
 		logger:         logger,
 	}
@@ -95,7 +104,7 @@ func (s *mcpConfigService) Get(ctx context.Context, projectID uuid.UUID) (*MCPCo
 		config = models.DefaultMCPConfig(projectID)
 	}
 
-	return s.buildResponse(ctx, projectID, config), nil
+	return s.buildResponse(projectID, config), nil
 }
 
 // Update updates the MCP configuration for a project.
@@ -109,30 +118,37 @@ func (s *mcpConfigService) Update(ctx context.Context, projectID uuid.UUID, req 
 		config = models.DefaultMCPConfig(projectID)
 	}
 
-	// Merge updates - only update known tool groups
-	for groupName, groupConfig := range req.ToolGroups {
-		if validToolGroups[groupName] {
-			if config.ToolGroups == nil {
-				config.ToolGroups = make(map[string]*models.ToolGroupConfig)
-			}
-			config.ToolGroups[groupName] = groupConfig
-		}
+	// Build state context for validation
+	hasQueries, err := s.hasEnabledQueries(ctx, projectID)
+	if err != nil {
+		s.logger.Warn("failed to check enabled queries, assuming none",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err),
+		)
+		hasQueries = false
 	}
 
-	// Enforce mutual exclusivity: agent_tools enabled = other tools disabled
-	if agentConfig, ok := config.ToolGroups[ToolGroupAgentTools]; ok && agentConfig.Enabled {
-		// Disable developer tools
-		if devConfig, ok := config.ToolGroups["developer"]; ok {
-			devConfig.Enabled = false
-			devConfig.EnableExecute = false
-		}
-		// Disable approved_queries
-		if aqConfig, ok := config.ToolGroups[ToolGroupApprovedQueries]; ok {
-			aqConfig.Enabled = false
-			aqConfig.ForceMode = false
-			aqConfig.AllowClientSuggestions = false
-		}
+	// Apply state transition using the validator
+	result := s.stateValidator.Apply(
+		MCPStateTransition{
+			Current: config.ToolGroups,
+			Update:  req.ToolGroups,
+		},
+		MCPStateContext{HasEnabledQueries: hasQueries},
+	)
+
+	// If validation failed, return error without persisting
+	if result.Error != nil {
+		s.logger.Debug("MCP config update rejected",
+			zap.String("project_id", projectID.String()),
+			zap.String("error_code", result.Error.Code),
+			zap.String("error_message", result.Error.Message),
+		)
+		return nil, result.Error
 	}
+
+	// Update config with validated state
+	config.ToolGroups = result.State
 
 	// Persist changes
 	if err := s.configRepo.Upsert(ctx, config); err != nil {
@@ -143,7 +159,7 @@ func (s *mcpConfigService) Update(ctx context.Context, projectID uuid.UUID, req 
 		zap.String("project_id", projectID.String()),
 	)
 
-	return s.buildResponse(ctx, projectID, config), nil
+	return s.buildResponse(projectID, config), nil
 }
 
 // IsToolGroupEnabled checks if a specific tool group is enabled for a project.
@@ -220,39 +236,26 @@ func (s *mcpConfigService) hasEnabledQueries(ctx context.Context, projectID uuid
 }
 
 // buildResponse creates the API response format from the model.
-// Returns only configuration state; UI metadata is defined in the frontend.
-func (s *mcpConfigService) buildResponse(ctx context.Context, projectID uuid.UUID, config *models.MCPConfig) *MCPConfigResponse {
+// Uses the state validator to ensure the response is normalized (sub-options reset when disabled).
+func (s *mcpConfigService) buildResponse(projectID uuid.UUID, config *models.MCPConfig) *MCPConfigResponse {
+	// Use the state validator to normalize the state for response
+	// Apply an empty update to get normalized state with all tool groups
+	result := s.stateValidator.Apply(
+		MCPStateTransition{
+			Current: config.ToolGroups,
+			Update:  map[string]*models.ToolGroupConfig{}, // Empty update = just normalize
+		},
+		MCPStateContext{HasEnabledQueries: true}, // Context doesn't matter for empty update
+	)
+
+	// Ensure all valid tool groups are in the response
 	toolGroups := make(map[string]*models.ToolGroupConfig)
-
-	// Check if approved_queries should actually be enabled (requires enabled queries)
-	approvedQueriesActive, err := s.hasEnabledQueries(ctx, projectID)
-	if err != nil {
-		s.logger.Error("failed to check enabled queries, defaulting to disabled",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err),
-		)
-		approvedQueriesActive = false
-	}
-
-	// Include all valid tool groups in response
 	for groupName := range validToolGroups {
-		groupConfig := &models.ToolGroupConfig{}
-		if gc, ok := config.ToolGroups[groupName]; ok {
-			// Copy the config to avoid mutating the original
-			groupConfig = &models.ToolGroupConfig{
-				Enabled:                gc.Enabled,
-				EnableExecute:          gc.EnableExecute,
-				ForceMode:              gc.ForceMode,
-				AllowClientSuggestions: gc.AllowClientSuggestions,
-			}
+		if gc, ok := result.State[groupName]; ok {
+			toolGroups[groupName] = gc
+		} else {
+			toolGroups[groupName] = &models.ToolGroupConfig{}
 		}
-
-		// Override approved_queries: only show as enabled if there are enabled queries
-		if groupName == ToolGroupApprovedQueries && !approvedQueriesActive {
-			groupConfig.Enabled = false
-		}
-
-		toolGroups[groupName] = groupConfig
 	}
 
 	serverURL, err := url.JoinPath(s.baseURL, "mcp", projectID.String())
@@ -266,9 +269,19 @@ func (s *mcpConfigService) buildResponse(ctx context.Context, projectID uuid.UUI
 		serverURL = s.baseURL + "/mcp/" + projectID.String()
 	}
 
+	// Convert ToolDefinition to EnabledToolInfo for API response
+	enabledTools := make([]EnabledToolInfo, len(result.EnabledTools))
+	for i, tool := range result.EnabledTools {
+		enabledTools[i] = EnabledToolInfo{
+			Name:        tool.Name,
+			Description: tool.Description,
+		}
+	}
+
 	return &MCPConfigResponse{
-		ServerURL:  serverURL,
-		ToolGroups: toolGroups,
+		ServerURL:    serverURL,
+		ToolGroups:   toolGroups,
+		EnabledTools: enabledTools,
 	}
 }
 

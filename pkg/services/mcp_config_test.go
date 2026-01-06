@@ -146,10 +146,10 @@ func (m *mockProjectServiceForMCP) GetAuthServerURL(ctx context.Context, project
 
 // Tests
 
-func TestMCPConfigService_Get_ApprovedQueriesDisabledWhenNoEnabledQueries(t *testing.T) {
-	// This test verifies that when approved_queries is enabled in config,
-	// but there are no enabled queries (e.g., all deleted), the response
-	// should show approved_queries as disabled.
+func TestMCPConfigService_Get_ReturnsStoredConfigState(t *testing.T) {
+	// This test verifies that Get() returns the stored config state,
+	// without overriding. The UI and ShouldShowApprovedQueriesTools
+	// handle the validation of whether tools should actually be exposed.
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -164,7 +164,7 @@ func TestMCPConfigService_Get_ApprovedQueriesDisabledWhenNoEnabledQueries(t *tes
 		},
 	}
 
-	// But no enabled queries exist (e.g., all were deleted)
+	// Even with no enabled queries, the response should reflect stored state
 	queryService := &mockQueryServiceForMCP{
 		hasEnabledQueries: false,
 	}
@@ -185,10 +185,10 @@ func TestMCPConfigService_Get_ApprovedQueriesDisabledWhenNoEnabledQueries(t *tes
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// approved_queries should be disabled because no enabled queries exist
+	// Response should reflect stored state (enabled=true)
 	approvedQueries, ok := resp.ToolGroups[ToolGroupApprovedQueries]
 	require.True(t, ok, "approved_queries should be in response")
-	assert.False(t, approvedQueries.Enabled, "approved_queries should be disabled when no enabled queries exist")
+	assert.True(t, approvedQueries.Enabled, "response should reflect stored config state")
 }
 
 func TestMCPConfigService_Get_ApprovedQueriesEnabledWhenEnabledQueriesExist(t *testing.T) {
@@ -342,8 +342,9 @@ func TestMCPConfigService_ShouldShowApprovedQueriesTools_ErrorFromHasEnabledQuer
 	assert.False(t, shouldShow)
 }
 
-func TestMCPConfigService_Get_NoDatasourceFallsBackToDisabled(t *testing.T) {
-	// When project has no default datasource, approved_queries should be disabled
+func TestMCPConfigService_Get_NoDatasource_StillReturnsStoredState(t *testing.T) {
+	// Even when project has no default datasource, Get() should return stored state.
+	// ShouldShowApprovedQueriesTools handles whether tools are exposed.
 	projectID := uuid.New()
 
 	configRepo := &mockMCPConfigRepository{
@@ -376,10 +377,152 @@ func TestMCPConfigService_Get_NoDatasourceFallsBackToDisabled(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// approved_queries should be disabled because no datasource exists
+	// Response should reflect stored state (enabled=true)
 	approvedQueries, ok := resp.ToolGroups[ToolGroupApprovedQueries]
 	require.True(t, ok)
-	assert.False(t, approvedQueries.Enabled, "approved_queries should be disabled when no datasource exists")
+	assert.True(t, approvedQueries.Enabled, "response should reflect stored config state")
+}
+
+func TestMCPConfigService_Update_ShouldPersistEnabledState(t *testing.T) {
+	// This test verifies that when Update() saves enabled=true,
+	// the response should reflect enabled=true (when queries exist).
+	// This catches the bug where buildResponse was overriding saved state.
+
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	configRepo := &mockMCPConfigRepository{
+		config: models.DefaultMCPConfig(projectID),
+	}
+
+	// Enabled queries exist
+	queryService := &mockQueryServiceForMCP{
+		hasEnabledQueries: true,
+	}
+
+	projectService := &mockProjectServiceForMCP{
+		defaultDatasourceID: datasourceID,
+	}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	// Update to enable approved_queries
+	req := &UpdateMCPConfigRequest{
+		ToolGroups: map[string]*models.ToolGroupConfig{
+			ToolGroupApprovedQueries: {Enabled: true},
+		},
+	}
+
+	resp, err := svc.Update(context.Background(), projectID, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// The response should show enabled=true
+	approvedQueries, ok := resp.ToolGroups[ToolGroupApprovedQueries]
+	require.True(t, ok, "approved_queries should be in response")
+	assert.True(t, approvedQueries.Enabled, "approved_queries should be enabled in response after Update")
+
+	// Also verify the config was actually saved with enabled=true
+	assert.True(t, configRepo.config.ToolGroups[ToolGroupApprovedQueries].Enabled,
+		"config should be persisted with enabled=true")
+}
+
+func TestMCPConfigService_Update_NoDefaultDatasource_ResponseReflectsSavedState(t *testing.T) {
+	// Even when GetDefaultDatasourceID returns nil, the response should
+	// reflect the saved state. This was previously a bug where buildResponse
+	// would override enabled=false when hasEnabledQueries returned false.
+
+	projectID := uuid.New()
+
+	configRepo := &mockMCPConfigRepository{
+		config: models.DefaultMCPConfig(projectID),
+	}
+
+	queryService := &mockQueryServiceForMCP{
+		hasEnabledQueries: true,
+	}
+
+	// No default datasource configured
+	projectService := &mockProjectServiceForMCP{
+		defaultDatasourceID: uuid.Nil,
+	}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	// Update to enable approved_queries
+	req := &UpdateMCPConfigRequest{
+		ToolGroups: map[string]*models.ToolGroupConfig{
+			ToolGroupApprovedQueries: {Enabled: true},
+		},
+	}
+
+	resp, err := svc.Update(context.Background(), projectID, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// The config should be saved with enabled=true
+	require.NotNil(t, configRepo.config.ToolGroups[ToolGroupApprovedQueries])
+	assert.True(t, configRepo.config.ToolGroups[ToolGroupApprovedQueries].Enabled,
+		"config should be persisted with enabled=true")
+
+	// Response should reflect saved state (enabled=true)
+	approvedQueries, ok := resp.ToolGroups[ToolGroupApprovedQueries]
+	require.True(t, ok)
+	assert.True(t, approvedQueries.Enabled, "response should reflect saved state")
+}
+
+func TestMCPConfigService_Get_SubOptionsResetWhenDisabled(t *testing.T) {
+	// When a tool group is disabled, sub-options should be reset to false in response
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	// Config has developer disabled but with enableExecute=true (inconsistent state)
+	configRepo := &mockMCPConfigRepository{
+		config: &models.MCPConfig{
+			ProjectID: projectID,
+			ToolGroups: map[string]*models.ToolGroupConfig{
+				"developer": {Enabled: false, EnableExecute: true},
+			},
+		},
+	}
+
+	queryService := &mockQueryServiceForMCP{
+		hasEnabledQueries: false,
+	}
+
+	projectService := &mockProjectServiceForMCP{
+		defaultDatasourceID: datasourceID,
+	}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Developer should be disabled and sub-options should be reset
+	developer, ok := resp.ToolGroups["developer"]
+	require.True(t, ok)
+	assert.False(t, developer.Enabled, "developer should be disabled")
+	assert.False(t, developer.EnableExecute, "enableExecute should be reset when group is disabled")
 }
 
 func TestMCPConfigService_Get_ServerURLConstruction(t *testing.T) {
@@ -440,4 +583,279 @@ func TestMCPConfigService_Get_ServerURLConstruction(t *testing.T) {
 			assert.Equal(t, tt.expectedURL, resp.ServerURL, "ServerURL should be properly constructed")
 		})
 	}
+}
+
+func TestMCPConfigService_Get_EnabledToolsIncluded(t *testing.T) {
+	// When no tool groups are enabled, only the health tool should be in EnabledTools
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	configRepo := &mockMCPConfigRepository{
+		config: models.DefaultMCPConfig(projectID),
+	}
+
+	queryService := &mockQueryServiceForMCP{
+		hasEnabledQueries: false,
+	}
+
+	projectService := &mockProjectServiceForMCP{
+		defaultDatasourceID: datasourceID,
+	}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// With no tool groups enabled, only health should be available
+	require.Len(t, resp.EnabledTools, 1, "should have exactly one tool enabled (health)")
+	assert.Equal(t, "health", resp.EnabledTools[0].Name)
+	assert.Equal(t, "Server health check", resp.EnabledTools[0].Description)
+}
+
+func TestMCPConfigService_Get_EnabledToolsWithDeveloperEnabled(t *testing.T) {
+	// When developer tools are enabled, EnabledTools should include developer tools + health
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	configRepo := &mockMCPConfigRepository{
+		config: &models.MCPConfig{
+			ProjectID: projectID,
+			ToolGroups: map[string]*models.ToolGroupConfig{
+				"developer": {Enabled: true},
+			},
+		},
+	}
+
+	queryService := &mockQueryServiceForMCP{
+		hasEnabledQueries: false,
+	}
+
+	projectService := &mockProjectServiceForMCP{
+		defaultDatasourceID: datasourceID,
+	}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Developer tools (echo, get_schema) + health, but NOT execute (requires enableExecute)
+	toolNames := make([]string, len(resp.EnabledTools))
+	for i, tool := range resp.EnabledTools {
+		toolNames[i] = tool.Name
+	}
+
+	assert.Contains(t, toolNames, "echo", "should include echo tool")
+	assert.Contains(t, toolNames, "get_schema", "should include get_schema tool")
+	assert.Contains(t, toolNames, "health", "should include health tool")
+	assert.NotContains(t, toolNames, "execute", "should NOT include execute (enableExecute not set)")
+}
+
+func TestMCPConfigService_Get_EnabledToolsWithDeveloperAndExecute(t *testing.T) {
+	// When developer tools and enableExecute are enabled, execute tool should be included
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	configRepo := &mockMCPConfigRepository{
+		config: &models.MCPConfig{
+			ProjectID: projectID,
+			ToolGroups: map[string]*models.ToolGroupConfig{
+				"developer": {Enabled: true, EnableExecute: true},
+			},
+		},
+	}
+
+	queryService := &mockQueryServiceForMCP{
+		hasEnabledQueries: false,
+	}
+
+	projectService := &mockProjectServiceForMCP{
+		defaultDatasourceID: datasourceID,
+	}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	toolNames := make([]string, len(resp.EnabledTools))
+	for i, tool := range resp.EnabledTools {
+		toolNames[i] = tool.Name
+	}
+
+	assert.Contains(t, toolNames, "execute", "should include execute tool when enableExecute is true")
+}
+
+func TestMCPConfigService_Get_EnabledToolsWithApprovedQueries(t *testing.T) {
+	// When approved_queries is enabled, business user tools should be included
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	configRepo := &mockMCPConfigRepository{
+		config: &models.MCPConfig{
+			ProjectID: projectID,
+			ToolGroups: map[string]*models.ToolGroupConfig{
+				ToolGroupApprovedQueries: {Enabled: true},
+			},
+		},
+	}
+
+	queryService := &mockQueryServiceForMCP{
+		hasEnabledQueries: true,
+	}
+
+	projectService := &mockProjectServiceForMCP{
+		defaultDatasourceID: datasourceID,
+	}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	toolNames := make([]string, len(resp.EnabledTools))
+	for i, tool := range resp.EnabledTools {
+		toolNames[i] = tool.Name
+	}
+
+	// Business user tools
+	assert.Contains(t, toolNames, "query", "should include query tool")
+	assert.Contains(t, toolNames, "sample", "should include sample tool")
+	assert.Contains(t, toolNames, "validate", "should include validate tool")
+	assert.Contains(t, toolNames, "get_ontology", "should include get_ontology tool")
+	assert.Contains(t, toolNames, "get_glossary", "should include get_glossary tool")
+	assert.Contains(t, toolNames, "list_approved_queries", "should include list_approved_queries tool")
+	assert.Contains(t, toolNames, "execute_approved_query", "should include execute_approved_query tool")
+	assert.Contains(t, toolNames, "health", "should include health tool")
+
+	// Developer tools should NOT be present
+	assert.NotContains(t, toolNames, "echo", "should NOT include developer tool echo")
+	assert.NotContains(t, toolNames, "get_schema", "should NOT include developer tool get_schema")
+}
+
+func TestMCPConfigService_Get_EnabledToolsWithAgentTools(t *testing.T) {
+	// When agent_tools is enabled, only agent-allowed tools should be included
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	configRepo := &mockMCPConfigRepository{
+		config: &models.MCPConfig{
+			ProjectID: projectID,
+			ToolGroups: map[string]*models.ToolGroupConfig{
+				ToolGroupAgentTools: {Enabled: true},
+			},
+		},
+	}
+
+	queryService := &mockQueryServiceForMCP{
+		hasEnabledQueries: false,
+	}
+
+	projectService := &mockProjectServiceForMCP{
+		defaultDatasourceID: datasourceID,
+	}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	toolNames := make([]string, len(resp.EnabledTools))
+	for i, tool := range resp.EnabledTools {
+		toolNames[i] = tool.Name
+	}
+
+	// Agent-allowed tools only
+	assert.Contains(t, toolNames, "echo", "should include echo tool for agents")
+	assert.Contains(t, toolNames, "list_approved_queries", "should include list_approved_queries for agents")
+	assert.Contains(t, toolNames, "execute_approved_query", "should include execute_approved_query for agents")
+	assert.Contains(t, toolNames, "health", "should include health tool")
+
+	// Other tools should NOT be present
+	assert.NotContains(t, toolNames, "query", "should NOT include query tool for agents")
+	assert.NotContains(t, toolNames, "get_schema", "should NOT include get_schema for agents")
+	assert.Len(t, resp.EnabledTools, 4, "should have exactly 4 tools for agent mode")
+}
+
+func TestMCPConfigService_Update_EnabledToolsReflectNewState(t *testing.T) {
+	// When Update() is called, the response EnabledTools should reflect the new state
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	configRepo := &mockMCPConfigRepository{
+		config: models.DefaultMCPConfig(projectID),
+	}
+
+	queryService := &mockQueryServiceForMCP{
+		hasEnabledQueries: true,
+	}
+
+	projectService := &mockProjectServiceForMCP{
+		defaultDatasourceID: datasourceID,
+	}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	// Update to enable developer tools
+	req := &UpdateMCPConfigRequest{
+		ToolGroups: map[string]*models.ToolGroupConfig{
+			"developer": {Enabled: true, EnableExecute: true},
+		},
+	}
+
+	resp, err := svc.Update(context.Background(), projectID, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	toolNames := make([]string, len(resp.EnabledTools))
+	for i, tool := range resp.EnabledTools {
+		toolNames[i] = tool.Name
+	}
+
+	// Should include developer tools after update
+	assert.Contains(t, toolNames, "echo", "should include echo after enabling developer")
+	assert.Contains(t, toolNames, "execute", "should include execute after enabling developer+enableExecute")
+	assert.Contains(t, toolNames, "get_schema", "should include get_schema after enabling developer")
 }

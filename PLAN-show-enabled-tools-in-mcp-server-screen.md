@@ -228,25 +228,43 @@ Option B: Use React context or state management for agent key (heavier solution)
    - **Files created**: `pkg/services/mcp_state.go`, `pkg/services/mcp_state_test.go`
    - **Key design decision**: Error results include enabled tools from the ORIGINAL state, not the failed transition state. This ensures the UI can always display a valid tools list.
 
-4. **Update API response** (`pkg/services/mcp_config.go`)
-   - Add `EnabledTools` to `MCPConfigResponse`
-   - Update `buildResponse()` to include enabled tools from state result
+4. [x] **Update API response** (`pkg/services/mcp_config.go`) ✅ COMPLETED
+   - Added `EnabledToolInfo` struct with `Name` and `Description` fields for API responses (line 29-33)
+   - Added `EnabledTools []EnabledToolInfo` field to `MCPConfigResponse` struct (line 40)
+   - **Key refactor**: `Update()` now uses state validator for all state transitions instead of inline logic
+     - Calls `stateValidator.Apply()` with transition and context containing `HasEnabledQueries`
+     - Returns validation errors without persisting (e.g., mutual exclusivity violations)
+     - Only persists when validation succeeds
+   - **Key refactor**: `buildResponse()` now uses state validator for normalization
+     - Ensures sub-options are reset when group is disabled
+     - Converts `result.EnabledTools` ([]ToolDefinition) to `[]EnabledToolInfo` for API response
+   - Added `stateValidator MCPStateValidator` field to service struct
+   - Added 6 new tests in `mcp_config_test.go` for `EnabledTools`:
+     - `TestMCPConfigService_Get_EnabledToolsIncluded` - verifies health tool is returned when no groups enabled
+     - `TestMCPConfigService_Get_EnabledToolsWithDeveloperEnabled` - verifies developer tools (echo, get_schema) but not execute
+     - `TestMCPConfigService_Get_EnabledToolsWithDeveloperAndExecute` - verifies execute tool included with enableExecute
+     - `TestMCPConfigService_Get_EnabledToolsWithApprovedQueries` - verifies all business user tools included
+     - `TestMCPConfigService_Get_EnabledToolsWithAgentTools` - verifies only agent-allowed tools (4 total)
+     - `TestMCPConfigService_Update_EnabledToolsReflectNewState` - verifies Update() returns correct enabled tools
+   - Updated existing tests to reflect new behavior (state is stored as-is, not overridden based on queries)
+   - All tests pass
+   - **Key design**: Uses separate `EnabledToolInfo` type for API response to avoid exposing internal `ToolDefinition` details (ToolGroup, SubOption)
 
-4. **Create frontend component** (`ui/src/components/mcp/MCPEnabledTools.tsx`)
+5. **Create frontend component** (`ui/src/components/mcp/MCPEnabledTools.tsx`)
    - Simple table display component
 
-5. **Update MCPServerURL** (`ui/src/components/mcp/MCPServerURL.tsx`)
+6. **Update MCPServerURL** (`ui/src/components/mcp/MCPServerURL.tsx`)
    - Add `enabledTools` prop
    - Render `MCPEnabledTools` inside the card
 
-6. **Update MCPServerPage** (`ui/src/pages/MCPServerPage.tsx`)
+7. **Update MCPServerPage** (`ui/src/pages/MCPServerPage.tsx`)
    - Pass `enabledTools` from config response to `MCPServerURL`
 
-7. **Fix agent key rotation bug** (`ui/src/components/mcp/AgentAPIKeyDisplay.tsx`, `ui/src/pages/MCPServerPage.tsx`)
+8. **Fix agent key rotation bug** (`ui/src/components/mcp/AgentAPIKeyDisplay.tsx`, `ui/src/pages/MCPServerPage.tsx`)
    - Add `onKeyChange` callback prop
    - Lift key state to parent
 
-8. **Update types** (`ui/src/types/index.ts`)
+9. **Update types** (`ui/src/types/index.ts`)
    - Add `EnabledToolInfo` type
    - Update `MCPConfigResponse` type
 
