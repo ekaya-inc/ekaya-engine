@@ -308,7 +308,25 @@ ontologyDAGService.SetGlossaryEnrichmentMethods(services.NewGlossaryEnrichmentAd
    - Build successful, all existing tests pass
    - **Architectural note**: The glossary service is now properly wired into both the DAG workflow (for automatic discovery/enrichment) and the HTTP handler layer (for manual term management via API). This dual integration enables both automated ontology-driven term discovery and manual business glossary curation.
    - **For next session**: DAG workflow is now fully wired with glossary nodes. The integration is complete from a wiring perspective. Task 8 (unit tests for nodes) and Task 9 (extending service tests) are remaining, but the core feature is functional. If you want to test the workflow end-to-end, you can start an ontology extraction and the glossary nodes will automatically run after OntologyFinalization.
-8. [ ] Add unit tests for nodes
+8. [x] Add unit tests for nodes
+   - **COMPLETED**: Created comprehensive test files for both glossary nodes
+   - **pkg/services/dag/glossary_discovery_node_test.go**: 5 tests covering success case, missing ontology ID, discovery errors, progress reporting errors, and node name verification
+   - TestGlossaryDiscoveryNode_Execute_Success: Verifies successful discovery with mocked methods and term count reporting
+   - TestGlossaryDiscoveryNode_Execute_NoOntologyID: Ensures proper error when ontology ID is missing
+   - TestGlossaryDiscoveryNode_Execute_DiscoveryError: Tests error handling when discovery fails
+   - TestGlossaryDiscoveryNode_Execute_ProgressReportingError: Confirms execution succeeds even if progress reporting fails (non-critical)
+   - TestGlossaryDiscoveryNode_Name: Verifies node returns correct name constant
+   - **pkg/services/dag/glossary_enrichment_node_test.go**: 5 tests covering success case, missing ontology ID, enrichment errors, progress reporting errors, and node name verification
+   - TestGlossaryEnrichmentNode_Execute_Success: Verifies successful enrichment with mocked methods
+   - TestGlossaryEnrichmentNode_Execute_NoOntologyID: Ensures proper error when ontology ID is missing
+   - TestGlossaryEnrichmentNode_Execute_EnrichmentError: Tests error handling when enrichment fails
+   - TestGlossaryEnrichmentNode_Execute_ProgressReportingError: Confirms execution succeeds even if progress reporting fails (non-critical)
+   - TestGlossaryEnrichmentNode_Name: Verifies node returns correct name constant
+   - **Testing**: All 10 tests pass successfully
+   - Both test files include comprehensive mock implementations of GlossaryDiscoveryMethods/GlossaryEnrichmentMethods and OntologyDAGRepository
+   - Tests validate progress reporting with message tracking
+   - Tests verify correct projectID and ontologyID are passed to service methods
+   - Pattern follows existing node test patterns (EntityDiscoveryNode, etc.)
 9. [ ] Extend existing service tests
 
 ## Key Design Decisions
