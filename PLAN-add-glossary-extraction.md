@@ -278,7 +278,25 @@ ontologyDAGService.SetGlossaryEnrichmentMethods(services.NewGlossaryEnrichmentAd
    - Tests cover: success cases, error handling, zero results, context cancellation
    - All 6 tests pass successfully
    - **For next session**: Both adapters are simple delegation wrappers. Ready to wire into ontology_dag_service.go via setter methods.
-6. [ ] Update `pkg/services/ontology_dag_service.go` (fields, setters, getNodeExecutor)
+6. [x] Update `pkg/services/ontology_dag_service.go` (fields, setters, getNodeExecutor)
+   - **COMPLETED**: Added glossaryDiscoveryMethods and glossaryEnrichmentMethods fields to ontologyDAGService struct at pkg/services/ontology_dag_service.go:58-59
+   - **COMPLETED**: Added SetGlossaryDiscoveryMethods setter at pkg/services/ontology_dag_service.go:140-143
+   - **COMPLETED**: Added SetGlossaryEnrichmentMethods setter at pkg/services/ontology_dag_service.go:145-148
+   - **COMPLETED**: Updated getNodeExecutor() switch statement at pkg/services/ontology_dag_service.go:665-679
+   - Added case for DAGNodeGlossaryDiscovery: checks if methods are set, creates NewGlossaryDiscoveryNode, sets current node ID
+   - Added case for DAGNodeGlossaryEnrichment: checks if methods are set, creates NewGlossaryEnrichmentNode, sets current node ID
+   - Follows exact pattern of existing node executor cases (EntityDiscovery, ColumnEnrichment, etc.)
+   - **Testing**: Added comprehensive unit tests in pkg/services/ontology_dag_service_test.go:812-887
+   - TestGetNodeExecutor_GlossaryDiscovery: verifies correct executor returned when methods are set
+   - TestGetNodeExecutor_GlossaryDiscovery_NotSet: verifies error when methods are not set
+   - TestGetNodeExecutor_GlossaryEnrichment: verifies correct executor returned when methods are set
+   - TestGetNodeExecutor_GlossaryEnrichment_NotSet: verifies error when methods are not set
+   - TestSetGlossaryMethods: verifies both setter methods work correctly
+   - Added test helper implementations: testGlossaryDiscovery and testGlossaryEnrichment at pkg/services/ontology_dag_service_test.go:210-220
+   - Extended TestNodeExecutorInterfaces_AreWellDefined to include glossary interfaces at pkg/services/ontology_dag_service_test.go:76-82
+   - Extended TestDAGNodes_AllNodesHaveCorrectOrder to include both glossary nodes in expected order at pkg/services/ontology_dag_service_test.go:32-33
+   - All tests pass successfully (5 new tests + 2 test extensions)
+   - **For next session**: DAG service is now aware of glossary nodes and can instantiate them. Next step is to wire these methods in main.go (task 7).
 7. [ ] Wire in `main.go`
 8. [ ] Add unit tests for nodes
 9. [ ] Extend existing service tests
