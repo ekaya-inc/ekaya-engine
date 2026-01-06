@@ -1,4 +1,4 @@
-import { ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, ExternalLink } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Loader2, Pencil, ExternalLink, AlertTriangle } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 
@@ -11,6 +11,14 @@ import { parsePostgresUrl } from "../utils/connectionString";
 
 import { Button } from "./ui/Button";
 import { Card, CardContent } from "./ui/Card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/Dialog";
 import { Input } from "./ui/Input";
 import { Label } from "./ui/Label";
 import { Switch } from "./ui/Switch";
@@ -59,6 +67,8 @@ const DatasourceConfiguration = ({
   const [testingConnection, setTestingConnection] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isDisconnecting, setIsDisconnecting] = useState<boolean>(false);
+  const [showDisconnectDialog, setShowDisconnectDialog] = useState<boolean>(false);
+  const [disconnectConfirmation, setDisconnectConfirmation] = useState<string>("");
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
   const [connectionString, setConnectionString] = useState<string>("");
   const [connectionStringError, setConnectionStringError] = useState<string>("");
@@ -230,6 +240,8 @@ const DatasourceConfiguration = ({
 
       const result = await deleteDataSource(projectId, datasourceId);
       if (result.success) {
+        setShowDisconnectDialog(false);
+        setDisconnectConfirmation("");
         toast({
           title: "Success",
           description: "Datasource disconnected successfully!",
@@ -656,18 +668,10 @@ const DatasourceConfiguration = ({
           {isConnected && connectionDetails && (
             <Button
               variant="outline"
-              onClick={handleDisconnect}
-              disabled={isDisconnecting}
+              onClick={() => setShowDisconnectDialog(true)}
               className="text-red-600 border-red-300 hover:bg-red-50 dark:text-red-400 dark:border-red-700 dark:hover:bg-red-950"
             >
-              {isDisconnecting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Disconnecting...
-                </>
-              ) : (
-                "Disconnect"
-              )}
+              Disconnect
             </Button>
           )}
         </div>
@@ -693,6 +697,67 @@ const DatasourceConfiguration = ({
           )}
         </Button>
       </div>
+
+      {/* Disconnect Confirmation Dialog */}
+      <Dialog
+        open={showDisconnectDialog}
+        onOpenChange={(open) => {
+          if (!isDisconnecting) {
+            setShowDisconnectDialog(open);
+            if (!open) {
+              setDisconnectConfirmation("");
+            }
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-red-500" />
+              Disconnect Datasource?
+            </DialogTitle>
+            <DialogDescription>
+              This will disconnect from the datasource and clear all schema, approved queries,
+              and associated ontology extractions that were attached to this datasource.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <label className="text-sm font-medium text-text-primary">
+              Type <span className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">disconnect</span> to confirm
+            </label>
+            <Input
+              value={disconnectConfirmation}
+              onChange={(e) => setDisconnectConfirmation(e.target.value)}
+              placeholder="disconnect"
+              className="mt-2"
+              disabled={isDisconnecting}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowDisconnectDialog(false)}
+              disabled={isDisconnecting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDisconnect}
+              disabled={disconnectConfirmation !== "disconnect" || isDisconnecting}
+            >
+              {isDisconnecting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Disconnecting...
+                </>
+              ) : (
+                "Disconnect"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
