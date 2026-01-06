@@ -207,19 +207,6 @@ describe("DatasourceAdapterSelection", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/projects/test-project");
   });
 
-  it("displays connection string help text for providers that have it", async () => {
-    renderComponent();
-
-    await waitFor(() => {
-      expect(screen.getByText("Supabase")).toBeInTheDocument();
-    });
-
-    // Supabase has connectionStringHelp
-    expect(
-      screen.getByText("Find in: Project Settings → Database → Connection string")
-    ).toBeInTheDocument();
-  });
-
   it("shows correct page title and subtitle", async () => {
     renderComponent();
 

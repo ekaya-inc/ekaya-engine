@@ -194,28 +194,15 @@ const DatasourceAdapterSelection = ({
                         </div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h3
-                            className={`font-semibold truncate ${
-                              isDisabled
-                                ? "text-text-tertiary"
-                                : "text-text-primary"
-                            }`}
-                          >
-                            {provider.name}
-                          </h3>
-                        </div>
-                        {provider.connectionStringHelp && (
-                          <p
-                            className={`text-xs truncate ${
-                              isDisabled
-                                ? "text-text-tertiary"
-                                : "text-text-secondary"
-                            }`}
-                          >
-                            {provider.connectionStringHelp}
-                          </p>
-                        )}
+                        <h3
+                          className={`font-semibold truncate ${
+                            isDisabled
+                              ? "text-text-tertiary"
+                              : "text-text-primary"
+                          }`}
+                        >
+                          {provider.name}
+                        </h3>
                       </div>
                     </div>
                   </CardContent>
