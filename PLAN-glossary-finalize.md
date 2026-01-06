@@ -163,17 +163,24 @@ CREATE POLICY glossary_aliases_access ON engine_glossary_aliases
 
 ## Phase 2: Backend Model & Repository Updates
 
-### 2.1 Update Models (`pkg/models/glossary.go`)
+### 2.1 Update Models (`pkg/models/glossary.go`) ✅
 
+**Status:** Complete - Model updated with new schema fields
+
+**Implementation Notes:**
+- Updated BusinessGlossaryTerm model with new fields:
+  - DefiningSQL (string) - The definitive SQL definition
+  - OutputColumns ([]OutputColumn) - Columns returned by the SQL (reuses existing OutputColumn struct from query.go)
+  - Aliases ([]string) - Alternative names for the term
+  - UpdatedBy (*uuid.UUID) - User who last updated
+- Removed old fragmented fields: SQLPattern, ColumnsUsed, Filters, Aggregation
+- Removed Filter struct (no longer needed)
+- Added GlossarySource constants: GlossarySourceInferred, GlossarySourceManual, GlossarySourceClient
+- OutputColumn struct already exists in pkg/models/query.go (reused for consistency - no need to define again)
+- Updated model comment to reflect SQL definition focus
+
+**Final Model Structure:**
 ```go
-// OutputColumn describes a column returned by the defining SQL.
-// Same structure as approved queries for consistency.
-type OutputColumn struct {
-    Name        string `json:"name"`
-    Type        string `json:"type"`
-    Description string `json:"description,omitempty"`
-}
-
 // Source values for glossary terms
 const (
     GlossarySourceInferred = "inferred" // LLM discovered during ontology extraction
@@ -198,6 +205,12 @@ type BusinessGlossaryTerm struct {
     UpdatedAt     time.Time      `json:"updated_at"`
 }
 ```
+
+**Important for next tasks:**
+- The model now aligns perfectly with the migration 031 schema
+- OutputColumn is imported from the same package (already defined in query.go)
+- All JSON tags match the database column names (snake_case in DB, automatically mapped by encoding/json)
+- Next step: Update repository layer to work with these new fields
 
 ### 2.2 Update Repository (`pkg/repositories/glossary_repository.go`)
 

@@ -6,29 +6,27 @@ import (
 	"github.com/google/uuid"
 )
 
-// BusinessGlossaryTerm represents a business term with its technical mapping.
-// Used for reverse lookup from business term → schema/SQL pattern.
+// Source values for glossary terms
+const (
+	GlossarySourceInferred = "inferred" // LLM discovered during ontology extraction
+	GlossarySourceManual   = "manual"   // Human added or edited via UI
+	GlossarySourceClient   = "client"   // MCP client added dynamically
+)
+
+// BusinessGlossaryTerm represents a business term with its SQL definition.
 // Stored in engine_business_glossary table.
 type BusinessGlossaryTerm struct {
-	ID          uuid.UUID  `json:"id"`
-	ProjectID   uuid.UUID  `json:"project_id"`
-	Term        string     `json:"term"`
-	Definition  string     `json:"definition"`
-	SQLPattern  string     `json:"sql_pattern,omitempty"`
-	BaseTable   string     `json:"base_table,omitempty"`
-	ColumnsUsed []string   `json:"columns_used,omitempty"`
-	Filters     []Filter   `json:"filters,omitempty"`
-	Aggregation string     `json:"aggregation,omitempty"`
-	Source      string     `json:"source"` // "user" or "suggested"
-	CreatedBy   *uuid.UUID `json:"created_by,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-}
-
-// Filter represents a condition in a glossary term definition.
-// Example: {"column": "transaction_state", "operator": "=", "values": ["completed"]}
-type Filter struct {
-	Column   string   `json:"column"`
-	Operator string   `json:"operator"` // =, IN, >, <, >=, <=, !=, BETWEEN, LIKE, IS NULL, IS NOT NULL
-	Values   []string `json:"values"`
+	ID            uuid.UUID      `json:"id"`
+	ProjectID     uuid.UUID      `json:"project_id"`
+	Term          string         `json:"term"`
+	Definition    string         `json:"definition"`
+	DefiningSQL   string         `json:"defining_sql"`
+	BaseTable     string         `json:"base_table,omitempty"`
+	OutputColumns []OutputColumn `json:"output_columns,omitempty"`
+	Aliases       []string       `json:"aliases,omitempty"`
+	Source        string         `json:"source"`
+	CreatedBy     *uuid.UUID     `json:"created_by,omitempty"`
+	UpdatedBy     *uuid.UUID     `json:"updated_by,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
 }
