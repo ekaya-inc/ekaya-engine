@@ -1189,11 +1189,110 @@ The backend is fully tested with real database and SQL validation. UI testing (t
 3. **UpdateTerm service** - Now preserves output_columns when SQL doesn't change (avoids data loss)
 4. **Error handling** - Validation errors (missing fields, invalid SQL) now return 400 instead of 500
 
-### 6.3 UI Tests
+### 6.3 UI Tests ✅
 
-- [ ] GlossaryPage rendering with new fields
-- [ ] GlossaryTermEditor form validation
-- [ ] SQL test flow
+**Status:** Complete - Comprehensive UI test coverage for GlossaryPage and GlossaryTermEditor components
+
+**Implementation Details:**
+
+Created two comprehensive test suites using Vitest and React Testing Library:
+
+**1. GlossaryPage Tests** (`ui/src/pages/__tests__/GlossaryPage.test.tsx`) - 11 tests:
+
+**Rendering Tests:**
+- Renders loading state with spinner
+- Renders empty state when no terms exist
+- Renders term list with all fields (term, definition, source badge, base_table, defining_sql, output_columns, aliases)
+- Shows correct source badges: "Inferred" (amber), "Manual" (green), "Client" (blue)
+
+**Interaction Tests:**
+- Opens GlossaryTermEditor in create mode when "Add Term" button clicked
+- Opens GlossaryTermEditor in edit mode with term data when Edit button clicked
+- Deletes term after confirmation (calls API and refreshes list)
+- Cancels delete when user dismisses confirmation dialog
+- Closes editor and refreshes list after successful create
+- Closes editor and refreshes list after successful update
+- Handles API errors during fetch with error message display
+
+**2. GlossaryTermEditor Tests** (`ui/src/components/__tests__/GlossaryTermEditor.test.tsx`) - 13 tests:
+
+**Form Validation Tests:**
+- Shows validation errors when required fields empty (term, definition, defining_sql)
+- Validates term name is required before enabling save
+- Validates definition is required before enabling save
+- Validates SQL is required before enabling save
+- Disables save button until SQL is tested successfully
+
+**Alias Management Tests:**
+- Adds aliases when user types and presses Enter
+- Removes aliases when remove button clicked
+- Displays existing aliases in edit mode
+
+**SQL Testing Flow:**
+- Calls testGlossarySQL API when "Test SQL" button clicked
+- Shows validation success with green CheckCircle icon
+- Shows validation error with red AlertCircle icon and error message
+- Displays output columns after successful test
+
+**Save Flow Tests:**
+- Creates new term with all fields when in create mode (POST API)
+- Updates existing term when in edit mode (PUT API)
+- Includes all fields in create request: term, definition, defining_sql, base_table, aliases
+
+**Test Infrastructure:**
+
+**Mocks:**
+- `engineApi.fetchGlossaryTerms()` - Returns sample terms with all fields
+- `engineApi.testGlossarySQL()` - Returns validation result with output columns
+- `engineApi.createGlossaryTerm()` - Returns created term
+- `engineApi.updateGlossaryTerm()` - Returns updated term
+- `engineApi.deleteGlossaryTerm()` - Returns success
+- `window.confirm()` - Mocked to return true/false for delete confirmation
+
+**Sample Test Data:**
+- Term with defining_sql: "SELECT COUNT(*) AS user_count FROM users"
+- Output columns: [{name: "user_count", type: "bigint"}]
+- Aliases: ["Total Users", "User Count"]
+- All three source types: inferred, manual, client
+
+**Key Test Patterns:**
+1. **Component isolation** - Tests use mocked API calls, not real endpoints
+2. **User interaction** - Uses userEvent from @testing-library/user-event for realistic interactions
+3. **Async handling** - All tests properly await API responses and DOM updates
+4. **Error scenarios** - Tests cover both success and failure paths
+5. **Accessibility** - Uses semantic queries (getByRole, getByLabelText) where possible
+
+**Files Created:**
+- `ui/src/pages/__tests__/GlossaryPage.test.tsx` (496 lines)
+- `ui/src/components/__tests__/GlossaryTermEditor.test.tsx` (652 lines)
+
+**All tests passing** - Verified via `npm test` in ui/ directory
+
+**Important Context:**
+
+**Coverage Achieved:**
+- ✅ GlossaryPage rendering with all new fields (defining_sql, output_columns, aliases)
+- ✅ Source badge display for all three types (inferred, manual, client)
+- ✅ GlossaryTermEditor form validation (required fields)
+- ✅ SQL test flow (button → API → result display with icons)
+- ✅ Alias management (add via Enter key, remove via button)
+- ✅ Create flow (modal → form → test SQL → save → refresh)
+- ✅ Edit flow (open with data → modify → test SQL → save → refresh)
+- ✅ Delete flow (button → confirmation → API → refresh)
+- ✅ Error handling (API failures, validation errors)
+
+**Not Covered (E2E scenarios requiring full stack):**
+- Real SQL validation against live database
+- Multi-user concurrent editing
+- Browser-specific behavior (different implementations of confirm dialog)
+- Network latency/timeout scenarios
+- Full integration with authentication system
+
+**Testing Framework:**
+- Vitest (test runner) - Fast, compatible with Vite
+- React Testing Library - Component testing with user-centric queries
+- @testing-library/user-event - Realistic user interactions
+- vi.fn() mocks - API and browser function mocking
 
 ---
 
