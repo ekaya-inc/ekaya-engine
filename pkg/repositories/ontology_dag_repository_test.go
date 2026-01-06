@@ -489,7 +489,7 @@ func TestDAGRepository_GetNextPendingNode(t *testing.T) {
 	nodes := []models.DAGNode{
 		{DAGID: dag.ID, NodeName: "EntityDiscovery", NodeOrder: 1, Status: models.DAGNodeStatusCompleted},
 		{DAGID: dag.ID, NodeName: "EntityEnrichment", NodeOrder: 2, Status: models.DAGNodeStatusPending},
-		{DAGID: dag.ID, NodeName: "RelationshipDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusPending},
+		{DAGID: dag.ID, NodeName: "FKDiscovery", NodeOrder: 3, Status: models.DAGNodeStatusPending},
 	}
 	err := tc.repo.CreateNodes(ctx, nodes)
 	if err != nil {
