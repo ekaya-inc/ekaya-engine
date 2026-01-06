@@ -297,7 +297,17 @@ ontologyDAGService.SetGlossaryEnrichmentMethods(services.NewGlossaryEnrichmentAd
    - Extended TestDAGNodes_AllNodesHaveCorrectOrder to include both glossary nodes in expected order at pkg/services/ontology_dag_service_test.go:32-33
    - All tests pass successfully (5 new tests + 2 test extensions)
    - **For next session**: DAG service is now aware of glossary nodes and can instantiate them. Next step is to wire these methods in main.go (task 7).
-7. [ ] Wire in `main.go`
+7. [x] Wire in `main.go`
+   - **COMPLETED**: Moved glossaryRepo and glossaryService initialization to line 224-225 (before DAG service creation)
+   - Previously these were initialized at line 381-382, but needed to be moved earlier for DAG adapter wiring
+   - Added glossary adapter wiring at lines 241-242 after SetColumnEnrichmentMethods
+   - `ontologyDAGService.SetGlossaryDiscoveryMethods(services.NewGlossaryDiscoveryAdapter(glossaryService))`
+   - `ontologyDAGService.SetGlossaryEnrichmentMethods(services.NewGlossaryEnrichmentAdapter(glossaryService))`
+   - Removed duplicate glossaryRepo/glossaryService declarations from line 385-386
+   - Updated mockGlossaryService in pkg/mcp/tools/glossary_test.go:55-62 to include DiscoverGlossaryTerms and EnrichGlossaryTerms methods
+   - Build successful, all existing tests pass
+   - **Architectural note**: The glossary service is now properly wired into both the DAG workflow (for automatic discovery/enrichment) and the HTTP handler layer (for manual term management via API). This dual integration enables both automated ontology-driven term discovery and manual business glossary curation.
+   - **For next session**: DAG workflow is now fully wired with glossary nodes. The integration is complete from a wiring perspective. Task 8 (unit tests for nodes) and Task 9 (extending service tests) are remaining, but the core feature is functional. If you want to test the workflow end-to-end, you can start an ontology extraction and the glossary nodes will automatically run after OntologyFinalization.
 8. [ ] Add unit tests for nodes
 9. [ ] Extend existing service tests
 

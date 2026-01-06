@@ -221,6 +221,8 @@ func main() {
 		datasourceService, adapterFactory, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
 	relationshipEnrichmentService := services.NewRelationshipEnrichmentService(
 		entityRelationshipRepo, ontologyEntityRepo, convRepo, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
+	glossaryRepo := repositories.NewGlossaryRepository()
+	glossaryService := services.NewGlossaryService(glossaryRepo, ontologyRepo, ontologyEntityRepo, llmFactory, logger)
 
 	// Ontology DAG service for orchestrated workflow execution
 	ontologyDAGService := services.NewOntologyDAGService(
@@ -236,6 +238,8 @@ func main() {
 	ontologyDAGService.SetRelationshipEnrichmentMethods(services.NewRelationshipEnrichmentAdapter(relationshipEnrichmentService))
 	ontologyDAGService.SetFinalizationMethods(services.NewOntologyFinalizationAdapter(ontologyFinalizationService))
 	ontologyDAGService.SetColumnEnrichmentMethods(services.NewColumnEnrichmentAdapter(columnEnrichmentService))
+	ontologyDAGService.SetGlossaryDiscoveryMethods(services.NewGlossaryDiscoveryAdapter(glossaryService))
+	ontologyDAGService.SetGlossaryEnrichmentMethods(services.NewGlossaryEnrichmentAdapter(glossaryService))
 
 	mux := http.NewServeMux()
 
@@ -378,8 +382,6 @@ func main() {
 	ontologyDAGHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register glossary handler (protected) - business glossary for MCP clients
-	glossaryRepo := repositories.NewGlossaryRepository()
-	glossaryService := services.NewGlossaryService(glossaryRepo, ontologyRepo, ontologyEntityRepo, llmFactory, logger)
 	glossaryHandler := handlers.NewGlossaryHandler(glossaryService, logger)
 	glossaryHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
