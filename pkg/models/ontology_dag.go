@@ -105,7 +105,6 @@ const (
 	DAGNodeRelationshipEnrichment DAGNodeName = "RelationshipEnrichment"
 	DAGNodeOntologyFinalization   DAGNodeName = "OntologyFinalization"
 	DAGNodeGlossaryDiscovery      DAGNodeName = "GlossaryDiscovery"
-	DAGNodeGlossaryEnrichment     DAGNodeName = "GlossaryEnrichment"
 )
 
 // DAGNodeOrder defines the execution order for each node.
@@ -118,7 +117,6 @@ var DAGNodeOrder = map[DAGNodeName]int{
 	DAGNodeRelationshipEnrichment: 6,
 	DAGNodeOntologyFinalization:   7,
 	DAGNodeGlossaryDiscovery:      8,
-	DAGNodeGlossaryEnrichment:     9,
 }
 
 // AllDAGNodes returns all DAG node names in execution order.
@@ -132,7 +130,6 @@ func AllDAGNodes() []DAGNodeName {
 		DAGNodeRelationshipEnrichment,
 		DAGNodeOntologyFinalization,
 		DAGNodeGlossaryDiscovery,
-		DAGNodeGlossaryEnrichment,
 	}
 }
 

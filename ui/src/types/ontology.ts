@@ -500,8 +500,7 @@ export type DAGNodeName =
   | 'RelationshipEnrichment'
   | 'OntologyFinalization'
   | 'ColumnEnrichment'
-  | 'GlossaryDiscovery'
-  | 'GlossaryEnrichment';
+  | 'GlossaryDiscovery';
 
 /**
  * Progress within a DAG node
@@ -573,10 +572,6 @@ export const DAGNodeDescriptions: Record<DAGNodeName, { title: string; descripti
   },
   GlossaryDiscovery: {
     title: 'Glossary Discovery',
-    description: 'Discovering business glossary terms',
-  },
-  GlossaryEnrichment: {
-    title: 'Glossary Enrichment',
-    description: 'Enriching glossary terms with SQL patterns',
+    description: 'Discovering and defining business glossary terms',
   },
 };

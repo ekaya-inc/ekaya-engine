@@ -476,9 +476,51 @@ type BusinessGlossaryTerm struct {
 - Post-discovery validation (task 3.4) will automatically apply to both phases via service layer SQL validation
 - Any LLM-generated SQL that is invalid will be caught by `TestSQL()` in the service layer
 
-### 3.3 Update Enrichment Node (if keeping two-phase)
+### 3.3 Update Enrichment Node (or consolidate phases) ✅ COMMITTED
 
-Or consolidate into single discovery phase that generates complete definitions.
+**Status:** Complete - Consolidated into single discovery phase
+
+**Decision:** Removed the GlossaryEnrichment phase entirely from the DAG workflow.
+
+**Reasoning:**
+- After tasks 3.1 and 3.2, both discovery and enrichment generated identical output (complete executable SQL with `defining_sql`, `base_table`, and `aliases`)
+- The enrichment service method already had a comment acknowledging it was a no-op: "DefiningSQL is now required, so this is a no-op for new schema"
+- Discovery now generates complete SQL definitions, leaving nothing for enrichment to do
+- The enrichment phase filtered for `term.DefiningSQL == ""`, which would never be true after discovery completes
+- Keeping both phases added unnecessary DAG complexity and execution time with no benefit
+
+**Implementation:**
+1. Removed `DAGNodeGlossaryEnrichment` constant from `pkg/models/ontology_dag.go`
+2. Removed enrichment node from DAG execution order (DAG now has 8 steps instead of 9)
+3. Deleted node files:
+   - `pkg/services/dag/glossary_enrichment_node.go`
+   - `pkg/services/dag/glossary_enrichment_node_test.go`
+4. Removed enrichment adapter from `pkg/services/dag_adapters.go`
+5. Removed enrichment wiring from:
+   - `pkg/services/ontology_dag_service.go` (removed field, setter, and switch case)
+   - `main.go` (removed adapter registration)
+6. Updated UI types in `ui/src/types/ontology.ts`:
+   - Removed `GlossaryEnrichment` from `DAGNodeName` union type
+   - Removed from `DAGNodeDescriptions` object
+   - Updated description for `GlossaryDiscovery` to reflect that it now handles both discovery and definition
+7. Updated tests:
+   - `pkg/services/dag_adapters_test.go` (removed enrichment adapter tests)
+   - `pkg/services/ontology_dag_service_test.go` (removed enrichment node tests, updated expected node order)
+
+**Files Modified:**
+- `pkg/models/ontology_dag.go` - Removed constant and order entry
+- `pkg/services/dag_adapters.go` - Removed adapter implementation
+- `pkg/services/ontology_dag_service.go` - Removed wiring and switch case
+- `main.go` - Removed adapter registration
+- `ui/src/types/ontology.ts` - Removed from UI types
+- `pkg/services/dag_adapters_test.go` - Removed tests
+- `pkg/services/ontology_dag_service_test.go` - Updated tests
+
+**Files Deleted:**
+- `pkg/services/dag/glossary_enrichment_node.go`
+- `pkg/services/dag/glossary_enrichment_node_test.go`
+
+**Note:** The `EnrichGlossaryTerms` service method remains in `pkg/services/glossary_service.go` but is no longer called by the DAG. It's harmless as a no-op and might be useful for backfilling old data if needed.
 
 ### 3.4 Post-Discovery Validation
 

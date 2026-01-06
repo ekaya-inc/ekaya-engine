@@ -56,7 +56,6 @@ type ontologyDAGService struct {
 	finalizationMethods           dag.OntologyFinalizationMethods
 	columnEnrichmentMethods       dag.ColumnEnrichmentMethods
 	glossaryDiscoveryMethods      dag.GlossaryDiscoveryMethods
-	glossaryEnrichmentMethods     dag.GlossaryEnrichmentMethods
 
 	getTenantCtx TenantContextFunc
 	logger       *zap.Logger
@@ -140,11 +139,6 @@ func (s *ontologyDAGService) SetColumnEnrichmentMethods(methods dag.ColumnEnrich
 // SetGlossaryDiscoveryMethods sets the glossary discovery methods interface.
 func (s *ontologyDAGService) SetGlossaryDiscoveryMethods(methods dag.GlossaryDiscoveryMethods) {
 	s.glossaryDiscoveryMethods = methods
-}
-
-// SetGlossaryEnrichmentMethods sets the glossary enrichment methods interface.
-func (s *ontologyDAGService) SetGlossaryEnrichmentMethods(methods dag.GlossaryEnrichmentMethods) {
-	s.glossaryEnrichmentMethods = methods
 }
 
 // Start initiates a new DAG execution or returns an existing active DAG.
@@ -666,14 +660,6 @@ func (s *ontologyDAGService) getNodeExecutor(nodeName models.DAGNodeName, nodeID
 			return nil, fmt.Errorf("glossary discovery methods not set")
 		}
 		node := dag.NewGlossaryDiscoveryNode(s.dagRepo, s.glossaryDiscoveryMethods, s.logger)
-		node.SetCurrentNodeID(nodeID)
-		return node, nil
-
-	case models.DAGNodeGlossaryEnrichment:
-		if s.glossaryEnrichmentMethods == nil {
-			return nil, fmt.Errorf("glossary enrichment methods not set")
-		}
-		node := dag.NewGlossaryEnrichmentNode(s.dagRepo, s.glossaryEnrichmentMethods, s.logger)
 		node.SetCurrentNodeID(nodeID)
 		return node, nil
 
