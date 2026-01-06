@@ -327,7 +327,25 @@ ontologyDAGService.SetGlossaryEnrichmentMethods(services.NewGlossaryEnrichmentAd
    - Tests validate progress reporting with message tracking
    - Tests verify correct projectID and ontologyID are passed to service methods
    - Pattern follows existing node test patterns (EntityDiscoveryNode, etc.)
-9. [ ] Extend existing service tests
+9. [x] Extend existing service tests
+   - **COMPLETED**: Extended both glossary_service_test.go and ontology_dag_service_test.go with comprehensive test coverage
+   - **pkg/services/glossary_service_test.go** (commit 3754d55): Added 6 new tests
+     - TestGlossaryService_DiscoverGlossaryTerms: Verifies discovery saves terms to database with source="discovered"
+     - TestGlossaryService_DiscoverGlossaryTerms_SkipsDuplicates: Ensures duplicate terms are not created
+     - TestGlossaryService_DiscoverGlossaryTerms_NoEntities: Tests behavior when no entities exist
+     - TestGlossaryService_EnrichGlossaryTerms: Verifies enrichment populates all SQL-related fields
+     - TestGlossaryService_EnrichGlossaryTerms_OnlyEnrichesUnenrichedTerms: Confirms selective processing of terms
+     - TestGlossaryService_EnrichGlossaryTerms_NoUnenrichedTerms: Tests no-op behavior when all terms are enriched
+   - **pkg/services/ontology_dag_service_test.go** (commit 3245af0): Added 5 new tests + 2 test extensions
+     - TestGetNodeExecutor_GlossaryDiscovery: Verifies correct executor returned when methods are set
+     - TestGetNodeExecutor_GlossaryDiscovery_NotSet: Verifies error when methods are not set
+     - TestGetNodeExecutor_GlossaryEnrichment: Verifies correct executor returned when methods are set
+     - TestGetNodeExecutor_GlossaryEnrichment_NotSet: Verifies error when methods are not set
+     - TestSetGlossaryMethods: Verifies both setter methods work correctly
+     - Extended TestNodeExecutorInterfaces_AreWellDefined to include glossary interfaces
+     - Extended TestDAGNodes_AllNodesHaveCorrectOrder to include both glossary nodes in expected order
+   - **Testing**: All tests pass successfully with comprehensive coverage of success paths, error handling, and edge cases
+   - **For next session**: All implementation tasks are complete. The glossary extraction feature is fully integrated into the DAG workflow with comprehensive test coverage. The feature will automatically discover and enrich business glossary terms during ontology extraction, running after OntologyFinalization.
 
 ## Key Design Decisions
 
