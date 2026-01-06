@@ -78,7 +78,8 @@ const GlossaryPage = () => {
 
       if (response.data) {
         // Sort terms alphabetically by term field
-        const sortedTerms = [...response.data.terms].sort((a, b) =>
+        const termsArray = response.data.terms ?? [];
+        const sortedTerms = [...termsArray].sort((a, b) =>
           a.term.localeCompare(b.term)
         );
         setTerms(sortedTerms);
