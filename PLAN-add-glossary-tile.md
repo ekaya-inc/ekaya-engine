@@ -65,27 +65,41 @@ Add a new "Glossary" tile to the Intelligence section on the ProjectDashboard. T
 - `ui/src/services/engineApi.ts` - Added method and import
 - `ui/src/types/index.ts` - Added glossary type export
 
-### Step 3: Create GlossaryPage Component
+### Step 3: Create GlossaryPage Component [x]
 
-Create `ui/src/pages/GlossaryPage.tsx`:
+**Status:** COMPLETE
 
-**Structure (mirror EntitiesPage):**
-1. **Loading state:** Spinner while fetching
+**Implementation:** Created `ui/src/pages/GlossaryPage.tsx` following EntitiesPage pattern with all required features:
+
+1. **Loading state:** Spinner with "Loading glossary terms..." message
 2. **Error state:** Error message with retry button
 3. **Empty state:**
-   - If ontology not complete: "Run Ontology Extraction first" with link to `/projects/${pid}/ontology`
-   - If ontology complete but no terms: "No glossary terms discovered yet"
+   - If ontology not complete: "Run Ontology Extraction First" with Go to Ontology button
+   - If ontology complete but no terms: "No Glossary Terms Discovered Yet" with Go to Ontology button
 4. **Data display:**
-   - Summary card: total terms count
-   - Terms list sorted alphabetically by `term` field
-   - Each term shows: name, definition, source badge, expandable SQL details
+   - Summary card: total terms count with BookOpen icon in cyan
+   - Terms list sorted alphabetically by term field using localeCompare
+   - Each term shows:
+     - Term name (bold heading)
+     - Definition (description text)
+     - Source badge (Suggested in amber, User in green)
+     - Expandable SQL Details section with chevron icon
+   - SQL details include: sql_pattern, base_table, columns_used (as badges), filters, aggregation
 
-**Key imports:**
-- `BookOpen` icon from lucide-react
-- `ontologyService` for checking completion status
-- Card components from `@/components/ui/card`
+**Key features:**
+- Uses ontologyService to subscribe to ontology status and determine completion state
+- Proper state management with expandedTerms Set for toggling SQL details
+- Back button to dashboard and Go to Ontology button in header
+- TypeScript strict mode compliant (passed typecheck)
 
-**Sorting:** `terms.sort((a, b) => a.term.localeCompare(b.term))`
+**Architecture notes for future sessions:**
+- Component mirrors EntitiesPage structure (loading → error → empty → data)
+- Empty state logic: checks `ontologyStatus?.progress.state === 'complete' || ontologyStatus?.ontologyReady === true`
+- SQL details are collapsible to avoid clutter when many terms exist
+- All term SQL fields are optional (sql_pattern, base_table, columns_used, filters, aggregation)
+- Sort uses `localeCompare` for proper alphabetical ordering
+
+**File:** `ui/src/pages/GlossaryPage.tsx`
 
 ### Step 4: Add Route
 
