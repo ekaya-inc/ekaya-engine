@@ -130,15 +130,13 @@ func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uu
 		return fmt.Errorf("update entity summaries: %w", err)
 	}
 
-	var sampleQuestions []string // Empty for now
-
 	// Save to domain_summary JSONB
 	domainSummary := &models.DomainSummary{
 		Description:       description,
 		Domains:           primaryDomains,
 		Conventions:       conventions,
 		RelationshipGraph: relationshipGraph,
-		SampleQuestions:   sampleQuestions,
+		SampleQuestions:   nil, // Feature removed, may be reimplemented later
 	}
 
 	if err := s.ontologyRepo.UpdateDomainSummary(ctx, projectID, domainSummary); err != nil {
