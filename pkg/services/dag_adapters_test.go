@@ -1,0 +1,170 @@
+package services
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+)
+
+// Mock GlossaryService for testing adapters
+type mockGlossaryService struct {
+	discoverFunc func(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error)
+	enrichFunc   func(ctx context.Context, projectID, ontologyID uuid.UUID) error
+}
+
+func (m *mockGlossaryService) CreateTerm(ctx context.Context, projectID uuid.UUID, term *models.BusinessGlossaryTerm) error {
+	return nil
+}
+
+func (m *mockGlossaryService) UpdateTerm(ctx context.Context, term *models.BusinessGlossaryTerm) error {
+	return nil
+}
+
+func (m *mockGlossaryService) DeleteTerm(ctx context.Context, termID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockGlossaryService) GetTerms(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error) {
+	return nil, nil
+}
+
+func (m *mockGlossaryService) GetTerm(ctx context.Context, termID uuid.UUID) (*models.BusinessGlossaryTerm, error) {
+	return nil, nil
+}
+
+func (m *mockGlossaryService) SuggestTerms(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error) {
+	return nil, nil
+}
+
+func (m *mockGlossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error) {
+	if m.discoverFunc != nil {
+		return m.discoverFunc(ctx, projectID, ontologyID)
+	}
+	return 0, nil
+}
+
+func (m *mockGlossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error {
+	if m.enrichFunc != nil {
+		return m.enrichFunc(ctx, projectID, ontologyID)
+	}
+	return nil
+}
+
+// GlossaryDiscoveryAdapter Tests
+
+func TestGlossaryDiscoveryAdapter_DiscoverGlossaryTerms_Success(t *testing.T) {
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	expectedCount := 5
+
+	mock := &mockGlossaryService{
+		discoverFunc: func(ctx context.Context, pid, oid uuid.UUID) (int, error) {
+			assert.Equal(t, projectID, pid)
+			assert.Equal(t, ontologyID, oid)
+			return expectedCount, nil
+		},
+	}
+
+	adapter := NewGlossaryDiscoveryAdapter(mock)
+	count, err := adapter.DiscoverGlossaryTerms(context.Background(), projectID, ontologyID)
+
+	assert.NoError(t, err)
+	assert.Equal(t, expectedCount, count)
+}
+
+func TestGlossaryDiscoveryAdapter_DiscoverGlossaryTerms_Error(t *testing.T) {
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	expectedErr := errors.New("discovery failed")
+
+	mock := &mockGlossaryService{
+		discoverFunc: func(ctx context.Context, pid, oid uuid.UUID) (int, error) {
+			return 0, expectedErr
+		},
+	}
+
+	adapter := NewGlossaryDiscoveryAdapter(mock)
+	count, err := adapter.DiscoverGlossaryTerms(context.Background(), projectID, ontologyID)
+
+	assert.Error(t, err)
+	assert.Equal(t, expectedErr, err)
+	assert.Equal(t, 0, count)
+}
+
+func TestGlossaryDiscoveryAdapter_DiscoverGlossaryTerms_ZeroTerms(t *testing.T) {
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	mock := &mockGlossaryService{
+		discoverFunc: func(ctx context.Context, pid, oid uuid.UUID) (int, error) {
+			return 0, nil
+		},
+	}
+
+	adapter := NewGlossaryDiscoveryAdapter(mock)
+	count, err := adapter.DiscoverGlossaryTerms(context.Background(), projectID, ontologyID)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 0, count)
+}
+
+// GlossaryEnrichmentAdapter Tests
+
+func TestGlossaryEnrichmentAdapter_EnrichGlossaryTerms_Success(t *testing.T) {
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	mock := &mockGlossaryService{
+		enrichFunc: func(ctx context.Context, pid, oid uuid.UUID) error {
+			assert.Equal(t, projectID, pid)
+			assert.Equal(t, ontologyID, oid)
+			return nil
+		},
+	}
+
+	adapter := NewGlossaryEnrichmentAdapter(mock)
+	err := adapter.EnrichGlossaryTerms(context.Background(), projectID, ontologyID)
+
+	assert.NoError(t, err)
+}
+
+func TestGlossaryEnrichmentAdapter_EnrichGlossaryTerms_Error(t *testing.T) {
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	expectedErr := errors.New("enrichment failed")
+
+	mock := &mockGlossaryService{
+		enrichFunc: func(ctx context.Context, pid, oid uuid.UUID) error {
+			return expectedErr
+		},
+	}
+
+	adapter := NewGlossaryEnrichmentAdapter(mock)
+	err := adapter.EnrichGlossaryTerms(context.Background(), projectID, ontologyID)
+
+	assert.Error(t, err)
+	assert.Equal(t, expectedErr, err)
+}
+
+func TestGlossaryEnrichmentAdapter_EnrichGlossaryTerms_ContextCancellation(t *testing.T) {
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	expectedErr := context.Canceled
+
+	mock := &mockGlossaryService{
+		enrichFunc: func(ctx context.Context, pid, oid uuid.UUID) error {
+			return expectedErr
+		},
+	}
+
+	adapter := NewGlossaryEnrichmentAdapter(mock)
+	err := adapter.EnrichGlossaryTerms(context.Background(), projectID, ontologyID)
+
+	assert.Error(t, err)
+	assert.Equal(t, expectedErr, err)
+}

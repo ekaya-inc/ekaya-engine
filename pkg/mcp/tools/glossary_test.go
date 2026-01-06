@@ -52,6 +52,14 @@ func (m *mockGlossaryService) SuggestTerms(ctx context.Context, projectID uuid.U
 	return nil, nil
 }
 
+func (m *mockGlossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockGlossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error {
+	return nil
+}
+
 // TestGlossaryToolDeps_Structure verifies the GlossaryToolDeps struct has all required fields.
 func TestGlossaryToolDeps_Structure(t *testing.T) {
 	deps := &GlossaryToolDeps{}

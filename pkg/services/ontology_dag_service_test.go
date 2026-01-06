@@ -29,6 +29,8 @@ func TestDAGNodes_AllNodesHaveCorrectOrder(t *testing.T) {
 		models.DAGNodePKMatchDiscovery,
 		models.DAGNodeRelationshipEnrichment,
 		models.DAGNodeOntologyFinalization,
+		models.DAGNodeGlossaryDiscovery,
+		models.DAGNodeGlossaryEnrichment,
 	}
 
 	assert.Equal(t, len(expectedOrder), len(allNodes))
@@ -70,6 +72,14 @@ func TestNodeExecutorInterfaces_AreWellDefined(t *testing.T) {
 	// ColumnEnrichmentMethods
 	var cem dag.ColumnEnrichmentMethods = &testColumnEnrichment{}
 	assert.NotNil(t, cem)
+
+	// GlossaryDiscoveryMethods
+	var gdm dag.GlossaryDiscoveryMethods = &testGlossaryDiscovery{}
+	assert.NotNil(t, gdm)
+
+	// GlossaryEnrichmentMethods
+	var gem dag.GlossaryEnrichmentMethods = &testGlossaryEnrichment{}
+	assert.NotNil(t, gem)
 }
 
 func TestDAGStatus_ValidStatuses(t *testing.T) {
@@ -195,6 +205,18 @@ type testColumnEnrichment struct{}
 
 func (t *testColumnEnrichment) EnrichProject(_ context.Context, _ uuid.UUID, _ []string, _ dag.ProgressCallback) (*dag.ColumnEnrichmentResult, error) {
 	return nil, nil
+}
+
+type testGlossaryDiscovery struct{}
+
+func (t *testGlossaryDiscovery) DiscoverGlossaryTerms(_ context.Context, _, _ uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+type testGlossaryEnrichment struct{}
+
+func (t *testGlossaryEnrichment) EnrichGlossaryTerms(_ context.Context, _, _ uuid.UUID) error {
+	return nil
 }
 
 // ============================================================================
@@ -781,4 +803,85 @@ func TestExecuteDAG_HeartbeatCleanupOrder(t *testing.T) {
 	// Verify heartbeat was cleaned up
 	_, exists = service.heartbeatCancel.Load(dagID)
 	assert.False(t, exists, "Heartbeat should be cleaned up after completion")
+}
+
+// ============================================================================
+// GetNodeExecutor Tests
+// ============================================================================
+
+func TestGetNodeExecutor_GlossaryDiscovery(t *testing.T) {
+	service := &ontologyDAGService{
+		dagRepo:                  &mockDAGRepository{},
+		logger:                   zap.NewNop(),
+		glossaryDiscoveryMethods: &testGlossaryDiscovery{},
+	}
+
+	nodeID := uuid.New()
+	executor, err := service.getNodeExecutor(models.DAGNodeGlossaryDiscovery, nodeID)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, executor)
+	assert.IsType(t, &dag.GlossaryDiscoveryNode{}, executor)
+}
+
+func TestGetNodeExecutor_GlossaryDiscovery_NotSet(t *testing.T) {
+	service := &ontologyDAGService{
+		dagRepo: &mockDAGRepository{},
+		logger:  zap.NewNop(),
+		// glossaryDiscoveryMethods intentionally not set
+	}
+
+	nodeID := uuid.New()
+	executor, err := service.getNodeExecutor(models.DAGNodeGlossaryDiscovery, nodeID)
+
+	assert.Error(t, err)
+	assert.Nil(t, executor)
+	assert.Contains(t, err.Error(), "glossary discovery methods not set")
+}
+
+func TestGetNodeExecutor_GlossaryEnrichment(t *testing.T) {
+	service := &ontologyDAGService{
+		dagRepo:                   &mockDAGRepository{},
+		logger:                    zap.NewNop(),
+		glossaryEnrichmentMethods: &testGlossaryEnrichment{},
+	}
+
+	nodeID := uuid.New()
+	executor, err := service.getNodeExecutor(models.DAGNodeGlossaryEnrichment, nodeID)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, executor)
+	assert.IsType(t, &dag.GlossaryEnrichmentNode{}, executor)
+}
+
+func TestGetNodeExecutor_GlossaryEnrichment_NotSet(t *testing.T) {
+	service := &ontologyDAGService{
+		dagRepo: &mockDAGRepository{},
+		logger:  zap.NewNop(),
+		// glossaryEnrichmentMethods intentionally not set
+	}
+
+	nodeID := uuid.New()
+	executor, err := service.getNodeExecutor(models.DAGNodeGlossaryEnrichment, nodeID)
+
+	assert.Error(t, err)
+	assert.Nil(t, executor)
+	assert.Contains(t, err.Error(), "glossary enrichment methods not set")
+}
+
+func TestSetGlossaryMethods(t *testing.T) {
+	service := &ontologyDAGService{
+		dagRepo: &mockDAGRepository{},
+		logger:  zap.NewNop(),
+	}
+
+	// Test SetGlossaryDiscoveryMethods
+	discoveryMethods := &testGlossaryDiscovery{}
+	service.SetGlossaryDiscoveryMethods(discoveryMethods)
+	assert.Equal(t, discoveryMethods, service.glossaryDiscoveryMethods)
+
+	// Test SetGlossaryEnrichmentMethods
+	enrichmentMethods := &testGlossaryEnrichment{}
+	service.SetGlossaryEnrichmentMethods(enrichmentMethods)
+	assert.Equal(t, enrichmentMethods, service.glossaryEnrichmentMethods)
 }
