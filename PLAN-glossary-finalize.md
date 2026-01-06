@@ -583,7 +583,38 @@ Added comprehensive test in `pkg/services/glossary_service_test.go:847-908`:
 
 ## Phase 4: MCP Tools
 
-### 4.1 Refactor to Two Tools (`pkg/mcp/tools/glossary.go`)
+### 4.1 Refactor to Two Tools (`pkg/mcp/tools/glossary.go`) ✅ COMPLETED
+
+**Status:** Complete - Two-tool pattern implemented, tested, and committed
+
+**Implementation Notes:**
+- Replaced single `get_glossary` tool with two specialized tools:
+  1. `list_glossary` - Lightweight discovery tool returning only term, definition, and aliases
+  2. `get_glossary_sql` - Full SQL definition tool with defining_sql, output_columns, base_table, and aliases
+- Both tools use `GlossaryService.GetTermByName()` which supports lookup by term name OR alias
+- `get_glossary_sql` handles not found gracefully with structured error response: `{"error": "Term not found", "term": "<searched-name>"}`
+- Updated `ontologyToolNames` map in `pkg/mcp/tools/developer.go` to include both new tools
+- Removed deprecated response types (`glossaryTermResponse`, `filterResponse`)
+- Created new response types:
+  - `listGlossaryResponse` - For lightweight discovery (term, definition, aliases)
+  - `getGlossarySQLResponse` - For full SQL definition (all fields including defining_sql and output_columns)
+- Comprehensive test coverage:
+  - Unit tests for response converters (`toListGlossaryResponse`, `toGetGlossarySQLResponse`)
+  - Integration tests for both tools
+  - Tool registration tests
+  - Filter map tests
+- All tests pass, code formatted, linting clean
+
+**Files Modified:**
+- `pkg/mcp/tools/glossary.go` - Replaced single tool with two-tool pattern (237 lines)
+- `pkg/mcp/tools/glossary_test.go` - Updated tests for new tools (409 lines)
+- `pkg/mcp/tools/developer.go` - Updated ontologyToolNames map
+
+**Context for Next Session:**
+- MCP tool refactoring is complete - no more backwards compatibility mapping needed
+- The two-tool pattern (list + get) aligns with REST best practices for resource discovery vs retrieval
+- Service layer already supports name OR alias lookup via `GetTermByName()` - both tools leverage this
+- Next task (4.2) is design-only documentation for future client updates - no code changes required
 
 **Tool 1: `list_glossary`**
 ```go

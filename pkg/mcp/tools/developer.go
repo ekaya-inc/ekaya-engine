@@ -73,10 +73,11 @@ var developerToolNames = map[string]bool{
 }
 
 // ontologyToolNames lists all ontology tools (grouped with approved_queries visibility).
-// This includes get_glossary since business glossary is part of semantic context.
+// This includes glossary tools since business glossary is part of semantic context.
 var ontologyToolNames = map[string]bool{
-	"get_ontology": true,
-	"get_glossary": true,
+	"get_ontology":     true,
+	"list_glossary":    true,
+	"get_glossary_sql": true,
 }
 
 // agentToolNames lists tools available to agents when agent_tools is enabled.
