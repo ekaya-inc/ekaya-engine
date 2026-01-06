@@ -106,6 +106,8 @@ const (
 	DAGNodeOntologyFinalization   DAGNodeName = "OntologyFinalization"
 
 	// Deprecated: Use DAGNodeFKDiscovery instead. Kept for backward compatibility with existing DAGs.
+	// Target removal: v1.0.0 or 2025-06-01, whichever comes first.
+	// After this date, any persisted DAGs using this node name should be migrated or recreated.
 	DAGNodeRelationshipDiscovery DAGNodeName = "RelationshipDiscovery"
 )
 
@@ -120,6 +122,7 @@ var DAGNodeOrder = map[DAGNodeName]int{
 	DAGNodeOntologyFinalization:   7,
 
 	// Deprecated: mapped to same order as FKDiscovery for backward compatibility
+	// Target removal: v1.0.0 or 2025-06-01, whichever comes first.
 	DAGNodeRelationshipDiscovery: 3,
 }
 

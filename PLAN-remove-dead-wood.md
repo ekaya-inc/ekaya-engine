@@ -80,12 +80,18 @@ After migrating to the DAG-based ontology extraction workflow, several pieces of
 
 **Context for next session:** These tools were part of the old workflow state system where the LLM could ask questions and get answers. The DAG-based workflow doesn't use this pattern - questions are now handled differently. No backward compatibility concerns because no persisted DAGs reference these tools.
 
-### 5. Document `DAGNodeRelationshipDiscovery` deprecation timeline
+### 5. Document `DAGNodeRelationshipDiscovery` deprecation timeline ✅
 
-- [ ] Add comment with target removal version/date
-- [ ] No code removal yet - kept for backward compatibility
+- [x] Add comment with target removal version/date
+- [x] No code removal yet - kept for backward compatibility
 
 **Risk:** None - documentation only.
+
+**Completed:** Added target removal timeline (v1.0.0 or 2025-06-01) to deprecation comments in three locations:
+- `pkg/models/ontology_dag.go`: Updated constant definition comment (lines 108-111) and DAGNodeOrder map comment (lines 124-126)
+- `pkg/services/ontology_dag_service.go`: Updated case handler comment (lines 612-614)
+- All tests pass (`make check`)
+- **Impact:** Documentation only, no code changes
 
 ## Verification
 

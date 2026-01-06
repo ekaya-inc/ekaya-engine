@@ -611,6 +611,7 @@ func (s *ontologyDAGService) getNodeExecutor(nodeName models.DAGNodeName, nodeID
 
 	case models.DAGNodeFKDiscovery, models.DAGNodeRelationshipDiscovery:
 		// DAGNodeRelationshipDiscovery is deprecated but supported for backward compatibility
+		// Target removal: v1.0.0 or 2025-06-01, whichever comes first.
 		if s.fkDiscoveryMethods == nil {
 			return nil, fmt.Errorf("FK discovery methods not set")
 		}
