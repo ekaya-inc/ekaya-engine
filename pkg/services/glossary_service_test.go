@@ -302,7 +302,7 @@ func (m *mockLLMFactoryForGlossary) CreateEmbeddingClient(ctx context.Context, p
 // Mock datasource service (minimal implementation for tests)
 type mockDatasourceServiceForGlossary struct{}
 
-func (m *mockDatasourceServiceForGlossary) Create(ctx context.Context, projectID uuid.UUID, name, dsType string, config map[string]any) (*models.Datasource, error) {
+func (m *mockDatasourceServiceForGlossary) Create(ctx context.Context, projectID uuid.UUID, name, dsType, provider string, config map[string]any) (*models.Datasource, error) {
 	return nil, nil
 }
 
@@ -327,7 +327,7 @@ func (m *mockDatasourceServiceForGlossary) List(ctx context.Context, projectID u
 	}, nil
 }
 
-func (m *mockDatasourceServiceForGlossary) Update(ctx context.Context, id uuid.UUID, name, dsType string, config map[string]any) error {
+func (m *mockDatasourceServiceForGlossary) Update(ctx context.Context, id uuid.UUID, name, dsType, provider string, config map[string]any) error {
 	return nil
 }
 

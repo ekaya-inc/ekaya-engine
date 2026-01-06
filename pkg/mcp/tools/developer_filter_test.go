@@ -29,7 +29,8 @@ func createTestTools() []mcp.Tool {
 		{Name: "list_approved_queries"},
 		{Name: "execute_approved_query"},
 		{Name: "get_ontology"},
-		{Name: "get_glossary"},
+		{Name: "list_glossary"},
+		{Name: "get_glossary_sql"},
 	}
 }
 
@@ -121,9 +122,9 @@ func TestNewToolFilter_DeveloperEnabled_AllToolsAvailable(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Should have ALL tools (11 total) when developer is enabled
-	if len(filtered) != 11 {
-		t.Errorf("expected 11 tools (all), got %d: %v", len(filtered), toolNames(filtered))
+	// Should have ALL tools (12 total) when developer is enabled
+	if len(filtered) != 12 {
+		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
 	// Execute should be included (no longer controlled by EnableExecute flag)
@@ -170,13 +171,13 @@ func TestNewToolFilter_DeveloperEnabled_VerifyAllTools(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Should have ALL 11 tools when developer is enabled
-	if len(filtered) != 11 {
-		t.Errorf("expected 11 tools (all), got %d: %v", len(filtered), toolNames(filtered))
+	// Should have ALL 12 tools when developer is enabled
+	if len(filtered) != 12 {
+		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
 	// All tools should be present
-	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "get_glossary"}
+	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"}
 	for _, name := range allTools {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present in developer mode", name)
@@ -215,8 +216,8 @@ func TestFilterOutExecuteTool(t *testing.T) {
 	filtered := filterOutExecuteTool(tools)
 
 	// Should filter out only execute tool, keep all others
-	if len(filtered) != 10 {
-		t.Errorf("expected 10 tools (all except execute), got %d: %v", len(filtered), toolNames(filtered))
+	if len(filtered) != 11 {
+		t.Errorf("expected 11 tools (all except execute), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
 	if containsTool(filtered, "execute") {
@@ -364,13 +365,13 @@ func TestNewToolFilter_DeveloperEnabled_ApprovedQueriesOff(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Developer mode = ALL tools available (11 total)
-	if len(filtered) != 11 {
-		t.Errorf("expected 11 tools (all), got %d: %v", len(filtered), toolNames(filtered))
+	// Developer mode = ALL tools available (12 total)
+	if len(filtered) != 12 {
+		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
 	// All tools should be present in developer mode
-	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "get_glossary"}
+	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"}
 	for _, name := range allTools {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present in developer mode", name)
@@ -405,7 +406,7 @@ func TestNewToolFilter_ApprovedQueriesOnly_NoQueriesExist(t *testing.T) {
 	// With approved_queries enabled, all approved_queries tools should be present
 	// (the check for "no queries exist" is handled by the UI, not tool filtering)
 	// GetEnabledTools returns tools based on config, not query count
-	expectedTools := []string{"health", "query", "sample", "validate", "get_ontology", "get_glossary", "list_approved_queries", "execute_approved_query"}
+	expectedTools := []string{"health", "query", "sample", "validate", "get_ontology", "list_glossary", "get_glossary_sql", "list_approved_queries", "execute_approved_query"}
 	if len(filtered) != len(expectedTools) {
 		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
 	}
@@ -475,8 +476,8 @@ func TestNewToolFilter_ApprovedQueriesEnabledWithQueries(t *testing.T) {
 	}
 
 	// All tools should be present
-	if len(filtered) != 11 {
-		t.Errorf("expected 11 tools (all), got %d: %v", len(filtered), toolNames(filtered))
+	if len(filtered) != 12 {
+		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 }
 
@@ -530,9 +531,9 @@ func TestFilterTools(t *testing.T) {
 
 	// Test approved_queries enabled, developer disabled
 	filtered = filterTools(tools, false, false, true)
-	// Should have: health + query + sample + validate + get_ontology + get_glossary + list_approved_queries + execute_approved_query = 8
-	if len(filtered) != 8 {
-		t.Errorf("expected 8 tools (health + business user tools + approved_queries tools), got %d: %v", len(filtered), toolNames(filtered))
+	// Should have: health + query + sample + validate + get_ontology + list_glossary + get_glossary_sql + list_approved_queries + execute_approved_query = 9
+	if len(filtered) != 9 {
+		t.Errorf("expected 9 tools (health + business user tools + approved_queries tools), got %d: %v", len(filtered), toolNames(filtered))
 	}
 	if !containsTool(filtered, "query") {
 		t.Error("query should be present when approved_queries enabled")
@@ -543,8 +544,8 @@ func TestFilterTools(t *testing.T) {
 
 	// Test all enabled
 	filtered = filterTools(tools, true, true, true)
-	if len(filtered) != 11 {
-		t.Errorf("expected 11 tools (all), got %d: %v", len(filtered), toolNames(filtered))
+	if len(filtered) != 12 {
+		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 }
 
@@ -576,7 +577,7 @@ func TestNewToolFilter_ForceModeOnlyShowsApprovedQueriesTools(t *testing.T) {
 	filtered := filter(ctx, tools)
 
 	// With ForceMode ON and developer disabled, only approved_queries tools should be present
-	expectedTools := []string{"health", "query", "sample", "validate", "list_approved_queries", "execute_approved_query", "get_ontology", "get_glossary"}
+	expectedTools := []string{"health", "query", "sample", "validate", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"}
 	if len(filtered) != len(expectedTools) {
 		t.Errorf("expected %d tools with ForceMode, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
 	}
@@ -625,8 +626,8 @@ func TestNewToolFilter_ForceModeOffAllowsDeveloperTools(t *testing.T) {
 	filtered := filter(ctx, tools)
 
 	// With ForceMode OFF, all tools should be present
-	if len(filtered) != 11 {
-		t.Errorf("expected 11 tools (all) with ForceMode OFF, got %d: %v", len(filtered), toolNames(filtered))
+	if len(filtered) != 12 {
+		t.Errorf("expected 12 tools (all) with ForceMode OFF, got %d: %v", len(filtered), toolNames(filtered))
 	}
 
 	// Developer tools should be present
@@ -666,7 +667,7 @@ func TestNewToolFilter_ApprovedQueriesOn_DeveloperOff(t *testing.T) {
 
 	// Expected: health, query, sample, validate (business user tools), list_approved_queries, execute_approved_query, get_ontology, get_glossary
 	// Business user tools are now in approved_queries group
-	expectedTools := []string{"health", "query", "sample", "validate", "list_approved_queries", "execute_approved_query", "get_ontology", "get_glossary"}
+	expectedTools := []string{"health", "query", "sample", "validate", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"}
 	if len(filtered) != len(expectedTools) {
 		t.Errorf("expected %d tools, got %d: %v", len(expectedTools), len(filtered), toolNames(filtered))
 	}
@@ -712,9 +713,9 @@ func TestNewToolFilter_DeveloperEnabled_EnableExecuteFlagIgnored(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Developer mode = ALL tools (11 total), regardless of EnableExecute flag
-	if len(filtered) != 11 {
-		t.Errorf("expected 11 tools (all), got %d: %v", len(filtered), toolNames(filtered))
+	// Developer mode = ALL tools (12 total), regardless of EnableExecute flag
+	if len(filtered) != 12 {
+		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
 	// Execute should be present - EnableExecute flag is now ignored
@@ -723,7 +724,7 @@ func TestNewToolFilter_DeveloperEnabled_EnableExecuteFlagIgnored(t *testing.T) {
 	}
 
 	// All other tools should also be present
-	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "get_glossary"}
+	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"}
 	for _, name := range allTools {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present in developer mode", name)
@@ -752,13 +753,13 @@ func TestNewToolFilter_DeveloperOnly_AllToolsAvailable(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Developer mode = ALL tools (11 total)
-	if len(filtered) != 11 {
-		t.Errorf("expected 11 tools (all), got %d: %v", len(filtered), toolNames(filtered))
+	// Developer mode = ALL tools (12 total)
+	if len(filtered) != 12 {
+		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
 	// All tools should be present in developer mode
-	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "get_glossary"}
+	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"}
 	for _, name := range allTools {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present in developer mode", name)
@@ -1088,13 +1089,13 @@ func TestNewToolFilter_UserAuth_DeveloperMode_AllTools(t *testing.T) {
 	ctx = context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 
-	// User with developer mode = ALL tools (11 total)
-	if len(filtered) != 11 {
-		t.Errorf("expected 11 tools (all) for user in developer mode, got %d: %v", len(filtered), toolNames(filtered))
+	// User with developer mode = ALL tools (12 total)
+	if len(filtered) != 12 {
+		t.Errorf("expected 12 tools (all) for user in developer mode, got %d: %v", len(filtered), toolNames(filtered))
 	}
 
 	// All tools should be present in developer mode
-	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "get_glossary"}
+	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"}
 	for _, name := range allTools {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present in developer mode", name)

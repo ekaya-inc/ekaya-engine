@@ -46,7 +46,8 @@ func TestGetEnabledTools_DeveloperEnabled(t *testing.T) {
 	assert.Contains(t, toolNames, "list_approved_queries")
 	assert.Contains(t, toolNames, "execute_approved_query")
 	assert.Contains(t, toolNames, "get_ontology")
-	assert.Contains(t, toolNames, "get_glossary")
+	assert.Contains(t, toolNames, "list_glossary")
+	assert.Contains(t, toolNames, "get_glossary_sql")
 
 	// Health is always included
 	assert.Contains(t, toolNames, "health")
@@ -91,7 +92,8 @@ func TestGetEnabledTools_ApprovedQueriesEnabled(t *testing.T) {
 	assert.Contains(t, toolNames, "list_approved_queries")
 	assert.Contains(t, toolNames, "execute_approved_query")
 	assert.Contains(t, toolNames, "get_ontology")
-	assert.Contains(t, toolNames, "get_glossary")
+	assert.Contains(t, toolNames, "list_glossary")
+	assert.Contains(t, toolNames, "get_glossary_sql")
 	assert.Contains(t, toolNames, "health")
 
 	// developer tools should not be included
@@ -165,7 +167,8 @@ func TestGetEnabledTools_AgentToolsEnabled(t *testing.T) {
 
 	// Ontology tools should NOT be available in agent mode
 	assert.NotContains(t, toolNames, "get_ontology")
-	assert.NotContains(t, toolNames, "get_glossary")
+	assert.NotContains(t, toolNames, "list_glossary")
+	assert.NotContains(t, toolNames, "get_glossary_sql")
 }
 
 func TestGetEnabledTools_AgentToolsOverridesOthers(t *testing.T) {
@@ -196,7 +199,7 @@ func TestGetEnabledTools_AgentToolsOverridesOthers(t *testing.T) {
 func TestToolRegistry_ContainsAllExpectedTools(t *testing.T) {
 	expectedTools := []string{
 		"echo", "query", "sample", "validate", "execute", "get_schema",
-		"get_ontology", "get_glossary", "list_approved_queries", "execute_approved_query",
+		"get_ontology", "list_glossary", "get_glossary_sql", "list_approved_queries", "execute_approved_query",
 		"health",
 	}
 
