@@ -16,16 +16,24 @@ After migrating to the DAG-based ontology extraction workflow, several pieces of
 
 **Completed:** Successfully removed `pkg/models/ontology_workflow.go` (261 lines) and its only import point in `pkg/services/workflow/infra.go` (323 lines). The `TenantContextFunc` type alias that was referenced from `workflow` package was moved inline to `pkg/services/tenant_context.go` to maintain the public API. All tests pass. Total: 584 lines removed.
 
-### 2. Remove sample questions dead code from `pkg/services/ontology_finalization.go`
+### 2. Remove sample questions dead code from `pkg/services/ontology_finalization.go` ✅
 
-- [ ] Delete `generateSampleQuestions()` method (lines 275-312)
-- [ ] Delete `buildSampleQuestionsPrompt()` method (lines 314-358)
-- [ ] Delete `sampleQuestionsResponse` struct (lines 360-362)
-- [ ] Delete `parseSampleQuestionsResponse()` method (lines 364-370)
-- [ ] Remove the commented-out call and TODO at lines 133-140
-- [ ] Run `make check`
+- [x] Delete `generateSampleQuestions()` method (lines 275-312)
+- [x] Delete `buildSampleQuestionsPrompt()` method (lines 314-358)
+- [x] Delete `sampleQuestionsResponse` struct (lines 360-362)
+- [x] Delete `parseSampleQuestionsResponse()` method (lines 364-370)
+- [x] Remove the commented-out call and TODO at lines 133-140
+- [x] Add test to verify sample questions are empty
+- [x] Run `make check`
 
 **Risk:** Low - code is already commented out and disabled.
+
+**Completed:** Successfully removed all sample questions dead code from `pkg/services/ontology_finalization.go` (~110 lines removed total):
+- Removed 4 methods: `generateSampleQuestions()`, `buildSampleQuestionsPrompt()`, `parseSampleQuestionsResponse()`, and the `sampleQuestionsResponse` struct
+- Removed commented-out call with TODO explaining it was disabled pending relationship algorithm improvements
+- Left `var sampleQuestions []string // Empty for now` in place to maintain the domain summary structure
+- Added test `TestOntologyFinalization_SampleQuestionsAreEmpty` to verify behavior
+- All tests pass (`make check`)
 
 ### 3. Clean up unused repository methods in `pkg/repositories/ontology_repository.go`
 

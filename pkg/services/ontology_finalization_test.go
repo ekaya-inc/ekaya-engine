@@ -963,3 +963,46 @@ func TestOntologyFinalization_NoConventions(t *testing.T) {
 	// Conventions should be nil when nothing detected
 	assert.Nil(t, ontologyRepo.updatedDomainSummary.Conventions)
 }
+
+func TestOntologyFinalization_SampleQuestionsAreEmpty(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	entityID1 := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{ID: entityID1, ProjectID: projectID, OntologyID: ontologyID, Name: "User", Description: "Platform users", Domain: "customer", PrimaryTable: "users"},
+	}
+
+	ontologyRepo := &mockOntologyRepoForFinalization{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+	entityRepo := &mockEntityRepoForFinalization{entities: entities}
+	relationshipRepo := &mockRelationshipRepoForFinalization{}
+	schemaRepo := &mockSchemaRepoForFinalization{columnsByTable: map[string][]*models.SchemaColumn{}}
+
+	llmClient := &mockLLMClient{
+		responseContent: `{"description": "A user management system."}`,
+	}
+	llmFactory := &mockLLMFactoryForFinalization{client: llmClient}
+
+	logger := zap.NewNop()
+
+	svc := NewOntologyFinalizationService(
+		ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil,
+		llmFactory, nil, logger,
+	)
+
+	err := svc.Finalize(ctx, projectID)
+	require.NoError(t, err)
+
+	// Verify domain summary was updated
+	require.NotNil(t, ontologyRepo.updatedDomainSummary)
+
+	// Verify sample questions are nil/empty (sample question generation code removed)
+	assert.Empty(t, ontologyRepo.updatedDomainSummary.SampleQuestions)
+}
