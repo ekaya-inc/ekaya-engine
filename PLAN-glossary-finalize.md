@@ -1021,11 +1021,90 @@ All methods properly typed with interfaces from `ui/src/types/glossary.ts`.
 
 ## Phase 6: Testing
 
-### 6.1 Unit Tests
+### 6.1 Unit Tests ✅
 
-- `glossary_repository_test.go`: CRUD with new schema, alias operations
-- `glossary_service_test.go`: SQL validation, output column capture
-- `glossary_test.go` (MCP tools): Both tools with various inputs
+**Status:** Complete - Comprehensive unit test coverage across all layers
+
+**Test Coverage Summary:**
+
+1. **Repository Layer** (`pkg/repositories/glossary_repository_test.go`) - 22 tests, 21,737 bytes:
+   - CRUD operations with new schema (defining_sql, output_columns, aliases)
+   - Create: full fields, minimal fields, duplicate term constraint
+   - Update: success with alias replacement, not found error
+   - Delete: success, not found error
+   - GetByProject: returns all terms with aliases, empty result
+   - GetByTerm: success with aliases, not found
+   - GetByAlias: finds term by alias, returns nil when not found
+   - GetByID: success, not found
+   - CreateAlias: adds new alias successfully
+   - DeleteAlias: removes alias successfully, returns ErrNotFound when not found
+   - OutputColumns: storage and retrieval with types
+   - RLS: enforcement for ALL methods including alias operations
+   - All tests use shared Docker testcontainer via testhelpers
+
+2. **Service Layer** (`pkg/services/glossary_service_test.go`) - 20 tests, 41,228 bytes:
+   - CreateTerm: basic creation, validation (missing name, missing definition)
+   - UpdateTerm: success, not found error
+   - DeleteTerm: success
+   - GetTerms: retrieval
+   - SuggestTerms: LLM-based discovery with various scenarios
+     - Basic success case
+     - No ontology (error handling)
+     - No entities (error handling)
+     - LLM error (error handling)
+     - With naming conventions
+     - With column details
+     - Invalid SQL handling (skips term, logs warning)
+   - DiscoverGlossaryTerms: workflow tests
+     - Basic discovery
+     - Skips duplicates
+     - Handles no entities
+   - EnrichGlossaryTerms: enrichment tests
+     - Basic enrichment
+     - Only enriches unenriched terms
+     - No unenriched terms
+   - DAG adapter tests: GlossaryDiscovery adapter registration and execution
+
+3. **MCP Tools** (`pkg/mcp/tools/glossary_test.go`) - 9 tests, 12,908 bytes:
+   - Structure and initialization tests
+   - Tool registration tests
+   - Filter map tests (ontology tools toggleable via developer mode)
+   - Response converter tests:
+     - `toListGlossaryResponse` - Lightweight discovery format
+     - `toGetGlossarySQLResponse` - Full SQL definition format
+   - Integration tests:
+     - `list_glossary` - Returns all terms with definitions and aliases
+     - `get_glossary_sql` - Returns full SQL definition, handles not found
+
+**Key Test Patterns:**
+
+1. **Integration tests use testcontainers** - Shared Docker container across all tests (pkg/testhelpers)
+2. **RLS validation** - All repository tests verify project isolation via Row-Level Security
+3. **Fail-fast error handling** - Invalid SQL is caught and logged, not silently ignored
+4. **Alias support** - Tests verify lookup by term name OR alias
+5. **Output column capture** - Tests verify SQL validation captures column metadata
+
+**Files Verified:**
+- `pkg/repositories/glossary_repository_test.go` (22 tests)
+- `pkg/services/glossary_service_test.go` (20 tests)
+- `pkg/mcp/tools/glossary_test.go` (9 tests)
+
+**All tests passing** - Confirmed via `make test`
+
+**Important Context for Next Session (Task 6.2):**
+
+The unit test layer is complete. Integration tests (task 6.2) should focus on:
+1. API endpoint testing (`pkg/handlers/glossary_integration_test.go`)
+2. Full flow from HTTP request → handler → service → repository → database
+3. SQL validation against real datasource (not mocked)
+4. Error cases: missing datasource, invalid SQL, duplicate term, not found
+5. Alias lookup via API endpoints
+
+The integration test file likely already exists and needs verification/updates for new endpoints:
+- POST `/api/projects/:pid/glossary/test-sql` - Test SQL validation
+- POST `/api/projects/:pid/glossary` - Create term
+- PUT `/api/projects/:pid/glossary/:id` - Update term
+- DELETE `/api/projects/:pid/glossary/:id` - Delete term
 
 ### 6.2 Integration Tests
 
