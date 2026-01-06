@@ -247,7 +247,15 @@ ontologyDAGService.SetGlossaryEnrichmentMethods(services.NewGlossaryEnrichmentAd
    - Enrichment response includes: sql_pattern, base_table, columns_used, filters, aggregation
    - **Testing**: Added comprehensive unit tests covering success cases, duplicate handling, empty states, and filtering logic
    - Tests verify: term creation with correct source, skipping duplicates, enrichment field population, selective processing of unenriched terms
-3. [ ] Create `pkg/services/dag/glossary_discovery_node.go`
+3. [x] Create `pkg/services/dag/glossary_discovery_node.go`
+   - **COMPLETED**: Created new file with GlossaryDiscoveryMethods interface, GlossaryDiscoveryNode struct, NewGlossaryDiscoveryNode constructor, and Execute() method
+   - Execute() method reports progress "Discovering business terms..." at start
+   - Validates ontology ID is present before proceeding
+   - Calls DiscoverGlossaryTerms() service method and returns term count
+   - Reports completion with "Discovered N business terms" message
+   - Follows existing EntityDiscoveryNode pattern closely
+   - **Testing**: Added comprehensive unit tests covering success case, missing ontology ID, discovery errors, progress reporting errors, and node name verification
+   - All 5 tests pass successfully
 4. [ ] Create `pkg/services/dag/glossary_enrichment_node.go`
 5. [ ] Update `pkg/services/dag_adapters.go` with two new adapters
 6. [ ] Update `pkg/services/ontology_dag_service.go` (fields, setters, getNodeExecutor)
