@@ -401,17 +401,34 @@ ui/public/icons/adapters/
 └── AmazonRedshift.png  # Existing
 ```
 
-### Phase 3: Datasource List Display
+### Phase 3: Datasource List Display [x] COMPLETE
 
 Update datasource list to show provider icon/name instead of generic "PostgreSQL":
 
-**File:** `ui/src/components/DatasourceCard.tsx` (or equivalent)
+**File:** `ui/src/pages/QueriesPage.tsx` (updated)
 
+**What was implemented:**
+- Updated QueriesPage.tsx header to display provider icon and name instead of generic adapter type
+- Uses `getProviderById()` when `selectedDatasource.provider` is set, falls back to `getAdapterInfo()` for adapter info
+- Displays provider-specific icon (e.g., Supabase, Neon, CockroachDB) in header
+- Shows provider name below the datasource display name (e.g., "Supabase" instead of "postgres")
+
+**Pattern used:**
 ```typescript
 // Read provider from config, fall back to adapter type
-const provider = datasource.config?.provider || datasource.type;
-const providerInfo = getProviderById(provider) || getAdapterInfo(datasource.type);
+const providerInfo = selectedDatasource?.provider
+  ? getProviderById(selectedDatasource.provider)
+  : undefined;
+const adapterInfo = getAdapterInfo(selectedDatasource?.type);
+const displayInfo = providerInfo ?? adapterInfo;
 ```
+
+**Tests:** `ui/src/pages/__tests__/QueriesPage.test.tsx` - 8 tests covering:
+- Provider name display for Supabase, Neon, CockroachDB
+- Provider icon display
+- Fallback to adapter info when no provider is set
+- Non-postgres datasource adapter display
+- Missing datasource state handling
 
 ## Backend Considerations
 

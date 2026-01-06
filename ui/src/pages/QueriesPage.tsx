@@ -8,6 +8,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import QueriesView from '../components/QueriesView';
 import { Button } from '../components/ui/Button';
+import { getProviderById, getAdapterInfo } from '../constants/adapters';
 import { useDatasourceConnection } from '../contexts/DatasourceConnectionContext';
 import { datasourceTypeToDialect } from '../types';
 
@@ -20,6 +21,13 @@ const QueriesPage = () => {
   const dialect = selectedDatasource?.type
     ? datasourceTypeToDialect[selectedDatasource.type]
     : 'PostgreSQL';
+
+  // Get display info for datasource (provider-specific if available, otherwise adapter info)
+  const providerInfo = selectedDatasource?.provider
+    ? getProviderById(selectedDatasource.provider)
+    : undefined;
+  const adapterInfo = getAdapterInfo(selectedDatasource?.type);
+  const displayInfo = providerInfo ?? adapterInfo;
 
   // No datasource selected - show message
   if (!isConnected || !selectedDatasource?.datasourceId || !pid) {
@@ -92,14 +100,23 @@ const QueriesPage = () => {
               corresponding SQL
             </p>
           </div>
-          <div className="text-right">
-            <p className="text-sm text-text-tertiary">Datasource</p>
-            <p className="text-sm font-medium text-text-primary">
-              {selectedDatasource.displayName ?? selectedDatasource.name}
-            </p>
-            <p className="text-xs text-text-tertiary capitalize">
-              {selectedDatasource.type}
-            </p>
+          <div className="flex items-center gap-3">
+            {displayInfo.icon && (
+              <img
+                src={displayInfo.icon}
+                alt={displayInfo.name}
+                className="h-10 w-10 object-contain"
+              />
+            )}
+            <div className="text-right">
+              <p className="text-sm text-text-tertiary">Datasource</p>
+              <p className="text-sm font-medium text-text-primary">
+                {selectedDatasource.displayName ?? selectedDatasource.name}
+              </p>
+              <p className="text-xs text-text-tertiary">
+                {displayInfo.name}
+              </p>
+            </div>
           </div>
         </div>
       </div>
