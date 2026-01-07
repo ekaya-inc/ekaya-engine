@@ -25,15 +25,15 @@ docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data ghcr.io/ekaya-inc
 
 ### Process Management
 
-Use **supervisord** to manage three processes:
+Use a simple **shell script** (`entrypoint.sh`) to manage three processes:
 1. PostgreSQL 17
 2. Redis 7
 3. ekaya-engine
 
-Supervisord handles:
+The entrypoint script handles:
 - Process startup ordering (Postgres first, then Redis, then engine)
-- Automatic restart on crash
 - Graceful shutdown signal propagation
+- No auto-restart on crash (if a process dies, container exits - appropriate for demo)
 
 ### Data Persistence
 
@@ -74,7 +74,6 @@ docker run -p 3443:3443 -e ANTHROPIC_API_KEY=sk-... -v ekaya-data:/var/lib/postg
 deploy/
 └── quickstart/
     ├── Dockerfile
-    ├── supervisord.conf
     ├── entrypoint.sh
     ├── config.quickstart.yaml
     └── README.md
@@ -117,90 +116,33 @@ deploy/
 
 **File location:** `deploy/quickstart/config.quickstart.yaml`
 
-### Step 3: Create supervisord.conf
+### Step 3: Create entrypoint.sh [x]
 
-```ini
-[supervisord]
-nodaemon=true
-user=root
-logfile=/var/log/supervisord.log
-pidfile=/var/run/supervisord.pid
+**Status:** Complete
 
-[program:postgresql]
-command=/usr/lib/postgresql/17/bin/postgres -D /var/lib/postgresql/data -c config_file=/etc/postgresql/postgresql.conf
-user=postgres
-autostart=true
-autorestart=true
-priority=100
-stdout_logfile=/dev/stdout
-stdout_logfile_maxbytes=0
-stderr_logfile=/dev/stderr
-stderr_logfile_maxbytes=0
+**What was done:**
+- Created `deploy/quickstart/entrypoint.sh` - a simple shell script to manage all processes
+- Decided against supervisord in favor of simpler shell script approach (appropriate for demo image)
+- Script handles first-run initialization: initdb, pg_hba.conf, postgresql.conf, user/database creation
+- Starts PostgreSQL and Redis in background, then runs ekaya-engine
+- Includes graceful shutdown handler via trap for SIGTERM/SIGINT
+- If any process exits, the container shuts down (no auto-restart - keeps demo simple)
 
-[program:redis]
-command=/usr/bin/redis-server --bind 127.0.0.1 --port 6379
-autostart=true
-autorestart=true
-priority=200
-stdout_logfile=/dev/stdout
-stdout_logfile_maxbytes=0
-stderr_logfile=/dev/stderr
-stderr_logfile_maxbytes=0
+**Key features:**
+- First-run detection: checks if `/var/lib/postgresql/data` is empty
+- Creates `ekaya` user with password `quickstart`
+- Creates `ekaya_engine` database owned by `ekaya`
+- Waits for both Postgres and Redis to be ready before starting engine
+- Graceful shutdown propagates to all processes
 
-[program:ekaya-engine]
-command=/usr/local/bin/ekaya-engine
-directory=/app
-autostart=true
-autorestart=true
-priority=300
-startsecs=5
-startretries=10
-stdout_logfile=/dev/stdout
-stdout_logfile_maxbytes=0
-stderr_logfile=/dev/stderr
-stderr_logfile_maxbytes=0
-environment=PGPASSWORD="quickstart",PROJECT_CREDENTIALS_KEY="quickstart-demo-key-not-for-production"
-```
+**File location:** `deploy/quickstart/entrypoint.sh`
 
-Note: Engine has `startsecs=5` and `startretries=10` to allow Postgres to initialize on first run.
-
-### Step 4: Create entrypoint.sh
-
-```bash
-#!/bin/bash
-set -e
-
-PGDATA=/var/lib/postgresql/data
-
-# Initialize Postgres if data directory is empty
-if [ -z "$(ls -A $PGDATA 2>/dev/null)" ]; then
-    echo "Initializing PostgreSQL database..."
-    chown -R postgres:postgres $PGDATA
-    su postgres -c "/usr/lib/postgresql/17/bin/initdb -D $PGDATA"
-
-    # Configure pg_hba.conf for local trust auth
-    echo "local all all trust" > $PGDATA/pg_hba.conf
-    echo "host all all 127.0.0.1/32 trust" >> $PGDATA/pg_hba.conf
-    echo "host all all ::1/128 trust" >> $PGDATA/pg_hba.conf
-
-    # Configure postgresql.conf
-    echo "listen_addresses = 'localhost'" >> $PGDATA/postgresql.conf
-    echo "port = 5432" >> $PGDATA/postgresql.conf
-fi
-
-# Ensure postgres owns the data directory (for volume mounts)
-chown -R postgres:postgres $PGDATA
-
-# Start supervisord (manages postgres, redis, engine)
-exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
-```
-
-### Step 5: Create Dockerfile
+### Step 4: Create Dockerfile
 
 Multi-stage build that:
 1. Builds the Go binary (reuse existing builder stages)
 2. Builds the UI
-3. Creates runtime image with Postgres + Redis + supervisord
+3. Creates runtime image with Postgres + Redis
 
 ```dockerfile
 # ============================================
@@ -238,16 +180,15 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -o ekaya-engine \
     main.go
 
-# Runtime stage with Postgres + Redis + supervisord
+# Runtime stage with Postgres + Redis
 FROM debian:bookworm-slim
 
-# Install Postgres 17, Redis, and supervisord
+# Install Postgres 17 and Redis
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg2 \
     lsb-release \
     curl \
     ca-certificates \
-    supervisor \
     redis-server \
     && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
@@ -267,7 +208,6 @@ COPY migrations/ /app/migrations/
 
 # Copy quickstart config and scripts
 COPY deploy/quickstart/config.quickstart.yaml /app/config.yaml
-COPY deploy/quickstart/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY deploy/quickstart/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
@@ -277,6 +217,7 @@ ENV PORT=3443 \
     PGHOST=localhost \
     PGPORT=5432 \
     PGUSER=ekaya \
+    PGPASSWORD=quickstart \
     PGDATABASE=ekaya_engine \
     PGSSLMODE=disable \
     REDIS_HOST=localhost \
@@ -294,7 +235,7 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=5 \
 ENTRYPOINT ["/entrypoint.sh"]
 ```
 
-### Step 6: Create README.md
+### Step 5: Create README.md
 
 ```markdown
 # Ekaya Engine Quickstart Image
@@ -346,7 +287,7 @@ This image is for evaluation only:
 For production, see the main deployment documentation.
 ```
 
-### Step 7: Add Makefile target
+### Step 6: Add Makefile target
 
 Add to Makefile:
 
