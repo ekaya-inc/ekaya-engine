@@ -313,14 +313,27 @@ deploy/
 - Data survives container stop/start cycles as expected
 - The quickstart image is ready for users who need data persistence across sessions
 
-### Health Check Test
+### Health Check Test [x]
 
-```bash
-curl http://localhost:3443/ping
-curl http://localhost:3443/health
-```
+**Status:** Complete
 
-Expected: Both return valid JSON responses.
+**What was done:**
+- Started quickstart container in background using `docker run -d`
+- Tested `/ping` endpoint using curl - returned valid JSON with server status information
+- Tested `/health` endpoint using curl - returned valid JSON with connection pool information
+- Validated JSON structure using `jq` to ensure proper formatting
+
+**Verification results:**
+- ✅ `/ping` endpoint returns: `{"status":"ok","version":"73cf871-dirty","service":"ekaya-engine","go_version":"go1.25.5","hostname":"f0117f9dd6be","environment":"quickstart"}`
+- ✅ `/health` endpoint returns: `{"status":"ok","connections":{...}}` with full connection pool details
+- ✅ Both endpoints return well-formed JSON (validated with jq)
+- ✅ Server responds correctly after container startup
+- ✅ Container health check confirms healthy status
+
+**Notes:**
+- The `/ping` endpoint includes useful debugging information: version, go_version, hostname, and environment
+- The `/health` endpoint provides connection pool metrics useful for monitoring
+- Both endpoints are working as expected in the quickstart image
 
 ### LLM Feature Test (optional)
 
