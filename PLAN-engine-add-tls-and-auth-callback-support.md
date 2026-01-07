@@ -104,36 +104,32 @@ Added TLS configuration section to all three config files with:
 - Production deployments with custom domains will need to uncomment and set these values
 - The validation from Task 1 ensures both cert and key are provided together or both empty
 
-### 4. Validate TLS Config
+### 4. Validate TLS Config ✅ COMPLETE
 
-**File:** `pkg/config/config.go` (in `Load()` or validation function)
+**File Modified:** `pkg/config/config.go:183-203`
 
-Add validation:
-- If one of cert/key is provided, both must be provided
-- If provided, verify files exist and are readable
-- Log warning if BaseURL is HTTPS but no TLS config (assumes reverse proxy)
+**Implementation Details:**
 
-```go
-func (c *Config) validateTLS() error {
-    certSet := c.TLSCertPath != ""
-    keySet := c.TLSKeyPath != ""
+Added `validateTLS()` method called during `Load()`:
+- Validates both cert and key are provided together (or both empty)
+- Verifies files exist and are readable using `os.Stat()`
+- Returns clear error messages for configuration issues
+- Note: Actual certificate validity is checked by Go's `tls.LoadX509KeyPair()` at server startup
 
-    if certSet != keySet {
-        return fmt.Errorf("both tls_cert_path and tls_key_path must be provided together")
-    }
+**Test Coverage:**
+- No TLS config (both empty) - passes ✅
+- Both cert and key provided - passes ✅
+- Only cert provided - fails with "both must be provided" error ✅
+- Only key provided - fails with "both must be provided" error ✅
+- Cert file not found - fails with "cert file not readable" error ✅
+- Key file not found - fails with "key file not readable" error ✅
+- TLS config from env vars - passes ✅
 
-    if certSet {
-        if _, err := os.Stat(c.TLSCertPath); err != nil {
-            return fmt.Errorf("TLS cert file not readable: %w", err)
-        }
-        if _, err := os.Stat(c.TLSKeyPath); err != nil {
-            return fmt.Errorf("TLS key file not readable: %w", err)
-        }
-    }
-
-    return nil
-}
-```
+**Patterns for Future Tasks:**
+- Config validation happens in `Load()` by calling specialized validation methods
+- Tests use `t.TempDir()` for isolated test environments
+- Tests use `t.Setenv()` for environment variable isolation
+- File permission errors (beyond existence) are deferred to server startup
 
 ## Testing
 
