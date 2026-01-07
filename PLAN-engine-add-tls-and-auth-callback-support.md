@@ -57,23 +57,28 @@ Added `validateTLS()` method called during `Load()`:
 - Tests use `t.Setenv()` for environment variable isolation
 - File permission errors (beyond existence) are deferred to server startup
 
-### 2. Update Server Startup
+### 2. Update Server Startup ✅ COMPLETE
 
-**File:** `main.go`
+**File Modified:** `main.go:468-482`
 
-Modify server startup logic (around line 471):
-```go
-if cfg.TLSCertPath != "" && cfg.TLSKeyPath != "" {
-    logger.Info("Starting HTTPS server",
-        zap.String("addr", cfg.BindAddr+":"+cfg.Port),
-        zap.String("cert", cfg.TLSCertPath))
-    err = server.ListenAndServeTLS(cfg.TLSCertPath, cfg.TLSKeyPath)
-} else {
-    logger.Info("Starting HTTP server",
-        zap.String("addr", cfg.BindAddr+":"+cfg.Port))
-    err = server.ListenAndServe()
-}
-```
+**Implementation Details:**
+
+Modified server startup to conditionally enable TLS:
+- Added conditional check: if both `cfg.TLSCertPath` and `cfg.TLSKeyPath` are non-empty, use HTTPS
+- HTTPS path: calls `server.ListenAndServeTLS(cfg.TLSCertPath, cfg.TLSKeyPath)` and logs "Starting HTTPS server" with cert path
+- HTTP path: calls `server.ListenAndServe()` and logs "Starting HTTP server"
+- Both paths log the bind address and version
+- Error handling unchanged: checks for `http.ErrServerClosed` before calling `logger.Fatal()`
+
+**Key Decision:**
+- Simple boolean logic based on config presence (validated in task 1)
+- No separate TLS enable flag - presence of cert/key paths implies TLS intent
+- Falls back to HTTP if paths are empty (for local development and CI)
+
+**Testing:**
+- Build verification: ✅ Compiles successfully (`make check` passes)
+- Unit tests: ✅ All existing tests pass
+- Manual HTTPS testing: Pending (requires actual cert/key files - see Testing section below)
 
 ### 3. Update Config Templates
 

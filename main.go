@@ -465,10 +465,19 @@ func main() {
 	}()
 
 	// Start server
-	logger.Info("Starting ekaya-engine",
-		zap.String("addr", cfg.BindAddr+":"+cfg.Port),
-		zap.String("version", cfg.Version))
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if cfg.TLSCertPath != "" && cfg.TLSKeyPath != "" {
+		logger.Info("Starting HTTPS server",
+			zap.String("addr", cfg.BindAddr+":"+cfg.Port),
+			zap.String("version", cfg.Version),
+			zap.String("cert", cfg.TLSCertPath))
+		err = server.ListenAndServeTLS(cfg.TLSCertPath, cfg.TLSKeyPath)
+	} else {
+		logger.Info("Starting HTTP server",
+			zap.String("addr", cfg.BindAddr+":"+cfg.Port),
+			zap.String("version", cfg.Version))
+		err = server.ListenAndServe()
+	}
+	if err != nil && err != http.ErrServerClosed {
 		logger.Fatal("Server failed", zap.Error(err))
 	}
 
