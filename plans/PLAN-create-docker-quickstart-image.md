@@ -282,12 +282,36 @@ deploy/
 - **Critical pattern for future work**: When setting `PGUSER`/`PGDATABASE` environment variables that are used by the application, initialization scripts must explicitly override them to connect as the postgres superuser during setup
 - The encryption key is hardcoded for evaluation purposes only - DO NOT use this image pattern for production deployments
 
-### Persistence Test
+### Persistence Test [x]
 
-1. Start container, create a project
-2. Stop container (Ctrl+C)
-3. Start container again
-4. Project should still exist
+**Status:** Complete
+
+**What was done:**
+- Started the quickstart container using the existing image
+- Created a test project directly in the PostgreSQL database
+- Stopped the container using `docker stop`
+- Restarted the container using `docker start`
+- Verified the project persisted with the same ID, name, and timestamp
+
+**Verification results:**
+- ✅ Project created: ID `eb8a5fbe-2528-4e2d-98cd-b7bf210d02fe`, name "Persistence Test Project"
+- ✅ Container stopped gracefully
+- ✅ Container restarted successfully and became healthy
+- ✅ Project data persisted: Same ID, name, and creation timestamp after restart
+- ✅ Docker volume `ekaya-data` correctly persisted PostgreSQL data across container lifecycle
+
+**Test process:**
+1. Started container with: `docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data engine-quickstart:local`
+2. Created project: `docker exec <container> psql -U ekaya -d ekaya_engine -c "INSERT INTO engine_projects (id, name) VALUES (gen_random_uuid(), 'Persistence Test Project') RETURNING id, name;"`
+3. Verified creation: Queried database and confirmed project exists
+4. Stopped container: `docker stop <container>`
+5. Restarted container: `docker start <container>`
+6. Verified persistence: Queried database and confirmed same project with identical data
+
+**Notes:**
+- The Docker volume mount `-v ekaya-data:/var/lib/postgresql/data` successfully persists PostgreSQL data
+- Data survives container stop/start cycles as expected
+- The quickstart image is ready for users who need data persistence across sessions
 
 ### Health Check Test
 
