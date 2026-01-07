@@ -191,29 +191,34 @@ deploy/
 
 **File location:** `deploy/quickstart/README.md`
 
-### Step 6: Add Makefile target
+### Step 6: Add Makefile target [x]
 
-Add to Makefile:
+**Status:** Complete
 
-```makefile
-# Quickstart image for demos/trials
-quickstart-build: ## Build the all-in-one quickstart Docker image
-	@echo "$(YELLOW)Building quickstart image...$(NC)"
-	@docker build \
-		--build-arg VERSION=$(VERSION) \
-		--build-arg BUILD_TAGS=$(BUILD_TAGS) \
-		-f deploy/quickstart/Dockerfile \
-		-t engine-quickstart:local \
-		.
-	@echo "$(GREEN)✓ Quickstart image built: engine-quickstart:local$(NC)"
-	@echo ""
-	@echo "Run with:"
-	@echo "  docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data engine-quickstart:local"
+**What was done:**
+- Added two new Makefile targets: `quickstart-build` and `quickstart-run`
+- Updated `.PHONY` declaration to include both new targets
+- Both targets appear in `make help` output with descriptions
 
-quickstart-run: quickstart-build ## Build and run the quickstart image
-	@echo "$(YELLOW)Starting quickstart container...$(NC)"
-	@docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data engine-quickstart:local
-```
+**Implementation details:**
+- `quickstart-build` target:
+  - Builds Docker image from `deploy/quickstart/Dockerfile`
+  - Tags as `engine-quickstart:local`
+  - Passes `VERSION` (from git describe) and `BUILD_TAGS` (default: all_adapters) as build arguments
+  - Shows helpful post-build message with example run command
+- `quickstart-run` target:
+  - Depends on `quickstart-build` to ensure fresh build
+  - Runs container with `-p 3443:3443` port mapping
+  - Mounts `ekaya-data` volume to `/var/lib/postgresql/data` for persistence
+  - Runs in foreground (not detached) for easy testing
+
+**File modified:** `Makefile` (lines 1, 330-345)
+
+**Notes for next session:**
+- The Makefile targets are ready but have NOT been tested yet
+- Next step should test the build and run process
+- The targets use the same VERSION injection mechanism as other Docker builds in this project
+- The image will be tagged as `engine-quickstart:local` to distinguish from CI/CD builds
 
 ## Testing Checklist
 

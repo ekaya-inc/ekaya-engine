@@ -1,5 +1,5 @@
 # ekaya-engine Makefile
-.PHONY: help install install-hooks install-air clean test fmt lint check run dev-ui dev-server dev-build-docker ping dev-up dev-down dev-build-container connect-postgres DANGER-recreate-database build-test-image push-test-image pull-test-image
+.PHONY: help install install-hooks install-air clean test fmt lint check run dev-ui dev-server dev-build-docker ping dev-up dev-down dev-build-container connect-postgres DANGER-recreate-database build-test-image push-test-image pull-test-image quickstart-build quickstart-run
 
 # Variables
 # Note: These are the registries for dev and prod environments
@@ -326,6 +326,24 @@ pull-test-image: ## Pull test image from dev registry
 	@gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
 	@docker pull $(TEST_IMAGE_PATH):latest
 	@echo "$(GREEN)✓ Test image pulled: $(TEST_IMAGE_PATH):latest$(NC)"
+
+# Quickstart image targets
+quickstart-build: ## Build the all-in-one quickstart Docker image
+	@echo "$(YELLOW)Building quickstart image...$(NC)"
+	@docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg BUILD_TAGS=$(BUILD_TAGS) \
+		-f deploy/quickstart/Dockerfile \
+		-t engine-quickstart:local \
+		.
+	@echo "$(GREEN)✓ Quickstart image built: engine-quickstart:local$(NC)"
+	@echo ""
+	@echo "Run with:"
+	@echo "  docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data engine-quickstart:local"
+
+quickstart-run: quickstart-build ## Build and run the quickstart image
+	@echo "$(YELLOW)Starting quickstart container...$(NC)"
+	@docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data engine-quickstart:local
 
 
 .DEFAULT_GOAL := help
