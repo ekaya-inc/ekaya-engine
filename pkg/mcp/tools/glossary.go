@@ -27,7 +27,8 @@ type GlossaryToolDeps struct {
 
 // RegisterGlossaryTools registers glossary-related MCP tools.
 func RegisterGlossaryTools(s *server.MCPServer, deps *GlossaryToolDeps) {
-	registerGetGlossaryTool(s, deps)
+	registerListGlossaryTool(s, deps)
+	registerGetGlossarySQLTool(s, deps)
 }
 
 // checkGlossaryToolsEnabled verifies glossary tools are enabled for the project.
@@ -71,15 +72,16 @@ func checkGlossaryToolsEnabled(ctx context.Context, deps *GlossaryToolDeps) (uui
 	return projectID, tenantCtx, func() { scope.Close() }, nil
 }
 
-// registerGetGlossaryTool adds the get_glossary tool for business term lookup.
-func registerGetGlossaryTool(s *server.MCPServer, deps *GlossaryToolDeps) {
+// registerListGlossaryTool adds the list_glossary tool for discovering available business terms.
+// Returns lightweight list of terms with definitions and aliases for discovery.
+func registerListGlossaryTool(s *server.MCPServer, deps *GlossaryToolDeps) {
 	tool := mcp.NewTool(
-		"get_glossary",
+		"list_glossary",
 		mcp.WithDescription(
-			"Get business glossary terms for the project. "+
-				"Returns metric definitions, calculations, and SQL patterns. "+
-				"Use this to understand business terms like 'Revenue', 'Active User', 'GMV', etc. "+
-				"Each term includes the SQL pattern and filters needed to calculate it.",
+			"List all business glossary terms for the project. "+
+				"Returns term names, definitions, and aliases for discovery. "+
+				"Use this to explore available business terms like 'Revenue', 'Active User', 'GMV', etc. "+
+				"To get the SQL definition for a specific term, use get_glossary_sql.",
 		),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -100,17 +102,17 @@ func registerGetGlossaryTool(s *server.MCPServer, deps *GlossaryToolDeps) {
 			return nil, fmt.Errorf("failed to get glossary terms: %w", err)
 		}
 
-		// Build response
+		// Build lightweight response for discovery
 		result := struct {
-			Terms []glossaryTermResponse `json:"terms"`
+			Terms []listGlossaryResponse `json:"terms"`
 			Count int                    `json:"count"`
 		}{
-			Terms: make([]glossaryTermResponse, 0, len(terms)),
+			Terms: make([]listGlossaryResponse, 0, len(terms)),
 			Count: len(terms),
 		}
 
 		for _, term := range terms {
-			result.Terms = append(result.Terms, toGlossaryTermResponse(term))
+			result.Terms = append(result.Terms, toListGlossaryResponse(term))
 		}
 
 		jsonResult, err := json.Marshal(result)
@@ -122,48 +124,113 @@ func registerGetGlossaryTool(s *server.MCPServer, deps *GlossaryToolDeps) {
 	})
 }
 
-// glossaryTermResponse is the MCP response format for a glossary term.
-// Excludes internal fields like ID, ProjectID, CreatedBy, timestamps.
-type glossaryTermResponse struct {
-	Term        string           `json:"term"`
-	Definition  string           `json:"definition"`
-	SQLPattern  string           `json:"sql_pattern,omitempty"`
-	BaseTable   string           `json:"base_table,omitempty"`
-	ColumnsUsed []string         `json:"columns_used,omitempty"`
-	Filters     []filterResponse `json:"filters,omitempty"`
-	Aggregation string           `json:"aggregation,omitempty"`
-	Source      string           `json:"source"`
-}
+// registerGetGlossarySQLTool adds the get_glossary_sql tool for retrieving SQL definitions.
+// Accepts term name or alias and returns full entry with defining_sql for query composition.
+func registerGetGlossarySQLTool(s *server.MCPServer, deps *GlossaryToolDeps) {
+	tool := mcp.NewTool(
+		"get_glossary_sql",
+		mcp.WithDescription(
+			"Get the SQL definition for a specific business term. "+
+				"Accepts term name or alias (e.g., 'Revenue' or 'Total Revenue'). "+
+				"Returns the complete SQL definition, output columns, and metadata needed for query composition. "+
+				"Use list_glossary first to discover available terms.",
+		),
+		mcp.WithString(
+			"term",
+			mcp.Required(),
+			mcp.Description("Business term name or alias to look up"),
+		),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
 
-// filterResponse is the MCP response format for a filter condition.
-type filterResponse struct {
-	Column   string   `json:"column"`
-	Operator string   `json:"operator"`
-	Values   []string `json:"values,omitempty"`
-}
-
-// toGlossaryTermResponse converts a model to MCP response format.
-func toGlossaryTermResponse(term *models.BusinessGlossaryTerm) glossaryTermResponse {
-	resp := glossaryTermResponse{
-		Term:        term.Term,
-		Definition:  term.Definition,
-		SQLPattern:  term.SQLPattern,
-		BaseTable:   term.BaseTable,
-		ColumnsUsed: term.ColumnsUsed,
-		Aggregation: term.Aggregation,
-		Source:      term.Source,
-	}
-
-	if len(term.Filters) > 0 {
-		resp.Filters = make([]filterResponse, 0, len(term.Filters))
-		for _, f := range term.Filters {
-			resp.Filters = append(resp.Filters, filterResponse{
-				Column:   f.Column,
-				Operator: f.Operator,
-				Values:   f.Values,
-			})
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := checkGlossaryToolsEnabled(ctx, deps)
+		if err != nil {
+			return nil, err
 		}
-	}
+		defer cleanup()
 
-	return resp
+		// Get term parameter
+		termName, err := req.RequireString("term")
+		if err != nil {
+			return nil, err
+		}
+
+		// Look up term by name or alias
+		term, err := deps.GlossaryService.GetTermByName(tenantCtx, projectID, termName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get glossary term: %w", err)
+		}
+
+		// Handle not found case gracefully
+		if term == nil {
+			notFoundResult := struct {
+				Error string `json:"error"`
+				Term  string `json:"term"`
+			}{
+				Error: "Term not found",
+				Term:  termName,
+			}
+
+			jsonResult, err := json.Marshal(notFoundResult)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal result: %w", err)
+			}
+
+			return mcp.NewToolResultText(string(jsonResult)), nil
+		}
+
+		// Build full response with SQL definition
+		result := toGetGlossarySQLResponse(term)
+
+		jsonResult, err := json.Marshal(result)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// listGlossaryResponse is the lightweight response format for list_glossary tool.
+// Used for discovery - only includes term, definition, and aliases.
+type listGlossaryResponse struct {
+	Term       string   `json:"term"`
+	Definition string   `json:"definition"`
+	Aliases    []string `json:"aliases,omitempty"`
+}
+
+// getGlossarySQLResponse is the full response format for get_glossary_sql tool.
+// Includes all fields needed for query composition.
+type getGlossarySQLResponse struct {
+	Term          string                `json:"term"`
+	Definition    string                `json:"definition"`
+	DefiningSQL   string                `json:"defining_sql"`
+	BaseTable     string                `json:"base_table,omitempty"`
+	OutputColumns []models.OutputColumn `json:"output_columns,omitempty"`
+	Aliases       []string              `json:"aliases,omitempty"`
+}
+
+// toListGlossaryResponse converts a model to list_glossary response format.
+func toListGlossaryResponse(term *models.BusinessGlossaryTerm) listGlossaryResponse {
+	return listGlossaryResponse{
+		Term:       term.Term,
+		Definition: term.Definition,
+		Aliases:    term.Aliases,
+	}
+}
+
+// toGetGlossarySQLResponse converts a model to get_glossary_sql response format.
+func toGetGlossarySQLResponse(term *models.BusinessGlossaryTerm) getGlossarySQLResponse {
+	return getGlossarySQLResponse{
+		Term:          term.Term,
+		Definition:    term.Definition,
+		DefiningSQL:   term.DefiningSQL,
+		BaseTable:     term.BaseTable,
+		OutputColumns: term.OutputColumns,
+		Aliases:       term.Aliases,
+	}
 }

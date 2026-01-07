@@ -114,10 +114,12 @@ func buildBusinessUserToolMap() map[string]bool {
 }
 
 // buildOntologyToolMap returns ontology-related tools from the approved_queries group.
+// This includes glossary tools since business glossary is part of semantic context.
 func buildOntologyToolMap() map[string]bool {
 	return map[string]bool{
-		"get_ontology": true,
-		"get_glossary": true,
+		"get_ontology":     true,
+		"list_glossary":    true,
+		"get_glossary_sql": true,
 	}
 }
 

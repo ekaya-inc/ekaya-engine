@@ -573,10 +573,10 @@ export const DAGNodeDescriptions: Record<DAGNodeName, { title: string; descripti
   },
   GlossaryDiscovery: {
     title: 'Glossary Discovery',
-    description: 'Discovering business glossary terms',
+    description: 'Discovering business glossary terms and definitions',
   },
   GlossaryEnrichment: {
     title: 'Glossary Enrichment',
-    description: 'Enriching glossary terms with SQL patterns',
+    description: 'Generating SQL definitions for glossary terms',
   },
 };

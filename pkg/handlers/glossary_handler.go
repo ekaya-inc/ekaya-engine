@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -25,25 +26,34 @@ type GlossaryListResponse struct {
 
 // CreateGlossaryTermRequest for POST /glossary
 type CreateGlossaryTermRequest struct {
-	Term        string          `json:"term"`
-	Definition  string          `json:"definition"`
-	SQLPattern  string          `json:"sql_pattern,omitempty"`
-	BaseTable   string          `json:"base_table,omitempty"`
-	ColumnsUsed []string        `json:"columns_used,omitempty"`
-	Filters     []models.Filter `json:"filters,omitempty"`
-	Aggregation string          `json:"aggregation,omitempty"`
-	Source      string          `json:"source,omitempty"`
+	Term        string   `json:"term"`
+	Definition  string   `json:"definition"`
+	DefiningSQL string   `json:"defining_sql"`
+	BaseTable   string   `json:"base_table,omitempty"`
+	Aliases     []string `json:"aliases,omitempty"`
+	Source      string   `json:"source,omitempty"`
 }
 
 // UpdateGlossaryTermRequest for PUT /glossary/{termId}
 type UpdateGlossaryTermRequest struct {
-	Term        string          `json:"term"`
-	Definition  string          `json:"definition"`
-	SQLPattern  string          `json:"sql_pattern,omitempty"`
-	BaseTable   string          `json:"base_table,omitempty"`
-	ColumnsUsed []string        `json:"columns_used,omitempty"`
-	Filters     []models.Filter `json:"filters,omitempty"`
-	Aggregation string          `json:"aggregation,omitempty"`
+	Term        string   `json:"term"`
+	Definition  string   `json:"definition"`
+	DefiningSQL string   `json:"defining_sql"`
+	BaseTable   string   `json:"base_table,omitempty"`
+	Aliases     []string `json:"aliases,omitempty"`
+}
+
+// TestSQLRequest for POST /glossary/test-sql
+type TestSQLRequest struct {
+	SQL string `json:"sql"`
+}
+
+// TestSQLResponse for POST /glossary/test-sql
+type TestSQLResponse struct {
+	Valid         bool                   `json:"valid"`
+	Error         string                 `json:"error,omitempty"`
+	OutputColumns []models.OutputColumn  `json:"output_columns,omitempty"`
+	SampleRow     map[string]interface{} `json:"sample_row,omitempty"`
 }
 
 // ============================================================================
@@ -83,6 +93,8 @@ func (h *GlossaryHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *aut
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Delete)))
 	mux.HandleFunc("POST "+base+"/suggest",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Suggest)))
+	mux.HandleFunc("POST "+base+"/test-sql",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.TestSQL)))
 }
 
 // List handles GET /api/projects/{pid}/glossary
@@ -131,11 +143,9 @@ func (h *GlossaryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	term := &models.BusinessGlossaryTerm{
 		Term:        req.Term,
 		Definition:  req.Definition,
-		SQLPattern:  req.SQLPattern,
+		DefiningSQL: req.DefiningSQL,
 		BaseTable:   req.BaseTable,
-		ColumnsUsed: req.ColumnsUsed,
-		Filters:     req.Filters,
-		Aggregation: req.Aggregation,
+		Aliases:     req.Aliases,
 		Source:      req.Source,
 	}
 
@@ -146,8 +156,9 @@ func (h *GlossaryHandler) Create(w http.ResponseWriter, r *http.Request) {
 			zap.Error(err))
 
 		// Check for validation errors
-		if err.Error() == "term name is required" || err.Error() == "term definition is required" {
-			if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", err.Error()); err != nil {
+		errMsg := err.Error()
+		if errMsg == "term name is required" || errMsg == "term definition is required" || errMsg == "defining_sql is required" || strings.Contains(errMsg, "SQL validation failed") {
+			if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", errMsg); err != nil {
 				h.logger.Error("Failed to write error response", zap.Error(err))
 			}
 			return
@@ -201,7 +212,7 @@ func (h *GlossaryHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // Update handles PUT /api/projects/{pid}/glossary/{tid}
 func (h *GlossaryHandler) Update(w http.ResponseWriter, r *http.Request) {
-	_, ok := ParseProjectID(w, r, h.logger)
+	projectID, ok := ParseProjectID(w, r, h.logger)
 	if !ok {
 		return
 	}
@@ -221,13 +232,13 @@ func (h *GlossaryHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	term := &models.BusinessGlossaryTerm{
 		ID:          termID,
+		ProjectID:   projectID,
 		Term:        req.Term,
 		Definition:  req.Definition,
-		SQLPattern:  req.SQLPattern,
+		DefiningSQL: req.DefiningSQL,
 		BaseTable:   req.BaseTable,
-		ColumnsUsed: req.ColumnsUsed,
-		Filters:     req.Filters,
-		Aggregation: req.Aggregation,
+		Aliases:     req.Aliases,
+		Source:      models.GlossarySourceManual, // Updates via UI are marked as manual
 	}
 
 	if err := h.glossaryService.UpdateTerm(r.Context(), term); err != nil {
@@ -236,8 +247,9 @@ func (h *GlossaryHandler) Update(w http.ResponseWriter, r *http.Request) {
 			zap.Error(err))
 
 		// Check for validation errors
-		if err.Error() == "term name is required" || err.Error() == "term definition is required" {
-			if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", err.Error()); err != nil {
+		errMsg := err.Error()
+		if errMsg == "term name is required" || errMsg == "term definition is required" || errMsg == "defining_sql is required" || strings.Contains(errMsg, "SQL validation failed") {
+			if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", errMsg); err != nil {
 				h.logger.Error("Failed to write error response", zap.Error(err))
 			}
 			return
@@ -340,6 +352,51 @@ func (h *GlossaryHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 	response := GlossaryListResponse{
 		Terms: suggestions,
 		Total: len(suggestions),
+	}
+
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// TestSQL handles POST /api/projects/{pid}/glossary/test-sql
+func (h *GlossaryHandler) TestSQL(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	var req TestSQLRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if req.SQL == "" {
+		if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", "SQL is required"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	testResult, err := h.glossaryService.TestSQL(r.Context(), projectID, req.SQL)
+	if err != nil {
+		h.logger.Error("Failed to test SQL",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "test_sql_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	response := TestSQLResponse{
+		Valid:         testResult.Valid,
+		Error:         testResult.Error,
+		OutputColumns: testResult.OutputColumns,
+		SampleRow:     testResult.SampleRow,
 	}
 
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {

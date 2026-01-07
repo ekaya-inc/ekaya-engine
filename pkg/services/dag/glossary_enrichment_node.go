@@ -14,14 +14,14 @@ import (
 // GlossaryEnrichmentMethods defines the methods needed from GlossaryService for DAG execution.
 // This interface allows the node to call the service without exposing internal implementation details.
 type GlossaryEnrichmentMethods interface {
-	// EnrichGlossaryTerms adds SQL patterns, filters, and aggregations to discovered terms.
-	// Processes terms in parallel via LLM calls.
-	// Only enriches terms with source="discovered" that lack enrichment.
+	// EnrichGlossaryTerms generates SQL definitions for discovered terms.
+	// Processes terms in parallel via LLM calls and validates SQL against the database.
+	// Only enriches terms with source="inferred" that lack defining_sql.
 	EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error
 }
 
-// GlossaryEnrichmentNode wraps glossary term enrichment with SQL patterns.
-// This operation adds SQL patterns, base tables, columns, filters, and aggregations to discovered terms.
+// GlossaryEnrichmentNode wraps glossary term enrichment with SQL generation and validation.
+// This operation generates SQL definitions for each discovered term and validates them.
 type GlossaryEnrichmentNode struct {
 	*BaseNode
 	glossaryEnrichment GlossaryEnrichmentMethods
@@ -45,7 +45,7 @@ func (n *GlossaryEnrichmentNode) Execute(ctx context.Context, dag *models.Ontolo
 		zap.String("project_id", dag.ProjectID.String()))
 
 	// Report initial progress
-	if err := n.ReportProgress(ctx, 0, 100, "Enriching glossary terms with SQL patterns..."); err != nil {
+	if err := n.ReportProgress(ctx, 0, 100, "Generating SQL definitions for glossary terms..."); err != nil {
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 

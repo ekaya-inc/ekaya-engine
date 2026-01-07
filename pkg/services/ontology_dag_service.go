@@ -373,6 +373,25 @@ func (s *ontologyDAGService) Delete(ctx context.Context, projectID uuid.UUID) er
 	}
 	s.logger.Debug("Deleted project knowledge", zap.String("project_id", projectID.String()))
 
+	// Delete inferred glossary terms (preserve manual and client terms)
+	// First delete aliases for inferred terms
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM engine_glossary_aliases
+		WHERE glossary_id IN (
+			SELECT id FROM engine_business_glossary
+			WHERE project_id = $1 AND source = 'inferred'
+		)
+	`, projectID); err != nil {
+		s.logger.Error("Failed to delete inferred glossary aliases", zap.String("project_id", projectID.String()), zap.Error(err))
+		return fmt.Errorf("delete inferred glossary aliases: %w", err)
+	}
+	// Then delete the inferred terms
+	if _, err := tx.Exec(ctx, "DELETE FROM engine_business_glossary WHERE project_id = $1 AND source = 'inferred'", projectID); err != nil {
+		s.logger.Error("Failed to delete inferred glossary terms", zap.String("project_id", projectID.String()), zap.Error(err))
+		return fmt.Errorf("delete inferred glossary terms: %w", err)
+	}
+	s.logger.Debug("Deleted inferred glossary terms", zap.String("project_id", projectID.String()))
+
 	// Delete ontologies (must be last due to FK references)
 	if _, err := tx.Exec(ctx, "DELETE FROM engine_ontologies WHERE project_id = $1", projectID); err != nil {
 		s.logger.Error("Failed to delete ontologies", zap.String("project_id", projectID.String()), zap.Error(err))

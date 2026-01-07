@@ -8,6 +8,7 @@ import type {
   ApiResponse,
   ConnectionDetails,
   CreateDatasourceResponse,
+  CreateGlossaryTermRequest,
   CreateQueryRequest,
   CreateRelationshipRequest,
   DAGStatusResponse,
@@ -21,6 +22,8 @@ import type {
   ExecuteQueryRequest,
   ExecuteQueryResponse,
   GetDatasourceResponse,
+  GlossaryListResponse,
+  GlossaryTerm,
   ListDatasourcesResponse,
   ListQueriesResponse,
   MCPConfigResponse,
@@ -32,6 +35,8 @@ import type {
   TestConnectionRequest,
   TestConnectionResponse,
   TestQueryRequest,
+  TestSQLResult,
+  UpdateGlossaryTermRequest,
   UpdateMCPConfigRequest,
   UpdateQueryRequest,
   ValidateQueryRequest,
@@ -477,6 +482,74 @@ class EngineApiService {
     projectId: string
   ): Promise<ApiResponse<EntitiesListResponse>> {
     return this.makeRequest<EntitiesListResponse>(`/${projectId}/entities`);
+  }
+
+  // --- Glossary Methods ---
+
+  /**
+   * List all glossary terms for a project
+   * GET /api/projects/{projectId}/glossary
+   */
+  async listGlossaryTerms(
+    projectId: string
+  ): Promise<ApiResponse<GlossaryListResponse>> {
+    return this.makeRequest<GlossaryListResponse>(`/${projectId}/glossary`);
+  }
+
+  /**
+   * Test SQL for a glossary term
+   * POST /api/projects/{projectId}/glossary/test-sql
+   */
+  async testGlossarySQL(
+    projectId: string,
+    sql: string
+  ): Promise<ApiResponse<TestSQLResult>> {
+    return this.makeRequest<TestSQLResult>(`/${projectId}/glossary/test-sql`, {
+      method: 'POST',
+      body: JSON.stringify({ sql }),
+    });
+  }
+
+  /**
+   * Create a new glossary term
+   * POST /api/projects/{projectId}/glossary
+   */
+  async createGlossaryTerm(
+    projectId: string,
+    request: CreateGlossaryTermRequest
+  ): Promise<ApiResponse<GlossaryTerm>> {
+    return this.makeRequest<GlossaryTerm>(`/${projectId}/glossary`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  /**
+   * Update an existing glossary term
+   * PUT /api/projects/{projectId}/glossary/{termId}
+   */
+  async updateGlossaryTerm(
+    projectId: string,
+    termId: string,
+    request: UpdateGlossaryTermRequest
+  ): Promise<ApiResponse<GlossaryTerm>> {
+    return this.makeRequest<GlossaryTerm>(`/${projectId}/glossary/${termId}`, {
+      method: 'PUT',
+      body: JSON.stringify(request),
+    });
+  }
+
+  /**
+   * Delete a glossary term
+   * DELETE /api/projects/{projectId}/glossary/{termId}
+   */
+  async deleteGlossaryTerm(
+    projectId: string,
+    termId: string
+  ): Promise<ApiResponse<void>> {
+    return this.makeRequest<void>(`/${projectId}/glossary/${termId}`, {
+      method: 'DELETE',
+    });
   }
 
   // --- MCP Configuration Methods ---

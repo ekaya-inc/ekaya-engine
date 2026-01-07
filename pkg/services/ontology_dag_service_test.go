@@ -76,10 +76,6 @@ func TestNodeExecutorInterfaces_AreWellDefined(t *testing.T) {
 	// GlossaryDiscoveryMethods
 	var gdm dag.GlossaryDiscoveryMethods = &testGlossaryDiscovery{}
 	assert.NotNil(t, gdm)
-
-	// GlossaryEnrichmentMethods
-	var gem dag.GlossaryEnrichmentMethods = &testGlossaryEnrichment{}
-	assert.NotNil(t, gem)
 }
 
 func TestDAGStatus_ValidStatuses(t *testing.T) {
@@ -211,12 +207,6 @@ type testGlossaryDiscovery struct{}
 
 func (t *testGlossaryDiscovery) DiscoverGlossaryTerms(_ context.Context, _, _ uuid.UUID) (int, error) {
 	return 0, nil
-}
-
-type testGlossaryEnrichment struct{}
-
-func (t *testGlossaryEnrichment) EnrichGlossaryTerms(_ context.Context, _, _ uuid.UUID) error {
-	return nil
 }
 
 // ============================================================================
@@ -839,36 +829,6 @@ func TestGetNodeExecutor_GlossaryDiscovery_NotSet(t *testing.T) {
 	assert.Contains(t, err.Error(), "glossary discovery methods not set")
 }
 
-func TestGetNodeExecutor_GlossaryEnrichment(t *testing.T) {
-	service := &ontologyDAGService{
-		dagRepo:                   &mockDAGRepository{},
-		logger:                    zap.NewNop(),
-		glossaryEnrichmentMethods: &testGlossaryEnrichment{},
-	}
-
-	nodeID := uuid.New()
-	executor, err := service.getNodeExecutor(models.DAGNodeGlossaryEnrichment, nodeID)
-
-	assert.NoError(t, err)
-	assert.NotNil(t, executor)
-	assert.IsType(t, &dag.GlossaryEnrichmentNode{}, executor)
-}
-
-func TestGetNodeExecutor_GlossaryEnrichment_NotSet(t *testing.T) {
-	service := &ontologyDAGService{
-		dagRepo: &mockDAGRepository{},
-		logger:  zap.NewNop(),
-		// glossaryEnrichmentMethods intentionally not set
-	}
-
-	nodeID := uuid.New()
-	executor, err := service.getNodeExecutor(models.DAGNodeGlossaryEnrichment, nodeID)
-
-	assert.Error(t, err)
-	assert.Nil(t, executor)
-	assert.Contains(t, err.Error(), "glossary enrichment methods not set")
-}
-
 func TestSetGlossaryMethods(t *testing.T) {
 	service := &ontologyDAGService{
 		dagRepo: &mockDAGRepository{},
@@ -879,9 +839,4 @@ func TestSetGlossaryMethods(t *testing.T) {
 	discoveryMethods := &testGlossaryDiscovery{}
 	service.SetGlossaryDiscoveryMethods(discoveryMethods)
 	assert.Equal(t, discoveryMethods, service.glossaryDiscoveryMethods)
-
-	// Test SetGlossaryEnrichmentMethods
-	enrichmentMethods := &testGlossaryEnrichment{}
-	service.SetGlossaryEnrichmentMethods(enrichmentMethods)
-	assert.Equal(t, enrichmentMethods, service.glossaryEnrichmentMethods)
 }

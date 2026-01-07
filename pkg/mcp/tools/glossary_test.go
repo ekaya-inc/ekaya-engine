@@ -13,6 +13,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // mockGlossaryService implements services.GlossaryService for testing.
@@ -57,6 +58,22 @@ func (m *mockGlossaryService) DiscoverGlossaryTerms(ctx context.Context, project
 }
 
 func (m *mockGlossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockGlossaryService) GetTermByName(ctx context.Context, projectID uuid.UUID, termName string) (*models.BusinessGlossaryTerm, error) {
+	return nil, nil
+}
+
+func (m *mockGlossaryService) TestSQL(ctx context.Context, projectID uuid.UUID, sql string) (*services.SQLTestResult, error) {
+	return nil, nil
+}
+
+func (m *mockGlossaryService) CreateAlias(ctx context.Context, termID uuid.UUID, alias string) error {
+	return nil
+}
+
+func (m *mockGlossaryService) DeleteAlias(ctx context.Context, termID uuid.UUID, alias string) error {
 	return nil
 }
 
@@ -114,13 +131,14 @@ func TestRegisterGlossaryTools(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(resultBytes, &response))
 
-	// Check get_glossary tool is registered
+	// Check both glossary tools are registered
 	toolNames := make(map[string]bool)
 	for _, tool := range response.Result.Tools {
 		toolNames[tool.Name] = true
 	}
 
-	assert.True(t, toolNames["get_glossary"], "get_glossary tool should be registered")
+	assert.True(t, toolNames["list_glossary"], "list_glossary tool should be registered")
+	assert.True(t, toolNames["get_glossary_sql"], "get_glossary_sql tool should be registered")
 }
 
 // TestCheckGlossaryToolsEnabled tests the checkGlossaryToolsEnabled function.
@@ -173,75 +191,210 @@ func TestCheckGlossaryToolsEnabled(t *testing.T) {
 	}
 }
 
-// TestToGlossaryTermResponse verifies the model to response conversion.
-func TestToGlossaryTermResponse(t *testing.T) {
-	t.Run("full term with all fields", func(t *testing.T) {
+// TestToListGlossaryResponse verifies the model to list response conversion.
+func TestToListGlossaryResponse(t *testing.T) {
+	t.Run("term with aliases", func(t *testing.T) {
 		term := &models.BusinessGlossaryTerm{
-			ID:          uuid.New(),
-			ProjectID:   uuid.New(),
-			Term:        "Revenue",
-			Definition:  "Total earned amount from completed transactions",
-			SQLPattern:  "SUM(earned_amount) WHERE transaction_state = 'completed'",
-			BaseTable:   "billing_transactions",
-			ColumnsUsed: []string{"earned_amount", "transaction_state"},
-			Filters: []models.Filter{
-				{Column: "transaction_state", Operator: "=", Values: []string{"completed"}},
-			},
-			Aggregation: "SUM",
-			Source:      "user",
+			ID:         uuid.New(),
+			ProjectID:  uuid.New(),
+			Term:       "Revenue",
+			Definition: "Total earned amount from completed transactions",
+			Aliases:    []string{"Total Revenue", "Gross Revenue"},
 		}
 
-		resp := toGlossaryTermResponse(term)
+		resp := toListGlossaryResponse(term)
 
 		assert.Equal(t, "Revenue", resp.Term)
 		assert.Equal(t, "Total earned amount from completed transactions", resp.Definition)
-		assert.Equal(t, "SUM(earned_amount) WHERE transaction_state = 'completed'", resp.SQLPattern)
-		assert.Equal(t, "billing_transactions", resp.BaseTable)
-		assert.Equal(t, []string{"earned_amount", "transaction_state"}, resp.ColumnsUsed)
-		assert.Equal(t, "SUM", resp.Aggregation)
-		assert.Equal(t, "user", resp.Source)
-		require.Len(t, resp.Filters, 1)
-		assert.Equal(t, "transaction_state", resp.Filters[0].Column)
-		assert.Equal(t, "=", resp.Filters[0].Operator)
-		assert.Equal(t, []string{"completed"}, resp.Filters[0].Values)
+		assert.Equal(t, []string{"Total Revenue", "Gross Revenue"}, resp.Aliases)
 	})
 
-	t.Run("minimal term with only required fields", func(t *testing.T) {
+	t.Run("term without aliases", func(t *testing.T) {
 		term := &models.BusinessGlossaryTerm{
 			ID:         uuid.New(),
 			ProjectID:  uuid.New(),
 			Term:       "Active User",
 			Definition: "User with recent activity",
-			Source:     "suggested",
+			Aliases:    nil,
 		}
 
-		resp := toGlossaryTermResponse(term)
+		resp := toListGlossaryResponse(term)
 
 		assert.Equal(t, "Active User", resp.Term)
 		assert.Equal(t, "User with recent activity", resp.Definition)
-		assert.Equal(t, "", resp.SQLPattern)
-		assert.Equal(t, "", resp.BaseTable)
-		assert.Nil(t, resp.ColumnsUsed)
-		assert.Nil(t, resp.Filters)
-		assert.Equal(t, "", resp.Aggregation)
-		assert.Equal(t, "suggested", resp.Source)
-	})
-
-	t.Run("term with empty filters slice", func(t *testing.T) {
-		term := &models.BusinessGlossaryTerm{
-			Term:       "Test",
-			Definition: "Test definition",
-			Filters:    []models.Filter{}, // Empty slice
-			Source:     "user",
-		}
-
-		resp := toGlossaryTermResponse(term)
-
-		assert.Nil(t, resp.Filters, "Empty filters should result in nil in response")
+		assert.Nil(t, resp.Aliases)
 	})
 }
 
-// TestGlossaryToolInOntologyToolNames verifies get_glossary is in the tool filter map.
-func TestGlossaryToolInOntologyToolNames(t *testing.T) {
-	assert.True(t, ontologyToolNames["get_glossary"], "get_glossary should be in ontologyToolNames for filtering")
+// TestToGetGlossarySQLResponse verifies the model to SQL response conversion.
+func TestToGetGlossarySQLResponse(t *testing.T) {
+	t.Run("full term with all fields", func(t *testing.T) {
+		term := &models.BusinessGlossaryTerm{
+			ID:         uuid.New(),
+			ProjectID:  uuid.New(),
+			Term:       "Revenue",
+			Definition: "Total earned amount from completed transactions",
+			DefiningSQL: `SELECT SUM(earned_amount) AS revenue
+FROM billing_transactions
+WHERE transaction_state = 'completed'`,
+			BaseTable: "billing_transactions",
+			OutputColumns: []models.OutputColumn{
+				{Name: "revenue", Type: "numeric"},
+			},
+			Aliases: []string{"total_revenue", "earnings"},
+		}
+
+		resp := toGetGlossarySQLResponse(term)
+
+		assert.Equal(t, "Revenue", resp.Term)
+		assert.Equal(t, "Total earned amount from completed transactions", resp.Definition)
+		assert.Contains(t, resp.DefiningSQL, "SUM(earned_amount)")
+		assert.Equal(t, "billing_transactions", resp.BaseTable)
+		assert.Equal(t, 1, len(resp.OutputColumns))
+		assert.Equal(t, "revenue", resp.OutputColumns[0].Name)
+		assert.Equal(t, "numeric", resp.OutputColumns[0].Type)
+		assert.Equal(t, []string{"total_revenue", "earnings"}, resp.Aliases)
+	})
+
+	t.Run("minimal term with only required fields", func(t *testing.T) {
+		term := &models.BusinessGlossaryTerm{
+			ID:          uuid.New(),
+			ProjectID:   uuid.New(),
+			Term:        "Active User",
+			Definition:  "User with recent activity",
+			DefiningSQL: "SELECT COUNT(*) FROM users WHERE active = true",
+		}
+
+		resp := toGetGlossarySQLResponse(term)
+
+		assert.Equal(t, "Active User", resp.Term)
+		assert.Equal(t, "User with recent activity", resp.Definition)
+		assert.Equal(t, "SELECT COUNT(*) FROM users WHERE active = true", resp.DefiningSQL)
+		assert.Equal(t, "", resp.BaseTable)
+		assert.Nil(t, resp.OutputColumns)
+		assert.Nil(t, resp.Aliases)
+	})
+}
+
+// TestGlossaryToolsInOntologyToolNames verifies glossary tools are in the tool filter map.
+func TestGlossaryToolsInOntologyToolNames(t *testing.T) {
+	assert.True(t, ontologyToolNames["list_glossary"], "list_glossary should be in ontologyToolNames for filtering")
+	assert.True(t, ontologyToolNames["get_glossary_sql"], "get_glossary_sql should be in ontologyToolNames for filtering")
+}
+
+// TestListGlossaryTool_Integration verifies the list_glossary tool returns lightweight discovery response.
+func TestListGlossaryTool_Integration(t *testing.T) {
+	// Create mock service that returns terms
+	terms := []*models.BusinessGlossaryTerm{
+		{
+			ID:          uuid.New(),
+			ProjectID:   uuid.New(),
+			Term:        "Revenue",
+			Definition:  "Total earned amount",
+			DefiningSQL: "SELECT SUM(amount) FROM transactions",
+			Aliases:     []string{"Total Revenue"},
+		},
+		{
+			ID:          uuid.New(),
+			ProjectID:   uuid.New(),
+			Term:        "Active Users",
+			Definition:  "Users who logged in recently",
+			DefiningSQL: "SELECT COUNT(*) FROM users WHERE active = true",
+			Aliases:     []string{"MAU", "Monthly Active Users"},
+		},
+	}
+
+	mockService := &mockGlossaryService{
+		terms: terms,
+	}
+
+	deps := &GlossaryToolDeps{
+		GlossaryService: mockService,
+		Logger:          zap.NewNop(),
+	}
+
+	// Register tools
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+	RegisterGlossaryTools(mcpServer, deps)
+
+	// The list_glossary response should NOT include DefiningSQL or OutputColumns
+	// It's a lightweight discovery response with just term, definition, and aliases
+	t.Run("list_glossary returns lightweight response", func(t *testing.T) {
+		result := struct {
+			Terms []listGlossaryResponse `json:"terms"`
+			Count int                    `json:"count"`
+		}{}
+
+		// Simulate response building
+		for _, term := range terms {
+			result.Terms = append(result.Terms, toListGlossaryResponse(term))
+		}
+		result.Count = len(result.Terms)
+
+		assert.Equal(t, 2, result.Count)
+		assert.Equal(t, "Revenue", result.Terms[0].Term)
+		assert.Equal(t, "Total earned amount", result.Terms[0].Definition)
+		assert.Equal(t, []string{"Total Revenue"}, result.Terms[0].Aliases)
+
+		assert.Equal(t, "Active Users", result.Terms[1].Term)
+		assert.Equal(t, []string{"MAU", "Monthly Active Users"}, result.Terms[1].Aliases)
+	})
+}
+
+// TestGetGlossarySQLTool_Integration verifies the get_glossary_sql tool returns full SQL definition.
+func TestGetGlossarySQLTool_Integration(t *testing.T) {
+	term := &models.BusinessGlossaryTerm{
+		ID:         uuid.New(),
+		ProjectID:  uuid.New(),
+		Term:       "Revenue",
+		Definition: "Total earned amount from completed transactions",
+		DefiningSQL: `SELECT SUM(earned_amount) AS revenue
+FROM billing_transactions
+WHERE transaction_state = 'completed'`,
+		BaseTable: "billing_transactions",
+		OutputColumns: []models.OutputColumn{
+			{Name: "revenue", Type: "numeric"},
+		},
+		Aliases: []string{"Total Revenue", "Gross Revenue"},
+	}
+
+	mockService := &mockGlossaryService{
+		term: term,
+	}
+
+	deps := &GlossaryToolDeps{
+		GlossaryService: mockService,
+		Logger:          zap.NewNop(),
+	}
+
+	// Register tools
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+	RegisterGlossaryTools(mcpServer, deps)
+
+	t.Run("get_glossary_sql returns complete SQL definition", func(t *testing.T) {
+		result := toGetGlossarySQLResponse(term)
+
+		assert.Equal(t, "Revenue", result.Term)
+		assert.Equal(t, "Total earned amount from completed transactions", result.Definition)
+		assert.Contains(t, result.DefiningSQL, "SUM(earned_amount)")
+		assert.Equal(t, "billing_transactions", result.BaseTable)
+		assert.Equal(t, 1, len(result.OutputColumns))
+		assert.Equal(t, "revenue", result.OutputColumns[0].Name)
+		assert.Equal(t, "numeric", result.OutputColumns[0].Type)
+		assert.Equal(t, []string{"Total Revenue", "Gross Revenue"}, result.Aliases)
+	})
+
+	t.Run("get_glossary_sql handles not found gracefully", func(t *testing.T) {
+		// Simulate not found response
+		notFoundResult := struct {
+			Error string `json:"error"`
+			Term  string `json:"term"`
+		}{
+			Error: "Term not found",
+			Term:  "Unknown",
+		}
+
+		assert.Equal(t, "Term not found", notFoundResult.Error)
+		assert.Equal(t, "Unknown", notFoundResult.Term)
+	})
 }

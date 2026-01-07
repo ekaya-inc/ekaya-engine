@@ -2,14 +2,14 @@ package services
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/jsonutil"
+	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -32,6 +32,18 @@ type GlossaryService interface {
 	// GetTerm returns a single glossary term by ID.
 	GetTerm(ctx context.Context, termID uuid.UUID) (*models.BusinessGlossaryTerm, error)
 
+	// GetTermByName returns a single glossary term by name (term or alias).
+	GetTermByName(ctx context.Context, projectID uuid.UUID, termName string) (*models.BusinessGlossaryTerm, error)
+
+	// TestSQL validates SQL syntax and captures output columns.
+	TestSQL(ctx context.Context, projectID uuid.UUID, sql string) (*SQLTestResult, error)
+
+	// CreateAlias adds an alias to an existing glossary term.
+	CreateAlias(ctx context.Context, termID uuid.UUID, alias string) error
+
+	// DeleteAlias removes an alias from a glossary term.
+	DeleteAlias(ctx context.Context, termID uuid.UUID, alias string) error
+
 	// SuggestTerms uses LLM to analyze the ontology and suggest business terms.
 	SuggestTerms(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error)
 
@@ -46,12 +58,23 @@ type GlossaryService interface {
 	EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error
 }
 
+// SQLTestResult contains the result of testing a SQL query.
+type SQLTestResult struct {
+	Valid         bool                   `json:"valid"`
+	Error         string                 `json:"error,omitempty"`
+	OutputColumns []models.OutputColumn  `json:"output_columns,omitempty"`
+	SampleRow     map[string]interface{} `json:"sample_row,omitempty"`
+}
+
 type glossaryService struct {
-	glossaryRepo repositories.GlossaryRepository
-	ontologyRepo repositories.OntologyRepository
-	entityRepo   repositories.OntologyEntityRepository
-	llmFactory   llm.LLMClientFactory
-	logger       *zap.Logger
+	glossaryRepo   repositories.GlossaryRepository
+	ontologyRepo   repositories.OntologyRepository
+	entityRepo     repositories.OntologyEntityRepository
+	datasourceSvc  DatasourceService
+	adapterFactory datasource.DatasourceAdapterFactory
+	llmFactory     llm.LLMClientFactory
+	getTenant      TenantContextFunc
+	logger         *zap.Logger
 }
 
 // NewGlossaryService creates a new GlossaryService.
@@ -59,15 +82,21 @@ func NewGlossaryService(
 	glossaryRepo repositories.GlossaryRepository,
 	ontologyRepo repositories.OntologyRepository,
 	entityRepo repositories.OntologyEntityRepository,
+	datasourceSvc DatasourceService,
+	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
+	getTenant TenantContextFunc,
 	logger *zap.Logger,
 ) GlossaryService {
 	return &glossaryService{
-		glossaryRepo: glossaryRepo,
-		ontologyRepo: ontologyRepo,
-		entityRepo:   entityRepo,
-		llmFactory:   llmFactory,
-		logger:       logger.Named("glossary-service"),
+		glossaryRepo:   glossaryRepo,
+		ontologyRepo:   ontologyRepo,
+		entityRepo:     entityRepo,
+		datasourceSvc:  datasourceSvc,
+		adapterFactory: adapterFactory,
+		llmFactory:     llmFactory,
+		getTenant:      getTenant,
+		logger:         logger.Named("glossary-service"),
 	}
 }
 
@@ -81,12 +110,32 @@ func (s *glossaryService) CreateTerm(ctx context.Context, projectID uuid.UUID, t
 	if term.Definition == "" {
 		return fmt.Errorf("term definition is required")
 	}
+	if term.DefiningSQL == "" {
+		return fmt.Errorf("defining_sql is required")
+	}
 
 	// Set project ID and default source if not provided
 	term.ProjectID = projectID
 	if term.Source == "" {
-		term.Source = "user"
+		term.Source = models.GlossarySourceManual
 	}
+
+	// Validate SQL and capture output columns
+	testResult, err := s.TestSQL(ctx, projectID, term.DefiningSQL)
+	if err != nil {
+		s.logger.Error("Failed to test SQL during term creation",
+			zap.String("project_id", projectID.String()),
+			zap.String("term", term.Term),
+			zap.Error(err))
+		return fmt.Errorf("test SQL: %w", err)
+	}
+
+	if !testResult.Valid {
+		return fmt.Errorf("SQL validation failed: %s", testResult.Error)
+	}
+
+	// Set output columns from test result
+	term.OutputColumns = testResult.OutputColumns
 
 	if err := s.glossaryRepo.Create(ctx, term); err != nil {
 		s.logger.Error("Failed to create glossary term",
@@ -114,6 +163,44 @@ func (s *glossaryService) UpdateTerm(ctx context.Context, term *models.BusinessG
 	}
 	if term.Definition == "" {
 		return fmt.Errorf("term definition is required")
+	}
+	if term.DefiningSQL == "" {
+		return fmt.Errorf("defining_sql is required")
+	}
+
+	// Get existing term to check if SQL changed
+	existing, err := s.glossaryRepo.GetByID(ctx, term.ID)
+	if err != nil {
+		s.logger.Error("Failed to get existing term",
+			zap.String("term_id", term.ID.String()),
+			zap.Error(err))
+		return fmt.Errorf("get existing term: %w", err)
+	}
+
+	if existing == nil {
+		return apperrors.ErrNotFound
+	}
+
+	// If SQL changed, re-validate and update output columns
+	if term.DefiningSQL != existing.DefiningSQL {
+		testResult, err := s.TestSQL(ctx, term.ProjectID, term.DefiningSQL)
+		if err != nil {
+			s.logger.Error("Failed to test SQL during term update",
+				zap.String("term_id", term.ID.String()),
+				zap.String("term", term.Term),
+				zap.Error(err))
+			return fmt.Errorf("test SQL: %w", err)
+		}
+
+		if !testResult.Valid {
+			return fmt.Errorf("SQL validation failed: %s", testResult.Error)
+		}
+
+		// Update output columns from test result
+		term.OutputColumns = testResult.OutputColumns
+	} else {
+		// SQL hasn't changed, preserve existing output columns
+		term.OutputColumns = existing.OutputColumns
 	}
 
 	if err := s.glossaryRepo.Update(ctx, term); err != nil {
@@ -166,6 +253,135 @@ func (s *glossaryService) GetTerm(ctx context.Context, termID uuid.UUID) (*model
 	}
 
 	return term, nil
+}
+
+func (s *glossaryService) GetTermByName(ctx context.Context, projectID uuid.UUID, termName string) (*models.BusinessGlossaryTerm, error) {
+	// Try to find by exact term name first
+	term, err := s.glossaryRepo.GetByTerm(ctx, projectID, termName)
+	if err != nil {
+		s.logger.Error("Failed to get glossary term by name",
+			zap.String("project_id", projectID.String()),
+			zap.String("term_name", termName),
+			zap.Error(err))
+		return nil, fmt.Errorf("get glossary term by name: %w", err)
+	}
+
+	// If not found by term name, try alias lookup
+	if term == nil {
+		term, err = s.glossaryRepo.GetByAlias(ctx, projectID, termName)
+		if err != nil {
+			s.logger.Error("Failed to get glossary term by alias",
+				zap.String("project_id", projectID.String()),
+				zap.String("alias", termName),
+				zap.Error(err))
+			return nil, fmt.Errorf("get glossary term by alias: %w", err)
+		}
+	}
+
+	return term, nil
+}
+
+func (s *glossaryService) TestSQL(ctx context.Context, projectID uuid.UUID, sql string) (*SQLTestResult, error) {
+	// Get datasource for the project (assumes one datasource per project)
+	datasources, err := s.datasourceSvc.List(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list datasources: %w", err)
+	}
+
+	if len(datasources) == 0 {
+		return &SQLTestResult{
+			Valid: false,
+			Error: "no datasource configured for project",
+		}, nil
+	}
+
+	ds := datasources[0] // Use first datasource
+
+	// Create query executor (empty userID uses shared pool for system operations)
+	executor, err := s.adapterFactory.NewQueryExecutor(ctx, ds.DatasourceType, ds.Config, projectID, ds.ID, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create query executor: %w", err)
+	}
+	defer executor.Close()
+
+	// First, validate SQL syntax using EXPLAIN (doesn't execute the query)
+	// Note: ValidateQuery might not be available on all adapters, so we'll try to execute with LIMIT 1 directly
+	// and catch any syntax errors
+
+	// Execute query with LIMIT 1 to capture output columns
+	sqlWithLimit := sql
+	if !strings.Contains(strings.ToUpper(sql), "LIMIT") {
+		sqlWithLimit = fmt.Sprintf("%s LIMIT 1", sql)
+	}
+
+	result, err := executor.ExecuteQuery(ctx, sqlWithLimit, 1)
+	if err != nil {
+		return &SQLTestResult{
+			Valid: false,
+			Error: err.Error(),
+		}, nil
+	}
+
+	// Convert ColumnInfo to OutputColumn
+	outputColumns := make([]models.OutputColumn, len(result.Columns))
+	for i, col := range result.Columns {
+		outputColumns[i] = models.OutputColumn{
+			Name: col.Name,
+			Type: col.Type,
+		}
+	}
+
+	// Get sample row if available
+	var sampleRow map[string]interface{}
+	if len(result.Rows) > 0 {
+		sampleRow = result.Rows[0]
+	}
+
+	return &SQLTestResult{
+		Valid:         true,
+		OutputColumns: outputColumns,
+		SampleRow:     sampleRow,
+	}, nil
+}
+
+func (s *glossaryService) CreateAlias(ctx context.Context, termID uuid.UUID, alias string) error {
+	if alias == "" {
+		return fmt.Errorf("alias is required")
+	}
+
+	if err := s.glossaryRepo.CreateAlias(ctx, termID, alias); err != nil {
+		s.logger.Error("Failed to create glossary alias",
+			zap.String("term_id", termID.String()),
+			zap.String("alias", alias),
+			zap.Error(err))
+		return fmt.Errorf("create glossary alias: %w", err)
+	}
+
+	s.logger.Info("Created glossary alias",
+		zap.String("term_id", termID.String()),
+		zap.String("alias", alias))
+
+	return nil
+}
+
+func (s *glossaryService) DeleteAlias(ctx context.Context, termID uuid.UUID, alias string) error {
+	if alias == "" {
+		return fmt.Errorf("alias is required")
+	}
+
+	if err := s.glossaryRepo.DeleteAlias(ctx, termID, alias); err != nil {
+		s.logger.Error("Failed to delete glossary alias",
+			zap.String("term_id", termID.String()),
+			zap.String("alias", alias),
+			zap.Error(err))
+		return fmt.Errorf("delete glossary alias: %w", err)
+	}
+
+	s.logger.Info("Deleted glossary alias",
+		zap.String("term_id", termID.String()),
+		zap.String("alias", alias))
+
+	return nil
 }
 
 func (s *glossaryService) SuggestTerms(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error) {
@@ -227,20 +443,23 @@ func (s *glossaryService) SuggestTerms(ctx context.Context, projectID uuid.UUID)
 }
 
 func (s *glossaryService) suggestTermsSystemMessage() string {
-	return `You are a business analyst expert. Your task is to analyze a database schema and suggest business metrics and terms that would help executives understand the data.
+	return `You are a business analyst expert. Your task is to analyze a database schema and identify business metrics and terms that would help executives understand the data.
 
-Focus on:
+Focus on discovering as many useful business terms as possible across these categories:
 1. Key Performance Indicators (KPIs) - metrics that measure business success
-2. Financial metrics - revenue, costs, margins, etc.
-3. User/customer metrics - active users, retention, churn, etc.
+2. Financial metrics - revenue, costs, margins, GMV, AOV, etc.
+3. User/customer metrics - active users, retention, churn, lifetime value, etc.
 4. Transaction metrics - volume, value, conversion rates, etc.
+5. Engagement metrics - sessions, page views, time on platform, etc.
+6. Growth metrics - new users, growth rates, acquisition costs, etc.
 
-For each term, provide:
-- A clear business name
-- A definition that explains what it measures
-- The SQL pattern or aggregation used to calculate it
-- The base table(s) involved
-- Any filters that should be applied`
+For each term, provide ONLY:
+- term: A clear business name
+- definition: A detailed explanation of what it measures and how it's typically calculated
+- aliases: Alternative names that business users might use for this metric
+
+DO NOT include SQL in this response. SQL definitions will be generated separately.
+Be comprehensive - suggest 10-20 terms if the schema supports it.`
 }
 
 func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntology, entities []*models.OntologyEntity) string {
@@ -320,99 +539,59 @@ func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntolog
 	}
 
 	sb.WriteString("## Response Format\n\n")
-	sb.WriteString("Respond with a JSON array of suggested business terms:\n")
+	sb.WriteString("Respond with a JSON object containing suggested business terms (NO SQL - just term, definition, aliases):\n")
 	sb.WriteString("```json\n")
-	sb.WriteString(`[
-  {
-    "term": "Revenue",
-    "definition": "Total earned amount from completed transactions after fees",
-    "sql_pattern": "SUM(earned_amount) WHERE transaction_state = 'completed'",
-    "base_table": "billing_transactions",
-    "columns_used": ["earned_amount", "transaction_state"],
-    "filters": [
-      {"column": "transaction_state", "operator": "=", "values": ["completed"]}
-    ],
-    "aggregation": "SUM"
-  }
-]
+	sb.WriteString(`{
+  "terms": [
+    {
+      "term": "Revenue",
+      "definition": "Total earned amount from completed transactions after deducting platform fees. Calculated by summing the earned_amount field for transactions in 'completed' state.",
+      "aliases": ["Total Revenue", "Gross Revenue", "Earnings"]
+    },
+    {
+      "term": "Active Users",
+      "definition": "Number of unique users who have engaged with the platform within a defined time frame (typically 30 days). Measured by counting distinct user IDs with recent activity.",
+      "aliases": ["MAU", "Monthly Active Users", "Active User Count"]
+    }
+  ]
+}
 `)
 	sb.WriteString("```\n\n")
-	sb.WriteString("Suggest 3-5 key business metrics based on the schema.\n")
+	sb.WriteString("Suggest 10-20 key business metrics based on the schema. Be comprehensive!\n")
 
 	return sb.String()
 }
 
-// suggestedTermResponse represents a single term in the LLM response.
-type suggestedTermResponse struct {
-	Term        string            `json:"term"`
-	Definition  string            `json:"definition"`
-	SQLPattern  string            `json:"sql_pattern,omitempty"`
-	BaseTable   string            `json:"base_table,omitempty"`
-	ColumnsUsed []string          `json:"columns_used,omitempty"`
-	Filters     []suggestedFilter `json:"filters,omitempty"`
-	Aggregation string            `json:"aggregation,omitempty"`
+// suggestedTermsResponse wraps the array of suggested terms.
+type suggestedTermsResponse struct {
+	Terms []suggestedTerm `json:"terms"`
 }
 
-type suggestedFilter struct {
-	Column   string   `json:"column"`
-	Operator string   `json:"operator"`
-	Values   []string `json:"values"`
-}
-
-// UnmarshalJSON handles LLM responses that return values as numbers or booleans instead of strings.
-func (f *suggestedFilter) UnmarshalJSON(data []byte) error {
-	type filterAlias struct {
-		Column   string            `json:"column"`
-		Operator string            `json:"operator"`
-		Values   []json.RawMessage `json:"values"`
-	}
-
-	var flex filterAlias
-	if err := json.Unmarshal(data, &flex); err != nil {
-		return err
-	}
-
-	f.Column = flex.Column
-	f.Operator = flex.Operator
-	f.Values = make([]string, 0, len(flex.Values))
-
-	for _, rawVal := range flex.Values {
-		if v := jsonutil.FlexibleStringValue(rawVal); v != "" {
-			f.Values = append(f.Values, v)
-		}
-	}
-
-	return nil
+// suggestedTerm represents a single term in the discovery LLM response.
+// Note: DefiningSQL and BaseTable are NOT included - they are generated in the enrichment phase.
+type suggestedTerm struct {
+	Term       string   `json:"term"`
+	Definition string   `json:"definition"`
+	Aliases    []string `json:"aliases,omitempty"`
 }
 
 func (s *glossaryService) parseSuggestTermsResponse(content string, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error) {
-	suggestions, err := llm.ParseJSONResponse[[]suggestedTermResponse](content)
+	response, err := llm.ParseJSONResponse[suggestedTermsResponse](content)
 	if err != nil {
 		return nil, fmt.Errorf("parse suggestions JSON: %w", err)
 	}
 
-	terms := make([]*models.BusinessGlossaryTerm, 0, len(suggestions))
-	for _, suggestion := range suggestions {
-		// Convert filters
-		filters := make([]models.Filter, 0, len(suggestion.Filters))
-		for _, f := range suggestion.Filters {
-			filters = append(filters, models.Filter{
-				Column:   f.Column,
-				Operator: f.Operator,
-				Values:   f.Values,
-			})
-		}
-
+	terms := make([]*models.BusinessGlossaryTerm, 0, len(response.Terms))
+	for _, suggestion := range response.Terms {
+		// Discovery phase only captures term, definition, aliases
+		// DefiningSQL and BaseTable are generated in the enrichment phase
 		term := &models.BusinessGlossaryTerm{
-			ProjectID:   projectID,
-			Term:        suggestion.Term,
-			Definition:  suggestion.Definition,
-			SQLPattern:  suggestion.SQLPattern,
-			BaseTable:   suggestion.BaseTable,
-			ColumnsUsed: suggestion.ColumnsUsed,
-			Filters:     filters,
-			Aggregation: suggestion.Aggregation,
-			Source:      "suggested",
+			ProjectID:  projectID,
+			Term:       suggestion.Term,
+			Definition: suggestion.Definition,
+			Aliases:    suggestion.Aliases,
+			Source:     models.GlossarySourceInferred,
+			// DefiningSQL is empty - will be filled by enrichment phase
 		}
 		terms = append(terms, term)
 	}
@@ -473,7 +652,8 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 		return 0, fmt.Errorf("parse LLM response: %w", err)
 	}
 
-	// Save discovered terms to database with source="discovered"
+	// Save discovered terms to database with source="inferred"
+	// Note: DefiningSQL is NOT generated in discovery phase - that's done in enrichment
 	discoveredCount := 0
 	for _, term := range suggestions {
 		// Check for duplicates
@@ -492,8 +672,8 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 			continue
 		}
 
-		// Set source to "discovered" instead of "suggested"
-		term.Source = "discovered"
+		// Source is already set to "inferred" in parseSuggestTermsResponse
+		// DefiningSQL is empty - will be populated in enrichment phase
 
 		// Create the term
 		if err := s.glossaryRepo.Create(ctx, term); err != nil {
@@ -523,16 +703,16 @@ func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, on
 		zap.String("project_id", projectID.String()),
 		zap.String("ontology_id", ontologyID.String()))
 
-	// Get terms that need enrichment (discovered terms without sql_pattern)
+	// Get terms that need enrichment (inferred terms without DefiningSQL)
 	allTerms, err := s.glossaryRepo.GetByProject(ctx, projectID)
 	if err != nil {
 		return fmt.Errorf("get glossary terms: %w", err)
 	}
 
-	// Filter for unenriched discovered terms
+	// Filter for unenriched inferred terms
 	var unenrichedTerms []*models.BusinessGlossaryTerm
 	for _, term := range allTerms {
-		if term.Source == "discovered" && term.SQLPattern == "" {
+		if term.Source == models.GlossarySourceInferred && term.DefiningSQL == "" {
 			unenrichedTerms = append(unenrichedTerms, term)
 		}
 	}
@@ -567,80 +747,139 @@ func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, on
 		return fmt.Errorf("create LLM client: %w", err)
 	}
 
-	// Process each term (for now, sequentially - can be parallelized later)
-	successCount := 0
+	// Process terms in parallel with bounded concurrency
+	const maxConcurrency = 5
+	semaphore := make(chan struct{}, maxConcurrency)
+	results := make(chan enrichmentResult, len(unenrichedTerms))
+
 	for _, term := range unenrichedTerms {
-		prompt := s.buildEnrichTermPrompt(term, ontology, entities)
-		systemMessage := s.enrichTermSystemMessage()
+		semaphore <- struct{}{} // Acquire
+		go func(t *models.BusinessGlossaryTerm) {
+			defer func() { <-semaphore }() // Release
+			results <- s.enrichSingleTerm(ctx, t, ontology, entities, llmClient, projectID)
+		}(term)
+	}
 
-		// Call LLM
-		result, err := llmClient.GenerateResponse(ctx, prompt, systemMessage, 0.3, false)
-		if err != nil {
-			s.logger.Error("Failed to enrich term with LLM",
-				zap.String("term_id", term.ID.String()),
-				zap.String("term", term.Term),
-				zap.Error(err))
-			continue
+	// Collect results
+	successCount := 0
+	failedCount := 0
+	for range unenrichedTerms {
+		result := <-results
+		if result.err != nil {
+			s.logger.Error("Failed to enrich term",
+				zap.String("term", result.termName),
+				zap.Error(result.err))
+			failedCount++
+		} else {
+			successCount++
+			s.logger.Debug("Enriched term",
+				zap.String("term", result.termName),
+				zap.Int("output_columns", result.outputColumns))
 		}
-
-		// Parse enrichment response
-		enrichment, err := s.parseEnrichTermResponse(result.Content)
-		if err != nil {
-			s.logger.Error("Failed to parse enrichment response",
-				zap.String("term_id", term.ID.String()),
-				zap.String("term", term.Term),
-				zap.Error(err))
-			continue
-		}
-
-		// Update term with enrichment
-		term.SQLPattern = enrichment.SQLPattern
-		term.BaseTable = enrichment.BaseTable
-		term.ColumnsUsed = enrichment.ColumnsUsed
-
-		// Convert filters
-		filters := make([]models.Filter, 0, len(enrichment.Filters))
-		for _, f := range enrichment.Filters {
-			filters = append(filters, models.Filter{
-				Column:   f.Column,
-				Operator: f.Operator,
-				Values:   f.Values,
-			})
-		}
-		term.Filters = filters
-		term.Aggregation = enrichment.Aggregation
-
-		if err := s.glossaryRepo.Update(ctx, term); err != nil {
-			s.logger.Error("Failed to update enriched term",
-				zap.String("term_id", term.ID.String()),
-				zap.String("term", term.Term),
-				zap.Error(err))
-			continue
-		}
-
-		successCount++
-		s.logger.Debug("Enriched term",
-			zap.String("term", term.Term),
-			zap.String("term_id", term.ID.String()))
 	}
 
 	s.logger.Info("Completed glossary term enrichment",
 		zap.String("project_id", projectID.String()),
 		zap.Int("terms_enriched", successCount),
+		zap.Int("terms_failed", failedCount),
 		zap.Int("terms_processed", len(unenrichedTerms)))
 
 	return nil
 }
 
+// enrichmentResult holds the result of enriching a single term.
+type enrichmentResult struct {
+	termName      string
+	outputColumns int
+	err           error
+}
+
+// enrichSingleTerm generates SQL for a single term, validates it, and updates the database.
+// Each call acquires its own database connection from the pool to allow parallel execution.
+func (s *glossaryService) enrichSingleTerm(
+	ctx context.Context,
+	term *models.BusinessGlossaryTerm,
+	ontology *models.TieredOntology,
+	entities []*models.OntologyEntity,
+	llmClient llm.LLMClient,
+	projectID uuid.UUID,
+) enrichmentResult {
+	// Acquire own database connection FIRST - this ensures the LLM client's SavePending
+	// uses this goroutine's dedicated connection, avoiding "conn busy" errors when
+	// multiple goroutines share the parent context's connection.
+	tenantCtx, cleanup, err := s.getTenant(ctx, projectID)
+	if err != nil {
+		return enrichmentResult{termName: term.Term, err: fmt.Errorf("get tenant context: %w", err)}
+	}
+	defer cleanup()
+
+	prompt := s.buildEnrichTermPrompt(term, ontology, entities)
+	systemMessage := s.enrichTermSystemMessage()
+
+	// Call LLM to generate SQL (uses tenantCtx so SavePending has its own connection)
+	result, err := llmClient.GenerateResponse(tenantCtx, prompt, systemMessage, 0.3, false)
+	if err != nil {
+		return enrichmentResult{termName: term.Term, err: fmt.Errorf("LLM generate: %w", err)}
+	}
+
+	// Parse enrichment response
+	enrichment, err := s.parseEnrichTermResponse(result.Content)
+	if err != nil {
+		return enrichmentResult{termName: term.Term, err: fmt.Errorf("parse response: %w", err)}
+	}
+
+	if enrichment.DefiningSQL == "" {
+		return enrichmentResult{termName: term.Term, err: fmt.Errorf("LLM returned empty SQL")}
+	}
+
+	// Validate SQL and capture output columns (uses tenantCtx for datasource lookup)
+	testResult, err := s.TestSQL(tenantCtx, projectID, enrichment.DefiningSQL)
+	if err != nil {
+		return enrichmentResult{termName: term.Term, err: fmt.Errorf("test SQL: %w", err)}
+	}
+
+	if !testResult.Valid {
+		return enrichmentResult{termName: term.Term, err: fmt.Errorf("SQL validation failed: %s", testResult.Error)}
+	}
+
+	// Update term with enrichment and output columns
+	term.DefiningSQL = enrichment.DefiningSQL
+	term.BaseTable = enrichment.BaseTable
+	term.OutputColumns = testResult.OutputColumns
+	// Merge aliases - keep existing ones and add new ones from enrichment
+	if len(enrichment.Aliases) > 0 {
+		aliasSet := make(map[string]bool)
+		for _, a := range term.Aliases {
+			aliasSet[a] = true
+		}
+		for _, a := range enrichment.Aliases {
+			if !aliasSet[a] {
+				term.Aliases = append(term.Aliases, a)
+			}
+		}
+	}
+
+	if err := s.glossaryRepo.Update(tenantCtx, term); err != nil {
+		return enrichmentResult{termName: term.Term, err: fmt.Errorf("update term: %w", err)}
+	}
+
+	return enrichmentResult{termName: term.Term, outputColumns: len(testResult.OutputColumns)}
+}
+
 func (s *glossaryService) enrichTermSystemMessage() string {
-	return `You are a SQL expert and business analyst. Your task is to generate SQL patterns for calculating business metrics based on database schema context.
+	return `You are a SQL expert and business analyst. Your task is to generate complete, executable SQL definitions for business metrics based on database schema context.
 
 For each business term, provide:
-1. A SQL pattern showing how to calculate this metric
-2. The base table(s) to query
-3. The columns involved in the calculation
-4. Any filters that should be applied
-5. The aggregation function used (if any)
+- A complete, executable SQL SELECT statement (defining_sql) that computes the metric
+- The primary table being queried (base_table)
+- Alternative names that business users might use (aliases)
+
+IMPORTANT: The defining_sql must be a complete SELECT statement that can be executed as-is. It should:
+- Start with SELECT and include column aliases that represent the metric
+- Include all necessary FROM, JOIN, WHERE, GROUP BY, ORDER BY clauses
+- Be a definition/calculation of the metric, not just a fragment
+- Be ready to execute without modification
+- Return meaningful column names that business users will understand
 
 Be specific and use exact table/column names from the provided schema.`
 }
@@ -730,13 +969,9 @@ func (s *glossaryService) buildEnrichTermPrompt(
 	sb.WriteString("Respond with a JSON object containing the enrichment:\n")
 	sb.WriteString("```json\n")
 	sb.WriteString(`{
-  "sql_pattern": "SUM(amount) WHERE status = 'completed'",
+  "defining_sql": "SELECT SUM(amount) AS total_revenue\nFROM transactions\nWHERE status = 'completed'",
   "base_table": "transactions",
-  "columns_used": ["amount", "status"],
-  "filters": [
-    {"column": "status", "operator": "=", "values": ["completed"]}
-  ],
-  "aggregation": "SUM"
+  "aliases": ["Total Revenue", "Gross Revenue"]
 }
 `)
 	sb.WriteString("```\n")
@@ -745,11 +980,9 @@ func (s *glossaryService) buildEnrichTermPrompt(
 }
 
 type termEnrichment struct {
-	SQLPattern  string            `json:"sql_pattern"`
-	BaseTable   string            `json:"base_table"`
-	ColumnsUsed []string          `json:"columns_used"`
-	Filters     []suggestedFilter `json:"filters"`
-	Aggregation string            `json:"aggregation"`
+	DefiningSQL string   `json:"defining_sql"`
+	BaseTable   string   `json:"base_table"`
+	Aliases     []string `json:"aliases"`
 }
 
 func (s *glossaryService) parseEnrichTermResponse(content string) (*termEnrichment, error) {

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -53,7 +54,7 @@ func NewAuthHandler(oauthService services.OAuthService, projectService services.
 // RegisterRoutes registers the auth handler's routes on the given mux.
 func (h *AuthHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/auth/complete-oauth", h.CompleteOAuth)
-	mux.HandleFunc("POST /api/auth/logout", h.Logout)
+	mux.HandleFunc("POST /api/projects/{pid}/auth/logout", h.Logout)
 }
 
 // CompleteOAuth handles POST /api/auth/complete-oauth
@@ -138,8 +139,8 @@ func (h *AuthHandler) CompleteOAuth(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Logout handles POST /api/auth/logout
-// Clears the ekaya_jwt cookie and returns a redirect URL to ekaya-central projects page.
+// Logout handles POST /api/projects/{pid}/auth/logout
+// Clears the ekaya_jwt cookie and returns a redirect URL to ekaya-central project page.
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	// Derive cookie settings from base URL (same settings used when setting the cookie)
 	cookieSettings := auth.DeriveCookieSettings(h.config.BaseURL, h.config.CookieDomain)
@@ -156,8 +157,9 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		Domain:   cookieSettings.Domain,
 	})
 
-	// Get redirect URL from project's stored projects_page_url
-	redirectURL := h.getProjectsPageURL(r)
+	// Get redirect URL from project's stored project_page_url using pid from path
+	pid := r.PathValue("pid")
+	redirectURL := h.getProjectPageURL(r.Context(), pid)
 
 	h.logger.Info("User logged out", zap.String("redirect_url", redirectURL))
 
@@ -170,23 +172,26 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// getProjectsPageURL retrieves the projects page URL from the project's stored parameters.
-// Falls back to AuthServerURL + "/projects" if not available.
-func (h *AuthHandler) getProjectsPageURL(r *http.Request) string {
-	// Try to get from project parameters
-	claims, ok := auth.GetClaims(r.Context())
-	if ok && claims.ProjectID != "" {
-		projectID, err := uuid.Parse(claims.ProjectID)
-		if err == nil {
-			project, err := h.projectService.GetByIDWithoutTenant(r.Context(), projectID)
-			if err == nil && project.Parameters != nil {
-				if url, ok := project.Parameters["projects_page_url"].(string); ok && url != "" {
-					return url
-				}
-			}
-		}
+// getProjectPageURL retrieves the project page URL from the project's stored parameters.
+// Falls back to "/" if project not found or URL not available.
+func (h *AuthHandler) getProjectPageURL(ctx context.Context, pid string) string {
+	if pid == "" {
+		return "/"
 	}
 
-	// Fallback to constructed URL
-	return h.config.AuthServerURL + "/projects"
+	projectID, err := uuid.Parse(pid)
+	if err != nil {
+		return "/"
+	}
+
+	project, err := h.projectService.GetByIDWithoutTenant(ctx, projectID)
+	if err != nil || project.Parameters == nil {
+		return "/"
+	}
+
+	if url, ok := project.Parameters["project_page_url"].(string); ok && url != "" {
+		return url
+	}
+
+	return "/"
 }

@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
+  BookOpen,
   Boxes,
   Brain,
   Check,
@@ -421,6 +422,13 @@ const ProjectDashboard = () => {
       path: `/projects/${pid}/relationships`,
       disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
       color: 'indigo',
+    },
+    {
+      title: 'Glossary',
+      icon: BookOpen,
+      path: `/projects/${pid}/glossary`,
+      disabled: !isConnected || !hasSelectedTables, // Disabled if no datasource or no tables (glossary is database-derived, not AI-derived)
+      color: 'cyan',
     },
   ];
 

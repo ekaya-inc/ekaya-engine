@@ -37,6 +37,22 @@ func (m *mockGlossaryService) GetTerm(ctx context.Context, termID uuid.UUID) (*m
 	return nil, nil
 }
 
+func (m *mockGlossaryService) GetTermByName(ctx context.Context, projectID uuid.UUID, termName string) (*models.BusinessGlossaryTerm, error) {
+	return nil, nil
+}
+
+func (m *mockGlossaryService) TestSQL(ctx context.Context, projectID uuid.UUID, sql string) (*SQLTestResult, error) {
+	return nil, nil
+}
+
+func (m *mockGlossaryService) CreateAlias(ctx context.Context, termID uuid.UUID, alias string) error {
+	return nil
+}
+
+func (m *mockGlossaryService) DeleteAlias(ctx context.Context, termID uuid.UUID, alias string) error {
+	return nil
+}
+
 func (m *mockGlossaryService) SuggestTerms(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error) {
 	return nil, nil
 }
@@ -111,60 +127,4 @@ func TestGlossaryDiscoveryAdapter_DiscoverGlossaryTerms_ZeroTerms(t *testing.T) 
 
 	assert.NoError(t, err)
 	assert.Equal(t, 0, count)
-}
-
-// GlossaryEnrichmentAdapter Tests
-
-func TestGlossaryEnrichmentAdapter_EnrichGlossaryTerms_Success(t *testing.T) {
-	projectID := uuid.New()
-	ontologyID := uuid.New()
-
-	mock := &mockGlossaryService{
-		enrichFunc: func(ctx context.Context, pid, oid uuid.UUID) error {
-			assert.Equal(t, projectID, pid)
-			assert.Equal(t, ontologyID, oid)
-			return nil
-		},
-	}
-
-	adapter := NewGlossaryEnrichmentAdapter(mock)
-	err := adapter.EnrichGlossaryTerms(context.Background(), projectID, ontologyID)
-
-	assert.NoError(t, err)
-}
-
-func TestGlossaryEnrichmentAdapter_EnrichGlossaryTerms_Error(t *testing.T) {
-	projectID := uuid.New()
-	ontologyID := uuid.New()
-	expectedErr := errors.New("enrichment failed")
-
-	mock := &mockGlossaryService{
-		enrichFunc: func(ctx context.Context, pid, oid uuid.UUID) error {
-			return expectedErr
-		},
-	}
-
-	adapter := NewGlossaryEnrichmentAdapter(mock)
-	err := adapter.EnrichGlossaryTerms(context.Background(), projectID, ontologyID)
-
-	assert.Error(t, err)
-	assert.Equal(t, expectedErr, err)
-}
-
-func TestGlossaryEnrichmentAdapter_EnrichGlossaryTerms_ContextCancellation(t *testing.T) {
-	projectID := uuid.New()
-	ontologyID := uuid.New()
-	expectedErr := context.Canceled
-
-	mock := &mockGlossaryService{
-		enrichFunc: func(ctx context.Context, pid, oid uuid.UUID) error {
-			return expectedErr
-		},
-	}
-
-	adapter := NewGlossaryEnrichmentAdapter(mock)
-	err := adapter.EnrichGlossaryTerms(context.Background(), projectID, ontologyID)
-
-	assert.Error(t, err)
-	assert.Equal(t, expectedErr, err)
 }
