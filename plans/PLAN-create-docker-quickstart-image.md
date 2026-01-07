@@ -137,103 +137,39 @@ deploy/
 
 **File location:** `deploy/quickstart/entrypoint.sh`
 
-### Step 4: Create Dockerfile
+### Step 4: Create Dockerfile [x]
 
-Multi-stage build that:
-1. Builds the Go binary (reuse existing builder stages)
-2. Builds the UI
-3. Creates runtime image with Postgres + Redis
+**Status:** Complete
 
-```dockerfile
-# ============================================
-# Quickstart Image - All-in-one for demo/trial
-# ============================================
-# Usage:
-#   docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data ghcr.io/ekaya-inc/engine-quickstart:latest
-#
-# For LLM features (ontology extraction):
-#   docker run -p 3443:3443 -e ANTHROPIC_API_KEY=sk-... -v ekaya-data:/var/lib/postgresql/data ghcr.io/ekaya-inc/engine-quickstart:latest
+**What was done:**
+- Created `deploy/quickstart/Dockerfile` with multi-stage build
+- Three build stages: UI (node:22-alpine), Go (golang:1.25-alpine), Runtime (debian:bookworm-slim)
+- Runtime stage installs PostgreSQL 17 and Redis 7 from official repositories
+- Copies built binary, UI dist, migrations, config.yaml, and entrypoint.sh into image
+- Sets all required environment variables for quickstart mode
+- Exposes port 3443 with health check endpoint
+- Uses `/entrypoint.sh` to manage all processes
 
-# UI Build stage
-FROM node:22-alpine AS ui-builder
-WORKDIR /app/ui
-COPY ui/package*.json ./
-RUN npm ci
-COPY ui/ ./
-RUN npm run build
+**Key implementation decisions:**
+- Base image: `debian:bookworm-slim` (required for official Postgres 17 packages)
+- Postgres installation: Official PostgreSQL APT repository with GPG key verification
+- Redis: Standard `redis-server` package from Debian repos
+- Volume mount: `/var/lib/postgresql/data` for data persistence
+- Healthcheck: Polls `/health` endpoint every 10s after 30s startup period
+- Build args: `VERSION` and `BUILD_TAGS` (default: `all_adapters`)
 
-# Go Build stage
-FROM golang:1.25-alpine AS go-builder
-RUN apk add --no-cache git
-WORKDIR /app
-COPY go.mod go.sum* ./
-RUN go mod download
-COPY . .
-COPY --from=ui-builder /app/ui/dist ./ui/dist
+**Dependencies:**
+- Requires `deploy/quickstart/config.quickstart.yaml` (created in step 2)
+- Requires `deploy/quickstart/entrypoint.sh` (created in step 3)
+- Requires `migrations/` directory in repo root (already exists)
 
-ARG VERSION=dev
-ARG BUILD_TAGS=all_adapters
+**File location:** `deploy/quickstart/Dockerfile`
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -tags="${BUILD_TAGS}" \
-    -ldflags="-w -s -X main.Version=${VERSION}" \
-    -o ekaya-engine \
-    main.go
-
-# Runtime stage with Postgres + Redis
-FROM debian:bookworm-slim
-
-# Install Postgres 17 and Redis
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gnupg2 \
-    lsb-release \
-    curl \
-    ca-certificates \
-    redis-server \
-    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-17 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create app directory
-WORKDIR /app
-
-# Copy binary and UI from builders
-COPY --from=go-builder /app/ekaya-engine /usr/local/bin/ekaya-engine
-COPY --from=ui-builder /app/ui/dist /app/ui/dist
-
-# Copy migrations (engine runs these on startup)
-COPY migrations/ /app/migrations/
-
-# Copy quickstart config and scripts
-COPY deploy/quickstart/config.quickstart.yaml /app/config.yaml
-COPY deploy/quickstart/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-# Environment variables
-ENV PORT=3443 \
-    BIND_ADDR=0.0.0.0 \
-    PGHOST=localhost \
-    PGPORT=5432 \
-    PGUSER=ekaya \
-    PGPASSWORD=quickstart \
-    PGDATABASE=ekaya_engine \
-    PGSSLMODE=disable \
-    REDIS_HOST=localhost \
-    REDIS_PORT=6379 \
-    PROJECT_CREDENTIALS_KEY=quickstart-demo-key-not-for-production
-
-# Create postgres data directory mount point
-VOLUME ["/var/lib/postgresql/data"]
-
-EXPOSE 3443
-
-HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=5 \
-    CMD curl -f http://localhost:3443/health || exit 1
-
-ENTRYPOINT ["/entrypoint.sh"]
-```
+**Notes for next session:**
+- The Dockerfile is ready to build but has NOT been tested yet
+- Next step should add a Makefile target for convenience
+- The image will be ~600-800MB due to Postgres + Redis
+- First container startup will be ~10-15 seconds (Postgres init + migrations)
 
 ### Step 5: Create README.md
 
