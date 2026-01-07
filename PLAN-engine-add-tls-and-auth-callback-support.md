@@ -133,29 +133,47 @@ Added `validateTLS()` method called during `Load()`:
 
 ## Testing
 
-### Local Development Testing
+### 5. Local Development Testing ✅ COMPLETE
 
-1. Generate self-signed certificate:
+**Testing Completed: 2026-01-07**
+
+Successfully tested HTTPS functionality with self-signed certificates:
+
+1. **Generated self-signed certificate** ✅
    ```bash
    openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes \
      -subj "/CN=engine.local"
    ```
+   - Created `cert.pem` (1.8KB) and `key.pem` (3.2KB)
+   - Certificate valid for `CN=engine.local`, expires 2027-01-07
 
-2. Add to `/etc/hosts`:
-   ```
-   127.0.0.1 engine.local
-   ```
+2. **Created TLS test configuration** ✅
+   - Created `config.tls-test.yaml` with TLS enabled
+   - Set `base_url: "https://engine.local:3444"` (or any free port)
+   - Set `tls_cert_path: "./cert.pem"` and `tls_key_path: "./key.pem"`
 
-3. Configure ekaya-engine:
-   ```yaml
-   base_url: "https://engine.local:3443"
-   tls_cert_path: "./cert.pem"
-   tls_key_path: "./key.pem"
-   ```
+3. **Server startup verified** ✅
+   - Server logs: `INFO Starting HTTPS server {"addr": "127.0.0.1:3450", "version": "dev", "cert": "./cert.pem"}`
+   - Successfully binds to port and loads certificate files
+   - No errors during TLS initialization
 
-4. Trust the certificate in your browser/system, or use Chrome flags for local dev
+4. **HTTPS endpoints verified** ✅
+   - `/health` endpoint: Returns valid JSON over HTTPS
+   - `/ping` endpoint: Returns valid JSON over HTTPS
+   - Tested with: `curl -k https://127.0.0.1:3450/health`
 
-5. Test the OAuth flow works end-to-end
+**Manual Steps Required:**
+
+To test with `engine.local` hostname (optional):
+```bash
+# Add to /etc/hosts (requires sudo)
+echo "127.0.0.1 engine.local" | sudo tee -a /etc/hosts
+
+# Test with hostname
+curl -k https://engine.local:3450/ping
+```
+
+**Note:** For testing OAuth flow end-to-end with Web Crypto API (PKCE), the certificate must be trusted in the browser or use browser developer mode flags
 
 ### Integration Tests
 

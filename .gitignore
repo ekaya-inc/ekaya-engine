@@ -51,6 +51,10 @@ debug
 config.yaml
 !config.dev.yaml
 !config.prod.yaml
+config.tls-test.yaml
+
+# TLS certificates (for local testing only)
+*.pem
 
 # Local ML models (downloaded for embedding)
 /models/
