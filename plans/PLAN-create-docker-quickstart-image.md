@@ -171,57 +171,25 @@ deploy/
 - The image will be ~600-800MB due to Postgres + Redis
 - First container startup will be ~10-15 seconds (Postgres init + migrations)
 
-### Step 5: Create README.md
+### Step 5: Create README.md [x]
 
-```markdown
-# Ekaya Engine Quickstart Image
+**Status:** Complete
 
-All-in-one Docker image for trying Ekaya Engine locally.
+**What was done:**
+- Created `deploy/quickstart/README.md` with quick start instructions
+- Included example commands for running with and without Anthropic API key
+- Documented data persistence using Docker volumes
+- Listed what's included (PostgreSQL 17, Redis 7, Ekaya Engine with UI)
+- Added clear production warning about static encryption key and disabled auth
 
-## Quick Start
+**Key sections:**
+- Quick Start: Basic `docker run` command with volume mount
+- With LLM Features: Same command with `ANTHROPIC_API_KEY` environment variable
+- Data Persistence: Volume mount explanation and reset instructions
+- What's Included: Component list
+- Not for Production: Clear warnings about evaluation-only limitations
 
-```bash
-docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data ghcr.io/ekaya-inc/engine-quickstart:latest
-```
-
-Open http://localhost:3443
-
-## With LLM Features
-
-For ontology extraction and AI features, provide your Anthropic API key:
-
-```bash
-docker run -p 3443:3443 \
-  -e ANTHROPIC_API_KEY=sk-ant-... \
-  -v ekaya-data:/var/lib/postgresql/data \
-  ghcr.io/ekaya-inc/engine-quickstart:latest
-```
-
-## Data Persistence
-
-The `-v ekaya-data:/var/lib/postgresql/data` mount persists your data between container restarts.
-
-To start fresh, remove the volume:
-
-```bash
-docker volume rm ekaya-data
-```
-
-## What's Included
-
-- PostgreSQL 17
-- Redis 7
-- Ekaya Engine with UI
-
-## Not for Production
-
-This image is for evaluation only:
-- Uses static encryption key
-- Auth verification disabled
-- Single-container architecture
-
-For production, see the main deployment documentation.
-```
+**File location:** `deploy/quickstart/README.md`
 
 ### Step 6: Add Makefile target
 
