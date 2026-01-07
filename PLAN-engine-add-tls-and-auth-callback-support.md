@@ -80,18 +80,29 @@ Modified server startup to conditionally enable TLS:
 - Unit tests: ✅ All existing tests pass
 - Manual HTTPS testing: Pending (requires actual cert/key files - see Testing section below)
 
-### 3. Update Config Templates
+### 3. Update Config Templates ✅ COMPLETE
 
-**Files:** `config/config.*.yaml.template`
+**Files Modified:**
+- `config/config.dev.yaml`
+- `config/config.local.yaml`
+- `config/config.prod.yaml`
 
-Add TLS section to templates:
-```yaml
-# TLS Configuration (optional)
-# For local development, leave empty to use HTTP
-# For production, provide paths to cert and key files
-# tls_cert_path: "/path/to/cert.pem"
-# tls_key_path: "/path/to/key.pem"
-```
+**Implementation Details:**
+
+Added TLS configuration section to all three config files with:
+- Clear comments explaining when to use TLS (leave empty for local dev, provide paths for production)
+- Reference to Web Crypto API requirement (secure contexts needed for OAuth PKCE)
+- Commented-out example paths: `tls_cert_path` and `tls_key_path`
+- Consistent formatting across all three files
+- Section placed after `cookie_domain` and before `auth:` section for logical grouping
+
+**Note:** The actual files are `config.*.yaml` (not `.yaml.template`). These files serve as templates that users copy to `config.yaml` via the `make setup-auth-*` commands.
+
+**What Future Sessions Need to Know:**
+- The TLS config is optional by design - empty values default to HTTP mode
+- Comments emphasize that localhost works with HTTP (Web Crypto API allows it)
+- Production deployments with custom domains will need to uncomment and set these values
+- The validation from Task 1 ensures both cert and key are provided together or both empty
 
 ### 4. Validate TLS Config
 
