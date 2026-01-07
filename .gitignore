@@ -67,6 +67,7 @@ config.tls-test.yaml
 /*.dump.gz
 /*.sql
 ekaya-region
+ekaya-engine
 
 SPARK-CONFIGURATION.md
 
