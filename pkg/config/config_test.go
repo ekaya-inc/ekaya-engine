@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -346,5 +348,358 @@ datasource:
 	}
 	if cfg.Datasource.PoolMinConns != 3 {
 		t.Errorf("expected PoolMinConns=3 (from env), got %d", cfg.Datasource.PoolMinConns)
+	}
+}
+
+// TLS Configuration Tests
+
+func TestLoad_NoTLS(t *testing.T) {
+	// Create a temp directory with config.yaml that has no TLS settings
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	yamlContent := `
+port: "3443"
+env: "test"
+database:
+  host: "localhost"
+redis:
+  host: "localhost"
+`
+	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+	t.Cleanup(func() {
+		os.Chdir(originalDir)
+	})
+
+	// Clear TLS env vars
+	os.Unsetenv("TLS_CERT_PATH")
+	os.Unsetenv("TLS_KEY_PATH")
+
+	cfg, err := Load("test-version")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	// Verify TLS fields are empty
+	if cfg.TLSCertPath != "" {
+		t.Errorf("expected empty TLSCertPath, got %s", cfg.TLSCertPath)
+	}
+	if cfg.TLSKeyPath != "" {
+		t.Errorf("expected empty TLSKeyPath, got %s", cfg.TLSKeyPath)
+	}
+}
+
+func TestValidateTLS_BothProvided(t *testing.T) {
+	// Create a temp directory with valid cert and key files
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	certPath := filepath.Join(tmpDir, "test-cert.pem")
+	keyPath := filepath.Join(tmpDir, "test-key.pem")
+
+	// Create dummy cert and key files
+	if err := os.WriteFile(certPath, []byte("fake-cert-content"), 0644); err != nil {
+		t.Fatalf("failed to write test cert: %v", err)
+	}
+	if err := os.WriteFile(keyPath, []byte("fake-key-content"), 0644); err != nil {
+		t.Fatalf("failed to write test key: %v", err)
+	}
+
+	yamlContent := fmt.Sprintf(`
+port: "3443"
+env: "test"
+tls_cert_path: "%s"
+tls_key_path: "%s"
+database:
+  host: "localhost"
+redis:
+  host: "localhost"
+`, certPath, keyPath)
+	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+	t.Cleanup(func() {
+		os.Chdir(originalDir)
+	})
+
+	cfg, err := Load("test-version")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	// Verify TLS paths are set correctly
+	if cfg.TLSCertPath != certPath {
+		t.Errorf("expected TLSCertPath=%s, got %s", certPath, cfg.TLSCertPath)
+	}
+	if cfg.TLSKeyPath != keyPath {
+		t.Errorf("expected TLSKeyPath=%s, got %s", keyPath, cfg.TLSKeyPath)
+	}
+}
+
+func TestValidateTLS_OnlyCertProvided(t *testing.T) {
+	// Create a temp directory with only cert file
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	certPath := filepath.Join(tmpDir, "test-cert.pem")
+
+	// Create dummy cert file
+	if err := os.WriteFile(certPath, []byte("fake-cert-content"), 0644); err != nil {
+		t.Fatalf("failed to write test cert: %v", err)
+	}
+
+	yamlContent := fmt.Sprintf(`
+port: "3443"
+env: "test"
+tls_cert_path: "%s"
+database:
+  host: "localhost"
+redis:
+  host: "localhost"
+`, certPath)
+	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+	t.Cleanup(func() {
+		os.Chdir(originalDir)
+	})
+
+	_, err = Load("test-version")
+	if err == nil {
+		t.Fatal("expected error when only cert provided, got nil")
+	}
+
+	// Verify error message mentions both must be provided
+	if !strings.Contains(err.Error(), "both") {
+		t.Errorf("expected error to mention 'both', got: %v", err)
+	}
+}
+
+func TestValidateTLS_OnlyKeyProvided(t *testing.T) {
+	// Create a temp directory with only key file
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	keyPath := filepath.Join(tmpDir, "test-key.pem")
+
+	// Create dummy key file
+	if err := os.WriteFile(keyPath, []byte("fake-key-content"), 0644); err != nil {
+		t.Fatalf("failed to write test key: %v", err)
+	}
+
+	yamlContent := fmt.Sprintf(`
+port: "3443"
+env: "test"
+tls_key_path: "%s"
+database:
+  host: "localhost"
+redis:
+  host: "localhost"
+`, keyPath)
+	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+	t.Cleanup(func() {
+		os.Chdir(originalDir)
+	})
+
+	_, err = Load("test-version")
+	if err == nil {
+		t.Fatal("expected error when only key provided, got nil")
+	}
+
+	// Verify error message mentions both must be provided
+	if !strings.Contains(err.Error(), "both") {
+		t.Errorf("expected error to mention 'both', got: %v", err)
+	}
+}
+
+func TestValidateTLS_CertFileNotFound(t *testing.T) {
+	// Create a temp directory with config that references non-existent cert
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	certPath := filepath.Join(tmpDir, "nonexistent-cert.pem")
+	keyPath := filepath.Join(tmpDir, "test-key.pem")
+
+	// Create only the key file (cert file intentionally missing)
+	if err := os.WriteFile(keyPath, []byte("fake-key-content"), 0644); err != nil {
+		t.Fatalf("failed to write test key: %v", err)
+	}
+
+	yamlContent := fmt.Sprintf(`
+port: "3443"
+env: "test"
+tls_cert_path: "%s"
+tls_key_path: "%s"
+database:
+  host: "localhost"
+redis:
+  host: "localhost"
+`, certPath, keyPath)
+	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+	t.Cleanup(func() {
+		os.Chdir(originalDir)
+	})
+
+	_, err = Load("test-version")
+	if err == nil {
+		t.Fatal("expected error when cert file not found, got nil")
+	}
+
+	// Verify error message mentions cert file
+	if !strings.Contains(err.Error(), "cert") {
+		t.Errorf("expected error to mention 'cert', got: %v", err)
+	}
+}
+
+func TestValidateTLS_KeyFileNotFound(t *testing.T) {
+	// Create a temp directory with config that references non-existent key
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	certPath := filepath.Join(tmpDir, "test-cert.pem")
+	keyPath := filepath.Join(tmpDir, "nonexistent-key.pem")
+
+	// Create only the cert file (key file intentionally missing)
+	if err := os.WriteFile(certPath, []byte("fake-cert-content"), 0644); err != nil {
+		t.Fatalf("failed to write test cert: %v", err)
+	}
+
+	yamlContent := fmt.Sprintf(`
+port: "3443"
+env: "test"
+tls_cert_path: "%s"
+tls_key_path: "%s"
+database:
+  host: "localhost"
+redis:
+  host: "localhost"
+`, certPath, keyPath)
+	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+	t.Cleanup(func() {
+		os.Chdir(originalDir)
+	})
+
+	_, err = Load("test-version")
+	if err == nil {
+		t.Fatal("expected error when key file not found, got nil")
+	}
+
+	// Verify error message mentions key file
+	if !strings.Contains(err.Error(), "key") {
+		t.Errorf("expected error to mention 'key', got: %v", err)
+	}
+}
+
+// Note: We don't test unreadable files (e.g., files with 0000 permissions) because:
+// 1. os.Stat() succeeds even on unreadable files (it only checks metadata)
+// 2. Actual readability errors will be caught by tls.LoadX509KeyPair() at server startup
+// 3. Testing true read permissions would require OS-specific setups that are fragile
+// The file existence checks (tested above) are sufficient for config validation.
+
+func TestValidateTLS_TLSFromEnv(t *testing.T) {
+	// Test that TLS config can come from environment variables
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	certPath := filepath.Join(tmpDir, "test-cert.pem")
+	keyPath := filepath.Join(tmpDir, "test-key.pem")
+
+	// Create cert and key files
+	if err := os.WriteFile(certPath, []byte("fake-cert-content"), 0644); err != nil {
+		t.Fatalf("failed to write test cert: %v", err)
+	}
+	if err := os.WriteFile(keyPath, []byte("fake-key-content"), 0644); err != nil {
+		t.Fatalf("failed to write test key: %v", err)
+	}
+
+	// Create minimal config without TLS in YAML
+	yamlContent := `
+port: "3443"
+env: "test"
+database:
+  host: "localhost"
+redis:
+  host: "localhost"
+`
+	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+	t.Cleanup(func() {
+		os.Chdir(originalDir)
+	})
+
+	// Set TLS paths via environment variables
+	t.Setenv("TLS_CERT_PATH", certPath)
+	t.Setenv("TLS_KEY_PATH", keyPath)
+
+	cfg, err := Load("test-version")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	// Verify TLS paths from env
+	if cfg.TLSCertPath != certPath {
+		t.Errorf("expected TLSCertPath=%s (from env), got %s", certPath, cfg.TLSCertPath)
+	}
+	if cfg.TLSKeyPath != keyPath {
+		t.Errorf("expected TLSKeyPath=%s (from env), got %s", keyPath, cfg.TLSKeyPath)
 	}
 }

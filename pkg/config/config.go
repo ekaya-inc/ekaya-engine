@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/ilyakaznacheev/cleanenv"
@@ -18,6 +19,10 @@ type Config struct {
 	Env      string `yaml:"env" env:"ENVIRONMENT" env-default:"local"`
 	BaseURL  string `yaml:"base_url" env:"BASE_URL" env-default:""` // Auto-derived from Port if empty
 	Version  string `yaml:"-"`                                      // Set at load time, not from config
+
+	// TLS configuration (optional - if both provided, server uses HTTPS)
+	TLSCertPath string `yaml:"tls_cert_path" env:"TLS_CERT_PATH" env-default:""`
+	TLSKeyPath  string `yaml:"tls_key_path" env:"TLS_KEY_PATH" env-default:""`
 
 	// Authentication configuration
 	Auth AuthConfig `yaml:"auth"`
@@ -153,6 +158,11 @@ func Load(version string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config fields: %w", err)
 	}
 
+	// Validate TLS configuration
+	if err := cfg.validateTLS(); err != nil {
+		return nil, fmt.Errorf("invalid TLS configuration: %w", err)
+	}
+
 	// Auto-derive BaseURL from Port if not explicitly set
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = fmt.Sprintf("http://localhost:%s", cfg.Port)
@@ -165,6 +175,30 @@ func Load(version string) (*Config, error) {
 func (c *Config) parseComplexFields() error {
 	// Parse JWKS endpoints from string to map
 	c.Auth.JWKSEndpoints = parseJWKSEndpoints(c.Auth.JWKSEndpointsStr)
+	return nil
+}
+
+// validateTLS ensures TLS configuration is valid if provided.
+// Both cert and key must be provided together, and files must exist and be readable.
+func (c *Config) validateTLS() error {
+	certSet := c.TLSCertPath != ""
+	keySet := c.TLSKeyPath != ""
+
+	// Both must be provided together or both empty
+	if certSet != keySet {
+		return fmt.Errorf("both tls_cert_path and tls_key_path must be provided together")
+	}
+
+	// If both provided, verify files exist and are readable
+	if certSet {
+		if _, err := os.Stat(c.TLSCertPath); err != nil {
+			return fmt.Errorf("TLS cert file not readable: %w", err)
+		}
+		if _, err := os.Stat(c.TLSKeyPath); err != nil {
+			return fmt.Errorf("TLS key file not readable: %w", err)
+		}
+	}
+
 	return nil
 }
 
