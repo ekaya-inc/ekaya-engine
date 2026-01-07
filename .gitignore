@@ -49,22 +49,12 @@ debug
 
 # Local configuration overrides
 config.yaml
-!config.dev.yaml
-!config.prod.yaml
-
-# Local ML models (downloaded for embedding)
-/models/
-
-# Local ONNX Runtime binaries
-.local/
 
 # Database dumps and temporary SQL scripts (root level only)
 /*.dump
 /*.dump.gz
 /*.sql
-ekaya-region
-
-SPARK-CONFIGURATION.md
+ekaya-engine
 
 # MCP configuration (contains project-specific URLs)
 .mcp.json
@@ -72,4 +62,9 @@ SPARK-CONFIGURATION.md
 
 # Developer
 .dvx/
+
+# Certificates (keep README and .gitkeep)
+certs/*
+!certs/README.md
+!certs/.gitkeep
 

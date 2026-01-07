@@ -1,33 +1,30 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestLoad_EnvOverridesYAML(t *testing.T) {
-	// Create a temp directory with a config.yaml
-	tmpDir := t.TempDir()
+// setupConfigTest creates config.yaml in a temp directory and changes to it.
+// If dir is empty, creates a new temp directory. Returns the directory path.
+// Cleanup is registered automatically.
+func setupConfigTest(t *testing.T, yamlContent string, dir ...string) string {
+	t.Helper()
+	var tmpDir string
+	if len(dir) > 0 && dir[0] != "" {
+		tmpDir = dir[0]
+	} else {
+		tmpDir = t.TempDir()
+	}
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	yamlContent := `
-port: "3443"
-env: "test"
-database:
-  host: "db.example.com"
-  port: 5432
-  user: "testuser"
-  database: "testdb"
-redis:
-  host: "redis.example.com"
-  port: 6379
-`
 	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
 		t.Fatalf("failed to write test config: %v", err)
 	}
 
-	// Change to temp directory so Load() finds config.yaml
 	originalDir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("failed to get working directory: %v", err)
@@ -38,6 +35,52 @@ redis:
 	t.Cleanup(func() {
 		os.Chdir(originalDir)
 	})
+
+	return tmpDir
+}
+
+// tlsTestFiles holds paths to TLS test files created by setupTLSFiles.
+type tlsTestFiles struct {
+	CertPath string
+	KeyPath  string
+}
+
+// setupTLSFiles creates dummy cert and/or key files in the given directory.
+// Pass empty string to skip creating that file.
+func setupTLSFiles(t *testing.T, dir string, createCert, createKey bool) tlsTestFiles {
+	t.Helper()
+	files := tlsTestFiles{
+		CertPath: filepath.Join(dir, "test-cert.pem"),
+		KeyPath:  filepath.Join(dir, "test-key.pem"),
+	}
+
+	if createCert {
+		if err := os.WriteFile(files.CertPath, []byte("fake-cert-content"), 0644); err != nil {
+			t.Fatalf("failed to write test cert: %v", err)
+		}
+	}
+	if createKey {
+		if err := os.WriteFile(files.KeyPath, []byte("fake-key-content"), 0644); err != nil {
+			t.Fatalf("failed to write test key: %v", err)
+		}
+	}
+
+	return files
+}
+
+func TestLoad_EnvOverridesYAML(t *testing.T) {
+	setupConfigTest(t, `
+port: "3443"
+env: "test"
+database:
+  host: "db.example.com"
+  port: 5432
+  user: "testuser"
+  database: "testdb"
+redis:
+  host: "redis.example.com"
+  port: 6379
+`)
 
 	// Clear env vars that might interfere with test
 	os.Unsetenv("PGHOST")
@@ -77,34 +120,16 @@ redis:
 }
 
 func TestLoad_BaseURLAutoDerive(t *testing.T) {
-	// Create a temp directory with a minimal config.yaml
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.yaml")
-
-	yamlContent := `
+	setupConfigTest(t, `
 port: "5678"
 env: "test"
 database:
   host: "localhost"
 redis:
   host: "localhost"
-`
-	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
-		t.Fatalf("failed to write test config: %v", err)
-	}
+`)
 
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
-	t.Cleanup(func() {
-		os.Chdir(originalDir)
-	})
-
-	// Clear BASE_URL to test auto-derivation
+	// Clear env vars to test auto-derivation from YAML
 	os.Unsetenv("BASE_URL")
 	os.Unsetenv("PORT")
 
@@ -120,11 +145,7 @@ redis:
 }
 
 func TestLoad_BaseURLExplicit(t *testing.T) {
-	// Create a temp directory with a config that sets base_url explicitly
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.yaml")
-
-	yamlContent := `
+	setupConfigTest(t, `
 port: "3443"
 env: "test"
 base_url: "http://my-server.internal:8080"
@@ -132,21 +153,7 @@ database:
   host: "localhost"
 redis:
   host: "localhost"
-`
-	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
-		t.Fatalf("failed to write test config: %v", err)
-	}
-
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
-	t.Cleanup(func() {
-		os.Chdir(originalDir)
-	})
+`)
 
 	// Clear env vars
 	os.Unsetenv("BASE_URL")
@@ -163,53 +170,58 @@ redis:
 	}
 }
 
+func TestLoad_BaseURLAutoDeriveTLS(t *testing.T) {
+	// Create TLS files first (need paths for config)
+	tmpDir := t.TempDir()
+	tls := setupTLSFiles(t, tmpDir, true, true)
+
+	setupConfigTest(t, fmt.Sprintf(`
+port: "8443"
+env: "test"
+tls_cert_path: "%s"
+tls_key_path: "%s"
+database:
+  host: "localhost"
+redis:
+  host: "localhost"
+`, tls.CertPath, tls.KeyPath), tmpDir)
+
+	// Clear env vars to test auto-derivation from YAML
+	os.Unsetenv("BASE_URL")
+	os.Unsetenv("PORT")
+
+	cfg, err := Load("test-version")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	// Verify BaseURL uses HTTPS when TLS is configured
+	if cfg.BaseURL != "https://localhost:8443" {
+		t.Errorf("expected BaseURL=https://localhost:8443 (auto-derived with TLS), got %s", cfg.BaseURL)
+	}
+}
+
 func TestLoad_MissingConfigFile(t *testing.T) {
 	tmpDir := t.TempDir()
+	originalDir, _ := os.Getwd()
+	_ = os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(originalDir) })
 
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
-	t.Cleanup(func() {
-		os.Chdir(originalDir)
-	})
-
-	_, err = Load("test-version")
+	_, err := Load("test-version")
 	if err == nil {
 		t.Error("expected error when config.yaml is missing")
 	}
 }
 
 func TestLoad_DatasourceConfigDefaults(t *testing.T) {
-	// Create a temp directory with minimal config.yaml
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.yaml")
-
-	yamlContent := `
+	setupConfigTest(t, `
 port: "3443"
 env: "test"
 database:
   host: "localhost"
 redis:
   host: "localhost"
-`
-	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
-		t.Fatalf("failed to write test config: %v", err)
-	}
-
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
-	t.Cleanup(func() {
-		os.Chdir(originalDir)
-	})
+`)
 
 	// Clear any env vars that might interfere
 	os.Unsetenv("DATASOURCE_CONNECTION_TTL_MINUTES")
@@ -238,11 +250,7 @@ redis:
 }
 
 func TestLoad_DatasourceConfigFromYAML(t *testing.T) {
-	// Create a temp directory with datasource config in YAML
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.yaml")
-
-	yamlContent := `
+	setupConfigTest(t, `
 port: "3443"
 env: "test"
 database:
@@ -254,21 +262,7 @@ datasource:
   max_connections_per_user: 20
   pool_max_conns: 15
   pool_min_conns: 2
-`
-	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
-		t.Fatalf("failed to write test config: %v", err)
-	}
-
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
-	t.Cleanup(func() {
-		os.Chdir(originalDir)
-	})
+`)
 
 	cfg, err := Load("test-version")
 	if err != nil {
@@ -291,11 +285,7 @@ datasource:
 }
 
 func TestLoad_DatasourceConfigFromEnv(t *testing.T) {
-	// Create a temp directory with minimal config.yaml
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.yaml")
-
-	yamlContent := `
+	setupConfigTest(t, `
 port: "3443"
 env: "test"
 database:
@@ -307,21 +297,7 @@ datasource:
   max_connections_per_user: 10
   pool_max_conns: 10
   pool_min_conns: 1
-`
-	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
-		t.Fatalf("failed to write test config: %v", err)
-	}
-
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
-	t.Cleanup(func() {
-		os.Chdir(originalDir)
-	})
+`)
 
 	// Set env vars to override YAML values
 	t.Setenv("DATASOURCE_CONNECTION_TTL_MINUTES", "15")
@@ -346,5 +322,205 @@ datasource:
 	}
 	if cfg.Datasource.PoolMinConns != 3 {
 		t.Errorf("expected PoolMinConns=3 (from env), got %d", cfg.Datasource.PoolMinConns)
+	}
+}
+
+// TLS Configuration Tests
+
+func TestLoad_NoTLS(t *testing.T) {
+	setupConfigTest(t, `
+port: "3443"
+env: "test"
+database:
+  host: "localhost"
+redis:
+  host: "localhost"
+`)
+
+	// Clear TLS env vars
+	os.Unsetenv("TLS_CERT_PATH")
+	os.Unsetenv("TLS_KEY_PATH")
+
+	cfg, err := Load("test-version")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	// Verify TLS fields are empty
+	if cfg.TLSCertPath != "" {
+		t.Errorf("expected empty TLSCertPath, got %s", cfg.TLSCertPath)
+	}
+	if cfg.TLSKeyPath != "" {
+		t.Errorf("expected empty TLSKeyPath, got %s", cfg.TLSKeyPath)
+	}
+}
+
+func TestValidateTLS_BothProvided(t *testing.T) {
+	tmpDir := t.TempDir()
+	tls := setupTLSFiles(t, tmpDir, true, true)
+
+	setupConfigTest(t, fmt.Sprintf(`
+port: "3443"
+env: "test"
+tls_cert_path: "%s"
+tls_key_path: "%s"
+database:
+  host: "localhost"
+redis:
+  host: "localhost"
+`, tls.CertPath, tls.KeyPath), tmpDir)
+
+	cfg, err := Load("test-version")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	// Verify TLS paths are set correctly
+	if cfg.TLSCertPath != tls.CertPath {
+		t.Errorf("expected TLSCertPath=%s, got %s", tls.CertPath, cfg.TLSCertPath)
+	}
+	if cfg.TLSKeyPath != tls.KeyPath {
+		t.Errorf("expected TLSKeyPath=%s, got %s", tls.KeyPath, cfg.TLSKeyPath)
+	}
+}
+
+func TestValidateTLS_OnlyCertProvided(t *testing.T) {
+	tmpDir := t.TempDir()
+	tls := setupTLSFiles(t, tmpDir, true, false) // cert only
+
+	setupConfigTest(t, fmt.Sprintf(`
+port: "3443"
+env: "test"
+tls_cert_path: "%s"
+database:
+  host: "localhost"
+redis:
+  host: "localhost"
+`, tls.CertPath), tmpDir)
+
+	_, err := Load("test-version")
+	if err == nil {
+		t.Fatal("expected error when only cert provided, got nil")
+	}
+
+	// Verify error message mentions both must be provided
+	if !strings.Contains(err.Error(), "both") {
+		t.Errorf("expected error to mention 'both', got: %v", err)
+	}
+}
+
+func TestValidateTLS_OnlyKeyProvided(t *testing.T) {
+	tmpDir := t.TempDir()
+	tls := setupTLSFiles(t, tmpDir, false, true) // key only
+
+	setupConfigTest(t, fmt.Sprintf(`
+port: "3443"
+env: "test"
+tls_key_path: "%s"
+database:
+  host: "localhost"
+redis:
+  host: "localhost"
+`, tls.KeyPath), tmpDir)
+
+	_, err := Load("test-version")
+	if err == nil {
+		t.Fatal("expected error when only key provided, got nil")
+	}
+
+	// Verify error message mentions both must be provided
+	if !strings.Contains(err.Error(), "both") {
+		t.Errorf("expected error to mention 'both', got: %v", err)
+	}
+}
+
+func TestValidateTLS_CertFileNotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	tls := setupTLSFiles(t, tmpDir, false, true) // key only, cert missing
+	nonexistentCert := filepath.Join(tmpDir, "nonexistent-cert.pem")
+
+	setupConfigTest(t, fmt.Sprintf(`
+port: "3443"
+env: "test"
+tls_cert_path: "%s"
+tls_key_path: "%s"
+database:
+  host: "localhost"
+redis:
+  host: "localhost"
+`, nonexistentCert, tls.KeyPath), tmpDir)
+
+	_, err := Load("test-version")
+	if err == nil {
+		t.Fatal("expected error when cert file not found, got nil")
+	}
+
+	// Verify error message mentions cert file does not exist
+	if !strings.Contains(err.Error(), "cert file does not exist") {
+		t.Errorf("expected error to mention 'cert file does not exist', got: %v", err)
+	}
+}
+
+func TestValidateTLS_KeyFileNotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	tls := setupTLSFiles(t, tmpDir, true, false) // cert only, key missing
+	nonexistentKey := filepath.Join(tmpDir, "nonexistent-key.pem")
+
+	setupConfigTest(t, fmt.Sprintf(`
+port: "3443"
+env: "test"
+tls_cert_path: "%s"
+tls_key_path: "%s"
+database:
+  host: "localhost"
+redis:
+  host: "localhost"
+`, tls.CertPath, nonexistentKey), tmpDir)
+
+	_, err := Load("test-version")
+	if err == nil {
+		t.Fatal("expected error when key file not found, got nil")
+	}
+
+	// Verify error message mentions key file does not exist
+	if !strings.Contains(err.Error(), "key file does not exist") {
+		t.Errorf("expected error to mention 'key file does not exist', got: %v", err)
+	}
+}
+
+// Note: We don't test unreadable files (e.g., files with 0000 permissions) because:
+// 1. os.Stat() succeeds even on unreadable files (it only checks metadata)
+// 2. Actual readability errors will be caught by tls.LoadX509KeyPair() at server startup
+// 3. Testing true read permissions would require OS-specific setups that are fragile
+// The file existence checks (tested above) are sufficient for config validation.
+
+func TestValidateTLS_TLSFromEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	tls := setupTLSFiles(t, tmpDir, true, true)
+
+	setupConfigTest(t, `
+port: "3443"
+env: "test"
+database:
+  host: "localhost"
+redis:
+  host: "localhost"
+`, tmpDir)
+
+	// Set TLS paths via environment variables
+	t.Setenv("TLS_CERT_PATH", tls.CertPath)
+	t.Setenv("TLS_KEY_PATH", tls.KeyPath)
+
+	cfg, err := Load("test-version")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	// Verify TLS paths from env
+	if cfg.TLSCertPath != tls.CertPath {
+		t.Errorf("expected TLSCertPath=%s (from env), got %s", tls.CertPath, cfg.TLSCertPath)
+	}
+	if cfg.TLSKeyPath != tls.KeyPath {
+		t.Errorf("expected TLSKeyPath=%s (from env), got %s", tls.KeyPath, cfg.TLSKeyPath)
 	}
 }
