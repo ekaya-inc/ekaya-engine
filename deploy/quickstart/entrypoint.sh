@@ -32,17 +32,17 @@ EOF
     echo "Starting PostgreSQL to create user and database..."
     su postgres -c "/usr/lib/postgresql/17/bin/pg_ctl -D $PGDATA -l /tmp/pg_init.log start"
 
-    # Wait for Postgres to be ready
-    until su postgres -c "pg_isready -q"; do
+    # Wait for Postgres to be ready (connect as postgres user to postgres database)
+    until su postgres -c "PGUSER=postgres PGDATABASE=postgres pg_isready -q"; do
         echo "Waiting for PostgreSQL to start..."
         sleep 1
     done
 
-    # Create ekaya user and database
+    # Create ekaya user and database (override PG* vars to connect as postgres superuser to postgres db)
     echo "Creating ekaya user and ekaya_engine database..."
-    su postgres -c "psql -c \"CREATE USER ekaya WITH PASSWORD 'quickstart';\""
-    su postgres -c "psql -c \"CREATE DATABASE ekaya_engine OWNER ekaya;\""
-    su postgres -c "psql -c \"GRANT ALL PRIVILEGES ON DATABASE ekaya_engine TO ekaya;\""
+    su postgres -c "PGUSER=postgres PGDATABASE=postgres psql -c \"CREATE USER ekaya WITH PASSWORD 'quickstart';\""
+    su postgres -c "PGUSER=postgres PGDATABASE=postgres psql -c \"CREATE DATABASE ekaya_engine OWNER ekaya;\""
+    su postgres -c "PGUSER=postgres PGDATABASE=postgres psql -c \"GRANT ALL PRIVILEGES ON DATABASE ekaya_engine TO ekaya;\""
 
     # Stop Postgres (we'll start it properly below)
     echo "Database initialization complete. Restarting PostgreSQL..."
@@ -66,7 +66,7 @@ REDIS_PID=$!
 
 # Wait for PostgreSQL to be ready
 echo "Waiting for PostgreSQL to be ready..."
-until su postgres -c "pg_isready -q"; do
+until su postgres -c "PGUSER=postgres PGDATABASE=postgres pg_isready -q"; do
     sleep 1
 done
 echo "PostgreSQL is ready."

@@ -75,7 +75,7 @@ ENV PORT=3443 \
     PGSSLMODE=disable \
     REDIS_HOST=localhost \
     REDIS_PORT=6379 \
-    PROJECT_CREDENTIALS_KEY=quickstart-demo-key-not-for-production
+    PROJECT_CREDENTIALS_KEY=iJbJ35cBhYXTxtzKE2tMI2QmxfcKh/QYpqIgl0NNoiI=
 
 # Create postgres data directory mount point
 VOLUME ["/var/lib/postgresql/data"]

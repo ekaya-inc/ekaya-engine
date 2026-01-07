@@ -245,19 +245,42 @@ deploy/
 - Multi-stage build optimizes final image size
 - Ready for first run testing
 
-### First Run Test
+### First Run Test [x]
 
-```bash
-docker volume rm ekaya-data 2>/dev/null || true
-docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data engine-quickstart:local
-```
+**Status:** Complete
 
-Expected:
-- Postgres initializes (first run only)
-- Migrations run
-- Server starts
-- `/health` returns healthy
-- UI loads at http://localhost:3443
+**What was done:**
+- Fixed entrypoint.sh to properly handle PostgreSQL environment variables during initialization
+- Fixed encryption key in Dockerfile to use a valid 32-byte base64-encoded value
+- Successfully tested first container run with clean volume
+
+**Verification results:**
+- ✅ Postgres initializes successfully on first run
+- ✅ Database migrations applied (version 32)
+- ✅ Server starts and listens on 0.0.0.0:3443
+- ✅ `/health` endpoint returns healthy status
+- ✅ UI loads successfully at http://localhost:3443
+- ✅ Container reports healthy status
+- ✅ Docker volume `ekaya-data` created for persistence
+
+**Issues found and fixed:**
+1. **PostgreSQL environment variable interference**: The `PGUSER` and `PGDATABASE` environment variables set in the Dockerfile were being inherited by the `su postgres -c "psql ..."` commands, causing authentication failures during database initialization.
+   - **Root cause**: When the entrypoint script runs `su postgres -c "psql ..."` to create the ekaya user and database, it inherits `PGUSER=ekaya` and `PGDATABASE=ekaya_engine` from the Dockerfile environment. Since these don't exist yet, authentication fails.
+   - **Solution**: Explicitly override environment variables in initialization commands by prefixing with `PGUSER=postgres PGDATABASE=postgres` to connect as the postgres superuser to the postgres database during setup.
+   - **Files modified**: `deploy/quickstart/entrypoint.sh` (lines 35-36, 40-42, 69)
+
+2. **Invalid encryption key**: The placeholder key `quickstart-demo-key-not-for-production` was not a valid base64-encoded 32-byte key, causing server startup failure.
+   - **Root cause**: The PROJECT_CREDENTIALS_KEY must be exactly 32 bytes when base64-decoded for AES-256 encryption.
+   - **Solution**: Generated a valid key using `openssl rand -base64 32` and replaced the placeholder value.
+   - **File modified**: `deploy/quickstart/Dockerfile` (line 78)
+   - **New key**: `iJbJ35cBhYXTxtzKE2tMI2QmxfcKh/QYpqIgl0NNoiI=`
+
+**Notes for next session:**
+- The quickstart image is now fully functional for evaluation and demo purposes
+- First run takes approximately 10-15 seconds for Postgres initialization and migrations
+- Container health check confirms server is responding correctly
+- **Critical pattern for future work**: When setting `PGUSER`/`PGDATABASE` environment variables that are used by the application, initialization scripts must explicitly override them to connect as the postgres superuser during setup
+- The encryption key is hardcoded for evaluation purposes only - DO NOT use this image pattern for production deployments
 
 ### Persistence Test
 
