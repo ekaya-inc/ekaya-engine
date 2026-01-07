@@ -94,46 +94,28 @@ deploy/
 - The directory is empty and ready for config files, scripts, and Dockerfile
 - No other changes were made to the codebase in this step
 
-### Step 2: Create config.quickstart.yaml
+### Step 2: Create config.quickstart.yaml [x]
 
-Minimal config with auth disabled:
+**Status:** Complete
 
-```yaml
-port: "3443"
-env: "quickstart"
-auth_server_url: ""
+**What was done:**
+- Created `deploy/quickstart/config.quickstart.yaml` with auth disabled for demos
+- Configuration targets the all-in-one Docker environment (Postgres + Redis on localhost)
+- Password provided via `PGPASSWORD` environment variable (set in Dockerfile/supervisord)
+- Encryption key provided via `PROJECT_CREDENTIALS_KEY` environment variable
 
-auth:
-  enable_verification: false
-  jwks_endpoints: ""
+**Key configuration decisions:**
+- `auth.enable_verification: false` - No external auth server required for quickstart
+- `database.ssl_mode: disable` - Localhost connection, no TLS needed
+- `enabled_tools: []` - Empty list means all tools enabled by default
+- `ontology_max_iterations: 3` and `ontology_target_confidence: 0.8` - Standard settings
 
-database:
-  host: "localhost"
-  port: 5432
-  user: "ekaya"
-  database: "ekaya_engine"
-  max_connections: 10
-  max_idle_conns: 2
-  type: "postgres"
-  ssl_mode: "disable"
+**Notes for next session:**
+- The config file is ready to be copied into the Docker image
+- Environment variables (`PGPASSWORD`, `PROJECT_CREDENTIALS_KEY`) will be set in Dockerfile/supervisord
+- This config is only for the quickstart image, not for production use
 
-redis:
-  host: "localhost"
-  port: 6379
-  db: 0
-  key_prefix: "project:"
-
-datasource:
-  connection_ttl_minutes: 5
-  max_connections_per_user: 10
-  pool_max_conns: 5
-  pool_min_conns: 1
-
-ontology_max_iterations: 3
-ontology_target_confidence: 0.8
-
-enabled_tools: []
-```
+**File location:** `deploy/quickstart/config.quickstart.yaml`
 
 ### Step 3: Create supervisord.conf
 
