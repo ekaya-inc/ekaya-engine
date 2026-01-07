@@ -65,7 +65,6 @@ export const POSTGRES_PROVIDERS: ProviderInfo[] = [
     adapterType: "postgres",
     defaultPort: 5432,
     defaultSSL: "require",
-    helpUrl: "https://www.postgresql.org/docs/current/libpq-connect.html",
   },
   {
     id: "supabase",
