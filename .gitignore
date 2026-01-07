@@ -49,27 +49,12 @@ debug
 
 # Local configuration overrides
 config.yaml
-!config.dev.yaml
-!config.prod.yaml
-config.tls-test.yaml
-
-# TLS certificates (for local testing only)
-*.pem
-
-# Local ML models (downloaded for embedding)
-/models/
-
-# Local ONNX Runtime binaries
-.local/
 
 # Database dumps and temporary SQL scripts (root level only)
 /*.dump
 /*.dump.gz
 /*.sql
-ekaya-region
 ekaya-engine
-
-SPARK-CONFIGURATION.md
 
 # MCP configuration (contains project-specific URLs)
 .mcp.json
@@ -77,4 +62,9 @@ SPARK-CONFIGURATION.md
 
 # Developer
 .dvx/
+
+# Certificates (keep README and .gitkeep)
+certs/*
+!certs/README.md
+!certs/.gitkeep
 

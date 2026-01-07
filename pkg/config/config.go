@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -164,8 +165,16 @@ func Load(version string) (*Config, error) {
 	}
 
 	// Auto-derive BaseURL from Port if not explicitly set
+	// Use HTTPS scheme if TLS is configured
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = fmt.Sprintf("http://localhost:%s", cfg.Port)
+		scheme := "http"
+		if cfg.TLSCertPath != "" {
+			scheme = "https"
+		}
+		cfg.BaseURL = (&url.URL{
+			Scheme: scheme,
+			Host:   "localhost:" + cfg.Port,
+		}).String()
 	}
 
 	return cfg, nil
@@ -189,13 +198,13 @@ func (c *Config) validateTLS() error {
 		return fmt.Errorf("both tls_cert_path and tls_key_path must be provided together")
 	}
 
-	// If both provided, verify files exist and are readable
+	// If both provided, verify files exist (actual readability checked by tls.LoadX509KeyPair at startup)
 	if certSet {
 		if _, err := os.Stat(c.TLSCertPath); err != nil {
-			return fmt.Errorf("TLS cert file not readable: %w", err)
+			return fmt.Errorf("TLS cert file does not exist: %w", err)
 		}
 		if _, err := os.Stat(c.TLSKeyPath); err != nil {
-			return fmt.Errorf("TLS key file not readable: %w", err)
+			return fmt.Errorf("TLS key file does not exist: %w", err)
 		}
 	}
 

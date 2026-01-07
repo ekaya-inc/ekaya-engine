@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"fmt"
 	"log"
@@ -433,6 +434,13 @@ func main() {
 		Handler: handler,
 	}
 
+	// Configure TLS with minimum version 1.2 for security
+	if cfg.TLSCertPath != "" && cfg.TLSKeyPath != "" {
+		server.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+	}
+
 	// Channel to signal shutdown complete
 	shutdownComplete := make(chan struct{})
 
@@ -469,7 +477,8 @@ func main() {
 		logger.Info("Starting HTTPS server",
 			zap.String("addr", cfg.BindAddr+":"+cfg.Port),
 			zap.String("version", cfg.Version),
-			zap.String("cert", cfg.TLSCertPath))
+			zap.String("cert", cfg.TLSCertPath),
+			zap.String("key", cfg.TLSKeyPath))
 		err = server.ListenAndServeTLS(cfg.TLSCertPath, cfg.TLSKeyPath)
 	} else {
 		logger.Info("Starting HTTP server",
