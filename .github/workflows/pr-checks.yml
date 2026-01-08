@@ -7,6 +7,7 @@ on:
 
 env:
   GO_VERSION: '1.25'
+  TEST_IMAGE: ghcr.io/ekaya-inc/ekaya-engine-test-image:latest
 
 jobs:
   validate:
@@ -17,15 +18,25 @@ jobs:
       packages: read
 
     steps:
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Cache test Docker image
+        id: cache-test-image
+        uses: actions/cache@v4
+        with:
+          path: /tmp/test-image.tar
+          key: test-image-${{ hashFiles('test/docker/engine-test-db/**') }}
+
+      - name: Load cached test image
+        if: steps.cache-test-image.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/test-image.tar
+
+      - name: Pull and cache test image
+        if: steps.cache-test-image.outputs.cache-hit != 'true'
+        run: |
+          docker pull ${{ env.TEST_IMAGE }}
+          docker save ${{ env.TEST_IMAGE }} -o /tmp/test-image.tar
 
       - name: Set up Go
         uses: actions/setup-go@v5
