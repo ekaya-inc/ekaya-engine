@@ -10,8 +10,8 @@ Custom PostgreSQL 18 Docker image with pre-loaded test database for fast integra
 # Build locally
 make build-test-image
 
-# Push to dev registry (requires gcloud auth)
-make push-test-image
+# Push to ghcr.io (requires GITHUB_TOKEN with write:packages scope)
+GITHUB_TOKEN=ghp_xxx make push-test-image
 ```
 
 ### Pull from Registry
@@ -60,9 +60,9 @@ postgresql://ekaya:test_password@localhost:5432/test_data
 
 ## Registry Image
 
-The image is stored in Google Artifact Registry:
+The image is stored in GitHub Container Registry:
 ```
-us-central1-docker.pkg.dev/ekaya-dev-shared/ekaya-dev-containers/ekaya-engine-test-image:latest
+ghcr.io/ekaya-inc/ekaya-engine-test-image:latest
 ```
 
 ## Files

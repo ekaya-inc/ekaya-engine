@@ -20,7 +20,7 @@ import (
 )
 
 // EngineTestImage is the custom PostgreSQL image with pre-loaded test schema.
-const EngineTestImage = "us-central1-docker.pkg.dev/ekaya-dev-shared/ekaya-dev-containers/ekaya-engine-test-image:latest"
+const EngineTestImage = "ghcr.io/ekaya-inc/ekaya-engine-test-image:latest"
 
 // TestDB holds a shared test database container and connection pool.
 type TestDB struct {
