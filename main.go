@@ -464,6 +464,17 @@ func main() {
 	}
 	mcptools.RegisterProbeTools(mcpServer.MCP(), probeToolDeps)
 
+	// Register search tools (for full-text search across schema and ontology)
+	searchToolDeps := &mcptools.SearchToolDeps{
+		DB:               db,
+		MCPConfigService: mcpConfigService,
+		SchemaRepo:       schemaRepo,
+		OntologyRepo:     ontologyRepo,
+		EntityRepo:       ontologyEntityRepo,
+		Logger:           logger,
+	}
+	mcptools.RegisterSearchTools(mcpServer.MCP(), searchToolDeps)
+
 	// Register ontology question tools (for listing and managing questions)
 	questionToolDeps := &mcptools.QuestionToolDeps{
 		DB:               db,

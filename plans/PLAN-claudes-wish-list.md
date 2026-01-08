@@ -1745,7 +1745,86 @@ Not all tools should be available to all users. The admin can control which tool
 
 ### Phase 6: Power Features (Lower Priority)
 
-17. **[ ] `search_schema`** - Full-text search
+17. **[x] `search_schema`** - COMPLETED (2026-01-08): Full-text search across tables, columns, and entities
+   - **Commit:** `feat: enable AI agents to search schema via full-text pattern matching`
+   - **Implementation:** `pkg/mcp/tools/search.go` (registerSearchSchemaTool function) + `pkg/mcp/tools/search_test.go`
+   - **Registration:** Tool registered in RegisterSearchTools function (search.go:31), added to main.go (lines 467-476)
+   - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupDeveloper (line 41)
+   - **Key Features Implemented:**
+     - Full-text search using PostgreSQL ILIKE for case-insensitive pattern matching
+     - Searches across tables (table_name, business_name, description)
+     - Searches across columns (column_name, business_name, description)
+     - Searches across entities (name, aliases, description) from active ontology
+     - Relevance ranking with scores: exact match (1.0), prefix match (0.9), business name exact (0.95), partial (0.8), description (0.6)
+     - Match type classification: "table_name", "business_name", "description", "column_name", "name", "alias"
+     - Graceful degradation when ontology doesn't exist (entity search returns empty array)
+     - Limit parameter (default 20, max 100) for pagination
+     - Returns aggregated results with total_count
+   - **Testing:** Comprehensive unit tests covering response structure, match types, relevance scoring, total count aggregation
+   - **Tool Group:** ToolGroupDeveloper (available when Developer Tools enabled)
+   - **Response Format:**
+     ```json
+     {
+       "query": "user",
+       "tables": [
+         {
+           "schema_name": "public",
+           "table_name": "users",
+           "business_name": "Users",
+           "description": "User accounts table",
+           "row_count": 100,
+           "match_type": "table_name",
+           "relevance": 1.0
+         }
+       ],
+       "columns": [
+         {
+           "schema_name": "public",
+           "table_name": "accounts",
+           "column_name": "user_id",
+           "data_type": "uuid",
+           "business_name": "User ID",
+           "description": "Foreign key to users",
+           "match_type": "column_name",
+           "relevance": 0.9
+         }
+       ],
+       "entities": [
+         {
+           "name": "User",
+           "description": "Platform user",
+           "primary_table": "users",
+           "domain": "user_management",
+           "aliases": ["creator", "host"],
+           "match_type": "name",
+           "relevance": 1.0
+         }
+       ],
+       "total_count": 3
+     }
+     ```
+   - **Architecture Notes:**
+     - Uses SearchToolDeps (DB, MCPConfigService, SchemaRepo, OntologyRepo, EntityRepo, Logger)
+     - Access control via checkSearchToolEnabled (validates Developer Tools enabled)
+     - Three separate search functions: searchTables, searchColumns, searchEntities
+     - Each function executes a SQL query with CASE statements for relevance scoring
+     - Partial failures in any search category are logged as warnings, don't fail entire request
+     - Entity search checks for active ontology first, returns empty if none exists
+   - **Design Decisions:**
+     - Uses PostgreSQL ILIKE for pattern matching instead of trigram/GIN indexing (no pg_trgm extension needed)
+     - ILIKE provides sufficient performance for typical schema sizes (10-100 tables, 100-1000 columns)
+     - Pattern: `LOWER(column) LIKE '%' || $query || '%'` for case-insensitive substring matching
+     - Relevance scoring prioritizes exact matches, then prefix matches, then partial matches
+     - Business names score higher (0.95) than technical names to surface human-friendly results
+     - Entity aliases treated separately with explicit EXISTS subquery for matching
+     - Limit enforced at query level (ORDER BY + LIMIT) for efficiency
+   - **Next Session Notes:**
+     - For very large schemas (1000+ tables), consider adding GIN indexes if performance becomes an issue
+     - To add GIN indexes: `CREATE EXTENSION pg_trgm; CREATE INDEX idx_table_name_gin ON engine_schema_tables USING gin(table_name gin_trgm_ops);`
+     - The tool works without indexes but will scale better with them for large schemas
+     - Entity search gracefully handles missing ontology (common during initial setup)
+     - Match types enable UI to highlight why a result matched (useful for debugging searches)
+     - **WHY this tool exists:** With 38+ tables and 300+ columns, finding relevant schema elements is hard. AI agents need to quickly locate tables/columns related to a concept without knowing exact names. This tool enables natural language-style discovery: search "user" to find users table, user_id columns, User entity, and "creator" alias. The relevance ranking surfaces best matches first. This is especially valuable during ontology refinement when agents research questions like "What tables involve billing?" without knowing the exact table names. Unlike `get_context` which returns entire schema, this tool filters to relevant items only.
 18. **[ ] `explain_query`** - Performance insights
 19. **[ ] `get_query_history`** - Recent queries
 
