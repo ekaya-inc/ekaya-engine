@@ -24,6 +24,7 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "get_entity", Description: "Retrieve full entity details including aliases, key columns, occurrences, and relationships", ToolGroup: ToolGroupDeveloper},
 	{Name: "probe_column", Description: "Deep-dive into specific column with statistics, joinability, and semantic information", ToolGroup: ToolGroupDeveloper},
 	{Name: "probe_columns", Description: "Batch variant of probe_column for analyzing multiple columns at once", ToolGroup: ToolGroupDeveloper},
+	{Name: "probe_relationship", Description: "Deep-dive into relationships between entities with cardinality and data quality metrics", ToolGroup: ToolGroupDeveloper},
 	{Name: "update_project_knowledge", Description: "Create or update domain facts (terminology, business rules, enumerations, conventions)", ToolGroup: ToolGroupDeveloper},
 	{Name: "delete_project_knowledge", Description: "Remove incorrect or outdated domain facts", ToolGroup: ToolGroupDeveloper},
 

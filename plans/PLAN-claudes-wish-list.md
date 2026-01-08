@@ -1082,7 +1082,52 @@ Not all tools should be available to all users. The admin can control which tool
      - Batch tool has 50-column limit to prevent excessive database queries
      - Dependencies: DB, MCPConfigService, SchemaRepo, OntologyRepo, Logger
      - For sample_values support, implement Phase 2 item #7 first (ontology extraction changes), then add to this tool
-6. **[ ] `probe_relationship`** - Relationship metrics and cardinality
+6. **[x] `probe_relationship`** - COMPLETED: Relationship exploration with optional entity filtering
+   - **Implementation:** `pkg/mcp/tools/probe.go` (registerProbeRelationshipTool function) + `pkg/mcp/tools/probe_test.go`
+   - **Registration:** Added to main.go with ProbeToolDeps (main.go:434-444), added EntityRepo and RelationshipRepo dependencies
+   - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupDeveloper (line 27)
+   - **Key Features Implemented:**
+     - Supports optional `from_entity` and `to_entity` parameters for filtering relationships
+     - Returns entity relationships with from/to entity names and column mappings
+     - Includes description and association label if available
+     - Returns empty arrays for data_quality and rejected_candidates (see limitations below)
+   - **Testing:** Unit tests covering response structure, empty state, minimal fields, and orphan calculation logic
+   - **Tool Group:** ToolGroupDeveloper (available when Developer Tools enabled)
+   - **Response Format:**
+     ```json
+     {
+       "relationships": [{
+         "from_entity": "Account",
+         "to_entity": "User",
+         "from_column": "accounts.owner_id",
+         "to_column": "users.user_id",
+         "description": "The user who owns this account",
+         "label": "owns"
+       }],
+       "rejected_candidates": []
+     }
+     ```
+   - **Architecture Notes:**
+     - Queries engine_entity_relationships to get confirmed relationships
+     - Filters by from_entity/to_entity parameters if provided
+     - Maps entity IDs to names for readable output
+     - Access control via checkProbeToolEnabled (validates Developer Tools enabled for project)
+     - Dependencies: DB, MCPConfigService, SchemaRepo, OntologyRepo, EntityRepo, RelationshipRepo, Logger
+   - **Known Limitations:**
+     - **cardinality and data_quality metrics NOT currently returned** - These are stored in engine_schema_relationships table but require additional repository/query logic to fetch and map to entity relationships
+     - **rejected_candidates NOT currently returned** - These are stored in engine_schema_relationships with rejection_reason but require similar infrastructure
+     - The implementation focuses on entity-level relationships from engine_entity_relationships, not schema-level metrics from engine_schema_relationships
+   - **Next Session Notes:**
+     - To add cardinality/data_quality metrics, need to:
+       1. Query engine_schema_relationships table (via SchemaRepo or new SchemaRelationshipRepo)
+       2. Match schema relationships to entity relationships by (source_table, source_column, target_table, target_column)
+       3. Extract match_rate, source_distinct, target_distinct, matched_count
+       4. Calculate orphan_count = source_distinct - matched_count
+     - To add rejected_candidates, need to:
+       1. Query engine_schema_relationships WHERE rejection_reason IS NOT NULL
+       2. Filter by entity names if from_entity/to_entity parameters provided
+       3. Return rejection_reason and match_rate for each candidate
+     - For now, tool provides entity-level relationship visibility which is still valuable for understanding domain model
 7. **[ ] Persist sample_values** - Store distinct values during extraction (currently discarded)
 
 ### Phase 3: Query Intelligence (High Impact, Higher Effort)
