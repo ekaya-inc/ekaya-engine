@@ -53,7 +53,7 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 				"If a relationship between these entities already exists, it will be updated with the new values. "+
 				"Optional parameters (description, label, cardinality) replace existing values when provided. "+
 				"Omitted parameters preserve existing values. "+
-				"Cardinality values: '1:1', '1:N', 'N:1', 'N:N', 'unknown' (default). "+
+				"Cardinality values: '1:1', '1:N', 'N:1', 'N:M', 'unknown' (default)."+
 				"Example: update_relationship(from_entity='Account', to_entity='User', label='owns', cardinality='N:1', description='The user who owns this account')",
 		),
 		mcp.WithString(
@@ -76,7 +76,7 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 		),
 		mcp.WithString(
 			"cardinality",
-			mcp.Description("Optional - Cardinality of the relationship: '1:1', '1:N', 'N:1', 'N:N', or 'unknown'"),
+			mcp.Description("Optional - Cardinality of the relationship: '1:1', '1:N', 'N:1', 'N:M', or 'unknown'"),
 		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -110,10 +110,10 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 		// Validate cardinality if provided
 		if cardinality != "" {
 			validCardinalities := map[string]bool{
-				"1:1": true, "1:N": true, "N:1": true, "N:N": true, "unknown": true,
+				"1:1": true, "1:N": true, "N:1": true, "N:M": true, "unknown": true,
 			}
 			if !validCardinalities[cardinality] {
-				return nil, fmt.Errorf("invalid cardinality '%s': must be one of '1:1', '1:N', 'N:1', 'N:N', 'unknown'", cardinality)
+				return nil, fmt.Errorf("invalid cardinality '%s': must be one of '1:1', '1:N', 'N:1', 'N:M', 'unknown'", cardinality)
 			}
 		}
 
