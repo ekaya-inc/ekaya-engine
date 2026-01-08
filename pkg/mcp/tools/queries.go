@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"time"
 
@@ -20,11 +21,12 @@ import (
 
 // QueryToolDeps contains dependencies for approved queries tools.
 type QueryToolDeps struct {
-	DB               *database.DB
-	MCPConfigService services.MCPConfigService
-	ProjectService   services.ProjectService
-	QueryService     services.QueryService
-	Logger           *zap.Logger
+	DB                        *database.DB
+	MCPConfigService          services.MCPConfigService
+	ProjectService            services.ProjectService
+	QueryService              services.QueryService
+	Logger                    *zap.Logger
+	QueryHistoryRetentionDays int
 }
 
 const approvedQueriesToolGroup = "approved_queries"
@@ -319,6 +321,11 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 
 		// Log execution to history (best effort - don't fail request if logging fails)
 		go logQueryExecution(tenantCtx, deps, projectID, queryID, query.SQLQuery, params, len(result.Rows), int(executionTimeMs))
+
+		// Randomly trigger cleanup (1% probability) to avoid overhead on every query
+		if rand.IntN(100) == 0 {
+			go cleanupOldQueryExecutions(tenantCtx, deps, projectID)
+		}
 
 		// Format response
 		truncated := len(result.Rows) > limit
@@ -750,6 +757,42 @@ func logQueryExecution(ctx context.Context, deps *QueryToolDeps, projectID, quer
 			zap.Error(err),
 			zap.String("project_id", projectID.String()),
 			zap.String("query_id", queryID.String()))
+	}
+}
+
+// cleanupOldQueryExecutions deletes query execution records older than the retention period.
+// This is called randomly (1% probability) during query execution to avoid cleanup overhead on every query.
+// Runs in a goroutine and uses best-effort - failures are logged but don't affect the caller.
+func cleanupOldQueryExecutions(ctx context.Context, deps *QueryToolDeps, projectID uuid.UUID) {
+	// Get tenant scope
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok || scope == nil {
+		deps.Logger.Warn("Failed to cleanup old query executions: tenant scope not found")
+		return
+	}
+
+	// Delete executions older than retention period
+	query := `
+		DELETE FROM engine_query_executions
+		WHERE project_id = $1
+		  AND executed_at < NOW() - INTERVAL '1 day' * $2
+	`
+
+	result, err := scope.Conn.Exec(ctx, query, projectID, deps.QueryHistoryRetentionDays)
+	if err != nil {
+		deps.Logger.Error("Failed to cleanup old query executions",
+			zap.Error(err),
+			zap.String("project_id", projectID.String()),
+			zap.Int("retention_days", deps.QueryHistoryRetentionDays))
+		return
+	}
+
+	rowsDeleted := result.RowsAffected()
+	if rowsDeleted > 0 {
+		deps.Logger.Info("Cleaned up old query executions",
+			zap.String("project_id", projectID.String()),
+			zap.Int64("rows_deleted", rowsDeleted),
+			zap.Int("retention_days", deps.QueryHistoryRetentionDays))
 	}
 }
 
