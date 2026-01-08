@@ -1,7 +1,8 @@
 # FIX: Consolidate Tool Access Control Logic
 
 **Created:** 2025-01-08
-**Status:** Ready for implementation
+**Completed:** 2025-01-08
+**Status:** ✅ Completed
 **Priority:** Low (code quality improvement, no functional changes)
 
 ---
@@ -38,8 +39,8 @@ type ToolAccessDeps interface {
 // CheckToolAccess verifies that the specified tool is enabled for the current project.
 func CheckToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string) (*ToolAccessResult, error)
 
-// CheckToolAccessWithLegacySignature maintains the 4-return-value signature for migration.
-func CheckToolAccessWithLegacySignature(ctx context.Context, deps ToolAccessDeps, toolName string) (uuid.UUID, context.Context, func(), error)
+// AcquireToolAccess maintains the 4-return-value signature for direct use in tools.
+func AcquireToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string) (uuid.UUID, context.Context, func(), error)
 ```
 
 ---
@@ -61,24 +62,27 @@ func (d *KnowledgeToolDeps) GetLogger() *zap.Logger { return d.Logger }
 projectID, tenantCtx, cleanup, err := checkKnowledgeToolEnabled(ctx, deps, "update_project_knowledge")
 
 // After
-projectID, tenantCtx, cleanup, err := CheckToolAccessWithLegacySignature(ctx, deps, "update_project_knowledge")
+projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "update_project_knowledge")
 ```
 
 3. Delete the old `check*ToolEnabled` function
 
 ---
 
-## Files to Update
+## Files Updated
 
-- [ ] pkg/mcp/tools/knowledge.go
-- [ ] pkg/mcp/tools/context.go
-- [ ] pkg/mcp/tools/questions.go
-- [ ] pkg/mcp/tools/entity.go
-- [ ] pkg/mcp/tools/column.go
-- [ ] pkg/mcp/tools/glossary.go
-- [ ] pkg/mcp/tools/relationship.go
-- [ ] pkg/mcp/tools/probe.go
-- [ ] pkg/mcp/tools/search.go
+- [x] pkg/mcp/tools/knowledge.go
+- [x] pkg/mcp/tools/context.go
+- [x] pkg/mcp/tools/questions.go
+- [x] pkg/mcp/tools/entity.go
+- [x] pkg/mcp/tools/column.go
+- [x] pkg/mcp/tools/glossary.go
+- [x] pkg/mcp/tools/relationship.go
+- [x] pkg/mcp/tools/probe.go
+- [x] pkg/mcp/tools/search.go
+- [x] pkg/mcp/tools/developer.go (additional)
+- [x] pkg/mcp/tools/schema.go (additional)
+- [x] pkg/mcp/tools/ontology.go (additional)
 
 ---
 
@@ -95,7 +99,7 @@ All existing tests should pass since the logic is identical.
 
 ## Notes
 
-- The shared helper is already created and ready to use
-- Migration can be done incrementally (one file at a time)
-- This is purely a refactoring - no behavioral changes
-- Consider doing this as part of a dedicated cleanup PR
+- The shared helper `AcquireToolAccess` (renamed from `CheckToolAccessWithLegacySignature`) is used by all tool files
+- All 12 tool files migrated to use the shared helper
+- All tests pass (`make check`)
+- ~400 lines of duplicated code removed
