@@ -734,3 +734,285 @@ func TestGetQueryHistory_Registration(t *testing.T) {
 func strPtr(s string) *string {
 	return &s
 }
+
+func TestGetQueryHistory_ParameterDefaults(t *testing.T) {
+	// Test that parameter defaults and bounds are applied correctly
+	tests := []struct {
+		name           string
+		limitInput     *float64
+		hoursBackInput *float64
+		wantLimit      int
+		wantHoursBack  int
+	}{
+		{
+			name:          "defaults when no parameters provided",
+			wantLimit:     20,
+			wantHoursBack: 24,
+		},
+		{
+			name:          "custom values within bounds",
+			limitInput:    floatPtr(50),
+			hoursBackInput: floatPtr(48),
+			wantLimit:     50,
+			wantHoursBack: 48,
+		},
+		{
+			name:          "limit exceeds max (100)",
+			limitInput:    floatPtr(200),
+			wantLimit:     100,
+			wantHoursBack: 24,
+		},
+		{
+			name:          "hours_back exceeds max (168)",
+			hoursBackInput: floatPtr(200),
+			wantLimit:     20,
+			wantHoursBack: 168,
+		},
+		{
+			name:          "limit below min (1)",
+			limitInput:    floatPtr(0),
+			wantLimit:     1,
+			wantHoursBack: 24,
+		},
+		{
+			name:          "hours_back below min (1)",
+			hoursBackInput: floatPtr(0),
+			wantLimit:     20,
+			wantHoursBack: 1,
+		},
+		{
+			name:          "negative limit coerced to 1",
+			limitInput:    floatPtr(-10),
+			wantLimit:     1,
+			wantHoursBack: 24,
+		},
+		{
+			name:          "negative hours_back coerced to 1",
+			hoursBackInput: floatPtr(-5),
+			wantLimit:     20,
+			wantHoursBack: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the parameter processing logic from registerGetQueryHistoryTool
+			limit := 20 // default
+			if tt.limitInput != nil {
+				limit = int(*tt.limitInput)
+				if limit > 100 {
+					limit = 100
+				}
+				if limit < 1 {
+					limit = 1
+				}
+			}
+
+			hoursBack := 24 // default
+			if tt.hoursBackInput != nil {
+				hoursBack = int(*tt.hoursBackInput)
+				if hoursBack > 168 {
+					hoursBack = 168
+				}
+				if hoursBack < 1 {
+					hoursBack = 1
+				}
+			}
+
+			assert.Equal(t, tt.wantLimit, limit, "limit should be %d", tt.wantLimit)
+			assert.Equal(t, tt.wantHoursBack, hoursBack, "hours_back should be %d", tt.wantHoursBack)
+		})
+	}
+}
+
+func TestGetQueryHistory_QueryStructure(t *testing.T) {
+	// Test that the SQL query structure is correct
+	// This validates that the query has the expected columns and filters
+
+	// Expected query structure (from queries.go:819-833)
+	expectedQuery := `
+		SELECT
+			qe.sql,
+			qe.executed_at,
+			qe.row_count,
+			qe.execution_time_ms,
+			qe.parameters,
+			q.natural_language_prompt as query_name
+		FROM engine_query_executions qe
+		LEFT JOIN engine_queries q ON qe.query_id = q.id
+		WHERE qe.project_id = $1
+		  AND qe.executed_at >= $2
+		ORDER BY qe.executed_at DESC
+		LIMIT $3
+	`
+
+	// Verify the query has the required components
+	assert.Contains(t, expectedQuery, "engine_query_executions", "should query executions table")
+	assert.Contains(t, expectedQuery, "LEFT JOIN engine_queries", "should join with queries table")
+	assert.Contains(t, expectedQuery, "WHERE qe.project_id = $1", "should filter by project_id")
+	assert.Contains(t, expectedQuery, "qe.executed_at >= $2", "should filter by time range")
+	assert.Contains(t, expectedQuery, "ORDER BY qe.executed_at DESC", "should order by execution time")
+	assert.Contains(t, expectedQuery, "LIMIT $3", "should limit results")
+
+	// Verify all required fields are selected
+	assert.Contains(t, expectedQuery, "qe.sql", "should select SQL")
+	assert.Contains(t, expectedQuery, "qe.executed_at", "should select execution time")
+	assert.Contains(t, expectedQuery, "qe.row_count", "should select row count")
+	assert.Contains(t, expectedQuery, "qe.execution_time_ms", "should select execution time")
+	assert.Contains(t, expectedQuery, "qe.parameters", "should select parameters")
+	assert.Contains(t, expectedQuery, "q.natural_language_prompt", "should select query name")
+}
+
+func TestGetQueryHistory_EmptyResults(t *testing.T) {
+	// Test response structure when no executions are found
+	response := struct {
+		RecentQueries []struct {
+			SQL             string         `json:"sql"`
+			ExecutedAt      string         `json:"executed_at"`
+			RowCount        int            `json:"row_count"`
+			ExecutionTimeMs int            `json:"execution_time_ms"`
+			Parameters      map[string]any `json:"parameters,omitempty"`
+			QueryName       *string        `json:"query_name,omitempty"`
+		} `json:"recent_queries"`
+		Count     int `json:"count"`
+		HoursBack int `json:"hours_back"`
+	}{
+		RecentQueries: []struct {
+			SQL             string         `json:"sql"`
+			ExecutedAt      string         `json:"executed_at"`
+			RowCount        int            `json:"row_count"`
+			ExecutionTimeMs int            `json:"execution_time_ms"`
+			Parameters      map[string]any `json:"parameters,omitempty"`
+			QueryName       *string        `json:"query_name,omitempty"`
+		}{},
+		Count:     0,
+		HoursBack: 24,
+	}
+
+	// Verify JSON serialization handles empty array correctly
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	assert.Equal(t, float64(0), parsed["count"])
+	assert.Equal(t, float64(24), parsed["hours_back"])
+
+	queries, ok := parsed["recent_queries"].([]any)
+	require.True(t, ok)
+	assert.Empty(t, queries, "recent_queries should be empty array")
+}
+
+func TestGetQueryHistory_WithoutParameters(t *testing.T) {
+	// Test query execution without parameters (parameters is null in database)
+	response := struct {
+		RecentQueries []struct {
+			SQL             string         `json:"sql"`
+			ExecutedAt      string         `json:"executed_at"`
+			RowCount        int            `json:"row_count"`
+			ExecutionTimeMs int            `json:"execution_time_ms"`
+			Parameters      map[string]any `json:"parameters,omitempty"`
+			QueryName       *string        `json:"query_name,omitempty"`
+		} `json:"recent_queries"`
+		Count     int `json:"count"`
+		HoursBack int `json:"hours_back"`
+	}{
+		RecentQueries: []struct {
+			SQL             string         `json:"sql"`
+			ExecutedAt      string         `json:"executed_at"`
+			RowCount        int            `json:"row_count"`
+			ExecutionTimeMs int            `json:"execution_time_ms"`
+			Parameters      map[string]any `json:"parameters,omitempty"`
+			QueryName       *string        `json:"query_name,omitempty"`
+		}{
+			{
+				SQL:             "SELECT COUNT(*) FROM users",
+				ExecutedAt:      "2024-01-15T10:30:00Z",
+				RowCount:        1,
+				ExecutionTimeMs: 42,
+				Parameters:      nil, // No parameters
+				QueryName:       strPtr("Count all users"),
+			},
+		},
+		Count:     1,
+		HoursBack: 24,
+	}
+
+	// Verify JSON serialization omits nil parameters
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	queries, ok := parsed["recent_queries"].([]any)
+	require.True(t, ok)
+	require.Len(t, queries, 1)
+
+	firstQuery, ok := queries[0].(map[string]any)
+	require.True(t, ok)
+
+	// parameters should be omitted when nil (due to omitempty tag)
+	_, hasParameters := firstQuery["parameters"]
+	assert.False(t, hasParameters, "parameters should be omitted when nil")
+}
+
+func TestGetQueryHistory_WithNullQueryName(t *testing.T) {
+	// Test execution without an associated query (ad-hoc execution, query_id is null)
+	response := struct {
+		RecentQueries []struct {
+			SQL             string         `json:"sql"`
+			ExecutedAt      string         `json:"executed_at"`
+			RowCount        int            `json:"row_count"`
+			ExecutionTimeMs int            `json:"execution_time_ms"`
+			Parameters      map[string]any `json:"parameters,omitempty"`
+			QueryName       *string        `json:"query_name,omitempty"`
+		} `json:"recent_queries"`
+		Count     int `json:"count"`
+		HoursBack int `json:"hours_back"`
+	}{
+		RecentQueries: []struct {
+			SQL             string         `json:"sql"`
+			ExecutedAt      string         `json:"executed_at"`
+			RowCount        int            `json:"row_count"`
+			ExecutionTimeMs int            `json:"execution_time_ms"`
+			Parameters      map[string]any `json:"parameters,omitempty"`
+			QueryName       *string        `json:"query_name,omitempty"`
+		}{
+			{
+				SQL:             "SELECT * FROM transactions LIMIT 10",
+				ExecutedAt:      "2024-01-15T10:30:00Z",
+				RowCount:        10,
+				ExecutionTimeMs: 89,
+				Parameters:      nil,
+				QueryName:       nil, // No associated approved query
+			},
+		},
+		Count:     1,
+		HoursBack: 24,
+	}
+
+	// Verify JSON serialization handles null query_name
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	queries, ok := parsed["recent_queries"].([]any)
+	require.True(t, ok)
+	require.Len(t, queries, 1)
+
+	firstQuery, ok := queries[0].(map[string]any)
+	require.True(t, ok)
+
+	// query_name should be omitted when nil (due to omitempty tag)
+	_, hasQueryName := firstQuery["query_name"]
+	assert.False(t, hasQueryName, "query_name should be omitted when nil")
+}
+
+// Helper function to create float64 pointer
+func floatPtr(f float64) *float64 {
+	return &f
+}

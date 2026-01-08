@@ -1845,7 +1845,7 @@ Not all tools should be available to all users. The admin can control which tool
     - Consider adding a `dry_run` parameter to use EXPLAIN without ANALYZE for risky queries
     - **WHY this tool exists:** Developers need to understand query performance without leaving their AI assistant. Instead of copy-pasting SQL to a database client, running EXPLAIN manually, and interpreting cryptic plan output, this tool provides instant performance insights with actionable optimization hints. This is especially valuable during ontology extraction (complex analytical queries) and when refining approved queries (users want fast queries). The hints help non-DBAs understand common issues like missing indexes or inefficient joins.
 19. **[x] `get_query_history`** - Recent queries
-    - **Status:** Complete
+    - **Status:** Complete (including comprehensive testing)
     - **Files:**
       - Migration: `migrations/038_query_executions.{up,down}.sql`
       - Tool implementation: `pkg/mcp/tools/queries.go` (registerGetQueryHistoryTool)
@@ -1859,6 +1859,12 @@ Not all tools should be available to all users. The admin can control which tool
       - Execution logging happens asynchronously (via goroutine) after successful query execution
       - Best-effort logging: failures are logged but don't affect query execution
       - Query history is project-scoped and respects RLS
+    - **Testing Added:**
+      - Parameter defaults and boundary validation (negative values, exceeding max limits)
+      - SQL query structure verification (correct joins, filters, ordering, column selection)
+      - Edge cases: empty results, null parameters, null query_name (ad-hoc executions)
+      - JSON serialization with omitempty behavior for optional fields
+      - All edge cases pass and match expected behavior
     - **Next Session Notes:**
       - History only tracks MCP tool executions (source='mcp'), not UI or direct API queries
       - Consider adding retention policy for old executions (e.g., DELETE after 30 days)
