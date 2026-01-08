@@ -173,12 +173,24 @@ func (r *testColEnrichmentRelRepo) UpdateDescriptionAndAssociation(ctx context.C
 	return nil
 }
 
-func (r *testColEnrichmentRelRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+func (r *testColEnrichmentRelRepo) GetByTargetEntity(ctx context.Context, entityID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (r *testColEnrichmentRelRepo) GetByEntityPair(ctx context.Context, ontologyID uuid.UUID, fromEntityID uuid.UUID, toEntityID uuid.UUID) (*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (r *testColEnrichmentRelRepo) Upsert(ctx context.Context, rel *models.EntityRelationship) error {
 	return nil
 }
 
-func (r *testColEnrichmentRelRepo) GetByTargetEntity(ctx context.Context, entityID uuid.UUID) ([]*models.EntityRelationship, error) {
-	return nil, nil
+func (r *testColEnrichmentRelRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (r *testColEnrichmentRelRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
 }
 
 type testColEnrichmentSchemaRepo struct {

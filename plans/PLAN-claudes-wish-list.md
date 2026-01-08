@@ -1442,6 +1442,10 @@ Not all tools should be available to all users. The admin can control which tool
      - When creating relationships, column details are placeholders since actual column mapping unknown
      - Cardinality validation ensures only valid values ('1:1', '1:N', 'N:1', 'N:N', 'unknown')
      - Idempotent delete makes tool safe to call multiple times
+   - **Test Changes:** Updated mock repositories in 6 test files to match new EntityRelationshipRepository interface:
+     - Added GetByEntityPair, Upsert, Delete methods to all mock implementations
+     - Files: column_enrichment_test.go, deterministic_relationship_service_test.go, entity_service_test.go, ontology_context_test.go, ontology_finalization_test.go, relationship_enrichment_test.go
+   - **Commit:** `9339046 feat: enable AI agents to manage entity relationships via MCP tools`
    - **Next Session Notes:**
      - AI agents can now create/update relationships discovered during analysis
      - Agents should ensure both entities exist before creating relationship
