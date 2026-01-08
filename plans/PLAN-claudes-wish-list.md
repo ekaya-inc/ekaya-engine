@@ -1305,7 +1305,77 @@ Not all tools should be available to all users. The admin can control which tool
 
 ### Phase 4: Ontology Updates (Medium Impact)
 
-10. **[ ] `update_entity`**, **[ ] `delete_entity`**
+10. **[x] `update_entity`**, **[x] `delete_entity`** - COMPLETED (2026-01-08): AI agents can create/update entity metadata with upsert semantics
+   - **Implementation:** `pkg/mcp/tools/entity.go` (registerUpdateEntityTool, registerDeleteEntityTool functions) + `pkg/mcp/tools/entity_test.go`
+   - **Registration:** Tools registered in RegisterEntityTools function (entity.go:33-35)
+   - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupDeveloper (lines 25-26)
+   - **Key Features Implemented:**
+     - `update_entity` tool with upsert semantics - uses entity name as key
+     - Creates new entity if not found, updates existing entity if found
+     - Optional parameters: description, aliases, key_columns (merge with existing)
+     - Aliases: replaces existing (explicit array = replace, omitted = preserve)
+     - Key columns: additive only (new columns added, existing preserved)
+     - Response includes `created` boolean to distinguish create vs update
+     - `delete_entity` tool for soft-deleting incorrect entities
+     - Soft delete with reason="Deleted via MCP agent"
+     - Aliases and key columns CASCADE deleted automatically
+     - Idempotent (deleting same entity twice succeeds)
+   - **Testing:** Unit tests covering tool registration, structure, response formats
+   - **Tool Group:** ToolGroupDeveloper (available when Developer Tools enabled)
+   - **update_entity Parameters:**
+     - `name` (required): Entity name (upsert key)
+     - `description` (optional): Entity description
+     - `aliases` (optional): Array of alternative names (replaces existing if provided, empty array clears aliases)
+     - `key_columns` (optional): Array of important column names (additive only)
+   - **update_entity Response Format:**
+     ```json
+     {
+       "name": "User",
+       "description": "Platform user...",
+       "aliases": ["creator", "host"],
+       "key_columns": ["user_id", "username"],
+       "created": true
+     }
+     ```
+   - **delete_entity Parameters:**
+     - `name` (required): Name of entity to delete
+   - **delete_entity Response Format:**
+     ```json
+     {
+       "name": "InvalidEntity",
+       "deleted": true
+     }
+     ```
+   - **Architecture Notes:**
+     - Uses existing EntityToolDeps (DB, MCPConfigService, OntologyRepo, OntologyEntityRepo, Logger)
+     - Access control via checkEntityToolEnabled (validates Developer Tools enabled)
+     - update_entity workflow: Check if exists → Create or Update entity → Update aliases → Update key_columns
+     - Aliases logic: Get existing → Delete removed → Create new
+     - Key columns logic: Get existing → Skip duplicates → Create new (never delete)
+     - delete_entity workflow: Get active ontology → Get entity by name → SoftDelete via repo
+     - Error handling: Returns descriptive errors for missing ontology, missing entity, repo failures
+   - **Implementation Details:**
+     - Optional string parameters extracted via getOptionalString helper
+     - Array parameters (aliases, key_columns) extracted from req.Params.Arguments map
+     - Entity creation sets ProjectID, OntologyID, Name, Description (leaves PrimaryTable/Column empty)
+     - Alias updates build sets of existing vs new aliases, delete removed, create new
+     - Key column updates skip duplicates (additive only policy)
+     - Source field set to "agent" for aliases created via MCP
+     - Delete uses OntologyEntityRepo.SoftDelete with reason parameter
+   - **Design Decisions:**
+     - Key columns are additive only: removing valuable metadata could lose information
+     - Aliases are replaceable: passing empty array clears all aliases (explicit intent)
+     - Omitting optional params preserves existing values (merge semantics)
+     - Entity name is the upsert key (no separate entity_id parameter)
+     - Soft delete for entities (preserves history, can be recovered)
+   - **Next Session Notes:**
+     - AI agents can now create new entities discovered during analysis
+     - AI agents can enrich existing entities with descriptions, aliases, key columns
+     - Agents should call `get_entity` first to see existing state before updating
+     - Key columns cannot be removed via this tool (intentional design decision)
+     - To clear aliases, pass empty array: `update_entity(name="User", aliases=[])`
+     - Delete is soft delete only (deleted_at timestamp set, reason recorded)
+     - **WHY these tools exist:** During ontology extraction and refinement, AI agents discover additional entity metadata that wasn't captured initially. Without these tools, agents must ask humans to manually update the ontology in the UI. With these tools, agents can contribute knowledge directly: add descriptions they infer from documentation, add aliases they discover in queries, add key columns they identify as important. The upsert semantics make updates safe and idempotent. The delete tool removes false positives (e.g., entities incorrectly identified during extraction). Together, these tools enable AI-driven ontology refinement and continuous improvement.
 11. **[ ] `update_relationship`**, **[ ] `delete_relationship`** (with cardinality)
 12. **[ ] `update_glossary_term`**, **[ ] `delete_glossary_term`**
 13. **[ ] `update_column`**, **[ ] `delete_column_metadata`** (with entity/role params)

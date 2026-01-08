@@ -22,6 +22,8 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "execute", Description: "Execute DDL/DML statements", ToolGroup: ToolGroupDeveloper, SubOption: "enableExecute"},
 	{Name: "get_schema", Description: "Get database schema with entity semantics", ToolGroup: ToolGroupDeveloper},
 	{Name: "get_entity", Description: "Retrieve full entity details including aliases, key columns, occurrences, and relationships", ToolGroup: ToolGroupDeveloper},
+	{Name: "update_entity", Description: "Create or update entity metadata with upsert semantics (description, aliases, key_columns)", ToolGroup: ToolGroupDeveloper},
+	{Name: "delete_entity", Description: "Remove an entity that was incorrectly identified (soft delete)", ToolGroup: ToolGroupDeveloper},
 	{Name: "probe_column", Description: "Deep-dive into specific column with statistics, joinability, and semantic information", ToolGroup: ToolGroupDeveloper},
 	{Name: "probe_columns", Description: "Batch variant of probe_column for analyzing multiple columns at once", ToolGroup: ToolGroupDeveloper},
 	{Name: "probe_relationship", Description: "Deep-dive into relationships between entities with cardinality and data quality metrics", ToolGroup: ToolGroupDeveloper},

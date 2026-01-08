@@ -227,3 +227,256 @@ func TestBuildGetEntityResponse_EmptyData(t *testing.T) {
 	assert.Empty(t, response.Occurrences)
 	assert.Empty(t, response.Relationships)
 }
+
+// TestUpdateEntityToolRegistration verifies update_entity tool is registered.
+func TestUpdateEntityToolRegistration(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &EntityToolDeps{
+		Logger: zap.NewNop(),
+	}
+
+	RegisterEntityTools(mcpServer, deps)
+
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+
+	err = json.Unmarshal(resultBytes, &response)
+	require.NoError(t, err)
+
+	// Check that update_entity is in the tool list
+	foundUpdateEntity := false
+	for _, tool := range response.Result.Tools {
+		if tool.Name == "update_entity" {
+			foundUpdateEntity = true
+			assert.Contains(t, tool.Description, "upsert")
+			assert.Contains(t, tool.Description, "entity")
+		}
+	}
+
+	assert.True(t, foundUpdateEntity, "update_entity tool should be registered")
+}
+
+// TestUpdateEntityToolStructure tests the update_entity tool definition structure.
+func TestUpdateEntityToolStructure(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &EntityToolDeps{
+		Logger: zap.NewNop(),
+	}
+
+	RegisterEntityTools(mcpServer, deps)
+
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				InputSchema struct {
+					Type       string                 `json:"type"`
+					Properties map[string]interface{} `json:"properties"`
+					Required   []string               `json:"required"`
+				} `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+
+	err = json.Unmarshal(resultBytes, &response)
+	require.NoError(t, err)
+
+	// Find update_entity tool
+	var updateEntityTool *struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		InputSchema struct {
+			Type       string                 `json:"type"`
+			Properties map[string]interface{} `json:"properties"`
+			Required   []string               `json:"required"`
+		} `json:"inputSchema"`
+	}
+
+	for i := range response.Result.Tools {
+		if response.Result.Tools[i].Name == "update_entity" {
+			updateEntityTool = &response.Result.Tools[i]
+			break
+		}
+	}
+
+	require.NotNil(t, updateEntityTool, "update_entity tool should exist")
+
+	// Verify required parameters
+	assert.Contains(t, updateEntityTool.InputSchema.Required, "name", "name should be required")
+
+	// Verify properties
+	assert.Contains(t, updateEntityTool.InputSchema.Properties, "name", "should have name parameter")
+	assert.Contains(t, updateEntityTool.InputSchema.Properties, "description", "should have description parameter")
+	assert.Contains(t, updateEntityTool.InputSchema.Properties, "aliases", "should have aliases parameter")
+	assert.Contains(t, updateEntityTool.InputSchema.Properties, "key_columns", "should have key_columns parameter")
+}
+
+// TestUpdateEntityResponse tests the updateEntityResponse structure.
+func TestUpdateEntityResponse(t *testing.T) {
+	response := updateEntityResponse{
+		Name:        "User",
+		Description: "A platform user",
+		Aliases:     []string{"creator", "host"},
+		KeyColumns:  []string{"user_id", "username"},
+		Created:     true,
+	}
+
+	// Marshal and unmarshal to verify JSON structure
+	jsonData, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var decoded updateEntityResponse
+	err = json.Unmarshal(jsonData, &decoded)
+	require.NoError(t, err)
+
+	assert.Equal(t, "User", decoded.Name)
+	assert.Equal(t, "A platform user", decoded.Description)
+	assert.Len(t, decoded.Aliases, 2)
+	assert.Contains(t, decoded.Aliases, "creator")
+	assert.Contains(t, decoded.Aliases, "host")
+	assert.Len(t, decoded.KeyColumns, 2)
+	assert.Contains(t, decoded.KeyColumns, "user_id")
+	assert.Contains(t, decoded.KeyColumns, "username")
+	assert.True(t, decoded.Created)
+}
+
+// TestDeleteEntityToolRegistration verifies delete_entity tool is registered.
+func TestDeleteEntityToolRegistration(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &EntityToolDeps{
+		Logger: zap.NewNop(),
+	}
+
+	RegisterEntityTools(mcpServer, deps)
+
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+
+	err = json.Unmarshal(resultBytes, &response)
+	require.NoError(t, err)
+
+	// Check that delete_entity is in the tool list
+	foundDeleteEntity := false
+	for _, tool := range response.Result.Tools {
+		if tool.Name == "delete_entity" {
+			foundDeleteEntity = true
+			assert.Contains(t, tool.Description, "delete")
+			assert.Contains(t, tool.Description, "entity")
+		}
+	}
+
+	assert.True(t, foundDeleteEntity, "delete_entity tool should be registered")
+}
+
+// TestDeleteEntityToolStructure tests the delete_entity tool definition structure.
+func TestDeleteEntityToolStructure(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &EntityToolDeps{
+		Logger: zap.NewNop(),
+	}
+
+	RegisterEntityTools(mcpServer, deps)
+
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				InputSchema struct {
+					Type       string                 `json:"type"`
+					Properties map[string]interface{} `json:"properties"`
+					Required   []string               `json:"required"`
+				} `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+
+	err = json.Unmarshal(resultBytes, &response)
+	require.NoError(t, err)
+
+	// Find delete_entity tool
+	var deleteEntityTool *struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		InputSchema struct {
+			Type       string                 `json:"type"`
+			Properties map[string]interface{} `json:"properties"`
+			Required   []string               `json:"required"`
+		} `json:"inputSchema"`
+	}
+
+	for i := range response.Result.Tools {
+		if response.Result.Tools[i].Name == "delete_entity" {
+			deleteEntityTool = &response.Result.Tools[i]
+			break
+		}
+	}
+
+	require.NotNil(t, deleteEntityTool, "delete_entity tool should exist")
+
+	// Verify required parameters
+	assert.Contains(t, deleteEntityTool.InputSchema.Required, "name", "name should be required")
+
+	// Verify properties
+	assert.Contains(t, deleteEntityTool.InputSchema.Properties, "name", "should have name parameter")
+}
+
+// TestDeleteEntityResponse tests the deleteEntityResponse structure.
+func TestDeleteEntityResponse(t *testing.T) {
+	response := deleteEntityResponse{
+		Name:    "InvalidEntity",
+		Deleted: true,
+	}
+
+	// Marshal and unmarshal to verify JSON structure
+	jsonData, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var decoded deleteEntityResponse
+	err = json.Unmarshal(jsonData, &decoded)
+	require.NoError(t, err)
+
+	assert.Equal(t, "InvalidEntity", decoded.Name)
+	assert.True(t, decoded.Deleted)
+}
