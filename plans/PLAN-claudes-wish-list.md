@@ -1,18 +1,23 @@
 # PLAN: Claude's MCP Tool Wishlist
 
 **Author:** Claude (as MCP Client)
-**Date:** 2025-01-05
+**Date:** 2025-01-05 (Updated: 2025-01-08)
 **Status:** Design Proposal
+
+---
 
 ## Executive Summary
 
 This document captures my wishlist as an MCP client after hands-on experience with the ekaya-engine MCP server. The core thesis: **the current tools work, but they're designed for humans managing a system rather than AI agents collaborating with it.**
 
-Three major capabilities would transform this from a query tool into a learning system:
+**Key insight from testing:** *"The AI Data Liaison isn't just answering questions—it's building a curated library of business queries tailored to your domain."*
+
+Four major capabilities would transform this from a query tool into a learning system:
 
 1. **Unified Context Tool** - Progressive disclosure with graceful degradation
-2. **Ontology Contribution** - Let me enhance what I learn
-3. **Query Recommendation** - Let me suggest reusable queries
+2. **Ontology Update Tools** - Let me enhance what I learn (`update_*` with upsert semantics)
+3. **Ontology Questions Workflow** - Let me answer questions the schema can't
+4. **Query Suggestion** - Let me propose reusable queries for approval
 
 ---
 
@@ -23,7 +28,7 @@ Three major capabilities would transform this from a query tool into a learning 
 Currently I call multiple tools to understand a database:
 - `get_ontology(depth=domain)` → business context
 - `get_schema` → table/column details
-- `get_glossary` → business terms
+- `list_glossary` → business terms
 
 This creates three problems:
 1. **Token waste** - Entity descriptions appear in both ontology and schema
@@ -128,118 +133,67 @@ func handleGetContext(ctx, depth, tables, includeRelationships) {
 
 ---
 
-## Part 2: Ontology Contribution Tools
+## Part 2: Ontology Update Tools
 
-### Problem Statement
+### Design Principles
 
-I learn things during queries that the ontology doesn't capture:
-- "Oh, `transaction_state='settled'` means the payment completed"
-- "The `tikr_share` column is the platform's commission"
-- "`visitor` and `host` are the two sides of an engagement"
+1. **`update_*` naming with upsert semantics** - No cognitive overhead deciding "is this new or existing?"
+2. **Separate `delete_*` tools** - Deletion is rare and destructive; it deserves its own verb
+3. **Key identifier is the upsert key** - Entity name, term name, etc.
 
-Currently this knowledge dies with my session. The next Claude instance starts from scratch.
+### 2.1 Entity Management
 
-### Proposed Tools
+#### `update_entity`
 
-#### 2.1 `suggest_knowledge`
-
-Add project-level facts that persist across sessions.
+Create or update entity metadata.
 
 ```
-suggest_knowledge(
-  fact_type: "terminology" | "business_rule" | "enumeration" | "convention",
-  key: string,
-  value: string,
-  context?: string,
-  confidence: "high" | "medium" | "low"
+update_entity(
+  name: string,              // Required - entity name (upsert key)
+  description?: string,      // Entity description
+  aliases?: string[],        // Alternative names
+  key_columns?: string[]     // Important business columns
 )
 ```
 
 **Examples:**
 
 ```json
-// Learning from a query result
+// Add description to existing entity
 {
-  "fact_type": "enumeration",
-  "key": "billing_transactions.transaction_state",
-  "value": "pending, processing, settled, failed, refunded",
-  "context": "Discovered while analyzing transaction flow",
-  "confidence": "high"
+  "name": "User",
+  "description": "Platform user who can act as a host (content creator) or visitor (consumer)"
 }
 
-// Understanding a business term
+// Add aliases discovered during queries
 {
-  "fact_type": "terminology",
-  "key": "tik",
-  "value": "A billing unit representing approximately 6 seconds of engagement time",
-  "context": "Inferred from tiks * 6 ≈ total_duration_s in billing_engagements",
-  "confidence": "medium"
-}
-
-// Documenting a business rule
-{
-  "fact_type": "business_rule",
-  "key": "platform_fee_calculation",
-  "value": "Platform fees are 33% of total_amount, stored in tikr_share column",
-  "context": "Verified: tikr_share / total_amount ≈ 0.33 across all transactions",
-  "confidence": "high"
+  "name": "User",
+  "aliases": ["creator", "host", "visitor"]
 }
 ```
 
-**Storage:** `engine_project_knowledge` table (already exists!)
+**Storage:** `engine_ontology_entities`, `engine_ontology_entity_aliases`, `engine_ontology_entity_key_columns`
 
-**Approval Workflow:**
-- `confidence: high` → Auto-approved, immediately visible
-- `confidence: medium|low` → Queued for human review
-- UI shows pending suggestions for admin approval
+#### `delete_entity`
 
-#### 2.2 `enhance_entity`
-
-Add or update entity metadata.
+Remove an entity that doesn't belong.
 
 ```
-enhance_entity(
-  entity_name: string,
-  enhancement_type: "alias" | "key_column" | "description",
-  value: string | string[],
-  source: "query_learning"
-)
+delete_entity(name: string)
 ```
 
-**Examples:**
+### 2.2 Relationship Management
 
-```json
-// Add an alias I discovered
-{
-  "entity_name": "User",
-  "enhancement_type": "alias",
-  "value": "creator",
-  "source": "query_learning"
-}
+#### `update_relationship`
 
-// Flag an important column
-{
-  "entity_name": "Billing Transaction",
-  "enhancement_type": "key_column",
-  "value": "earned_amount",
-  "source": "query_learning"
-}
-```
-
-**Storage:**
-- Aliases → `engine_ontology_entity_aliases` with `source='query'`
-- Key columns → `engine_ontology_entity_key_columns`
-
-#### 2.3 `enhance_relationship`
-
-Add semantic context to relationships.
+Create or update relationship between entities.
 
 ```
-enhance_relationship(
-  from_entity: string,
-  to_entity: string,
-  association: string,
-  description?: string
+update_relationship(
+  from_entity: string,       // Required - source entity
+  to_entity: string,         // Required - target entity (together form upsert key)
+  description?: string,      // What the relationship means
+  label?: string             // Short label (e.g., "owns", "follows")
 )
 ```
 
@@ -249,55 +203,36 @@ enhance_relationship(
 {
   "from_entity": "Billing Engagement",
   "to_entity": "User",
-  "association": "as visitor",
-  "description": "The user who initiated the engagement and will be charged"
+  "label": "charges",
+  "description": "The visitor (payer) who initiated the engagement and will be charged"
 }
 ```
 
-**Storage:** Updates `engine_entity_relationships.association` and `description` fields.
+**Storage:** `engine_entity_relationships`
 
-### Permission Model
+#### `delete_relationship`
 
-| Tool | User | Agent (API Key) | Auto-Approve |
-|------|------|-----------------|--------------|
-| `suggest_knowledge` | Yes | Yes | High confidence only |
-| `enhance_entity` | Yes | No | Aliases only |
-| `enhance_relationship` | Yes | No | Never |
-
-**Rationale:** Agents can suggest but not directly modify schema semantics. This prevents prompt injection attacks where malicious web content tries to poison the ontology.
-
----
-
-## Part 3: Query Recommendation Tool
-
-### Problem Statement
-
-When I write a useful query, it's ephemeral. The admin must manually:
-1. Copy the SQL
-2. Navigate to Queries page
-3. Add natural language prompt
-4. Define parameters with types
-5. Test to capture output columns
-6. Add constraints
-7. Save
-
-This friction means most useful queries never get saved.
-
-### Proposed Tool
-
-#### `recommend_query`
-
-Suggest a query for approval with full metadata.
+Remove a relationship that doesn't exist.
 
 ```
-recommend_query(
-  name: string,
-  description: string,
-  sql: string,
-  parameters: QueryParameter[],
-  output_columns: OutputColumn[],
-  constraints?: string,
-  example_usage?: string
+delete_relationship(
+  from_entity: string,
+  to_entity: string
+)
+```
+
+### 2.3 Glossary Management
+
+#### `update_glossary_term`
+
+Create or update a business term definition.
+
+```
+update_glossary_term(
+  term: string,              // Required - term name (upsert key)
+  definition?: string,       // What it means
+  sql?: string,              // SQL pattern to calculate it
+  aliases?: string[]         // Alternative names (AOV, Average Order Value, etc.)
 )
 ```
 
@@ -305,79 +240,550 @@ recommend_query(
 
 ```json
 {
-  "name": "Top hosts by revenue",
-  "description": "Returns hosts ranked by total earnings with transaction counts",
-  "sql": "SELECT payee_user_id, payee_username, COUNT(*) as transactions, SUM(earned_amount) / 100.0 as total_earned_usd FROM billing_transactions WHERE deleted_at IS NULL AND created_at >= {{start_date}} AND created_at < {{end_date}} GROUP BY payee_user_id, payee_username ORDER BY total_earned_usd DESC LIMIT {{limit}}",
-  "parameters": [
-    { "name": "start_date", "type": "date", "description": "Start of date range", "required": true },
-    { "name": "end_date", "type": "date", "description": "End of date range", "required": true },
-    { "name": "limit", "type": "integer", "description": "Max results", "required": false, "default": 10 }
-  ],
-  "output_columns": [
-    { "name": "payee_user_id", "type": "uuid", "description": "Host's user ID" },
-    { "name": "payee_username", "type": "string", "description": "Host's username" },
-    { "name": "transactions", "type": "integer", "description": "Number of completed transactions" },
-    { "name": "total_earned_usd", "type": "decimal", "description": "Total earnings in USD" }
-  ],
-  "constraints": "Only includes transactions with deleted_at IS NULL. Amounts converted from cents to dollars.",
-  "example_usage": "Find top 5 hosts in January 2024: start_date='2024-01-01', end_date='2024-02-01', limit=5"
+  "term": "Platform Take Rate",
+  "definition": "Percentage of transaction value retained by the platform",
+  "sql": "SUM(tikr_share) / NULLIF(SUM(total_amount), 0) * 100",
+  "aliases": ["Take Rate", "Platform Commission Rate"]
 }
 ```
 
-### Workflow
+**Storage:** `engine_glossary_terms` (or existing glossary table)
+
+#### `delete_glossary_term`
+
+Remove a term that's no longer relevant.
 
 ```
-Claude writes ad-hoc query
-        ↓
-Query works well
-        ↓
-Claude calls recommend_query()
-        ↓
-System validates SQL + parameters
-        ↓
-Recommendation stored (is_enabled=false, status='pending')
-        ↓
-Admin sees notification in UI
-        ↓
-Admin reviews, optionally edits, approves
-        ↓
-Query becomes available in list_approved_queries
+delete_glossary_term(term: string)
 ```
 
-### Storage
+### 2.4 Project Knowledge Management
 
-New table or extend `engine_queries`:
+#### `update_project_knowledge`
 
-```sql
--- Option A: New status field
-ALTER TABLE engine_queries ADD COLUMN status VARCHAR DEFAULT 'approved';
--- Values: 'pending_review', 'approved', 'rejected'
+Create or update domain facts that persist across sessions.
 
-ALTER TABLE engine_queries ADD COLUMN recommended_by VARCHAR;
--- Values: 'user', 'agent', 'system'
-
-ALTER TABLE engine_queries ADD COLUMN recommendation_context JSONB;
--- Stores: original conversation context, example usage, etc.
+```
+update_project_knowledge(
+  fact: string,              // Required - the knowledge (upsert key or use fact_id)
+  fact_id?: string,          // Optional - for updating existing fact
+  context?: string,          // How this was discovered
+  category?: string          // "terminology" | "business_rule" | "enumeration" | "convention"
+)
 ```
 
-### UI Changes
+**Examples:**
 
-**Queries Page:**
-- New tab or filter: "Pending Recommendations"
-- Badge showing count of pending recommendations
-- One-click approve/reject with optional edits
-- Show recommendation context (who suggested, when, example usage)
+```json
+// Business rule
+{
+  "fact": "Platform fees are approximately 33% of total_amount, stored in tikr_share column",
+  "context": "Verified: tikr_share / total_amount ≈ 0.33 across all transactions",
+  "category": "business_rule"
+}
+
+// Enumeration
+{
+  "fact": "users.status values: ACTIVE (normal), SUSPENDED (temporary hold), BANNED (permanent)",
+  "context": "Found in user.go lines 45-67",
+  "category": "enumeration"
+}
+
+// Terminology
+{
+  "fact": "A 'tik' is a billing unit representing approximately 6 seconds of engagement time",
+  "context": "Inferred from tiks * 6 ≈ total_duration_s in billing_engagements",
+  "category": "terminology"
+}
+```
+
+**Storage:** `engine_project_knowledge` (already exists)
+
+#### `delete_project_knowledge`
+
+Remove knowledge that's incorrect or outdated.
+
+```
+delete_project_knowledge(fact_id: string)
+```
+
+### 2.5 Column Metadata Management
+
+#### `update_column`
+
+Add or update semantic information about a column.
+
+```
+update_column(
+  table: string,             // Required - table name
+  column: string,            // Required - column name (together form upsert key)
+  description?: string,      // What the column means
+  enum_values?: string[]     // Known enumeration values with descriptions
+)
+```
+
+**Example:**
+
+```json
+{
+  "table": "billing_transactions",
+  "column": "transaction_state",
+  "description": "Current state of the billing transaction lifecycle",
+  "enum_values": [
+    "TRANSACTION_STATE_PENDING - Payment initiated, awaiting processing",
+    "TRANSACTION_STATE_WAITING - Payment captured, in hold period",
+    "TRANSACTION_STATE_ENDED - Session ended, no charges applied",
+    "TRANSACTION_STATE_FAILED - Payment failed"
+  ]
+}
+```
+
+#### `delete_column_metadata`
+
+Clear custom metadata for a column (revert to schema-only).
+
+```
+delete_column_metadata(
+  table: string,
+  column: string
+)
+```
+
+### Tool Summary
+
+| Tool | Purpose | Upsert Key |
+|------|---------|------------|
+| `update_entity` | Entity descriptions, aliases, key columns | `name` |
+| `delete_entity` | Remove entity | `name` |
+| `update_relationship` | Relationship descriptions, labels | `from_entity` + `to_entity` |
+| `delete_relationship` | Remove relationship | `from_entity` + `to_entity` |
+| `update_glossary_term` | Business term definitions, SQL | `term` |
+| `delete_glossary_term` | Remove term | `term` |
+| `update_project_knowledge` | Domain facts, rules, conventions | `fact_id` or content match |
+| `delete_project_knowledge` | Remove knowledge | `fact_id` |
+| `update_column` | Column descriptions, enum values | `table` + `column` |
+| `delete_column_metadata` | Clear column metadata | `table` + `column` |
 
 ---
 
-## Part 4: Additional Improvements
+## Part 3: Ontology Questions Workflow
 
-### 4.1 Query History/Favorites
+### Problem Statement
+
+When the server builds the ontology, it generates questions it cannot answer from the schema or data alone:
+- "What does this enumeration in this column mean?"
+- "What is the business relationship between these entities?"
+- "What does this cryptic column name refer to?"
+
+These questions might be answerable by me (Claude Code) by reviewing source code, documentation, or other assets the user has access to.
+
+### Question States
+
+| State | Meaning | Who Moves It Here |
+|-------|---------|-------------------|
+| `pending` | Not yet attempted | Initial state |
+| `resolved` | Answered, ontology updated | Me, after research |
+| `skipped` | Can't answer now, revisit later | Me |
+| `escalated` | Needs human domain knowledge | Me |
+| `dismissed` | Unanswerable or not worth pursuing | Me or Admin |
+
+### 3.1 List Questions with Filtering
+
+```
+list_ontology_questions(
+  status?: string,           // Filter: "pending" | "resolved" | "skipped" | "escalated" | "dismissed"
+  category?: string,         // Filter: "enumeration" | "relationship" | "business_logic" | "naming" | "calculation"
+  entity?: string,           // Filter: related entity name
+  priority?: string,         // Filter: "high" | "medium" | "low"
+  limit?: number,            // Pagination (default 20)
+  offset?: number            // Pagination offset
+)
+```
+
+**Response:**
+
+```json
+{
+  "questions": [
+    {
+      "id": "uuid",
+      "question": "What do the status values 'ACTIVE', 'SUSPENDED', 'BANNED' mean in users.status?",
+      "category": "enumeration",
+      "priority": "high",
+      "context": {
+        "entity": "User",
+        "table": "users",
+        "column": "status",
+        "observed_values": ["ACTIVE", "SUSPENDED", "BANNED"]
+      },
+      "created_at": "2025-01-05T10:00:00Z"
+    }
+  ],
+  "total_count": 147,
+  "counts_by_status": {
+    "pending": 89,
+    "resolved": 42,
+    "skipped": 8,
+    "escalated": 5,
+    "dismissed": 3
+  }
+}
+```
+
+### Question Categories
+
+| Category | Example Question | Where I'd Look |
+|----------|------------------|----------------|
+| `enumeration` | "What does status='PENDING' mean?" | Model definitions, constants |
+| `relationship` | "How are Channel and Account related?" | Foreign keys, model associations |
+| `business_logic` | "When is a transaction 'available'?" | Service layer, business rules |
+| `naming` | "What does 'tiks' mean?" | Domain glossary, product docs |
+| `calculation` | "How is earned_amount computed?" | Transaction processing code |
+
+### 3.2 Resolve Question
+
+After researching and updating the ontology with what I learned.
+
+```
+resolve_ontology_question(
+  question_id: string,       // Required
+  resolution_notes?: string  // How I found the answer (e.g., "Found in user.go:45-67")
+)
+```
+
+### 3.3 Triage Questions
+
+When I can't answer a question right now or ever.
+
+```
+skip_ontology_question(
+  question_id: string,
+  reason: string             // Why I'm skipping (e.g., "Need access to frontend repo")
+)
+
+escalate_ontology_question(
+  question_id: string,
+  reason: string             // Why human needed (e.g., "Business rule not documented in code")
+)
+
+dismiss_ontology_question(
+  question_id: string,
+  reason: string             // Why not worth answering (e.g., "Column appears unused, legacy")
+)
+```
+
+### My Workflow for Hundreds of Questions
+
+```python
+# 1. Get high-priority pending questions, 20 at a time
+questions = list_ontology_questions(status="pending", priority="high", limit=20)
+
+# 2. For each question:
+for q in questions:
+    # Research using my existing tools (Grep, Read, etc.)
+    results = grep(q.context.column, path="tikr-backend/")
+    code = read("tikr-backend/models/user.go")
+
+    if found_answer:
+        # Update ontology with what I learned (may call multiple update tools)
+        update_column("users", "status", description="...", enum_values=[...])
+        update_project_knowledge(fact="Users are soft-banned via SUSPENDED status...")
+        resolve_ontology_question(q.id, notes="Found in user.go:45-67")
+
+    elif needs_human:
+        escalate_ontology_question(q.id, reason="Business rule, not in code")
+
+    elif might_find_later:
+        skip_ontology_question(q.id, reason="Need access to frontend repo")
+
+    else:
+        dismiss_ontology_question(q.id, reason="Column appears unused")
+
+# 3. Repeat until done or context exhausted
+```
+
+### Why Separate Update + Resolve (Not One Mega-Tool)
+
+Researching one question may teach me **multiple things**:
+- The enum values → `update_column`
+- A business rule → `update_project_knowledge`
+- A relationship I didn't know about → `update_relationship`
+- A glossary term → `update_glossary_term`
+
+Keeping them separate lets me record everything I learn, not just the narrow answer to the question.
+
+---
+
+## Part 4: Query Suggestion Tool
+
+### Problem Statement
+
+When I write a useful query, it's ephemeral. The next session starts from scratch. The admin must manually recreate it as an approved query.
+
+### Understanding Query vs Execute Approved Query
+
+| Tool | Purpose | When to Use |
+|------|---------|-------------|
+| `query` | Ad-hoc SQL execution | Exploration, one-off questions, testing ideas |
+| `execute_approved_query` | Run vetted, parameterized query | Repeatable business questions |
+
+**The value loop:**
+1. I explore with `query` to understand the data
+2. I discover a useful pattern
+3. I call `suggest_approved_query` to codify it
+4. Human approves (or auto-approve if enabled)
+5. Future sessions use `execute_approved_query`
+6. **The system gets smarter over time**
+
+### 4.1 Suggest Approved Query
+
+```
+suggest_approved_query(
+  name: string,              // Required - human-readable name
+  description: string,       // Required - what business question it answers
+  sql: string,               // Required - SQL with {{parameter}} placeholders
+  parameters?: [             // Optional - inferred from SQL if omitted
+    {
+      name: string,          // Matches {{placeholder}} in SQL
+      type: string,          // "string" | "number" | "date" | "boolean"
+      description?: string,  // User-friendly explanation
+      required?: boolean,    // Default true
+      example: any           // Required for dry-run validation (unless has default)
+    }
+  ],
+  output_column_descriptions?: {  // Optional - types auto-detected, descriptions added
+    "column_name": "description"
+  }
+)
+```
+
+**Example:**
+
+```json
+{
+  "name": "Host Revenue by Month",
+  "description": "Total earnings for a specific host broken down by month",
+  "sql": "SELECT date_trunc('month', created_at) as month, SUM(earned_amount) / 100.0 as total_earned_usd, COUNT(*) as transaction_count FROM billing_transactions WHERE payee_username = {{host_username}} AND transaction_state = 'TRANSACTION_STATE_WAITING' AND deleted_at IS NULL GROUP BY 1 ORDER BY 1 DESC",
+  "parameters": [
+    {
+      "name": "host_username",
+      "type": "string",
+      "description": "Host's username",
+      "required": true,
+      "example": "damon"
+    }
+  ],
+  "output_column_descriptions": {
+    "total_earned_usd": "Total earnings in USD (converted from cents)",
+    "transaction_count": "Number of completed transactions"
+  }
+}
+```
+
+### Validation Workflow
+
+With the `example` values provided, the system can:
+
+1. **Validate SQL** - Substitute examples and run `EXPLAIN`
+2. **Detect output columns** - Run the actual query (with `LIMIT 1`) to get column names/types
+3. **Sanity check** - Confirm it returns data (not a guaranteed failure)
+4. **Show preview** - Display sample results to the human reviewer
+
+### Approval Workflow
+
+```
+Claude calls suggest_approved_query()
+        ↓
+System validates SQL with example parameters
+        ↓
+System auto-detects output column types
+        ↓
+Suggestion stored (status='pending')
+        ↓
+Admin notified immediately
+        ↓
+[If auto-approve enabled] → Query immediately available
+[If manual review] → Admin reviews in UI, approves/rejects
+        ↓
+Query appears in list_approved_queries
+```
+
+### Return Value
+
+```json
+{
+  "suggestion_id": "uuid",
+  "status": "pending" | "approved",  // approved if auto-approve enabled
+  "validation": {
+    "sql_valid": true,
+    "dry_run_rows": 3,
+    "detected_output_columns": [
+      {"name": "month", "type": "TIMESTAMP"},
+      {"name": "total_earned_usd", "type": "NUMERIC"},
+      {"name": "transaction_count", "type": "BIGINT"}
+    ]
+  },
+  "approved_query": { ... }  // Only if auto-approved
+}
+```
+
+---
+
+## Part 5: Ontology Probe Tools
+
+**See also:** `PLAN-ontology-probe-tools.md` for detailed design.
+
+### Problem Statement
+
+During ontology extraction, the system collects extensive data:
+- Column statistics (distinct counts, null rates, cardinality)
+- Sample values for enum detection
+- Join analysis (match rates, orphan counts)
+- Joinability classification
+
+This data is either **persisted but not exposed** or **collected but discarded**. I shouldn't have to query the database to learn what's already been learned.
+
+### 5.1 `get_entity` Tool
+
+Before updating an entity, I need to see its current state.
+
+```
+get_entity(name: string)
+```
+
+**Returns:**
+```json
+{
+  "name": "User",
+  "primary_table": "users",
+  "description": "Platform user who can act as host or visitor",
+  "aliases": ["creator", "host", "visitor"],
+  "key_columns": ["user_id", "username", "is_available"],
+  "occurrences": [
+    {"table": "billing_transactions", "column": "payee_user_id", "role": "payee"},
+    {"table": "billing_transactions", "column": "payer_user_id", "role": "payer"}
+  ],
+  "relationships": [
+    {"to": "Account", "label": "belongs to", "cardinality": "N:1"},
+    {"from": "Channel", "label": "owns", "cardinality": "1:N"}
+  ]
+}
+```
+
+### 5.2 `probe_column` Tool
+
+Deep-dive into specific columns without writing SQL.
+
+```
+probe_column(table: string, column: string)
+```
+
+**Returns:**
+```json
+{
+  "table": "users",
+  "column": "status",
+  "statistics": {
+    "distinct_count": 5,
+    "row_count": 1000,
+    "null_rate": 0.02,
+    "cardinality_ratio": 0.005
+  },
+  "joinability": {
+    "is_joinable": false,
+    "reason": "low_cardinality"
+  },
+  "sample_values": ["ACTIVE", "SUSPENDED", "BANNED", "PENDING", "DELETED"],
+  "semantic": {
+    "entity": "User",
+    "role": "status",
+    "enum_labels": {
+      "ACTIVE": "Normal active account",
+      "SUSPENDED": "Temporarily disabled"
+    }
+  }
+}
+```
+
+**Batch variant:** `probe_columns(columns: [{table, column}, ...])`
+
+### 5.3 `probe_relationship` Tool
+
+Deep-dive into relationships with pre-computed metrics.
+
+```
+probe_relationship(from_entity?: string, to_entity?: string)
+```
+
+**Returns:**
+```json
+{
+  "relationships": [{
+    "from_entity": "Account",
+    "to_entity": "User",
+    "cardinality": "N:1",
+    "data_quality": {
+      "match_rate": 0.98,
+      "orphan_count": 10,
+      "source_distinct": 500,
+      "target_distinct": 450
+    }
+  }],
+  "rejected_candidates": [{
+    "from_column": "accounts.created_by",
+    "to_column": "users.user_id",
+    "rejection_reason": "low_match_rate",
+    "match_rate": 0.12
+  }]
+}
+```
+
+### 5.4 Enhance `get_context` with `include` Parameter
+
+```
+get_context(
+  depth: "domain" | "entities" | "tables" | "columns",
+  include?: ["statistics", "sample_values"]  // NEW
+)
+```
+
+When `include` contains `"statistics"`, column responses include:
+- `distinct_count`, `row_count`, `null_rate`, `cardinality_ratio`
+- `is_joinable`, `joinability_reason`
+
+When `include` contains `"sample_values"`, columns with ≤50 distinct values include the actual values.
+
+### 5.5 Extend `update_column` with Entity/Role
+
+```
+update_column(
+  table: string,
+  column: string,
+  description?: string,
+  enum_values?: string[],
+  entity?: string,        // NEW: "User", "Account", etc.
+  role?: string           // NEW: "payee", "visitor", "owner"
+)
+```
+
+---
+
+## Part 6: Additional Improvements
+
+### 6.1 Query History (Lower Priority)
 
 **Problem:** I write the same queries repeatedly across sessions.
 
-**Solution:** New tool `get_query_history` returning recent successful queries:
+**Solution:** New tool `get_query_history`:
 
+```
+get_query_history(
+  limit?: number,            // Default 20
+  hours_back?: number        // Default 24
+)
+```
+
+**Response:**
 ```json
 {
   "recent_queries": [
@@ -391,56 +797,35 @@ ALTER TABLE engine_queries ADD COLUMN recommendation_context JSONB;
 }
 ```
 
-**Privacy:** Only return queries from same user/agent, last 24 hours, de-duplicated.
+### 6.2 Schema Search (Lower Priority)
 
-### 4.2 Schema Search
-
-**Problem:** With 38 tables, finding relevant ones is hard.
+**Problem:** With 38+ tables, finding relevant ones is hard.
 
 **Solution:** New tool `search_schema`:
 
 ```
-search_schema(query: "billing")
-→ Returns tables/columns matching "billing" with relevance ranking
+search_schema(query: string)
 ```
 
-**Implementation:** Full-text search over table names, column names, entity descriptions, aliases.
+Returns tables/columns/entities matching the query with relevance ranking. Uses full-text search (trigram/GIN), not embeddings.
 
-### 4.3 Explain Plan
+### 6.3 Explain Query (Lower Priority)
 
 **Problem:** I write slow queries without knowing.
 
-**Solution:** Enhance `validate` tool or new `explain_query` tool:
+**Solution:** New tool or enhancement to `validate`:
 
 ```
-explain_query(sql: "SELECT ...")
-→ Returns EXPLAIN ANALYZE output with performance hints
+explain_query(sql: string)
 ```
 
-### 4.4 Ontology Extraction Status
-
-**Problem:** I don't know if ontology is being extracted, complete, or failed.
-
-**Solution:** Include in `get_context` response:
-
-```json
-{
-  "ontology_status": "extracting",
-  "extraction_progress": {
-    "current_node": "ColumnEnrichment",
-    "progress": { "current": 15, "total": 38 },
-    "started_at": "2024-01-05T10:00:00Z"
-  }
-}
-```
+Returns `EXPLAIN ANALYZE` output with performance hints.
 
 ---
 
-## Part 5: Architecture Philosophy — No LLM in the Middle
+## Part 7: Architecture Philosophy - No LLM in the Middle
 
 ### The Problem with Traditional AI-to-Database Products
-
-Most AI-to-database solutions follow this pattern:
 
 ```
 User → AI Assistant → [Product's LLM] → SQL → Database → Results
@@ -468,175 +853,14 @@ User → AI Assistant (Claude) → SQL → Ekaya (validate + execute) → Result
 
 **Core principle: Don't put an LLM between Claude and the data. Give Claude the context, let Claude write SQL.**
 
-The MCP server's role shifts from "LLM-powered query generator" to:
-1. **Context provider** — Rich semantic metadata via ontology
-2. **Guardrails** — Validation, conventions enforcement, injection detection
-3. **Coordinator** — Orchestrates advanced MCP features that leverage the CLIENT's intelligence
+### What Makes Ekaya Different
 
-### Why This Works Better
+Most AI-to-database products ask: *"How do we make our LLM write better SQL?"*
 
-| Dimension | Traditional (LLM Middleware) | Ekaya (Smart Context) |
-|-----------|------------------------------|----------------------|
-| Latency | 2x LLM calls | 1x LLM call |
-| SQL accuracy | Dependent on middleware model | Claude's full reasoning |
-| Token throughput | Limited by middleware | Claude's batched inference |
-| Infrastructure | Vector DB + Embeddings + LLM hosting | Postgres only |
-| Context freshness | Embedding lag | Real-time from schema |
-| Reasoning depth | Constrained by middleware context window | Full client context |
+Ekaya asks: *"How do we give the client's LLM everything it needs to write perfect SQL?"*
 
-**Real numbers**: Claude runs ~6x faster (tokens/sec) than typical local models and has superior reasoning for complex joins. Why add a slower, less capable model in the middle?
-
-### MCP Advanced Features: Leveraging Client Intelligence
-
-MCP provides three mechanisms that let a "dumb" server leverage a "smart" client:
-
-#### 5.1 Prompts: Ontology-Driven Query Recipes
-
-The server auto-generates MCP prompts from the ontology — no LLM required, just structured data:
-
-```
-prompts/list → ["revenue_analysis", "user_engagement", "billing_troubleshooting"]
-
-prompts/get("revenue_analysis") →
-{
-  "name": "Revenue Analysis Patterns",
-  "messages": [{
-    "role": "user",
-    "content": "When analyzing revenue in this database:
-
-      **Key tables:** billing_transactions, billing_engagements
-
-      **Conventions:**
-      - Currency stored in cents → divide by 100 for display
-      - Soft delete: always filter deleted_at IS NULL
-      - Host earnings: use earned_amount (not total_amount)
-      - Platform commission: tikr_share column
-
-      **Entity roles:**
-      - visitor_id = the user being charged
-      - host_id = the user receiving payment
-
-      **Common patterns:**
-      - Revenue by host: GROUP BY payee_user_id, payee_username
-      - Time filtering: created_at BETWEEN {{start}} AND {{end}}
-
-      **Pre-approved queries available:**
-      - 'Top hosts by revenue' (params: start_date, end_date, limit)
-      - 'Daily revenue trend' (params: days_back)
-      - 'Revenue by offer type' (params: start_date, end_date)"
-  }]
-}
-```
-
-**Implementation**: Pure template generation from:
-- `engine_ontologies.conventions` → Currency, soft delete rules
-- `engine_ontology_entities` → Entity names and key columns
-- `engine_entity_relationships` → Role semantics (visitor/host)
-- `engine_queries` → Available pre-approved queries
-- `engine_project_knowledge` → Business rules and terminology
-
-**No LLM call**. The prompt is assembled from structured data at request time.
-
-#### 5.2 Elicitation: Rule-Based Disambiguation
-
-When I write an ambiguous query, the server can ask for clarification without using an LLM:
-
-```
-Me: "Show me this quarter's revenue"
-Server: detects date ambiguity, returns elicitation
-
-{
-  "type": "elicitation",
-  "question": "Which quarter did you mean?",
-  "options": [
-    {
-      "label": "Q4 2024 (Oct 1 - Dec 31)",
-      "value": { "start": "2024-10-01", "end": "2025-01-01" }
-    },
-    {
-      "label": "Q1 2025 (Jan 1 - Mar 31)",
-      "value": { "start": "2025-01-01", "end": "2025-04-01" }
-    }
-  ],
-  "context": "Project fiscal year starts October 1"
-}
-
-Me: presents options to user
-User: selects Q4 2024
-Me: re-executes with resolved dates
-```
-
-**Rule-based triggers** (no LLM):
-- Date ranges: "this quarter", "last month", "YTD"
-- Entity ambiguity: Multiple entities with same name
-- Enum values: Unknown status value
-- Fiscal calendar: Project-specific date logic from `engine_project_knowledge`
-
-**Implementation**: Pattern matching on query text + project configuration. Date math, not language understanding.
-
-#### 5.3 Sampling: Server Asks Claude to Do the Work
-
-The most powerful inversion. Instead of running its own LLM, the server asks ME (via MCP sampling) to do reasoning:
-
-**Use case: SQL validation with business context**
-
-```
-Me: calls query("SELECT * FROM users WHERE id = 'abc-123'")
-
-Server: detects potential issue (id vs user_id confusion)
-Server → Me (via sampling request):
-  "The submitted query uses users.id (internal surrogate key, bigint)
-   but the value 'abc-123' looks like a business identifier.
-
-   Schema context:
-   - users.id: bigint, internal primary key
-   - users.user_id: text, business identifier (UUID format)
-
-   Should this query use user_id instead of id?"
-
-Me: "Yes, I meant user_id. The corrected query is:
-     SELECT * FROM users WHERE user_id = 'abc-123'"
-
-Server: executes corrected query, returns results with correction note
-```
-
-**Use case: Query recommendation enrichment**
-
-```
-Me: calls recommend_query(sql="SELECT payee_username, SUM(earned_amount)...")
-
-Server: wants high-quality metadata without its own LLM
-Server → Me (via sampling):
-  "Given this SQL, please provide:
-   1. A concise name (5 words max)
-   2. A description of what business question it answers
-   3. For each parameter, a user-friendly description
-   4. Any constraints or assumptions users should know"
-
-Me: returns structured metadata
-
-Server: stores recommendation with my enrichment
-```
-
-**Use case: Result explanation for non-technical users**
-
-```
-User: "Why is revenue down this month?"
-Me: executes comparison query, gets results
-Me: asks server for explanation help via sampling
-
-Server → Me (via sampling):
-  "Given these results and the user's question, explain:
-   - billing_transactions decreased 23% month-over-month
-   - Top host 'damon-and' had 0 transactions (vs 42 last month)
-   - New host signups down 15%
-
-   Provide a business-friendly explanation."
-
-Me: synthesizes explanation for user
-```
-
-**Why this works**: The server contributes structured context (schema, relationships, conventions). I contribute reasoning. Neither needs to duplicate the other's capability.
+- **They bet on their model** — fine-tuning, RAG, prompt engineering
+- **Ekaya bets on context** — rich ontology, structured metadata, MCP features
 
 ### What Ekaya DOESN'T Need
 
@@ -650,206 +874,133 @@ Me: synthesizes explanation for user
 
 **Ekaya needs**: Postgres + structured ontology + MCP server. That's it.
 
-### The Competitive Moat
+---
 
-Other products can copy features. They can't easily copy this architecture because:
+## Part 8: Tool Access Control
 
-1. **They've built on LLM middleware** — Ripping it out means rewriting everything
-2. **They've invested in RAG** — Sunk cost in vector infrastructure
-3. **MCP is new** — Most products don't support advanced features (Prompts, Elicitation, Sampling)
+### Developer Tools vs Business User Tools
 
-Ekaya's architecture is **designed for the AI-native future** where:
-- Client LLMs are fast, cheap, and highly capable
-- Context is more valuable than computation
-- Structured metadata beats fuzzy embeddings
+Not all tools should be available to all users. The admin can control which tools are enabled.
 
-### Implementation: MCP Advanced Features
+**Developer Tools** (ontology updates, questions workflow, probing):
+- `update_entity`, `delete_entity`, `get_entity`
+- `update_relationship`, `delete_relationship`
+- `update_glossary_term`, `delete_glossary_term`
+- `update_project_knowledge`, `delete_project_knowledge`
+- `update_column`, `delete_column_metadata`
+- `probe_column`, `probe_columns`, `probe_relationship`
+- `list_ontology_questions`, `resolve_ontology_question`
+- `skip_ontology_question`, `escalate_ontology_question`, `dismiss_ontology_question`
 
-**Phase 1: Prompts from Ontology**
+**Business User Tools** (query execution):
+- `query`, `sample`, `validate`
+- `list_approved_queries`, `execute_approved_query`
+- `get_context`, `get_glossary_sql`
+- `suggest_approved_query` (if admin enables suggestions from users)
 
-New endpoint: `prompts/list` and `prompts/get`
-
-```go
-// pkg/mcp/prompts/ontology_prompts.go
-
-func GenerateQueryPrompt(ctx context.Context, projectID uuid.UUID, domain string) *mcp.Prompt {
-    // Fetch ontology
-    ontology := ontologyRepo.GetActive(ctx, projectID)
-    entities := entityRepo.GetByDomain(ctx, projectID, domain)
-    queries := queryRepo.ListEnabled(ctx, projectID)
-    knowledge := knowledgeRepo.GetAll(ctx, projectID)
-
-    // Build prompt from structured data (no LLM)
-    return &mcp.Prompt{
-        Name: fmt.Sprintf("%s_patterns", domain),
-        Messages: []mcp.PromptMessage{{
-            Role: "user",
-            Content: buildPromptContent(ontology, entities, queries, knowledge),
-        }},
-    }
-}
-```
-
-**Phase 2: Rule-Based Elicitation**
-
-```go
-// pkg/mcp/elicitation/date_resolver.go
-
-type DateElicitor struct {
-    fiscalYearStart time.Month  // From project_knowledge
-}
-
-func (e *DateElicitor) Resolve(query string) *mcp.Elicitation {
-    if matches := datePatterns.FindStringSubmatch(query); matches != nil {
-        ambiguity := e.detectAmbiguity(matches[1])  // "this quarter", etc.
-        if ambiguity != nil {
-            return &mcp.Elicitation{
-                Question: ambiguity.Question,
-                Options:  ambiguity.Options,
-            }
-        }
-    }
-    return nil
-}
-```
-
-**Phase 3: Sampling Integration**
-
-```go
-// pkg/mcp/sampling/client.go
-
-func (s *SamplingClient) AskClientForHelp(ctx context.Context, prompt string) (string, error) {
-    // MCP sampling request - asks the CLIENT (Claude) to generate a response
-    return s.mcpServer.CreateSamplingRequest(ctx, mcp.SamplingRequest{
-        Messages: []mcp.Message{{Role: "user", Content: prompt}},
-        MaxTokens: 500,
-    })
-}
-```
-
-### Summary: The "No LLM in the Middle" Principle
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         EKAYA PHILOSOPHY                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   ❌  Don't run inference on the server                         │
-│   ❌  Don't embed documents for RAG                             │
-│   ❌  Don't add latency between client and data                 │
-│                                                                 │
-│   ✅  DO provide rich structured context                        │
-│   ✅  DO leverage client LLM via MCP Sampling                   │
-│   ✅  DO use rule-based disambiguation (Elicitation)            │
-│   ✅  DO generate prompts from ontology (not embeddings)        │
-│                                                                 │
-│   The smartest model is already in the conversation.            │
-│   Don't duplicate it. Empower it.                               │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+**Always Available:**
+- `health`, `echo`
 
 ---
 
-## Implementation Priority
+## Part 9: Implementation Priority
 
 ### Phase 1: Foundation (High Impact, Moderate Effort)
 
 1. **`get_context` unified tool** - Consolidates 3 tools, graceful degradation
-2. **`suggest_knowledge`** - Leverages existing `engine_project_knowledge` table
-3. **Ontology status in responses** - Simple addition to existing tools
-4. **MCP Prompts from ontology** - Auto-generate query recipes (no LLM)
+2. **`get_context` with `include` parameter** - Add statistics and sample_values options
+3. **`update_project_knowledge`** - Leverages existing `engine_project_knowledge` table
 
-### Phase 2: Query Intelligence (High Impact, Higher Effort)
+### Phase 2: Probe Tools (High Impact, Low Effort - Data Already Persisted)
 
-5. **`recommend_query`** - Requires UI work for approval flow
-6. **Query history** - New table + tool
-7. **Rule-based Elicitation** - Date disambiguation, entity resolution
+4. **`get_entity`** - Full entity details before updates
+5. **`probe_column`** / **`probe_columns`** - Column statistics and sample values
+6. **`probe_relationship`** - Relationship metrics and cardinality
+7. **Persist sample_values** - Store distinct values during extraction (currently discarded)
 
-### Phase 3: Power Features (Medium Impact)
+### Phase 3: Query Intelligence (High Impact, Higher Effort)
 
-8. **`enhance_entity`** - Alias and key column additions
-9. **`search_schema`** - Full-text search (no embeddings, just trigram/GIN)
-10. **`explain_query`** - Performance insights
+8. **`suggest_approved_query`** - Requires UI work for approval flow
+9. **Query tags/categories** - Add to suggestion and listing
 
-### Phase 4: Advanced MCP Features (Requires Client Support)
+### Phase 4: Ontology Updates (Medium Impact)
 
-11. **MCP Sampling integration** - Server asks client for help
-12. **`enhance_relationship`** - Requires careful permission model
-13. **Query favorites** - User preference storage
+10. **`update_entity`**, **`delete_entity`**
+11. **`update_relationship`**, **`delete_relationship`** (with cardinality)
+12. **`update_glossary_term`**, **`delete_glossary_term`**
+13. **`update_column`**, **`delete_column_metadata`** (with entity/role params)
+
+### Phase 5: Questions Workflow (High Impact, Higher Effort)
+
+14. **`list_ontology_questions`** with filtering and pagination
+15. **`resolve_ontology_question`**
+16. **`skip_ontology_question`**, **`escalate_ontology_question`**, **`dismiss_ontology_question`**
+
+### Phase 6: Power Features (Lower Priority)
+
+17. **`search_schema`** - Full-text search
+18. **`explain_query`** - Performance insights
+19. **`get_query_history`** - Recent queries
 
 ---
 
-## Technical Considerations
+## Part 10: Database Changes
 
-### Backwards Compatibility
+### New Tables
 
-- Keep existing tools (`get_schema`, `get_ontology`, `get_glossary`) working
-- Add deprecation notices in tool descriptions
-- New tools are additive, not replacing
+None required - reuse existing tables.
 
-### Security
+### Schema Changes
 
-- All contribution tools require authentication
-- Agent API keys have limited write access (suggest only, not direct modify)
-- SQL injection detection on all recommended queries
-- Rate limiting on contribution endpoints
-
-### Token Efficiency
-
-The unified `get_context` tool should reduce typical token usage:
-
-| Current Pattern | Tokens | New Pattern | Tokens |
-|-----------------|--------|-------------|--------|
-| `get_ontology(domain)` + `get_schema` | ~9k | `get_context(entities)` | ~3k |
-| `get_schema` + `get_glossary` | ~8.5k | `get_context(tables)` | ~4k |
-
-### Database Changes
-
-**New tables:** None required (reuse existing)
-
-**Schema changes:**
 ```sql
--- engine_queries additions
-ALTER TABLE engine_queries ADD COLUMN status VARCHAR DEFAULT 'approved';
-ALTER TABLE engine_queries ADD COLUMN recommended_by VARCHAR;
-ALTER TABLE engine_queries ADD COLUMN recommendation_context JSONB;
+-- engine_queries additions for suggestion workflow
+ALTER TABLE engine_queries ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'approved';
+-- Values: 'pending', 'approved', 'rejected'
+
+ALTER TABLE engine_queries ADD COLUMN IF NOT EXISTS suggested_by VARCHAR;
+-- Values: 'user', 'agent', 'admin'
+
+ALTER TABLE engine_queries ADD COLUMN IF NOT EXISTS suggestion_context JSONB;
+-- Stores: example usage, validation results, etc.
 
 -- engine_project_knowledge additions
-ALTER TABLE engine_project_knowledge ADD COLUMN confidence VARCHAR DEFAULT 'high';
-ALTER TABLE engine_project_knowledge ADD COLUMN status VARCHAR DEFAULT 'approved';
-ALTER TABLE engine_project_knowledge ADD COLUMN suggested_by VARCHAR;
+ALTER TABLE engine_project_knowledge ADD COLUMN IF NOT EXISTS category VARCHAR;
+-- Values: 'terminology', 'business_rule', 'enumeration', 'convention'
+
+ALTER TABLE engine_project_knowledge ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'manual';
+-- Values: 'manual', 'agent', 'ontology_extraction'
+
+-- engine_ontology_questions (new or extend existing)
+-- Stores questions generated during ontology extraction
+CREATE TABLE IF NOT EXISTS engine_ontology_questions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES engine_projects(id),
+    question TEXT NOT NULL,
+    category VARCHAR NOT NULL,  -- enumeration, relationship, business_logic, naming, calculation
+    priority VARCHAR DEFAULT 'medium',  -- high, medium, low
+    status VARCHAR DEFAULT 'pending',  -- pending, resolved, skipped, escalated, dismissed
+    context JSONB,  -- entity, table, column, observed_values, etc.
+    resolution_notes TEXT,
+    status_reason TEXT,  -- reason for skip/escalate/dismiss
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    resolved_at TIMESTAMPTZ
+);
 ```
 
 ---
 
-## Success Metrics
+## Part 11: Success Metrics
 
 After implementation, measure:
 
-1. **Tool call reduction** - Fewer calls needed per task
-2. **Knowledge accumulation** - Facts added via `suggest_knowledge`
-3. **Query reuse** - Recommended queries that get approved and used
-4. **Token efficiency** - Reduction in context tokens per session
-5. **Time to first query** - How quickly Claude can write correct SQL
-
----
-
-## Appendix: Current Tool Inventory
-
-| Tool | Purpose | Keep/Deprecate |
-|------|---------|----------------|
-| `health` | Health check | Keep |
-| `echo` | Auth testing | Keep |
-| `query` | Execute SQL | Keep |
-| `sample` | Quick preview | Keep |
-| `execute` | DDL/DML | Keep |
-| `validate` | SQL validation | Keep |
-| `get_schema` | Schema + entities | Deprecate → `get_context` |
-| `get_ontology` | Ontology tiers | Deprecate → `get_context` |
-| `get_glossary` | Business terms | Deprecate → `get_context` |
-| `list_approved_queries` | List queries | Keep |
-| `execute_approved_query` | Run query | Keep |
+1. **Zero database probes** - Enum discovery, cardinality checks via probe tools, not SQL
+2. **Knowledge accumulation** - Facts added via `update_project_knowledge`
+3. **Query reuse** - Suggested queries that get approved and used
+4. **Questions resolved** - Percentage of ontology questions answered
+5. **Tool call reduction** - Fewer calls needed per task with `get_context`
+6. **Token efficiency** - Reduction in context tokens per session
+7. **Time to first correct query** - How quickly Claude can write accurate SQL
 
 ---
 
@@ -859,21 +1010,10 @@ The current MCP tools treat me as a **consumer** of a static knowledge base. The
 
 1. **Learn progressively** - Start shallow, go deep only when needed
 2. **Contribute knowledge** - Capture insights that persist
-3. **Suggest improvements** - Recommend queries for the team
+3. **Answer questions** - Bridge the gap between schema and source code
+4. **Suggest queries** - Build a curated library of business queries
 
 The underlying infrastructure already exists (ontology tables, knowledge table, query system). These proposals are about exposing that infrastructure through the MCP interface in a way that makes AI agents first-class participants in the knowledge ecosystem.
-
-### What Makes Ekaya Different
-
-Most AI-to-database products ask: *"How do we make our LLM write better SQL?"*
-
-Ekaya asks: *"How do we give the client's LLM everything it needs to write perfect SQL?"*
-
-This is a fundamentally different bet:
-- **They bet on their model** — fine-tuning, RAG, prompt engineering
-- **Ekaya bets on context** — rich ontology, structured metadata, MCP features
-
-The client LLMs (Claude, GPT-4, Gemini) are getting faster, cheaper, and smarter every quarter. Middleware LLMs add latency and potential errors. The winning architecture minimizes hops between the user's intent and the data.
 
 ### The Vision
 
@@ -883,10 +1023,10 @@ Tomorrow:  Claude + Ekaya = Self-improving knowledge base
 Future:    Claude + Ekaya = The database explains itself
 ```
 
-Ekaya isn't competing to be the best SQL-writing AI. It's competing to be the **best context layer for AI-powered data access**. That's a moat that grows with every ontology extraction, every knowledge suggestion, every approved query.
+Ekaya isn't competing to be the best SQL-writing AI. It's competing to be the **best context layer for AI-powered data access**. That's a moat that grows with every ontology extraction, every knowledge update, every approved query.
 
 ---
 
-*"The best database documentation is the one that writes itself through use."*
+*"The AI Data Liaison isn't just answering questions—it's building a curated library of business queries tailored to your domain."*
 
 *"The smartest model is already in the conversation. Don't duplicate it. Empower it."*
