@@ -464,6 +464,15 @@ func main() {
 	}
 	mcptools.RegisterProbeTools(mcpServer.MCP(), probeToolDeps)
 
+	// Register ontology question tools (for listing and managing questions)
+	questionToolDeps := &mcptools.QuestionToolDeps{
+		DB:               db,
+		MCPConfigService: mcpConfigService,
+		QuestionRepo:     ontologyQuestionRepo,
+		Logger:           logger,
+	}
+	mcptools.RegisterQuestionTools(mcpServer.MCP(), questionToolDeps)
+
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"
 	fileServer := http.FileServer(http.Dir(uiDir))

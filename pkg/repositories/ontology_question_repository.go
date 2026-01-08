@@ -19,6 +19,23 @@ type QuestionCounts struct {
 	Optional int `json:"optional"`
 }
 
+// QuestionListFilters contains filtering and pagination options for listing questions.
+type QuestionListFilters struct {
+	Status   *models.QuestionStatus // Filter by status (nil = all)
+	Category *string                // Filter by category (nil = all)
+	Entity   *string                // Filter by entity in affects (nil = all)
+	Priority *int                   // Filter by priority (nil = all)
+	Limit    int                    // Max number of results (default 20)
+	Offset   int                    // Offset for pagination (default 0)
+}
+
+// QuestionListResult contains paginated question results and counts by status.
+type QuestionListResult struct {
+	Questions      []*models.OntologyQuestion    `json:"questions"`
+	TotalCount     int                           `json:"total_count"`
+	CountsByStatus map[models.QuestionStatus]int `json:"counts_by_status"`
+}
+
 // OntologyQuestionRepository provides data access for ontology questions.
 type OntologyQuestionRepository interface {
 	// Create inserts a new question.
@@ -50,6 +67,9 @@ type OntologyQuestionRepository interface {
 
 	// DeleteByProject deletes all questions for a project.
 	DeleteByProject(ctx context.Context, projectID uuid.UUID) error
+
+	// List returns filtered and paginated questions with counts by status.
+	List(ctx context.Context, projectID uuid.UUID, filters QuestionListFilters) (*QuestionListResult, error)
 }
 
 type ontologyQuestionRepository struct{}
@@ -386,6 +406,150 @@ func (r *ontologyQuestionRepository) DeleteByProject(ctx context.Context, projec
 	}
 
 	return nil
+}
+
+func (r *ontologyQuestionRepository) List(ctx context.Context, projectID uuid.UUID, filters QuestionListFilters) (*QuestionListResult, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	// Build WHERE clause
+	whereClauses := []string{"project_id = $1"}
+	args := []interface{}{projectID}
+	argIdx := 2
+
+	if filters.Status != nil {
+		whereClauses = append(whereClauses, fmt.Sprintf("status = $%d", argIdx))
+		args = append(args, string(*filters.Status))
+		argIdx++
+	}
+
+	if filters.Category != nil {
+		whereClauses = append(whereClauses, fmt.Sprintf("category = $%d", argIdx))
+		args = append(args, *filters.Category)
+		argIdx++
+	}
+
+	if filters.Priority != nil {
+		whereClauses = append(whereClauses, fmt.Sprintf("priority = $%d", argIdx))
+		args = append(args, *filters.Priority)
+		argIdx++
+	}
+
+	if filters.Entity != nil {
+		// Search for entity name in affects.tables array or as source_entity_key
+		whereClauses = append(whereClauses, fmt.Sprintf("(source_entity_key = $%d OR affects::text ILIKE $%d)", argIdx, argIdx+1))
+		args = append(args, *filters.Entity)
+		args = append(args, fmt.Sprintf("%%\"%s\"%%", *filters.Entity))
+		argIdx += 2
+	}
+
+	whereClause := ""
+	if len(whereClauses) > 0 {
+		whereClause = "WHERE " + whereClauses[0]
+		for i := 1; i < len(whereClauses); i++ {
+			whereClause += " AND " + whereClauses[i]
+		}
+	}
+
+	// Get total count with filters
+	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM engine_ontology_questions %s`, whereClause)
+	var totalCount int
+	err := scope.Conn.QueryRow(ctx, countQuery, args...).Scan(&totalCount)
+	if err != nil {
+		return nil, fmt.Errorf("count questions: %w", err)
+	}
+
+	// Get counts by status for all questions (not filtered by status)
+	statusWhereClause := "WHERE project_id = $1"
+	statusArgs := []interface{}{projectID}
+	if filters.Category != nil {
+		statusWhereClause += " AND category = $2"
+		statusArgs = append(statusArgs, *filters.Category)
+	}
+	if filters.Priority != nil {
+		idx := len(statusArgs) + 1
+		statusWhereClause += fmt.Sprintf(" AND priority = $%d", idx)
+		statusArgs = append(statusArgs, *filters.Priority)
+	}
+	if filters.Entity != nil {
+		idx := len(statusArgs) + 1
+		statusWhereClause += fmt.Sprintf(" AND (source_entity_key = $%d OR affects::text ILIKE $%d)", idx, idx+1)
+		statusArgs = append(statusArgs, *filters.Entity)
+		statusArgs = append(statusArgs, fmt.Sprintf("%%\"%s\"%%", *filters.Entity))
+	}
+
+	statusCountQuery := fmt.Sprintf(`
+		SELECT status, COUNT(*)
+		FROM engine_ontology_questions
+		%s
+		GROUP BY status`, statusWhereClause)
+
+	statusRows, err := scope.Conn.Query(ctx, statusCountQuery, statusArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("count by status: %w", err)
+	}
+	defer statusRows.Close()
+
+	countsByStatus := make(map[models.QuestionStatus]int)
+	for statusRows.Next() {
+		var status string
+		var count int
+		if err := statusRows.Scan(&status, &count); err != nil {
+			return nil, fmt.Errorf("scan status count: %w", err)
+		}
+		countsByStatus[models.QuestionStatus(status)] = count
+	}
+	if err := statusRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate status counts: %w", err)
+	}
+
+	// Apply pagination defaults
+	limit := filters.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	offset := filters.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Get paginated questions
+	query := fmt.Sprintf(`
+		SELECT id, project_id, ontology_id, text, reasoning, category,
+		       priority, is_required, affects, source_entity_type, source_entity_key,
+		       status, answer, answered_by, answered_at, created_at, updated_at
+		FROM engine_ontology_questions
+		%s
+		ORDER BY priority ASC, created_at ASC
+		LIMIT $%d OFFSET $%d`, whereClause, argIdx, argIdx+1)
+
+	args = append(args, limit, offset)
+
+	rows, err := scope.Conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list questions: %w", err)
+	}
+	defer rows.Close()
+
+	questions := make([]*models.OntologyQuestion, 0)
+	for rows.Next() {
+		q, err := scanQuestionRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		questions = append(questions, q)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate questions: %w", err)
+	}
+
+	return &QuestionListResult{
+		Questions:      questions,
+		TotalCount:     totalCount,
+		CountsByStatus: countsByStatus,
+	}, nil
 }
 
 // ============================================================================

@@ -1595,7 +1595,76 @@ Not all tools should be available to all users. The admin can control which tool
 
 ### Phase 5: Questions Workflow (High Impact, Higher Effort)
 
-14. **[ ] `list_ontology_questions`** with filtering and pagination
+14. **[x] `list_ontology_questions`** - COMPLETED (2026-01-08): with filtering and pagination
+   - **Commit:** `feat: enable AI agents to discover and filter ontology questions via MCP`
+   - **Implementation:** `pkg/mcp/tools/questions.go` (registerListOntologyQuestionsTool function) + `pkg/mcp/tools/questions_test.go`
+   - **Repository Changes:** Added `List` method to `OntologyQuestionRepository` with `QuestionListFilters` and `QuestionListResult` types (pkg/repositories/ontology_question_repository.go:70-551)
+   - **Registration:** Tool registered in RegisterQuestionTools function (questions.go:32), added to main.go (lines 464-472)
+   - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupDeveloper (line 36)
+   - **Key Features Implemented:**
+     - Filtering by status (pending/skipped/answered/deleted)
+     - Filtering by category (business_rules/relationship/terminology/enumeration/temporal/data_quality)
+     - Filtering by entity (searches in affects.tables and source_entity_key)
+     - Filtering by priority (1-5, where 1=highest)
+     - Pagination with limit (default 20, max 100) and offset (default 0)
+     - Returns questions array with id, question, category, priority, context, created_at
+     - Returns total_count and counts_by_status (aggregates by status for all matching questions)
+     - All filters are optional and can be combined
+   - **Testing:** Comprehensive unit tests covering tool structure, registration, response structure, filtering logic
+   - **Tool Group:** ToolGroupDeveloper (available when Developer Tools enabled)
+   - **Response Format:**
+     ```json
+     {
+       "questions": [
+         {
+           "id": "uuid",
+           "question": "What does status='ACTIVE' mean?",
+           "category": "enumeration",
+           "priority": 1,
+           "status": "pending",
+           "context": {
+             "tables": ["users"],
+             "columns": ["users.status"]
+           },
+           "created_at": "2025-01-05T10:00:00Z",
+           "is_required": true
+         }
+       ],
+       "total_count": 147,
+       "counts_by_status": {
+         "pending": 89,
+         "skipped": 8,
+         "answered": 42,
+         "deleted": 3
+       }
+     }
+     ```
+   - **Tool Parameters:**
+     - `status` (optional): Filter by status value
+     - `category` (optional): Filter by category value
+     - `entity` (optional): Filter by entity name in affects
+     - `priority` (optional): Filter by priority (1-5)
+     - `limit` (optional): Max results, default 20, max 100
+     - `offset` (optional): Pagination offset, default 0
+   - **Repository Implementation:**
+     - Dynamic WHERE clause building based on provided filters
+     - Separate query for total count with filters applied
+     - Status counts query excludes status filter to show all status counts
+     - Entity filter uses source_entity_key exact match OR affects JSONB text search
+     - Results ordered by priority ASC, created_at ASC
+     - Pagination applied after filtering
+   - **Architecture Notes:**
+     - Uses QuestionToolDeps (DB, MCPConfigService, QuestionRepo, Logger)
+     - Access control via checkQuestionToolEnabled (validates Developer Tools enabled)
+     - Mock repository implementation in tests for full filtering and pagination coverage
+     - Error handling returns descriptive errors for invalid filter values
+   - **Next Session Notes:**
+     - The tool now enables batch processing of pending questions by priority
+     - AI agents can filter questions by category to focus on specific types (e.g., enumerations)
+     - Status counts allow dashboard display of question progress
+     - Entity filtering enables focused work on specific entities
+     - Pagination supports handling hundreds of questions efficiently
+     - **WHY this tool exists:** During ontology extraction, the system generates hundreds of questions that AI agents can help answer by researching code, documentation, and schemas. Without this tool, agents cannot discover and filter these questions efficiently. With this tool, agents can batch-process questions by category (e.g., all enumeration questions), priority (high-priority first), or entity (focus on specific tables). The counts_by_status provide visibility into overall progress. This tool is the foundation for the Questions Workflow (Part 3 of the plan), enabling agents to systematically improve ontology quality by answering outstanding questions.
 15. **[ ] `resolve_ontology_question`**
 16. **[ ] `skip_ontology_question`**, **[ ] `escalate_ontology_question`**, **[ ] `dismiss_ontology_question`**
 
