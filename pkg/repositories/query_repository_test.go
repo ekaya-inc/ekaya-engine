@@ -1281,3 +1281,149 @@ func TestQueryRepository_OutputColumnsAndConstraints(t *testing.T) {
 		t.Errorf("expected updated constraints '%s', got '%s'", newConstraints, *updated.Constraints)
 	}
 }
+
+func TestQueryRepository_ListEnabledByTags(t *testing.T) {
+	tc := setupQueryTest(t)
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Clean up any existing queries before test
+	tc.cleanup()
+
+	// Create test queries with different tags
+	query1 := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Billing revenue report",
+		SQLQuery:              "SELECT * FROM billing_transactions WHERE total_amount > 0",
+		Dialect:               "postgres",
+		IsEnabled:             true,
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{{Name: "id", Type: "UUID", Description: "Transaction ID"}},
+		Tags:                  []string{"billing", "category:finance", "reporting"},
+		Status:                "approved",
+		UsageCount:            0,
+	}
+
+	query2 := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "User engagement metrics",
+		SQLQuery:              "SELECT user_id, COUNT(*) as session_count FROM sessions GROUP BY user_id",
+		Dialect:               "postgres",
+		IsEnabled:             true,
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{{Name: "user_id", Type: "UUID", Description: "User ID"}},
+		Tags:                  []string{"engagement", "category:analytics", "reporting"},
+		Status:                "approved",
+		UsageCount:            0,
+	}
+
+	query3 := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Disabled query with billing tag",
+		SQLQuery:              "SELECT * FROM billing_transactions WHERE deleted_at IS NOT NULL",
+		Dialect:               "postgres",
+		IsEnabled:             false, // Disabled - should not appear in results
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{{Name: "id", Type: "UUID", Description: "Transaction ID"}},
+		Tags:                  []string{"billing", "admin"},
+		Status:                "approved",
+		UsageCount:            0,
+	}
+
+	query4 := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Query without tags",
+		SQLQuery:              "SELECT NOW()",
+		Dialect:               "postgres",
+		IsEnabled:             true,
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{{Name: "now", Type: "TIMESTAMP", Description: "Current time"}},
+		Tags:                  []string{}, // No tags
+		Status:                "approved",
+		UsageCount:            0,
+	}
+
+	// Create all queries
+	if err := tc.repo.Create(ctx, query1); err != nil {
+		t.Fatalf("Create query1 failed: %v", err)
+	}
+	if err := tc.repo.Create(ctx, query2); err != nil {
+		t.Fatalf("Create query2 failed: %v", err)
+	}
+	if err := tc.repo.Create(ctx, query3); err != nil {
+		t.Fatalf("Create query3 failed: %v", err)
+	}
+	if err := tc.repo.Create(ctx, query4); err != nil {
+		t.Fatalf("Create query4 failed: %v", err)
+	}
+
+	// Test 1: Filter by single tag "billing" - should return query1 only (query3 is disabled)
+	results, err := tc.repo.ListEnabledByTags(ctx, tc.projectID, tc.dsID, []string{"billing"})
+	if err != nil {
+		t.Fatalf("ListEnabledByTags failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 query with tag 'billing', got %d", len(results))
+	}
+	if len(results) > 0 && results[0].NaturalLanguagePrompt != "Billing revenue report" {
+		t.Errorf("expected 'Billing revenue report', got '%s'", results[0].NaturalLanguagePrompt)
+	}
+
+	// Test 2: Filter by single tag "reporting" - should return query1 and query2 (both have reporting tag)
+	results, err = tc.repo.ListEnabledByTags(ctx, tc.projectID, tc.dsID, []string{"reporting"})
+	if err != nil {
+		t.Fatalf("ListEnabledByTags failed: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("expected 2 queries with tag 'reporting', got %d", len(results))
+	}
+
+	// Test 3: Filter by multiple tags (OR logic) - should return queries matching ANY tag
+	results, err = tc.repo.ListEnabledByTags(ctx, tc.projectID, tc.dsID, []string{"billing", "engagement"})
+	if err != nil {
+		t.Fatalf("ListEnabledByTags failed: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("expected 2 queries with tags 'billing' OR 'engagement', got %d", len(results))
+	}
+
+	// Test 4: Filter by tag that doesn't exist - should return empty list
+	results, err = tc.repo.ListEnabledByTags(ctx, tc.projectID, tc.dsID, []string{"nonexistent"})
+	if err != nil {
+		t.Fatalf("ListEnabledByTags failed: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 queries with tag 'nonexistent', got %d", len(results))
+	}
+
+	// Test 5: Empty tag list - should return empty list
+	results, err = tc.repo.ListEnabledByTags(ctx, tc.projectID, tc.dsID, []string{})
+	if err != nil {
+		t.Fatalf("ListEnabledByTags failed: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 queries with empty tag list, got %d", len(results))
+	}
+
+	// Test 6: Verify tags are properly returned in results
+	results, err = tc.repo.ListEnabledByTags(ctx, tc.projectID, tc.dsID, []string{"category:finance"})
+	if err != nil {
+		t.Fatalf("ListEnabledByTags failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 query, got %d", len(results))
+	}
+	if len(results[0].Tags) != 3 {
+		t.Errorf("expected 3 tags, got %d", len(results[0].Tags))
+	}
+	expectedTags := map[string]bool{"billing": true, "category:finance": true, "reporting": true}
+	for _, tag := range results[0].Tags {
+		if !expectedTags[tag] {
+			t.Errorf("unexpected tag: %s", tag)
+		}
+	}
+}

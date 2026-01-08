@@ -1238,7 +1238,51 @@ Not all tools should be available to all users. The admin can control which tool
      - SuggestionContext stores validation metadata as map[string]any with "validation" key
      - Helper functions are internal to queries.go (not exported) to keep MCP tool surface minimal
      - **WHY this tool exists:** AI agents discover useful query patterns during exploration. Without this tool, those patterns are ephemeral - lost when the session ends. This tool captures them for human review and approval, building a curated library of business queries over time. The system gets smarter with each approved suggestion. The validation workflow ensures suggested queries are syntactically valid and executable before being submitted for review.
-9. **[ ] Query tags/categories** - Add to suggestion and listing
+9. **[x] Query tags/categories** - COMPLETED (2026-01-08): Add tagging and categorization support
+   - **Migration:** Added `tags TEXT[]` column to `engine_queries` table with GIN index for array containment queries (migrations/035_query_tags.{up,down}.sql)
+   - **Model Changes:** Added `Tags []string` field to `models.Query` struct (pkg/models/query.go)
+   - **Repository Changes:**
+     - Updated all SQL queries (Create, Update, GetByID, ListByDatasource, ListEnabled) to include tags column
+     - Updated scan functions (scanQuery, scanQueryRow) to scan tags
+     - Added `ListEnabledByTags` method for filtering queries by tags (uses PostgreSQL `&&` array overlap operator)
+     - Tag filtering uses OR logic: queries matching ANY of the provided tags are returned
+   - **Service Changes:**
+     - Added `Tags []string` field to `CreateQueryRequest` (pkg/services/query.go)
+     - Updated `Create` method to ensure tags is never nil (defaults to empty array)
+     - Added `ListEnabledByTags` method to QueryService interface and implementation
+   - **MCP Tool Changes:**
+     - Added `tags` array parameter to `suggest_approved_query` tool (optional)
+     - Added `Tags` field to `approvedQueryInfo` response struct
+     - Added `tags` array parameter to `list_approved_queries` tool for filtering (optional)
+     - Updated list handler to use `ListEnabledByTags` when tags filter is provided
+     - Updated response building to include tags in query info
+   - **Testing:** Added comprehensive integration test `TestQueryRepository_ListEnabledByTags` covering:
+     - Single tag filtering
+     - Multiple tag filtering (OR logic)
+     - Filtering by non-existent tags
+     - Empty tag list handling
+     - Disabled query exclusion
+     - Tag array preservation in results
+   - **Test Updates:** Updated all mock repositories and services to include `ListEnabledByTags` method:
+     - `pkg/services/query_parameterized_test.go` - mockQueryRepository
+     - `pkg/mcp/tools/mocks_test.go` - mockQueryService
+     - `pkg/services/mcp_config_test.go` - mockQueryServiceForMCP
+   - **Design Decision:** Used single `tags` TEXT[] field instead of separate tags/categories for:
+     - Flexibility: Can represent categories as special tags (e.g., "category:billing", "category:analytics")
+     - Simplicity: One column vs two, simpler schema
+     - Ease of querying: PostgreSQL array operations work well for this use case
+     - Natural multi-category support: Queries can belong to multiple categories if needed
+   - **Usage Examples:**
+     - Suggest query with tags: `suggest_approved_query(..., tags: ["billing", "category:finance", "reporting"])`
+     - List queries by tag: `list_approved_queries(tags: ["billing"])` - returns queries with "billing" tag
+     - List queries by multiple tags: `list_approved_queries(tags: ["billing", "engagement"])` - returns queries with ANY of these tags
+   - **WHY this feature exists:** As the approved query library grows, users need ways to organize and find queries. Tags allow flexible categorization by business domain (billing, engagement), use case (reporting, analytics), or custom categories. AI agents can suggest appropriate tags when proposing queries, and users can filter queries by tag when searching for relevant ones. This makes the query library more discoverable and maintainable at scale.
+   - **Next Session Notes:**
+     - All repository and service mocks have been updated to include ListEnabledByTags method
+     - GIN index on tags column enables efficient array containment queries (tags && ARRAY['billing'])
+     - The implementation uses PostgreSQL array overlap operator (&&) for OR logic filtering
+     - Tags default to empty array (never nil) to prevent null-related issues in queries
+     - Future enhancement: UI for managing tags (bulk tagging, tag renaming, tag suggestions)
 
 ### Phase 4: Ontology Updates (Medium Impact)
 

@@ -458,6 +458,10 @@ func (m *mockQueryRepository) ListEnabled(ctx context.Context, projectID, dataso
 	return nil, nil
 }
 
+func (m *mockQueryRepository) ListEnabledByTags(ctx context.Context, projectID, datasourceID uuid.UUID, tags []string) ([]*models.Query, error) {
+	return nil, nil
+}
+
 func (m *mockQueryRepository) UpdateEnabledStatus(ctx context.Context, projectID, queryID uuid.UUID, isEnabled bool) error {
 	return nil
 }

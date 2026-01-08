@@ -99,6 +99,10 @@ func (m *mockQueryService) ListEnabled(ctx context.Context, projectID, datasourc
 	return m.enabledQueries, nil
 }
 
+func (m *mockQueryService) ListEnabledByTags(ctx context.Context, projectID, datasourceID uuid.UUID, tags []string) ([]*models.Query, error) {
+	return m.enabledQueries, nil
+}
+
 func (m *mockQueryService) HasEnabledQueries(ctx context.Context, projectID, datasourceID uuid.UUID) (bool, error) {
 	return len(m.enabledQueries) > 0, nil
 }

@@ -103,6 +103,7 @@ type approvedQueryInfo struct {
 	Parameters    []parameterInfo    `json:"parameters"`
 	OutputColumns []outputColumnInfo `json:"output_columns,omitempty"`
 	Constraints   string             `json:"constraints,omitempty"` // Limitations and assumptions
+	Tags          []string           `json:"tags,omitempty"`        // Tags for organizing queries
 	Dialect       string             `json:"dialect"`
 }
 
@@ -127,7 +128,12 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 		mcp.WithDescription(
 			"List all pre-approved SQL queries available for execution. "+
 				"Returns query metadata including parameters needed for execution. "+
+				"Optionally filter by tags to find queries in specific categories. "+
 				"Use execute_approved_query to run a specific query with parameters.",
+		),
+		mcp.WithArray(
+			"tags",
+			mcp.Description("Optional: Filter queries by tags. Returns queries matching ANY of the provided tags (e.g., [\"billing\", \"category:analytics\"])"),
 		),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -148,8 +154,25 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 			return nil, fmt.Errorf("failed to get default datasource: %w", err)
 		}
 
-		// List enabled queries only
-		queries, err := deps.QueryService.ListEnabled(tenantCtx, projectID, dsID)
+		// Parse optional tags filter
+		var tags []string
+		if args, ok := req.Params.Arguments.(map[string]any); ok {
+			if tagsArray, ok := args["tags"].([]any); ok {
+				for _, tag := range tagsArray {
+					if str, ok := tag.(string); ok {
+						tags = append(tags, str)
+					}
+				}
+			}
+		}
+
+		// List enabled queries (filtered by tags if provided)
+		var queries []*models.Query
+		if len(tags) > 0 {
+			queries, err = deps.QueryService.ListEnabledByTags(tenantCtx, projectID, dsID, tags)
+		} else {
+			queries, err = deps.QueryService.ListEnabled(tenantCtx, projectID, dsID)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to list queries: %w", err)
 		}
@@ -202,6 +225,7 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 				Parameters:    params,
 				OutputColumns: outputCols,
 				Constraints:   constraints,
+				Tags:          q.Tags,
 				Dialect:       q.Dialect,
 			}
 		}
@@ -414,6 +438,10 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			"output_column_descriptions",
 			mcp.Description("Optional descriptions for output columns (e.g., {\"total_earned_usd\": \"Total earnings in USD\"})"),
 		),
+		mcp.WithArray(
+			"tags",
+			mcp.Description("Optional tags for organizing queries (e.g., [\"billing\", \"category:analytics\", \"reporting\"])"),
+		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(false),
@@ -471,6 +499,18 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			}
 		}
 
+		// Parse optional tags
+		var tags []string
+		if args, ok := req.Params.Arguments.(map[string]any); ok {
+			if tagsArray, ok := args["tags"].([]any); ok {
+				for _, tag := range tagsArray {
+					if str, ok := tag.(string); ok {
+						tags = append(tags, str)
+					}
+				}
+			}
+		}
+
 		// Validate SQL and parameters with dry-run execution
 		validationResult, err := validateAndTestQuery(tenantCtx, deps, projectID, dsID, sqlQuery, paramDefs)
 		if err != nil {
@@ -497,6 +537,7 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			IsEnabled:             false, // Start disabled until approved
 			Parameters:            paramDefs,
 			OutputColumns:         outputColumns,
+			Tags:                  tags,
 			Status:                "pending",
 			SuggestedBy:           "agent",
 			SuggestionContext:     suggestionContext,
