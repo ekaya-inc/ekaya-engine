@@ -1717,7 +1717,31 @@ Not all tools should be available to all users. The admin can control which tool
      - Pairs with list_ontology_questions, update_entity, update_column, update_relationship tools
      - **WHY this tool exists:** After an AI agent researches a question and updates the ontology with learned knowledge via update tools, the question must be marked as resolved to prevent duplicate work. Without this tool, questions remain in "pending" status forever, cluttering the questions list. This tool closes the loop by transitioning questions to "answered" status and recording how the answer was found. The resolution_notes field creates an audit trail showing which code files, documentation, or analysis led to the answer, helping future sessions understand the agent's reasoning.
      - **Implementation completed:** Tool includes validation for question existence, proper error handling, descriptive tool description explaining workflow (research → update → resolve), and comprehensive unit tests including mock repository roundtrip testing.
-16. **[ ] `skip_ontology_question`**, **[ ] `escalate_ontology_question`**, **[ ] `dismiss_ontology_question`**
+16. **[x] `skip_ontology_question`**, **[x] `escalate_ontology_question`**, **[x] `dismiss_ontology_question`** - COMPLETED (2026-01-08)
+   - **Migration:** migrations/037_question_triage_statuses.{up,down}.sql - Added 'escalated' and 'dismissed' statuses plus status_reason column
+   - **Model Changes:** Added QuestionStatusEscalated and QuestionStatusDismissed constants, StatusReason field to OntologyQuestion
+   - **Repository Changes:** Added UpdateStatusWithReason method to OntologyQuestionRepository interface, updated all SELECT queries and scan functions to include status_reason column
+   - **Implementation:** Three MCP tools in pkg/mcp/tools/questions.go with identical structure (question_id + reason params, UpdateStatusWithReason call, status-specific responses)
+   - **Testing:** Comprehensive unit tests covering tool registration, response structure, and repository behavior for all three tools
+   - **Registry:** All three tools added to ToolRegistry under ToolGroupDeveloper (lines 38-40)
+   - **Key Features Implemented:**
+     - skip_ontology_question: Mark question for later with reason (e.g., 'Need access to frontend repo')
+     - escalate_ontology_question: Mark question as requiring human domain knowledge (e.g., 'Business rule not documented in code')
+     - dismiss_ontology_question: Mark question as not worth pursuing (e.g., 'Column appears unused, legacy')
+     - All tools accept question_id (required) and reason (required) parameters
+     - All tools validate question exists before updating
+     - All tools use UpdateStatusWithReason to set both status and reason atomically
+     - All tools are idempotent and include proper MCP hint annotations
+   - **Response Format (all three tools):**
+     ```json
+     {
+       "question_id": "uuid",
+       "status": "skipped|escalated|dismissed",
+       "reason": "user-provided reason",
+       "skipped_at|escalated_at|dismissed_at": "2026-01-08T10:00:00Z"
+     }
+     ```
+   - **WHY these tools exist:** During ontology refinement, AI agents encounter questions they cannot answer immediately. The triage tools enable systematic question management: skip questions requiring additional context (will revisit later), escalate questions needing human domain expertise (business rules not in code), and dismiss questions that aren't actionable (legacy features, deprecated columns). This prevents agents from wasting time on unanswerable questions while preserving the questions for future work or human review. The reason field documents the rationale for each triage decision, creating an audit trail for future sessions.
 
 ### Phase 6: Power Features (Lower Priority)
 

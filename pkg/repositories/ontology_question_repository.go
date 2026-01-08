@@ -59,6 +59,9 @@ type OntologyQuestionRepository interface {
 	// UpdateStatus updates the status of a question.
 	UpdateStatus(ctx context.Context, id uuid.UUID, status models.QuestionStatus) error
 
+	// UpdateStatusWithReason updates the status of a question with a reason.
+	UpdateStatusWithReason(ctx context.Context, id uuid.UUID, status models.QuestionStatus, reason string) error
+
 	// SubmitAnswer records an answer for a question.
 	SubmitAnswer(ctx context.Context, id uuid.UUID, answer string, answeredBy *uuid.UUID) error
 
@@ -212,7 +215,7 @@ func (r *ontologyQuestionRepository) GetByID(ctx context.Context, id uuid.UUID) 
 	query := `
 		SELECT id, project_id, ontology_id, text, reasoning, category,
 		       priority, is_required, affects, source_entity_type, source_entity_key,
-		       status, answer, answered_by, answered_at, created_at, updated_at
+		       status, status_reason, answer, answered_by, answered_at, created_at, updated_at
 		FROM engine_ontology_questions
 		WHERE id = $1`
 
@@ -236,7 +239,7 @@ func (r *ontologyQuestionRepository) ListPending(ctx context.Context, projectID 
 	query := `
 		SELECT id, project_id, ontology_id, text, reasoning, category,
 		       priority, is_required, affects, source_entity_type, source_entity_key,
-		       status, answer, answered_by, answered_at, created_at, updated_at
+		       status, status_reason, answer, answered_by, answered_at, created_at, updated_at
 		FROM engine_ontology_questions
 		WHERE project_id = $1 AND status = 'pending'
 		ORDER BY priority ASC, created_at ASC`
@@ -272,7 +275,7 @@ func (r *ontologyQuestionRepository) GetNextPending(ctx context.Context, project
 	query := `
 		SELECT id, project_id, ontology_id, text, reasoning, category,
 		       priority, is_required, affects, source_entity_type, source_entity_key,
-		       status, answer, answered_by, answered_at, created_at, updated_at
+		       status, status_reason, answer, answered_by, answered_at, created_at, updated_at
 		FROM engine_ontology_questions
 		WHERE project_id = $1 AND status = 'pending'
 		ORDER BY is_required DESC, priority ASC, created_at ASC
@@ -334,6 +337,29 @@ func (r *ontologyQuestionRepository) UpdateStatus(ctx context.Context, id uuid.U
 	return nil
 }
 
+func (r *ontologyQuestionRepository) UpdateStatusWithReason(ctx context.Context, id uuid.UUID, status models.QuestionStatus, reason string) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		UPDATE engine_ontology_questions
+		SET status = $2, status_reason = $3, updated_at = NOW()
+		WHERE id = $1`
+
+	result, err := scope.Conn.Exec(ctx, query, id, string(status), nullableString(reason))
+	if err != nil {
+		return fmt.Errorf("update question status with reason: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("question not found: %s", id)
+	}
+
+	return nil
+}
+
 func (r *ontologyQuestionRepository) SubmitAnswer(ctx context.Context, id uuid.UUID, answer string, answeredBy *uuid.UUID) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
@@ -366,7 +392,7 @@ func (r *ontologyQuestionRepository) ListByOntologyID(ctx context.Context, ontol
 	query := `
 		SELECT id, project_id, ontology_id, text, reasoning, category,
 		       priority, is_required, affects, source_entity_type, source_entity_key,
-		       status, answer, answered_by, answered_at, created_at, updated_at
+		       status, status_reason, answer, answered_by, answered_at, created_at, updated_at
 		FROM engine_ontology_questions
 		WHERE ontology_id = $1
 		ORDER BY created_at ASC`
@@ -519,7 +545,7 @@ func (r *ontologyQuestionRepository) List(ctx context.Context, projectID uuid.UU
 	query := fmt.Sprintf(`
 		SELECT id, project_id, ontology_id, text, reasoning, category,
 		       priority, is_required, affects, source_entity_type, source_entity_key,
-		       status, answer, answered_by, answered_at, created_at, updated_at
+		       status, status_reason, answer, answered_by, answered_at, created_at, updated_at
 		FROM engine_ontology_questions
 		%s
 		ORDER BY priority ASC, created_at ASC
@@ -565,14 +591,14 @@ func nullableString(s string) *string {
 
 func scanQuestionRow(row pgx.Row) (*models.OntologyQuestion, error) {
 	var q models.OntologyQuestion
-	var reasoning, category, sourceEntityType, sourceEntityKey, answer *string
+	var reasoning, category, sourceEntityType, sourceEntityKey, statusReason, answer *string
 	var status string
 	var affectsJSON []byte
 
 	err := row.Scan(
 		&q.ID, &q.ProjectID, &q.OntologyID, &q.Text, &reasoning, &category,
 		&q.Priority, &q.IsRequired, &affectsJSON, &sourceEntityType, &sourceEntityKey,
-		&status, &answer, &q.AnsweredBy, &q.AnsweredAt, &q.CreatedAt, &q.UpdatedAt,
+		&status, &statusReason, &answer, &q.AnsweredBy, &q.AnsweredAt, &q.CreatedAt, &q.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -583,6 +609,9 @@ func scanQuestionRow(row pgx.Row) (*models.OntologyQuestion, error) {
 	}
 	if category != nil {
 		q.Category = *category
+	}
+	if statusReason != nil {
+		q.StatusReason = *statusReason
 	}
 	if answer != nil {
 		q.Answer = *answer
@@ -601,14 +630,14 @@ func scanQuestionRow(row pgx.Row) (*models.OntologyQuestion, error) {
 
 func scanQuestionRows(rows pgx.Rows) (*models.OntologyQuestion, error) {
 	var q models.OntologyQuestion
-	var reasoning, category, sourceEntityType, sourceEntityKey, answer *string
+	var reasoning, category, sourceEntityType, sourceEntityKey, statusReason, answer *string
 	var status string
 	var affectsJSON []byte
 
 	err := rows.Scan(
 		&q.ID, &q.ProjectID, &q.OntologyID, &q.Text, &reasoning, &category,
 		&q.Priority, &q.IsRequired, &affectsJSON, &sourceEntityType, &sourceEntityKey,
-		&status, &answer, &q.AnsweredBy, &q.AnsweredAt, &q.CreatedAt, &q.UpdatedAt,
+		&status, &statusReason, &answer, &q.AnsweredBy, &q.AnsweredAt, &q.CreatedAt, &q.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scan question: %w", err)
@@ -619,6 +648,9 @@ func scanQuestionRows(rows pgx.Rows) (*models.OntologyQuestion, error) {
 	}
 	if category != nil {
 		q.Category = *category
+	}
+	if statusReason != nil {
+		q.StatusReason = *statusReason
 	}
 	if answer != nil {
 		q.Answer = *answer

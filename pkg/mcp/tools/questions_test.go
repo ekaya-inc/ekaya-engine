@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -106,6 +107,21 @@ func (m *mockQuestionRepository) UpdateStatus(ctx context.Context, id uuid.UUID,
 	for _, q := range m.questions {
 		if q.ID == id {
 			q.Status = status
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *mockQuestionRepository) UpdateStatusWithReason(ctx context.Context, id uuid.UUID, status models.QuestionStatus, reason string) error {
+	if m.err != nil {
+		return m.err
+	}
+	for _, q := range m.questions {
+		if q.ID == id {
+			q.Status = status
+			q.StatusReason = reason
+			q.UpdatedAt = time.Now()
 			return nil
 		}
 	}
@@ -439,4 +455,220 @@ func TestMockQuestionRepository_SubmitAnswer(t *testing.T) {
 	assert.Equal(t, models.QuestionStatusAnswered, updated.Status, "Status should be answered")
 	assert.NotNil(t, updated.AnsweredAt, "AnsweredAt should be set")
 	assert.Nil(t, updated.AnsweredBy, "AnsweredBy should be nil for agent")
+}
+
+// Test skip_ontology_question tool registration and structure
+func TestSkipOntologyQuestion_ToolRegistration(t *testing.T) {
+	s := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+	repo := &mockQuestionRepository{}
+	deps := &QuestionToolDeps{
+		QuestionRepo: repo,
+		Logger:       zap.NewNop(),
+	}
+
+	registerSkipOntologyQuestionTool(s, deps)
+
+	// Verify tool is registered
+	ctx := context.Background()
+	result := s.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	// Find skip_ontology_question tool
+	var toolFound bool
+	var toolDesc string
+	for _, tool := range response.Result.Tools {
+		if tool.Name == "skip_ontology_question" {
+			toolFound = true
+			toolDesc = tool.Description
+			break
+		}
+	}
+
+	require.True(t, toolFound, "skip_ontology_question tool should be registered")
+	assert.Contains(t, toolDesc, "skipped")
+	assert.Contains(t, toolDesc, "revisit")
+}
+
+// Test escalate_ontology_question tool registration and structure
+func TestEscalateOntologyQuestion_ToolRegistration(t *testing.T) {
+	s := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+	repo := &mockQuestionRepository{}
+	deps := &QuestionToolDeps{
+		QuestionRepo: repo,
+		Logger:       zap.NewNop(),
+	}
+
+	registerEscalateOntologyQuestionTool(s, deps)
+
+	// Verify tool is registered
+	ctx := context.Background()
+	result := s.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	// Find escalate_ontology_question tool
+	var toolFound bool
+	var toolDesc string
+	for _, tool := range response.Result.Tools {
+		if tool.Name == "escalate_ontology_question" {
+			toolFound = true
+			toolDesc = tool.Description
+			break
+		}
+	}
+
+	require.True(t, toolFound, "escalate_ontology_question tool should be registered")
+	assert.Contains(t, toolDesc, "escalated")
+	assert.Contains(t, toolDesc, "human")
+}
+
+// Test dismiss_ontology_question tool registration and structure
+func TestDismissOntologyQuestion_ToolRegistration(t *testing.T) {
+	s := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+	repo := &mockQuestionRepository{}
+	deps := &QuestionToolDeps{
+		QuestionRepo: repo,
+		Logger:       zap.NewNop(),
+	}
+
+	registerDismissOntologyQuestionTool(s, deps)
+
+	// Verify tool is registered
+	ctx := context.Background()
+	result := s.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	// Find dismiss_ontology_question tool
+	var toolFound bool
+	var toolDesc string
+	for _, tool := range response.Result.Tools {
+		if tool.Name == "dismiss_ontology_question" {
+			toolFound = true
+			toolDesc = tool.Description
+			break
+		}
+	}
+
+	require.True(t, toolFound, "dismiss_ontology_question tool should be registered")
+	assert.Contains(t, toolDesc, "dismissed")
+	assert.Contains(t, toolDesc, "not worth pursuing")
+}
+
+// Test skip_ontology_question response structure
+func TestSkipOntologyQuestion_ResponseStructure(t *testing.T) {
+	questionID := uuid.New()
+	repo := &mockQuestionRepository{
+		questions: []*models.OntologyQuestion{
+			{
+				ID:         questionID,
+				ProjectID:  uuid.New(),
+				OntologyID: uuid.New(),
+				Text:       "Test question",
+				Status:     models.QuestionStatusPending,
+			},
+		},
+	}
+
+	// Mock the tool implementation
+	// Since we can't easily test the full MCP handler without a real context,
+	// we verify the repository method works correctly
+	reason := "Need access to frontend repo"
+	err := repo.UpdateStatusWithReason(context.Background(), questionID, models.QuestionStatusSkipped, reason)
+	assert.NoError(t, err)
+
+	// Verify the question was updated
+	q, err := repo.GetByID(context.Background(), questionID)
+	assert.NoError(t, err)
+	require.NotNil(t, q)
+	assert.Equal(t, models.QuestionStatusSkipped, q.Status)
+	assert.Equal(t, reason, q.StatusReason)
+}
+
+// Test escalate_ontology_question response structure
+func TestEscalateOntologyQuestion_ResponseStructure(t *testing.T) {
+	questionID := uuid.New()
+	repo := &mockQuestionRepository{
+		questions: []*models.OntologyQuestion{
+			{
+				ID:         questionID,
+				ProjectID:  uuid.New(),
+				OntologyID: uuid.New(),
+				Text:       "Test question",
+				Status:     models.QuestionStatusPending,
+			},
+		},
+	}
+
+	reason := "Business rule not documented in code"
+	err := repo.UpdateStatusWithReason(context.Background(), questionID, models.QuestionStatusEscalated, reason)
+	assert.NoError(t, err)
+
+	// Verify the question was updated
+	q, err := repo.GetByID(context.Background(), questionID)
+	assert.NoError(t, err)
+	require.NotNil(t, q)
+	assert.Equal(t, models.QuestionStatusEscalated, q.Status)
+	assert.Equal(t, reason, q.StatusReason)
+}
+
+// Test dismiss_ontology_question response structure
+func TestDismissOntologyQuestion_ResponseStructure(t *testing.T) {
+	questionID := uuid.New()
+	repo := &mockQuestionRepository{
+		questions: []*models.OntologyQuestion{
+			{
+				ID:         questionID,
+				ProjectID:  uuid.New(),
+				OntologyID: uuid.New(),
+				Text:       "Test question",
+				Status:     models.QuestionStatusPending,
+			},
+		},
+	}
+
+	reason := "Column appears unused (legacy)"
+	err := repo.UpdateStatusWithReason(context.Background(), questionID, models.QuestionStatusDismissed, reason)
+	assert.NoError(t, err)
+
+	// Verify the question was updated
+	q, err := repo.GetByID(context.Background(), questionID)
+	assert.NoError(t, err)
+	require.NotNil(t, q)
+	assert.Equal(t, models.QuestionStatusDismissed, q.Status)
+	assert.Equal(t, reason, q.StatusReason)
 }

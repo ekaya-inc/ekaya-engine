@@ -35,6 +35,9 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "delete_column_metadata", Description: "Clear custom metadata for a column, reverting to schema-only information", ToolGroup: ToolGroupDeveloper},
 	{Name: "list_ontology_questions", Description: "List ontology questions with filtering by status, category, entity, priority, and pagination", ToolGroup: ToolGroupDeveloper},
 	{Name: "resolve_ontology_question", Description: "Mark an ontology question as resolved after researching and updating the ontology", ToolGroup: ToolGroupDeveloper},
+	{Name: "skip_ontology_question", Description: "Mark a question as skipped for revisiting later (e.g., 'Need access to frontend repo')", ToolGroup: ToolGroupDeveloper},
+	{Name: "escalate_ontology_question", Description: "Mark a question as requiring human domain knowledge (e.g., 'Business rule not documented in code')", ToolGroup: ToolGroupDeveloper},
+	{Name: "dismiss_ontology_question", Description: "Mark a question as not worth pursuing (e.g., 'Column appears unused, legacy')", ToolGroup: ToolGroupDeveloper},
 
 	// Business user tools (approved_queries group)
 	// These read-only query tools enable business users to answer ad-hoc questions
