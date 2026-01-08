@@ -1189,6 +1189,7 @@ Not all tools should be available to all users. The admin can control which tool
 ### Phase 3: Query Intelligence (High Impact, Higher Effort)
 
 8. **[x] `suggest_approved_query`** - COMPLETED (2026-01-08): Allow AI agents to propose reusable queries
+   - **Commit:** `c4c2336 feat: enable AI agents to suggest reusable queries via MCP for human approval`
    - **Implementation:** `pkg/mcp/tools/queries.go` (registerSuggestApprovedQueryTool function) + `pkg/mcp/tools/queries_test.go`
    - **Migration:** Added `status`, `suggested_by`, and `suggestion_context` fields to `engine_queries` table (migrations/034_query_suggestions.{up,down}.sql)
    - **Model Changes:** Added Status, SuggestedBy, SuggestionContext fields to `models.Query` struct (pkg/models/query.go)
