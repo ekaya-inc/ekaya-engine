@@ -976,34 +976,70 @@ Not all tools should be available to all users. The admin can control which tool
 
 ### Phase 2: Probe Tools (High Impact, Low Effort - Data Already Persisted)
 
-4. **`get_entity`** - Full entity details before updates
-5. **`probe_column`** / **`probe_columns`** - Column statistics and sample values
-6. **`probe_relationship`** - Relationship metrics and cardinality
-7. **Persist sample_values** - Store distinct values during extraction (currently discarded)
+4. **[x] `get_entity`** - COMPLETED: Full entity details before updates
+   - **Implementation:** `pkg/mcp/tools/entity.go` + `pkg/mcp/tools/entity_test.go`
+   - **Registration:** Added to main.go with EntityToolDeps (main.go:423-432)
+   - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupDeveloper
+   - **Key Features Implemented:**
+     - Retrieves full entity details by name from active ontology
+     - Returns name, primary_table, description
+     - Includes all aliases from engine_ontology_entity_aliases
+     - Includes all key columns from engine_ontology_entity_key_columns
+     - Builds occurrences from relationships (where entity appears in schema with roles)
+     - Lists relationships to/from other entities with labels and column mappings
+     - Deduplicates occurrences across source and target relationships
+     - Maps entity IDs to names for readable relationship output
+   - **Testing:** Comprehensive unit tests covering response building, empty data, aliases, key columns, occurrences, relationships
+   - **Tool Group:** ToolGroupDeveloper (available when Developer Tools enabled)
+   - **Response Format:**
+     ```json
+     {
+       "name": "User",
+       "primary_table": "users",
+       "description": "Platform user...",
+       "aliases": ["creator", "host"],
+       "key_columns": ["user_id", "username"],
+       "occurrences": [
+         {"table": "billing_transactions", "column": "payee_user_id", "role": "payee"}
+       ],
+       "relationships": [
+         {"direction": "to", "entity": "Account", "label": "owns", "columns": "users.user_id -> accounts.owner_id"}
+       ]
+     }
+     ```
+   - **Next Session Notes:**
+     - The tool queries engine_ontology_entities, engine_ontology_entity_aliases, engine_ontology_entity_key_columns, and engine_entity_relationships
+     - Occurrences are derived from relationships (both source and target) rather than stored separately
+     - Returns error if no active ontology or entity not found
+     - Uses consistent error handling pattern from other MCP tools
+     - Dependencies: OntologyRepo, OntologyEntityRepo, EntityRelationshipRepo
+5. **[ ] `probe_column`** / **`probe_columns`** - Column statistics and sample values
+6. **[ ] `probe_relationship`** - Relationship metrics and cardinality
+7. **[ ] Persist sample_values** - Store distinct values during extraction (currently discarded)
 
 ### Phase 3: Query Intelligence (High Impact, Higher Effort)
 
-8. **`suggest_approved_query`** - Requires UI work for approval flow
-9. **Query tags/categories** - Add to suggestion and listing
+8. **[ ] `suggest_approved_query`** - Requires UI work for approval flow
+9. **[ ] Query tags/categories** - Add to suggestion and listing
 
 ### Phase 4: Ontology Updates (Medium Impact)
 
-10. **`update_entity`**, **`delete_entity`**
-11. **`update_relationship`**, **`delete_relationship`** (with cardinality)
-12. **`update_glossary_term`**, **`delete_glossary_term`**
-13. **`update_column`**, **`delete_column_metadata`** (with entity/role params)
+10. **[ ] `update_entity`**, **[ ] `delete_entity`**
+11. **[ ] `update_relationship`**, **[ ] `delete_relationship`** (with cardinality)
+12. **[ ] `update_glossary_term`**, **[ ] `delete_glossary_term`**
+13. **[ ] `update_column`**, **[ ] `delete_column_metadata`** (with entity/role params)
 
 ### Phase 5: Questions Workflow (High Impact, Higher Effort)
 
-14. **`list_ontology_questions`** with filtering and pagination
-15. **`resolve_ontology_question`**
-16. **`skip_ontology_question`**, **`escalate_ontology_question`**, **`dismiss_ontology_question`**
+14. **[ ] `list_ontology_questions`** with filtering and pagination
+15. **[ ] `resolve_ontology_question`**
+16. **[ ] `skip_ontology_question`**, **[ ] `escalate_ontology_question`**, **[ ] `dismiss_ontology_question`**
 
 ### Phase 6: Power Features (Lower Priority)
 
-17. **`search_schema`** - Full-text search
-18. **`explain_query`** - Performance insights
-19. **`get_query_history`** - Recent queries
+17. **[ ] `search_schema`** - Full-text search
+18. **[ ] `explain_query`** - Performance insights
+19. **[ ] `get_query_history`** - Recent queries
 
 ---
 

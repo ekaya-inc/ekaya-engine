@@ -420,6 +420,17 @@ func main() {
 	}
 	mcptools.RegisterContextTools(mcpServer.MCP(), contextToolDeps)
 
+	// Register entity probe tools (for exploring entity details)
+	entityToolDeps := &mcptools.EntityToolDeps{
+		DB:                     db,
+		MCPConfigService:       mcpConfigService,
+		OntologyRepo:           ontologyRepo,
+		OntologyEntityRepo:     ontologyEntityRepo,
+		EntityRelationshipRepo: entityRelationshipRepo,
+		Logger:                 logger,
+	}
+	mcptools.RegisterEntityTools(mcpServer.MCP(), entityToolDeps)
+
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"
 	fileServer := http.FileServer(http.Dir(uiDir))
