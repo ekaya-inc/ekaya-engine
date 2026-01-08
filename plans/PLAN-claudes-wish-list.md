@@ -978,10 +978,11 @@ Not all tools should be available to all users. The admin can control which tool
 
 ### Phase 2: Probe Tools (High Impact, Low Effort - Data Already Persisted)
 
-4. **[x] `get_entity`** - COMPLETED: Full entity details before updates
+4. **[x] `get_entity`** - COMPLETED (2026-01-08): Full entity details for before making updates
    - **Implementation:** `pkg/mcp/tools/entity.go` + `pkg/mcp/tools/entity_test.go`
    - **Registration:** Added to main.go with EntityToolDeps (main.go:423-432)
    - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupDeveloper
+   - **Commit:** `2fb9e30 feat: enable AI agents to inspect full entity details via get_entity tool`
    - **Key Features Implemented:**
      - Retrieves full entity details by name from active ontology
      - Returns name, primary_table, description
@@ -1015,6 +1016,7 @@ Not all tools should be available to all users. The admin can control which tool
      - Returns error if no active ontology or entity not found
      - Uses consistent error handling pattern from other MCP tools
      - Dependencies: OntologyRepo, OntologyEntityRepo, EntityRelationshipRepo
+     - **WHY this tool exists:** AI agents need to inspect full entity state (aliases, key columns, occurrences, relationships) before making updates with `update_entity` or similar tools. Without this, agents must query multiple tables or risk overwriting existing data. This tool provides complete context in a single call.
 5. **[x] `probe_column`** / **`probe_columns`** - COMPLETED: Column statistics and semantic information
    - **Implementation:** `pkg/mcp/tools/probe.go` + `pkg/mcp/tools/probe_test.go`
    - **Registration:** Added to main.go with ProbeToolDeps (main.go:431-442)
