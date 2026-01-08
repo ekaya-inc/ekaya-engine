@@ -142,8 +142,8 @@ func TestCheckOntologyToolsEnabled(t *testing.T) {
 				Logger: zap.NewNop(),
 			}
 
-			// Call checkOntologyToolsEnabled
-			projectID, tenantCtx, cleanup, err := checkOntologyToolsEnabled(ctx, deps)
+			// Call checkOntologyToolEnabled
+			projectID, tenantCtx, cleanup, err := checkOntologyToolEnabled(ctx, deps, "get_ontology")
 
 			// Verify results
 			require.Error(t, err)

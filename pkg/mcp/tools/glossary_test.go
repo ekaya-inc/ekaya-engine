@@ -180,7 +180,7 @@ func TestCheckGlossaryToolsEnabled(t *testing.T) {
 				Logger: zap.NewNop(),
 			}
 
-			projectID, tenantCtx, cleanup, err := checkGlossaryToolsEnabled(ctx, deps)
+			projectID, tenantCtx, cleanup, err := checkGlossaryToolEnabled(ctx, deps, "list_glossary")
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.errorContains)

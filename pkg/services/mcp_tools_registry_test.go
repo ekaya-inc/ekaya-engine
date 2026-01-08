@@ -31,13 +31,13 @@ func TestGetEnabledTools_DeveloperEnabled(t *testing.T) {
 	}
 	tools := GetEnabledTools(state)
 
-	// Developer mode enables ALL tools (full access for developers)
+	// Developer mode enables most tools, but NOT execute (requires EnableExecute)
 	toolNames := extractToolNames(tools)
 
-	// Developer-specific tools
+	// Developer-specific tools (except execute)
 	assert.Contains(t, toolNames, "echo")
 	assert.Contains(t, toolNames, "get_schema")
-	assert.Contains(t, toolNames, "execute")
+	assert.NotContains(t, toolNames, "execute") // execute requires EnableExecute
 
 	// Business user tools are also available in developer mode
 	assert.Contains(t, toolNames, "query")
@@ -52,12 +52,12 @@ func TestGetEnabledTools_DeveloperEnabled(t *testing.T) {
 	// Health is always included
 	assert.Contains(t, toolNames, "health")
 
-	// Should have all tools from the registry
-	assert.Len(t, tools, len(ToolRegistry))
+	// Should have all tools from the registry except execute
+	assert.Len(t, tools, len(ToolRegistry)-1)
 }
 
 func TestGetEnabledTools_DeveloperWithExecute(t *testing.T) {
-	// Note: EnableExecute flag is now ignored - all tools are available when developer is enabled
+	// With EnableExecute=true, execute tool should be available
 	state := map[string]*models.ToolGroupConfig{
 		ToolGroupDeveloper: {Enabled: true, EnableExecute: true},
 	}
@@ -65,7 +65,7 @@ func TestGetEnabledTools_DeveloperWithExecute(t *testing.T) {
 
 	toolNames := extractToolNames(tools)
 
-	// Developer mode enables ALL tools
+	// Developer mode with EnableExecute enables ALL tools
 	assert.Contains(t, toolNames, "execute")
 	assert.Contains(t, toolNames, "echo")
 	assert.Contains(t, toolNames, "get_schema")
@@ -132,9 +132,9 @@ func TestGetEnabledTools_ForceModeNoLongerHidesDeveloper(t *testing.T) {
 	toolNames := extractToolNames(tools)
 
 	// Both groups' tools should be visible (GetEnabledTools doesn't enforce radio button,
-	// that's done by the state machine)
+	// that's done by the state machine). But execute requires EnableExecute.
 	assert.Contains(t, toolNames, "echo")
-	assert.Contains(t, toolNames, "execute")
+	assert.NotContains(t, toolNames, "execute") // execute requires EnableExecute
 	assert.Contains(t, toolNames, "get_schema")
 	assert.Contains(t, toolNames, "query")
 	assert.Contains(t, toolNames, "sample")
@@ -145,6 +145,9 @@ func TestGetEnabledTools_ForceModeNoLongerHidesDeveloper(t *testing.T) {
 }
 
 func TestGetEnabledTools_AgentToolsEnabled(t *testing.T) {
+	// GetEnabledTools returns tools for USER perspective (not agent).
+	// When only agent_tools is enabled, from user perspective only health is available
+	// since neither developer nor approved_queries is enabled.
 	state := map[string]*models.ToolGroupConfig{
 		ToolGroupAgentTools: {Enabled: true},
 	}
@@ -152,27 +155,15 @@ func TestGetEnabledTools_AgentToolsEnabled(t *testing.T) {
 
 	toolNames := extractToolNames(tools)
 
-	// Agent tools mode: only specific tools available
-	assert.Contains(t, toolNames, "echo")
-	assert.Contains(t, toolNames, "list_approved_queries")
-	assert.Contains(t, toolNames, "execute_approved_query")
+	// From user perspective with only agent_tools enabled, only health is available
 	assert.Contains(t, toolNames, "health")
-
-	// Developer-only tools should NOT be available
-	assert.NotContains(t, toolNames, "query")
-	assert.NotContains(t, toolNames, "sample")
-	assert.NotContains(t, toolNames, "validate")
-	assert.NotContains(t, toolNames, "execute")
-	assert.NotContains(t, toolNames, "get_schema")
-
-	// Ontology tools should NOT be available in agent mode
-	assert.NotContains(t, toolNames, "get_ontology")
-	assert.NotContains(t, toolNames, "list_glossary")
-	assert.NotContains(t, toolNames, "get_glossary_sql")
+	assert.Len(t, tools, 1)
 }
 
-func TestGetEnabledTools_AgentToolsOverridesOthers(t *testing.T) {
-	// Even with developer and approved_queries enabled, agent_tools takes precedence
+func TestGetEnabledTools_AgentToolsDoesNotOverrideForUsers(t *testing.T) {
+	// GetEnabledTools returns tools for USER perspective.
+	// When developer is enabled, users get developer tools regardless of agent_tools.
+	// agent_tools only affects actual agent callers (via GetEnabledToolsForAgent).
 	state := map[string]*models.ToolGroupConfig{
 		ToolGroupDeveloper:       {Enabled: true, EnableExecute: true},
 		ToolGroupApprovedQueries: {Enabled: true},
@@ -182,18 +173,16 @@ func TestGetEnabledTools_AgentToolsOverridesOthers(t *testing.T) {
 
 	toolNames := extractToolNames(tools)
 
-	// Only agent-allowed tools should be visible
+	// From user perspective, developer mode gives ALL tools
 	assert.Contains(t, toolNames, "echo")
-	assert.Contains(t, toolNames, "list_approved_queries")
-	assert.Contains(t, toolNames, "execute_approved_query")
+	assert.Contains(t, toolNames, "execute")
+	assert.Contains(t, toolNames, "get_schema")
+	assert.Contains(t, toolNames, "query")
+	assert.Contains(t, toolNames, "get_ontology")
 	assert.Contains(t, toolNames, "health")
 
-	// Other tools should be hidden
-	assert.NotContains(t, toolNames, "query")
-	assert.NotContains(t, toolNames, "get_ontology")
-
-	// Should have exactly 4 tools
-	assert.Len(t, tools, 4)
+	// Should have all tools from the registry
+	assert.Len(t, tools, len(ToolRegistry))
 }
 
 func TestToolRegistry_ContainsAllExpectedTools(t *testing.T) {
@@ -233,13 +222,13 @@ func TestToolRegistry_AllToolsHaveValidToolGroup(t *testing.T) {
 	}
 }
 
-func TestToolRegistry_ExecuteNoSubOption(t *testing.T) {
-	// With radio button behavior, execute is always included when developer is enabled.
-	// No sub-option is needed.
+func TestToolRegistry_ExecuteHasSubOption(t *testing.T) {
+	// Execute is a dangerous DDL/DML tool that requires explicit opt-in via EnableExecute
+	// even when developer mode is enabled. This provides an extra safety check.
 	for _, tool := range ToolRegistry {
 		if tool.Name == "execute" {
-			assert.Empty(t, tool.SubOption,
-				"execute tool should NOT have a sub-option (always included with developer)")
+			assert.Equal(t, "enableExecute", tool.SubOption,
+				"execute tool should have enableExecute sub-option for safety")
 			return
 		}
 	}

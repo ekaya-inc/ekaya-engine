@@ -1,0 +1,47 @@
+# Quickstart configuration for ekaya-engine
+# Scenario: All-in-one Docker image authenticating through production ekaya-central
+# Use this when: Running the quickstart Docker image for evaluation
+# This file is embedded in the quickstart Docker image
+
+# Server configuration
+port: "3443"
+env: "quickstart"
+auth_server_url: "https://auth.ekaya.ai"
+
+# Authentication configuration
+auth:
+  enable_verification: true
+  jwks_endpoints: "https://auth.ekaya.ai=https://auth.ekaya.ai/.well-known/jwks.json"
+
+# Database configuration
+# Password provided via PGPASSWORD environment variable in Docker image
+database:
+  host: "localhost"
+  port: 5432
+  user: "ekaya"
+  database: "ekaya_engine"
+  max_connections: 10
+  max_idle_conns: 2
+  type: "postgres"
+  ssl_mode: "disable"
+
+# Redis configuration
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+  key_prefix: "project:"
+
+# Datasource configuration
+datasource:
+  connection_ttl_minutes: 5
+  max_connections_per_user: 10
+  pool_max_conns: 5
+  pool_min_conns: 1
+
+# Ontology extraction configuration
+ontology_max_iterations: 3
+ontology_target_confidence: 0.8
+
+# Tool filters (empty list = all tools enabled)
+enabled_tools: []

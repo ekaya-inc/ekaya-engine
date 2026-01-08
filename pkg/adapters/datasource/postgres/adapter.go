@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	"github.com/ekaya-inc/ekaya-engine/pkg/config"
 )
 
 // Adapter provides PostgreSQL connectivity.
@@ -24,16 +25,22 @@ type Adapter struct {
 // buildConnectionString builds a PostgreSQL URL with proper escaping.
 // IMPORTANT: All user-provided fields must be URL-escaped to handle special characters
 // in passwords (e.g., @, /, #, ?) that would otherwise break URL parsing.
+// When running in Docker, localhost is automatically resolved to host.docker.internal
+// to allow connections to databases running on the host machine.
 func buildConnectionString(cfg *Config) string {
 	sslMode := cfg.SSLMode
 	if sslMode == "" {
 		sslMode = "require"
 	}
+
+	// Resolve localhost to host.docker.internal when running in Docker
+	host := config.ResolveHostForDocker(cfg.Host)
+
 	return fmt.Sprintf(
 		"postgresql://%s:%s@%s:%d/%s?sslmode=%s",
 		url.QueryEscape(cfg.User),
 		url.QueryEscape(cfg.Password),
-		cfg.Host,
+		host,
 		cfg.Port,
 		url.QueryEscape(cfg.Database),
 		sslMode,
