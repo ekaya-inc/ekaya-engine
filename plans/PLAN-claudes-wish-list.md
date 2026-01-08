@@ -1381,6 +1381,7 @@ Not all tools should be available to all users. The admin can control which tool
      - Delete is soft delete only (deleted_at timestamp set, reason recorded)
      - **WHY these tools exist:** During ontology extraction and refinement, AI agents discover additional entity metadata that wasn't captured initially. Without these tools, agents must ask humans to manually update the ontology in the UI. With these tools, agents can contribute knowledge directly: add descriptions they infer from documentation, add aliases they discover in queries, add key columns they identify as important. The upsert semantics make updates safe and idempotent. The delete tool removes false positives (e.g., entities incorrectly identified during extraction). Together, these tools enable AI-driven ontology refinement and continuous improvement.
 11. **[x] `update_relationship`**, **[x] `delete_relationship`** - COMPLETED (2026-01-08): AI agents can create/update relationship metadata with upsert semantics and cardinality support
+   - **Commit:** `9339046 feat: enable AI agents to manage entity relationships via MCP tools`
    - **Implementation:** `pkg/mcp/tools/relationship.go` (registerUpdateRelationshipTool, registerDeleteRelationshipTool functions) + `pkg/mcp/tools/relationship_test.go`
    - **Registration:** Tools registered in RegisterRelationshipTools function (relationship.go:33-36), added to main.go (lines 434-443)
    - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupDeveloper (lines 27-28)
@@ -1445,7 +1446,6 @@ Not all tools should be available to all users. The admin can control which tool
    - **Test Changes:** Updated mock repositories in 6 test files to match new EntityRelationshipRepository interface:
      - Added GetByEntityPair, Upsert, Delete methods to all mock implementations
      - Files: column_enrichment_test.go, deterministic_relationship_service_test.go, entity_service_test.go, ontology_context_test.go, ontology_finalization_test.go, relationship_enrichment_test.go
-   - **Commit:** `9339046 feat: enable AI agents to manage entity relationships via MCP tools`
    - **Next Session Notes:**
      - AI agents can now create/update relationships discovered during analysis
      - Agents should ensure both entities exist before creating relationship
