@@ -96,15 +96,37 @@ func DoWithResult[T any](ctx context.Context, cfg *Config, fn func() (T, error))
 	return result, lastErr
 }
 
+// RetryableError is an interface for errors that explicitly declare their retryability.
+// LLM errors implement this interface to provide explicit retry behavior.
+type RetryableError interface {
+	error
+	IsRetryable() bool
+}
+
 // IsRetryable determines if an error is transient and worth retrying
 // This prevents wasting retries on permanent failures (auth errors, bad SQL, etc.)
+//
+// The function checks errors in this order:
+// 1. If the error implements RetryableError interface, use its IsRetryable() method
+// 2. Otherwise, pattern-match against known retryable error strings
 func IsRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
 
+	// Check if the error implements RetryableError interface
+	// This allows LLM errors (and others) to explicitly declare retryability
+	type retryable interface {
+		IsRetryable() bool
+	}
+	if r, ok := err.(retryable); ok {
+		return r.IsRetryable()
+	}
+
+	// Fall back to pattern matching for other error types
 	errStr := strings.ToLower(err.Error())
 	retryablePatterns := []string{
+		// Connection errors
 		"connection refused",
 		"connection reset",
 		"broken pipe",
@@ -116,6 +138,21 @@ func IsRetryable(err error) bool {
 		"i/o timeout",
 		"network is unreachable",
 		"connection timed out",
+		// HTTP status codes
+		"429",
+		"500",
+		"502",
+		"503",
+		"504",
+		// HTTP error messages
+		"rate limit",
+		"service busy",
+		"service unavailable",
+		"too many requests",
+		// GPU/CUDA errors
+		"cuda error",
+		"gpu error",
+		"out of memory",
 	}
 
 	for _, pattern := range retryablePatterns {

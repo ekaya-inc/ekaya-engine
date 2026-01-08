@@ -83,11 +83,27 @@ But `pkg/retry/retry.go` has no jitter, causing thundering herd when multiple DA
 
 ## Implementation Plan
 
-### Phase 1: Unify Error Classification
+### Phase 1: Unify Error Classification ✅ COMPLETED
 
 **Goal:** Create a single source of truth for retryable error detection that handles both connection and HTTP errors.
 
-#### Option A: Extend retry.IsRetryable() (Recommended)
+**Implementation Notes:**
+- Used interface-based approach instead of direct type checking to avoid import cycles
+- Added `RetryableError` interface in `pkg/retry/retry.go` with `IsRetryable() bool` method
+- Updated `llm.Error` to implement this interface (pkg/llm/errors.go:30-35)
+- Extended pattern matching in `retry.IsRetryable()` to include HTTP status codes (429, 500-504), rate limit messages, and GPU/CUDA errors
+- Interface check takes precedence over pattern matching for explicit control
+- Added comprehensive unit tests in `pkg/retry/retry_test.go` (connection, HTTP, GPU errors)
+- Added integration test in `pkg/retry/llm_integration_test.go` verifying LLM errors work correctly with retry logic
+- Pattern matching serves as fallback for wrapped errors or non-LLM error types
+
+**Files Modified:**
+- `pkg/llm/errors.go` - Added IsRetryable() method
+- `pkg/retry/retry.go` - Added RetryableError interface, extended pattern matching
+- `pkg/retry/retry_test.go` - Added tests for HTTP/GPU error patterns and interface-based retryability
+- `pkg/retry/llm_integration_test.go` (new) - Integration tests with actual llm.Error types
+
+#### Option A: Extend retry.IsRetryable() (Recommended) ✅ USED
 
 **File:** `pkg/retry/retry.go`
 

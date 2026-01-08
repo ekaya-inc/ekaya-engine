@@ -27,6 +27,12 @@ func (e *Error) Unwrap() error {
 	return e.Cause
 }
 
+// IsRetryable implements the retry.RetryableError interface.
+// This allows the retry package to check retryability without importing llm.
+func (e *Error) IsRetryable() bool {
+	return e.Retryable
+}
+
 // NewError creates a new structured LLM error.
 func NewError(errType ErrorType, message string, retryable bool, cause error) *Error {
 	return &Error{

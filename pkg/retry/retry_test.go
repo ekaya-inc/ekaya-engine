@@ -364,6 +364,7 @@ func TestIsRetryable(t *testing.T) {
 		expected bool
 	}{
 		{"nil error", nil, false},
+		// Connection errors
 		{"connection refused", errors.New("connection refused"), true},
 		{"Connection Refused (uppercase)", errors.New("Connection Refused"), true},
 		{"connection reset", errors.New("connection reset by peer"), true},
@@ -376,11 +377,75 @@ func TestIsRetryable(t *testing.T) {
 		{"temporary failure", errors.New("temporary failure in name resolution"), true},
 		{"too many connections", errors.New("too many connections"), true},
 		{"deadlock", errors.New("deadlock detected"), true},
+		// HTTP status codes
+		{"HTTP 429", errors.New("HTTP 429 Too Many Requests"), true},
+		{"HTTP 500", errors.New("HTTP 500 Internal Server Error"), true},
+		{"HTTP 502", errors.New("HTTP 502 Bad Gateway"), true},
+		{"HTTP 503", errors.New("HTTP 503 Service Unavailable"), true},
+		{"HTTP 504", errors.New("HTTP 504 Gateway Timeout"), true},
+		// HTTP error messages
+		{"rate limit", errors.New("rate limit exceeded"), true},
+		{"service busy", errors.New("service busy, try again later"), true},
+		{"service unavailable", errors.New("service unavailable"), true},
+		{"too many requests", errors.New("too many requests"), true},
+		// GPU/CUDA errors
+		{"cuda error", errors.New("CUDA error: out of memory"), true},
+		{"gpu error", errors.New("GPU error occurred"), true},
+		{"out of memory", errors.New("out of memory"), true},
+		// Non-retryable errors
 		{"auth error", errors.New("authentication failed"), false},
 		{"permission denied", errors.New("permission denied"), false},
 		{"syntax error", errors.New("syntax error at position 10"), false},
 		{"invalid credentials", errors.New("invalid credentials"), false},
 		{"not found", errors.New("table not found"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := IsRetryable(tt.err)
+			if result != tt.expected {
+				t.Errorf("IsRetryable(%v) = %v, expected %v", tt.err, result, tt.expected)
+			}
+		})
+	}
+}
+
+// mockRetryableError implements the RetryableError interface for testing
+type mockRetryableError struct {
+	message   string
+	retryable bool
+}
+
+func (e *mockRetryableError) Error() string {
+	return e.message
+}
+
+func (e *mockRetryableError) IsRetryable() bool {
+	return e.retryable
+}
+
+func TestIsRetryable_WithRetryableInterface(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "retryable error via interface",
+			err:      &mockRetryableError{message: "transient error", retryable: true},
+			expected: true,
+		},
+		{
+			name:     "non-retryable error via interface",
+			err:      &mockRetryableError{message: "permanent error", retryable: false},
+			expected: false,
+		},
+		{
+			name: "retryable interface takes precedence over pattern matching",
+			// Even though message contains "timeout" (would match pattern), interface says not retryable
+			err:      &mockRetryableError{message: "timeout error", retryable: false},
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {
