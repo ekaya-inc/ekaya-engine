@@ -1258,6 +1258,7 @@ Not all tools should be available to all users. The admin can control which tool
      - Helper functions are internal to queries.go (not exported) to keep MCP tool surface minimal
      - **WHY this tool exists:** AI agents discover useful query patterns during exploration. Without this tool, those patterns are ephemeral - lost when the session ends. This tool captures them for human review and approval, building a curated library of business queries over time. The system gets smarter with each approved suggestion. The validation workflow ensures suggested queries are syntactically valid and executable before being submitted for review.
 9. **[x] Query tags/categories** - COMPLETED (2026-01-08): Add tagging and categorization support
+   - **Commit:** `82b91e2 feat: enable AI agents to organize approved queries with flexible tags`
    - **Migration:** Added `tags TEXT[]` column to `engine_queries` table with GIN index for array containment queries (migrations/035_query_tags.{up,down}.sql)
    - **Model Changes:** Added `Tags []string` field to `models.Query` struct (pkg/models/query.go)
    - **Repository Changes:**
@@ -1302,6 +1303,9 @@ Not all tools should be available to all users. The admin can control which tool
      - The implementation uses PostgreSQL array overlap operator (&&) for OR logic filtering
      - Tags default to empty array (never nil) to prevent null-related issues in queries
      - Future enhancement: UI for managing tags (bulk tagging, tag renaming, tag suggestions)
+     - **Integration with suggest_approved_query:** AI agents can now suggest appropriate tags when proposing queries, and users can filter the query library by tags to find relevant queries efficiently
+     - **Performance:** GIN index enables O(log n) tag containment queries even with thousands of queries
+     - **Flexibility:** Tags can be used for both categorization (category:billing) and freeform labels (high-priority, needs-review, etc.)
 
 ### Phase 4: Ontology Updates (Medium Impact)
 
