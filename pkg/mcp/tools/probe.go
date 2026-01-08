@@ -360,8 +360,10 @@ func probeColumn(ctx context.Context, deps *ProbeToolDeps, projectID uuid.UUID, 
 		}
 	}
 
-	// Note: sample_values are not currently persisted, so we cannot return them
-	// This would require on-demand fetching from the datasource adapter
+	// Add sample values from persisted data (low-cardinality columns ≤50 distinct values)
+	if len(column.SampleValues) > 0 {
+		response.SampleValues = column.SampleValues
+	}
 
 	return response, nil
 }
@@ -372,7 +374,7 @@ type probeColumnResponse struct {
 	Column       string                  `json:"column"`
 	Statistics   *probeColumnStatistics  `json:"statistics,omitempty"`
 	Joinability  *probeColumnJoinability `json:"joinability,omitempty"`
-	SampleValues []string                `json:"sample_values,omitempty"` // Not yet implemented
+	SampleValues []string                `json:"sample_values,omitempty"` // Distinct values for low-cardinality columns (≤50 values)
 	Semantic     *probeColumnSemantic    `json:"semantic,omitempty"`
 	Error        string                  `json:"error,omitempty"` // For batch mode partial failures
 }

@@ -1373,7 +1373,7 @@ func (m *mockTestSchemaRepo) UpdateColumnSelection(ctx context.Context, projectI
 	return nil
 }
 
-func (m *mockTestSchemaRepo) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error {
+func (m *mockTestSchemaRepo) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error {
 	return nil
 }
 

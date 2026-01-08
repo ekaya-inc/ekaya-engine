@@ -1130,7 +1130,43 @@ Not all tools should be available to all users. The admin can control which tool
        2. Filter by entity names if from_entity/to_entity parameters provided
        3. Return rejection_reason and match_rate for each candidate
      - For now, tool provides entity-level relationship visibility which is still valuable for understanding domain model
-7. **[ ] Persist sample_values** - Store distinct values during extraction (currently discarded)
+7. **[x] Persist sample_values** - COMPLETED (2026-01-08): Store distinct values during extraction
+   - **Commit:** `feat: persist sample values for low-cardinality columns during ontology extraction`
+   - **Implementation:** Modified column enrichment workflow to persist sample values for low-cardinality columns (≤50 distinct values)
+   - **Migration:** Added `sample_values TEXT[]` column to `engine_schema_columns` table (migrations/033_add_sample_values.{up,down}.sql)
+   - **Model Changes:**
+     - Added `SampleValues []string` field to `models.SchemaColumn` struct
+     - Field is included in JSON serialization and repository scanning
+   - **Repository Changes:** Updated `SchemaRepository.UpdateColumnStats` signature to accept `sampleValues []string` parameter
+     - Modified all query methods (ListColumnsByTable, ListColumnsByDatasource, GetColumnsByTables, GetColumnByID, GetColumnByName) to SELECT sample_values column
+     - Updated UpsertColumn to preserve sample_values when reactivating soft-deleted columns
+     - Updated scanSchemaColumn, scanSchemaColumnRow, and scanSchemaColumnWithDiscovery to scan sample_values
+   - **Service Changes:**
+     - Added `persistSampleValues` method to `ColumnEnrichmentService` (pkg/services/column_enrichment.go:322-342)
+     - Method iterates over enumSamples map (already collected by `sampleEnumValues`) and persists to database
+     - Calls `schemaRepo.UpdateColumnStats` with nil for other stats to preserve existing values
+     - Uses Warn-level logging for persistence failures (non-fatal, continues with other columns)
+     - Called from `EnrichTable` after saving column details (line 221-228)
+   - **MCP Tool Changes:**
+     - Updated `probe_column` tool (pkg/mcp/tools/probe.go:363-367) to return sample_values from SchemaColumn
+     - Removed obsolete comment about sample_values not being persisted
+     - Updated response struct comment to document sample_values availability for low-cardinality columns
+   - **Testing:**
+     - Updated all repository test mocks to include sample_values parameter
+     - Modified test fixtures across 6 test files to match new signature
+     - All tests pass (repository, service, integration)
+   - **Key Design Decisions:**
+     - Sample values are collected during ontology extraction via existing `sampleEnumValues` method (already identifies low-cardinality columns)
+     - No on-demand fetching required - data is persisted during extraction and retrieved from database
+     - Only columns with ≤50 distinct values get sample_values (enum candidates)
+     - Non-fatal persistence - if UpdateColumnStats fails for one column, others continue
+     - MCP tools (probe_column, get_context) can now return sample_values without datasource adapter access
+   - **Next Session Notes:**
+     - Sample values are only populated for columns that passed enum candidate detection (distinctCount <= 50)
+     - The data is already present from previous ontology extractions - no re-extraction needed
+     - To add sample_values to `get_context` tool responses, modify `buildColumnDetails` in pkg/mcp/tools/context.go to include SampleValues field
+     - The persistence is opportunistic - failures are logged but don't block enrichment workflow
+     - **WHY this change was needed:** Without persisted sample_values, MCP tools like probe_column would need on-demand datasource adapter access to fetch distinct values, adding latency and complexity. Persisting during extraction (when values are already sampled) enables instant retrieval via simple SELECT queries.
 
 ### Phase 3: Query Intelligence (High Impact, Higher Effort)
 

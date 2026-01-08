@@ -44,7 +44,7 @@ type SchemaRepository interface {
 	UpsertColumn(ctx context.Context, column *models.SchemaColumn) error
 	SoftDeleteRemovedColumns(ctx context.Context, tableID uuid.UUID, activeColumnNames []string) (int64, error)
 	UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error
-	UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error
+	UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error
 	UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error
 
 	// Relationships
@@ -392,7 +392,7 @@ func (r *schemaRepository) ListColumnsByTable(ctx context.Context, projectID, ta
 		       is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
 		       default_value, distinct_count, null_count, min_length, max_length,
 		       business_name, description, metadata,
-		       created_at, updated_at
+		       created_at, updated_at, sample_values
 		FROM engine_schema_columns
 		WHERE project_id = $1 AND schema_table_id = $2 AND deleted_at IS NULL
 		ORDER BY ordinal_position`
@@ -431,7 +431,8 @@ func (r *schemaRepository) ListColumnsByDatasource(ctx context.Context, projectI
 		       c.distinct_count, c.null_count, c.min_length, c.max_length,
 		       c.business_name, c.description, c.metadata,
 		       c.created_at, c.updated_at,
-		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at
+		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at,
+		       c.sample_values
 		FROM engine_schema_columns c
 		JOIN engine_schema_tables t ON c.schema_table_id = t.id
 		WHERE c.project_id = $1 AND t.datasource_id = $2
@@ -474,7 +475,7 @@ func (r *schemaRepository) GetColumnsByTables(ctx context.Context, projectID uui
 		       c.is_nullable, c.is_primary_key, c.is_unique, c.is_selected, c.ordinal_position,
 		       c.default_value, c.distinct_count, c.null_count, c.min_length, c.max_length,
 		       c.business_name, c.description, c.metadata,
-		       c.created_at, c.updated_at,
+		       c.created_at, c.updated_at, c.sample_values,
 		       t.table_name
 		FROM engine_schema_columns c
 		JOIN engine_schema_tables t ON c.schema_table_id = t.id
@@ -500,7 +501,7 @@ func (r *schemaRepository) GetColumnsByTables(ctx context.Context, projectID uui
 			&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
 			&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
 			&c.BusinessName, &c.Description, &metadata,
-			&c.CreatedAt, &c.UpdatedAt,
+			&c.CreatedAt, &c.UpdatedAt, &c.SampleValues,
 			&tableName,
 		)
 		if err != nil {
@@ -552,7 +553,7 @@ func (r *schemaRepository) GetColumnByID(ctx context.Context, projectID, columnI
 		       is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
 		       default_value, distinct_count, null_count, min_length, max_length,
 		       business_name, description, metadata,
-		       created_at, updated_at
+		       created_at, updated_at, sample_values
 		FROM engine_schema_columns
 		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
 
@@ -579,7 +580,7 @@ func (r *schemaRepository) GetColumnByName(ctx context.Context, tableID uuid.UUI
 		       is_nullable, is_primary_key, is_unique, is_selected, ordinal_position,
 		       default_value, distinct_count, null_count, min_length, max_length,
 		       business_name, description, metadata,
-		       created_at, updated_at
+		       created_at, updated_at, sample_values
 		FROM engine_schema_columns
 		WHERE schema_table_id = $1 AND column_name = $2 AND deleted_at IS NULL`
 
@@ -632,19 +633,20 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 		  AND column_name = $2
 		  AND project_id = $3
 		  AND deleted_at IS NOT NULL
-		RETURNING id, created_at, is_selected, distinct_count, null_count, business_name, description`
+		RETURNING id, created_at, is_selected, distinct_count, null_count, business_name, description, sample_values`
 
 	var existingID uuid.UUID
 	var existingCreatedAt time.Time
 	var existingIsSelected bool
 	var existingDistinctCount, existingNullCount *int64
 	var existingBusinessName, existingDescription *string
+	var existingSampleValues []string
 	err = scope.Conn.QueryRow(ctx, reactivateQuery,
 		column.SchemaTableID, column.ColumnName, column.ProjectID,
 		column.DataType, column.IsNullable, column.IsPrimaryKey, column.IsUnique, column.OrdinalPosition,
 		column.DefaultValue, metadata, now,
 	).Scan(&existingID, &existingCreatedAt, &existingIsSelected,
-		&existingDistinctCount, &existingNullCount, &existingBusinessName, &existingDescription)
+		&existingDistinctCount, &existingNullCount, &existingBusinessName, &existingDescription, &existingSampleValues)
 
 	if err == nil {
 		// Reactivated soft-deleted record - preserve user metadata and stats
@@ -655,6 +657,7 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 		column.NullCount = existingNullCount
 		column.BusinessName = existingBusinessName
 		column.Description = existingDescription
+		column.SampleValues = existingSampleValues
 		return nil
 	}
 	if err != pgx.ErrNoRows {
@@ -680,7 +683,7 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 			default_value = EXCLUDED.default_value,
 			metadata = EXCLUDED.metadata,
 			updated_at = EXCLUDED.updated_at
-		RETURNING id, created_at, is_selected, distinct_count, null_count, business_name, description`
+		RETURNING id, created_at, is_selected, distinct_count, null_count, business_name, description, sample_values`
 
 	err = scope.Conn.QueryRow(ctx, upsertQuery,
 		column.ID, column.ProjectID, column.SchemaTableID, column.ColumnName, column.DataType,
@@ -688,7 +691,7 @@ func (r *schemaRepository) UpsertColumn(ctx context.Context, column *models.Sche
 		column.DefaultValue, column.DistinctCount, column.NullCount, column.BusinessName, column.Description, metadata,
 		column.CreatedAt, column.UpdatedAt,
 	).Scan(&column.ID, &column.CreatedAt, &column.IsSelected,
-		&column.DistinctCount, &column.NullCount, &column.BusinessName, &column.Description)
+		&column.DistinctCount, &column.NullCount, &column.BusinessName, &column.Description, &column.SampleValues)
 
 	if err != nil {
 		return fmt.Errorf("failed to upsert column: %w", err)
@@ -755,7 +758,7 @@ func (r *schemaRepository) UpdateColumnSelection(ctx context.Context, projectID,
 	return nil
 }
 
-func (r *schemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error {
+func (r *schemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return fmt.Errorf("no tenant scope in context")
@@ -763,10 +766,10 @@ func (r *schemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.
 
 	query := `
 		UPDATE engine_schema_columns
-		SET distinct_count = $2, null_count = $3, min_length = $4, max_length = $5, updated_at = NOW()
+		SET distinct_count = $2, null_count = $3, min_length = $4, max_length = $5, sample_values = $6, updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL`
 
-	result, err := scope.Conn.Exec(ctx, query, columnID, distinctCount, nullCount, minLength, maxLength)
+	result, err := scope.Conn.Exec(ctx, query, columnID, distinctCount, nullCount, minLength, maxLength, sampleValues)
 	if err != nil {
 		return fmt.Errorf("failed to update column stats: %w", err)
 	}
@@ -1547,7 +1550,7 @@ func scanSchemaColumn(rows pgx.Rows) (*models.SchemaColumn, error) {
 		&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
 		&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
 		&c.BusinessName, &c.Description, &metadata,
-		&c.CreatedAt, &c.UpdatedAt,
+		&c.CreatedAt, &c.UpdatedAt, &c.SampleValues,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan column: %w", err)
@@ -1566,7 +1569,7 @@ func scanSchemaColumnRow(row pgx.Row) (*models.SchemaColumn, error) {
 		&c.IsNullable, &c.IsPrimaryKey, &c.IsUnique, &c.IsSelected, &c.OrdinalPosition,
 		&c.DefaultValue, &c.DistinctCount, &c.NullCount, &c.MinLength, &c.MaxLength,
 		&c.BusinessName, &c.Description, &metadata,
-		&c.CreatedAt, &c.UpdatedAt,
+		&c.CreatedAt, &c.UpdatedAt, &c.SampleValues,
 	)
 	if err != nil {
 		return nil, err
@@ -1653,6 +1656,7 @@ func scanSchemaColumnWithDiscovery(rows pgx.Rows) (*models.SchemaColumn, error) 
 		&c.BusinessName, &c.Description, &metadata,
 		&c.CreatedAt, &c.UpdatedAt,
 		&c.RowCount, &c.NonNullCount, &c.IsJoinable, &c.JoinabilityReason, &c.StatsUpdatedAt,
+		&c.SampleValues,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan column with discovery: %w", err)
