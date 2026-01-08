@@ -5,7 +5,7 @@
 # Note: All images are published to GitHub Container Registry
 REGISTRY_URL := ghcr.io/ekaya-inc
 IMAGE_NAME := ekaya-engine
-QUICKSTART_IMAGE_NAME := engine-quickstart
+QUICKSTART_IMAGE_NAME := ekaya-engine-quickstart
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 VERSION_NO_V := $(shell echo $(VERSION) | sed 's/^v//')
 PORT ?= 3443
