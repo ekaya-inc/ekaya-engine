@@ -1825,7 +1825,25 @@ Not all tools should be available to all users. The admin can control which tool
      - Entity search gracefully handles missing ontology (common during initial setup)
      - Match types enable UI to highlight why a result matched (useful for debugging searches)
      - **WHY this tool exists:** With 38+ tables and 300+ columns, finding relevant schema elements is hard. AI agents need to quickly locate tables/columns related to a concept without knowing exact names. This tool enables natural language-style discovery: search "user" to find users table, user_id columns, User entity, and "creator" alias. The relevance ranking surfaces best matches first. This is especially valuable during ontology refinement when agents research questions like "What tables involve billing?" without knowing the exact table names. Unlike `get_context` which returns entire schema, this tool filters to relevant items only.
-18. **[ ] `explain_query`** - Performance insights
+18. **[x] `explain_query`** - Performance insights
+  - **Implementation:**
+    - Added `ExplainQuery` method to `QueryExecutor` interface with `ExplainResult` struct
+    - PostgreSQL implementation uses `EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)`
+    - Parses execution/planning times from plan output
+    - Provides performance hints by analyzing plan patterns (seq scans, joins, buffer usage, etc.)
+  - **Tool Registration:**
+    - Registered as MCP tool in `pkg/mcp/tools/developer.go:registerExplainQueryTool`
+    - Added to ToolRegistry in `pkg/services/mcp_tools_registry.go`
+    - Enabled by default for Developer Tools group
+  - **Testing:**
+    - Comprehensive tests in `pkg/adapters/datasource/postgres/query_executor_test.go`
+    - Tests cover: valid queries, complex queries, invalid SQL, joins, performance hint generation
+  - **Next Session Notes:**
+    - Query EXECUTES when explained (ANALYZE runs the query) - NOT read-only
+    - Hints are heuristic-based (seq scans, missing indexes, sorts, buffer usage)
+    - For write queries, user should be warned that EXPLAIN ANALYZE will execute side effects
+    - Consider adding a `dry_run` parameter to use EXPLAIN without ANALYZE for risky queries
+    - **WHY this tool exists:** Developers need to understand query performance without leaving their AI assistant. Instead of copy-pasting SQL to a database client, running EXPLAIN manually, and interpreting cryptic plan output, this tool provides instant performance insights with actionable optimization hints. This is especially valuable during ontology extraction (complex analytical queries) and when refining approved queries (users want fast queries). The hints help non-DBAs understand common issues like missing indexes or inefficient joins.
 19. **[ ] `get_query_history`** - Recent queries
 
 ---
