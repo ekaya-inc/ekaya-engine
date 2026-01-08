@@ -750,11 +750,11 @@ func TestGetQueryHistory_ParameterDefaults(t *testing.T) {
 			wantHoursBack: 24,
 		},
 		{
-			name:          "custom values within bounds",
-			limitInput:    floatPtr(50),
+			name:           "custom values within bounds",
+			limitInput:     floatPtr(50),
 			hoursBackInput: floatPtr(48),
-			wantLimit:     50,
-			wantHoursBack: 48,
+			wantLimit:      50,
+			wantHoursBack:  48,
 		},
 		{
 			name:          "limit exceeds max (100)",
@@ -763,10 +763,10 @@ func TestGetQueryHistory_ParameterDefaults(t *testing.T) {
 			wantHoursBack: 24,
 		},
 		{
-			name:          "hours_back exceeds max (168)",
+			name:           "hours_back exceeds max (168)",
 			hoursBackInput: floatPtr(200),
-			wantLimit:     20,
-			wantHoursBack: 168,
+			wantLimit:      20,
+			wantHoursBack:  168,
 		},
 		{
 			name:          "limit below min (1)",
@@ -775,10 +775,10 @@ func TestGetQueryHistory_ParameterDefaults(t *testing.T) {
 			wantHoursBack: 24,
 		},
 		{
-			name:          "hours_back below min (1)",
+			name:           "hours_back below min (1)",
 			hoursBackInput: floatPtr(0),
-			wantLimit:     20,
-			wantHoursBack: 1,
+			wantLimit:      20,
+			wantHoursBack:  1,
 		},
 		{
 			name:          "negative limit coerced to 1",
@@ -787,10 +787,10 @@ func TestGetQueryHistory_ParameterDefaults(t *testing.T) {
 			wantHoursBack: 24,
 		},
 		{
-			name:          "negative hours_back coerced to 1",
+			name:           "negative hours_back coerced to 1",
 			hoursBackInput: floatPtr(-5),
-			wantLimit:     20,
-			wantHoursBack: 1,
+			wantLimit:      20,
+			wantHoursBack:  1,
 		},
 	}
 
