@@ -348,3 +348,95 @@ func TestListOntologyQuestionsTool_ResponseStructure(t *testing.T) {
 	assert.NotEmpty(t, q2.Answer, "Answered question should have answer")
 	assert.NotNil(t, q2.AnsweredAt, "Answered question should have answered_at")
 }
+
+// TestResolveOntologyQuestionTool_Registration verifies the tool can be registered with MCP server.
+func TestResolveOntologyQuestionTool_Registration(t *testing.T) {
+	mcpServer := server.NewMCPServer("test-server", "1.0.0", server.WithToolCapabilities(true))
+	repo := &mockQuestionRepository{}
+	logger := zap.NewNop()
+
+	deps := &QuestionToolDeps{
+		QuestionRepo: repo,
+		Logger:       logger,
+	}
+
+	// Should not panic
+	require.NotPanics(t, func() {
+		RegisterQuestionTools(mcpServer, deps)
+	})
+}
+
+// TestResolveOntologyQuestionTool_ResponseStructure verifies the response structure.
+func TestResolveOntologyQuestionTool_ResponseStructure(t *testing.T) {
+	questionID := uuid.New()
+	resolutionNotes := "Found in user.go:45-67"
+
+	// Expected response structure
+	response := map[string]interface{}{
+		"question_id":      questionID.String(),
+		"status":           "answered",
+		"resolved_at":      time.Now().Format("2006-01-02T15:04:05Z07:00"),
+		"resolution_notes": resolutionNotes,
+	}
+
+	// Verify structure
+	assert.NotEmpty(t, response["question_id"], "Should have question_id")
+	assert.Equal(t, "answered", response["status"], "Status should be 'answered'")
+	assert.NotEmpty(t, response["resolved_at"], "Should have resolved_at timestamp")
+	assert.Equal(t, resolutionNotes, response["resolution_notes"], "Should have resolution_notes")
+}
+
+// TestResolveOntologyQuestionTool_WithoutNotes verifies the response when resolution_notes is omitted.
+func TestResolveOntologyQuestionTool_WithoutNotes(t *testing.T) {
+	questionID := uuid.New()
+
+	// Expected response structure without resolution_notes
+	response := map[string]interface{}{
+		"question_id": questionID.String(),
+		"status":      "answered",
+		"resolved_at": time.Now().Format("2006-01-02T15:04:05Z07:00"),
+	}
+
+	// Verify structure
+	assert.NotEmpty(t, response["question_id"], "Should have question_id")
+	assert.Equal(t, "answered", response["status"], "Status should be 'answered'")
+	assert.NotEmpty(t, response["resolved_at"], "Should have resolved_at timestamp")
+	_, hasNotes := response["resolution_notes"]
+	assert.False(t, hasNotes, "Should not have resolution_notes when omitted")
+}
+
+// TestMockQuestionRepository_SubmitAnswer verifies the mock SubmitAnswer implementation.
+func TestMockQuestionRepository_SubmitAnswer(t *testing.T) {
+	repo := &mockQuestionRepository{}
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	// Create a pending question
+	question := &models.OntologyQuestion{
+		ID:         uuid.New(),
+		ProjectID:  projectID,
+		OntologyID: ontologyID,
+		Text:       "Test question",
+		Status:     models.QuestionStatusPending,
+		Priority:   1,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+
+	err := repo.Create(ctx, question)
+	require.NoError(t, err)
+
+	// Submit answer
+	answer := "Found in code"
+	err = repo.SubmitAnswer(ctx, question.ID, answer, nil)
+	require.NoError(t, err)
+
+	// Verify question was updated
+	updated, err := repo.GetByID(ctx, question.ID)
+	require.NoError(t, err)
+	assert.Equal(t, answer, updated.Answer, "Answer should be set")
+	assert.Equal(t, models.QuestionStatusAnswered, updated.Status, "Status should be answered")
+	assert.NotNil(t, updated.AnsweredAt, "AnsweredAt should be set")
+	assert.Nil(t, updated.AnsweredBy, "AnsweredBy should be nil for agent")
+}

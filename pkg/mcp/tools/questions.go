@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -30,6 +31,7 @@ type QuestionToolDeps struct {
 // RegisterQuestionTools registers ontology question MCP tools.
 func RegisterQuestionTools(s *server.MCPServer, deps *QuestionToolDeps) {
 	registerListOntologyQuestionsTool(s, deps)
+	registerResolveOntologyQuestionTool(s, deps)
 }
 
 // checkQuestionToolEnabled verifies a specific question tool is enabled for the project.
@@ -297,6 +299,103 @@ func registerListOntologyQuestionsTool(s *server.MCPServer, deps *QuestionToolDe
 			"questions":        questions,
 			"total_count":      result.TotalCount,
 			"counts_by_status": countsByStatus,
+		}
+
+		jsonResult, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// registerResolveOntologyQuestionTool adds the resolve_ontology_question tool for marking questions as resolved.
+func registerResolveOntologyQuestionTool(s *server.MCPServer, deps *QuestionToolDeps) {
+	tool := mcp.NewTool(
+		"resolve_ontology_question",
+		mcp.WithDescription(
+			"Mark an ontology question as resolved after researching and updating the ontology. "+
+				"Use this after you've used other update tools (update_entity, update_column, update_glossary_term, etc.) "+
+				"to capture the knowledge you learned while answering the question. "+
+				"This transitions the question status from 'pending' to 'answered' and sets the answered_at timestamp. "+
+				"Example workflow: 1) Research code/docs to answer question, 2) Update ontology with learned knowledge via update tools, "+
+				"3) Call resolve_ontology_question with optional resolution_notes explaining how you found the answer.",
+		),
+		mcp.WithString(
+			"question_id",
+			mcp.Required(),
+			mcp.Description("Required - The UUID of the question to mark as resolved"),
+		),
+		mcp.WithString(
+			"resolution_notes",
+			mcp.Description("Optional - Notes explaining how the answer was found (e.g., 'Found in user.go:45-67', 'Inferred from FK constraints')"),
+		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		_, tenantCtx, cleanup, err := checkQuestionToolEnabled(ctx, deps, "resolve_ontology_question")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Extract question_id (required)
+		questionIDStr := getOptionalString(req, "question_id")
+		if questionIDStr == "" {
+			return nil, fmt.Errorf("question_id is required")
+		}
+
+		questionID, err := uuid.Parse(questionIDStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid question_id format: %w", err)
+		}
+
+		// Extract resolution_notes (optional)
+		resolutionNotes := getOptionalString(req, "resolution_notes")
+
+		// Get the question to verify it exists and is pending
+		question, err := deps.QuestionRepo.GetByID(tenantCtx, questionID)
+		if err != nil {
+			deps.Logger.Error("Failed to get question",
+				zap.String("question_id", questionID.String()),
+				zap.Error(err))
+			return nil, fmt.Errorf("failed to get question: %w", err)
+		}
+
+		if question == nil {
+			return nil, fmt.Errorf("question not found: %s", questionID)
+		}
+
+		// Mark question as answered with optional resolution notes
+		// Use nil for answered_by since this is an agent action (not a specific user)
+		if resolutionNotes != "" {
+			err = deps.QuestionRepo.SubmitAnswer(tenantCtx, questionID, resolutionNotes, nil)
+		} else {
+			// If no notes provided, submit a default message
+			err = deps.QuestionRepo.SubmitAnswer(tenantCtx, questionID, "Resolved by AI agent", nil)
+		}
+
+		if err != nil {
+			deps.Logger.Error("Failed to resolve question",
+				zap.String("question_id", questionID.String()),
+				zap.Error(err))
+			return nil, fmt.Errorf("failed to resolve question: %w", err)
+		}
+
+		// Build response
+		response := map[string]interface{}{
+			"question_id": questionID.String(),
+			"status":      "answered",
+			"resolved_at": time.Now().Format("2006-01-02T15:04:05Z07:00"),
+		}
+
+		if resolutionNotes != "" {
+			response["resolution_notes"] = resolutionNotes
 		}
 
 		jsonResult, err := json.Marshal(response)

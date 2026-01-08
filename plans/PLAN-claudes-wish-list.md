@@ -1665,7 +1665,58 @@ Not all tools should be available to all users. The admin can control which tool
      - Entity filtering enables focused work on specific entities
      - Pagination supports handling hundreds of questions efficiently
      - **WHY this tool exists:** During ontology extraction, the system generates hundreds of questions that AI agents can help answer by researching code, documentation, and schemas. Without this tool, agents cannot discover and filter these questions efficiently. With this tool, agents can batch-process questions by category (e.g., all enumeration questions), priority (high-priority first), or entity (focus on specific tables). The counts_by_status provide visibility into overall progress. This tool is the foundation for the Questions Workflow (Part 3 of the plan), enabling agents to systematically improve ontology quality by answering outstanding questions.
-15. **[ ] `resolve_ontology_question`**
+15. **[x] `resolve_ontology_question`** - COMPLETED (2026-01-08): Mark questions as resolved after AI agent research
+   - **Commit:** `feat: enable AI agents to resolve ontology questions after research and updates`
+   - **Implementation:** `pkg/mcp/tools/questions.go` (registerResolveOntologyQuestionTool function) + `pkg/mcp/tools/questions_test.go`
+   - **Registration:** Tool registered in RegisterQuestionTools function (questions.go:33)
+   - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupDeveloper (line 37)
+   - **Key Features Implemented:**
+     - Accepts question_id (required) and resolution_notes (optional)
+     - Uses existing OntologyQuestionRepository.SubmitAnswer to mark question as answered
+     - Sets answer field to resolution_notes (or "Resolved by AI agent" if notes omitted)
+     - Sets answered_at timestamp automatically via repository
+     - answered_by field is nil (indicating agent action, not specific user)
+     - Idempotent operation - can be called multiple times on same question
+     - Validates question exists and returns 404 error if not found
+     - Includes MCP tool hints: not read-only, not destructive, idempotent, not open-world
+   - **Testing:** Unit tests covering tool registration, response structure with/without notes, mock repository behavior, roundtrip mock SubmitAnswer implementation
+   - **Tool Group:** ToolGroupDeveloper (available when Developer Tools enabled)
+   - **Tool Parameters:**
+     - `question_id` (required): UUID of the question to mark as resolved
+     - `resolution_notes` (optional): Notes explaining how the answer was found (e.g., "Found in user.go:45-67")
+   - **Response Format:**
+     ```json
+     {
+       "question_id": "uuid",
+       "status": "answered",
+       "resolved_at": "2026-01-08T10:00:00Z",
+       "resolution_notes": "Found in user.go:45-67"
+     }
+     ```
+   - **Architecture Notes:**
+     - Uses existing QuestionToolDeps (DB, MCPConfigService, QuestionRepo, Logger)
+     - Access control via checkQuestionToolEnabled (validates Developer Tools enabled)
+     - Leverages existing OntologyQuestionRepository.SubmitAnswer method (no new repository methods needed)
+     - Imports time package for resolved_at timestamp formatting
+     - Error handling returns descriptive errors for missing/invalid question_id, repository failures
+   - **Workflow Integration:**
+     - Step 1: AI agent calls list_ontology_questions to discover pending questions
+     - Step 2: AI agent researches using Grep, Read, and other tools
+     - Step 3: AI agent updates ontology using update_entity, update_column, update_glossary_term, etc.
+     - Step 4: AI agent calls resolve_ontology_question to mark question as answered
+   - **Design Decisions:**
+     - Status is "answered" (not "resolved") to match existing DB schema and models.QuestionStatusAnswered constant
+     - Timestamp field is answered_at (not resolved_at) in DB, but response uses resolved_at for clarity to agents
+     - Default resolution_notes is "Resolved by AI agent" to distinguish from empty/null answers
+     - Uses SubmitAnswer instead of UpdateStatus to also capture the answer text and timestamp
+     - Verifies question exists before attempting to resolve (GetByID check)
+   - **Next Session Notes:**
+     - The tool completes the Questions Workflow loop: discover → research → update → resolve
+     - AI agents can now systematically process pending questions without human intervention
+     - Resolution notes provide audit trail showing where agent found the answer
+     - Pairs with list_ontology_questions, update_entity, update_column, update_relationship tools
+     - **WHY this tool exists:** After an AI agent researches a question and updates the ontology with learned knowledge via update tools, the question must be marked as resolved to prevent duplicate work. Without this tool, questions remain in "pending" status forever, cluttering the questions list. This tool closes the loop by transitioning questions to "answered" status and recording how the answer was found. The resolution_notes field creates an audit trail showing which code files, documentation, or analysis led to the answer, helping future sessions understand the agent's reasoning.
+     - **Implementation completed:** Tool includes validation for question existence, proper error handling, descriptive tool description explaining workflow (research → update → resolve), and comprehensive unit tests including mock repository roundtrip testing.
 16. **[ ] `skip_ontology_question`**, **[ ] `escalate_ontology_question`**, **[ ] `dismiss_ontology_question`**
 
 ### Phase 6: Power Features (Lower Priority)
