@@ -969,4 +969,3 @@ func TestDefaultConfig_HasMaxSameErrorType(t *testing.T) {
 		t.Errorf("expected MaxSameErrorType=5, got %d", cfg.MaxSameErrorType)
 	}
 }
-

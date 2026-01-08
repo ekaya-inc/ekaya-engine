@@ -122,12 +122,12 @@ func TestDoIfRetryable_WithLLMError(t *testing.T) {
 func TestDoIfRetryable_LLMErrorEscalation(t *testing.T) {
 	t.Run("escalates after repeated 503 errors", func(t *testing.T) {
 		cfg := &retry.Config{
-			MaxRetries:       10,                      // Allow many retries
-			InitialDelay:     1,                       // Fast for testing
-			MaxDelay:         10,                      // Fast for testing
-			Multiplier:       2.0,                     //
-			MaxSameErrorType: 3,                       // Escalate after 3 same-type errors
-			JitterFactor:     0,                       // No jitter for deterministic test
+			MaxRetries:       10,  // Allow many retries
+			InitialDelay:     1,   // Fast for testing
+			MaxDelay:         10,  // Fast for testing
+			Multiplier:       2.0, //
+			MaxSameErrorType: 3,   // Escalate after 3 same-type errors
+			JitterFactor:     0,   // No jitter for deterministic test
 		}
 
 		callCount := 0
