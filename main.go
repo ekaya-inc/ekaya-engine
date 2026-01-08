@@ -442,6 +442,15 @@ func main() {
 	}
 	mcptools.RegisterRelationshipTools(mcpServer.MCP(), relationshipToolDeps)
 
+	// Register column metadata tools (for updating column semantic information)
+	columnToolDeps := &mcptools.ColumnToolDeps{
+		DB:               db,
+		MCPConfigService: mcpConfigService,
+		OntologyRepo:     ontologyRepo,
+		Logger:           logger,
+	}
+	mcptools.RegisterColumnTools(mcpServer.MCP(), columnToolDeps)
+
 	// Register column probe tools (for deep-diving into column statistics and semantics)
 	probeToolDeps := &mcptools.ProbeToolDeps{
 		DB:               db,

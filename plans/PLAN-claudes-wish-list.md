@@ -1519,7 +1519,79 @@ Not all tools should be available to all users. The admin can control which tool
      - Output columns are automatically detected from SQL execution results
      - Delete is permanent (hard delete) - terms can be easily recreated if needed
      - **WHY these tools exist:** During ontology extraction and query analysis, AI agents discover business metrics and terms that weren't captured initially. Without these tools, agents must ask humans to manually add terms in the UI. With these tools, agents can document business definitions directly: add terms they discover in code comments, update terms with SQL patterns they infer from usage, add aliases they see in documentation. The upsert semantics make updates safe and idempotent. The GlossarySourceClient source value tracks agent contributions separately from LLM-inferred terms. Together, these tools enable AI-driven glossary maintenance and continuous business knowledge capture.
-13. **[ ] `update_column`**, **[ ] `delete_column_metadata`** (with entity/role params)
+13. **[x] `update_column`**, **[x] `delete_column_metadata`** - COMPLETED (2026-01-08)
+   - **Commit:** `feat: enable AI agents to update column metadata via MCP tools`
+   - **Implementation:** `pkg/mcp/tools/column.go` (registerUpdateColumnTool, registerDeleteColumnMetadataTool functions) + `pkg/mcp/tools/column_test.go`
+   - **Registration:** Tools registered in RegisterColumnTools function (column.go:30-33), added to main.go (lines 445-454)
+   - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupDeveloper (lines 34-35)
+   - **Key Features Implemented:**
+     - `update_column` tool with upsert semantics - uses table + column as composite key
+     - Creates new column metadata if not found, updates existing if found
+     - Optional parameters: description, enum_values, entity, role (merge with existing)
+     - Enum values parsed with support for "VALUE - Description" format
+     - Response includes `created` boolean to distinguish create vs update
+     - `delete_column_metadata` tool for clearing column enrichment
+     - Idempotent delete (deleting non-existent column metadata returns deleted=false)
+     - Removes column from ontology's column_details JSONB field
+   - **Testing:** Comprehensive unit tests covering tool structure, registration, parameter validation, enum parsing/formatting, roundtrip tests
+   - **Tool Group:** ToolGroupDeveloper (available when Developer Tools enabled)
+   - **update_column Parameters:**
+     - `table` (required): Table name (e.g., 'users', 'billing_transactions')
+     - `column` (required): Column name (together with table form upsert key)
+     - `description` (optional): Business description of the column
+     - `enum_values` (optional): Array of enumeration values with optional descriptions (e.g., ['ACTIVE - Normal account', 'SUSPENDED'])
+     - `entity` (optional): Entity this column belongs to (stored in SemanticType field)
+     - `role` (optional): Semantic role: 'dimension', 'measure', 'identifier', or 'attribute'
+   - **update_column Response Format:**
+     ```json
+     {
+       "table": "users",
+       "column": "status",
+       "description": "User account status",
+       "enum_values": ["ACTIVE - Normal account", "SUSPENDED - Temporarily disabled"],
+       "entity": "User",
+       "role": "attribute",
+       "created": true
+     }
+     ```
+   - **delete_column_metadata Parameters:**
+     - `table` (required): Table name
+     - `column` (required): Column name
+   - **delete_column_metadata Response Format:**
+     ```json
+     {
+       "table": "users",
+       "column": "status",
+       "deleted": true
+     }
+     ```
+   - **Architecture Notes:**
+     - Uses ColumnToolDeps (DB, MCPConfigService, OntologyRepo, Logger)
+     - Access control via checkColumnToolEnabled (validates Developer Tools enabled)
+     - Operates on ontology's column_details JSONB field via OntologyRepo.UpdateColumnDetails
+     - update_column workflow: Get active ontology → Get/create column detail → Update fields → Save to JSONB
+     - delete_column_metadata workflow: Get active ontology → Filter out column → Save updated JSONB
+     - Enum values stored as EnumValue models with Value and Description fields
+     - Entity stored in SemanticType field for consistency with existing ontology structure
+   - **Design Decisions:**
+     - Composite key (table + column) for upsert semantics (no separate column_id parameter)
+     - Enum values support both "VALUE" and "VALUE - Description" formats with automatic parsing
+     - Entity parameter maps to SemanticType field (existing field in ColumnDetail model)
+     - Hard delete for column metadata (removes from JSONB, preserves schema information)
+     - Idempotent delete makes tool safe to call multiple times
+     - Updates are merged (omitted parameters preserve existing values)
+   - **Enum Value Parsing:**
+     - Supports "ACTIVE - Normal account" format (splits on " - " separator)
+     - Supports bare value "ACTIVE" format (no description)
+     - Roundtrip preserves format: VALUE → EnumValue → VALUE or VALUE - DESCRIPTION
+     - Empty arrays clear all enum values (explicit intent)
+   - **Next Session Notes:**
+     - AI agents can now add semantic information to columns discovered during analysis
+     - Agents can document enum values with business descriptions
+     - Entity and role fields enable semantic column classification
+     - Delete tool allows clearing incorrect enrichments without affecting schema
+     - Column metadata stored in ontology's column_details JSONB field per table
+     - **WHY these tools exist:** During ontology extraction and refinement, AI agents discover column semantics that weren't captured initially. Without these tools, agents must ask humans to manually enrich column metadata in the UI. With these tools, agents can document column meanings directly: add descriptions they infer from code, add enum values they discover in constants, classify columns by entity and role. The upsert semantics make updates safe. The delete tool removes incorrect enrichments. Together, these tools enable AI-driven column metadata maintenance and continuous schema documentation improvement.
 
 ### Phase 5: Questions Workflow (High Impact, Higher Effort)
 

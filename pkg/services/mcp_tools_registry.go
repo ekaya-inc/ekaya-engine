@@ -31,6 +31,8 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "probe_relationship", Description: "Deep-dive into relationships between entities with cardinality and data quality metrics", ToolGroup: ToolGroupDeveloper},
 	{Name: "update_project_knowledge", Description: "Create or update domain facts (terminology, business rules, enumerations, conventions)", ToolGroup: ToolGroupDeveloper},
 	{Name: "delete_project_knowledge", Description: "Remove incorrect or outdated domain facts", ToolGroup: ToolGroupDeveloper},
+	{Name: "update_column", Description: "Add or update semantic information about a column (description, enum_values, entity, role)", ToolGroup: ToolGroupDeveloper},
+	{Name: "delete_column_metadata", Description: "Clear custom metadata for a column, reverting to schema-only information", ToolGroup: ToolGroupDeveloper},
 
 	// Business user tools (approved_queries group)
 	// These read-only query tools enable business users to answer ad-hoc questions
