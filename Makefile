@@ -307,19 +307,23 @@ dev-build-container: ## Build devcontainer environment
 	@echo "$(GREEN)✓ Devcontainer built$(NC)"
 
 # Test database image targets
-build-test-image: ## Build the ekaya-engine-test-image for integration tests
+build-test-image: ## Build the ekaya-engine-test-image for integration tests (local arch only)
 	@echo "$(YELLOW)Building test database image...$(NC)"
 	@docker build -t $(TEST_IMAGE_NAME):latest test/docker/engine-test-db/
 	@docker tag $(TEST_IMAGE_NAME):latest $(TEST_IMAGE_PATH):latest
 	@echo "$(GREEN)✓ Test image built: $(TEST_IMAGE_NAME):latest$(NC)"
 	@echo "$(GREEN)✓ Tagged as: $(TEST_IMAGE_PATH):latest$(NC)"
 
-push-test-image: build-test-image ## Build and push test image to ghcr.io (requires GITHUB_TOKEN)
-	@echo "$(YELLOW)Pushing test image to ghcr.io...$(NC)"
+push-test-image: ## Build and push multi-arch test image to ghcr.io (requires GITHUB_TOKEN)
+	@echo "$(YELLOW)Building and pushing multi-arch test image to ghcr.io...$(NC)"
 	@if [ -z "$$GITHUB_TOKEN" ]; then echo "$(RED)Error: GITHUB_TOKEN not set$(NC)"; exit 1; fi
 	@echo "$$GITHUB_TOKEN" | docker login ghcr.io -u $(shell git config user.email || echo "user") --password-stdin
-	@docker push $(TEST_IMAGE_PATH):latest
-	@echo "$(GREEN)✓ Test image pushed to: $(TEST_IMAGE_PATH):latest$(NC)"
+	@docker buildx create --name multiarch --driver docker-container --use 2>/dev/null || docker buildx use multiarch
+	@docker buildx build --platform linux/amd64,linux/arm64 \
+		-t $(TEST_IMAGE_PATH):latest \
+		--push \
+		test/docker/engine-test-db/
+	@echo "$(GREEN)✓ Test image pushed to: $(TEST_IMAGE_PATH):latest (linux/amd64, linux/arm64)$(NC)"
 
 pull-test-image: ## Pull test image from ghcr.io
 	@echo "$(YELLOW)Pulling test image from ghcr.io...$(NC)"
