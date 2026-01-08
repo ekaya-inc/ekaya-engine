@@ -216,9 +216,46 @@ Then update `ontology_dag_service.go` to use `llm.DoIfRetryable()`.
 
 ---
 
-### Phase 3: Make Glossary Nodes Non-Fatal
+### Phase 3: Make Glossary Nodes Non-Fatal ✅ COMPLETED (2026-01-08)
 
 **Goal:** Glossary discovery/enrichment failures should not kill the pipeline - the ontology is still useful without glossary terms.
+
+**Implementation Summary:**
+Both glossary nodes now treat errors as non-fatal, logging warnings instead of failing the pipeline. This follows the same graceful degradation pattern used by `EntityEnrichmentNode`.
+
+**Key Changes:**
+1. **GlossaryDiscoveryNode** (line 60):
+   - Catches discovery errors and logs warning with context
+   - Sets `termCount = 0` to continue with empty glossary
+   - Progress reporting continues normally showing "Discovered 0 business terms"
+
+2. **GlossaryEnrichmentNode** (line 59):
+   - Catches enrichment errors and logs warning with context
+   - Continues without SQL definitions for glossary terms
+   - Progress reporting continues normally
+
+3. **Validation still works:**
+   - Missing ontology ID still returns error (fail-fast for config issues)
+   - Only LLM/service errors are treated as non-fatal
+
+**Test Coverage:**
+- Updated `TestGlossaryDiscoveryNode_Execute_DiscoveryError` to verify non-fatal behavior (now expects success, verifies warning logged)
+- Created comprehensive test suite in `pkg/services/dag/glossary_enrichment_node_test.go`:
+  - Success path with progress tracking
+  - Missing ontology ID validation (still fatal)
+  - Enrichment errors are non-fatal
+  - Progress reporting errors are non-fatal
+  - Node name verification
+- All existing tests continue to pass
+
+**Files Modified:**
+- `pkg/services/dag/glossary_discovery_node.go` (lines 59-65) - Made errors non-fatal
+- `pkg/services/dag/glossary_enrichment_node.go` (lines 58-62) - Made errors non-fatal
+- `pkg/services/dag/glossary_discovery_node_test.go` (lines 209-232) - Updated test expectations
+- `pkg/services/dag/glossary_enrichment_node_test.go` (new, 293 lines) - Added comprehensive test coverage
+
+**Design Pattern:**
+This matches the pattern in `EntityEnrichmentNode` (pkg/services/dag/entity_enrichment_node.go:56-60) which logs warnings on LLM failures but continues execution. The glossary is an optional enhancement - core ontology extraction (entities, relationships, columns) can succeed independently.
 
 #### File: `pkg/services/dag/glossary_discovery_node.go`
 

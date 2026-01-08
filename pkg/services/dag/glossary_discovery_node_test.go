@@ -207,11 +207,16 @@ func TestGlossaryDiscoveryNode_Execute_NoOntologyID(t *testing.T) {
 }
 
 func TestGlossaryDiscoveryNode_Execute_DiscoveryError(t *testing.T) {
+	// Discovery errors should not fail the execution - should log warning and continue
 	ctx := context.Background()
 	projectID := uuid.New()
 	ontologyID := uuid.New()
+	nodeID := uuid.New()
 
 	expectedErr := errors.New("discovery failed")
+
+	// Track progress reports
+	var progressReports []string
 
 	mockGlossary := &mockGlossaryDiscoveryMethods{
 		discoverFunc: func(ctx context.Context, pID, oID uuid.UUID) (int, error) {
@@ -220,23 +225,29 @@ func TestGlossaryDiscoveryNode_Execute_DiscoveryError(t *testing.T) {
 	}
 
 	mockRepo := &mockGlossaryDiscoveryDAGRepo{
-		updateProgressFunc: func(ctx context.Context, nodeID uuid.UUID, progress *models.DAGNodeProgress) error {
+		updateProgressFunc: func(ctx context.Context, nID uuid.UUID, progress *models.DAGNodeProgress) error {
+			assert.Equal(t, nodeID, nID)
+			progressReports = append(progressReports, progress.Message)
 			return nil
 		},
 	}
 
 	node := NewGlossaryDiscoveryNode(mockRepo, mockGlossary, zap.NewNop())
-	node.SetCurrentNodeID(uuid.New())
+	node.SetCurrentNodeID(nodeID)
 
 	dag := &models.OntologyDAG{
 		ProjectID:  projectID,
 		OntologyID: &ontologyID,
 	}
 
+	// Should succeed despite discovery error (warning logged)
 	err := node.Execute(ctx, dag)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "discover glossary terms")
-	assert.Contains(t, err.Error(), expectedErr.Error())
+	require.NoError(t, err)
+
+	// Verify progress was reported with 0 terms
+	assert.Len(t, progressReports, 2, "Should report initial and completion progress")
+	assert.Equal(t, "Discovering business terms...", progressReports[0])
+	assert.Equal(t, "Discovered 0 business terms", progressReports[1])
 }
 
 func TestGlossaryDiscoveryNode_Execute_ProgressReportingError(t *testing.T) {

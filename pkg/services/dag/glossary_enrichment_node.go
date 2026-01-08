@@ -56,7 +56,10 @@ func (n *GlossaryEnrichmentNode) Execute(ctx context.Context, dag *models.Ontolo
 
 	// Call the underlying service method
 	if err := n.glossaryEnrichment.EnrichGlossaryTerms(ctx, dag.ProjectID, *dag.OntologyID); err != nil {
-		return fmt.Errorf("enrich glossary terms: %w", err)
+		// Log but don't fail - glossary terms can remain unenriched
+		n.Logger().Warn("Failed to enrich glossary terms - terms will lack SQL definitions",
+			zap.String("project_id", dag.ProjectID.String()),
+			zap.Error(err))
 	}
 
 	// Report completion
