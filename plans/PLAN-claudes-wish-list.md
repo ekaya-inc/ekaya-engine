@@ -1452,7 +1452,73 @@ Not all tools should be available to all users. The admin can control which tool
      - Cardinality should be inferred from data analysis or schema relationships
      - Delete is permanent (hard delete) since relationships are lightweight and easily recreated
      - **WHY these tools exist:** During ontology refinement, AI agents discover relationships between entities from code analysis, documentation, or user clarifications. Without these tools, agents must ask humans to manually add relationships in the UI. With these tools, agents can document relationships directly, including semantic labels (e.g., "owns", "contains") and cardinality for query optimization. The upsert semantics make updates safe. Together with update_entity and delete_entity, these tools enable complete AI-driven ontology maintenance.
-12. **[ ] `update_glossary_term`**, **[ ] `delete_glossary_term`**
+12. **[x] `update_glossary_term`**, **[x] `delete_glossary_term`** - COMPLETED (2026-01-08)
+   - **Implementation:** `pkg/mcp/tools/glossary.go` (registerUpdateGlossaryTermTool, registerDeleteGlossaryTermTool functions) + `pkg/mcp/tools/glossary_test.go`
+   - **Registration:** Tools registered in RegisterGlossaryTools function (glossary.go:32-33)
+   - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupDeveloper (lines 45-46)
+   - **Key Features Implemented:**
+     - `update_glossary_term` tool with upsert semantics - uses term name as key
+     - Creates new term if not found, updates existing term if found
+     - Optional parameters: definition, sql, aliases (merge with existing)
+     - Response includes `created` boolean to distinguish create vs update
+     - Sets source to GlossarySourceClient ("client") to mark agent-created terms
+     - SQL validation performed during creation using GlossaryService.CreateTerm
+     - Output columns automatically detected from SQL execution
+     - `delete_glossary_term` tool for removing incorrect terms
+     - Idempotent delete (deleting non-existent term returns success with deleted=false)
+     - Hard delete (permanently removes term and aliases)
+   - **Testing:** Comprehensive unit tests covering tool structure, registration, response formats, idempotent behavior
+   - **Tool Group:** ToolGroupDeveloper (available when Developer Tools enabled)
+   - **update_glossary_term Parameters:**
+     - `term` (required): Business term name (upsert key)
+     - `definition` (optional): What the term means in business context (required for create)
+     - `sql` (optional): SQL pattern to calculate the term (required for create)
+     - `aliases` (optional): Array of alternative names (replaces existing if provided)
+   - **update_glossary_term Response Format:**
+     ```json
+     {
+       "term": "Platform Take Rate",
+       "definition": "Percentage of transaction value retained by the platform",
+       "sql": "SUM(tikr_share) / NULLIF(SUM(total_amount), 0) * 100",
+       "aliases": ["Take Rate", "Platform Commission Rate"],
+       "output_columns": [
+         {"name": "take_rate", "type": "NUMERIC"}
+       ],
+       "created": false
+     }
+     ```
+   - **delete_glossary_term Parameters:**
+     - `term` (required): Business term name to delete
+   - **delete_glossary_term Response Format:**
+     ```json
+     {
+       "term": "Platform Take Rate",
+       "deleted": true
+     }
+     ```
+   - **Architecture Notes:**
+     - Uses existing GlossaryToolDeps (DB, MCPConfigService, GlossaryService, Logger)
+     - Access control via checkGlossaryToolEnabled (validates Developer Tools enabled)
+     - update_glossary_term workflow: Check if exists → Create or Update term → Return response with created flag
+     - Create path validates SQL and detects output columns via GlossaryService.CreateTerm
+     - Update path preserves existing values for omitted optional params
+     - Source field transitions from "inferred" to "client" when agent updates LLM-discovered terms
+     - delete_glossary_term workflow: Check if exists → Delete if found → Return deleted flag
+     - Error handling: Returns descriptive errors for missing required fields, SQL validation failures
+   - **Design Decisions:**
+     - Term name is the upsert key (no separate term_id parameter needed)
+     - Aliases are replaced if provided (explicit array = replace, omitted = preserve)
+     - Definition and SQL required for create, optional for update (merge semantics)
+     - Hard delete for terms (simple removal, no soft delete needed)
+     - Idempotent delete makes tool safe to call multiple times
+     - Source field distinguishes agent-created ("client") from LLM-discovered ("inferred") terms
+   - **Next Session Notes:**
+     - AI agents can now create business glossary terms discovered during analysis
+     - AI agents can update existing terms with additional context or corrections
+     - SQL validation ensures terms are executable before storage
+     - Output columns are automatically detected from SQL execution results
+     - Delete is permanent (hard delete) - terms can be easily recreated if needed
+     - **WHY these tools exist:** During ontology extraction and query analysis, AI agents discover business metrics and terms that weren't captured initially. Without these tools, agents must ask humans to manually add terms in the UI. With these tools, agents can document business definitions directly: add terms they discover in code comments, update terms with SQL patterns they infer from usage, add aliases they see in documentation. The upsert semantics make updates safe and idempotent. The GlossarySourceClient source value tracks agent contributions separately from LLM-inferred terms. Together, these tools enable AI-driven glossary maintenance and continuous business knowledge capture.
 13. **[ ] `update_column`**, **[ ] `delete_column_metadata`** (with entity/role params)
 
 ### Phase 5: Questions Workflow (High Impact, Higher Effort)

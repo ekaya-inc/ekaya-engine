@@ -29,6 +29,8 @@ type GlossaryToolDeps struct {
 func RegisterGlossaryTools(s *server.MCPServer, deps *GlossaryToolDeps) {
 	registerListGlossaryTool(s, deps)
 	registerGetGlossarySQLTool(s, deps)
+	registerUpdateGlossaryTermTool(s, deps)
+	registerDeleteGlossaryTermTool(s, deps)
 }
 
 // checkGlossaryToolEnabled verifies a specific glossary tool is enabled for the project.
@@ -238,4 +240,255 @@ func toGetGlossarySQLResponse(term *models.BusinessGlossaryTerm) getGlossarySQLR
 		OutputColumns: term.OutputColumns,
 		Aliases:       term.Aliases,
 	}
+}
+
+// registerUpdateGlossaryTermTool adds the update_glossary_term tool for creating/updating business terms.
+// Uses upsert semantics: creates new term if not found, updates existing term if found.
+// The term name is the upsert key.
+func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps) {
+	tool := mcp.NewTool(
+		"update_glossary_term",
+		mcp.WithDescription(
+			"Create or update a business glossary term with upsert semantics. "+
+				"If a term with the given name exists, it will be updated. Otherwise, a new term will be created. "+
+				"The term name is the upsert key. All parameters except 'term' are optional. "+
+				"Use this to add business definitions that AI agents discover during analysis.",
+		),
+		mcp.WithString(
+			"term",
+			mcp.Required(),
+			mcp.Description("Business term name (upsert key)"),
+		),
+		mcp.WithString(
+			"definition",
+			mcp.Description("What the term means in business context"),
+		),
+		mcp.WithString(
+			"sql",
+			mcp.Description("SQL pattern to calculate the term (defining_sql)"),
+		),
+		mcp.WithArray(
+			"aliases",
+			mcp.Description("Alternative names for the term (e.g., 'AOV', 'Average Order Value')"),
+		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := checkGlossaryToolEnabled(ctx, deps, "update_glossary_term")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Get required term parameter
+		termName, err := req.RequireString("term")
+		if err != nil {
+			return nil, err
+		}
+
+		// Get optional parameters
+		definition := getOptionalString(req, "definition")
+		sql := getOptionalString(req, "sql")
+		var aliases []string
+		if args, ok := req.Params.Arguments.(map[string]any); ok {
+			if aliasesRaw, ok := args["aliases"]; ok && aliasesRaw != nil {
+				if aliasArray, ok := aliasesRaw.([]interface{}); ok {
+					for _, alias := range aliasArray {
+						if aliasStr, ok := alias.(string); ok {
+							aliases = append(aliases, aliasStr)
+						}
+					}
+				}
+			}
+		}
+
+		// Check if term already exists
+		existing, err := deps.GlossaryService.GetTermByName(tenantCtx, projectID, termName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check for existing term: %w", err)
+		}
+
+		var created bool
+		var term *models.BusinessGlossaryTerm
+
+		if existing == nil {
+			// Create new term
+			if definition == "" {
+				return nil, fmt.Errorf("definition is required when creating a new term")
+			}
+			if sql == "" {
+				return nil, fmt.Errorf("sql is required when creating a new term")
+			}
+
+			term = &models.BusinessGlossaryTerm{
+				ProjectID:   projectID,
+				Term:        termName,
+				Definition:  definition,
+				DefiningSQL: sql,
+				Aliases:     aliases,
+				Source:      models.GlossarySourceClient, // Mark as client-created
+			}
+
+			if err := deps.GlossaryService.CreateTerm(tenantCtx, projectID, term); err != nil {
+				deps.Logger.Error("Failed to create glossary term",
+					zap.String("project_id", projectID.String()),
+					zap.String("term", termName),
+					zap.Error(err))
+				return nil, fmt.Errorf("failed to create term: %w", err)
+			}
+
+			created = true
+			deps.Logger.Info("Created glossary term via MCP",
+				zap.String("project_id", projectID.String()),
+				zap.String("term", termName))
+		} else {
+			// Update existing term
+			term = existing
+
+			// Update fields if provided (nil means keep existing)
+			if definition != "" {
+				term.Definition = definition
+			}
+			if sql != "" {
+				term.DefiningSQL = sql
+			}
+			if aliases != nil {
+				term.Aliases = aliases
+			}
+
+			// Update source to client if it was previously inferred
+			if term.Source == models.GlossarySourceInferred {
+				term.Source = models.GlossarySourceClient
+			}
+
+			if err := deps.GlossaryService.UpdateTerm(tenantCtx, term); err != nil {
+				deps.Logger.Error("Failed to update glossary term",
+					zap.String("project_id", projectID.String()),
+					zap.String("term", termName),
+					zap.Error(err))
+				return nil, fmt.Errorf("failed to update term: %w", err)
+			}
+
+			created = false
+			deps.Logger.Info("Updated glossary term via MCP",
+				zap.String("project_id", projectID.String()),
+				zap.String("term", termName))
+		}
+
+		// Build response
+		response := struct {
+			Term          string                `json:"term"`
+			Definition    string                `json:"definition"`
+			SQL           string                `json:"sql"`
+			Aliases       []string              `json:"aliases,omitempty"`
+			OutputColumns []models.OutputColumn `json:"output_columns,omitempty"`
+			Created       bool                  `json:"created"`
+		}{
+			Term:          term.Term,
+			Definition:    term.Definition,
+			SQL:           term.DefiningSQL,
+			Aliases:       term.Aliases,
+			OutputColumns: term.OutputColumns,
+			Created:       created,
+		}
+
+		jsonResult, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// registerDeleteGlossaryTermTool adds the delete_glossary_term tool for removing business terms.
+func registerDeleteGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps) {
+	tool := mcp.NewTool(
+		"delete_glossary_term",
+		mcp.WithDescription(
+			"Delete a business glossary term by name. "+
+				"This permanently removes the term and its aliases. "+
+				"Use this to remove terms that are no longer relevant or were added incorrectly.",
+		),
+		mcp.WithString(
+			"term",
+			mcp.Required(),
+			mcp.Description("Business term name to delete"),
+		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := checkGlossaryToolEnabled(ctx, deps, "delete_glossary_term")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Get required term parameter
+		termName, err := req.RequireString("term")
+		if err != nil {
+			return nil, err
+		}
+
+		// Check if term exists
+		term, err := deps.GlossaryService.GetTermByName(tenantCtx, projectID, termName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check for existing term: %w", err)
+		}
+
+		if term == nil {
+			// Term doesn't exist - idempotent success
+			response := struct {
+				Term    string `json:"term"`
+				Deleted bool   `json:"deleted"`
+			}{
+				Term:    termName,
+				Deleted: false,
+			}
+
+			jsonResult, err := json.Marshal(response)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal result: %w", err)
+			}
+
+			return mcp.NewToolResultText(string(jsonResult)), nil
+		}
+
+		// Delete the term
+		if err := deps.GlossaryService.DeleteTerm(tenantCtx, term.ID); err != nil {
+			deps.Logger.Error("Failed to delete glossary term",
+				zap.String("project_id", projectID.String()),
+				zap.String("term", termName),
+				zap.Error(err))
+			return nil, fmt.Errorf("failed to delete term: %w", err)
+		}
+
+		deps.Logger.Info("Deleted glossary term via MCP",
+			zap.String("project_id", projectID.String()),
+			zap.String("term", termName))
+
+		// Build response
+		response := struct {
+			Term    string `json:"term"`
+			Deleted bool   `json:"deleted"`
+		}{
+			Term:    termName,
+			Deleted: true,
+		}
+
+		jsonResult, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
 }

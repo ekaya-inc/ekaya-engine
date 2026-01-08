@@ -398,3 +398,186 @@ WHERE transaction_state = 'completed'`,
 		assert.Equal(t, "Unknown", notFoundResult.Term)
 	})
 }
+
+// TestUpdateGlossaryTermTool_ToolStructure verifies the update_glossary_term tool is registered correctly.
+func TestUpdateGlossaryTermTool_ToolStructure(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &GlossaryToolDeps{
+		Logger: zap.NewNop(),
+	}
+
+	RegisterGlossaryTools(mcpServer, deps)
+
+	// Verify tool is registered
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	// Check update_glossary_term is registered
+	var updateToolFound bool
+	var updateToolName, updateToolDesc string
+	for _, tool := range response.Result.Tools {
+		if tool.Name == "update_glossary_term" {
+			updateToolFound = true
+			updateToolName = tool.Name
+			updateToolDesc = tool.Description
+			break
+		}
+	}
+
+	require.True(t, updateToolFound, "update_glossary_term tool should be registered")
+	assert.Equal(t, "update_glossary_term", updateToolName)
+	assert.Contains(t, updateToolDesc, "upsert")
+	assert.Contains(t, updateToolDesc, "business glossary term")
+}
+
+// TestUpdateGlossaryTermTool_ResponseStructure verifies response format.
+func TestUpdateGlossaryTermTool_ResponseStructure(t *testing.T) {
+	t.Run("create new term response", func(t *testing.T) {
+		response := struct {
+			Term          string                `json:"term"`
+			Definition    string                `json:"definition"`
+			SQL           string                `json:"sql"`
+			Aliases       []string              `json:"aliases,omitempty"`
+			OutputColumns []models.OutputColumn `json:"output_columns,omitempty"`
+			Created       bool                  `json:"created"`
+		}{
+			Term:       "Revenue",
+			Definition: "Total earned amount",
+			SQL:        "SELECT SUM(amount) FROM transactions",
+			Aliases:    []string{"Total Revenue"},
+			OutputColumns: []models.OutputColumn{
+				{Name: "revenue", Type: "numeric"},
+			},
+			Created: true,
+		}
+
+		assert.Equal(t, "Revenue", response.Term)
+		assert.Equal(t, "Total earned amount", response.Definition)
+		assert.Equal(t, "SELECT SUM(amount) FROM transactions", response.SQL)
+		assert.Equal(t, []string{"Total Revenue"}, response.Aliases)
+		assert.Equal(t, 1, len(response.OutputColumns))
+		assert.True(t, response.Created)
+	})
+
+	t.Run("update existing term response", func(t *testing.T) {
+		response := struct {
+			Term          string                `json:"term"`
+			Definition    string                `json:"definition"`
+			SQL           string                `json:"sql"`
+			Aliases       []string              `json:"aliases,omitempty"`
+			OutputColumns []models.OutputColumn `json:"output_columns,omitempty"`
+			Created       bool                  `json:"created"`
+		}{
+			Term:       "Revenue",
+			Definition: "Updated definition",
+			SQL:        "SELECT SUM(amount) FROM transactions WHERE status='completed'",
+			Aliases:    []string{"Total Revenue", "Gross Revenue"},
+			OutputColumns: []models.OutputColumn{
+				{Name: "revenue", Type: "numeric"},
+			},
+			Created: false,
+		}
+
+		assert.Equal(t, "Revenue", response.Term)
+		assert.Equal(t, "Updated definition", response.Definition)
+		assert.Contains(t, response.SQL, "status='completed'")
+		assert.Equal(t, 2, len(response.Aliases))
+		assert.False(t, response.Created)
+	})
+}
+
+// TestDeleteGlossaryTermTool_ToolStructure verifies the delete_glossary_term tool is registered correctly.
+func TestDeleteGlossaryTermTool_ToolStructure(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &GlossaryToolDeps{
+		Logger: zap.NewNop(),
+	}
+
+	RegisterGlossaryTools(mcpServer, deps)
+
+	// Verify tool is registered
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	// Check delete_glossary_term is registered
+	var deleteToolFound bool
+	var deleteToolName, deleteToolDesc string
+	for _, tool := range response.Result.Tools {
+		if tool.Name == "delete_glossary_term" {
+			deleteToolFound = true
+			deleteToolName = tool.Name
+			deleteToolDesc = tool.Description
+			break
+		}
+	}
+
+	require.True(t, deleteToolFound, "delete_glossary_term tool should be registered")
+	assert.Equal(t, "delete_glossary_term", deleteToolName)
+	assert.Contains(t, deleteToolDesc, "Delete")
+	assert.Contains(t, deleteToolDesc, "business glossary term")
+}
+
+// TestDeleteGlossaryTermTool_ResponseStructure verifies response format.
+func TestDeleteGlossaryTermTool_ResponseStructure(t *testing.T) {
+	t.Run("deleted term response", func(t *testing.T) {
+		response := struct {
+			Term    string `json:"term"`
+			Deleted bool   `json:"deleted"`
+		}{
+			Term:    "Revenue",
+			Deleted: true,
+		}
+
+		assert.Equal(t, "Revenue", response.Term)
+		assert.True(t, response.Deleted)
+	})
+
+	t.Run("term not found response (idempotent)", func(t *testing.T) {
+		response := struct {
+			Term    string `json:"term"`
+			Deleted bool   `json:"deleted"`
+		}{
+			Term:    "Unknown",
+			Deleted: false,
+		}
+
+		assert.Equal(t, "Unknown", response.Term)
+		assert.False(t, response.Deleted)
+	})
+}
+
+// TestGlossaryUpdateTools_AreDeveloperTools verifies new tools are in developer tools group.
+func TestGlossaryUpdateTools_AreDeveloperTools(t *testing.T) {
+	// update_glossary_term and delete_glossary_term are developer tools, NOT ontology tools
+	// They should NOT be in ontologyToolNames (which is for approved_queries group)
+	assert.False(t, ontologyToolNames["update_glossary_term"], "update_glossary_term should NOT be in ontologyToolNames (it's a developer tool)")
+	assert.False(t, ontologyToolNames["delete_glossary_term"], "delete_glossary_term should NOT be in ontologyToolNames (it's a developer tool)")
+}
