@@ -397,6 +397,20 @@ func main() {
 	}
 	mcptools.RegisterGlossaryTools(mcpServer.MCP(), glossaryToolDeps)
 
+	// Register unified context tool (consolidates ontology, schema, and glossary)
+	contextToolDeps := &mcptools.ContextToolDeps{
+		DB:                     db,
+		MCPConfigService:       mcpConfigService,
+		ProjectService:         projectService,
+		OntologyContextService: ontologyContextService,
+		OntologyRepo:           ontologyRepo,
+		SchemaService:          schemaService,
+		GlossaryService:        glossaryService,
+		SchemaRepo:             schemaRepo,
+		Logger:                 logger,
+	}
+	mcptools.RegisterContextTools(mcpServer.MCP(), contextToolDeps)
+
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"
 	fileServer := http.FileServer(http.Dir(uiDir))

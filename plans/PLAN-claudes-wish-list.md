@@ -907,7 +907,25 @@ Not all tools should be available to all users. The admin can control which tool
 
 ### Phase 1: Foundation (High Impact, Moderate Effort)
 
-1. **`get_context` unified tool** - Consolidates 3 tools, graceful degradation
+1. **[x] `get_context` unified tool** - Consolidates 3 tools, graceful degradation
+   - **Implementation:** `pkg/mcp/tools/context.go` + `pkg/mcp/tools/context_test.go`
+   - **Registration:** Added to main.go with ContextToolDeps
+   - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupApprovedQueries
+   - **Key Features Implemented:**
+     - Progressive depth levels: `domain`, `entities`, `tables`, `columns`
+     - Graceful degradation when ontology unavailable (falls back to schema-only)
+     - Consolidates ontology + schema + glossary in single call
+     - Reduces token waste by avoiding duplicate entity descriptions
+     - Always returns useful context (never fails with "ontology not found")
+   - **Testing:** Comprehensive unit tests covering all depth levels, with/without ontology, error cases
+   - **Tool Group:** ToolGroupApprovedQueries (available when Developer Tools OR Approved Queries enabled)
+   - **Next Session Notes:**
+     - The tool properly handles nil ontology (returns schema-only response)
+     - Depth filtering works correctly (domain < entities < tables < columns)
+     - Glossary integration is optional (gracefully handles missing glossary service)
+     - Entity descriptions from ontology are merged with schema table data
+     - Relationships are only included if ontology exists and depth >= entities
+
 2. **`get_context` with `include` parameter** - Add statistics and sample_values options
 3. **`update_project_knowledge`** - Leverages existing `engine_project_knowledge` table
 
