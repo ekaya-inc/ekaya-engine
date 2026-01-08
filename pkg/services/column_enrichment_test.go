@@ -855,9 +855,10 @@ func TestColumnEnrichmentService_EnrichProject_PartialFailure(t *testing.T) {
 		},
 	}
 
-	// Create a custom client that fails on the second call (table2)
+	// Create a custom client that fails for table2 specifically
 	client := &testColEnrichmentPartialFailureClient{
-		response: llmResponse,
+		response:      llmResponse,
+		failTableName: "table2",
 	}
 
 	llmFactory := &testColEnrichmentLLMFactory{client: client}
@@ -884,18 +885,22 @@ func TestColumnEnrichmentService_EnrichProject_PartialFailure(t *testing.T) {
 	assert.Contains(t, result.TablesFailed, "table2")
 }
 
-// testColEnrichmentPartialFailureClient simulates a client that fails on the second call
+// testColEnrichmentPartialFailureClient simulates a client that fails for a specific table
 type testColEnrichmentPartialFailureClient struct {
-	response  string
-	callCount int
+	response       string
+	failTableName  string
+	failCallsCount int // track how many times we've failed for the target table
 }
 
 func (c *testColEnrichmentPartialFailureClient) GenerateResponse(ctx context.Context, prompt, systemMsg string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
-	c.callCount++
-	// Fail on all calls during the second table (calls 2-5: 1 initial + 3 retries)
-	// This ensures the table fails even after all retries
-	if c.callCount >= 2 && c.callCount <= 5 {
-		return nil, llm.NewError(llm.ErrorTypeAuth, "auth failed", false, errors.New("auth failed"))
+	// Fail for a specific table by checking if the table name appears in the prompt
+	// This makes the test deterministic regardless of processing order
+	if strings.Contains(prompt, c.failTableName) {
+		c.failCallsCount++
+		// Fail all attempts (including retries) for this table
+		if c.failCallsCount <= 4 { // 1 initial + 3 retries
+			return nil, llm.NewError(llm.ErrorTypeAuth, "auth failed", false, errors.New("auth failed"))
+		}
 	}
 	return &llm.GenerateResponseResult{Content: c.response}, nil
 }
