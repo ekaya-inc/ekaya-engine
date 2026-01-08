@@ -51,6 +51,7 @@ engine_mcp_config                            -- Tool enablement pattern
 | Data Access Tracking | Which tables/columns were accessed | "Track sensitive data exposure" |
 | Session Tracking | Group activity by session/conversation | "Understand full AI interactions" |
 | Export to CSV/JSON | Compliance-ready exports | "SOC2 auditors love us" |
+| Retention Policy | Configure how long query history is retained | "Control storage costs & compliance" |
 
 **Data Model:**
 
