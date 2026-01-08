@@ -949,7 +949,7 @@ Not all tools should be available to all users. The admin can control which tool
 
 3. **[x] `update_project_knowledge`** - COMPLETED: Leverages existing `engine_project_knowledge` table
    - **Implementation:** `pkg/mcp/tools/knowledge.go` + `pkg/mcp/tools/knowledge_test.go`
-   - **Registration:** Added to main.go with KnowledgeToolDeps (main.go:400-406)
+   - **Registration:** Added to main.go with KnowledgeToolDeps (main.go:400-407)
    - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupDeveloper
    - **Key Features Implemented:**
      - `update_project_knowledge` tool with upsert semantics (by project_id + fact_type + key)
@@ -966,13 +966,15 @@ Not all tools should be available to all users. The admin can control which tool
      - Dependencies injected via KnowledgeToolDeps struct (DB, MCPConfigService, KnowledgeRepository, Logger)
      - Tools registered in main.go alongside other MCP tool groups (glossary, context, etc.)
      - Follows standard MCP tool pattern: deps struct → Register function → handler functions
-   - **Next Session Implementation Notes:**
+     - Uses unified ToolAccessChecker for consistent access control with tool list filtering
+   - **Implementation Details:**
      - Facts are stored in engine_project_knowledge table with upsert on (project_id, fact_type, key)
      - The tool uses fact content as the key for natural upsert behavior
      - fact_id can be explicitly provided to update a specific fact by ID instead of content-based upsert
-     - Integration tests with database would verify full CRUD behavior with actual postgres
-     - The KnowledgeRepository interface is already implemented in pkg/repositories/knowledge.go
+     - The KnowledgeRepository interface is fully implemented in pkg/repositories/knowledge.go
      - Tools properly filter by project_id from MCP context (no cross-project data leakage)
+     - Includes checkKnowledgeToolEnabled for project-scoped access control with tenant context
+     - Response includes fact_id, fact, category, context, created_at, and updated_at timestamps
 
 ### Phase 2: Probe Tools (High Impact, Low Effort - Data Already Persisted)
 
