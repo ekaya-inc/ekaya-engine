@@ -2,6 +2,7 @@ package retry
 
 import (
 	"context"
+	"math/rand"
 	"strings"
 	"time"
 )
@@ -12,17 +13,31 @@ type Config struct {
 	InitialDelay time.Duration
 	MaxDelay     time.Duration
 	Multiplier   float64
+	JitterFactor float64 // 0.0-1.0, default 0.1 for +/-10% jitter to prevent thundering herd
 }
 
 // DefaultConfig returns sensible defaults for database operations
-// 3 retries with 100ms initial delay, capped at 5s, doubling each time
+// 3 retries with 100ms initial delay, capped at 5s, doubling each time, with 10% jitter
 func DefaultConfig() *Config {
 	return &Config{
 		MaxRetries:   3,
 		InitialDelay: 100 * time.Millisecond,
 		MaxDelay:     5 * time.Second,
 		Multiplier:   2.0,
+		JitterFactor: 0.1, // +/-10% jitter to prevent thundering herd
 	}
+}
+
+// applyJitter adds random jitter to a delay to prevent thundering herd.
+// Returns the delay with jitter applied if jitterFactor > 0.
+// Jitter is calculated as: delay +/- (delay * jitterFactor * random(-1 to +1))
+func applyJitter(delay time.Duration, jitterFactor float64) time.Duration {
+	if jitterFactor <= 0 {
+		return delay
+	}
+	// Random value between -jitterFactor and +jitterFactor
+	jitter := float64(delay) * jitterFactor * (rand.Float64()*2 - 1)
+	return time.Duration(float64(delay) + jitter)
 }
 
 // Do executes fn with exponential backoff retry logic
@@ -44,7 +59,7 @@ func Do(ctx context.Context, cfg *Config, fn func() error) error {
 
 			if attempt < cfg.MaxRetries {
 				select {
-				case <-time.After(delay):
+				case <-time.After(applyJitter(delay, cfg.JitterFactor)):
 					delay = time.Duration(float64(delay) * cfg.Multiplier)
 					if delay > cfg.MaxDelay {
 						delay = cfg.MaxDelay
@@ -82,7 +97,7 @@ func DoWithResult[T any](ctx context.Context, cfg *Config, fn func() (T, error))
 
 		if attempt < cfg.MaxRetries {
 			select {
-			case <-time.After(delay):
+			case <-time.After(applyJitter(delay, cfg.JitterFactor)):
 				delay = time.Duration(float64(delay) * cfg.Multiplier)
 				if delay > cfg.MaxDelay {
 					delay = cfg.MaxDelay
@@ -188,7 +203,7 @@ func DoIfRetryable(ctx context.Context, cfg *Config, fn func() error) error {
 
 			if attempt < cfg.MaxRetries {
 				select {
-				case <-time.After(delay):
+				case <-time.After(applyJitter(delay, cfg.JitterFactor)):
 					delay = time.Duration(float64(delay) * cfg.Multiplier)
 					if delay > cfg.MaxDelay {
 						delay = cfg.MaxDelay

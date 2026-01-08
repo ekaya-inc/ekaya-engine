@@ -186,55 +186,33 @@ Then update `ontology_dag_service.go` to use `llm.DoIfRetryable()`.
 
 ---
 
-### Phase 2: Add Jitter to Retry Package
+### Phase 2: Add Jitter to Retry Package ✅ COMPLETED
 
-**File:** `pkg/retry/retry.go`
+**Goal:** Prevent thundering herd problem when multiple DAGs retry simultaneously by adding random jitter to retry delays.
 
-**Changes:**
+**Implementation Notes:**
+- Added `JitterFactor` field to `Config` struct (0.0-1.0 range, default 0.1 for +/-10% jitter)
+- Implemented `applyJitter()` helper function that adds random variation to delay: `delay +/- (delay * jitterFactor * random(-1 to +1))`
+- Applied jitter in all three retry functions: `Do()`, `DoWithResult()`, `DoIfRetryable()`
+- Jitter is applied before each wait: `time.After(applyJitter(delay, cfg.JitterFactor))`
+- Added comprehensive unit tests verifying jitter bounds and randomness
+- Integration tests verify jitter works correctly across all retry functions
 
-1. Add import: `"math/rand"`
+**Files Modified:**
+- `pkg/retry/retry.go` - Added JitterFactor field, applyJitter() function, applied to all retry logic
+- `pkg/retry/retry_test.go` - Added 5 new tests covering jitter functionality:
+  - `TestApplyJitter_NoJitter` - Verifies no jitter when factor=0 or negative
+  - `TestApplyJitter_WithJitter` - Verifies jitter stays within bounds over 100 iterations
+  - `TestDefaultConfig_HasJitter` - Verifies default config has 10% jitter
+  - `TestDo_WithJitter` - Integration test with retry.Do() using 20% jitter
+  - `TestDoWithResult_WithJitter` - Integration test with retry.DoWithResult()
+  - `TestDoIfRetryable_WithJitter` - Integration test with retry.DoIfRetryable()
 
-2. Add jitter to Config:
-```go
-type Config struct {
-    MaxRetries   int
-    InitialDelay time.Duration
-    MaxDelay     time.Duration
-    Multiplier   float64
-    JitterFactor float64 // 0.0-1.0, default 0.1 for +/-10%
-}
-
-func DefaultConfig() *Config {
-    return &Config{
-        MaxRetries:   3,
-        InitialDelay: 100 * time.Millisecond,
-        MaxDelay:     5 * time.Second,
-        Multiplier:   2.0,
-        JitterFactor: 0.1, // +/-10% jitter
-    }
-}
-```
-
-3. Add jitter calculation helper:
-```go
-func applyJitter(delay time.Duration, jitterFactor float64) time.Duration {
-    if jitterFactor <= 0 {
-        return delay
-    }
-    // Random value between -jitterFactor and +jitterFactor
-    jitter := float64(delay) * jitterFactor * (rand.Float64()*2 - 1)
-    return time.Duration(float64(delay) + jitter)
-}
-```
-
-4. Apply jitter in Do(), DoWithResult(), DoIfRetryable() before `time.After(delay)`:
-```go
-select {
-case <-time.After(applyJitter(delay, cfg.JitterFactor)):
-    delay = time.Duration(float64(delay) * cfg.Multiplier)
-    // ...
-}
-```
+**Key Design Decisions:**
+- Jitter is multiplicative (percentage-based) rather than additive (fixed amount) to scale naturally with delay magnitude
+- Jitter factor defaults to 0.1 (10%) which provides meaningful distribution without excessive variation
+- Zero or negative jitter factor disables jitter (returns delay unchanged)
+- Used standard `math/rand` package (sufficient for jitter purposes, doesn't need crypto/rand)
 
 ---
 

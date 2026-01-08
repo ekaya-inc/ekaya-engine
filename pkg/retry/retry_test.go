@@ -603,3 +603,155 @@ func TestDoIfRetryable_Success(t *testing.T) {
 		t.Errorf("expected 1 call, got %d", callCount)
 	}
 }
+
+func TestApplyJitter_NoJitter(t *testing.T) {
+	delay := 100 * time.Millisecond
+	result := applyJitter(delay, 0)
+	if result != delay {
+		t.Errorf("expected no jitter with factor=0, got %v instead of %v", result, delay)
+	}
+
+	result = applyJitter(delay, -0.1)
+	if result != delay {
+		t.Errorf("expected no jitter with negative factor, got %v instead of %v", result, delay)
+	}
+}
+
+func TestApplyJitter_WithJitter(t *testing.T) {
+	delay := 100 * time.Millisecond
+	jitterFactor := 0.1 // +/-10%
+
+	// Run multiple times to verify randomness is within bounds
+	for i := 0; i < 100; i++ {
+		result := applyJitter(delay, jitterFactor)
+
+		// Result should be within +/-10% of delay
+		minDelay := time.Duration(float64(delay) * (1.0 - jitterFactor))
+		maxDelay := time.Duration(float64(delay) * (1.0 + jitterFactor))
+
+		if result < minDelay || result > maxDelay {
+			t.Errorf("jittered delay %v is outside expected range [%v, %v]", result, minDelay, maxDelay)
+		}
+	}
+}
+
+func TestDefaultConfig_HasJitter(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.JitterFactor != 0.1 {
+		t.Errorf("expected JitterFactor=0.1, got %f", cfg.JitterFactor)
+	}
+}
+
+func TestDo_WithJitter(t *testing.T) {
+	ctx := context.Background()
+	cfg := &Config{
+		MaxRetries:   3,
+		InitialDelay: 50 * time.Millisecond,
+		MaxDelay:     500 * time.Millisecond,
+		Multiplier:   2.0,
+		JitterFactor: 0.2, // 20% jitter for easier detection
+	}
+
+	callTimes := []time.Time{}
+	err := Do(ctx, cfg, func() error {
+		callTimes = append(callTimes, time.Now())
+		return errors.New("error")
+	})
+
+	if err == nil {
+		t.Error("expected error after exhausting retries")
+	}
+
+	// Should have 4 calls: initial + 3 retries
+	if len(callTimes) != 4 {
+		t.Errorf("expected 4 calls, got %d", len(callTimes))
+	}
+
+	// Check that delays are within jittered range (not exact)
+	// First delay should be ~50ms +/- 20% = [40ms, 60ms]
+	if len(callTimes) >= 2 {
+		delay1 := callTimes[1].Sub(callTimes[0])
+		if delay1 < 35*time.Millisecond || delay1 > 70*time.Millisecond {
+			t.Errorf("expected ~50ms delay with jitter, got %v", delay1)
+		}
+	}
+
+	// Second delay should be ~100ms +/- 20% = [80ms, 120ms]
+	if len(callTimes) >= 3 {
+		delay2 := callTimes[2].Sub(callTimes[1])
+		if delay2 < 75*time.Millisecond || delay2 > 135*time.Millisecond {
+			t.Errorf("expected ~100ms delay with jitter, got %v", delay2)
+		}
+	}
+}
+
+func TestDoWithResult_WithJitter(t *testing.T) {
+	ctx := context.Background()
+	cfg := &Config{
+		MaxRetries:   2,
+		InitialDelay: 50 * time.Millisecond,
+		MaxDelay:     200 * time.Millisecond,
+		Multiplier:   2.0,
+		JitterFactor: 0.2, // 20% jitter
+	}
+
+	callTimes := []time.Time{}
+	result, err := DoWithResult(ctx, cfg, func() (string, error) {
+		callTimes = append(callTimes, time.Now())
+		return "test", errors.New("error")
+	})
+
+	if err == nil {
+		t.Error("expected error after exhausting retries")
+	}
+	if result != "test" {
+		t.Errorf("expected 'test' result, got %s", result)
+	}
+
+	// Should have 3 calls: initial + 2 retries
+	if len(callTimes) != 3 {
+		t.Errorf("expected 3 calls, got %d", len(callTimes))
+	}
+
+	// Verify delays are within jittered range
+	if len(callTimes) >= 2 {
+		delay1 := callTimes[1].Sub(callTimes[0])
+		if delay1 < 35*time.Millisecond || delay1 > 70*time.Millisecond {
+			t.Errorf("expected ~50ms delay with jitter, got %v", delay1)
+		}
+	}
+}
+
+func TestDoIfRetryable_WithJitter(t *testing.T) {
+	ctx := context.Background()
+	cfg := &Config{
+		MaxRetries:   2,
+		InitialDelay: 50 * time.Millisecond,
+		MaxDelay:     200 * time.Millisecond,
+		Multiplier:   2.0,
+		JitterFactor: 0.2, // 20% jitter
+	}
+
+	callTimes := []time.Time{}
+	err := DoIfRetryable(ctx, cfg, func() error {
+		callTimes = append(callTimes, time.Now())
+		return errors.New("connection timeout") // Retryable error
+	})
+
+	if err == nil {
+		t.Error("expected error after exhausting retries")
+	}
+
+	// Should have 3 calls: initial + 2 retries
+	if len(callTimes) != 3 {
+		t.Errorf("expected 3 calls, got %d", len(callTimes))
+	}
+
+	// Verify delays are within jittered range
+	if len(callTimes) >= 2 {
+		delay1 := callTimes[1].Sub(callTimes[0])
+		if delay1 < 35*time.Millisecond || delay1 > 70*time.Millisecond {
+			t.Errorf("expected ~50ms delay with jitter, got %v", delay1)
+		}
+	}
+}
