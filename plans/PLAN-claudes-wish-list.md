@@ -926,7 +926,27 @@ Not all tools should be available to all users. The admin can control which tool
      - Entity descriptions from ontology are merged with schema table data
      - Relationships are only included if ontology exists and depth >= entities
 
-2. **`get_context` with `include` parameter** - Add statistics and sample_values options
+2. **[x] `get_context` with `include` parameter** - COMPLETED: Add statistics and sample_values options
+   - **Implementation:** Added `include` array parameter to `get_context` tool in `pkg/mcp/tools/context.go`
+   - **Supported values:**
+     - `statistics`: Adds distinct_count, row_count, null_rate, cardinality_ratio, is_joinable, joinability_reason
+     - `sample_values`: Placeholder for future implementation (marked with TODO)
+   - **Statistics source:** Retrieved from `engine_schema_columns` table via SchemaRepository.GetColumnsByTables()
+   - **Architecture:**
+     - New `includeOptions` struct with Statistics and SampleValues flags
+     - `parseIncludeOptions()` function converts string array to options struct
+     - `buildColumnDetails()` enriches column data with statistics when requested
+     - `addStatisticsToColumnDetail()` adds computed statistics (null_rate, cardinality_ratio) from SchemaColumn
+   - **Error handling:** Partial failure tolerance - if statistics fetch fails, continues with basic column data (logs warning)
+   - **Testing:** Added comprehensive unit tests for parseIncludeOptions and addStatisticsToColumnDetail functions
+   - **Known limitation:** Sample values fetching on-demand requires datasource adapter access, which is not yet implemented
+   - **Next Session Notes:**
+     - Statistics are computed from SchemaColumn fields (DistinctCount, NullCount, RowCount, IsJoinable, JoinabilityReason)
+     - Only included when depth=columns and include contains "statistics"
+     - Sample values will require adding DatasourceAdapterFactory to ContextToolDeps for on-demand fetching
+     - The implementation handles missing statistics gracefully - nil pointers are checked before adding to response
+     - Calculated fields (null_rate, cardinality_ratio) are only added when required data is available
+
 3. **`update_project_knowledge`** - Leverages existing `engine_project_knowledge` table
 
 ### Phase 2: Probe Tools (High Impact, Low Effort - Data Already Persisted)

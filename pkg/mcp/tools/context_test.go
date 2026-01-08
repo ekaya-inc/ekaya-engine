@@ -331,3 +331,172 @@ func TestFilterDatasourceTables(t *testing.T) {
 		})
 	}
 }
+
+// TestParseIncludeOptions tests the parseIncludeOptions function.
+func TestParseIncludeOptions(t *testing.T) {
+	tests := []struct {
+		name             string
+		values           []string
+		expectStatistics bool
+		expectSamples    bool
+	}{
+		{
+			name:             "empty values returns false for both",
+			values:           []string{},
+			expectStatistics: false,
+			expectSamples:    false,
+		},
+		{
+			name:             "nil values returns false for both",
+			values:           nil,
+			expectStatistics: false,
+			expectSamples:    false,
+		},
+		{
+			name:             "statistics only",
+			values:           []string{"statistics"},
+			expectStatistics: true,
+			expectSamples:    false,
+		},
+		{
+			name:             "sample_values only",
+			values:           []string{"sample_values"},
+			expectStatistics: false,
+			expectSamples:    true,
+		},
+		{
+			name:             "both statistics and sample_values",
+			values:           []string{"statistics", "sample_values"},
+			expectStatistics: true,
+			expectSamples:    true,
+		},
+		{
+			name:             "unknown values are ignored",
+			values:           []string{"unknown", "invalid"},
+			expectStatistics: false,
+			expectSamples:    false,
+		},
+		{
+			name:             "mixed valid and invalid",
+			values:           []string{"statistics", "invalid", "sample_values"},
+			expectStatistics: true,
+			expectSamples:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseIncludeOptions(tt.values)
+			assert.Equal(t, tt.expectStatistics, result.Statistics, "Statistics flag should match")
+			assert.Equal(t, tt.expectSamples, result.SampleValues, "SampleValues flag should match")
+		})
+	}
+}
+
+// TestAddStatisticsToColumnDetail tests the addStatisticsToColumnDetail function.
+func TestAddStatisticsToColumnDetail(t *testing.T) {
+	tests := []struct {
+		name             string
+		schemaCol        *models.SchemaColumn
+		datasourceCol    *models.DatasourceColumn
+		expectFields     []string // fields expected in the result
+		expectNotPresent []string // fields NOT expected in the result
+	}{
+		{
+			name: "all statistics available",
+			schemaCol: &models.SchemaColumn{
+				DistinctCount:     ptrInt64(100),
+				NullCount:         ptrInt64(10),
+				RowCount:          ptrInt64(1000),
+				IsJoinable:        ptrBool(true),
+				JoinabilityReason: ptrString("high_cardinality"),
+			},
+			datasourceCol:    &models.DatasourceColumn{},
+			expectFields:     []string{"distinct_count", "row_count", "null_rate", "cardinality_ratio", "is_joinable", "joinability_reason"},
+			expectNotPresent: []string{},
+		},
+		{
+			name: "missing null count",
+			schemaCol: &models.SchemaColumn{
+				DistinctCount: ptrInt64(100),
+				RowCount:      ptrInt64(1000),
+			},
+			datasourceCol:    &models.DatasourceColumn{},
+			expectFields:     []string{"distinct_count", "row_count", "cardinality_ratio"},
+			expectNotPresent: []string{"null_rate"},
+		},
+		{
+			name: "missing row count",
+			schemaCol: &models.SchemaColumn{
+				DistinctCount: ptrInt64(100),
+			},
+			datasourceCol:    &models.DatasourceColumn{},
+			expectFields:     []string{"distinct_count"},
+			expectNotPresent: []string{"row_count", "null_rate", "cardinality_ratio"},
+		},
+		{
+			name: "joinability info only",
+			schemaCol: &models.SchemaColumn{
+				IsJoinable:        ptrBool(false),
+				JoinabilityReason: ptrString("low_cardinality"),
+			},
+			datasourceCol:    &models.DatasourceColumn{},
+			expectFields:     []string{"is_joinable", "joinability_reason"},
+			expectNotPresent: []string{"distinct_count", "row_count", "null_rate"},
+		},
+		{
+			name:             "no statistics available",
+			schemaCol:        &models.SchemaColumn{},
+			datasourceCol:    &models.DatasourceColumn{},
+			expectFields:     []string{},
+			expectNotPresent: []string{"distinct_count", "row_count", "null_rate", "cardinality_ratio", "is_joinable"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			colDetail := make(map[string]any)
+			addStatisticsToColumnDetail(colDetail, tt.schemaCol, tt.datasourceCol)
+
+			// Check expected fields are present
+			for _, field := range tt.expectFields {
+				_, exists := colDetail[field]
+				assert.True(t, exists, "Expected field %s to be present", field)
+			}
+
+			// Check fields that should not be present
+			for _, field := range tt.expectNotPresent {
+				_, exists := colDetail[field]
+				assert.False(t, exists, "Expected field %s to NOT be present", field)
+			}
+
+			// Verify calculated values are correct
+			if tt.schemaCol.RowCount != nil && tt.schemaCol.NullCount != nil {
+				if nullRate, ok := colDetail["null_rate"].(float64); ok {
+					expectedRate := float64(*tt.schemaCol.NullCount) / float64(*tt.schemaCol.RowCount)
+					assert.InDelta(t, expectedRate, nullRate, 0.0001, "null_rate calculation should be accurate")
+				}
+			}
+
+			if tt.schemaCol.RowCount != nil && tt.schemaCol.DistinctCount != nil && *tt.schemaCol.RowCount > 0 {
+				if cardRatio, ok := colDetail["cardinality_ratio"].(float64); ok {
+					expectedRatio := float64(*tt.schemaCol.DistinctCount) / float64(*tt.schemaCol.RowCount)
+					assert.InDelta(t, expectedRatio, cardRatio, 0.0001, "cardinality_ratio calculation should be accurate")
+				}
+			}
+		})
+	}
+}
+
+// Helper functions for creating pointers
+func ptrInt64(v int64) *int64 {
+	return &v
+}
+
+func ptrBool(v bool) *bool {
+	return &v
+}
+
+func ptrString(v string) *string {
+	return &v
+}
