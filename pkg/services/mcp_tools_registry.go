@@ -19,7 +19,7 @@ const ToolGroupDeveloper = "developer"
 var ToolRegistry = []ToolDefinition{
 	// Developer tools - all tools are always available when developer is enabled
 	{Name: "echo", Description: "Echo back input message for testing", ToolGroup: ToolGroupDeveloper},
-	{Name: "execute", Description: "Execute DDL/DML statements", ToolGroup: ToolGroupDeveloper},
+	{Name: "execute", Description: "Execute DDL/DML statements", ToolGroup: ToolGroupDeveloper, SubOption: "enableExecute"},
 	{Name: "get_schema", Description: "Get database schema with entity semantics", ToolGroup: ToolGroupDeveloper},
 
 	// Business user tools (approved_queries group)
@@ -50,62 +50,15 @@ var agentAllowedTools = map[string]bool{
 // GetEnabledTools returns the list of tools enabled based on the current state.
 // This computes which tools would be visible to a user (not an agent) based on
 // the tool group configurations.
-// With radio button behavior, only one tool group can be enabled at a time.
+// Delegates to ToolAccessChecker to ensure consistency with tool execution checks.
 func GetEnabledTools(state map[string]*models.ToolGroupConfig) []ToolDefinition {
-	if state == nil {
-		// Only health is available with no state
-		return filterAlwaysTools()
-	}
-
-	var enabled []ToolDefinition
-
-	// Check if agent_tools is enabled - this changes everything
-	agentConfig := state[ToolGroupAgentTools]
-	if agentConfig != nil && agentConfig.Enabled {
-		// Agent tools mode: only specific tools are available
-		for _, tool := range ToolRegistry {
-			if agentAllowedTools[tool.Name] {
-				enabled = append(enabled, tool)
-			}
-		}
-		return enabled
-	}
-
-	// Normal mode: check each tool group (radio button - only one can be enabled)
-
-	// Developer tools - when enabled, ALL tools are available (full access)
-	devConfig := state[ToolGroupDeveloper]
-	if devConfig != nil && devConfig.Enabled {
-		// Developer mode: return all tools
-		return ToolRegistry
-	}
-
-	// Approved queries tools
-	aqConfig := state[ToolGroupApprovedQueries]
-	showApprovedQueries := aqConfig != nil && aqConfig.Enabled
-
-	for _, tool := range ToolRegistry {
-		switch tool.ToolGroup {
-		case ToolGroupApprovedQueries:
-			if showApprovedQueries {
-				enabled = append(enabled, tool)
-			}
-
-		case "always":
-			enabled = append(enabled, tool)
-		}
-	}
-
-	return enabled
+	checker := NewToolAccessChecker()
+	return checker.GetAccessibleTools(state, false) // false = user auth, not agent
 }
 
-// filterAlwaysTools returns only tools that are always available.
-func filterAlwaysTools() []ToolDefinition {
-	var result []ToolDefinition
-	for _, tool := range ToolRegistry {
-		if tool.ToolGroup == "always" {
-			result = append(result, tool)
-		}
-	}
-	return result
+// GetEnabledToolsForAgent returns the list of tools enabled for agent authentication.
+// This is separate from GetEnabledTools because agents have different access rules.
+func GetEnabledToolsForAgent(state map[string]*models.ToolGroupConfig) []ToolDefinition {
+	checker := NewToolAccessChecker()
+	return checker.GetAccessibleTools(state, true) // true = agent auth
 }

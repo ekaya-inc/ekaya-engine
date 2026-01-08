@@ -621,8 +621,7 @@ func TestMCPConfigService_Get_EnabledToolsIncluded(t *testing.T) {
 }
 
 func TestMCPConfigService_Get_EnabledToolsWithDeveloperEnabled(t *testing.T) {
-	// When developer tools are enabled, EnabledTools should include ALL developer tools + health
-	// (including execute, which is now always included with developer)
+	// When developer tools are enabled without EnableExecute, execute should NOT be included
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -655,7 +654,7 @@ func TestMCPConfigService_Get_EnabledToolsWithDeveloperEnabled(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// All developer tools (echo, execute, get_schema) + health
+	// Developer tools (echo, get_schema) + health, but NOT execute (requires EnableExecute)
 	toolNames := make([]string, len(resp.EnabledTools))
 	for i, tool := range resp.EnabledTools {
 		toolNames[i] = tool.Name
@@ -664,7 +663,7 @@ func TestMCPConfigService_Get_EnabledToolsWithDeveloperEnabled(t *testing.T) {
 	assert.Contains(t, toolNames, "echo", "should include echo tool")
 	assert.Contains(t, toolNames, "get_schema", "should include get_schema tool")
 	assert.Contains(t, toolNames, "health", "should include health tool")
-	assert.Contains(t, toolNames, "execute", "should include execute (always included with developer)")
+	assert.NotContains(t, toolNames, "execute", "should NOT include execute without EnableExecute")
 }
 
 func TestMCPConfigService_Get_EnabledToolsWithDeveloperAndExecute(t *testing.T) {
@@ -765,7 +764,11 @@ func TestMCPConfigService_Get_EnabledToolsWithApprovedQueries(t *testing.T) {
 }
 
 func TestMCPConfigService_Get_EnabledToolsWithAgentTools(t *testing.T) {
-	// When agent_tools is enabled, only agent-allowed tools should be included
+	// When only agent_tools is enabled (no developer or approved_queries),
+	// the UI shows tools from the USER perspective, not agent perspective.
+	// Since neither developer nor approved_queries is enabled for users,
+	// only health should be available.
+	// Agent-specific filtering only happens at MCP connection time.
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -803,16 +806,9 @@ func TestMCPConfigService_Get_EnabledToolsWithAgentTools(t *testing.T) {
 		toolNames[i] = tool.Name
 	}
 
-	// Agent-allowed tools only
-	assert.Contains(t, toolNames, "echo", "should include echo tool for agents")
-	assert.Contains(t, toolNames, "list_approved_queries", "should include list_approved_queries for agents")
-	assert.Contains(t, toolNames, "execute_approved_query", "should include execute_approved_query for agents")
+	// From user perspective with only agent_tools enabled, only health is available
 	assert.Contains(t, toolNames, "health", "should include health tool")
-
-	// Other tools should NOT be present
-	assert.NotContains(t, toolNames, "query", "should NOT include query tool for agents")
-	assert.NotContains(t, toolNames, "get_schema", "should NOT include get_schema for agents")
-	assert.Len(t, resp.EnabledTools, 4, "should have exactly 4 tools for agent mode")
+	assert.Len(t, resp.EnabledTools, 1, "should have exactly 1 tool (health) when only agent_tools is enabled from user perspective")
 }
 
 func TestMCPConfigService_Update_EnabledToolsReflectNewState(t *testing.T) {

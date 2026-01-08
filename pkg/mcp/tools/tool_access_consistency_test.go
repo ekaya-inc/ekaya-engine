@@ -124,7 +124,7 @@ func TestAgentToolsEnabled_ListAndCallConsistency(t *testing.T) {
 	}
 
 	// checkApprovedQueriesEnabled is called when executing list_approved_queries or execute_approved_query
-	_, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, queryDeps)
+	_, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, queryDeps, "list_approved_queries")
 	if err != nil {
 		t.Fatalf("CALLING: checkApprovedQueriesEnabled failed: %v\n"+
 			"This means tools are LISTED but cannot be CALLED - list/call inconsistency!", err)
@@ -191,7 +191,7 @@ func TestApprovedQueriesEnabled_ListAndCallConsistency(t *testing.T) {
 		Logger:           zap.NewNop(),
 	}
 
-	_, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, queryDeps)
+	_, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, queryDeps, "list_approved_queries")
 	if err != nil {
 		t.Fatalf("CALLING: checkApprovedQueriesEnabled failed: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestNeitherEnabled_NeitherListedNorCallable(t *testing.T) {
 		Logger:           zap.NewNop(),
 	}
 
-	_, _, cleanup, err := checkApprovedQueriesEnabled(ctx, queryDeps)
+	_, _, cleanup, err := checkApprovedQueriesEnabled(ctx, queryDeps, "list_approved_queries")
 	if cleanup != nil {
 		defer cleanup()
 	}
@@ -376,7 +376,7 @@ func TestBothEnabled_UserSeesApprovedQueries(t *testing.T) {
 		Logger:           zap.NewNop(),
 	}
 
-	_, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, queryDeps)
+	_, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, queryDeps, "list_approved_queries")
 	if err != nil {
 		t.Fatalf("CALLING: checkApprovedQueriesEnabled failed for user: %v", err)
 	}
@@ -445,10 +445,10 @@ func TestAgentToolsEnabled_EchoListAndCallConsistency(t *testing.T) {
 		Logger:           zap.NewNop(),
 	}
 
-	// checkEchoEnabled is called when executing echo tool
-	_, tenantCtx, cleanup, err := checkEchoEnabled(ctx, devDeps)
+	// checkToolEnabled is called when executing echo tool
+	_, tenantCtx, cleanup, err := checkToolEnabled(ctx, devDeps, "echo")
 	if err != nil {
-		t.Fatalf("CALLING: checkEchoEnabled failed: %v\n"+
+		t.Fatalf("CALLING: checkToolEnabled for echo failed: %v\n"+
 			"This means echo is LISTED but cannot be CALLED - list/call inconsistency!", err)
 	}
 	if cleanup != nil {

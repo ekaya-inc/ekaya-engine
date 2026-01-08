@@ -106,8 +106,8 @@ func TestNewToolFilter_DeveloperEnabled_AllToolsAvailable(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Create config with developer tools enabled (EnableExecute flag is now ignored)
-	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true})
+	// Create config with developer tools enabled AND EnableExecute=true for all tools
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, EnableExecute: true})
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
@@ -118,18 +118,18 @@ func TestNewToolFilter_DeveloperEnabled_AllToolsAvailable(t *testing.T) {
 	filter := NewToolFilter(deps)
 	tools := createTestTools()
 
-	// Developer mode = ALL tools available (full access for developers)
+	// Developer mode with EnableExecute = ALL tools available (full access for developers)
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Should have ALL tools (12 total) when developer is enabled
+	// Should have ALL tools (12 total) when developer is enabled with EnableExecute
 	if len(filtered) != 12 {
 		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
-	// Execute should be included (no longer controlled by EnableExecute flag)
+	// Execute should be included when EnableExecute=true
 	if !containsTool(filtered, "execute") {
-		t.Error("expected execute tool to be present in developer mode")
+		t.Error("expected execute tool to be present in developer mode with EnableExecute=true")
 	}
 
 	// All business user tools should also be present in developer mode
@@ -155,8 +155,8 @@ func TestNewToolFilter_DeveloperEnabled_VerifyAllTools(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Create config with developer tools enabled
-	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true})
+	// Create config with developer tools enabled AND EnableExecute=true for all tools
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, EnableExecute: true})
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
@@ -167,11 +167,11 @@ func TestNewToolFilter_DeveloperEnabled_VerifyAllTools(t *testing.T) {
 	filter := NewToolFilter(deps)
 	tools := createTestTools()
 
-	// Developer mode = ALL tools available (full access)
+	// Developer mode with EnableExecute = ALL tools available (full access)
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Should have ALL 12 tools when developer is enabled
+	// Should have ALL 12 tools when developer is enabled with EnableExecute
 	if len(filtered) != 12 {
 		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
@@ -349,9 +349,8 @@ func TestNewToolFilter_DeveloperEnabled_ApprovedQueriesOff(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Developer enabled (radio button: only developer is ON, approved_queries is OFF)
-	// EnableExecute flag is now ignored - developer mode = ALL tools
-	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true})
+	// Developer enabled with EnableExecute=true (radio button: only developer is ON, approved_queries is OFF)
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, EnableExecute: true})
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
@@ -365,12 +364,12 @@ func TestNewToolFilter_DeveloperEnabled_ApprovedQueriesOff(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Developer mode = ALL tools available (12 total)
+	// Developer mode with EnableExecute = ALL tools available (12 total)
 	if len(filtered) != 12 {
 		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
-	// All tools should be present in developer mode
+	// All tools should be present in developer mode with EnableExecute
 	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"}
 	for _, name := range allTools {
 		if !containsTool(filtered, name) {
@@ -690,15 +689,13 @@ func TestNewToolFilter_ApprovedQueriesOn_DeveloperOff(t *testing.T) {
 	}
 }
 
-// Test that EnableExecute flag is ignored - developer mode always includes all tools
-// Previously this flag controlled the execute tool, but now developer mode = ALL tools
-func TestNewToolFilter_DeveloperEnabled_EnableExecuteFlagIgnored(t *testing.T) {
+// Test that EnableExecute flag controls execute tool visibility
+// When EnableExecute=false, execute tool should NOT be shown (ensures consistency with execution checks)
+func TestNewToolFilter_DeveloperEnabled_EnableExecuteFlagControlsExecute(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Developer ON with EnableExecute=false (should be ignored)
-	// Note: With radio button behavior, we shouldn't have both enabled,
-	// but for this test we're specifically testing that EnableExecute is ignored
+	// Developer ON with EnableExecute=false - execute should NOT be visible
 	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, EnableExecute: false})
 
 	deps := &MCPToolDeps{
@@ -713,33 +710,33 @@ func TestNewToolFilter_DeveloperEnabled_EnableExecuteFlagIgnored(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Developer mode = ALL tools (12 total), regardless of EnableExecute flag
-	if len(filtered) != 12 {
-		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
+	// Developer mode without EnableExecute = 11 tools (all except execute)
+	if len(filtered) != 11 {
+		t.Errorf("expected 11 tools (all except execute), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
-	// Execute should be present - EnableExecute flag is now ignored
-	if !containsTool(filtered, "execute") {
-		t.Error("execute tool should be present in developer mode (EnableExecute flag is ignored)")
+	// Execute should NOT be present when EnableExecute=false
+	if containsTool(filtered, "execute") {
+		t.Error("execute tool should NOT be present when EnableExecute=false")
 	}
 
-	// All other tools should also be present
-	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"}
-	for _, name := range allTools {
+	// All other tools should be present
+	otherTools := []string{"health", "echo", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"}
+	for _, name := range otherTools {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present in developer mode", name)
 		}
 	}
 }
 
-// Test developer mode with minimal config (only developer enabled)
-// Verifies that developer mode = ALL tools regardless of other tool group configs
-func TestNewToolFilter_DeveloperOnly_AllToolsAvailable(t *testing.T) {
+// Test developer mode with EnableExecute=false (only developer enabled, no execute)
+// Verifies that developer mode gives most tools but execute requires EnableExecute
+func TestNewToolFilter_DeveloperOnly_WithoutExecute(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Only developer tools enabled (radio button behavior - only one active)
-	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true})
+	// Only developer tools enabled without EnableExecute
+	setupTestConfig(t, engineDB.DB, projectID, &models.ToolGroupConfig{Enabled: true, EnableExecute: false})
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
@@ -753,17 +750,22 @@ func TestNewToolFilter_DeveloperOnly_AllToolsAvailable(t *testing.T) {
 	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{ProjectID: projectID.String()})
 	filtered := filter(ctx, tools)
 
-	// Developer mode = ALL tools (12 total)
-	if len(filtered) != 12 {
-		t.Errorf("expected 12 tools (all), got %d: %v", len(filtered), toolNames(filtered))
+	// Developer mode without EnableExecute = 11 tools (all except execute)
+	if len(filtered) != 11 {
+		t.Errorf("expected 11 tools (all except execute), got %d: %v", len(filtered), toolNames(filtered))
 	}
 
-	// All tools should be present in developer mode
-	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"}
-	for _, name := range allTools {
+	// All tools except execute should be present in developer mode
+	otherTools := []string{"health", "echo", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"}
+	for _, name := range otherTools {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present in developer mode", name)
 		}
+	}
+
+	// Execute should NOT be present without EnableExecute
+	if containsTool(filtered, "execute") {
+		t.Error("execute should NOT be present when EnableExecute=false")
 	}
 }
 
@@ -1033,7 +1035,7 @@ func TestNewToolFilter_UserAuth_DeveloperMode_AllTools(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Create config with developer tools enabled
+	// Create config with developer tools enabled AND EnableExecute=true
 	// (agent_tools config doesn't affect user authentication)
 	ctx := context.Background()
 	scope, err := engineDB.DB.WithTenant(ctx, projectID)
@@ -1054,7 +1056,7 @@ func TestNewToolFilter_UserAuth_DeveloperMode_AllTools(t *testing.T) {
 	mcpConfig := &models.MCPConfig{
 		ProjectID: projectID,
 		ToolGroups: map[string]*models.ToolGroupConfig{
-			"developer": {Enabled: true},
+			"developer": {Enabled: true, EnableExecute: true},
 		},
 	}
 
@@ -1089,12 +1091,12 @@ func TestNewToolFilter_UserAuth_DeveloperMode_AllTools(t *testing.T) {
 	ctx = context.WithValue(context.Background(), auth.ClaimsKey, claims)
 	filtered := filter(ctx, tools)
 
-	// User with developer mode = ALL tools (12 total)
+	// User with developer mode + EnableExecute = ALL tools (12 total)
 	if len(filtered) != 12 {
 		t.Errorf("expected 12 tools (all) for user in developer mode, got %d: %v", len(filtered), toolNames(filtered))
 	}
 
-	// All tools should be present in developer mode
+	// All tools should be present in developer mode with EnableExecute
 	allTools := []string{"health", "echo", "execute", "query", "sample", "validate", "get_schema", "list_approved_queries", "execute_approved_query", "get_ontology", "list_glossary", "get_glossary_sql"}
 	for _, name := range allTools {
 		if !containsTool(filtered, name) {

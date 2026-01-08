@@ -297,10 +297,11 @@ func main() {
 
 	// Register schema tools for entity/role semantic context
 	schemaToolDeps := &mcptools.SchemaToolDeps{
-		DB:             db,
-		ProjectService: projectService,
-		SchemaService:  schemaService,
-		Logger:         logger,
+		DB:               db,
+		MCPConfigService: mcpConfigService,
+		ProjectService:   projectService,
+		SchemaService:    schemaService,
+		Logger:           logger,
 	}
 	mcptools.RegisterSchemaTools(mcpServer.MCP(), schemaToolDeps)
 

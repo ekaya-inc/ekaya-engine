@@ -322,124 +322,10 @@ func filterOutExecuteTool(tools []mcp.Tool) []mcp.Tool {
 	return filtered
 }
 
-// checkDeveloperEnabled verifies the developer tool group is enabled for the project.
-// Returns the project ID and a tenant-scoped context if enabled, or an error if not.
-func checkDeveloperEnabled(ctx context.Context, deps *MCPToolDeps) (uuid.UUID, context.Context, func(), error) {
-	// Get claims from context
-	claims, ok := auth.GetClaims(ctx)
-	if !ok {
-		return uuid.Nil, nil, nil, fmt.Errorf("authentication required")
-	}
-
-	projectID, err := uuid.Parse(claims.ProjectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("invalid project ID: %w", err)
-	}
-
-	// Acquire connection with tenant scope
-	scope, err := deps.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to acquire database connection: %w", err)
-	}
-
-	// Set tenant context for the query
-	tenantCtx := database.SetTenantScope(ctx, scope)
-
-	// Check if developer tool group is enabled
-	enabled, err := deps.MCPConfigService.IsToolGroupEnabled(tenantCtx, projectID, developerToolGroup)
-	if err != nil {
-		scope.Close()
-		deps.Logger.Error("Failed to check developer tool group",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool group configuration: %w", err)
-	}
-
-	if !enabled {
-		scope.Close()
-		return uuid.Nil, nil, nil, fmt.Errorf("developer tools are not enabled for this project")
-	}
-
-	return projectID, tenantCtx, func() { scope.Close() }, nil
-}
-
-// checkExecuteEnabled verifies the execute tool is enabled for the project.
-// This checks both the developer tool group and the EnableExecute sub-option.
-func checkExecuteEnabled(ctx context.Context, deps *MCPToolDeps) (uuid.UUID, context.Context, func(), error) {
-	// First check if developer tools are enabled
-	projectID, tenantCtx, cleanup, err := checkDeveloperEnabled(ctx, deps)
-	if err != nil {
-		return uuid.Nil, nil, nil, err
-	}
-
-	// Check if EnableExecute is set
-	config, err := deps.MCPConfigService.GetToolGroupConfig(tenantCtx, projectID, developerToolGroup)
-	if err != nil {
-		cleanup()
-		deps.Logger.Error("Failed to get developer tool config",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool configuration: %w", err)
-	}
-
-	if config == nil || !config.EnableExecute {
-		cleanup()
-		return uuid.Nil, nil, nil, fmt.Errorf("execute tool is not enabled for this project")
-	}
-
-	return projectID, tenantCtx, cleanup, nil
-}
-
-// checkBusinessUserToolsEnabled verifies the caller is authorized to use business user tools (query, sample, validate).
-// Authorization is granted if approved_queries tool group is enabled.
-// These are read-only query tools that enable business users to answer ad-hoc questions.
+// checkToolEnabled verifies the caller is authorized to use a specific tool.
+// Uses ToolAccessChecker to ensure consistency with tool list filtering.
 // Returns the project ID and a tenant-scoped context if authorized, or an error if not.
-func checkBusinessUserToolsEnabled(ctx context.Context, deps *MCPToolDeps) (uuid.UUID, context.Context, func(), error) {
-	// Get claims from context
-	claims, ok := auth.GetClaims(ctx)
-	if !ok {
-		return uuid.Nil, nil, nil, fmt.Errorf("authentication required")
-	}
-
-	projectID, err := uuid.Parse(claims.ProjectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("invalid project ID: %w", err)
-	}
-
-	// Acquire connection with tenant scope
-	scope, err := deps.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to acquire database connection: %w", err)
-	}
-
-	// Set tenant context for the query
-	tenantCtx := database.SetTenantScope(ctx, scope)
-
-	// Check if approved_queries tool group is enabled
-	enabled, err := deps.MCPConfigService.IsToolGroupEnabled(tenantCtx, projectID, "approved_queries")
-	if err != nil {
-		scope.Close()
-		deps.Logger.Error("Failed to check approved_queries tool group",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool group configuration: %w", err)
-	}
-
-	if !enabled {
-		scope.Close()
-		return uuid.Nil, nil, nil, fmt.Errorf("business user tools are not enabled for this project")
-	}
-
-	return projectID, tenantCtx, func() { scope.Close() }, nil
-}
-
-// checkEchoEnabled verifies the caller is authorized to use the echo tool.
-// Authorization is granted if:
-//   - developer tool group is enabled (for user authentication), OR
-//   - agent_tools is enabled AND caller is an agent (claims.Subject == "agent")
-//
-// Returns the project ID and a tenant-scoped context if authorized, or an error if not.
-func checkEchoEnabled(ctx context.Context, deps *MCPToolDeps) (uuid.UUID, context.Context, func(), error) {
+func checkToolEnabled(ctx context.Context, deps *MCPToolDeps, toolName string) (uuid.UUID, context.Context, func(), error) {
 	// Get claims from context
 	claims, ok := auth.GetClaims(ctx)
 	if !ok {
@@ -463,40 +349,24 @@ func checkEchoEnabled(ctx context.Context, deps *MCPToolDeps) (uuid.UUID, contex
 	// Check if caller is an agent (API key authentication)
 	isAgent := claims.Subject == "agent"
 
-	// Check if developer tool group is enabled (for users)
-	developerEnabled, err := deps.MCPConfigService.IsToolGroupEnabled(tenantCtx, projectID, developerToolGroup)
+	// Get tool groups state and check access using the unified checker
+	state, err := deps.MCPConfigService.GetToolGroupsState(tenantCtx, projectID)
 	if err != nil {
 		scope.Close()
-		deps.Logger.Error("Failed to check developer tool group",
+		deps.Logger.Error("Failed to get tool groups state",
 			zap.String("project_id", projectID.String()),
 			zap.Error(err))
 		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool group configuration: %w", err)
 	}
 
-	// If developer tools is enabled, allow access (for both users and agents)
-	if developerEnabled {
+	// Use the unified ToolAccessChecker for consistent access decisions
+	checker := services.NewToolAccessChecker()
+	if checker.IsToolAccessible(toolName, state, isAgent) {
 		return projectID, tenantCtx, func() { scope.Close() }, nil
 	}
 
-	// For agents, also check if agent_tools is enabled
-	if isAgent {
-		agentToolsEnabled, err := deps.MCPConfigService.IsToolGroupEnabled(tenantCtx, projectID, services.ToolGroupAgentTools)
-		if err != nil {
-			scope.Close()
-			deps.Logger.Error("Failed to check agent_tools tool group",
-				zap.String("project_id", projectID.String()),
-				zap.Error(err))
-			return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool group configuration: %w", err)
-		}
-
-		if agentToolsEnabled {
-			return projectID, tenantCtx, func() { scope.Close() }, nil
-		}
-	}
-
-	// Neither developer tools nor agent_tools (for agents) is enabled
 	scope.Close()
-	return uuid.Nil, nil, nil, fmt.Errorf("echo tool is not enabled for this project")
+	return uuid.Nil, nil, nil, fmt.Errorf("%s tool is not enabled for this project", toolName)
 }
 
 // registerEchoTool adds a simple echo tool for testing the developer tool group.
@@ -517,8 +387,8 @@ func registerEchoTool(s *server.MCPServer, deps *MCPToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Check if echo tool is enabled (developer tools OR agent_tools for agents)
-		_, _, cleanup, err := checkEchoEnabled(ctx, deps)
+		// Check if echo tool is enabled using unified access checker
+		_, _, cleanup, err := checkToolEnabled(ctx, deps, "echo")
 		if err != nil {
 			return nil, err
 		}
@@ -580,7 +450,7 @@ func registerQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkBusinessUserToolsEnabled(ctx, deps)
+		projectID, tenantCtx, cleanup, err := checkToolEnabled(ctx, deps, "query")
 		if err != nil {
 			return nil, err
 		}
@@ -684,7 +554,7 @@ func registerSampleTool(s *server.MCPServer, deps *MCPToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkBusinessUserToolsEnabled(ctx, deps)
+		projectID, tenantCtx, cleanup, err := checkToolEnabled(ctx, deps, "sample")
 		if err != nil {
 			return nil, err
 		}
@@ -785,8 +655,8 @@ func registerExecuteTool(s *server.MCPServer, deps *MCPToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Check if execute tool is specifically enabled (not just developer tools)
-		projectID, tenantCtx, cleanup, err := checkExecuteEnabled(ctx, deps)
+		// Check if execute tool is enabled using unified access checker
+		projectID, tenantCtx, cleanup, err := checkToolEnabled(ctx, deps, "execute")
 		if err != nil {
 			return nil, err
 		}
@@ -887,7 +757,7 @@ func registerValidateTool(s *server.MCPServer, deps *MCPToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkBusinessUserToolsEnabled(ctx, deps)
+		projectID, tenantCtx, cleanup, err := checkToolEnabled(ctx, deps, "validate")
 		if err != nil {
 			return nil, err
 		}

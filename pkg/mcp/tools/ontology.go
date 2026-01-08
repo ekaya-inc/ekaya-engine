@@ -36,9 +36,9 @@ func RegisterOntologyTools(s *server.MCPServer, deps *OntologyToolDeps) {
 	registerGetOntologyTool(s, deps)
 }
 
-// checkOntologyToolsEnabled verifies ontology tools are enabled for the project.
-// Ontology tools share visibility with approved_queries tools.
-func checkOntologyToolsEnabled(ctx context.Context, deps *OntologyToolDeps) (uuid.UUID, context.Context, func(), error) {
+// checkOntologyToolEnabled verifies a specific ontology tool is enabled for the project.
+// Uses ToolAccessChecker to ensure consistency with tool list filtering.
+func checkOntologyToolEnabled(ctx context.Context, deps *OntologyToolDeps, toolName string) (uuid.UUID, context.Context, func(), error) {
 	// Get claims from context
 	claims, ok := auth.GetClaims(ctx)
 	if !ok {
@@ -59,22 +59,27 @@ func checkOntologyToolsEnabled(ctx context.Context, deps *OntologyToolDeps) (uui
 	// Set tenant context for the query
 	tenantCtx := database.SetTenantScope(ctx, scope)
 
-	// Check if approved_queries tool group is enabled (ontology tools share this visibility)
-	showOntologyTools, err := deps.MCPConfigService.ShouldShowApprovedQueriesTools(tenantCtx, projectID)
+	// Check if caller is an agent (API key authentication)
+	isAgent := claims.Subject == "agent"
+
+	// Get tool groups state and check access using the unified checker
+	state, err := deps.MCPConfigService.GetToolGroupsState(tenantCtx, projectID)
 	if err != nil {
 		scope.Close()
-		deps.Logger.Error("Failed to check ontology tools visibility",
+		deps.Logger.Error("Failed to get tool groups state",
 			zap.String("project_id", projectID.String()),
 			zap.Error(err))
 		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool configuration: %w", err)
 	}
 
-	if !showOntologyTools {
-		scope.Close()
-		return uuid.Nil, nil, nil, fmt.Errorf("ontology tools are not enabled for this project")
+	// Use the unified ToolAccessChecker for consistent access decisions
+	checker := services.NewToolAccessChecker()
+	if checker.IsToolAccessible(toolName, state, isAgent) {
+		return projectID, tenantCtx, func() { scope.Close() }, nil
 	}
 
-	return projectID, tenantCtx, func() { scope.Close() }, nil
+	scope.Close()
+	return uuid.Nil, nil, nil, fmt.Errorf("%s tool is not enabled for this project", toolName)
 }
 
 // getStringSlice extracts a slice of strings from request arguments.
@@ -134,7 +139,7 @@ func registerGetOntologyTool(s *server.MCPServer, deps *OntologyToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkOntologyToolsEnabled(ctx, deps)
+		projectID, tenantCtx, cleanup, err := checkOntologyToolEnabled(ctx, deps, "get_ontology")
 		if err != nil {
 			return nil, err
 		}
