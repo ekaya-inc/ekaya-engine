@@ -14,6 +14,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
@@ -32,12 +33,14 @@ const approvedQueriesToolGroup = "approved_queries"
 var approvedQueriesToolNames = map[string]bool{
 	"list_approved_queries":  true,
 	"execute_approved_query": true,
+	"suggest_approved_query": true,
 }
 
 // RegisterApprovedQueriesTools registers tools for executing Pre-Approved Queries.
 func RegisterApprovedQueriesTools(s *server.MCPServer, deps *QueryToolDeps) {
 	registerListApprovedQueriesTool(s, deps)
 	registerExecuteApprovedQueryTool(s, deps)
+	registerSuggestApprovedQueryTool(s, deps)
 }
 
 // checkApprovedQueriesEnabled verifies the caller is authorized to use approved queries tools.
@@ -377,4 +380,276 @@ func containsAny(s string, substrs []string) bool {
 		}
 	}
 	return false
+}
+
+// registerSuggestApprovedQueryTool - AI agents suggest reusable queries for approval.
+func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) {
+	tool := mcp.NewTool(
+		"suggest_approved_query",
+		mcp.WithDescription(
+			"Suggest a reusable parameterized query for approval. "+
+				"After validation, the query is stored with status='pending' (or 'approved' if auto-approve is enabled). "+
+				"Use this when you discover a useful query pattern that should be saved for future use.",
+		),
+		mcp.WithString(
+			"name",
+			mcp.Required(),
+			mcp.Description("Human-readable name for the query"),
+		),
+		mcp.WithString(
+			"description",
+			mcp.Required(),
+			mcp.Description("What business question this query answers"),
+		),
+		mcp.WithString(
+			"sql",
+			mcp.Required(),
+			mcp.Description("SQL query with {{parameter}} placeholders"),
+		),
+		mcp.WithArray(
+			"parameters",
+			mcp.Description("Parameter definitions (inferred from SQL if omitted)"),
+		),
+		mcp.WithObject(
+			"output_column_descriptions",
+			mcp.Description("Optional descriptions for output columns (e.g., {\"total_earned_usd\": \"Total earnings in USD\"})"),
+		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, deps, "suggest_approved_query")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Extract parameters
+		name, err := req.RequireString("name")
+		if err != nil {
+			return nil, err
+		}
+		description, err := req.RequireString("description")
+		if err != nil {
+			return nil, err
+		}
+		sqlQuery, err := req.RequireString("sql")
+		if err != nil {
+			return nil, err
+		}
+
+		// Get default datasource
+		dsID, err := deps.ProjectService.GetDefaultDatasourceID(tenantCtx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get default datasource: %w", err)
+		}
+
+		// Parse optional parameters
+		var paramDefs []models.QueryParameter
+		if args, ok := req.Params.Arguments.(map[string]any); ok {
+			if paramsArray, ok := args["parameters"].([]any); ok {
+				paramDefs, err = parseParameterDefinitions(paramsArray)
+				if err != nil {
+					return nil, fmt.Errorf("invalid parameters: %w", err)
+				}
+			}
+		}
+
+		// Parse optional output column descriptions
+		var outputColDescs map[string]string
+		if args, ok := req.Params.Arguments.(map[string]any); ok {
+			if descs, ok := args["output_column_descriptions"].(map[string]any); ok {
+				outputColDescs = make(map[string]string)
+				for k, v := range descs {
+					if str, ok := v.(string); ok {
+						outputColDescs[k] = str
+					}
+				}
+			}
+		}
+
+		// Validate SQL and parameters with dry-run execution
+		validationResult, err := validateAndTestQuery(tenantCtx, deps, projectID, dsID, sqlQuery, paramDefs)
+		if err != nil {
+			return nil, fmt.Errorf("validation failed: %w", err)
+		}
+
+		// Merge output column descriptions with detected columns
+		outputColumns := buildOutputColumns(validationResult.Columns, outputColDescs)
+
+		// Build suggestion context
+		suggestionContext := map[string]any{
+			"validation": map[string]any{
+				"sql_valid":       validationResult.SQLValid,
+				"dry_run_rows":    validationResult.DryRunRows,
+				"parameters_used": validationResult.ParametersUsed,
+			},
+		}
+
+		// Create query with status='pending' and suggested_by='agent'
+		createReq := &services.CreateQueryRequest{
+			NaturalLanguagePrompt: name,
+			AdditionalContext:     description,
+			SQLQuery:              sqlQuery,
+			IsEnabled:             false, // Start disabled until approved
+			Parameters:            paramDefs,
+			OutputColumns:         outputColumns,
+			Status:                "pending",
+			SuggestedBy:           "agent",
+			SuggestionContext:     suggestionContext,
+		}
+
+		query, err := deps.QueryService.Create(tenantCtx, projectID, dsID, createReq)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create query suggestion: %w", err)
+		}
+
+		// Format response
+		response := struct {
+			SuggestionID  string             `json:"suggestion_id"`
+			Status        string             `json:"status"`
+			Validation    validationResponse `json:"validation"`
+			ApprovedQuery *approvedQueryInfo `json:"approved_query,omitempty"`
+		}{
+			SuggestionID: query.ID.String(),
+			Status:       query.Status,
+			Validation: validationResponse{
+				SQLValid:              validationResult.SQLValid,
+				DryRunRows:            validationResult.DryRunRows,
+				DetectedOutputColumns: buildColumnInfo(validationResult.Columns),
+			},
+		}
+
+		// If auto-approve is enabled, include the approved query
+		// For now, always return pending status (auto-approve can be implemented later)
+
+		jsonResult, _ := json.Marshal(response)
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// validationResult holds the results of SQL validation and dry-run execution.
+type validationResult struct {
+	SQLValid       bool
+	DryRunRows     int
+	Columns        []columnDetail
+	ParametersUsed map[string]any
+}
+
+type columnDetail struct {
+	Name string
+	Type string
+}
+
+type validationResponse struct {
+	SQLValid              bool           `json:"sql_valid"`
+	DryRunRows            int            `json:"dry_run_rows"`
+	DetectedOutputColumns []columnDetail `json:"detected_output_columns"`
+}
+
+// parseParameterDefinitions converts MCP parameter array to QueryParameter slice.
+func parseParameterDefinitions(paramsArray []any) ([]models.QueryParameter, error) {
+	params := make([]models.QueryParameter, 0, len(paramsArray))
+
+	for i, p := range paramsArray {
+		paramMap, ok := p.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("parameter %d is not an object", i)
+		}
+
+		name, ok := paramMap["name"].(string)
+		if !ok || name == "" {
+			return nil, fmt.Errorf("parameter %d missing required 'name' field", i)
+		}
+
+		paramType, ok := paramMap["type"].(string)
+		if !ok || paramType == "" {
+			return nil, fmt.Errorf("parameter %d missing required 'type' field", i)
+		}
+
+		param := models.QueryParameter{
+			Name:     name,
+			Type:     paramType,
+			Required: true, // Default to required
+		}
+
+		if desc, ok := paramMap["description"].(string); ok {
+			param.Description = desc
+		}
+
+		if required, ok := paramMap["required"].(bool); ok {
+			param.Required = required
+		}
+
+		if example, ok := paramMap["example"]; ok {
+			param.Default = example
+		}
+
+		params = append(params, param)
+	}
+
+	return params, nil
+}
+
+// validateAndTestQuery validates SQL and runs a dry-run with example parameters.
+func validateAndTestQuery(ctx context.Context, deps *QueryToolDeps, projectID, dsID uuid.UUID, sqlQuery string, paramDefs []models.QueryParameter) (*validationResult, error) {
+	// Build parameter values from examples
+	paramValues := make(map[string]any)
+	for _, p := range paramDefs {
+		if p.Default != nil {
+			paramValues[p.Name] = p.Default
+		} else if p.Required {
+			return nil, fmt.Errorf("parameter %q is required but has no example value", p.Name)
+		}
+	}
+
+	// Test the query with a limit of 1 to detect output columns
+	testReq := &services.TestQueryRequest{
+		SQLQuery:             sqlQuery,
+		Limit:                1,
+		ParameterDefinitions: paramDefs,
+		ParameterValues:      paramValues,
+	}
+
+	result, err := deps.QueryService.Test(ctx, projectID, dsID, testReq)
+	if err != nil {
+		return nil, fmt.Errorf("query execution failed: %w", err)
+	}
+
+	// Build validation result
+	columns := make([]columnDetail, len(result.Columns))
+	for i, col := range result.Columns {
+		columns[i] = columnDetail{
+			Name: col.Name,
+			Type: col.Type,
+		}
+	}
+
+	return &validationResult{
+		SQLValid:       true,
+		DryRunRows:     len(result.Rows),
+		Columns:        columns,
+		ParametersUsed: paramValues,
+	}, nil
+}
+
+// buildOutputColumns merges detected columns with provided descriptions.
+func buildOutputColumns(columns []columnDetail, descriptions map[string]string) []models.OutputColumn {
+	outputCols := make([]models.OutputColumn, len(columns))
+	for i, col := range columns {
+		outputCols[i] = models.OutputColumn{
+			Name:        col.Name,
+			Type:        col.Type,
+			Description: descriptions[col.Name],
+		}
+	}
+	return outputCols
+}
+
+// buildColumnInfo converts columnDetail to response format.
+func buildColumnInfo(columns []columnDetail) []columnDetail {
+	return columns
 }

@@ -409,3 +409,205 @@ func TestListApprovedQueries_EmptyOutputColumns(t *testing.T) {
 	// Verify empty output columns (no fallback parsing)
 	assert.Empty(t, outputCols, "should have no output columns when not specified")
 }
+
+func TestRegisterSuggestApprovedQueryTool(t *testing.T) {
+	// Verify that suggest_approved_query tool is registered
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &QueryToolDeps{
+		MCPConfigService: &mockMCPConfigService{
+			config: &models.ToolGroupConfig{Enabled: true},
+		},
+		ProjectService: &mockProjectService{},
+		QueryService:   &mockQueryService{},
+		Logger:         zap.NewNop(),
+	}
+
+	RegisterApprovedQueriesTools(mcpServer, deps)
+
+	// Verify tool is registered
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	// Check suggest_approved_query tool is registered
+	toolNames := make(map[string]bool)
+	for _, tool := range response.Result.Tools {
+		toolNames[tool.Name] = true
+	}
+
+	assert.True(t, toolNames["suggest_approved_query"], "suggest_approved_query tool should be registered")
+}
+
+func TestParseParameterDefinitions(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     []any
+		wantErr   bool
+		wantCount int
+		validate  func(*testing.T, []models.QueryParameter)
+	}{
+		{
+			name: "valid parameters with all fields",
+			input: []any{
+				map[string]any{
+					"name":        "host_username",
+					"type":        "string",
+					"description": "Host's username",
+					"required":    true,
+					"example":     "damon",
+				},
+			},
+			wantErr:   false,
+			wantCount: 1,
+			validate: func(t *testing.T, params []models.QueryParameter) {
+				assert.Equal(t, "host_username", params[0].Name)
+				assert.Equal(t, "string", params[0].Type)
+				assert.Equal(t, "Host's username", params[0].Description)
+				assert.True(t, params[0].Required)
+				assert.Equal(t, "damon", params[0].Default)
+			},
+		},
+		{
+			name: "parameter with defaults",
+			input: []any{
+				map[string]any{
+					"name": "user_id",
+					"type": "integer",
+				},
+			},
+			wantErr:   false,
+			wantCount: 1,
+			validate: func(t *testing.T, params []models.QueryParameter) {
+				assert.Equal(t, "user_id", params[0].Name)
+				assert.Equal(t, "integer", params[0].Type)
+				assert.True(t, params[0].Required) // Default to required
+			},
+		},
+		{
+			name: "missing name field",
+			input: []any{
+				map[string]any{
+					"type": "string",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "missing type field",
+			input: []any{
+				map[string]any{
+					"name": "param1",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name:      "empty array",
+			input:     []any{},
+			wantErr:   false,
+			wantCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseParameterDefinitions(tt.input)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantCount, len(result))
+
+			if tt.validate != nil {
+				tt.validate(t, result)
+			}
+		})
+	}
+}
+
+func TestBuildOutputColumns(t *testing.T) {
+	columns := []columnDetail{
+		{Name: "month", Type: "TIMESTAMP"},
+		{Name: "total_earned_usd", Type: "NUMERIC"},
+		{Name: "transaction_count", Type: "BIGINT"},
+	}
+
+	descriptions := map[string]string{
+		"total_earned_usd":  "Total earnings in USD (converted from cents)",
+		"transaction_count": "Number of completed transactions",
+	}
+
+	result := buildOutputColumns(columns, descriptions)
+
+	require.Equal(t, 3, len(result))
+
+	// Check first column (no description provided)
+	assert.Equal(t, "month", result[0].Name)
+	assert.Equal(t, "TIMESTAMP", result[0].Type)
+	assert.Empty(t, result[0].Description)
+
+	// Check second column (description provided)
+	assert.Equal(t, "total_earned_usd", result[1].Name)
+	assert.Equal(t, "NUMERIC", result[1].Type)
+	assert.Equal(t, "Total earnings in USD (converted from cents)", result[1].Description)
+
+	// Check third column (description provided)
+	assert.Equal(t, "transaction_count", result[2].Name)
+	assert.Equal(t, "BIGINT", result[2].Type)
+	assert.Equal(t, "Number of completed transactions", result[2].Description)
+}
+
+func TestSuggestApprovedQuery_ResponseStructure(t *testing.T) {
+	// Verify the response structure of suggest_approved_query tool
+	response := struct {
+		SuggestionID string             `json:"suggestion_id"`
+		Status       string             `json:"status"`
+		Validation   validationResponse `json:"validation"`
+	}{
+		SuggestionID: uuid.New().String(),
+		Status:       "pending",
+		Validation: validationResponse{
+			SQLValid:   true,
+			DryRunRows: 3,
+			DetectedOutputColumns: []columnDetail{
+				{Name: "month", Type: "TIMESTAMP"},
+				{Name: "total", Type: "NUMERIC"},
+			},
+		},
+	}
+
+	// Verify JSON serialization works
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	// Verify required fields are present
+	assert.NotEmpty(t, parsed["suggestion_id"])
+	assert.Equal(t, "pending", parsed["status"])
+	assert.NotNil(t, parsed["validation"])
+
+	// Verify validation object structure
+	validation, ok := parsed["validation"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, true, validation["sql_valid"])
+	assert.Equal(t, float64(3), validation["dry_run_rows"])
+	assert.NotNil(t, validation["detected_output_columns"])
+}

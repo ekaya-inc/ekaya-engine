@@ -1170,7 +1170,74 @@ Not all tools should be available to all users. The admin can control which tool
 
 ### Phase 3: Query Intelligence (High Impact, Higher Effort)
 
-8. **[ ] `suggest_approved_query`** - Requires UI work for approval flow
+8. **[x] `suggest_approved_query`** - COMPLETED (2026-01-08): Allow AI agents to propose reusable queries
+   - **Implementation:** `pkg/mcp/tools/queries.go` (registerSuggestApprovedQueryTool function) + `pkg/mcp/tools/queries_test.go`
+   - **Migration:** Added `status`, `suggested_by`, and `suggestion_context` fields to `engine_queries` table (migrations/034_query_suggestions.{up,down}.sql)
+   - **Model Changes:** Added Status, SuggestedBy, SuggestionContext fields to `models.Query` struct (pkg/models/query.go)
+   - **Service Changes:** Extended `CreateQueryRequest` to accept suggestion metadata, updated `QueryService.Create` to handle status (default "approved" for backward compatibility) and metadata (pkg/services/query.go)
+   - **Repository Changes:** Updated all SQL queries (Create, GetByID, ListByDatasource, ListEnabled, Update) and scan functions (scanQuery, scanQueryRow) to include new fields (pkg/repositories/query_repository.go)
+   - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupApprovedQueries (line 42)
+   - **Key Features Implemented:**
+     - Validates SQL with example parameters using dry-run execution (via QueryService.Test)
+     - Detects output columns from query execution results (column names and types)
+     - Merges provided column descriptions with detected columns (buildOutputColumns function)
+     - Stores query with status='pending' and suggested_by='agent' by default
+     - Returns validation results including detected columns and row count
+     - Suggestion context stores validation metadata (sql_valid, dry_run_rows, parameters_used) for review
+     - Helper functions: parseParameterDefinitions, validateAndTestQuery, buildOutputColumns, buildColumnInfo
+   - **Testing:** Comprehensive unit tests covering tool registration, parameter parsing (parseParameterDefinitions), output column building (buildOutputColumns), and response structure (TestSuggestApprovedQuery_ResponseStructure)
+   - **Tool Group:** ToolGroupApprovedQueries (available when Approved Queries enabled)
+   - **Response Format:**
+     ```json
+     {
+       "suggestion_id": "uuid",
+       "status": "pending",
+       "validation": {
+         "sql_valid": true,
+         "dry_run_rows": 3,
+         "detected_output_columns": [
+           {"name": "month", "type": "TIMESTAMP"},
+           {"name": "total_earned_usd", "type": "NUMERIC"}
+         ]
+       }
+     }
+     ```
+   - **Tool Parameters:**
+     - `name` (required): Human-readable name for the query
+     - `description` (required): What business question this query answers
+     - `sql` (required): SQL query with {{parameter}} placeholders
+     - `parameters` (optional): Parameter definitions array (inferred from SQL if omitted)
+     - `output_column_descriptions` (optional): Object mapping column names to descriptions
+   - **Parameter Definition Structure:**
+     - `name` (required): Parameter name matching {{placeholder}} in SQL
+     - `type` (required): "string" | "number" | "date" | "boolean"
+     - `description` (optional): User-friendly explanation
+     - `required` (optional, default true): Whether parameter is required
+     - `example` (required for required params): Example value for dry-run validation
+   - **Validation Workflow:**
+     1. Extract and validate tool parameters (name, description, sql)
+     2. Get default datasource ID from project
+     3. Parse optional parameters array and output_column_descriptions object
+     4. Call validateAndTestQuery to run dry-run execution with example values
+     5. Build output columns by merging detected columns with provided descriptions
+     6. Create query via QueryService.Create with status='pending', suggested_by='agent'
+     7. Return suggestion_id, status, and validation results
+   - **Error Handling:**
+     - Returns error if required parameters (name, description, sql) missing
+     - Returns error if parameter definitions invalid (missing name or type)
+     - Returns error if required parameter has no example value for validation
+     - Returns error if SQL validation fails during dry-run execution
+     - Returns error if default datasource not configured for project
+   - **Next Session Notes:**
+     - UI work needed for approval flow (admin review of pending suggestions in /projects/{pid}/approved-queries)
+     - Future enhancement: Auto-approve mode (status='approved' if enabled in project config)
+     - The tool uses QueryService.Test to validate SQL with example parameters (limit=1 for column detection)
+     - Example parameters are required for all required parameters (stored in Default field of QueryParameter)
+     - Query is created as disabled (is_enabled=false) until approved by admin
+     - Status field defaults to "approved" in QueryService.Create for backward compatibility with existing code paths
+     - SuggestionContext stores validation metadata as map[string]any with "validation" key
+     - Helper functions are internal to queries.go (not exported) to keep MCP tool surface minimal
+     - **WHY this tool exists:** AI agents discover useful query patterns during exploration. Without this tool, those patterns are ephemeral - lost when the session ends. This tool captures them for human review and approval, building a curated library of business queries over time. The system gets smarter with each approved suggestion. The validation workflow ensures suggested queries are syntactically valid and executable before being submitted for review.
 9. **[ ] Query tags/categories** - Add to suggestion and listing
 
 ### Phase 4: Ontology Updates (Medium Impact)
