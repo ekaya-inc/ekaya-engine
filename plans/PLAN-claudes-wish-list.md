@@ -1015,7 +1015,73 @@ Not all tools should be available to all users. The admin can control which tool
      - Returns error if no active ontology or entity not found
      - Uses consistent error handling pattern from other MCP tools
      - Dependencies: OntologyRepo, OntologyEntityRepo, EntityRelationshipRepo
-5. **[ ] `probe_column`** / **`probe_columns`** - Column statistics and sample values
+5. **[x] `probe_column`** / **`probe_columns`** - COMPLETED: Column statistics and semantic information
+   - **Implementation:** `pkg/mcp/tools/probe.go` + `pkg/mcp/tools/probe_test.go`
+   - **Registration:** Added to main.go with ProbeToolDeps (main.go:431-442)
+   - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupDeveloper
+   - **Key Features Implemented:**
+     - `probe_column` tool for deep-diving into specific columns
+     - `probe_columns` batch variant for analyzing multiple columns at once (up to 50 columns max)
+     - Returns statistics (distinct_count, row_count, non_null_count, null_rate, cardinality_ratio, min_length, max_length)
+     - Returns joinability classification (is_joinable, reason)
+     - Returns semantic information from ontology (entity, role, description, enum_labels)
+     - Graceful error handling - batch mode returns partial results with errors for failed probes
+     - sample_values intentionally NOT included (see architecture notes below)
+   - **Testing:** Comprehensive unit tests covering tool structure, registration, parameter validation, and response formats
+   - **Tool Group:** ToolGroupDeveloper (available when Developer Tools enabled)
+   - **Response Format:**
+     ```json
+     {
+       "table": "users",
+       "column": "status",
+       "statistics": {
+         "distinct_count": 5,
+         "row_count": 1000,
+         "non_null_count": 950,
+         "null_rate": 0.05,
+         "cardinality_ratio": 0.005,
+         "min_length": 6,
+         "max_length": 9
+       },
+       "joinability": {
+         "is_joinable": false,
+         "reason": "low_cardinality"
+       },
+       "semantic": {
+         "entity": "User",
+         "role": "attribute",
+         "description": "User account status",
+         "enum_labels": {
+           "ACTIVE": "Normal active account",
+           "SUSPENDED": "Temporarily disabled"
+         }
+       }
+     }
+     ```
+   - **Architecture Notes:**
+     - Handler uses SchemaRepo.GetColumnsByTables() to fetch statistics from engine_schema_columns table
+     - Handler uses OntologyRepo.GetActive() to fetch semantic data from engine_ontologies.column_details
+     - Batch variant iterates over input columns and builds map of "table.column" -> probe result
+     - Partial failure support: if one column fails in batch mode, others still return successfully with error entry
+     - Access control via checkProbeToolEnabled (validates Developer Tools enabled for project)
+     - Tool filtering handled by unified ToolAccessChecker in MCP server
+   - **Design Decision: Why sample_values is NOT included:**
+     - The original plan (Part 5, Section 5.2) included sample_values in probe_column response
+     - However, Phase 2 item #7 specifies: "Persist sample_values - Store distinct values during extraction (currently discarded)"
+     - This means sample_values are NOT currently stored in engine_schema_columns during ontology extraction
+     - To implement sample_values would require BOTH:
+       1. Changes to ontology extraction workflow to persist values during extraction
+       2. Changes to this MCP tool to return persisted values
+     - The probe tools were implemented to expose EXISTING persisted data only, not to trigger on-demand data fetching
+     - This keeps probe tools fast (single DB query) and avoids datasource adapter complexity
+     - Future session implementing Phase 2 #7 can add sample_values to this tool's response once data is persisted
+   - **Next Session Notes:**
+     - Statistics are pre-computed during schema extraction and stored in engine_schema_columns
+     - Semantic information comes from active ontology's column_details JSONB field
+     - Enum labels are extracted by parsing column_details[table][column].enum_labels
+     - Batch tool has 50-column limit to prevent excessive database queries
+     - Dependencies: DB, MCPConfigService, SchemaRepo, OntologyRepo, Logger
+     - For sample_values support, implement Phase 2 item #7 first (ontology extraction changes), then add to this tool
 6. **[ ] `probe_relationship`** - Relationship metrics and cardinality
 7. **[ ] Persist sample_values** - Store distinct values during extraction (currently discarded)
 

@@ -431,6 +431,16 @@ func main() {
 	}
 	mcptools.RegisterEntityTools(mcpServer.MCP(), entityToolDeps)
 
+	// Register column probe tools (for deep-diving into column statistics and semantics)
+	probeToolDeps := &mcptools.ProbeToolDeps{
+		DB:               db,
+		MCPConfigService: mcpConfigService,
+		SchemaRepo:       schemaRepo,
+		OntologyRepo:     ontologyRepo,
+		Logger:           logger,
+	}
+	mcptools.RegisterProbeTools(mcpServer.MCP(), probeToolDeps)
+
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"
 	fileServer := http.FileServer(http.Dir(uiDir))
