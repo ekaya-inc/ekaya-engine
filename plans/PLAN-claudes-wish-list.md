@@ -947,7 +947,32 @@ Not all tools should be available to all users. The admin can control which tool
      - The implementation handles missing statistics gracefully - nil pointers are checked before adding to response
      - Calculated fields (null_rate, cardinality_ratio) are only added when required data is available
 
-3. **`update_project_knowledge`** - Leverages existing `engine_project_knowledge` table
+3. **[x] `update_project_knowledge`** - COMPLETED: Leverages existing `engine_project_knowledge` table
+   - **Implementation:** `pkg/mcp/tools/knowledge.go` + `pkg/mcp/tools/knowledge_test.go`
+   - **Registration:** Added to main.go with KnowledgeToolDeps (main.go:400-406)
+   - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupDeveloper
+   - **Key Features Implemented:**
+     - `update_project_knowledge` tool with upsert semantics (by project_id + fact_type + key)
+     - `delete_project_knowledge` tool for removing incorrect facts by fact_id
+     - Support for 4 categories: terminology, business_rule, enumeration, convention
+     - Optional fact_id parameter for explicit updates vs natural upsert
+     - Optional context parameter for tracking discovery source
+     - Default category to "terminology" if not specified
+     - Validation of category values with clear error messages
+   - **Testing:** Comprehensive unit tests covering tool structure, registration, parameter validation, and response formats
+   - **Tool Group:** ToolGroupDeveloper (available when Developer Tools enabled)
+   - **Architecture Notes:**
+     - Uses existing KnowledgeRepository interface with Upsert and Delete methods
+     - Dependencies injected via KnowledgeToolDeps struct (DB, MCPConfigService, KnowledgeRepository, Logger)
+     - Tools registered in main.go alongside other MCP tool groups (glossary, context, etc.)
+     - Follows standard MCP tool pattern: deps struct → Register function → handler functions
+   - **Next Session Implementation Notes:**
+     - Facts are stored in engine_project_knowledge table with upsert on (project_id, fact_type, key)
+     - The tool uses fact content as the key for natural upsert behavior
+     - fact_id can be explicitly provided to update a specific fact by ID instead of content-based upsert
+     - Integration tests with database would verify full CRUD behavior with actual postgres
+     - The KnowledgeRepository interface is already implemented in pkg/repositories/knowledge.go
+     - Tools properly filter by project_id from MCP context (no cross-project data leakage)
 
 ### Phase 2: Probe Tools (High Impact, Low Effort - Data Already Persisted)
 

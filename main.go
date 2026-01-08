@@ -397,6 +397,15 @@ func main() {
 	}
 	mcptools.RegisterGlossaryTools(mcpServer.MCP(), glossaryToolDeps)
 
+	// Register project knowledge MCP tools (for storing domain facts)
+	knowledgeToolDeps := &mcptools.KnowledgeToolDeps{
+		DB:                  db,
+		MCPConfigService:    mcpConfigService,
+		KnowledgeRepository: knowledgeRepo,
+		Logger:              logger,
+	}
+	mcptools.RegisterKnowledgeTools(mcpServer.MCP(), knowledgeToolDeps)
+
 	// Register unified context tool (consolidates ontology, schema, and glossary)
 	contextToolDeps := &mcptools.ContextToolDeps{
 		DB:                     db,
