@@ -11,7 +11,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -28,57 +27,20 @@ type EntityToolDeps struct {
 	Logger                 *zap.Logger
 }
 
+// GetDB implements ToolAccessDeps.
+func (d *EntityToolDeps) GetDB() *database.DB { return d.DB }
+
+// GetMCPConfigService implements ToolAccessDeps.
+func (d *EntityToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
+
+// GetLogger implements ToolAccessDeps.
+func (d *EntityToolDeps) GetLogger() *zap.Logger { return d.Logger }
+
 // RegisterEntityTools registers entity probe MCP tools.
 func RegisterEntityTools(s *server.MCPServer, deps *EntityToolDeps) {
 	registerGetEntityTool(s, deps)
 	registerUpdateEntityTool(s, deps)
 	registerDeleteEntityTool(s, deps)
-}
-
-// checkEntityToolEnabled verifies a specific entity tool is enabled for the project.
-// Uses ToolAccessChecker to ensure consistency with tool list filtering.
-func checkEntityToolEnabled(ctx context.Context, deps *EntityToolDeps, toolName string) (uuid.UUID, context.Context, func(), error) {
-	// Get claims from context
-	claims, ok := auth.GetClaims(ctx)
-	if !ok {
-		return uuid.Nil, nil, nil, fmt.Errorf("authentication required")
-	}
-
-	projectID, err := uuid.Parse(claims.ProjectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("invalid project ID: %w", err)
-	}
-
-	// Acquire connection with tenant scope
-	scope, err := deps.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to acquire database connection: %w", err)
-	}
-
-	// Set tenant context for the query
-	tenantCtx := database.SetTenantScope(ctx, scope)
-
-	// Check if caller is an agent (API key authentication)
-	isAgent := claims.Subject == "agent"
-
-	// Get tool groups state and check access using the unified checker
-	state, err := deps.MCPConfigService.GetToolGroupsState(tenantCtx, projectID)
-	if err != nil {
-		scope.Close()
-		deps.Logger.Error("Failed to get tool groups state",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool configuration: %w", err)
-	}
-
-	// Use the unified ToolAccessChecker for consistent access decisions
-	checker := services.NewToolAccessChecker()
-	if checker.IsToolAccessible(toolName, state, isAgent) {
-		return projectID, tenantCtx, func() { scope.Close() }, nil
-	}
-
-	scope.Close()
-	return uuid.Nil, nil, nil, fmt.Errorf("%s tool is not enabled for this project", toolName)
 }
 
 // registerGetEntityTool adds the get_entity tool for retrieving full entity details.
@@ -104,7 +66,7 @@ func registerGetEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkEntityToolEnabled(ctx, deps, "get_entity")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "get_entity")
 		if err != nil {
 			return nil, err
 		}
@@ -330,7 +292,7 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkEntityToolEnabled(ctx, deps, "update_entity")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "update_entity")
 		if err != nil {
 			return nil, err
 		}
@@ -525,7 +487,7 @@ func registerDeleteEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		_, tenantCtx, cleanup, err := checkEntityToolEnabled(ctx, deps, "delete_entity")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "delete_entity")
 		if err != nil {
 			return nil, err
 		}
@@ -535,17 +497,6 @@ func registerDeleteEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 		name, err := req.RequireString("name")
 		if err != nil {
 			return nil, err
-		}
-
-		// Get claims from context to get project ID
-		claims, ok := auth.GetClaims(ctx)
-		if !ok {
-			return nil, fmt.Errorf("authentication required")
-		}
-
-		projectID, err := uuid.Parse(claims.ProjectID)
-		if err != nil {
-			return nil, fmt.Errorf("invalid project ID: %w", err)
 		}
 
 		// Get active ontology

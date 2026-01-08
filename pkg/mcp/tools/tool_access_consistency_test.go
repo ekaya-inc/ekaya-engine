@@ -445,10 +445,10 @@ func TestAgentToolsEnabled_EchoListAndCallConsistency(t *testing.T) {
 		Logger:           zap.NewNop(),
 	}
 
-	// checkToolEnabled is called when executing echo tool
-	_, tenantCtx, cleanup, err := checkToolEnabled(ctx, devDeps, "echo")
+	// AcquireToolAccess is called when executing echo tool
+	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, devDeps, "echo")
 	if err != nil {
-		t.Fatalf("CALLING: checkToolEnabled for echo failed: %v\n"+
+		t.Fatalf("CALLING: AcquireToolAccess for echo failed: %v\n"+
 			"This means echo is LISTED but cannot be CALLED - list/call inconsistency!", err)
 	}
 	if cleanup != nil {

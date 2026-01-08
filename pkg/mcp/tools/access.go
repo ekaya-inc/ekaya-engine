@@ -83,9 +83,9 @@ func CheckToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string) 
 	return nil, fmt.Errorf("%s tool is not enabled for this project", toolName)
 }
 
-// CheckToolAccessWithLegacySignature is a helper that maintains the legacy 4-return-value signature
-// for gradual migration. New code should use CheckToolAccess directly.
-func CheckToolAccessWithLegacySignature(ctx context.Context, deps ToolAccessDeps, toolName string) (uuid.UUID, context.Context, func(), error) {
+// AcquireToolAccess verifies tool access and sets up tenant context for tool execution.
+// Returns project ID, tenant-scoped context, cleanup function, and any error.
+func AcquireToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string) (uuid.UUID, context.Context, func(), error) {
 	result, err := CheckToolAccess(ctx, deps, toolName)
 	if err != nil {
 		return uuid.Nil, nil, nil, err

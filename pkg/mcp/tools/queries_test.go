@@ -1016,4 +1016,3 @@ func TestGetQueryHistory_WithNullQueryName(t *testing.T) {
 func floatPtr(f float64) *float64 {
 	return &f
 }
-
