@@ -441,9 +441,63 @@ if err != nil {
 
 ---
 
-### Phase 5: Add Repeated Error Escalation
+### Phase 5: Add Repeated Error Escalation ✅ COMPLETED (2026-01-08)
 
 **Goal:** After N consecutive failures of the same error type, treat as permanent failure to avoid infinite retry loops.
+
+**Implementation Summary:**
+DoIfRetryable now tracks consecutive same-type errors and escalates to permanent failure after MaxSameErrorType consecutive failures (default: 5). A new classifyErrorType() helper extracts error categories for comparison.
+
+**Key Changes:**
+1. **Config struct** (pkg/retry/retry.go:10-18):
+   - Added MaxSameErrorType field (default: 5) to control escalation threshold
+
+2. **classifyErrorType() helper** (pkg/retry/retry.go:186-228):
+   - Extracts error categories from error strings for comparison
+   - Returns categories like "503", "429", "timeout", "connection", "oom", "gpu", "broken_pipe", "rate_limit", "unknown"
+   - Checks HTTP status codes first (503, 502, 504, 500, 429, 404, 403, 401, 400)
+   - Then checks connection errors (connection refused/reset)
+   - Then checks timeouts, broken pipe, rate limiting, GPU/CUDA errors, OOM
+   - Falls back to "unknown" for unclassified errors
+
+3. **DoIfRetryable() tracking** (pkg/retry/retry.go:236-267):
+   - Tracks sameErrorCount and lastErrorType across retry attempts
+   - Increments count when error type matches previous error
+   - Resets count to 1 when error type changes
+   - Escalates when sameErrorCount >= MaxSameErrorType (if MaxSameErrorType > 0)
+   - Returns formatted error: "repeated error (N times, type=XXX): original error"
+   - Escalation check happens BEFORE retrying, preventing unnecessary wait on final attempt
+
+4. **IsRetryable() pattern fix** (pkg/retry/retry.go:153):
+   - Added "timed out" pattern to fix bug where "request timed out" wasn't recognized as retryable
+
+**Test Coverage:**
+Created comprehensive test suite in pkg/retry/retry_test.go:
+- TestClassifyErrorType (31 cases) - Verifies error classification for all error types including HTTP codes, connection errors, timeouts, rate limits, GPU/CUDA errors, OOM
+- TestDoIfRetryable_RepeatedErrorEscalation - Verifies escalation after 5 consecutive same-type 503 errors (exactly 5 calls before escalating)
+- TestDoIfRetryable_MixedErrorTypes - Verifies counter resets when error type changes (503→502→503→timeout→503 pattern, escalates after 3 consecutive 503s)
+- TestDoIfRetryable_EscalationDisabled - Verifies MaxSameErrorType=0 disables escalation (exhausts all retries without escalating)
+- TestDoIfRetryable_EscalationAfterSuccess - Verifies success before threshold doesn't trigger escalation (4 errors < 5 threshold)
+- TestDefaultConfig_HasMaxSameErrorType - Verifies default config has MaxSameErrorType=5
+- All tests pass successfully
+
+**Files Modified:**
+- `pkg/retry/retry.go` - Added MaxSameErrorType, classifyErrorType(), tracking logic, "timed out" pattern
+- `pkg/retry/retry_test.go` - Added 6 new tests (227 lines) covering escalation behavior plus helper functions
+
+**Design Decisions:**
+- MaxSameErrorType=5 provides reasonable default (allows transient issues without infinite loops)
+- Setting MaxSameErrorType=0 disables escalation (for backward compatibility or testing)
+- Error type classification is coarse-grained (e.g., all 503 errors are same type) to detect systemic issues
+- Escalation error message includes count and type for debugging: "repeated error (5 times, type=503): HTTP 503 Service Unavailable"
+- classifyErrorType() checks specific HTTP codes before generic patterns to provide more precise error tracking
+- Escalation check happens during retry loop (not after exhausting retries) to fail fast when pattern is detected
+
+**Notes for Next Session:**
+- The escalation mechanism is now active for all code using retry.DoIfRetryable() including the ontology DAG executor
+- If you see "repeated error" messages in logs, it means the same error type occurred 5+ times consecutively - investigate the root cause
+- To tune escalation threshold, adjust MaxSameErrorType in retry.Config (higher = more tolerant of repeated failures, lower = faster escalation)
+- The classifyErrorType() function can be extended with new error patterns if needed
 
 #### File: `pkg/retry/retry.go`
 
