@@ -300,9 +300,57 @@ if err := n.glossaryEnrichment.EnrichGlossaryTerms(ctx, dag.ProjectID, *dag.Onto
 
 ---
 
-### Phase 4: Improve Error Messages
+### Phase 4: Improve Error Messages ✅ COMPLETED (2026-01-08)
 
 **Goal:** Error messages should include model, endpoint info, and original status code for debugging.
+
+**Implementation Summary:**
+All error messages now include HTTP status code and model information for improved debugging. The Error struct has been enhanced with StatusCode, Model, and Endpoint fields, and ClassifyError() automatically extracts status codes from error strings. The Client's parseError() method enriches all errors with model and endpoint context.
+
+**Key Changes:**
+1. **Error struct** (pkg/llm/errors.go:10-18):
+   - Added StatusCode, Model, Endpoint fields for enhanced context
+
+2. **Error() method** (pkg/llm/errors.go:21-38):
+   - Enhanced formatting to include "HTTP {code}" and "model={name}" in error messages
+   - Format: "{Type} HTTP {code} model={model}: {message}: {cause}"
+   - Each component is optional - only included if present
+   - Example: "ErrorTypeEndpoint HTTP 503 model=gpt-4: server error: <underlying error>"
+
+3. **ClassifyError()** (pkg/llm/errors.go:87-164):
+   - Extracts HTTP status codes (400, 401, 403, 404, 429, 500, 502, 503, 504) from error strings
+   - Sets StatusCode field on all returned errors where status code is detected
+   - Pattern matching looks for status codes in the error string itself
+
+4. **NewErrorWithContext()** (pkg/llm/errors.go:61-72):
+   - New constructor for creating errors with full context (model, endpoint, status code)
+   - Useful for creating errors from scratch with all debugging information
+   - Not currently used but available for future enhancements
+
+5. **Client.parseError()** (pkg/llm/client.go:178-185):
+   - Enriches all classified errors with model and endpoint from client instance
+   - Ensures every error from the LLM client includes debugging context
+   - Model and endpoint are added after ClassifyError returns
+
+**Test Coverage:**
+Created comprehensive test suite in pkg/llm/errors_test.go with 13 tests covering:
+- Error message formatting with status codes, models, and causes
+- ClassifyError() status code extraction for all HTTP codes
+- NewErrorWithContext() constructor functionality
+- Error interface methods (Unwrap, IsRetryable)
+- Preservation of existing *Error instances
+- All tests pass successfully
+
+**Files Modified:**
+- `pkg/llm/errors.go` - Enhanced Error struct, updated Error() method, updated ClassifyError(), added NewErrorWithContext()
+- `pkg/llm/client.go` - Updated parseError() to enrich errors with model and endpoint
+- `pkg/llm/errors_test.go` (new, 283 lines) - Comprehensive test coverage
+
+**Design Decisions for Next Session:**
+- Status code extraction is string-based (checking for "503", "429", etc. in error text) - works for OpenAI SDK errors
+- Model and endpoint are added at the client level, not in ClassifyError, to avoid coupling ClassifyError to client details
+- The Error() method builds a compact, readable format: type, HTTP code, model, message, cause
+- NewErrorWithContext() exists but is not used yet - future enhancement could use it for more precise error creation
 
 #### File: `pkg/llm/errors.go`
 
