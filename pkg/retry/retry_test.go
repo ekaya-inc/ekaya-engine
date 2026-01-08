@@ -3,6 +3,7 @@ package retry
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -364,23 +365,89 @@ func TestIsRetryable(t *testing.T) {
 		expected bool
 	}{
 		{"nil error", nil, false},
+		// Connection errors
 		{"connection refused", errors.New("connection refused"), true},
 		{"Connection Refused (uppercase)", errors.New("Connection Refused"), true},
 		{"connection reset", errors.New("connection reset by peer"), true},
 		{"broken pipe", errors.New("write: broken pipe"), true},
 		{"no such host", errors.New("no such host"), true},
 		{"timeout", errors.New("context deadline exceeded: timeout"), true},
+		{"timed out", errors.New("request timed out"), true},
 		{"i/o timeout", errors.New("i/o timeout"), true},
 		{"connection timed out", errors.New("connection timed out"), true},
 		{"network unreachable", errors.New("network is unreachable"), true},
 		{"temporary failure", errors.New("temporary failure in name resolution"), true},
 		{"too many connections", errors.New("too many connections"), true},
 		{"deadlock", errors.New("deadlock detected"), true},
+		// HTTP status codes
+		{"HTTP 429", errors.New("HTTP 429 Too Many Requests"), true},
+		{"HTTP 500", errors.New("HTTP 500 Internal Server Error"), true},
+		{"HTTP 502", errors.New("HTTP 502 Bad Gateway"), true},
+		{"HTTP 503", errors.New("HTTP 503 Service Unavailable"), true},
+		{"HTTP 504", errors.New("HTTP 504 Gateway Timeout"), true},
+		// HTTP error messages
+		{"rate limit", errors.New("rate limit exceeded"), true},
+		{"service busy", errors.New("service busy, try again later"), true},
+		{"service unavailable", errors.New("service unavailable"), true},
+		{"too many requests", errors.New("too many requests"), true},
+		// GPU/CUDA errors
+		{"cuda error", errors.New("CUDA error: out of memory"), true},
+		{"gpu error", errors.New("GPU error occurred"), true},
+		{"out of memory", errors.New("out of memory"), true},
+		// Non-retryable errors
 		{"auth error", errors.New("authentication failed"), false},
 		{"permission denied", errors.New("permission denied"), false},
 		{"syntax error", errors.New("syntax error at position 10"), false},
 		{"invalid credentials", errors.New("invalid credentials"), false},
 		{"not found", errors.New("table not found"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := IsRetryable(tt.err)
+			if result != tt.expected {
+				t.Errorf("IsRetryable(%v) = %v, expected %v", tt.err, result, tt.expected)
+			}
+		})
+	}
+}
+
+// mockRetryableError implements the RetryableError interface for testing
+type mockRetryableError struct {
+	message   string
+	retryable bool
+}
+
+func (e *mockRetryableError) Error() string {
+	return e.message
+}
+
+func (e *mockRetryableError) IsRetryable() bool {
+	return e.retryable
+}
+
+func TestIsRetryable_WithRetryableInterface(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "retryable error via interface",
+			err:      &mockRetryableError{message: "transient error", retryable: true},
+			expected: true,
+		},
+		{
+			name:     "non-retryable error via interface",
+			err:      &mockRetryableError{message: "permanent error", retryable: false},
+			expected: false,
+		},
+		{
+			name: "retryable interface takes precedence over pattern matching",
+			// Even though message contains "timeout" (would match pattern), interface says not retryable
+			err:      &mockRetryableError{message: "timeout error", retryable: false},
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -536,5 +603,369 @@ func TestDoIfRetryable_Success(t *testing.T) {
 	}
 	if callCount != 1 {
 		t.Errorf("expected 1 call, got %d", callCount)
+	}
+}
+
+func TestApplyJitter_NoJitter(t *testing.T) {
+	delay := 100 * time.Millisecond
+	result := applyJitter(delay, 0)
+	if result != delay {
+		t.Errorf("expected no jitter with factor=0, got %v instead of %v", result, delay)
+	}
+
+	result = applyJitter(delay, -0.1)
+	if result != delay {
+		t.Errorf("expected no jitter with negative factor, got %v instead of %v", result, delay)
+	}
+}
+
+func TestApplyJitter_WithJitter(t *testing.T) {
+	delay := 100 * time.Millisecond
+	jitterFactor := 0.1 // +/-10%
+
+	// Run multiple times to verify randomness is within bounds
+	for i := 0; i < 100; i++ {
+		result := applyJitter(delay, jitterFactor)
+
+		// Result should be within +/-10% of delay
+		minDelay := time.Duration(float64(delay) * (1.0 - jitterFactor))
+		maxDelay := time.Duration(float64(delay) * (1.0 + jitterFactor))
+
+		if result < minDelay || result > maxDelay {
+			t.Errorf("jittered delay %v is outside expected range [%v, %v]", result, minDelay, maxDelay)
+		}
+	}
+}
+
+func TestDefaultConfig_HasJitter(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.JitterFactor != 0.1 {
+		t.Errorf("expected JitterFactor=0.1, got %f", cfg.JitterFactor)
+	}
+}
+
+func TestDo_WithJitter(t *testing.T) {
+	ctx := context.Background()
+	cfg := &Config{
+		MaxRetries:   3,
+		InitialDelay: 50 * time.Millisecond,
+		MaxDelay:     500 * time.Millisecond,
+		Multiplier:   2.0,
+		JitterFactor: 0.2, // 20% jitter for easier detection
+	}
+
+	callTimes := []time.Time{}
+	err := Do(ctx, cfg, func() error {
+		callTimes = append(callTimes, time.Now())
+		return errors.New("error")
+	})
+
+	if err == nil {
+		t.Error("expected error after exhausting retries")
+	}
+
+	// Should have 4 calls: initial + 3 retries
+	if len(callTimes) != 4 {
+		t.Errorf("expected 4 calls, got %d", len(callTimes))
+	}
+
+	// Check that delays are within jittered range (not exact)
+	// First delay should be ~50ms +/- 20% = [40ms, 60ms]
+	if len(callTimes) >= 2 {
+		delay1 := callTimes[1].Sub(callTimes[0])
+		if delay1 < 35*time.Millisecond || delay1 > 70*time.Millisecond {
+			t.Errorf("expected ~50ms delay with jitter, got %v", delay1)
+		}
+	}
+
+	// Second delay should be ~100ms +/- 20% = [80ms, 120ms]
+	if len(callTimes) >= 3 {
+		delay2 := callTimes[2].Sub(callTimes[1])
+		if delay2 < 75*time.Millisecond || delay2 > 135*time.Millisecond {
+			t.Errorf("expected ~100ms delay with jitter, got %v", delay2)
+		}
+	}
+}
+
+func TestDoWithResult_WithJitter(t *testing.T) {
+	ctx := context.Background()
+	cfg := &Config{
+		MaxRetries:   2,
+		InitialDelay: 50 * time.Millisecond,
+		MaxDelay:     200 * time.Millisecond,
+		Multiplier:   2.0,
+		JitterFactor: 0.2, // 20% jitter
+	}
+
+	callTimes := []time.Time{}
+	result, err := DoWithResult(ctx, cfg, func() (string, error) {
+		callTimes = append(callTimes, time.Now())
+		return "test", errors.New("error")
+	})
+
+	if err == nil {
+		t.Error("expected error after exhausting retries")
+	}
+	if result != "test" {
+		t.Errorf("expected 'test' result, got %s", result)
+	}
+
+	// Should have 3 calls: initial + 2 retries
+	if len(callTimes) != 3 {
+		t.Errorf("expected 3 calls, got %d", len(callTimes))
+	}
+
+	// Verify delays are within jittered range
+	if len(callTimes) >= 2 {
+		delay1 := callTimes[1].Sub(callTimes[0])
+		if delay1 < 35*time.Millisecond || delay1 > 70*time.Millisecond {
+			t.Errorf("expected ~50ms delay with jitter, got %v", delay1)
+		}
+	}
+}
+
+func TestDoIfRetryable_WithJitter(t *testing.T) {
+	ctx := context.Background()
+	cfg := &Config{
+		MaxRetries:   2,
+		InitialDelay: 50 * time.Millisecond,
+		MaxDelay:     200 * time.Millisecond,
+		Multiplier:   2.0,
+		JitterFactor: 0.2, // 20% jitter
+	}
+
+	callTimes := []time.Time{}
+	err := DoIfRetryable(ctx, cfg, func() error {
+		callTimes = append(callTimes, time.Now())
+		return errors.New("connection timeout") // Retryable error
+	})
+
+	if err == nil {
+		t.Error("expected error after exhausting retries")
+	}
+
+	// Should have 3 calls: initial + 2 retries
+	if len(callTimes) != 3 {
+		t.Errorf("expected 3 calls, got %d", len(callTimes))
+	}
+
+	// Verify delays are within jittered range
+	if len(callTimes) >= 2 {
+		delay1 := callTimes[1].Sub(callTimes[0])
+		if delay1 < 35*time.Millisecond || delay1 > 70*time.Millisecond {
+			t.Errorf("expected ~50ms delay with jitter, got %v", delay1)
+		}
+	}
+}
+
+func TestClassifyErrorType(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected string
+	}{
+		{"nil error", nil, "nil"},
+		{"HTTP 503", errors.New("HTTP 503 Service Unavailable"), "503"},
+		{"HTTP 502", errors.New("HTTP 502 Bad Gateway"), "502"},
+		{"HTTP 504", errors.New("HTTP 504 Gateway Timeout"), "504"},
+		{"HTTP 500", errors.New("HTTP 500 Internal Server Error"), "500"},
+		{"HTTP 429", errors.New("HTTP 429 Too Many Requests"), "429"},
+		{"HTTP 404", errors.New("HTTP 404 Not Found"), "404"},
+		{"HTTP 403", errors.New("HTTP 403 Forbidden"), "403"},
+		{"HTTP 401", errors.New("HTTP 401 Unauthorized"), "401"},
+		{"HTTP 400", errors.New("HTTP 400 Bad Request"), "400"},
+		{"connection refused", errors.New("connection refused"), "connection"},
+		{"connection reset", errors.New("connection reset by peer"), "connection"},
+		{"timeout", errors.New("context deadline exceeded: timeout"), "timeout"},
+		{"timed out", errors.New("connection timed out"), "timeout"},
+		{"broken pipe", errors.New("write: broken pipe"), "broken_pipe"},
+		{"rate limit", errors.New("rate limit exceeded"), "rate_limit"},
+		{"too many requests", errors.New("too many requests"), "rate_limit"},
+		{"cuda error", errors.New("CUDA error: out of memory"), "gpu"},
+		{"gpu error", errors.New("GPU error occurred"), "gpu"},
+		{"cuda out of memory", errors.New("cuda out of memory"), "gpu"},
+		{"gpu out of memory", errors.New("gpu out of memory"), "gpu"},
+		{"out of memory", errors.New("out of memory"), "oom"}, // Generic OOM separate from GPU
+		{"unknown error", errors.New("something went wrong"), "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := classifyErrorType(tt.err)
+			if result != tt.expected {
+				t.Errorf("classifyErrorType(%v) = %q, expected %q", tt.err, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDoIfRetryable_RepeatedErrorEscalation(t *testing.T) {
+	ctx := context.Background()
+	cfg := &Config{
+		MaxRetries:       10, // High retry count to test escalation logic
+		InitialDelay:     10 * time.Millisecond,
+		MaxDelay:         100 * time.Millisecond,
+		Multiplier:       2.0,
+		MaxSameErrorType: 5, // Escalate after 5 consecutive same-type errors
+	}
+
+	callCount := 0
+	err := DoIfRetryable(ctx, cfg, func() error {
+		callCount++
+		return errors.New("HTTP 503 Service Unavailable") // Same error type every time
+	})
+
+	// Should escalate to permanent failure after 5 consecutive 503 errors
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+
+	// Error message should indicate repeated error escalation
+	if err != nil && !strings.Contains(err.Error(), "repeated error") {
+		t.Errorf("expected 'repeated error' in error message, got: %v", err)
+	}
+	if err != nil && !strings.Contains(err.Error(), "5 times") {
+		t.Errorf("expected '5 times' in error message, got: %v", err)
+	}
+	if err != nil && !strings.Contains(err.Error(), "type=503") {
+		t.Errorf("expected 'type=503' in error message, got: %v", err)
+	}
+
+	// Should have made exactly 5 calls before escalating
+	if callCount != 5 {
+		t.Errorf("expected 5 calls before escalation, got %d", callCount)
+	}
+}
+
+func TestDoIfRetryable_MixedErrorTypes(t *testing.T) {
+	ctx := context.Background()
+	cfg := &Config{
+		MaxRetries:       10,
+		InitialDelay:     10 * time.Millisecond,
+		MaxDelay:         100 * time.Millisecond,
+		Multiplier:       2.0,
+		MaxSameErrorType: 3, // Escalate after 3 consecutive same-type errors
+	}
+
+	errors503 := []error{
+		errors.New("HTTP 503 Service Unavailable"),
+		errors.New("HTTP 503 Service Busy"),
+	}
+	errors502 := []error{
+		errors.New("HTTP 502 Bad Gateway"),
+	}
+	errorsTimeout := []error{
+		errors.New("connection timeout"),
+		errors.New("request timed out"),
+	}
+
+	callCount := 0
+	err := DoIfRetryable(ctx, cfg, func() error {
+		callCount++
+		switch callCount {
+		case 1:
+			return errors503[0] // 503 (count=1)
+		case 2:
+			return errors503[1] // 503 (count=2)
+		case 3:
+			return errors502[0] // 502 (resets count, count=1 for 502)
+		case 4:
+			return errors503[0] // 503 (resets count, count=1 for 503)
+		case 5:
+			return errors503[1] // 503 (count=2)
+		case 6:
+			return errorsTimeout[0] // timeout (resets count, count=1 for timeout)
+		case 7:
+			return errorsTimeout[1] // timeout (count=2)
+		case 8:
+			return errors503[0] // 503 (resets count, count=1 for 503)
+		default:
+			return errors503[1] // Keep returning 503 (count=2, then 3 on call 10)
+		}
+	})
+
+	// Should escalate on call 10 when we hit 3 consecutive 503 errors (calls 8, 9, 10)
+	if err == nil {
+		t.Error("expected error")
+	}
+
+	// Should escalate after 3 consecutive 503 errors
+	if err != nil && !strings.Contains(err.Error(), "repeated error") {
+		t.Errorf("expected escalation with 'repeated error', got: %v", err)
+	}
+	if err != nil && !strings.Contains(err.Error(), "type=503") {
+		t.Errorf("expected 'type=503' in error message, got: %v", err)
+	}
+
+	// Should make 10 calls total before escalating on the 3rd consecutive 503
+	if callCount != 10 {
+		t.Errorf("expected 10 calls, got %d", callCount)
+	}
+}
+
+func TestDoIfRetryable_EscalationDisabled(t *testing.T) {
+	ctx := context.Background()
+	cfg := &Config{
+		MaxRetries:       5,
+		InitialDelay:     10 * time.Millisecond,
+		MaxDelay:         100 * time.Millisecond,
+		Multiplier:       2.0,
+		MaxSameErrorType: 0, // Disabled (0 means never escalate)
+	}
+
+	callCount := 0
+	err := DoIfRetryable(ctx, cfg, func() error {
+		callCount++
+		return errors.New("HTTP 503 Service Unavailable") // Same error every time
+	})
+
+	// Should NOT escalate when MaxSameErrorType is 0
+	if err == nil {
+		t.Error("expected error after exhausting retries")
+	}
+	if err != nil && strings.Contains(err.Error(), "repeated error") {
+		t.Errorf("should not escalate when MaxSameErrorType=0, got: %v", err)
+	}
+
+	// Should exhaust all retries (6 calls: initial + 5 retries)
+	if callCount != 6 {
+		t.Errorf("expected 6 calls, got %d", callCount)
+	}
+}
+
+func TestDoIfRetryable_EscalationAfterSuccess(t *testing.T) {
+	ctx := context.Background()
+	cfg := &Config{
+		MaxRetries:       10,
+		InitialDelay:     10 * time.Millisecond,
+		MaxDelay:         100 * time.Millisecond,
+		Multiplier:       2.0,
+		MaxSameErrorType: 5, // Escalate after 5 consecutive same-type errors
+	}
+
+	callCount := 0
+	err := DoIfRetryable(ctx, cfg, func() error {
+		callCount++
+		if callCount < 5 {
+			return errors.New("HTTP 503 Service Unavailable")
+		}
+		return nil // Success on 5th attempt
+	})
+
+	// Should succeed before reaching escalation threshold (4 errors < 5 threshold)
+	if err != nil {
+		t.Errorf("expected success, got error: %v", err)
+	}
+
+	// Should have made 5 calls (4 failures + 1 success)
+	if callCount != 5 {
+		t.Errorf("expected 5 calls, got %d", callCount)
+	}
+}
+
+func TestDefaultConfig_HasMaxSameErrorType(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.MaxSameErrorType != 5 {
+		t.Errorf("expected MaxSameErrorType=5, got %d", cfg.MaxSameErrorType)
 	}
 }

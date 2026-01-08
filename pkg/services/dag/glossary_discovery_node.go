@@ -57,7 +57,12 @@ func (n *GlossaryDiscoveryNode) Execute(ctx context.Context, dag *models.Ontolog
 	// Call the underlying service method
 	termCount, err := n.glossaryDiscovery.DiscoverGlossaryTerms(ctx, dag.ProjectID, *dag.OntologyID)
 	if err != nil {
-		return fmt.Errorf("discover glossary terms: %w", err)
+		// Log but don't fail - ontology is useful without glossary terms
+		n.Logger().Warn("Failed to discover glossary terms - continuing without glossary",
+			zap.String("project_id", dag.ProjectID.String()),
+			zap.String("degradation_type", "glossary_discovery"),
+			zap.Error(err))
+		termCount = 0
 	}
 
 	// Report completion

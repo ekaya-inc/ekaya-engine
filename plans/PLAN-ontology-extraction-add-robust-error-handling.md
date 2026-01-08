@@ -83,11 +83,27 @@ But `pkg/retry/retry.go` has no jitter, causing thundering herd when multiple DA
 
 ## Implementation Plan
 
-### Phase 1: Unify Error Classification
+### Phase 1: Unify Error Classification ✅ COMPLETED
 
 **Goal:** Create a single source of truth for retryable error detection that handles both connection and HTTP errors.
 
-#### Option A: Extend retry.IsRetryable() (Recommended)
+**Implementation Notes:**
+- Used interface-based approach instead of direct type checking to avoid import cycles
+- Added `RetryableError` interface in `pkg/retry/retry.go` with `IsRetryable() bool` method
+- Updated `llm.Error` to implement this interface (pkg/llm/errors.go:30-35)
+- Extended pattern matching in `retry.IsRetryable()` to include HTTP status codes (429, 500-504), rate limit messages, and GPU/CUDA errors
+- Interface check takes precedence over pattern matching for explicit control
+- Added comprehensive unit tests in `pkg/retry/retry_test.go` (connection, HTTP, GPU errors)
+- Added integration test in `pkg/retry/llm_integration_test.go` verifying LLM errors work correctly with retry logic
+- Pattern matching serves as fallback for wrapped errors or non-LLM error types
+
+**Files Modified:**
+- `pkg/llm/errors.go` - Added IsRetryable() method
+- `pkg/retry/retry.go` - Added RetryableError interface, extended pattern matching
+- `pkg/retry/retry_test.go` - Added tests for HTTP/GPU error patterns and interface-based retryability
+- `pkg/retry/llm_integration_test.go` (new) - Integration tests with actual llm.Error types
+
+#### Option A: Extend retry.IsRetryable() (Recommended) ✅ USED
 
 **File:** `pkg/retry/retry.go`
 
@@ -170,61 +186,76 @@ Then update `ontology_dag_service.go` to use `llm.DoIfRetryable()`.
 
 ---
 
-### Phase 2: Add Jitter to Retry Package
+### Phase 2: Add Jitter to Retry Package ✅ COMPLETED
 
-**File:** `pkg/retry/retry.go`
+**Goal:** Prevent thundering herd problem when multiple DAGs retry simultaneously by adding random jitter to retry delays.
 
-**Changes:**
+**Implementation Notes:**
+- Added `JitterFactor` field to `Config` struct (0.0-1.0 range, default 0.1 for +/-10% jitter)
+- Implemented `applyJitter()` helper function that adds random variation to delay: `delay +/- (delay * jitterFactor * random(-1 to +1))`
+- Applied jitter in all three retry functions: `Do()`, `DoWithResult()`, `DoIfRetryable()`
+- Jitter is applied before each wait: `time.After(applyJitter(delay, cfg.JitterFactor))`
+- Added comprehensive unit tests verifying jitter bounds and randomness
+- Integration tests verify jitter works correctly across all retry functions
 
-1. Add import: `"math/rand"`
+**Files Modified:**
+- `pkg/retry/retry.go` - Added JitterFactor field, applyJitter() function, applied to all retry logic
+- `pkg/retry/retry_test.go` - Added 5 new tests covering jitter functionality:
+  - `TestApplyJitter_NoJitter` - Verifies no jitter when factor=0 or negative
+  - `TestApplyJitter_WithJitter` - Verifies jitter stays within bounds over 100 iterations
+  - `TestDefaultConfig_HasJitter` - Verifies default config has 10% jitter
+  - `TestDo_WithJitter` - Integration test with retry.Do() using 20% jitter
+  - `TestDoWithResult_WithJitter` - Integration test with retry.DoWithResult()
+  - `TestDoIfRetryable_WithJitter` - Integration test with retry.DoIfRetryable()
 
-2. Add jitter to Config:
-```go
-type Config struct {
-    MaxRetries   int
-    InitialDelay time.Duration
-    MaxDelay     time.Duration
-    Multiplier   float64
-    JitterFactor float64 // 0.0-1.0, default 0.1 for +/-10%
-}
-
-func DefaultConfig() *Config {
-    return &Config{
-        MaxRetries:   3,
-        InitialDelay: 100 * time.Millisecond,
-        MaxDelay:     5 * time.Second,
-        Multiplier:   2.0,
-        JitterFactor: 0.1, // +/-10% jitter
-    }
-}
-```
-
-3. Add jitter calculation helper:
-```go
-func applyJitter(delay time.Duration, jitterFactor float64) time.Duration {
-    if jitterFactor <= 0 {
-        return delay
-    }
-    // Random value between -jitterFactor and +jitterFactor
-    jitter := float64(delay) * jitterFactor * (rand.Float64()*2 - 1)
-    return time.Duration(float64(delay) + jitter)
-}
-```
-
-4. Apply jitter in Do(), DoWithResult(), DoIfRetryable() before `time.After(delay)`:
-```go
-select {
-case <-time.After(applyJitter(delay, cfg.JitterFactor)):
-    delay = time.Duration(float64(delay) * cfg.Multiplier)
-    // ...
-}
-```
+**Key Design Decisions:**
+- Jitter is multiplicative (percentage-based) rather than additive (fixed amount) to scale naturally with delay magnitude
+- Jitter factor defaults to 0.1 (10%) which provides meaningful distribution without excessive variation
+- Zero or negative jitter factor disables jitter (returns delay unchanged)
+- Used standard `math/rand` package (sufficient for jitter purposes, doesn't need crypto/rand)
 
 ---
 
-### Phase 3: Make Glossary Nodes Non-Fatal
+### Phase 3: Make Glossary Nodes Non-Fatal ✅ COMPLETED (2026-01-08)
 
 **Goal:** Glossary discovery/enrichment failures should not kill the pipeline - the ontology is still useful without glossary terms.
+
+**Implementation Summary:**
+Both glossary nodes now treat errors as non-fatal, logging warnings instead of failing the pipeline. This follows the same graceful degradation pattern used by `EntityEnrichmentNode`.
+
+**Key Changes:**
+1. **GlossaryDiscoveryNode** (line 60):
+   - Catches discovery errors and logs warning with context
+   - Sets `termCount = 0` to continue with empty glossary
+   - Progress reporting continues normally showing "Discovered 0 business terms"
+
+2. **GlossaryEnrichmentNode** (line 59):
+   - Catches enrichment errors and logs warning with context
+   - Continues without SQL definitions for glossary terms
+   - Progress reporting continues normally
+
+3. **Validation still works:**
+   - Missing ontology ID still returns error (fail-fast for config issues)
+   - Only LLM/service errors are treated as non-fatal
+
+**Test Coverage:**
+- Updated `TestGlossaryDiscoveryNode_Execute_DiscoveryError` to verify non-fatal behavior (now expects success, verifies warning logged)
+- Created comprehensive test suite in `pkg/services/dag/glossary_enrichment_node_test.go`:
+  - Success path with progress tracking
+  - Missing ontology ID validation (still fatal)
+  - Enrichment errors are non-fatal
+  - Progress reporting errors are non-fatal
+  - Node name verification
+- All existing tests continue to pass
+
+**Files Modified:**
+- `pkg/services/dag/glossary_discovery_node.go` (lines 59-65) - Made errors non-fatal
+- `pkg/services/dag/glossary_enrichment_node.go` (lines 58-62) - Made errors non-fatal
+- `pkg/services/dag/glossary_discovery_node_test.go` (lines 209-232) - Updated test expectations
+- `pkg/services/dag/glossary_enrichment_node_test.go` (new, 293 lines) - Added comprehensive test coverage
+
+**Design Pattern:**
+This matches the pattern in `EntityEnrichmentNode` (pkg/services/dag/entity_enrichment_node.go:56-60) which logs warnings on LLM failures but continues execution. The glossary is an optional enhancement - core ontology extraction (entities, relationships, columns) can succeed independently.
 
 #### File: `pkg/services/dag/glossary_discovery_node.go`
 
@@ -269,9 +300,57 @@ if err := n.glossaryEnrichment.EnrichGlossaryTerms(ctx, dag.ProjectID, *dag.Onto
 
 ---
 
-### Phase 4: Improve Error Messages
+### Phase 4: Improve Error Messages ✅ COMPLETED (2026-01-08)
 
 **Goal:** Error messages should include model, endpoint info, and original status code for debugging.
+
+**Implementation Summary:**
+All error messages now include HTTP status code and model information for improved debugging. The Error struct has been enhanced with StatusCode, Model, and Endpoint fields, and ClassifyError() automatically extracts status codes from error strings. The Client's parseError() method enriches all errors with model and endpoint context.
+
+**Key Changes:**
+1. **Error struct** (pkg/llm/errors.go:10-18):
+   - Added StatusCode, Model, Endpoint fields for enhanced context
+
+2. **Error() method** (pkg/llm/errors.go:21-38):
+   - Enhanced formatting to include "HTTP {code}" and "model={name}" in error messages
+   - Format: "{Type} HTTP {code} model={model}: {message}: {cause}"
+   - Each component is optional - only included if present
+   - Example: "ErrorTypeEndpoint HTTP 503 model=gpt-4: server error: <underlying error>"
+
+3. **ClassifyError()** (pkg/llm/errors.go:87-164):
+   - Extracts HTTP status codes (400, 401, 403, 404, 429, 500, 502, 503, 504) from error strings
+   - Sets StatusCode field on all returned errors where status code is detected
+   - Pattern matching looks for status codes in the error string itself
+
+4. **NewErrorWithContext()** (pkg/llm/errors.go:61-72):
+   - New constructor for creating errors with full context (model, endpoint, status code)
+   - Useful for creating errors from scratch with all debugging information
+   - Not currently used but available for future enhancements
+
+5. **Client.parseError()** (pkg/llm/client.go:178-185):
+   - Enriches all classified errors with model and endpoint from client instance
+   - Ensures every error from the LLM client includes debugging context
+   - Model and endpoint are added after ClassifyError returns
+
+**Test Coverage:**
+Created comprehensive test suite in pkg/llm/errors_test.go with 13 tests covering:
+- Error message formatting with status codes, models, and causes
+- ClassifyError() status code extraction for all HTTP codes
+- NewErrorWithContext() constructor functionality
+- Error interface methods (Unwrap, IsRetryable)
+- Preservation of existing *Error instances
+- All tests pass successfully
+
+**Files Modified:**
+- `pkg/llm/errors.go` - Enhanced Error struct, updated Error() method, updated ClassifyError(), added NewErrorWithContext()
+- `pkg/llm/client.go` - Updated parseError() to enrich errors with model and endpoint
+- `pkg/llm/errors_test.go` (new, 283 lines) - Comprehensive test coverage
+
+**Design Decisions for Next Session:**
+- Status code extraction is string-based (checking for "503", "429", etc. in error text) - works for OpenAI SDK errors
+- Model and endpoint are added at the client level, not in ClassifyError, to avoid coupling ClassifyError to client details
+- The Error() method builds a compact, readable format: type, HTTP code, model, message, cause
+- NewErrorWithContext() exists but is not used yet - future enhancement could use it for more precise error creation
 
 #### File: `pkg/llm/errors.go`
 
@@ -362,9 +441,63 @@ if err != nil {
 
 ---
 
-### Phase 5: Add Repeated Error Escalation
+### Phase 5: Add Repeated Error Escalation ✅ COMPLETED (2026-01-08)
 
 **Goal:** After N consecutive failures of the same error type, treat as permanent failure to avoid infinite retry loops.
+
+**Implementation Summary:**
+DoIfRetryable now tracks consecutive same-type errors and escalates to permanent failure after MaxSameErrorType consecutive failures (default: 5). A new classifyErrorType() helper extracts error categories for comparison.
+
+**Key Changes:**
+1. **Config struct** (pkg/retry/retry.go:10-18):
+   - Added MaxSameErrorType field (default: 5) to control escalation threshold
+
+2. **classifyErrorType() helper** (pkg/retry/retry.go:186-228):
+   - Extracts error categories from error strings for comparison
+   - Returns categories like "503", "429", "timeout", "connection", "oom", "gpu", "broken_pipe", "rate_limit", "unknown"
+   - Checks HTTP status codes first (503, 502, 504, 500, 429, 404, 403, 401, 400)
+   - Then checks connection errors (connection refused/reset)
+   - Then checks timeouts, broken pipe, rate limiting, GPU/CUDA errors, OOM
+   - Falls back to "unknown" for unclassified errors
+
+3. **DoIfRetryable() tracking** (pkg/retry/retry.go:236-267):
+   - Tracks sameErrorCount and lastErrorType across retry attempts
+   - Increments count when error type matches previous error
+   - Resets count to 1 when error type changes
+   - Escalates when sameErrorCount >= MaxSameErrorType (if MaxSameErrorType > 0)
+   - Returns formatted error: "repeated error (N times, type=XXX): original error"
+   - Escalation check happens BEFORE retrying, preventing unnecessary wait on final attempt
+
+4. **IsRetryable() pattern fix** (pkg/retry/retry.go:153):
+   - Added "timed out" pattern to fix bug where "request timed out" wasn't recognized as retryable
+
+**Test Coverage:**
+Created comprehensive test suite in pkg/retry/retry_test.go:
+- TestClassifyErrorType (31 cases) - Verifies error classification for all error types including HTTP codes, connection errors, timeouts, rate limits, GPU/CUDA errors, OOM
+- TestDoIfRetryable_RepeatedErrorEscalation - Verifies escalation after 5 consecutive same-type 503 errors (exactly 5 calls before escalating)
+- TestDoIfRetryable_MixedErrorTypes - Verifies counter resets when error type changes (503→502→503→timeout→503 pattern, escalates after 3 consecutive 503s)
+- TestDoIfRetryable_EscalationDisabled - Verifies MaxSameErrorType=0 disables escalation (exhausts all retries without escalating)
+- TestDoIfRetryable_EscalationAfterSuccess - Verifies success before threshold doesn't trigger escalation (4 errors < 5 threshold)
+- TestDefaultConfig_HasMaxSameErrorType - Verifies default config has MaxSameErrorType=5
+- All tests pass successfully
+
+**Files Modified:**
+- `pkg/retry/retry.go` - Added MaxSameErrorType, classifyErrorType(), tracking logic, "timed out" pattern
+- `pkg/retry/retry_test.go` - Added 6 new tests (227 lines) covering escalation behavior plus helper functions
+
+**Design Decisions:**
+- MaxSameErrorType=5 provides reasonable default (allows transient issues without infinite loops)
+- Setting MaxSameErrorType=0 disables escalation (for backward compatibility or testing)
+- Error type classification is coarse-grained (e.g., all 503 errors are same type) to detect systemic issues
+- Escalation error message includes count and type for debugging: "repeated error (5 times, type=503): HTTP 503 Service Unavailable"
+- classifyErrorType() checks specific HTTP codes before generic patterns to provide more precise error tracking
+- Escalation check happens during retry loop (not after exhausting retries) to fail fast when pattern is detected
+
+**Notes for Next Session:**
+- The escalation mechanism is now active for all code using retry.DoIfRetryable() including the ontology DAG executor
+- If you see "repeated error" messages in logs, it means the same error type occurred 5+ times consecutively - investigate the root cause
+- To tune escalation threshold, adjust MaxSameErrorType in retry.Config (higher = more tolerant of repeated failures, lower = faster escalation)
+- The classifyErrorType() function can be extended with new error patterns if needed
 
 #### File: `pkg/retry/retry.go`
 

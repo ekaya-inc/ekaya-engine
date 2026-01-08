@@ -13,11 +13,12 @@ import (
 type ErrorType string
 
 const (
-	ErrorTypeNone     ErrorType = ""
-	ErrorTypeEndpoint ErrorType = "endpoint"
-	ErrorTypeAuth     ErrorType = "auth"
-	ErrorTypeModel    ErrorType = "model"
-	ErrorTypeUnknown  ErrorType = "unknown"
+	ErrorTypeNone        ErrorType = ""
+	ErrorTypeEndpoint    ErrorType = "endpoint"
+	ErrorTypeAuth        ErrorType = "auth"
+	ErrorTypeModel       ErrorType = "model"
+	ErrorTypeRateLimited ErrorType = "rate_limited"
+	ErrorTypeUnknown     ErrorType = "unknown"
 )
 
 // TestResult contains connection test results.

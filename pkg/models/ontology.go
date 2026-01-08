@@ -109,8 +109,31 @@ type EnumValue struct {
 	Description string `json:"description,omitempty"`
 }
 
-// UnmarshalJSON handles LLM responses that return value as number or boolean instead of string.
+// UnmarshalJSON handles LLM responses that may return enum values in different formats:
+// 1. Plain string: "AUD" → {value: "AUD"}
+// 2. Plain number: 42 → {value: "42"}
+// 3. Object with value as string: {value: "AUD", label: "Australian Dollar"}
+// 4. Object with value as number: {value: 2, label: "Type 2"}
 func (e *EnumValue) UnmarshalJSON(data []byte) error {
+	// First, try to unmarshal as a plain string (e.g., "AUD")
+	var plainString string
+	if err := json.Unmarshal(data, &plainString); err == nil {
+		e.Value = plainString
+		e.Label = ""
+		e.Description = ""
+		return nil
+	}
+
+	// Try to unmarshal as a plain number (e.g., 42)
+	var plainNumber json.Number
+	if err := json.Unmarshal(data, &plainNumber); err == nil {
+		e.Value = plainNumber.String()
+		e.Label = ""
+		e.Description = ""
+		return nil
+	}
+
+	// Otherwise, unmarshal as object with flexible value type
 	type flexibleEnumValue struct {
 		Value       json.RawMessage `json:"value"`
 		Label       string          `json:"label,omitempty"`

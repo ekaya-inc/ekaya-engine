@@ -176,5 +176,10 @@ func (c *Client) GetEndpoint() string {
 
 // parseError categorizes OpenAI API errors using the structured Error type.
 func (c *Client) parseError(err error) error {
-	return ClassifyError(err)
+	llmErr := ClassifyError(err)
+	if llmErr != nil {
+		llmErr.Model = c.model
+		llmErr.Endpoint = c.endpoint
+	}
+	return llmErr
 }
