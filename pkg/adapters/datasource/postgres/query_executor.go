@@ -5,6 +5,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -221,6 +222,103 @@ func (e *QueryExecutor) ValidateQuery(ctx context.Context, sqlQuery string) erro
 		return fmt.Errorf("invalid SQL: %w", err)
 	}
 	return nil
+}
+
+// ExplainQuery returns EXPLAIN ANALYZE output for a SQL query with performance insights.
+func (e *QueryExecutor) ExplainQuery(ctx context.Context, sqlQuery string) (*datasource.ExplainResult, error) {
+	// Use EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) to get detailed execution plan
+	explainSQL := "EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) " + sqlQuery
+	rows, err := e.pool.Query(ctx, explainSQL)
+	if err != nil {
+		return nil, fmt.Errorf("EXPLAIN ANALYZE failed: %w", err)
+	}
+	defer rows.Close()
+
+	// Collect all plan lines
+	var planLines []string
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			return nil, fmt.Errorf("failed to scan EXPLAIN output: %w", err)
+		}
+		planLines = append(planLines, line)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error reading EXPLAIN output: %w", err)
+	}
+
+	// Parse the plan to extract timing and generate hints
+	result := &datasource.ExplainResult{
+		Plan: strings.Join(planLines, "\n"),
+	}
+
+	// Extract execution and planning times from the plan
+	var executionTime, planningTime float64
+	for _, line := range planLines {
+		if strings.Contains(line, "Execution Time:") {
+			fmt.Sscanf(line, " Execution Time: %f ms", &executionTime)
+		} else if strings.Contains(line, "Planning Time:") {
+			fmt.Sscanf(line, " Planning Time: %f ms", &planningTime)
+		}
+	}
+	result.ExecutionTimeMs = executionTime
+	result.PlanningTimeMs = planningTime
+
+	// Generate performance hints based on plan analysis
+	result.PerformanceHints = generatePerformanceHints(planLines, executionTime)
+
+	return result, nil
+}
+
+// generatePerformanceHints analyzes the EXPLAIN plan and provides optimization suggestions.
+func generatePerformanceHints(planLines []string, executionTimeMs float64) []string {
+	var hints []string
+	planText := strings.Join(planLines, "\n")
+
+	// Check for sequential scans on large tables
+	if strings.Contains(planText, "Seq Scan") {
+		hints = append(hints, "Sequential scan detected - consider adding an index if this table is large")
+	}
+
+	// Check for missing indexes in joins
+	if strings.Contains(planText, "Hash Join") && strings.Contains(planText, "Seq Scan") {
+		hints = append(hints, "Hash join with sequential scan - an index on join columns may improve performance")
+	}
+
+	// Check for nested loop joins (can be slow with large datasets)
+	if strings.Contains(planText, "Nested Loop") {
+		hints = append(hints, "Nested loop join detected - ensure join columns are indexed for better performance")
+	}
+
+	// Check for sorts that spill to disk
+	if strings.Contains(planText, "external merge") || strings.Contains(planText, "Sort Method: external") {
+		hints = append(hints, "Sort operation spilled to disk - consider increasing work_mem or reducing result set")
+	}
+
+	// Check for bitmap heap scans (often indicates partial index usage)
+	if strings.Contains(planText, "Bitmap Heap Scan") {
+		hints = append(hints, "Bitmap heap scan detected - query may benefit from more selective conditions or better index coverage")
+	}
+
+	// Check for high buffer usage
+	if strings.Contains(planText, "Buffers: shared read=") {
+		hints = append(hints, "High buffer usage detected - query is reading significant data from disk/memory")
+	}
+
+	// Check for slow execution time
+	if executionTimeMs > 1000 {
+		hints = append(hints, fmt.Sprintf("Query execution took %.2f ms - consider optimization if this is a frequent query", executionTimeMs))
+	} else if executionTimeMs > 100 {
+		hints = append(hints, "Query execution is moderately slow - review plan for optimization opportunities")
+	}
+
+	// If no specific hints, provide a positive message
+	if len(hints) == 0 {
+		hints = append(hints, "Query plan looks efficient - no obvious optimization opportunities detected")
+	}
+
+	return hints
 }
 
 // Close releases the adapter (but NOT the pool if managed).

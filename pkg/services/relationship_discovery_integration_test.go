@@ -526,7 +526,7 @@ func (tc *discoveryTestContext) createTestColumnWithStats(ctx context.Context, t
 	column := tc.createTestColumn(ctx, tableID, columnName, dataType, ordinal, isPrimaryKey)
 
 	// Update distinct count for cardinality checks
-	if err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, nil, nil, nil); err != nil {
+	if err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, nil, nil, nil, nil); err != nil {
 		tc.t.Fatalf("Failed to update column stats: %v", err)
 	}
 

@@ -1,0 +1,421 @@
+// Package tools provides MCP tool implementations for ekaya-engine.
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/google/uuid"
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+	"go.uber.org/zap"
+
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/database"
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
+	"github.com/ekaya-inc/ekaya-engine/pkg/services"
+)
+
+// ColumnToolDeps contains dependencies for column metadata tools.
+type ColumnToolDeps struct {
+	DB               *database.DB
+	MCPConfigService services.MCPConfigService
+	OntologyRepo     repositories.OntologyRepository
+	Logger           *zap.Logger
+}
+
+// RegisterColumnTools registers column metadata MCP tools.
+func RegisterColumnTools(s *server.MCPServer, deps *ColumnToolDeps) {
+	registerUpdateColumnTool(s, deps)
+	registerDeleteColumnMetadataTool(s, deps)
+}
+
+// checkColumnToolEnabled verifies a specific column tool is enabled for the project.
+// Uses ToolAccessChecker to ensure consistency with tool list filtering.
+func checkColumnToolEnabled(ctx context.Context, deps *ColumnToolDeps, toolName string) (uuid.UUID, context.Context, func(), error) {
+	// Get claims from context
+	claims, ok := auth.GetClaims(ctx)
+	if !ok {
+		return uuid.Nil, nil, nil, fmt.Errorf("authentication required")
+	}
+
+	projectID, err := uuid.Parse(claims.ProjectID)
+	if err != nil {
+		return uuid.Nil, nil, nil, fmt.Errorf("invalid project ID: %w", err)
+	}
+
+	// Acquire connection with tenant scope
+	scope, err := deps.DB.WithTenant(ctx, projectID)
+	if err != nil {
+		return uuid.Nil, nil, nil, fmt.Errorf("failed to acquire database connection: %w", err)
+	}
+
+	// Set tenant context for the query
+	tenantCtx := database.SetTenantScope(ctx, scope)
+
+	// Check if caller is an agent (API key authentication)
+	isAgent := claims.Subject == "agent"
+
+	// Get tool groups state and check access using the unified checker
+	state, err := deps.MCPConfigService.GetToolGroupsState(tenantCtx, projectID)
+	if err != nil {
+		scope.Close()
+		deps.Logger.Error("Failed to get tool groups state",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool configuration: %w", err)
+	}
+
+	// Use the unified ToolAccessChecker for consistent access decisions
+	checker := services.NewToolAccessChecker()
+	if checker.IsToolAccessible(toolName, state, isAgent) {
+		return projectID, tenantCtx, func() { scope.Close() }, nil
+	}
+
+	scope.Close()
+	return uuid.Nil, nil, nil, fmt.Errorf("%s tool is not enabled for this project", toolName)
+}
+
+// registerUpdateColumnTool adds the update_column tool for adding or updating column semantic information.
+func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
+	tool := mcp.NewTool(
+		"update_column",
+		mcp.WithDescription(
+			"Add or update semantic information about a column in the ontology. "+
+				"The table and column name form the upsert key - if metadata exists for this column, it will be updated; otherwise, new metadata is created. "+
+				"Optional parameters (description, enum_values, entity, role) are merged with existing data when provided. "+
+				"Omitted parameters preserve existing values. "+
+				"Example: update_column(table='users', column='status', description='User account status', enum_values=['ACTIVE - Normal active account', 'SUSPENDED - Temporarily disabled'], entity='User', role='attribute')",
+		),
+		mcp.WithString(
+			"table",
+			mcp.Required(),
+			mcp.Description("Table name containing the column (e.g., 'users', 'billing_transactions')"),
+		),
+		mcp.WithString(
+			"column",
+			mcp.Required(),
+			mcp.Description("Column name to update (e.g., 'status', 'transaction_state')"),
+		),
+		mcp.WithString(
+			"description",
+			mcp.Description("Optional - Business description of what this column represents"),
+		),
+		mcp.WithArray(
+			"enum_values",
+			mcp.Description("Optional - Array of enumeration values with descriptions (e.g., ['ACTIVE - Normal account', 'SUSPENDED - Temporary hold'])"),
+		),
+		mcp.WithString(
+			"entity",
+			mcp.Description("Optional - Entity this column belongs to (e.g., 'User', 'Account')"),
+		),
+		mcp.WithString(
+			"role",
+			mcp.Description("Optional - Semantic role: 'dimension', 'measure', 'identifier', or 'attribute'"),
+		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := checkColumnToolEnabled(ctx, deps, "update_column")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Get required parameters
+		table, err := req.RequireString("table")
+		if err != nil {
+			return nil, err
+		}
+
+		column, err := req.RequireString("column")
+		if err != nil {
+			return nil, err
+		}
+
+		// Get optional parameters
+		description := getOptionalString(req, "description")
+		entity := getOptionalString(req, "entity")
+		role := getOptionalString(req, "role")
+
+		var enumValues []string
+		if args, ok := req.Params.Arguments.(map[string]any); ok {
+			// Extract enum_values array
+			if enumArray, ok := args["enum_values"].([]any); ok {
+				for _, ev := range enumArray {
+					if evStr, ok := ev.(string); ok {
+						enumValues = append(enumValues, evStr)
+					}
+				}
+			}
+		}
+
+		// Get active ontology
+		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get active ontology: %w", err)
+		}
+		if ontology == nil {
+			return nil, fmt.Errorf("no active ontology found for project")
+		}
+
+		// Get existing column details for this table
+		existingColumns := ontology.GetColumnDetails(table)
+		if existingColumns == nil {
+			existingColumns = []models.ColumnDetail{}
+		}
+
+		// Find existing column or create new one
+		var targetColumn *models.ColumnDetail
+		columnIndex := -1
+		for i := range existingColumns {
+			if existingColumns[i].Name == column {
+				targetColumn = &existingColumns[i]
+				columnIndex = i
+				break
+			}
+		}
+
+		isNew := targetColumn == nil
+		if isNew {
+			// Create new column detail
+			targetColumn = &models.ColumnDetail{
+				Name: column,
+			}
+		}
+
+		// Update fields if provided
+		if description != "" {
+			targetColumn.Description = description
+		}
+
+		if entity != "" {
+			// Store entity as semantic type (this field is used for entity associations)
+			targetColumn.SemanticType = entity
+		}
+
+		if role != "" {
+			targetColumn.Role = role
+		}
+
+		// Process enum values if provided
+		if enumValues != nil {
+			targetColumn.EnumValues = parseEnumValues(enumValues)
+		}
+
+		// Update or append column
+		if isNew {
+			existingColumns = append(existingColumns, *targetColumn)
+		} else {
+			existingColumns[columnIndex] = *targetColumn
+		}
+
+		// Save updated column details back to ontology
+		if err := deps.OntologyRepo.UpdateColumnDetails(tenantCtx, projectID, table, existingColumns); err != nil {
+			return nil, fmt.Errorf("failed to update column details: %w", err)
+		}
+
+		// Build response
+		response := updateColumnResponse{
+			Table:       table,
+			Column:      column,
+			Description: targetColumn.Description,
+			EnumValues:  formatEnumValues(targetColumn.EnumValues),
+			Entity:      targetColumn.SemanticType,
+			Role:        targetColumn.Role,
+			Created:     isNew,
+		}
+
+		jsonResult, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// registerDeleteColumnMetadataTool adds the delete_column_metadata tool for clearing custom column metadata.
+func registerDeleteColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps) {
+	tool := mcp.NewTool(
+		"delete_column_metadata",
+		mcp.WithDescription(
+			"Clear custom metadata for a column, reverting to schema-only information. "+
+				"This removes the semantic enrichment added via update_column while preserving schema information. "+
+				"Use this to remove incorrect or outdated column annotations. "+
+				"Example: delete_column_metadata(table='users', column='status')",
+		),
+		mcp.WithString(
+			"table",
+			mcp.Required(),
+			mcp.Description("Table name containing the column"),
+		),
+		mcp.WithString(
+			"column",
+			mcp.Required(),
+			mcp.Description("Column name to clear metadata for"),
+		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := checkColumnToolEnabled(ctx, deps, "delete_column_metadata")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Get required parameters
+		table, err := req.RequireString("table")
+		if err != nil {
+			return nil, err
+		}
+
+		column, err := req.RequireString("column")
+		if err != nil {
+			return nil, err
+		}
+
+		// Get active ontology
+		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get active ontology: %w", err)
+		}
+		if ontology == nil {
+			return nil, fmt.Errorf("no active ontology found for project")
+		}
+
+		// Get existing column details for this table
+		existingColumns := ontology.GetColumnDetails(table)
+		if existingColumns == nil {
+			// No columns for this table, nothing to delete
+			result := deleteColumnMetadataResponse{
+				Table:   table,
+				Column:  column,
+				Deleted: false,
+			}
+			jsonResult, err := json.Marshal(result)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal result: %w", err)
+			}
+			return mcp.NewToolResultText(string(jsonResult)), nil
+		}
+
+		// Find and remove the column
+		found := false
+		newColumns := make([]models.ColumnDetail, 0, len(existingColumns))
+		for i := range existingColumns {
+			if existingColumns[i].Name != column {
+				newColumns = append(newColumns, existingColumns[i])
+			} else {
+				found = true
+			}
+		}
+
+		if !found {
+			// Column not found in metadata, nothing to delete
+			result := deleteColumnMetadataResponse{
+				Table:   table,
+				Column:  column,
+				Deleted: false,
+			}
+			jsonResult, err := json.Marshal(result)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal result: %w", err)
+			}
+			return mcp.NewToolResultText(string(jsonResult)), nil
+		}
+
+		// Save updated column details back to ontology
+		if err := deps.OntologyRepo.UpdateColumnDetails(tenantCtx, projectID, table, newColumns); err != nil {
+			return nil, fmt.Errorf("failed to update column details: %w", err)
+		}
+
+		// Build response
+		result := deleteColumnMetadataResponse{
+			Table:   table,
+			Column:  column,
+			Deleted: true,
+		}
+
+		jsonResult, err := json.Marshal(result)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// parseEnumValues converts string array to EnumValue structs.
+// Supports format: "VALUE - Description" or just "VALUE"
+func parseEnumValues(enumStrings []string) []models.EnumValue {
+	result := make([]models.EnumValue, 0, len(enumStrings))
+	for _, enumStr := range enumStrings {
+		// Try to split on " - " to extract value and description
+		ev := models.EnumValue{}
+		// Simple parsing: if contains " - ", split it
+		if len(enumStr) > 0 {
+			// Find first occurrence of " - "
+			sepIndex := -1
+			for i := 0; i < len(enumStr)-2; i++ {
+				if enumStr[i:i+3] == " - " {
+					sepIndex = i
+					break
+				}
+			}
+
+			if sepIndex > 0 {
+				ev.Value = enumStr[:sepIndex]
+				ev.Description = enumStr[sepIndex+3:]
+			} else {
+				ev.Value = enumStr
+			}
+		}
+		result = append(result, ev)
+	}
+	return result
+}
+
+// formatEnumValues converts EnumValue structs back to string array for response.
+func formatEnumValues(enumValues []models.EnumValue) []string {
+	if enumValues == nil {
+		return nil
+	}
+	result := make([]string, 0, len(enumValues))
+	for _, ev := range enumValues {
+		if ev.Description != "" {
+			result = append(result, fmt.Sprintf("%s - %s", ev.Value, ev.Description))
+		} else {
+			result = append(result, ev.Value)
+		}
+	}
+	return result
+}
+
+// updateColumnResponse is the response format for update_column tool.
+type updateColumnResponse struct {
+	Table       string   `json:"table"`
+	Column      string   `json:"column"`
+	Description string   `json:"description,omitempty"`
+	EnumValues  []string `json:"enum_values,omitempty"`
+	Entity      string   `json:"entity,omitempty"`
+	Role        string   `json:"role,omitempty"`
+	Created     bool     `json:"created"` // true if column was newly added, false if updated
+}
+
+// deleteColumnMetadataResponse is the response format for delete_column_metadata tool.
+type deleteColumnMetadataResponse struct {
+	Table   string `json:"table"`
+	Column  string `json:"column"`
+	Deleted bool   `json:"deleted"` // true if metadata was deleted, false if not found
+}

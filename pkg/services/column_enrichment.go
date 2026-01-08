@@ -217,6 +217,13 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 		return fmt.Errorf("save column details: %w", err)
 	}
 
+	// Persist sample values for columns with low cardinality (≤50 distinct values)
+	if err := s.persistSampleValues(ctx, columns, enumSamples); err != nil {
+		s.logger.Warn("Failed to persist sample values, continuing",
+			zap.String("table", tableName),
+			zap.Error(err))
+	}
+
 	s.logger.Info("Enriched columns for table",
 		zap.String("table", tableName),
 		zap.Int("column_count", len(columnDetails)))
@@ -310,6 +317,28 @@ func (s *columnEnrichmentService) sampleEnumValues(
 	}
 
 	return result, nil
+}
+
+// persistSampleValues persists sample values for columns with low cardinality (≤50 distinct values)
+// to enable MCP tools to return sample_values without on-demand database queries.
+func (s *columnEnrichmentService) persistSampleValues(ctx context.Context, columns []*models.SchemaColumn, enumSamples map[string][]string) error {
+	for _, col := range columns {
+		if samples, ok := enumSamples[col.ColumnName]; ok && len(samples) > 0 {
+			// Update column stats with sample values
+			// Pass nil for other stats to preserve existing values
+			if err := s.schemaRepo.UpdateColumnStats(ctx, col.ID, nil, nil, nil, nil, samples); err != nil {
+				s.logger.Warn("Failed to persist sample values for column",
+					zap.String("column", col.ColumnName),
+					zap.Error(err))
+				// Continue with other columns even if one fails
+				continue
+			}
+			s.logger.Debug("Persisted sample values",
+				zap.String("column", col.ColumnName),
+				zap.Int("sample_count", len(samples)))
+		}
+	}
+	return nil
 }
 
 // identifyEnumCandidates identifies columns likely to contain enum values.

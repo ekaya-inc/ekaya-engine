@@ -287,11 +287,12 @@ func main() {
 
 	// Register approved queries tools (separate tool group from developer tools)
 	queryToolDeps := &mcptools.QueryToolDeps{
-		DB:               db,
-		MCPConfigService: mcpConfigService,
-		ProjectService:   projectService,
-		QueryService:     queryService,
-		Logger:           logger,
+		DB:                        db,
+		MCPConfigService:          mcpConfigService,
+		ProjectService:            projectService,
+		QueryService:              queryService,
+		Logger:                    logger,
+		QueryHistoryRetentionDays: cfg.QueryHistoryRetentionDays,
 	}
 	mcptools.RegisterApprovedQueriesTools(mcpServer.MCP(), queryToolDeps)
 
@@ -396,6 +397,93 @@ func main() {
 		Logger:           logger,
 	}
 	mcptools.RegisterGlossaryTools(mcpServer.MCP(), glossaryToolDeps)
+
+	// Register project knowledge MCP tools (for storing domain facts)
+	knowledgeToolDeps := &mcptools.KnowledgeToolDeps{
+		DB:                  db,
+		MCPConfigService:    mcpConfigService,
+		KnowledgeRepository: knowledgeRepo,
+		Logger:              logger,
+	}
+	mcptools.RegisterKnowledgeTools(mcpServer.MCP(), knowledgeToolDeps)
+
+	// Register unified context tool (consolidates ontology, schema, and glossary)
+	contextToolDeps := &mcptools.ContextToolDeps{
+		DB:                     db,
+		MCPConfigService:       mcpConfigService,
+		ProjectService:         projectService,
+		OntologyContextService: ontologyContextService,
+		OntologyRepo:           ontologyRepo,
+		SchemaService:          schemaService,
+		GlossaryService:        glossaryService,
+		SchemaRepo:             schemaRepo,
+		Logger:                 logger,
+	}
+	mcptools.RegisterContextTools(mcpServer.MCP(), contextToolDeps)
+
+	// Register entity probe tools (for exploring entity details)
+	entityToolDeps := &mcptools.EntityToolDeps{
+		DB:                     db,
+		MCPConfigService:       mcpConfigService,
+		OntologyRepo:           ontologyRepo,
+		OntologyEntityRepo:     ontologyEntityRepo,
+		EntityRelationshipRepo: entityRelationshipRepo,
+		Logger:                 logger,
+	}
+	mcptools.RegisterEntityTools(mcpServer.MCP(), entityToolDeps)
+
+	// Register relationship tools (for creating/updating/deleting entity relationships)
+	relationshipToolDeps := &mcptools.RelationshipToolDeps{
+		DB:                     db,
+		MCPConfigService:       mcpConfigService,
+		OntologyRepo:           ontologyRepo,
+		OntologyEntityRepo:     ontologyEntityRepo,
+		EntityRelationshipRepo: entityRelationshipRepo,
+		Logger:                 logger,
+	}
+	mcptools.RegisterRelationshipTools(mcpServer.MCP(), relationshipToolDeps)
+
+	// Register column metadata tools (for updating column semantic information)
+	columnToolDeps := &mcptools.ColumnToolDeps{
+		DB:               db,
+		MCPConfigService: mcpConfigService,
+		OntologyRepo:     ontologyRepo,
+		Logger:           logger,
+	}
+	mcptools.RegisterColumnTools(mcpServer.MCP(), columnToolDeps)
+
+	// Register column probe tools (for deep-diving into column statistics and semantics)
+	probeToolDeps := &mcptools.ProbeToolDeps{
+		DB:               db,
+		MCPConfigService: mcpConfigService,
+		SchemaRepo:       schemaRepo,
+		OntologyRepo:     ontologyRepo,
+		EntityRepo:       ontologyEntityRepo,
+		RelationshipRepo: entityRelationshipRepo,
+		ProjectService:   projectService,
+		Logger:           logger,
+	}
+	mcptools.RegisterProbeTools(mcpServer.MCP(), probeToolDeps)
+
+	// Register search tools (for full-text search across schema and ontology)
+	searchToolDeps := &mcptools.SearchToolDeps{
+		DB:               db,
+		MCPConfigService: mcpConfigService,
+		SchemaRepo:       schemaRepo,
+		OntologyRepo:     ontologyRepo,
+		EntityRepo:       ontologyEntityRepo,
+		Logger:           logger,
+	}
+	mcptools.RegisterSearchTools(mcpServer.MCP(), searchToolDeps)
+
+	// Register ontology question tools (for listing and managing questions)
+	questionToolDeps := &mcptools.QuestionToolDeps{
+		DB:               db,
+		MCPConfigService: mcpConfigService,
+		QuestionRepo:     ontologyQuestionRepo,
+		Logger:           logger,
+	}
+	mcptools.RegisterQuestionTools(mcpServer.MCP(), questionToolDeps)
 
 	// Serve static UI files from ui/dist with SPA routing
 	uiDir := "./ui/dist"

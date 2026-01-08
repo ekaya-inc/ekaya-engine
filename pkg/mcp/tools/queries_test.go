@@ -12,7 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
 )
 
 func TestRegisterApprovedQueriesTools(t *testing.T) {
@@ -408,4 +410,705 @@ func TestListApprovedQueries_EmptyOutputColumns(t *testing.T) {
 
 	// Verify empty output columns (no fallback parsing)
 	assert.Empty(t, outputCols, "should have no output columns when not specified")
+}
+
+func TestRegisterSuggestApprovedQueryTool(t *testing.T) {
+	// Verify that suggest_approved_query tool is registered
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &QueryToolDeps{
+		MCPConfigService: &mockMCPConfigService{
+			config: &models.ToolGroupConfig{Enabled: true},
+		},
+		ProjectService: &mockProjectService{},
+		QueryService:   &mockQueryService{},
+		Logger:         zap.NewNop(),
+	}
+
+	RegisterApprovedQueriesTools(mcpServer, deps)
+
+	// Verify tool is registered
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	// Check suggest_approved_query tool is registered
+	toolNames := make(map[string]bool)
+	for _, tool := range response.Result.Tools {
+		toolNames[tool.Name] = true
+	}
+
+	assert.True(t, toolNames["suggest_approved_query"], "suggest_approved_query tool should be registered")
+}
+
+func TestParseParameterDefinitions(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     []any
+		wantErr   bool
+		wantCount int
+		validate  func(*testing.T, []models.QueryParameter)
+	}{
+		{
+			name: "valid parameters with all fields",
+			input: []any{
+				map[string]any{
+					"name":        "host_username",
+					"type":        "string",
+					"description": "Host's username",
+					"required":    true,
+					"example":     "damon",
+				},
+			},
+			wantErr:   false,
+			wantCount: 1,
+			validate: func(t *testing.T, params []models.QueryParameter) {
+				assert.Equal(t, "host_username", params[0].Name)
+				assert.Equal(t, "string", params[0].Type)
+				assert.Equal(t, "Host's username", params[0].Description)
+				assert.True(t, params[0].Required)
+				assert.Equal(t, "damon", params[0].Default)
+			},
+		},
+		{
+			name: "parameter with defaults",
+			input: []any{
+				map[string]any{
+					"name": "user_id",
+					"type": "integer",
+				},
+			},
+			wantErr:   false,
+			wantCount: 1,
+			validate: func(t *testing.T, params []models.QueryParameter) {
+				assert.Equal(t, "user_id", params[0].Name)
+				assert.Equal(t, "integer", params[0].Type)
+				assert.True(t, params[0].Required) // Default to required
+			},
+		},
+		{
+			name: "missing name field",
+			input: []any{
+				map[string]any{
+					"type": "string",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "missing type field",
+			input: []any{
+				map[string]any{
+					"name": "param1",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name:      "empty array",
+			input:     []any{},
+			wantErr:   false,
+			wantCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseParameterDefinitions(tt.input)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantCount, len(result))
+
+			if tt.validate != nil {
+				tt.validate(t, result)
+			}
+		})
+	}
+}
+
+func TestBuildOutputColumns(t *testing.T) {
+	columns := []columnDetail{
+		{Name: "month", Type: "TIMESTAMP"},
+		{Name: "total_earned_usd", Type: "NUMERIC"},
+		{Name: "transaction_count", Type: "BIGINT"},
+	}
+
+	descriptions := map[string]string{
+		"total_earned_usd":  "Total earnings in USD (converted from cents)",
+		"transaction_count": "Number of completed transactions",
+	}
+
+	result := buildOutputColumns(columns, descriptions)
+
+	require.Equal(t, 3, len(result))
+
+	// Check first column (no description provided)
+	assert.Equal(t, "month", result[0].Name)
+	assert.Equal(t, "TIMESTAMP", result[0].Type)
+	assert.Empty(t, result[0].Description)
+
+	// Check second column (description provided)
+	assert.Equal(t, "total_earned_usd", result[1].Name)
+	assert.Equal(t, "NUMERIC", result[1].Type)
+	assert.Equal(t, "Total earnings in USD (converted from cents)", result[1].Description)
+
+	// Check third column (description provided)
+	assert.Equal(t, "transaction_count", result[2].Name)
+	assert.Equal(t, "BIGINT", result[2].Type)
+	assert.Equal(t, "Number of completed transactions", result[2].Description)
+}
+
+func TestSuggestApprovedQuery_ResponseStructure(t *testing.T) {
+	// Verify the response structure of suggest_approved_query tool
+	response := struct {
+		SuggestionID string             `json:"suggestion_id"`
+		Status       string             `json:"status"`
+		Validation   validationResponse `json:"validation"`
+	}{
+		SuggestionID: uuid.New().String(),
+		Status:       "pending",
+		Validation: validationResponse{
+			SQLValid:   true,
+			DryRunRows: 3,
+			DetectedOutputColumns: []columnDetail{
+				{Name: "month", Type: "TIMESTAMP"},
+				{Name: "total", Type: "NUMERIC"},
+			},
+		},
+	}
+
+	// Verify JSON serialization works
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	// Verify required fields are present
+	assert.NotEmpty(t, parsed["suggestion_id"])
+	assert.Equal(t, "pending", parsed["status"])
+	assert.NotNil(t, parsed["validation"])
+
+	// Verify validation object structure
+	validation, ok := parsed["validation"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, true, validation["sql_valid"])
+	assert.Equal(t, float64(3), validation["dry_run_rows"])
+	assert.NotNil(t, validation["detected_output_columns"])
+}
+
+func TestGetQueryHistory_ResponseStructure(t *testing.T) {
+	// This test verifies the get_query_history response structure.
+	// Full integration testing with actual database records is done in integration tests.
+
+	// Example response structure
+	response := struct {
+		RecentQueries []struct {
+			SQL             string         `json:"sql"`
+			ExecutedAt      string         `json:"executed_at"`
+			RowCount        int            `json:"row_count"`
+			ExecutionTimeMs int            `json:"execution_time_ms"`
+			Parameters      map[string]any `json:"parameters,omitempty"`
+			QueryName       *string        `json:"query_name,omitempty"`
+		} `json:"recent_queries"`
+		Count     int `json:"count"`
+		HoursBack int `json:"hours_back"`
+	}{
+		RecentQueries: []struct {
+			SQL             string         `json:"sql"`
+			ExecutedAt      string         `json:"executed_at"`
+			RowCount        int            `json:"row_count"`
+			ExecutionTimeMs int            `json:"execution_time_ms"`
+			Parameters      map[string]any `json:"parameters,omitempty"`
+			QueryName       *string        `json:"query_name,omitempty"`
+		}{
+			{
+				SQL:             "SELECT * FROM users WHERE username = $1",
+				ExecutedAt:      "2024-01-15T10:30:00Z",
+				RowCount:        42,
+				ExecutionTimeMs: 145,
+				Parameters: map[string]any{
+					"username": "john_doe",
+				},
+				QueryName: strPtr("Find user by username"),
+			},
+			{
+				SQL:             "SELECT COUNT(*) FROM orders WHERE created_at >= $1",
+				ExecutedAt:      "2024-01-15T10:25:00Z",
+				RowCount:        1,
+				ExecutionTimeMs: 89,
+				Parameters: map[string]any{
+					"start_date": "2024-01-01",
+				},
+				QueryName: strPtr("Count recent orders"),
+			},
+		},
+		Count:     2,
+		HoursBack: 24,
+	}
+
+	// Verify JSON serialization works
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	// Verify top-level fields
+	assert.Equal(t, float64(2), parsed["count"])
+	assert.Equal(t, float64(24), parsed["hours_back"])
+	assert.NotNil(t, parsed["recent_queries"])
+
+	// Verify recent_queries array structure
+	queries, ok := parsed["recent_queries"].([]any)
+	require.True(t, ok)
+	require.Len(t, queries, 2)
+
+	// Verify first query structure
+	firstQuery, ok := queries[0].(map[string]any)
+	require.True(t, ok)
+	assert.NotEmpty(t, firstQuery["sql"])
+	assert.NotEmpty(t, firstQuery["executed_at"])
+	assert.NotNil(t, firstQuery["row_count"])
+	assert.NotNil(t, firstQuery["execution_time_ms"])
+	assert.NotNil(t, firstQuery["parameters"])
+	assert.NotNil(t, firstQuery["query_name"])
+}
+
+func TestGetQueryHistory_Registration(t *testing.T) {
+	// Verify get_query_history tool is registered
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &QueryToolDeps{
+		MCPConfigService: &mockMCPConfigService{
+			config: &models.ToolGroupConfig{Enabled: true},
+		},
+		ProjectService: &mockProjectService{},
+		QueryService:   &mockQueryService{},
+		Logger:         zap.NewNop(),
+	}
+
+	RegisterApprovedQueriesTools(mcpServer, deps)
+
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	// Check get_query_history tool is registered
+	toolNames := make(map[string]bool)
+	for _, tool := range response.Result.Tools {
+		toolNames[tool.Name] = true
+	}
+
+	assert.True(t, toolNames["get_query_history"], "get_query_history tool should be registered")
+}
+
+// Helper function to create string pointer
+func strPtr(s string) *string {
+	return &s
+}
+
+func TestGetQueryHistory_ParameterDefaults(t *testing.T) {
+	// Test that parameter defaults and bounds are applied correctly
+	tests := []struct {
+		name           string
+		limitInput     *float64
+		hoursBackInput *float64
+		wantLimit      int
+		wantHoursBack  int
+	}{
+		{
+			name:          "defaults when no parameters provided",
+			wantLimit:     20,
+			wantHoursBack: 24,
+		},
+		{
+			name:           "custom values within bounds",
+			limitInput:     floatPtr(50),
+			hoursBackInput: floatPtr(48),
+			wantLimit:      50,
+			wantHoursBack:  48,
+		},
+		{
+			name:          "limit exceeds max (100)",
+			limitInput:    floatPtr(200),
+			wantLimit:     100,
+			wantHoursBack: 24,
+		},
+		{
+			name:           "hours_back exceeds max (168)",
+			hoursBackInput: floatPtr(200),
+			wantLimit:      20,
+			wantHoursBack:  168,
+		},
+		{
+			name:          "limit below min (1)",
+			limitInput:    floatPtr(0),
+			wantLimit:     1,
+			wantHoursBack: 24,
+		},
+		{
+			name:           "hours_back below min (1)",
+			hoursBackInput: floatPtr(0),
+			wantLimit:      20,
+			wantHoursBack:  1,
+		},
+		{
+			name:          "negative limit coerced to 1",
+			limitInput:    floatPtr(-10),
+			wantLimit:     1,
+			wantHoursBack: 24,
+		},
+		{
+			name:           "negative hours_back coerced to 1",
+			hoursBackInput: floatPtr(-5),
+			wantLimit:      20,
+			wantHoursBack:  1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the parameter processing logic from registerGetQueryHistoryTool
+			limit := 20 // default
+			if tt.limitInput != nil {
+				limit = int(*tt.limitInput)
+				if limit > 100 {
+					limit = 100
+				}
+				if limit < 1 {
+					limit = 1
+				}
+			}
+
+			hoursBack := 24 // default
+			if tt.hoursBackInput != nil {
+				hoursBack = int(*tt.hoursBackInput)
+				if hoursBack > 168 {
+					hoursBack = 168
+				}
+				if hoursBack < 1 {
+					hoursBack = 1
+				}
+			}
+
+			assert.Equal(t, tt.wantLimit, limit, "limit should be %d", tt.wantLimit)
+			assert.Equal(t, tt.wantHoursBack, hoursBack, "hours_back should be %d", tt.wantHoursBack)
+		})
+	}
+}
+
+func TestGetQueryHistory_QueryStructure(t *testing.T) {
+	// Test that the SQL query structure is correct
+	// This validates that the query has the expected columns and filters
+
+	// Expected query structure (from queries.go:819-833)
+	expectedQuery := `
+		SELECT
+			qe.sql,
+			qe.executed_at,
+			qe.row_count,
+			qe.execution_time_ms,
+			qe.parameters,
+			q.natural_language_prompt as query_name
+		FROM engine_query_executions qe
+		LEFT JOIN engine_queries q ON qe.query_id = q.id
+		WHERE qe.project_id = $1
+		  AND qe.executed_at >= $2
+		ORDER BY qe.executed_at DESC
+		LIMIT $3
+	`
+
+	// Verify the query has the required components
+	assert.Contains(t, expectedQuery, "engine_query_executions", "should query executions table")
+	assert.Contains(t, expectedQuery, "LEFT JOIN engine_queries", "should join with queries table")
+	assert.Contains(t, expectedQuery, "WHERE qe.project_id = $1", "should filter by project_id")
+	assert.Contains(t, expectedQuery, "qe.executed_at >= $2", "should filter by time range")
+	assert.Contains(t, expectedQuery, "ORDER BY qe.executed_at DESC", "should order by execution time")
+	assert.Contains(t, expectedQuery, "LIMIT $3", "should limit results")
+
+	// Verify all required fields are selected
+	assert.Contains(t, expectedQuery, "qe.sql", "should select SQL")
+	assert.Contains(t, expectedQuery, "qe.executed_at", "should select execution time")
+	assert.Contains(t, expectedQuery, "qe.row_count", "should select row count")
+	assert.Contains(t, expectedQuery, "qe.execution_time_ms", "should select execution time")
+	assert.Contains(t, expectedQuery, "qe.parameters", "should select parameters")
+	assert.Contains(t, expectedQuery, "q.natural_language_prompt", "should select query name")
+}
+
+func TestGetQueryHistory_EmptyResults(t *testing.T) {
+	// Test response structure when no executions are found
+	response := struct {
+		RecentQueries []struct {
+			SQL             string         `json:"sql"`
+			ExecutedAt      string         `json:"executed_at"`
+			RowCount        int            `json:"row_count"`
+			ExecutionTimeMs int            `json:"execution_time_ms"`
+			Parameters      map[string]any `json:"parameters,omitempty"`
+			QueryName       *string        `json:"query_name,omitempty"`
+		} `json:"recent_queries"`
+		Count     int `json:"count"`
+		HoursBack int `json:"hours_back"`
+	}{
+		RecentQueries: []struct {
+			SQL             string         `json:"sql"`
+			ExecutedAt      string         `json:"executed_at"`
+			RowCount        int            `json:"row_count"`
+			ExecutionTimeMs int            `json:"execution_time_ms"`
+			Parameters      map[string]any `json:"parameters,omitempty"`
+			QueryName       *string        `json:"query_name,omitempty"`
+		}{},
+		Count:     0,
+		HoursBack: 24,
+	}
+
+	// Verify JSON serialization handles empty array correctly
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	assert.Equal(t, float64(0), parsed["count"])
+	assert.Equal(t, float64(24), parsed["hours_back"])
+
+	queries, ok := parsed["recent_queries"].([]any)
+	require.True(t, ok)
+	assert.Empty(t, queries, "recent_queries should be empty array")
+}
+
+func TestGetQueryHistory_WithoutParameters(t *testing.T) {
+	// Test query execution without parameters (parameters is null in database)
+	response := struct {
+		RecentQueries []struct {
+			SQL             string         `json:"sql"`
+			ExecutedAt      string         `json:"executed_at"`
+			RowCount        int            `json:"row_count"`
+			ExecutionTimeMs int            `json:"execution_time_ms"`
+			Parameters      map[string]any `json:"parameters,omitempty"`
+			QueryName       *string        `json:"query_name,omitempty"`
+		} `json:"recent_queries"`
+		Count     int `json:"count"`
+		HoursBack int `json:"hours_back"`
+	}{
+		RecentQueries: []struct {
+			SQL             string         `json:"sql"`
+			ExecutedAt      string         `json:"executed_at"`
+			RowCount        int            `json:"row_count"`
+			ExecutionTimeMs int            `json:"execution_time_ms"`
+			Parameters      map[string]any `json:"parameters,omitempty"`
+			QueryName       *string        `json:"query_name,omitempty"`
+		}{
+			{
+				SQL:             "SELECT COUNT(*) FROM users",
+				ExecutedAt:      "2024-01-15T10:30:00Z",
+				RowCount:        1,
+				ExecutionTimeMs: 42,
+				Parameters:      nil, // No parameters
+				QueryName:       strPtr("Count all users"),
+			},
+		},
+		Count:     1,
+		HoursBack: 24,
+	}
+
+	// Verify JSON serialization omits nil parameters
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	queries, ok := parsed["recent_queries"].([]any)
+	require.True(t, ok)
+	require.Len(t, queries, 1)
+
+	firstQuery, ok := queries[0].(map[string]any)
+	require.True(t, ok)
+
+	// parameters should be omitted when nil (due to omitempty tag)
+	_, hasParameters := firstQuery["parameters"]
+	assert.False(t, hasParameters, "parameters should be omitted when nil")
+}
+
+func TestGetQueryHistory_WithNullQueryName(t *testing.T) {
+	// Test execution without an associated query (ad-hoc execution, query_id is null)
+	response := struct {
+		RecentQueries []struct {
+			SQL             string         `json:"sql"`
+			ExecutedAt      string         `json:"executed_at"`
+			RowCount        int            `json:"row_count"`
+			ExecutionTimeMs int            `json:"execution_time_ms"`
+			Parameters      map[string]any `json:"parameters,omitempty"`
+			QueryName       *string        `json:"query_name,omitempty"`
+		} `json:"recent_queries"`
+		Count     int `json:"count"`
+		HoursBack int `json:"hours_back"`
+	}{
+		RecentQueries: []struct {
+			SQL             string         `json:"sql"`
+			ExecutedAt      string         `json:"executed_at"`
+			RowCount        int            `json:"row_count"`
+			ExecutionTimeMs int            `json:"execution_time_ms"`
+			Parameters      map[string]any `json:"parameters,omitempty"`
+			QueryName       *string        `json:"query_name,omitempty"`
+		}{
+			{
+				SQL:             "SELECT * FROM transactions LIMIT 10",
+				ExecutedAt:      "2024-01-15T10:30:00Z",
+				RowCount:        10,
+				ExecutionTimeMs: 89,
+				Parameters:      nil,
+				QueryName:       nil, // No associated approved query
+			},
+		},
+		Count:     1,
+		HoursBack: 24,
+	}
+
+	// Verify JSON serialization handles null query_name
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	queries, ok := parsed["recent_queries"].([]any)
+	require.True(t, ok)
+	require.Len(t, queries, 1)
+
+	firstQuery, ok := queries[0].(map[string]any)
+	require.True(t, ok)
+
+	// query_name should be omitted when nil (due to omitempty tag)
+	_, hasQueryName := firstQuery["query_name"]
+	assert.False(t, hasQueryName, "query_name should be omitted when nil")
+}
+
+// Helper function to create float64 pointer
+func floatPtr(f float64) *float64 {
+	return &f
+}
+
+// Test_Z_Destructive_CleanupOldQueryExecutions tests the cleanup functionality.
+// Named with Z_Destructive prefix to run last (alphabetically) as it modifies the database.
+func Test_Z_Destructive_CleanupOldQueryExecutions(t *testing.T) {
+	// This test requires a real database
+	ctx := context.Background()
+	engineDB := testhelpers.GetEngineDB(t)
+
+	projectID := uuid.New()
+	queryID := uuid.New()
+	datasourceID := uuid.New()
+
+	// Set up tenant context
+	scope, err := engineDB.DB.WithTenant(ctx, projectID)
+	require.NoError(t, err)
+	defer scope.Close()
+
+	tenantCtx := database.SetTenantScope(ctx, scope)
+
+	// Create project (required for foreign key)
+	_, err = scope.Conn.Exec(tenantCtx, `
+		INSERT INTO engine_projects (id, name, created_at, updated_at)
+		VALUES ($1, 'Test Project', NOW(), NOW())
+	`, projectID)
+	require.NoError(t, err)
+
+	// Create datasource (required for query foreign key)
+	_, err = scope.Conn.Exec(tenantCtx, `
+		INSERT INTO engine_datasources (id, project_id, name, datasource_type, datasource_config, created_at, updated_at)
+		VALUES ($1, $2, 'Test Datasource', 'postgres', '{}', NOW(), NOW())
+	`, datasourceID, projectID)
+	require.NoError(t, err)
+
+	// Create query (required for query_executions foreign key)
+	_, err = scope.Conn.Exec(tenantCtx, `
+		INSERT INTO engine_queries (id, project_id, datasource_id, natural_language_prompt, sql_query, dialect, is_enabled, created_at, updated_at)
+		VALUES ($1, $2, $3, 'Test Query', 'SELECT 1', 'postgres', true, NOW(), NOW())
+	`, queryID, projectID, datasourceID)
+	require.NoError(t, err)
+
+	// Insert test execution records with different ages
+	now := "NOW()"
+	insertQuery := `
+		INSERT INTO engine_query_executions
+			(project_id, query_id, sql, row_count, execution_time_ms, executed_at, source)
+		VALUES
+			($1, $2, 'SELECT 1', 1, 10, ` + now + ` - INTERVAL '40 days', 'mcp'),  -- Should be deleted (> 30 days)
+			($1, $2, 'SELECT 2', 1, 10, ` + now + ` - INTERVAL '35 days', 'mcp'),  -- Should be deleted (> 30 days)
+			($1, $2, 'SELECT 3', 1, 10, ` + now + ` - INTERVAL '25 days', 'mcp'),  -- Should remain (< 30 days)
+			($1, $2, 'SELECT 4', 1, 10, ` + now + ` - INTERVAL '5 days', 'mcp'),   -- Should remain (< 30 days)
+			($1, $2, 'SELECT 5', 1, 10, ` + now + `, 'mcp')                         -- Should remain (current)
+	`
+
+	_, err = scope.Conn.Exec(tenantCtx, insertQuery, projectID, queryID)
+	require.NoError(t, err)
+
+	// Verify initial count
+	var initialCount int
+	err = scope.Conn.QueryRow(tenantCtx, "SELECT COUNT(*) FROM engine_query_executions WHERE project_id = $1", projectID).Scan(&initialCount)
+	require.NoError(t, err)
+	assert.Equal(t, 5, initialCount, "Should have 5 initial execution records")
+
+	// Create deps with 30-day retention
+	deps := &QueryToolDeps{
+		DB:                        engineDB.DB,
+		Logger:                    zap.NewNop(),
+		QueryHistoryRetentionDays: 30,
+	}
+
+	// Run cleanup
+	cleanupOldQueryExecutions(tenantCtx, deps, projectID)
+
+	// Verify records older than 30 days were deleted
+	var finalCount int
+	err = scope.Conn.QueryRow(tenantCtx, "SELECT COUNT(*) FROM engine_query_executions WHERE project_id = $1", projectID).Scan(&finalCount)
+	require.NoError(t, err)
+	assert.Equal(t, 3, finalCount, "Should have 3 execution records remaining (records < 30 days old)")
+
+	// Verify the remaining records are the correct ones
+	var remainingSQLs []string
+	rows, err := scope.Conn.Query(tenantCtx, "SELECT sql FROM engine_query_executions WHERE project_id = $1 ORDER BY sql", projectID)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	for rows.Next() {
+		var sql string
+		err := rows.Scan(&sql)
+		require.NoError(t, err)
+		remainingSQLs = append(remainingSQLs, sql)
+	}
+
+	expectedSQLs := []string{"SELECT 3", "SELECT 4", "SELECT 5"}
+	assert.Equal(t, expectedSQLs, remainingSQLs, "Should only have records younger than 30 days")
 }

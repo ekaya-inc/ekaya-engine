@@ -367,6 +367,15 @@ func (m *mockQueryExecutorForGlossary) ValidateQuery(ctx context.Context, sqlQue
 	return nil // All queries are valid in test mock
 }
 
+func (m *mockQueryExecutorForGlossary) ExplainQuery(ctx context.Context, sqlQuery string) (*datasource.ExplainResult, error) {
+	return &datasource.ExplainResult{
+		Plan:             "Mock execution plan",
+		ExecutionTimeMs:  10.5,
+		PlanningTimeMs:   1.2,
+		PerformanceHints: []string{"Mock hint"},
+	}, nil
+}
+
 func (m *mockQueryExecutorForGlossary) QuoteIdentifier(name string) string {
 	return `"` + name + `"`
 }

@@ -1305,6 +1305,14 @@ func (m *mockTestRelationshipRepo) GetByTargetEntity(ctx context.Context, entity
 	return nil, nil
 }
 
+func (m *mockTestRelationshipRepo) GetByEntityPair(ctx context.Context, ontologyID uuid.UUID, fromEntityID uuid.UUID, toEntityID uuid.UUID) (*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (m *mockTestRelationshipRepo) Upsert(ctx context.Context, rel *models.EntityRelationship) error {
+	return nil
+}
+
 func (m *mockTestSchemaRepo) GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
@@ -1373,7 +1381,7 @@ func (m *mockTestSchemaRepo) UpdateColumnSelection(ctx context.Context, projectI
 	return nil
 }
 
-func (m *mockTestSchemaRepo) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error {
+func (m *mockTestSchemaRepo) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error {
 	return nil
 }
 

@@ -1028,3 +1028,152 @@ func TestQueryExecutor_ExecuteQueryWithParams_ContextCancellation(t *testing.T) 
 		t.Error("expected error when context is cancelled")
 	}
 }
+
+// ============================================================================
+// ExplainQuery Tests
+// ============================================================================
+
+func TestQueryExecutor_ExplainQuery_Valid(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	result, err := tc.executor.ExplainQuery(ctx, "SELECT * FROM events WHERE id < 100")
+	if err != nil {
+		t.Fatalf("expected valid query to succeed, got error: %v", err)
+	}
+
+	if result.Plan == "" {
+		t.Error("expected non-empty execution plan")
+	}
+
+	// Execution time should be non-negative (0 is ok for very fast queries)
+	if result.ExecutionTimeMs < 0 {
+		t.Errorf("expected non-negative execution time, got %.2f", result.ExecutionTimeMs)
+	}
+
+	// Planning time should be non-negative
+	if result.PlanningTimeMs < 0 {
+		t.Errorf("expected non-negative planning time, got %.2f", result.PlanningTimeMs)
+	}
+
+	// Should have at least one hint
+	if len(result.PerformanceHints) == 0 {
+		t.Error("expected at least one performance hint")
+	}
+}
+
+func TestQueryExecutor_ExplainQuery_Complex(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// Test with a more complex query
+	sql := `
+		SELECT e.id, COUNT(*) as count
+		FROM events e
+		WHERE e.created_at > NOW() - INTERVAL '1 day'
+		GROUP BY e.id
+		ORDER BY count DESC
+		LIMIT 10
+	`
+
+	result, err := tc.executor.ExplainQuery(ctx, sql)
+	if err != nil {
+		t.Fatalf("expected complex query to succeed, got error: %v", err)
+	}
+
+	if result.Plan == "" {
+		t.Error("expected non-empty execution plan")
+	}
+
+	// Execution and planning times should be non-negative (can be 0 for very fast queries)
+	if result.ExecutionTimeMs < 0 {
+		t.Errorf("expected non-negative execution time, got %.2f", result.ExecutionTimeMs)
+	}
+	if result.PlanningTimeMs < 0 {
+		t.Errorf("expected non-negative planning time, got %.2f", result.PlanningTimeMs)
+	}
+
+	// Should have hints
+	if len(result.PerformanceHints) == 0 {
+		t.Error("expected at least one performance hint")
+	}
+}
+
+func TestQueryExecutor_ExplainQuery_InvalidSQL(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	_, err := tc.executor.ExplainQuery(ctx, "SELEC * FORM events")
+	if err == nil {
+		t.Error("expected invalid SQL to fail")
+	}
+
+	if !strings.Contains(err.Error(), "EXPLAIN ANALYZE failed") {
+		t.Errorf("expected error to mention EXPLAIN ANALYZE failure, got: %v", err)
+	}
+}
+
+func TestQueryExecutor_ExplainQuery_NonExistentTable(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	_, err := tc.executor.ExplainQuery(ctx, "SELECT * FROM nonexistent_table_xyz")
+	if err == nil {
+		t.Error("expected non-existent table to fail")
+	}
+}
+
+func TestQueryExecutor_ExplainQuery_WithJoin(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// Self-join to test join plan analysis
+	sql := `
+		SELECT e1.id, e2.id
+		FROM events e1
+		JOIN events e2 ON e1.id = e2.id
+		WHERE e1.id < 10
+	`
+
+	result, err := tc.executor.ExplainQuery(ctx, sql)
+	if err != nil {
+		t.Fatalf("expected join query to succeed, got error: %v", err)
+	}
+
+	if result.Plan == "" {
+		t.Error("expected non-empty execution plan")
+	}
+
+	// Should have timing information
+	if result.ExecutionTimeMs < 0 {
+		t.Errorf("expected non-negative execution time, got %.2f", result.ExecutionTimeMs)
+	}
+
+	// Should have hints
+	if len(result.PerformanceHints) == 0 {
+		t.Error("expected at least one performance hint")
+	}
+}
+
+func TestQueryExecutor_ExplainQuery_PerformanceHints(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// Query that will likely trigger a sequential scan
+	result, err := tc.executor.ExplainQuery(ctx, "SELECT * FROM events")
+	if err != nil {
+		t.Fatalf("expected query to succeed, got error: %v", err)
+	}
+
+	// Should have hints
+	if len(result.PerformanceHints) == 0 {
+		t.Error("expected performance hints to be generated")
+	}
+
+	// Verify hints are non-empty strings
+	for i, hint := range result.PerformanceHints {
+		if hint == "" {
+			t.Errorf("hint %d is empty", i)
+		}
+	}
+}

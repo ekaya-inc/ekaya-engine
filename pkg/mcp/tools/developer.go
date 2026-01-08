@@ -141,6 +141,7 @@ func RegisterMCPTools(s *server.MCPServer, deps *MCPToolDeps) {
 	registerSampleTool(s, deps)
 	registerExecuteTool(s, deps)
 	registerValidateTool(s, deps)
+	registerExplainQueryTool(s, deps)
 }
 
 // NewToolFilter creates a ToolFilterFunc that filters tools based on MCP configuration.
@@ -800,6 +801,79 @@ func registerValidateTool(s *server.MCPServer, deps *MCPToolDeps) {
 				Valid: false,
 				Error: validationErr.Error(),
 			}
+		}
+
+		jsonResult, err := json.Marshal(result)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// registerExplainQueryTool adds the explain_query tool for query performance analysis.
+func registerExplainQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
+	tool := mcp.NewTool(
+		"explain_query",
+		mcp.WithDescription(
+			"Analyze SQL query performance using EXPLAIN ANALYZE. "+
+				"Returns execution plan, timing information, and optimization hints. "+
+				"Note: This executes the query to gather actual performance data.",
+		),
+		mcp.WithString(
+			"sql",
+			mcp.Required(),
+			mcp.Description("SQL query to analyze (typically a SELECT statement)"),
+		),
+		mcp.WithReadOnlyHintAnnotation(false), // EXPLAIN ANALYZE executes the query
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := checkToolEnabled(ctx, deps, "explain_query")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Get SQL parameter
+		sql, err := req.RequireString("sql")
+		if err != nil {
+			return nil, err
+		}
+
+		// Get datasource config and create executor
+		dsType, dsConfig, err := getDefaultDatasourceConfig(tenantCtx, deps, projectID)
+		if err != nil {
+			return nil, err
+		}
+
+		executor, err := deps.AdapterFactory.NewQueryExecutor(tenantCtx, dsType, dsConfig, projectID, uuid.Nil, "")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create query executor: %w", err)
+		}
+		defer executor.Close()
+
+		// Execute EXPLAIN ANALYZE
+		explainResult, err := executor.ExplainQuery(tenantCtx, sql)
+		if err != nil {
+			return nil, fmt.Errorf("EXPLAIN ANALYZE failed: %w", err)
+		}
+
+		// Format response
+		result := struct {
+			Plan             string   `json:"plan"`
+			ExecutionTimeMs  float64  `json:"execution_time_ms"`
+			PlanningTimeMs   float64  `json:"planning_time_ms"`
+			PerformanceHints []string `json:"performance_hints"`
+		}{
+			Plan:             explainResult.Plan,
+			ExecutionTimeMs:  explainResult.ExecutionTimeMs,
+			PlanningTimeMs:   explainResult.PlanningTimeMs,
+			PerformanceHints: explainResult.PerformanceHints,
 		}
 
 		jsonResult, err := json.Marshal(result)

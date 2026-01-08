@@ -14,10 +14,12 @@ import (
 type QuestionStatus string
 
 const (
-	QuestionStatusPending  QuestionStatus = "pending"
-	QuestionStatusSkipped  QuestionStatus = "skipped"
-	QuestionStatusAnswered QuestionStatus = "answered"
-	QuestionStatusDeleted  QuestionStatus = "deleted"
+	QuestionStatusPending   QuestionStatus = "pending"
+	QuestionStatusSkipped   QuestionStatus = "skipped"
+	QuestionStatusAnswered  QuestionStatus = "answered"
+	QuestionStatusEscalated QuestionStatus = "escalated"
+	QuestionStatusDismissed QuestionStatus = "dismissed"
+	QuestionStatusDeleted   QuestionStatus = "deleted"
 )
 
 // ValidQuestionStatuses contains all valid question status values.
@@ -25,6 +27,8 @@ var ValidQuestionStatuses = []QuestionStatus{
 	QuestionStatusPending,
 	QuestionStatusSkipped,
 	QuestionStatusAnswered,
+	QuestionStatusEscalated,
+	QuestionStatusDismissed,
 	QuestionStatusDeleted,
 }
 
@@ -102,6 +106,7 @@ type OntologyQuestion struct {
 	Affects          *QuestionAffects `json:"affects,omitempty"`
 	DetectedPattern  string           `json:"detected_pattern,omitempty"`
 	Status           QuestionStatus   `json:"status"`
+	StatusReason     string           `json:"status_reason,omitempty"` // Reason for skip/escalate/dismiss
 	Answer           string           `json:"answer,omitempty"`
 	AnsweredBy       *uuid.UUID       `json:"answered_by,omitempty"`
 	AnsweredAt       *time.Time       `json:"answered_at,omitempty"`

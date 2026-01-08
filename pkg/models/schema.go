@@ -51,6 +51,7 @@ type SchemaColumn struct {
 	IsJoinable        *bool      `json:"is_joinable,omitempty"`        // Can be used as join key
 	JoinabilityReason *string    `json:"joinability_reason,omitempty"` // Why column is/isn't joinable
 	StatsUpdatedAt    *time.Time `json:"stats_updated_at,omitempty"`   // When stats were computed
+	SampleValues      []string   `json:"sample_values,omitempty"`      // Distinct values for low-cardinality columns (≤50 values)
 }
 
 // SchemaRelationship represents a relationship between two columns.

@@ -56,6 +56,10 @@ type Config struct {
 	// Must be a 32-byte key, base64 encoded. Generate with: openssl rand -base64 32
 	// Server will fail to start if this is not set.
 	ProjectCredentialsKey string `yaml:"-" env:"PROJECT_CREDENTIALS_KEY"` // Secret - not in YAML
+
+	// QueryHistoryRetentionDays is how many days of query execution history to retain.
+	// Older records are deleted during periodic cleanup (triggered by query executions).
+	QueryHistoryRetentionDays int `yaml:"query_history_retention_days" env:"QUERY_HISTORY_RETENTION_DAYS" env-default:"30"`
 }
 
 // OAuthConfig holds OAuth client configuration.

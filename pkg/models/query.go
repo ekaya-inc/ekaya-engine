@@ -35,6 +35,10 @@ type Query struct {
 	Parameters            []QueryParameter `json:"parameters,omitempty"`
 	OutputColumns         []OutputColumn   `json:"output_columns,omitempty"`
 	Constraints           *string          `json:"constraints,omitempty"`
+	Tags                  []string         `json:"tags,omitempty"`               // Tags for organizing queries (e.g., "billing", "category:analytics")
+	Status                string           `json:"status"`                       // pending, approved, rejected
+	SuggestedBy           *string          `json:"suggested_by,omitempty"`       // user, agent, admin
+	SuggestionContext     map[string]any   `json:"suggestion_context,omitempty"` // validation results, example usage
 	UsageCount            int              `json:"usage_count"`
 	LastUsedAt            *time.Time       `json:"last_used_at,omitempty"`
 	CreatedAt             time.Time        `json:"created_at"`

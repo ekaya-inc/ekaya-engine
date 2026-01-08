@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"time"
 
@@ -14,16 +15,18 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // QueryToolDeps contains dependencies for approved queries tools.
 type QueryToolDeps struct {
-	DB               *database.DB
-	MCPConfigService services.MCPConfigService
-	ProjectService   services.ProjectService
-	QueryService     services.QueryService
-	Logger           *zap.Logger
+	DB                        *database.DB
+	MCPConfigService          services.MCPConfigService
+	ProjectService            services.ProjectService
+	QueryService              services.QueryService
+	Logger                    *zap.Logger
+	QueryHistoryRetentionDays int
 }
 
 const approvedQueriesToolGroup = "approved_queries"
@@ -32,12 +35,16 @@ const approvedQueriesToolGroup = "approved_queries"
 var approvedQueriesToolNames = map[string]bool{
 	"list_approved_queries":  true,
 	"execute_approved_query": true,
+	"suggest_approved_query": true,
+	"get_query_history":      true,
 }
 
 // RegisterApprovedQueriesTools registers tools for executing Pre-Approved Queries.
 func RegisterApprovedQueriesTools(s *server.MCPServer, deps *QueryToolDeps) {
 	registerListApprovedQueriesTool(s, deps)
 	registerExecuteApprovedQueryTool(s, deps)
+	registerSuggestApprovedQueryTool(s, deps)
+	registerGetQueryHistoryTool(s, deps)
 }
 
 // checkApprovedQueriesEnabled verifies the caller is authorized to use approved queries tools.
@@ -100,6 +107,7 @@ type approvedQueryInfo struct {
 	Parameters    []parameterInfo    `json:"parameters"`
 	OutputColumns []outputColumnInfo `json:"output_columns,omitempty"`
 	Constraints   string             `json:"constraints,omitempty"` // Limitations and assumptions
+	Tags          []string           `json:"tags,omitempty"`        // Tags for organizing queries
 	Dialect       string             `json:"dialect"`
 }
 
@@ -124,7 +132,12 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 		mcp.WithDescription(
 			"List all pre-approved SQL queries available for execution. "+
 				"Returns query metadata including parameters needed for execution. "+
+				"Optionally filter by tags to find queries in specific categories. "+
 				"Use execute_approved_query to run a specific query with parameters.",
+		),
+		mcp.WithArray(
+			"tags",
+			mcp.Description("Optional: Filter queries by tags. Returns queries matching ANY of the provided tags (e.g., [\"billing\", \"category:analytics\"])"),
 		),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -145,8 +158,25 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 			return nil, fmt.Errorf("failed to get default datasource: %w", err)
 		}
 
-		// List enabled queries only
-		queries, err := deps.QueryService.ListEnabled(tenantCtx, projectID, dsID)
+		// Parse optional tags filter
+		var tags []string
+		if args, ok := req.Params.Arguments.(map[string]any); ok {
+			if tagsArray, ok := args["tags"].([]any); ok {
+				for _, tag := range tagsArray {
+					if str, ok := tag.(string); ok {
+						tags = append(tags, str)
+					}
+				}
+			}
+		}
+
+		// List enabled queries (filtered by tags if provided)
+		var queries []*models.Query
+		if len(tags) > 0 {
+			queries, err = deps.QueryService.ListEnabledByTags(tenantCtx, projectID, dsID, tags)
+		} else {
+			queries, err = deps.QueryService.ListEnabled(tenantCtx, projectID, dsID)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to list queries: %w", err)
 		}
@@ -199,6 +229,7 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 				Parameters:    params,
 				OutputColumns: outputCols,
 				Constraints:   constraints,
+				Tags:          q.Tags,
 				Dialect:       q.Dialect,
 			}
 		}
@@ -286,6 +317,14 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		if err != nil {
 			// Enhance error message with query context
 			return nil, enhanceErrorWithContext(err, query.NaturalLanguagePrompt)
+		}
+
+		// Log execution to history (best effort - don't fail request if logging fails)
+		go logQueryExecution(tenantCtx, deps, projectID, queryID, query.SQLQuery, params, len(result.Rows), int(executionTimeMs))
+
+		// Randomly trigger cleanup (1% probability) to avoid overhead on every query
+		if rand.IntN(100) == 0 {
+			go cleanupOldQueryExecutions(tenantCtx, deps, projectID)
 		}
 
 		// Format response
@@ -377,4 +416,529 @@ func containsAny(s string, substrs []string) bool {
 		}
 	}
 	return false
+}
+
+// registerSuggestApprovedQueryTool - AI agents suggest reusable queries for approval.
+func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) {
+	tool := mcp.NewTool(
+		"suggest_approved_query",
+		mcp.WithDescription(
+			"Suggest a reusable parameterized query for approval. "+
+				"After validation, the query is stored with status='pending' (or 'approved' if auto-approve is enabled). "+
+				"Use this when you discover a useful query pattern that should be saved for future use.",
+		),
+		mcp.WithString(
+			"name",
+			mcp.Required(),
+			mcp.Description("Human-readable name for the query"),
+		),
+		mcp.WithString(
+			"description",
+			mcp.Required(),
+			mcp.Description("What business question this query answers"),
+		),
+		mcp.WithString(
+			"sql",
+			mcp.Required(),
+			mcp.Description("SQL query with {{parameter}} placeholders"),
+		),
+		mcp.WithArray(
+			"parameters",
+			mcp.Description("Parameter definitions (inferred from SQL if omitted)"),
+		),
+		mcp.WithObject(
+			"output_column_descriptions",
+			mcp.Description("Optional descriptions for output columns (e.g., {\"total_earned_usd\": \"Total earnings in USD\"})"),
+		),
+		mcp.WithArray(
+			"tags",
+			mcp.Description("Optional tags for organizing queries (e.g., [\"billing\", \"category:analytics\", \"reporting\"])"),
+		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, deps, "suggest_approved_query")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Extract parameters
+		name, err := req.RequireString("name")
+		if err != nil {
+			return nil, err
+		}
+		description, err := req.RequireString("description")
+		if err != nil {
+			return nil, err
+		}
+		sqlQuery, err := req.RequireString("sql")
+		if err != nil {
+			return nil, err
+		}
+
+		// Get default datasource
+		dsID, err := deps.ProjectService.GetDefaultDatasourceID(tenantCtx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get default datasource: %w", err)
+		}
+
+		// Parse optional parameters
+		var paramDefs []models.QueryParameter
+		if args, ok := req.Params.Arguments.(map[string]any); ok {
+			if paramsArray, ok := args["parameters"].([]any); ok {
+				paramDefs, err = parseParameterDefinitions(paramsArray)
+				if err != nil {
+					return nil, fmt.Errorf("invalid parameters: %w", err)
+				}
+			}
+		}
+
+		// Parse optional output column descriptions
+		var outputColDescs map[string]string
+		if args, ok := req.Params.Arguments.(map[string]any); ok {
+			if descs, ok := args["output_column_descriptions"].(map[string]any); ok {
+				outputColDescs = make(map[string]string)
+				for k, v := range descs {
+					if str, ok := v.(string); ok {
+						outputColDescs[k] = str
+					}
+				}
+			}
+		}
+
+		// Parse optional tags
+		var tags []string
+		if args, ok := req.Params.Arguments.(map[string]any); ok {
+			if tagsArray, ok := args["tags"].([]any); ok {
+				for _, tag := range tagsArray {
+					if str, ok := tag.(string); ok {
+						tags = append(tags, str)
+					}
+				}
+			}
+		}
+
+		// Validate SQL and parameters with dry-run execution
+		validationResult, err := validateAndTestQuery(tenantCtx, deps, projectID, dsID, sqlQuery, paramDefs)
+		if err != nil {
+			return nil, fmt.Errorf("validation failed: %w", err)
+		}
+
+		// Merge output column descriptions with detected columns
+		outputColumns := buildOutputColumns(validationResult.Columns, outputColDescs)
+
+		// Build suggestion context
+		suggestionContext := map[string]any{
+			"validation": map[string]any{
+				"sql_valid":       validationResult.SQLValid,
+				"dry_run_rows":    validationResult.DryRunRows,
+				"parameters_used": validationResult.ParametersUsed,
+			},
+		}
+
+		// Create query with status='pending' and suggested_by='agent'
+		createReq := &services.CreateQueryRequest{
+			NaturalLanguagePrompt: name,
+			AdditionalContext:     description,
+			SQLQuery:              sqlQuery,
+			IsEnabled:             false, // Start disabled until approved
+			Parameters:            paramDefs,
+			OutputColumns:         outputColumns,
+			Tags:                  tags,
+			Status:                "pending",
+			SuggestedBy:           "agent",
+			SuggestionContext:     suggestionContext,
+		}
+
+		query, err := deps.QueryService.Create(tenantCtx, projectID, dsID, createReq)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create query suggestion: %w", err)
+		}
+
+		// Format response
+		response := struct {
+			SuggestionID  string             `json:"suggestion_id"`
+			Status        string             `json:"status"`
+			Validation    validationResponse `json:"validation"`
+			ApprovedQuery *approvedQueryInfo `json:"approved_query,omitempty"`
+		}{
+			SuggestionID: query.ID.String(),
+			Status:       query.Status,
+			Validation: validationResponse{
+				SQLValid:              validationResult.SQLValid,
+				DryRunRows:            validationResult.DryRunRows,
+				DetectedOutputColumns: buildColumnInfo(validationResult.Columns),
+			},
+		}
+
+		// If auto-approve is enabled, include the approved query
+		// For now, always return pending status (auto-approve can be implemented later)
+
+		jsonResult, _ := json.Marshal(response)
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// validationResult holds the results of SQL validation and dry-run execution.
+type validationResult struct {
+	SQLValid       bool
+	DryRunRows     int
+	Columns        []columnDetail
+	ParametersUsed map[string]any
+}
+
+type columnDetail struct {
+	Name string
+	Type string
+}
+
+type validationResponse struct {
+	SQLValid              bool           `json:"sql_valid"`
+	DryRunRows            int            `json:"dry_run_rows"`
+	DetectedOutputColumns []columnDetail `json:"detected_output_columns"`
+}
+
+// parseParameterDefinitions converts MCP parameter array to QueryParameter slice.
+func parseParameterDefinitions(paramsArray []any) ([]models.QueryParameter, error) {
+	params := make([]models.QueryParameter, 0, len(paramsArray))
+
+	for i, p := range paramsArray {
+		paramMap, ok := p.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("parameter %d is not an object", i)
+		}
+
+		name, ok := paramMap["name"].(string)
+		if !ok || name == "" {
+			return nil, fmt.Errorf("parameter %d missing required 'name' field", i)
+		}
+
+		paramType, ok := paramMap["type"].(string)
+		if !ok || paramType == "" {
+			return nil, fmt.Errorf("parameter %d missing required 'type' field", i)
+		}
+
+		param := models.QueryParameter{
+			Name:     name,
+			Type:     paramType,
+			Required: true, // Default to required
+		}
+
+		if desc, ok := paramMap["description"].(string); ok {
+			param.Description = desc
+		}
+
+		if required, ok := paramMap["required"].(bool); ok {
+			param.Required = required
+		}
+
+		if example, ok := paramMap["example"]; ok {
+			param.Default = example
+		}
+
+		params = append(params, param)
+	}
+
+	return params, nil
+}
+
+// validateAndTestQuery validates SQL and runs a dry-run with example parameters.
+func validateAndTestQuery(ctx context.Context, deps *QueryToolDeps, projectID, dsID uuid.UUID, sqlQuery string, paramDefs []models.QueryParameter) (*validationResult, error) {
+	// Build parameter values from examples
+	paramValues := make(map[string]any)
+	for _, p := range paramDefs {
+		if p.Default != nil {
+			paramValues[p.Name] = p.Default
+		} else if p.Required {
+			return nil, fmt.Errorf("parameter %q is required but has no example value", p.Name)
+		}
+	}
+
+	// Test the query with a limit of 1 to detect output columns
+	testReq := &services.TestQueryRequest{
+		SQLQuery:             sqlQuery,
+		Limit:                1,
+		ParameterDefinitions: paramDefs,
+		ParameterValues:      paramValues,
+	}
+
+	result, err := deps.QueryService.Test(ctx, projectID, dsID, testReq)
+	if err != nil {
+		return nil, fmt.Errorf("query execution failed: %w", err)
+	}
+
+	// Build validation result
+	columns := make([]columnDetail, len(result.Columns))
+	for i, col := range result.Columns {
+		columns[i] = columnDetail{
+			Name: col.Name,
+			Type: col.Type,
+		}
+	}
+
+	return &validationResult{
+		SQLValid:       true,
+		DryRunRows:     len(result.Rows),
+		Columns:        columns,
+		ParametersUsed: paramValues,
+	}, nil
+}
+
+// buildOutputColumns merges detected columns with provided descriptions.
+func buildOutputColumns(columns []columnDetail, descriptions map[string]string) []models.OutputColumn {
+	outputCols := make([]models.OutputColumn, len(columns))
+	for i, col := range columns {
+		outputCols[i] = models.OutputColumn{
+			Name:        col.Name,
+			Type:        col.Type,
+			Description: descriptions[col.Name],
+		}
+	}
+	return outputCols
+}
+
+// buildColumnInfo converts columnDetail to response format.
+func buildColumnInfo(columns []columnDetail) []columnDetail {
+	return columns
+}
+
+// logQueryExecution logs a query execution to the history table.
+// This runs in a goroutine and uses best-effort logging - failures are logged but don't affect the caller.
+func logQueryExecution(ctx context.Context, deps *QueryToolDeps, projectID, queryID uuid.UUID, sql string, params map[string]any, rowCount, executionTimeMs int) {
+	// Get user ID from context if available
+	userID := auth.GetUserIDFromContext(ctx)
+
+	// Get tenant scope
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok || scope == nil {
+		deps.Logger.Warn("Failed to log query execution: tenant scope not found")
+		return
+	}
+
+	// Marshal parameters to JSON
+	var paramsJSON []byte
+	if len(params) > 0 {
+		var err error
+		paramsJSON, err = json.Marshal(params)
+		if err != nil {
+			deps.Logger.Warn("Failed to marshal parameters for query execution log",
+				zap.Error(err),
+				zap.String("query_id", queryID.String()))
+			paramsJSON = nil
+		}
+	}
+
+	// Insert execution record
+	query := `
+		INSERT INTO engine_query_executions
+			(project_id, query_id, sql, row_count, execution_time_ms, parameters, user_id, source)
+		VALUES
+			($1, $2, $3, $4, $5, $6, $7, $8)
+	`
+
+	_, err := scope.Conn.Exec(ctx, query,
+		projectID,
+		queryID,
+		sql,
+		rowCount,
+		executionTimeMs,
+		paramsJSON,
+		userID,
+		"mcp",
+	)
+
+	if err != nil {
+		deps.Logger.Error("Failed to log query execution",
+			zap.Error(err),
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", queryID.String()))
+	}
+}
+
+// cleanupOldQueryExecutions deletes query execution records older than the retention period.
+// This is called randomly (1% probability) during query execution to avoid cleanup overhead on every query.
+// Runs in a goroutine and uses best-effort - failures are logged but don't affect the caller.
+func cleanupOldQueryExecutions(ctx context.Context, deps *QueryToolDeps, projectID uuid.UUID) {
+	// Get tenant scope
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok || scope == nil {
+		deps.Logger.Warn("Failed to cleanup old query executions: tenant scope not found")
+		return
+	}
+
+	// Delete executions older than retention period
+	query := `
+		DELETE FROM engine_query_executions
+		WHERE project_id = $1
+		  AND executed_at < NOW() - INTERVAL '1 day' * $2
+	`
+
+	result, err := scope.Conn.Exec(ctx, query, projectID, deps.QueryHistoryRetentionDays)
+	if err != nil {
+		deps.Logger.Error("Failed to cleanup old query executions",
+			zap.Error(err),
+			zap.String("project_id", projectID.String()),
+			zap.Int("retention_days", deps.QueryHistoryRetentionDays))
+		return
+	}
+
+	rowsDeleted := result.RowsAffected()
+	if rowsDeleted > 0 {
+		deps.Logger.Info("Cleaned up old query executions",
+			zap.String("project_id", projectID.String()),
+			zap.Int64("rows_deleted", rowsDeleted),
+			zap.Int("retention_days", deps.QueryHistoryRetentionDays))
+	}
+}
+
+// registerGetQueryHistoryTool - Returns recent query execution history to avoid rewriting queries.
+func registerGetQueryHistoryTool(s *server.MCPServer, deps *QueryToolDeps) {
+	tool := mcp.NewTool(
+		"get_query_history",
+		mcp.WithDescription(
+			"Get recent query execution history to see what queries have been run recently. "+
+				"Helps avoid rewriting the same queries repeatedly across sessions. "+
+				"Returns SQL, execution time, row count, and parameters for recent executions.",
+		),
+		mcp.WithNumber(
+			"limit",
+			mcp.Description("Maximum number of query executions to return (default: 20, max: 100)"),
+		),
+		mcp.WithNumber(
+			"hours_back",
+			mcp.Description("How many hours back to look for query history (default: 24, max: 168)"),
+		),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, deps, "get_query_history")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Get optional limit parameter (default 20, max 100)
+		limit := 20
+		if limitVal, ok := getOptionalFloat(req, "limit"); ok {
+			limit = int(limitVal)
+			if limit > 100 {
+				limit = 100
+			}
+			if limit < 1 {
+				limit = 1
+			}
+		}
+
+		// Get optional hours_back parameter (default 24, max 168 = 1 week)
+		hoursBack := 24
+		if hoursVal, ok := getOptionalFloat(req, "hours_back"); ok {
+			hoursBack = int(hoursVal)
+			if hoursBack > 168 {
+				hoursBack = 168
+			}
+			if hoursBack < 1 {
+				hoursBack = 1
+			}
+		}
+
+		// Calculate cutoff time
+		cutoffTime := time.Now().Add(-time.Duration(hoursBack) * time.Hour)
+
+		// Query execution history
+		scope, ok := database.GetTenantScope(tenantCtx)
+		if !ok || scope == nil {
+			return nil, fmt.Errorf("tenant scope not found in context")
+		}
+
+		query := `
+			SELECT
+				qe.sql,
+				qe.executed_at,
+				qe.row_count,
+				qe.execution_time_ms,
+				qe.parameters,
+				q.natural_language_prompt as query_name
+			FROM engine_query_executions qe
+			LEFT JOIN engine_queries q ON qe.query_id = q.id
+			WHERE qe.project_id = $1
+			  AND qe.executed_at >= $2
+			ORDER BY qe.executed_at DESC
+			LIMIT $3
+		`
+
+		rows, err := scope.Conn.Query(tenantCtx, query, projectID, cutoffTime, limit)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query execution history: %w", err)
+		}
+		defer rows.Close()
+
+		type queryExecution struct {
+			SQL             string         `json:"sql"`
+			ExecutedAt      string         `json:"executed_at"`
+			RowCount        int            `json:"row_count"`
+			ExecutionTimeMs int            `json:"execution_time_ms"`
+			Parameters      map[string]any `json:"parameters,omitempty"`
+			QueryName       *string        `json:"query_name,omitempty"`
+		}
+
+		var executions []queryExecution
+
+		for rows.Next() {
+			var exec queryExecution
+			var executedAt time.Time
+			var paramsJSON []byte
+			var queryName *string
+
+			err := rows.Scan(
+				&exec.SQL,
+				&executedAt,
+				&exec.RowCount,
+				&exec.ExecutionTimeMs,
+				&paramsJSON,
+				&queryName,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to scan execution row: %w", err)
+			}
+
+			exec.ExecutedAt = executedAt.Format(time.RFC3339)
+			exec.QueryName = queryName
+
+			// Parse parameters JSON if present
+			if len(paramsJSON) > 0 {
+				var params map[string]any
+				if err := json.Unmarshal(paramsJSON, &params); err == nil {
+					exec.Parameters = params
+				}
+			}
+
+			executions = append(executions, exec)
+		}
+
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("error iterating execution rows: %w", err)
+		}
+
+		response := struct {
+			RecentQueries []queryExecution `json:"recent_queries"`
+			Count         int              `json:"count"`
+			HoursBack     int              `json:"hours_back"`
+		}{
+			RecentQueries: executions,
+			Count:         len(executions),
+			HoursBack:     hoursBack,
+		}
+
+		jsonResult, _ := json.Marshal(response)
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
 }

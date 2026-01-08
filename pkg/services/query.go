@@ -31,6 +31,7 @@ type QueryService interface {
 
 	// Filtering
 	ListEnabled(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.Query, error)
+	ListEnabledByTags(ctx context.Context, projectID, datasourceID uuid.UUID, tags []string) ([]*models.Query, error)
 	// HasEnabledQueries efficiently checks if any enabled queries exist (uses LIMIT 1).
 	HasEnabledQueries(ctx context.Context, projectID, datasourceID uuid.UUID) (bool, error)
 
@@ -55,6 +56,10 @@ type CreateQueryRequest struct {
 	Parameters            []models.QueryParameter `json:"parameters,omitempty"`
 	OutputColumns         []models.OutputColumn   `json:"output_columns,omitempty"`
 	Constraints           string                  `json:"constraints,omitempty"`
+	Tags                  []string                `json:"tags,omitempty"`               // Tags for organizing queries
+	Status                string                  `json:"status,omitempty"`             // pending, approved, rejected (default: "approved")
+	SuggestedBy           string                  `json:"suggested_by,omitempty"`       // user, agent, admin
+	SuggestionContext     map[string]any          `json:"suggestion_context,omitempty"` // validation results, etc.
 }
 
 // UpdateQueryRequest contains fields for updating a query.
@@ -150,6 +155,18 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 	// OutputColumns already validated as non-empty above
 	outputCols := req.OutputColumns
 
+	// Ensure Tags is never nil
+	tags := req.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+
+	// Set status (default to "approved" for backward compatibility)
+	status := "approved"
+	if req.Status != "" {
+		status = req.Status
+	}
+
 	// Create query model with dialect derived from datasource type
 	query := &models.Query{
 		ProjectID:             projectID,
@@ -160,6 +177,9 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 		IsEnabled:             req.IsEnabled,
 		Parameters:            params,
 		OutputColumns:         outputCols,
+		Tags:                  tags,
+		Status:                status,
+		SuggestionContext:     req.SuggestionContext,
 		UsageCount:            0,
 	}
 
@@ -169,6 +189,10 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 
 	if req.Constraints != "" {
 		query.Constraints = &req.Constraints
+	}
+
+	if req.SuggestedBy != "" {
+		query.SuggestedBy = &req.SuggestedBy
 	}
 
 	if err := s.queryRepo.Create(ctx, query); err != nil {
@@ -298,6 +322,15 @@ func (s *queryService) ListEnabled(ctx context.Context, projectID, datasourceID 
 	queries, err := s.queryRepo.ListEnabled(ctx, projectID, datasourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list enabled queries: %w", err)
+	}
+	return queries, nil
+}
+
+// ListEnabledByTags lists enabled queries filtered by tags (queries matching ANY of the provided tags).
+func (s *queryService) ListEnabledByTags(ctx context.Context, projectID, datasourceID uuid.UUID, tags []string) ([]*models.Query, error) {
+	queries, err := s.queryRepo.ListEnabledByTags(ctx, projectID, datasourceID, tags)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list enabled queries by tags: %w", err)
 	}
 	return queries, nil
 }

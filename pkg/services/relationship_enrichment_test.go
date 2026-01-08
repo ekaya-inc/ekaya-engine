@@ -72,6 +72,18 @@ func (r *testRelEnrichmentRelRepo) GetByTargetEntity(ctx context.Context, entity
 	return nil, nil
 }
 
+func (r *testRelEnrichmentRelRepo) GetByEntityPair(ctx context.Context, ontologyID uuid.UUID, fromEntityID uuid.UUID, toEntityID uuid.UUID) (*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (r *testRelEnrichmentRelRepo) Upsert(ctx context.Context, rel *models.EntityRelationship) error {
+	return nil
+}
+
+func (r *testRelEnrichmentRelRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
 type testRelEnrichmentEntityRepo struct {
 	entities []*models.OntologyEntity
 }

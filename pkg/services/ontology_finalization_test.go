@@ -185,6 +185,18 @@ func (m *mockRelationshipRepoForFinalization) GetByTargetEntity(ctx context.Cont
 	return nil, nil
 }
 
+func (m *mockRelationshipRepoForFinalization) GetByEntityPair(ctx context.Context, ontologyID uuid.UUID, fromEntityID uuid.UUID, toEntityID uuid.UUID) (*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (m *mockRelationshipRepoForFinalization) Upsert(ctx context.Context, rel *models.EntityRelationship) error {
+	return nil
+}
+
+func (m *mockRelationshipRepoForFinalization) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
 type mockSchemaRepoForFinalization struct {
 	columnsByTable  map[string][]*models.SchemaColumn
 	getColumnsByErr error
@@ -246,7 +258,7 @@ func (m *mockSchemaRepoForFinalization) SoftDeleteRemovedColumns(ctx context.Con
 func (m *mockSchemaRepoForFinalization) UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error {
 	return nil
 }
-func (m *mockSchemaRepoForFinalization) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64) error {
+func (m *mockSchemaRepoForFinalization) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error {
 	return nil
 }
 func (m *mockSchemaRepoForFinalization) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {

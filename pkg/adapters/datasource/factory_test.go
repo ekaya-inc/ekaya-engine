@@ -94,6 +94,15 @@ func (m *mockQueryExecutor) ValidateQuery(ctx context.Context, sqlQuery string) 
 	return nil
 }
 
+func (m *mockQueryExecutor) ExplainQuery(ctx context.Context, sqlQuery string) (*ExplainResult, error) {
+	return &ExplainResult{
+		Plan:             "Mock execution plan",
+		ExecutionTimeMs:  10.5,
+		PlanningTimeMs:   1.2,
+		PerformanceHints: []string{"Mock hint"},
+	}, nil
+}
+
 func (m *mockQueryExecutor) Close() error {
 	return nil
 }
