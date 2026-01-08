@@ -431,6 +431,17 @@ func main() {
 	}
 	mcptools.RegisterEntityTools(mcpServer.MCP(), entityToolDeps)
 
+	// Register relationship tools (for creating/updating/deleting entity relationships)
+	relationshipToolDeps := &mcptools.RelationshipToolDeps{
+		DB:                     db,
+		MCPConfigService:       mcpConfigService,
+		OntologyRepo:           ontologyRepo,
+		OntologyEntityRepo:     ontologyEntityRepo,
+		EntityRelationshipRepo: entityRelationshipRepo,
+		Logger:                 logger,
+	}
+	mcptools.RegisterRelationshipTools(mcpServer.MCP(), relationshipToolDeps)
+
 	// Register column probe tools (for deep-diving into column statistics and semantics)
 	probeToolDeps := &mcptools.ProbeToolDeps{
 		DB:               db,

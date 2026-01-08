@@ -1380,7 +1380,74 @@ Not all tools should be available to all users. The admin can control which tool
      - To clear aliases, pass empty array: `update_entity(name="User", aliases=[])`
      - Delete is soft delete only (deleted_at timestamp set, reason recorded)
      - **WHY these tools exist:** During ontology extraction and refinement, AI agents discover additional entity metadata that wasn't captured initially. Without these tools, agents must ask humans to manually update the ontology in the UI. With these tools, agents can contribute knowledge directly: add descriptions they infer from documentation, add aliases they discover in queries, add key columns they identify as important. The upsert semantics make updates safe and idempotent. The delete tool removes false positives (e.g., entities incorrectly identified during extraction). Together, these tools enable AI-driven ontology refinement and continuous improvement.
-11. **[ ] `update_relationship`**, **[ ] `delete_relationship`** (with cardinality)
+11. **[x] `update_relationship`**, **[x] `delete_relationship`** - COMPLETED (2026-01-08): AI agents can create/update relationship metadata with upsert semantics and cardinality support
+   - **Implementation:** `pkg/mcp/tools/relationship.go` (registerUpdateRelationshipTool, registerDeleteRelationshipTool functions) + `pkg/mcp/tools/relationship_test.go`
+   - **Registration:** Tools registered in RegisterRelationshipTools function (relationship.go:33-36), added to main.go (lines 434-443)
+   - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupDeveloper (lines 27-28)
+   - **Migration:** Added cardinality column to engine_entity_relationships table (migrations/036_entity_relationship_cardinality.{up,down}.sql)
+   - **Model Changes:** Added Cardinality field to models.EntityRelationship struct
+   - **Repository Changes:**
+     - Updated all SELECT/INSERT queries to include cardinality column
+     - Added GetByEntityPair method for finding relationships by entity pair (ontologyID + fromEntityID + toEntityID)
+     - Added Upsert method with ON CONFLICT DO UPDATE for upsert semantics
+     - Added Delete method for hard deleting relationships
+   - **Key Features Implemented:**
+     - `update_relationship` tool with upsert semantics - uses from_entity + to_entity as key
+     - Creates new relationship if not found, updates existing relationship if found
+     - Optional parameters: description, label, cardinality (replace existing when provided)
+     - Cardinality validation: '1:1', '1:N', 'N:1', 'N:N', 'unknown' (default)
+     - Response includes `created` boolean to distinguish create vs update
+     - `delete_relationship` tool for hard-deleting incorrect relationships
+     - Idempotent delete (deleting non-existent relationship returns success with deleted=false)
+   - **Testing:** Unit tests covering tool structure, parameters, response formats
+   - **Tool Group:** ToolGroupDeveloper (available when Developer Tools enabled)
+   - **update_relationship Parameters:**
+     - `from_entity` (required): Source entity name (upsert key)
+     - `to_entity` (required): Target entity name (upsert key)
+     - `description` (optional): Relationship description
+     - `label` (optional): Short semantic label (e.g., "owns", "contains", "placed_by")
+     - `cardinality` (optional): '1:1', '1:N', 'N:1', 'N:N', or 'unknown'
+   - **update_relationship Response Format:**
+     ```json
+     {
+       "from_entity": "Account",
+       "to_entity": "User",
+       "description": "The user who owns this account",
+       "label": "owns",
+       "cardinality": "N:1",
+       "created": false
+     }
+     ```
+   - **delete_relationship Parameters:**
+     - `from_entity` (required): Source entity name
+     - `to_entity` (required): Target entity name
+   - **delete_relationship Response Format:**
+     ```json
+     {
+       "from_entity": "Account",
+       "to_entity": "InvalidEntity",
+       "deleted": true
+     }
+     ```
+   - **Architecture Notes:**
+     - Uses RelationshipToolDeps (DB, MCPConfigService, OntologyRepo, OntologyEntityRepo, EntityRelationshipRepo, Logger)
+     - Access control via checkRelationshipToolEnabled (validates Developer Tools enabled)
+     - update_relationship workflow: Get active ontology → Get from/to entities → Check if exists → Build/update relationship → Upsert
+     - For agent-created relationships, uses placeholder column values (primary table/column from entities)
+     - DetectionMethod set to "manual", Confidence=1.0, Status="confirmed" for agent-created relationships
+     - delete_relationship workflow: Get active ontology → Get from/to entities → Get relationship → Delete (or return success if not found)
+   - **Design Decisions:**
+     - Hard delete (not soft delete) since relationships can be easily re-created
+     - Upsert key is entity pair (from_entity + to_entity), not individual columns
+     - When creating relationships, column details are placeholders since actual column mapping unknown
+     - Cardinality validation ensures only valid values ('1:1', '1:N', 'N:1', 'N:N', 'unknown')
+     - Idempotent delete makes tool safe to call multiple times
+   - **Next Session Notes:**
+     - AI agents can now create/update relationships discovered during analysis
+     - Agents should ensure both entities exist before creating relationship
+     - Cardinality should be inferred from data analysis or schema relationships
+     - Delete is permanent (hard delete) since relationships are lightweight and easily recreated
+     - **WHY these tools exist:** During ontology refinement, AI agents discover relationships between entities from code analysis, documentation, or user clarifications. Without these tools, agents must ask humans to manually add relationships in the UI. With these tools, agents can document relationships directly, including semantic labels (e.g., "owns", "contains") and cardinality for query optimization. The upsert semantics make updates safe. Together with update_entity and delete_entity, these tools enable complete AI-driven ontology maintenance.
 12. **[ ] `update_glossary_term`**, **[ ] `delete_glossary_term`**
 13. **[ ] `update_column`**, **[ ] `delete_column_metadata`** (with entity/role params)
 
