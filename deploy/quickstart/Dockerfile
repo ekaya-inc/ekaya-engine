@@ -36,13 +36,14 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 # Runtime stage with Postgres + Redis
 FROM debian:bookworm-slim
 
-# Install Postgres 17 and Redis
+# Install Postgres 17, Redis, and iproute2 (for host.docker.internal setup on Linux)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg2 \
     lsb-release \
     curl \
     ca-certificates \
     redis-server \
+    iproute2 \
     && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update \

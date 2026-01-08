@@ -5,6 +5,17 @@ PGDATA=/var/lib/postgresql/data
 
 echo "=== Ekaya Engine Quickstart ==="
 
+# Setup host.docker.internal for Linux (already works on Mac/Windows Docker Desktop)
+# This allows users to connect to databases on their host machine using "localhost"
+if ! getent hosts host.docker.internal > /dev/null 2>&1; then
+    # host.docker.internal doesn't resolve, add it pointing to the default gateway
+    HOST_IP=$(ip route | grep default | awk '{print $3}')
+    if [ -n "$HOST_IP" ]; then
+        echo "$HOST_IP host.docker.internal" >> /etc/hosts
+        echo "Added host.docker.internal -> $HOST_IP for Linux Docker"
+    fi
+fi
+
 # Initialize Postgres if data directory is empty (first run)
 if [ -z "$(ls -A $PGDATA 2>/dev/null)" ]; then
     echo "First run detected. Initializing PostgreSQL..."

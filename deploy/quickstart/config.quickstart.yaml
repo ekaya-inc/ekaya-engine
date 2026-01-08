@@ -1,17 +1,17 @@
 # Quickstart configuration for ekaya-engine
-# Scenario: All-in-one Docker image with auth disabled
-# Use this when: Running the quickstart Docker image for demos/trials
+# Scenario: All-in-one Docker image authenticating through production ekaya-central
+# Use this when: Running the quickstart Docker image for evaluation
 # This file is embedded in the quickstart Docker image
 
 # Server configuration
 port: "3443"
 env: "quickstart"
-auth_server_url: ""  # Auth disabled in quickstart mode
+auth_server_url: "https://auth.ekaya.ai"
 
-# Authentication configuration (disabled)
+# Authentication configuration
 auth:
-  enable_verification: false  # No auth verification in quickstart mode
-  jwks_endpoints: ""
+  enable_verification: true
+  jwks_endpoints: "https://auth.ekaya.ai=https://auth.ekaya.ai/.well-known/jwks.json"
 
 # Database configuration
 # Password provided via PGPASSWORD environment variable in Docker image

@@ -1,6 +1,6 @@
 # Ekaya Engine Quickstart Image
 
-All-in-one Docker image for trying Ekaya Engine locally.
+All-in-one Docker image for running Ekaya Engine locally. Authenticates through production ekaya-central (us.ekaya.ai).
 
 ## Quick Start
 
@@ -41,7 +41,6 @@ docker volume rm ekaya-data
 
 This image is for evaluation only:
 - Uses static encryption key
-- Auth verification disabled
 - Single-container architecture
 
 For production, see the main deployment documentation.
