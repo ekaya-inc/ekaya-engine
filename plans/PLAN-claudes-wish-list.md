@@ -1084,7 +1084,7 @@ Not all tools should be available to all users. The admin can control which tool
      - Batch tool has 50-column limit to prevent excessive database queries
      - Dependencies: DB, MCPConfigService, SchemaRepo, OntologyRepo, Logger
      - For sample_values support, implement Phase 2 item #7 first (ontology extraction changes), then add to this tool
-6. **[x] `probe_relationship`** - COMPLETED: Relationship exploration with optional entity filtering
+6. **[x] `probe_relationship`** - COMPLETED (2026-01-08): Relationship exploration with optional entity filtering
    - **Implementation:** `pkg/mcp/tools/probe.go` (registerProbeRelationshipTool function) + `pkg/mcp/tools/probe_test.go`
    - **Registration:** Added to main.go with ProbeToolDeps (main.go:434-444), added EntityRepo and RelationshipRepo dependencies
    - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupDeveloper (line 27)
@@ -1130,6 +1130,7 @@ Not all tools should be available to all users. The admin can control which tool
        2. Filter by entity names if from_entity/to_entity parameters provided
        3. Return rejection_reason and match_rate for each candidate
      - For now, tool provides entity-level relationship visibility which is still valuable for understanding domain model
+     - **WHY this tool exists:** AI agents need to explore entity relationships to understand data model structure. Without this tool, agents must query multiple tables and manually join data. The probe_relationship tool provides a single API to discover relationships, filter by entity, and access metadata like descriptions and labels. This enables agents to answer questions like "How are User and Account related?" or "What relationships does the Billing entity have?" The tool surfaces pre-computed relationship data from ontology extraction, avoiding expensive on-demand analysis.
 7. **[x] Persist sample_values** - COMPLETED (2026-01-08): Store distinct values during extraction
    - **Commit:** `feat: persist sample values for low-cardinality columns during ontology extraction`
    - **Implementation:** Modified column enrichment workflow to persist sample values for low-cardinality columns (≤50 distinct values)
