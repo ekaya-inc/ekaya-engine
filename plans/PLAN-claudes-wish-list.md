@@ -1084,15 +1084,18 @@ Not all tools should be available to all users. The admin can control which tool
      - Batch tool has 50-column limit to prevent excessive database queries
      - Dependencies: DB, MCPConfigService, SchemaRepo, OntologyRepo, Logger
      - For sample_values support, implement Phase 2 item #7 first (ontology extraction changes), then add to this tool
-6. **[x] `probe_relationship`** - COMPLETED (2026-01-08): Relationship exploration with optional entity filtering
-   - **Implementation:** `pkg/mcp/tools/probe.go` (registerProbeRelationshipTool function) + `pkg/mcp/tools/probe_test.go`
-   - **Registration:** Added to main.go with ProbeToolDeps (main.go:434-444), added EntityRepo and RelationshipRepo dependencies
+6. **[x] `probe_relationship`** - COMPLETED (2026-01-08): Relationship exploration with cardinality and data_quality metrics
+   - **Implementation:** `pkg/mcp/tools/probe.go` (registerProbeRelationshipTool, probeRelationships, getSchemaRelationshipsWithMetrics, buildColumnKeyToIDMap functions) + `pkg/mcp/tools/probe_test.go`
+   - **Registration:** Added to main.go with ProbeToolDeps (main.go:434-445), added ProjectService dependency for datasource lookup
    - **Registry:** Added to ToolRegistry in pkg/services/mcp_tools_registry.go under ToolGroupDeveloper (line 27)
    - **Key Features Implemented:**
      - Supports optional `from_entity` and `to_entity` parameters for filtering relationships
      - Returns entity relationships with from/to entity names and column mappings
+     - Includes cardinality from engine_schema_relationships table
+     - Returns data_quality metrics: match_rate, source_distinct, target_distinct, matched_count, orphan_count (calculated)
+     - Returns rejected_candidates with rejection_reason and match_rate
      - Includes description and association label if available
-     - Returns empty arrays for data_quality and rejected_candidates (see limitations below)
+     - Graceful degradation: continues without metrics if schema relationship query fails
    - **Testing:** Unit tests covering response structure, empty state, minimal fields, and orphan calculation logic
    - **Tool Group:** ToolGroupDeveloper (available when Developer Tools enabled)
    - **Response Format:**
@@ -1103,34 +1106,48 @@ Not all tools should be available to all users. The admin can control which tool
          "to_entity": "User",
          "from_column": "accounts.owner_id",
          "to_column": "users.user_id",
+         "cardinality": "N:1",
+         "data_quality": {
+           "match_rate": 0.98,
+           "source_distinct": 500,
+           "target_distinct": 450,
+           "matched_count": 490,
+           "orphan_count": 10
+         },
          "description": "The user who owns this account",
          "label": "owns"
        }],
-       "rejected_candidates": []
+       "rejected_candidates": [{
+         "from_column": "accounts.created_by",
+         "to_column": "users.user_id",
+         "rejection_reason": "low_match_rate",
+         "match_rate": 0.12
+       }]
      }
      ```
    - **Architecture Notes:**
      - Queries engine_entity_relationships to get confirmed relationships
-     - Filters by from_entity/to_entity parameters if provided
-     - Maps entity IDs to names for readable output
+     - Uses ProjectService.GetDefaultDatasourceID to get datasource for schema relationship lookup
+     - Queries engine_schema_relationships with discovery metrics (match_rate, source_distinct, target_distinct, matched_count, rejection_reason)
+     - Builds columnKeyToIDMap to match entity relationships (table/column names) to schema relationships (column IDs)
+     - Filters rejected candidates by from_entity/to_entity if specified
      - Access control via checkProbeToolEnabled (validates Developer Tools enabled for project)
-     - Dependencies: DB, MCPConfigService, SchemaRepo, OntologyRepo, EntityRepo, RelationshipRepo, Logger
-   - **Known Limitations:**
-     - **cardinality and data_quality metrics NOT currently returned** - These are stored in engine_schema_relationships table but require additional repository/query logic to fetch and map to entity relationships
-     - **rejected_candidates NOT currently returned** - These are stored in engine_schema_relationships with rejection_reason but require similar infrastructure
-     - The implementation focuses on entity-level relationships from engine_entity_relationships, not schema-level metrics from engine_schema_relationships
+     - Dependencies: DB, MCPConfigService, SchemaRepo, OntologyRepo, EntityRepo, RelationshipRepo, ProjectService, Logger
+   - **Implementation Details:**
+     - getSchemaRelationshipsWithMetrics: Queries engine_schema_relationships with JOINs to get table/column names alongside metrics
+     - buildColumnKeyToIDMap: Builds map from (table_name, column_name) to column_id for matching entity to schema relationships
+     - Orphan count calculated as: source_distinct - matched_count (number of source values without matching target)
+     - Rejected candidates filtered by table name prefix matching entity primary tables
+   - **Key Files Modified:**
+     - `main.go`: Added ProjectService to ProbeToolDeps struct and registerProbeTools call
+     - `pkg/mcp/tools/probe.go`: Added probe_relationship tool implementation with schema relationship enrichment
    - **Next Session Notes:**
-     - To add cardinality/data_quality metrics, need to:
-       1. Query engine_schema_relationships table (via SchemaRepo or new SchemaRelationshipRepo)
-       2. Match schema relationships to entity relationships by (source_table, source_column, target_table, target_column)
-       3. Extract match_rate, source_distinct, target_distinct, matched_count
-       4. Calculate orphan_count = source_distinct - matched_count
-     - To add rejected_candidates, need to:
-       1. Query engine_schema_relationships WHERE rejection_reason IS NOT NULL
-       2. Filter by entity names if from_entity/to_entity parameters provided
-       3. Return rejection_reason and match_rate for each candidate
-     - For now, tool provides entity-level relationship visibility which is still valuable for understanding domain model
-     - **WHY this tool exists:** AI agents need to explore entity relationships to understand data model structure. Without this tool, agents must query multiple tables and manually join data. The probe_relationship tool provides a single API to discover relationships, filter by entity, and access metadata like descriptions and labels. This enables agents to answer questions like "How are User and Account related?" or "What relationships does the Billing entity have?" The tool surfaces pre-computed relationship data from ontology extraction, avoiding expensive on-demand analysis.
+     - The tool now provides complete relationship visibility including data quality metrics
+     - Graceful degradation ensures tool works even if schema relationship query fails (logs warning)
+     - All metrics are pre-computed during ontology extraction and stored in engine_schema_relationships
+     - Schema relationship lookup requires mapping entity relationships (table/column names) to schema relationships (column IDs)
+     - The columnKeyToIDMap is built on-demand by querying all tables and columns for the datasource
+     - **WHY this tool exists:** AI agents need to explore entity relationships with data quality metrics to understand data model structure and data integrity. Without this tool, agents must query multiple tables, manually join data, and compute metrics on-demand. The probe_relationship tool provides a single API to discover relationships, assess data quality, filter by entity, and access metadata. This enables agents to answer questions like "How are User and Account related?" or "What's the data quality of relationships involving Billing?" The tool surfaces pre-computed relationship data and metrics from ontology extraction, avoiding expensive on-demand analysis.
 7. **[x] Persist sample_values** - COMPLETED (2026-01-08): Store distinct values during extraction
    - **Commit:** `feat: persist sample values for low-cardinality columns during ontology extraction`
    - **Implementation:** Modified column enrichment workflow to persist sample values for low-cardinality columns (≤50 distinct values)

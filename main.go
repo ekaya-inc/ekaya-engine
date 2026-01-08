@@ -439,6 +439,7 @@ func main() {
 		OntologyRepo:     ontologyRepo,
 		EntityRepo:       ontologyEntityRepo,
 		RelationshipRepo: entityRelationshipRepo,
+		ProjectService:   projectService,
 		Logger:           logger,
 	}
 	mcptools.RegisterProbeTools(mcpServer.MCP(), probeToolDeps)

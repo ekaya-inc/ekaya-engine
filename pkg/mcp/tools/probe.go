@@ -26,6 +26,7 @@ type ProbeToolDeps struct {
 	OntologyRepo     repositories.OntologyRepository
 	EntityRepo       repositories.OntologyEntityRepository
 	RelationshipRepo repositories.EntityRelationshipRepository
+	ProjectService   services.ProjectService
 	Logger           *zap.Logger
 }
 
@@ -505,6 +506,34 @@ func probeRelationships(ctx context.Context, deps *ProbeToolDeps, projectID uuid
 		entityIDToTable[entity.ID] = entity.PrimaryTable
 	}
 
+	// Get default datasource ID
+	datasourceID, err := deps.ProjectService.GetDefaultDatasourceID(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get default datasource ID: %w", err)
+	}
+	if datasourceID == uuid.Nil {
+		return nil, fmt.Errorf("no default datasource configured for project")
+	}
+
+	// Get schema relationships with discovery metrics
+	// We need to query engine_schema_relationships to get cardinality and data quality metrics
+	schemaRelationshipsMap, rejectedCandidates, err := getSchemaRelationshipsWithMetrics(ctx, deps, projectID, datasourceID)
+	if err != nil {
+		// Log warning but continue without metrics (graceful degradation)
+		deps.Logger.Warn("Failed to fetch schema relationships with metrics",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+	}
+
+	// Build a map of (table_name, column_name) -> column_id for lookups
+	columnKeyToID, err := buildColumnKeyToIDMap(ctx, deps, projectID, datasourceID)
+	if err != nil {
+		// Log warning but continue without metrics (graceful degradation)
+		deps.Logger.Warn("Failed to build column key to ID map",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+	}
+
 	// Filter by from_entity and to_entity if provided
 	var filteredRelationships []*models.EntityRelationship
 	for _, rel := range entityRelationships {
@@ -524,11 +553,6 @@ func probeRelationships(ctx context.Context, deps *ProbeToolDeps, projectID uuid
 		filteredRelationships = append(filteredRelationships, rel)
 	}
 
-	// Note: To get data quality metrics (match_rate, orphan_count, etc.), we would need to
-	// query engine_schema_relationships table. For now, we'll return what's available from
-	// engine_entity_relationships, which includes cardinality but not the detailed metrics.
-	// TODO: Add SchemaRelationshipRepository to fetch data quality metrics
-
 	// Build response for confirmed relationships
 	for _, rel := range filteredRelationships {
 		detail := probeRelationshipDetail{
@@ -538,10 +562,6 @@ func probeRelationships(ctx context.Context, deps *ProbeToolDeps, projectID uuid
 			ToColumn:   fmt.Sprintf("%s.%s", rel.TargetColumnTable, rel.TargetColumnName),
 		}
 
-		// Note: Cardinality and data quality metrics are stored in engine_schema_relationships
-		// For now, we'll skip those and only return the entity-level relationship info
-		// TODO: Query engine_schema_relationships to get match_rate, source_distinct, target_distinct, etc.
-
 		// Add description and association if available
 		if rel.Description != nil {
 			detail.Description = rel.Description
@@ -550,14 +570,223 @@ func probeRelationships(ctx context.Context, deps *ProbeToolDeps, projectID uuid
 			detail.Label = rel.Association
 		}
 
+		// Look up corresponding schema relationship for cardinality and data quality metrics
+		// Build key using column IDs from the columnKeyToID map
+		sourceKey := columnKey{tableName: rel.SourceColumnTable, columnName: rel.SourceColumnName}
+		targetKey := columnKey{tableName: rel.TargetColumnTable, columnName: rel.TargetColumnName}
+		sourceColID, sourceOK := columnKeyToID[sourceKey]
+		targetColID, targetOK := columnKeyToID[targetKey]
+
+		if sourceOK && targetOK {
+			schemaRelKey := schemaRelationshipKey{
+				sourceColumnID: sourceColID,
+				targetColumnID: targetColID,
+			}
+			if schemaRel, ok := schemaRelationshipsMap[schemaRelKey]; ok {
+				// Add cardinality from schema relationship
+				if schemaRel.Cardinality != "" {
+					detail.Cardinality = schemaRel.Cardinality
+				}
+
+				// Add data quality metrics if available
+				if schemaRel.MatchRate != nil && schemaRel.SourceDistinct != nil && schemaRel.TargetDistinct != nil {
+					dataQuality := &probeRelationshipDataQuality{
+						MatchRate:      *schemaRel.MatchRate,
+						SourceDistinct: *schemaRel.SourceDistinct,
+						TargetDistinct: *schemaRel.TargetDistinct,
+					}
+
+					// Add matched_count if available
+					if schemaRel.MatchedCount != nil {
+						dataQuality.MatchedCount = *schemaRel.MatchedCount
+					}
+
+					// Calculate orphan_count if we have source_distinct and matched_count
+					if schemaRel.SourceDistinct != nil && schemaRel.MatchedCount != nil {
+						orphanCount := *schemaRel.SourceDistinct - *schemaRel.MatchedCount
+						dataQuality.OrphanCount = &orphanCount
+					}
+
+					detail.DataQuality = dataQuality
+				}
+			}
+		}
+
 		response.Relationships = append(response.Relationships, detail)
 	}
 
-	// Note: Rejected candidates are stored in engine_schema_relationships with rejection_reason
-	// For now, we'll skip this feature and return an empty list
-	// TODO: Query engine_schema_relationships WHERE rejection_reason IS NOT NULL
+	// Add rejected candidates (filter by entity if specified)
+	if fromEntity != nil || toEntity != nil {
+		// If entity filters are specified, filter rejected candidates
+		for _, candidate := range rejectedCandidates {
+			// Check if the candidate involves the filtered entities
+			// We need to check table names against entity primary tables
+			includeCandidate := true
+
+			if fromEntity != nil {
+				entityID := entityNameToID[*fromEntity]
+				fromTable := entityIDToTable[entityID]
+				if candidate.FromColumn[:len(fromTable)] != fromTable {
+					includeCandidate = false
+				}
+			}
+
+			if toEntity != nil && includeCandidate {
+				entityID := entityNameToID[*toEntity]
+				toTable := entityIDToTable[entityID]
+				if candidate.ToColumn[:len(toTable)] != toTable {
+					includeCandidate = false
+				}
+			}
+
+			if includeCandidate {
+				response.RejectedCandidates = append(response.RejectedCandidates, candidate)
+			}
+		}
+	} else {
+		// No filters, return all rejected candidates
+		response.RejectedCandidates = rejectedCandidates
+	}
 
 	return response, nil
+}
+
+// schemaRelationshipKey is used to match entity relationships to schema relationships.
+type schemaRelationshipKey struct {
+	sourceColumnID uuid.UUID
+	targetColumnID uuid.UUID
+}
+
+// getSchemaRelationshipsWithMetrics queries engine_schema_relationships to get cardinality
+// and data quality metrics. Returns a map keyed by (source_column_id, target_column_id)
+// for fast lookup, plus a list of rejected candidates.
+func getSchemaRelationshipsWithMetrics(ctx context.Context, deps *ProbeToolDeps, projectID, datasourceID uuid.UUID) (map[schemaRelationshipKey]*models.SchemaRelationship, []probeRelationshipCandidate, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	// Query all schema relationships (both confirmed and rejected) with discovery metrics
+	query := `
+		SELECT r.id, r.project_id, r.source_table_id, r.source_column_id,
+		       r.target_table_id, r.target_column_id, r.relationship_type,
+		       r.cardinality, r.confidence, r.inference_method, r.is_validated,
+		       r.validation_results, r.is_approved, r.created_at, r.updated_at,
+		       r.match_rate, r.source_distinct, r.target_distinct, r.matched_count, r.rejection_reason,
+		       sc.table_id as source_table_id_fk, sc.column_name as source_column_name,
+		       st.table_name as source_table_name,
+		       tc.table_id as target_table_id_fk, tc.column_name as target_column_name,
+		       tt.table_name as target_table_name
+		FROM engine_schema_relationships r
+		JOIN engine_schema_columns sc ON r.source_column_id = sc.id
+		JOIN engine_schema_columns tc ON r.target_column_id = tc.id
+		JOIN engine_schema_tables st ON sc.table_id = st.id
+		JOIN engine_schema_tables tt ON tc.table_id = tt.id
+		WHERE r.project_id = $1 AND st.datasource_id = $2
+		  AND r.deleted_at IS NULL
+		ORDER BY r.created_at`
+
+	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to query schema relationships: %w", err)
+	}
+	defer rows.Close()
+
+	confirmedMap := make(map[schemaRelationshipKey]*models.SchemaRelationship)
+	var rejectedCandidates []probeRelationshipCandidate
+
+	for rows.Next() {
+		var rel models.SchemaRelationship
+		var validationResultsJSON []byte
+		var sourceTableName, sourceColumnName, targetTableName, targetColumnName string
+
+		err := rows.Scan(
+			&rel.ID, &rel.ProjectID, &rel.SourceTableID, &rel.SourceColumnID,
+			&rel.TargetTableID, &rel.TargetColumnID, &rel.RelationshipType,
+			&rel.Cardinality, &rel.Confidence, &rel.InferenceMethod, &rel.IsValidated,
+			&validationResultsJSON, &rel.IsApproved, &rel.CreatedAt, &rel.UpdatedAt,
+			&rel.MatchRate, &rel.SourceDistinct, &rel.TargetDistinct, &rel.MatchedCount, &rel.RejectionReason,
+			&rel.SourceTableID, &sourceColumnName, &sourceTableName,
+			&rel.TargetTableID, &targetColumnName, &targetTableName,
+		)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to scan schema relationship: %w", err)
+		}
+
+		// Unmarshal validation results if present
+		if validationResultsJSON != nil {
+			var vr models.ValidationResults
+			if err := json.Unmarshal(validationResultsJSON, &vr); err == nil {
+				rel.ValidationResults = &vr
+			}
+		}
+
+		// If rejected, add to rejected candidates list
+		if rel.RejectionReason != nil && *rel.RejectionReason != "" {
+			candidate := probeRelationshipCandidate{
+				FromColumn:      fmt.Sprintf("%s.%s", sourceTableName, sourceColumnName),
+				ToColumn:        fmt.Sprintf("%s.%s", targetTableName, targetColumnName),
+				RejectionReason: *rel.RejectionReason,
+				MatchRate:       rel.MatchRate,
+			}
+			rejectedCandidates = append(rejectedCandidates, candidate)
+		} else {
+			// If confirmed, add to map for lookup
+			key := schemaRelationshipKey{
+				sourceColumnID: rel.SourceColumnID,
+				targetColumnID: rel.TargetColumnID,
+			}
+			confirmedMap[key] = &rel
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error iterating schema relationships: %w", err)
+	}
+
+	return confirmedMap, rejectedCandidates, nil
+}
+
+// columnKey is used to identify columns by (table_name, column_name).
+type columnKey struct {
+	tableName  string
+	columnName string
+}
+
+// buildColumnKeyToIDMap builds a map from (table_name, column_name) to column_id.
+// This is needed to match entity relationships (which only have table/column names)
+// to schema relationships (which use column IDs).
+func buildColumnKeyToIDMap(ctx context.Context, deps *ProbeToolDeps, projectID, datasourceID uuid.UUID) (map[columnKey]uuid.UUID, error) {
+	// Get all tables for this datasource to build table_id -> table_name map
+	tables, err := deps.SchemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tables: %w", err)
+	}
+
+	tableIDToName := make(map[uuid.UUID]string)
+	for _, table := range tables {
+		tableIDToName[table.ID] = table.TableName
+	}
+
+	// Get all columns for this datasource
+	columns, err := deps.SchemaRepo.ListColumnsByDatasource(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list columns: %w", err)
+	}
+
+	// Build map
+	keyToID := make(map[columnKey]uuid.UUID)
+	for _, col := range columns {
+		tableName, ok := tableIDToName[col.SchemaTableID]
+		if !ok {
+			// Skip columns whose table we don't know about (shouldn't happen)
+			continue
+		}
+		key := columnKey{tableName: tableName, columnName: col.ColumnName}
+		keyToID[key] = col.ID
+	}
+
+	return keyToID, nil
 }
 
 // probeRelationshipResponse is the response format for probe_relationship tool.
