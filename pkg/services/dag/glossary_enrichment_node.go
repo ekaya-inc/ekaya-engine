@@ -59,6 +59,7 @@ func (n *GlossaryEnrichmentNode) Execute(ctx context.Context, dag *models.Ontolo
 		// Log but don't fail - glossary terms can remain unenriched
 		n.Logger().Warn("Failed to enrich glossary terms - terms will lack SQL definitions",
 			zap.String("project_id", dag.ProjectID.String()),
+			zap.String("degradation_type", "glossary_enrichment"),
 			zap.Error(err))
 	}
 

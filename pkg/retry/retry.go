@@ -217,10 +217,13 @@ func classifyErrorType(err error) string {
 		return "rate_limit"
 	}
 
-	// Check for GPU/CUDA errors
-	if strings.Contains(errStr, "cuda error") || strings.Contains(errStr, "gpu error") {
+	// Check for GPU/CUDA errors (specific GPU errors only)
+	if strings.Contains(errStr, "cuda error") || strings.Contains(errStr, "gpu error") ||
+		strings.Contains(errStr, "cuda out of memory") || strings.Contains(errStr, "gpu out of memory") {
 		return "gpu"
 	}
+
+	// Check for OOM separately (non-GPU memory issues)
 	if strings.Contains(errStr, "out of memory") {
 		return "oom"
 	}

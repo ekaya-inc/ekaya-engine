@@ -3,6 +3,8 @@ package llm
 import (
 	"errors"
 	"fmt"
+	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -27,6 +29,14 @@ func (e *Error) Error() string {
 	}
 	if e.Model != "" {
 		parts = append(parts, fmt.Sprintf("model=%s", e.Model))
+	}
+	if e.Endpoint != "" {
+		// Redact endpoint to host only to avoid leaking sensitive info (API keys, tokens)
+		if u, err := url.Parse(e.Endpoint); err == nil && u.Host != "" {
+			parts = append(parts, fmt.Sprintf("endpoint=%s", u.Host))
+		} else {
+			parts = append(parts, fmt.Sprintf("endpoint=%s", e.Endpoint))
+		}
 	}
 
 	parts = append(parts, e.Message)
@@ -71,6 +81,27 @@ func NewErrorWithContext(errType ErrorType, message string, retryable bool, caus
 	}
 }
 
+// statusCodePattern matches HTTP status codes in error messages with context.
+// Matches patterns like "HTTP 503", "status 503", "status: 503", "code 503", "code: 503"
+// to avoid false positives like "processed 503 records".
+var statusCodePattern = regexp.MustCompile(`(?i)(?:HTTP|status[:\s]*|code[:\s]*)\s*(\d{3})`)
+
+// extractStatusCode extracts an HTTP status code from an error string.
+// Returns 0 if no status code is found with proper context.
+func extractStatusCode(errStr string) int {
+	matches := statusCodePattern.FindStringSubmatch(errStr)
+	if len(matches) >= 2 {
+		var code int
+		if _, err := fmt.Sscanf(matches[1], "%d", &code); err == nil {
+			// Only return valid HTTP status codes
+			if code >= 100 && code < 600 {
+				return code
+			}
+		}
+	}
+	return 0
+}
+
 // ClassifyError categorizes an error and returns a structured Error.
 // This consolidates error classification logic for consistent handling.
 func ClassifyError(err error) *Error {
@@ -87,17 +118,11 @@ func ClassifyError(err error) *Error {
 	errStr := err.Error()
 	lower := strings.ToLower(errStr)
 
-	// Extract HTTP status code from error string
-	statusCode := 0
-	for _, code := range []int{400, 401, 403, 404, 429, 500, 502, 503, 504} {
-		if strings.Contains(errStr, fmt.Sprintf("%d", code)) {
-			statusCode = code
-			break
-		}
-	}
+	// Extract HTTP status code from error string using precise pattern matching
+	statusCode := extractStatusCode(errStr)
 
 	// Authentication errors (not retryable)
-	if strings.Contains(errStr, "401") || strings.Contains(lower, "unauthorized") ||
+	if statusCode == 401 || strings.Contains(lower, "unauthorized") ||
 		strings.Contains(lower, "invalid api key") {
 		llmErr := NewError(ErrorTypeAuth, "authentication failed", false, err)
 		llmErr.StatusCode = statusCode
@@ -113,7 +138,7 @@ func ClassifyError(err error) *Error {
 	}
 
 	// Endpoint not found (not retryable without config change)
-	if strings.Contains(errStr, "404") {
+	if statusCode == 404 {
 		llmErr := NewError(ErrorTypeEndpoint, "endpoint not found", false, err)
 		llmErr.StatusCode = statusCode
 		return llmErr
@@ -126,33 +151,37 @@ func ClassifyError(err error) *Error {
 		return llmErr
 	}
 
+	// Context canceled - NOT retryable (user-initiated cancellation)
+	if strings.Contains(lower, "context canceled") {
+		llmErr := NewError(ErrorTypeEndpoint, "request cancelled", false, err)
+		llmErr.StatusCode = statusCode
+		return llmErr
+	}
+
 	// Timeout and deadline exceeded (retryable)
-	if strings.Contains(lower, "timeout") ||
-		strings.Contains(lower, "deadline exceeded") ||
-		strings.Contains(lower, "context canceled") {
+	if strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded") {
 		llmErr := NewError(ErrorTypeEndpoint, "request timeout", true, err)
 		llmErr.StatusCode = statusCode
 		return llmErr
 	}
 
 	// Rate limiting (retryable after backoff)
-	if strings.Contains(errStr, "429") || strings.Contains(lower, "rate limit") {
-		llmErr := NewError(ErrorTypeUnknown, "rate limited", true, err)
+	if statusCode == 429 || strings.Contains(lower, "rate limit") ||
+		strings.Contains(lower, "too many requests") {
+		llmErr := NewError(ErrorTypeRateLimited, "rate limited", true, err)
 		llmErr.StatusCode = statusCode
 		return llmErr
 	}
 
 	// CUDA/GPU errors (transient server-side issues, retryable)
-	if strings.Contains(lower, "cuda error") || strings.Contains(lower, "gpu error") ||
-		strings.Contains(lower, "out of memory") {
+	if strings.Contains(lower, "cuda error") || strings.Contains(lower, "gpu error") {
 		llmErr := NewError(ErrorTypeEndpoint, "GPU error", true, err)
 		llmErr.StatusCode = statusCode
 		return llmErr
 	}
 
 	// 5xx server errors (retryable)
-	if strings.Contains(errStr, "500") || strings.Contains(errStr, "502") ||
-		strings.Contains(errStr, "503") || strings.Contains(errStr, "504") {
+	if statusCode >= 500 && statusCode < 600 {
 		llmErr := NewError(ErrorTypeEndpoint, "server error", true, err)
 		llmErr.StatusCode = statusCode
 		return llmErr

@@ -60,6 +60,7 @@ func (n *GlossaryDiscoveryNode) Execute(ctx context.Context, dag *models.Ontolog
 		// Log but don't fail - ontology is useful without glossary terms
 		n.Logger().Warn("Failed to discover glossary terms - continuing without glossary",
 			zap.String("project_id", dag.ProjectID.String()),
+			zap.String("degradation_type", "glossary_discovery"),
 			zap.Error(err))
 		termCount = 0
 	}

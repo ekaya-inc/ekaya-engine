@@ -37,7 +37,26 @@ func TestError_Error_WithModel(t *testing.T) {
 	}
 }
 
-// TestError_Error_WithStatusCodeAndModel tests Error.Error() includes both status code and model
+// TestError_Error_WithEndpoint tests Error.Error() includes endpoint host (redacted for security)
+func TestError_Error_WithEndpoint(t *testing.T) {
+	err := &Error{
+		Type:     ErrorTypeEndpoint,
+		Message:  "connection failed",
+		Endpoint: "https://api.openai.com/v1",
+	}
+
+	result := err.Error()
+	// Should only contain host, not full URL (redacted for security)
+	if !strings.Contains(result, "endpoint=api.openai.com") {
+		t.Errorf("expected error message to contain 'endpoint=api.openai.com', got: %s", result)
+	}
+	// Should NOT contain full path
+	if strings.Contains(result, "/v1") {
+		t.Errorf("endpoint should be redacted to host only, but got full URL: %s", result)
+	}
+}
+
+// TestError_Error_WithStatusCodeAndModel tests Error.Error() includes status code, model, and endpoint
 func TestError_Error_WithStatusCodeAndModel(t *testing.T) {
 	err := &Error{
 		Type:       ErrorTypeEndpoint,
@@ -53,6 +72,10 @@ func TestError_Error_WithStatusCodeAndModel(t *testing.T) {
 	}
 	if !strings.Contains(result, "model=gpt-4o") {
 		t.Errorf("expected error message to contain 'model=gpt-4o', got: %s", result)
+	}
+	// Endpoint is redacted to host only
+	if !strings.Contains(result, "endpoint=api.openai.com") {
+		t.Errorf("expected error message to contain 'endpoint=api.openai.com', got: %s", result)
 	}
 	if !strings.Contains(result, "server error") {
 		t.Errorf("expected error message to contain 'server error', got: %s", result)
@@ -108,7 +131,7 @@ func TestClassifyError_ExtractsStatusCode(t *testing.T) {
 			name:               "429 rate limit",
 			inputError:         errors.New("HTTP 429 Too Many Requests"),
 			expectedStatusCode: 429,
-			expectedType:       ErrorTypeUnknown,
+			expectedType:       ErrorTypeRateLimited,
 		},
 		{
 			name:               "500 internal server error",
@@ -213,6 +236,10 @@ func TestNewErrorWithContext_ErrorMessage(t *testing.T) {
 	if !strings.Contains(result, "model=gpt-4o") {
 		t.Errorf("expected error message to contain 'model=gpt-4o', got: %s", result)
 	}
+	// Endpoint is redacted to host only
+	if !strings.Contains(result, "endpoint=api.openai.com") {
+		t.Errorf("expected error message to contain 'endpoint=api.openai.com', got: %s", result)
+	}
 	if !strings.Contains(result, "server error") {
 		t.Errorf("expected error message to contain 'server error', got: %s", result)
 	}
@@ -274,6 +301,71 @@ func TestError_IsRetryable(t *testing.T) {
 
 			if err.IsRetryable() != tt.retryable {
 				t.Errorf("expected IsRetryable() to return %v", tt.retryable)
+			}
+		})
+	}
+}
+
+// TestClassifyError_ContextCanceledNotRetryable tests that context canceled errors are not retryable
+func TestClassifyError_ContextCanceledNotRetryable(t *testing.T) {
+	err := errors.New("context canceled")
+	result := ClassifyError(err)
+
+	if result.Retryable {
+		t.Error("context canceled should NOT be retryable")
+	}
+	if result.Message != "request cancelled" {
+		t.Errorf("expected message 'request cancelled', got %s", result.Message)
+	}
+}
+
+// TestExtractStatusCode_Precision tests that status code extraction avoids false positives
+func TestExtractStatusCode_Precision(t *testing.T) {
+	tests := []struct {
+		name         string
+		errStr       string
+		expectedCode int
+	}{
+		{"HTTP prefix", "HTTP 503 Service Unavailable", 503},
+		{"status prefix", "status 429 rate limited", 429},
+		{"status colon", "status: 500", 500},
+		{"code prefix", "code 502 bad gateway", 502},
+		{"code colon", "code: 504 timeout", 504},
+		{"no false positive - processed records", "processed 503 records", 0},
+		{"no false positive - port number", "port 5432 connection failed", 0},
+		{"no false positive - random number", "error after 429 seconds", 0},
+		{"mixed case HTTP", "http 503 error", 503},
+		{"case insensitive status", "Status: 404 Not Found", 404},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractStatusCode(tt.errStr)
+			if result != tt.expectedCode {
+				t.Errorf("extractStatusCode(%q) = %d, expected %d", tt.errStr, result, tt.expectedCode)
+			}
+		})
+	}
+}
+
+// TestClassifyError_RateLimitedType tests that rate limit errors get proper type
+func TestClassifyError_RateLimitedType(t *testing.T) {
+	tests := []struct {
+		name     string
+		errStr   string
+		expected ErrorType
+	}{
+		{"HTTP 429", "HTTP 429 Too Many Requests", ErrorTypeRateLimited},
+		{"rate limit text", "rate limit exceeded", ErrorTypeRateLimited},
+		{"too many requests", "too many requests", ErrorTypeRateLimited},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := errors.New(tt.errStr)
+			result := ClassifyError(err)
+			if result.Type != tt.expected {
+				t.Errorf("expected type %s, got %s", tt.expected, result.Type)
 			}
 		})
 	}

@@ -3,6 +3,7 @@ package retry
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -782,7 +783,9 @@ func TestClassifyErrorType(t *testing.T) {
 		{"too many requests", errors.New("too many requests"), "rate_limit"},
 		{"cuda error", errors.New("CUDA error: out of memory"), "gpu"},
 		{"gpu error", errors.New("GPU error occurred"), "gpu"},
-		{"out of memory", errors.New("out of memory"), "oom"},
+		{"cuda out of memory", errors.New("cuda out of memory"), "gpu"},
+		{"gpu out of memory", errors.New("gpu out of memory"), "gpu"},
+		{"out of memory", errors.New("out of memory"), "oom"}, // Generic OOM separate from GPU
 		{"unknown error", errors.New("something went wrong"), "unknown"},
 	}
 
@@ -818,13 +821,13 @@ func TestDoIfRetryable_RepeatedErrorEscalation(t *testing.T) {
 	}
 
 	// Error message should indicate repeated error escalation
-	if err != nil && !contains(err.Error(), "repeated error") {
+	if err != nil && !strings.Contains(err.Error(), "repeated error") {
 		t.Errorf("expected 'repeated error' in error message, got: %v", err)
 	}
-	if err != nil && !contains(err.Error(), "5 times") {
+	if err != nil && !strings.Contains(err.Error(), "5 times") {
 		t.Errorf("expected '5 times' in error message, got: %v", err)
 	}
-	if err != nil && !contains(err.Error(), "type=503") {
+	if err != nil && !strings.Contains(err.Error(), "type=503") {
 		t.Errorf("expected 'type=503' in error message, got: %v", err)
 	}
 
@@ -887,10 +890,10 @@ func TestDoIfRetryable_MixedErrorTypes(t *testing.T) {
 	}
 
 	// Should escalate after 3 consecutive 503 errors
-	if err != nil && !contains(err.Error(), "repeated error") {
+	if err != nil && !strings.Contains(err.Error(), "repeated error") {
 		t.Errorf("expected escalation with 'repeated error', got: %v", err)
 	}
-	if err != nil && !contains(err.Error(), "type=503") {
+	if err != nil && !strings.Contains(err.Error(), "type=503") {
 		t.Errorf("expected 'type=503' in error message, got: %v", err)
 	}
 
@@ -920,7 +923,7 @@ func TestDoIfRetryable_EscalationDisabled(t *testing.T) {
 	if err == nil {
 		t.Error("expected error after exhausting retries")
 	}
-	if err != nil && contains(err.Error(), "repeated error") {
+	if err != nil && strings.Contains(err.Error(), "repeated error") {
 		t.Errorf("should not escalate when MaxSameErrorType=0, got: %v", err)
 	}
 
@@ -967,16 +970,3 @@ func TestDefaultConfig_HasMaxSameErrorType(t *testing.T) {
 	}
 }
 
-// contains is a helper function to check if a string contains a substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
