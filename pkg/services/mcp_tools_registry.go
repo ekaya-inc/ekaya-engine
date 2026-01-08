@@ -56,6 +56,7 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "list_approved_queries", Description: "List pre-approved SQL queries", ToolGroup: ToolGroupApprovedQueries},
 	{Name: "execute_approved_query", Description: "Execute a pre-approved query by ID", ToolGroup: ToolGroupApprovedQueries},
 	{Name: "suggest_approved_query", Description: "Suggest a reusable parameterized query for approval", ToolGroup: ToolGroupApprovedQueries},
+	{Name: "get_query_history", Description: "Get recent query execution history to avoid rewriting queries", ToolGroup: ToolGroupApprovedQueries},
 
 	// Health is always available
 	{Name: "health", Description: "Server health check", ToolGroup: "always"},

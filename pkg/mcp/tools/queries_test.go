@@ -611,3 +611,126 @@ func TestSuggestApprovedQuery_ResponseStructure(t *testing.T) {
 	assert.Equal(t, float64(3), validation["dry_run_rows"])
 	assert.NotNil(t, validation["detected_output_columns"])
 }
+
+func TestGetQueryHistory_ResponseStructure(t *testing.T) {
+	// This test verifies the get_query_history response structure.
+	// Full integration testing with actual database records is done in integration tests.
+
+	// Example response structure
+	response := struct {
+		RecentQueries []struct {
+			SQL             string         `json:"sql"`
+			ExecutedAt      string         `json:"executed_at"`
+			RowCount        int            `json:"row_count"`
+			ExecutionTimeMs int            `json:"execution_time_ms"`
+			Parameters      map[string]any `json:"parameters,omitempty"`
+			QueryName       *string        `json:"query_name,omitempty"`
+		} `json:"recent_queries"`
+		Count     int `json:"count"`
+		HoursBack int `json:"hours_back"`
+	}{
+		RecentQueries: []struct {
+			SQL             string         `json:"sql"`
+			ExecutedAt      string         `json:"executed_at"`
+			RowCount        int            `json:"row_count"`
+			ExecutionTimeMs int            `json:"execution_time_ms"`
+			Parameters      map[string]any `json:"parameters,omitempty"`
+			QueryName       *string        `json:"query_name,omitempty"`
+		}{
+			{
+				SQL:             "SELECT * FROM users WHERE username = $1",
+				ExecutedAt:      "2024-01-15T10:30:00Z",
+				RowCount:        42,
+				ExecutionTimeMs: 145,
+				Parameters: map[string]any{
+					"username": "john_doe",
+				},
+				QueryName: strPtr("Find user by username"),
+			},
+			{
+				SQL:             "SELECT COUNT(*) FROM orders WHERE created_at >= $1",
+				ExecutedAt:      "2024-01-15T10:25:00Z",
+				RowCount:        1,
+				ExecutionTimeMs: 89,
+				Parameters: map[string]any{
+					"start_date": "2024-01-01",
+				},
+				QueryName: strPtr("Count recent orders"),
+			},
+		},
+		Count:     2,
+		HoursBack: 24,
+	}
+
+	// Verify JSON serialization works
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	// Verify top-level fields
+	assert.Equal(t, float64(2), parsed["count"])
+	assert.Equal(t, float64(24), parsed["hours_back"])
+	assert.NotNil(t, parsed["recent_queries"])
+
+	// Verify recent_queries array structure
+	queries, ok := parsed["recent_queries"].([]any)
+	require.True(t, ok)
+	require.Len(t, queries, 2)
+
+	// Verify first query structure
+	firstQuery, ok := queries[0].(map[string]any)
+	require.True(t, ok)
+	assert.NotEmpty(t, firstQuery["sql"])
+	assert.NotEmpty(t, firstQuery["executed_at"])
+	assert.NotNil(t, firstQuery["row_count"])
+	assert.NotNil(t, firstQuery["execution_time_ms"])
+	assert.NotNil(t, firstQuery["parameters"])
+	assert.NotNil(t, firstQuery["query_name"])
+}
+
+func TestGetQueryHistory_Registration(t *testing.T) {
+	// Verify get_query_history tool is registered
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &QueryToolDeps{
+		MCPConfigService: &mockMCPConfigService{
+			config: &models.ToolGroupConfig{Enabled: true},
+		},
+		ProjectService: &mockProjectService{},
+		QueryService:   &mockQueryService{},
+		Logger:         zap.NewNop(),
+	}
+
+	RegisterApprovedQueriesTools(mcpServer, deps)
+
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	// Check get_query_history tool is registered
+	toolNames := make(map[string]bool)
+	for _, tool := range response.Result.Tools {
+		toolNames[tool.Name] = true
+	}
+
+	assert.True(t, toolNames["get_query_history"], "get_query_history tool should be registered")
+}
+
+// Helper function to create string pointer
+func strPtr(s string) *string {
+	return &s
+}

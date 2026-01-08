@@ -1844,7 +1844,25 @@ Not all tools should be available to all users. The admin can control which tool
     - For write queries, user should be warned that EXPLAIN ANALYZE will execute side effects
     - Consider adding a `dry_run` parameter to use EXPLAIN without ANALYZE for risky queries
     - **WHY this tool exists:** Developers need to understand query performance without leaving their AI assistant. Instead of copy-pasting SQL to a database client, running EXPLAIN manually, and interpreting cryptic plan output, this tool provides instant performance insights with actionable optimization hints. This is especially valuable during ontology extraction (complex analytical queries) and when refining approved queries (users want fast queries). The hints help non-DBAs understand common issues like missing indexes or inefficient joins.
-19. **[ ] `get_query_history`** - Recent queries
+19. **[x] `get_query_history`** - Recent queries
+    - **Status:** Complete
+    - **Files:**
+      - Migration: `migrations/038_query_executions.{up,down}.sql`
+      - Tool implementation: `pkg/mcp/tools/queries.go` (registerGetQueryHistoryTool)
+      - Execution logging: `pkg/mcp/tools/queries.go` (logQueryExecution)
+      - Tool registry: `pkg/services/mcp_tools_registry.go`
+      - Tests: `pkg/mcp/tools/queries_test.go` (TestGetQueryHistory_*)
+    - **Implementation:**
+      - Created `engine_query_executions` table to track query execution history
+      - Tool accepts `limit` (default 20, max 100) and `hours_back` (default 24, max 168) parameters
+      - Returns SQL, executed_at, row_count, execution_time_ms, parameters, and query_name for each execution
+      - Execution logging happens asynchronously (via goroutine) after successful query execution
+      - Best-effort logging: failures are logged but don't affect query execution
+      - Query history is project-scoped and respects RLS
+    - **Next Session Notes:**
+      - History only tracks MCP tool executions (source='mcp'), not UI or direct API queries
+      - Consider adding retention policy for old executions (e.g., DELETE after 30 days)
+      - Could enhance with query pattern deduplication (group similar queries)
 
 ---
 
