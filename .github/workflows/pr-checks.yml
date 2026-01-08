@@ -54,8 +54,8 @@ jobs:
       - name: Run linter
         run: golangci-lint run --timeout=5m
 
-      - name: Run unit tests
-        run: go test ./... -short -timeout 2m
+      - name: Run all tests (unit + integration)
+        run: go test ./... -timeout 5m
 
       - name: Frontend lint
         run: cd ui && npm run lint

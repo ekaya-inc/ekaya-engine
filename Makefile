@@ -1,11 +1,11 @@
 # ekaya-engine Makefile
-.PHONY: help install install-hooks install-air clean test fmt lint check run dev-ui dev-server dev-build-docker ping dev-up dev-down dev-build-container connect-postgres DANGER-recreate-database build-test-image push-test-image pull-test-image quickstart-build quickstart-run
+.PHONY: help install install-hooks install-air clean test fmt lint check run dev-ui dev-server dev-build-docker ping dev-up dev-down dev-build-container connect-postgres DANGER-recreate-database build-test-image push-test-image pull-test-image quickstart-build quickstart-run quickstart-push
 
 # Variables
-# Note: These are the registries for dev and prod environments
-DEV_REGISTRY_URL := us-central1-docker.pkg.dev/ekaya-dev-shared/ekaya-dev-containers
-PROD_REGISTRY_URL := us-central1-docker.pkg.dev/ekaya-prod-shared/ekaya-prod-containers
+# Note: All images are published to GitHub Container Registry
+REGISTRY_URL := ghcr.io/ekaya-inc
 IMAGE_NAME := ekaya-engine
+QUICKSTART_IMAGE_NAME := engine-quickstart
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 VERSION_NO_V := $(shell echo $(VERSION) | sed 's/^v//')
 PORT ?= 3443
@@ -19,12 +19,12 @@ BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 DATE_TAG := $(shell date +%Y%m%d)
 
 # Full image paths
-DEV_IMAGE_PATH := $(DEV_REGISTRY_URL)/$(IMAGE_NAME)
-PROD_IMAGE_PATH := $(PROD_REGISTRY_URL)/$(IMAGE_NAME)
+IMAGE_PATH := $(REGISTRY_URL)/$(IMAGE_NAME)
+QUICKSTART_IMAGE_PATH := $(REGISTRY_URL)/$(QUICKSTART_IMAGE_NAME)
 
 # Test container image (used for integration tests)
 TEST_IMAGE_NAME := ekaya-engine-test-image
-TEST_IMAGE_PATH := $(DEV_REGISTRY_URL)/$(TEST_IMAGE_NAME)
+TEST_IMAGE_PATH := $(REGISTRY_URL)/$(TEST_IMAGE_NAME)
 
 # Colors for output
 RED := \033[0;31m
@@ -63,8 +63,8 @@ clean: ## Clean build artifacts and Go cache
 	@cd ui && npm run clean
 	@echo "$(GREEN)✓ Clean complete$(NC)"
 
-test: ## Run all tests
-	@echo "$(YELLOW)Running full test suite...$(NC)"
+test: ## Run all tests including integration tests (requires Docker)
+	@echo "$(YELLOW)Running full test suite (unit + integration)...$(NC)"
 	@go test -tags="$(BUILD_TAGS)" ./... -v -cover -timeout 5m
 	@echo "$(GREEN)✓ All tests passed$(NC)"
 
@@ -314,16 +314,15 @@ build-test-image: ## Build the ekaya-engine-test-image for integration tests
 	@echo "$(GREEN)✓ Test image built: $(TEST_IMAGE_NAME):latest$(NC)"
 	@echo "$(GREEN)✓ Tagged as: $(TEST_IMAGE_PATH):latest$(NC)"
 
-push-test-image: build-test-image ## Build and push test image to dev registry
-	@echo "$(YELLOW)Pushing test image to registry...$(NC)"
-	@echo "$(YELLOW)Authenticating with gcloud...$(NC)"
-	@gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+push-test-image: build-test-image ## Build and push test image to ghcr.io (requires GITHUB_TOKEN)
+	@echo "$(YELLOW)Pushing test image to ghcr.io...$(NC)"
+	@if [ -z "$$GITHUB_TOKEN" ]; then echo "$(RED)Error: GITHUB_TOKEN not set$(NC)"; exit 1; fi
+	@echo "$$GITHUB_TOKEN" | docker login ghcr.io -u $(shell git config user.email || echo "user") --password-stdin
 	@docker push $(TEST_IMAGE_PATH):latest
 	@echo "$(GREEN)✓ Test image pushed to: $(TEST_IMAGE_PATH):latest$(NC)"
 
-pull-test-image: ## Pull test image from dev registry
-	@echo "$(YELLOW)Pulling test image from registry...$(NC)"
-	@gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+pull-test-image: ## Pull test image from ghcr.io
+	@echo "$(YELLOW)Pulling test image from ghcr.io...$(NC)"
 	@docker pull $(TEST_IMAGE_PATH):latest
 	@echo "$(GREEN)✓ Test image pulled: $(TEST_IMAGE_PATH):latest$(NC)"
 
@@ -334,16 +333,29 @@ quickstart-build: ## Build the all-in-one quickstart Docker image
 		--build-arg VERSION=$(VERSION) \
 		--build-arg BUILD_TAGS=$(BUILD_TAGS) \
 		-f deploy/quickstart/Dockerfile \
-		-t engine-quickstart:local \
+		-t $(QUICKSTART_IMAGE_NAME):local \
+		-t $(QUICKSTART_IMAGE_PATH):$(VERSION) \
+		-t $(QUICKSTART_IMAGE_PATH):latest \
 		.
-	@echo "$(GREEN)✓ Quickstart image built: engine-quickstart:local$(NC)"
+	@echo "$(GREEN)✓ Quickstart image built: $(QUICKSTART_IMAGE_NAME):local$(NC)"
+	@echo "$(GREEN)✓ Tagged as: $(QUICKSTART_IMAGE_PATH):$(VERSION)$(NC)"
+	@echo "$(GREEN)✓ Tagged as: $(QUICKSTART_IMAGE_PATH):latest$(NC)"
 	@echo ""
 	@echo "Run with:"
-	@echo "  docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data engine-quickstart:local"
+	@echo "  docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data $(QUICKSTART_IMAGE_NAME):local"
 
 quickstart-run: quickstart-build ## Build and run the quickstart image
 	@echo "$(YELLOW)Starting quickstart container...$(NC)"
-	@docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data engine-quickstart:local
+	@docker run -p 3443:3443 -v ekaya-data:/var/lib/postgresql/data $(QUICKSTART_IMAGE_NAME):local
+
+quickstart-push: quickstart-build ## Build and push quickstart image to ghcr.io (requires GITHUB_TOKEN)
+	@echo "$(YELLOW)Pushing quickstart image to ghcr.io...$(NC)"
+	@if [ -z "$$GITHUB_TOKEN" ]; then echo "$(RED)Error: GITHUB_TOKEN not set$(NC)"; exit 1; fi
+	@echo "$$GITHUB_TOKEN" | docker login ghcr.io -u $(shell git config user.email || echo "user") --password-stdin
+	@docker push $(QUICKSTART_IMAGE_PATH):$(VERSION)
+	@docker push $(QUICKSTART_IMAGE_PATH):latest
+	@echo "$(GREEN)✓ Quickstart image pushed to: $(QUICKSTART_IMAGE_PATH):$(VERSION)$(NC)"
+	@echo "$(GREEN)✓ Quickstart image pushed to: $(QUICKSTART_IMAGE_PATH):latest$(NC)"
 
 
 .DEFAULT_GOAL := help
