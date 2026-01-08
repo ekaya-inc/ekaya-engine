@@ -500,9 +500,11 @@ func buildColumnDetails(
 			addStatisticsToColumnDetail(colDetail, schemaCol, col)
 		}
 
-		// Add sample values if requested (not yet implemented - would require datasource adapter)
-		// TODO: Implement sample values fetching via datasource adapter when include.SampleValues is true
-		// and column qualifies (≤50 distinct values)
+		// Add sample values if requested and available
+		// Sample values are persisted during ontology extraction for low-cardinality columns (≤50 distinct values)
+		if include.SampleValues && schemaCol != nil && len(schemaCol.SampleValues) > 0 {
+			colDetail["sample_values"] = schemaCol.SampleValues
+		}
 
 		columns = append(columns, colDetail)
 	}
