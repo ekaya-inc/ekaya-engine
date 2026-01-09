@@ -45,8 +45,10 @@ Database and Redis use standard PG* and REDIS_* environment variables.
 ### Quality Checks
 
 ```bash
-make check  # Format, lint, typecheck, tests (backend + frontend)
+make check  # Format, lint, typecheck, unit tests, integration tests (backend + frontend)
 ```
+
+**Note:** Integration tests require Docker to be running (spins up a PostgreSQL container).
 
 ## Deployment
 

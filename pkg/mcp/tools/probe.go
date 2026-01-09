@@ -11,7 +11,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -30,57 +29,20 @@ type ProbeToolDeps struct {
 	Logger           *zap.Logger
 }
 
+// GetDB implements ToolAccessDeps.
+func (d *ProbeToolDeps) GetDB() *database.DB { return d.DB }
+
+// GetMCPConfigService implements ToolAccessDeps.
+func (d *ProbeToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
+
+// GetLogger implements ToolAccessDeps.
+func (d *ProbeToolDeps) GetLogger() *zap.Logger { return d.Logger }
+
 // RegisterProbeTools registers probe MCP tools.
 func RegisterProbeTools(s *server.MCPServer, deps *ProbeToolDeps) {
 	registerProbeColumnTool(s, deps)
 	registerProbeColumnsTool(s, deps)
 	registerProbeRelationshipTool(s, deps)
-}
-
-// checkProbeToolEnabled verifies a specific probe tool is enabled for the project.
-// Uses ToolAccessChecker to ensure consistency with tool list filtering.
-func checkProbeToolEnabled(ctx context.Context, deps *ProbeToolDeps, toolName string) (uuid.UUID, context.Context, func(), error) {
-	// Get claims from context
-	claims, ok := auth.GetClaims(ctx)
-	if !ok {
-		return uuid.Nil, nil, nil, fmt.Errorf("authentication required")
-	}
-
-	projectID, err := uuid.Parse(claims.ProjectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("invalid project ID: %w", err)
-	}
-
-	// Acquire connection with tenant scope
-	scope, err := deps.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to acquire database connection: %w", err)
-	}
-
-	// Set tenant context for the query
-	tenantCtx := database.SetTenantScope(ctx, scope)
-
-	// Check if caller is an agent (API key authentication)
-	isAgent := claims.Subject == "agent"
-
-	// Get tool groups state and check access using the unified checker
-	state, err := deps.MCPConfigService.GetToolGroupsState(tenantCtx, projectID)
-	if err != nil {
-		scope.Close()
-		deps.Logger.Error("Failed to get tool groups state",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool configuration: %w", err)
-	}
-
-	// Use the unified ToolAccessChecker for consistent access decisions
-	checker := services.NewToolAccessChecker()
-	if checker.IsToolAccessible(toolName, state, isAgent) {
-		return projectID, tenantCtx, func() { scope.Close() }, nil
-	}
-
-	scope.Close()
-	return uuid.Nil, nil, nil, fmt.Errorf("%s tool is not enabled for this project", toolName)
 }
 
 // registerProbeColumnTool adds the probe_column tool for deep-diving into specific columns.
@@ -111,7 +73,7 @@ func registerProbeColumnTool(s *server.MCPServer, deps *ProbeToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkProbeToolEnabled(ctx, deps, "probe_column")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "probe_column")
 		if err != nil {
 			return nil, err
 		}
@@ -164,7 +126,7 @@ func registerProbeColumnsTool(s *server.MCPServer, deps *ProbeToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkProbeToolEnabled(ctx, deps, "probe_columns")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "probe_columns")
 		if err != nil {
 			return nil, err
 		}
@@ -436,7 +398,7 @@ func registerProbeRelationshipTool(s *server.MCPServer, deps *ProbeToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkProbeToolEnabled(ctx, deps, "probe_relationship")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "probe_relationship")
 		if err != nil {
 			return nil, err
 		}

@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   TOOL_GROUP_IDS,
   TOOL_GROUP_METADATA,
+  ALL_TOOLS_ORDERED,
   getToolGroupMetadata,
+  getToolOrder,
 } from './mcpToolMetadata';
 
 describe('mcpToolMetadata', () => {
@@ -12,16 +14,17 @@ describe('mcpToolMetadata', () => {
       expect(TOOL_GROUP_IDS.DEVELOPER).toBe('developer');
       expect(TOOL_GROUP_IDS.APPROVED_QUERIES).toBe('approved_queries');
       expect(TOOL_GROUP_IDS.AGENT_TOOLS).toBe('agent_tools');
+      expect(TOOL_GROUP_IDS.CUSTOM).toBe('custom');
     });
 
-    it('has exactly 3 tool group IDs', () => {
+    it('has exactly 4 tool group IDs', () => {
       const ids = Object.keys(TOOL_GROUP_IDS);
-      expect(ids).toHaveLength(3);
+      expect(ids).toHaveLength(4);
     });
   });
 
   describe('TOOL_GROUP_METADATA', () => {
-    it('has metadata for developer tools', () => {
+    it('has metadata for developer tools with sub-options', () => {
       const metadata = TOOL_GROUP_METADATA[TOOL_GROUP_IDS.DEVELOPER];
       if (metadata === undefined) {
         throw new Error('Expected metadata to be defined');
@@ -31,20 +34,21 @@ describe('mcpToolMetadata', () => {
       // Warning is at top level (execute is now always included when developer is enabled)
       expect(metadata.warning).toBeDefined();
       expect(metadata.warning).toContain('destructive operations');
-      // No subOptions (enableExecute toggle was removed - execute is always included)
-      expect(metadata.subOptions).toBeUndefined();
+      // Sub-options for adding query tools and ontology questions
+      expect(metadata.subOptions).toBeDefined();
+      expect(metadata.subOptions?.addQueryTools).toBeDefined();
+      expect(metadata.subOptions?.addOntologyQuestions).toBeDefined();
     });
 
-    it('has metadata for approved queries', () => {
+    it('has metadata for business user tools', () => {
       const metadata = TOOL_GROUP_METADATA[TOOL_GROUP_IDS.APPROVED_QUERIES];
       if (metadata === undefined) {
         throw new Error('Expected metadata to be defined');
       }
-      expect(metadata.name).toBe('Pre-Approved Queries');
+      expect(metadata.name).toBe('Business User Tools');
       expect(metadata.description).toBeTruthy();
       expect(metadata.subOptions).toBeDefined();
-      expect(metadata.subOptions?.forceMode).toBeDefined();
-      expect(metadata.subOptions?.allowClientSuggestions).toBeDefined();
+      expect(metadata.subOptions?.allowOntologyMaintenance).toBeDefined();
     });
 
     it('has metadata for agent tools', () => {
@@ -67,6 +71,16 @@ describe('mcpToolMetadata', () => {
       expect(metadata.subOptions).toBeUndefined();
     });
 
+    it('has metadata for custom tools', () => {
+      const metadata = TOOL_GROUP_METADATA[TOOL_GROUP_IDS.CUSTOM];
+      if (metadata === undefined) {
+        throw new Error('Expected metadata to be defined');
+      }
+      expect(metadata.name).toBe('Custom Tools');
+      expect(metadata.description).toBeTruthy();
+      expect(metadata.subOptions).toBeUndefined();
+    });
+
     it('all tool group IDs have corresponding metadata', () => {
       for (const id of Object.values(TOOL_GROUP_IDS)) {
         const metadata = TOOL_GROUP_METADATA[id];
@@ -76,6 +90,47 @@ describe('mcpToolMetadata', () => {
           expect(metadata.description).toBeTruthy();
         }
       }
+    });
+  });
+
+  describe('ALL_TOOLS_ORDERED', () => {
+    it('starts with health tool', () => {
+      expect(ALL_TOOLS_ORDERED[0]?.name).toBe('health');
+    });
+
+    it('contains all expected tool categories', () => {
+      const toolNames = ALL_TOOLS_ORDERED.map((t) => t.name);
+      // Default
+      expect(toolNames).toContain('health');
+      // Developer Core
+      expect(toolNames).toContain('echo');
+      expect(toolNames).toContain('execute');
+      // Query
+      expect(toolNames).toContain('query');
+      expect(toolNames).toContain('get_schema');
+      expect(toolNames).toContain('sample');
+      // Ontology Questions
+      expect(toolNames).toContain('list_ontology_questions');
+      // Ontology Maintenance
+      expect(toolNames).toContain('update_entity');
+    });
+
+    it('has correct tool order (developer core before query tools)', () => {
+      const echoIndex = ALL_TOOLS_ORDERED.findIndex((t) => t.name === 'echo');
+      const queryIndex = ALL_TOOLS_ORDERED.findIndex((t) => t.name === 'query');
+      expect(echoIndex).toBeLessThan(queryIndex);
+    });
+  });
+
+  describe('getToolOrder', () => {
+    it('returns correct index for known tools', () => {
+      expect(getToolOrder('health')).toBe(0);
+      expect(getToolOrder('echo')).toBe(1);
+      expect(getToolOrder('execute')).toBe(2);
+    });
+
+    it('returns length for unknown tools (sorts them last)', () => {
+      expect(getToolOrder('unknown_tool')).toBe(ALL_TOOLS_ORDERED.length);
     });
   });
 
@@ -89,6 +144,12 @@ describe('mcpToolMetadata', () => {
       const metadata = getToolGroupMetadata('agent_tools');
       expect(metadata).toBeDefined();
       expect(metadata?.name).toBe('Agent Tools');
+    });
+
+    it('returns metadata for custom', () => {
+      const metadata = getToolGroupMetadata('custom');
+      expect(metadata).toBeDefined();
+      expect(metadata?.name).toBe('Custom Tools');
     });
 
     it('returns undefined for unknown group ID', () => {

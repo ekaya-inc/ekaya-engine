@@ -12,8 +12,19 @@ import type { ReactNode } from 'react';
  */
 export interface ToolGroupState {
   enabled: boolean;
+
+  // Business Tools (approved_queries) sub-options
+  allowOntologyMaintenance?: boolean;
+
+  // Developer Tools sub-options
+  addQueryTools?: boolean;
+  addOntologyQuestions?: boolean;
+
+  // Custom Tools - individually selected tool names
+  customTools?: string[];
+
+  // Legacy sub-options (backward compatibility)
   enableExecute?: boolean;
-  // approved_queries only
   forceMode?: boolean;
   allowClientSuggestions?: boolean;
 }
@@ -37,8 +48,19 @@ export interface MCPConfigResponse {
 
 export interface ToolGroupConfigUpdate {
   enabled: boolean;
+
+  // Business Tools (approved_queries) sub-options
+  allowOntologyMaintenance?: boolean;
+
+  // Developer Tools sub-options
+  addQueryTools?: boolean;
+  addOntologyQuestions?: boolean;
+
+  // Custom Tools - individually selected tool names
+  customTools?: string[];
+
+  // Legacy sub-options (backward compatibility)
   enableExecute?: boolean;
-  // approved_queries only
   forceMode?: boolean;
   allowClientSuggestions?: boolean;
 }
@@ -54,6 +76,7 @@ export interface SubOptionInfo {
   name: string;
   description?: ReactNode | undefined;
   warning?: string | undefined;
+  tip?: ReactNode | undefined;
 }
 
 export interface ToolGroupInfo {

@@ -11,7 +11,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
@@ -29,57 +28,18 @@ type OntologyToolDeps struct {
 	Logger                 *zap.Logger
 }
 
-const ontologyToolGroup = "approved_queries" // Ontology tools share visibility with approved_queries
+// GetDB implements ToolAccessDeps.
+func (d *OntologyToolDeps) GetDB() *database.DB { return d.DB }
+
+// GetMCPConfigService implements ToolAccessDeps.
+func (d *OntologyToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
+
+// GetLogger implements ToolAccessDeps.
+func (d *OntologyToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // RegisterOntologyTools registers ontology-related MCP tools.
 func RegisterOntologyTools(s *server.MCPServer, deps *OntologyToolDeps) {
 	registerGetOntologyTool(s, deps)
-}
-
-// checkOntologyToolEnabled verifies a specific ontology tool is enabled for the project.
-// Uses ToolAccessChecker to ensure consistency with tool list filtering.
-func checkOntologyToolEnabled(ctx context.Context, deps *OntologyToolDeps, toolName string) (uuid.UUID, context.Context, func(), error) {
-	// Get claims from context
-	claims, ok := auth.GetClaims(ctx)
-	if !ok {
-		return uuid.Nil, nil, nil, fmt.Errorf("authentication required")
-	}
-
-	projectID, err := uuid.Parse(claims.ProjectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("invalid project ID: %w", err)
-	}
-
-	// Acquire connection with tenant scope
-	scope, err := deps.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to acquire database connection: %w", err)
-	}
-
-	// Set tenant context for the query
-	tenantCtx := database.SetTenantScope(ctx, scope)
-
-	// Check if caller is an agent (API key authentication)
-	isAgent := claims.Subject == "agent"
-
-	// Get tool groups state and check access using the unified checker
-	state, err := deps.MCPConfigService.GetToolGroupsState(tenantCtx, projectID)
-	if err != nil {
-		scope.Close()
-		deps.Logger.Error("Failed to get tool groups state",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool configuration: %w", err)
-	}
-
-	// Use the unified ToolAccessChecker for consistent access decisions
-	checker := services.NewToolAccessChecker()
-	if checker.IsToolAccessible(toolName, state, isAgent) {
-		return projectID, tenantCtx, func() { scope.Close() }, nil
-	}
-
-	scope.Close()
-	return uuid.Nil, nil, nil, fmt.Errorf("%s tool is not enabled for this project", toolName)
 }
 
 // getStringSlice extracts a slice of strings from request arguments.
@@ -139,7 +99,7 @@ func registerGetOntologyTool(s *server.MCPServer, deps *OntologyToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkOntologyToolEnabled(ctx, deps, "get_ontology")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "get_ontology")
 		if err != nil {
 			return nil, err
 		}

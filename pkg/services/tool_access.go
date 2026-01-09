@@ -28,98 +28,34 @@ func NewToolAccessChecker() ToolAccessChecker {
 }
 
 // IsToolAccessible checks if a specific tool is accessible given the current state.
+// Uses the loadout system to determine access.
 func (c *toolAccessChecker) IsToolAccessible(toolName string, state map[string]*models.ToolGroupConfig, isAgent bool) bool {
-	// Health is always accessible
-	if toolName == "health" {
-		return true
-	}
+	// Compute enabled tools using the loadout system
+	enabledTools := ComputeEnabledToolsFromConfig(state, isAgent)
 
-	// Find the tool in the registry
-	var toolDef *ToolDefinition
-	for i := range ToolRegistry {
-		if ToolRegistry[i].Name == toolName {
-			toolDef = &ToolRegistry[i]
-			break
+	// Check if the requested tool is in the enabled list
+	for _, tool := range enabledTools {
+		if tool.Name == toolName {
+			return true
 		}
 	}
-
-	// Unknown tool - not accessible
-	if toolDef == nil {
-		return false
-	}
-
-	// No state means only "always" tools are available
-	if state == nil {
-		return toolDef.ToolGroup == "always"
-	}
-
-	// Agent authentication has special rules
-	if isAgent {
-		return c.isToolAccessibleForAgent(toolDef, state)
-	}
-
-	// User authentication
-	return c.isToolAccessibleForUser(toolDef, state)
-}
-
-// isToolAccessibleForAgent checks tool access for agent authentication.
-// Agents can only access tools when agent_tools is enabled, and only specific tools.
-func (c *toolAccessChecker) isToolAccessibleForAgent(tool *ToolDefinition, state map[string]*models.ToolGroupConfig) bool {
-	// Check if agent_tools is enabled
-	agentConfig := state[ToolGroupAgentTools]
-	if agentConfig == nil || !agentConfig.Enabled {
-		return false
-	}
-
-	// Only specific tools are available to agents
-	return agentAllowedTools[tool.Name]
-}
-
-// isToolAccessibleForUser checks tool access for user authentication.
-func (c *toolAccessChecker) isToolAccessibleForUser(tool *ToolDefinition, state map[string]*models.ToolGroupConfig) bool {
-	// "always" tools are always accessible
-	if tool.ToolGroup == "always" {
-		return true
-	}
-
-	// Developer mode grants access to ALL tools
-	devConfig := state[ToolGroupDeveloper]
-	if devConfig != nil && devConfig.Enabled {
-		// Check sub-options for specific tools
-		if tool.SubOption == "enableExecute" {
-			return devConfig.EnableExecute
-		}
-		return true
-	}
-
-	// Check if the tool's specific group is enabled
-	switch tool.ToolGroup {
-	case ToolGroupApprovedQueries:
-		aqConfig := state[ToolGroupApprovedQueries]
-		return aqConfig != nil && aqConfig.Enabled
-
-	case ToolGroupDeveloper:
-		// Already checked above, but if we get here, developer is not enabled
-		return false
-
-	case ToolGroupAgentTools:
-		// Agent tools group is only for agent auth, not user auth
-		return false
-	}
-
 	return false
 }
 
 // GetAccessibleTools returns all tools accessible given the current state.
+// Uses the loadout system to compute the tool list in canonical order.
 func (c *toolAccessChecker) GetAccessibleTools(state map[string]*models.ToolGroupConfig, isAgent bool) []ToolDefinition {
-	var result []ToolDefinition
+	// Get tools from loadout system (returns ToolSpec)
+	specs := ComputeEnabledToolsFromConfig(state, isAgent)
 
-	for _, tool := range ToolRegistry {
-		if c.IsToolAccessible(tool.Name, state, isAgent) {
-			result = append(result, tool)
+	// Convert ToolSpec to ToolDefinition for backward compatibility
+	result := make([]ToolDefinition, len(specs))
+	for i, spec := range specs {
+		result[i] = ToolDefinition{
+			Name:        spec.Name,
+			Description: spec.Description,
 		}
 	}
-
 	return result
 }
 

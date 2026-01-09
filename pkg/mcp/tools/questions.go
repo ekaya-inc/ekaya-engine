@@ -13,7 +13,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -28,6 +27,15 @@ type QuestionToolDeps struct {
 	Logger           *zap.Logger
 }
 
+// GetDB implements ToolAccessDeps.
+func (d *QuestionToolDeps) GetDB() *database.DB { return d.DB }
+
+// GetMCPConfigService implements ToolAccessDeps.
+func (d *QuestionToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
+
+// GetLogger implements ToolAccessDeps.
+func (d *QuestionToolDeps) GetLogger() *zap.Logger { return d.Logger }
+
 // RegisterQuestionTools registers ontology question MCP tools.
 func RegisterQuestionTools(s *server.MCPServer, deps *QuestionToolDeps) {
 	registerListOntologyQuestionsTool(s, deps)
@@ -35,52 +43,6 @@ func RegisterQuestionTools(s *server.MCPServer, deps *QuestionToolDeps) {
 	registerSkipOntologyQuestionTool(s, deps)
 	registerEscalateOntologyQuestionTool(s, deps)
 	registerDismissOntologyQuestionTool(s, deps)
-}
-
-// checkQuestionToolEnabled verifies a specific question tool is enabled for the project.
-// Uses ToolAccessChecker to ensure consistency with tool list filtering.
-func checkQuestionToolEnabled(ctx context.Context, deps *QuestionToolDeps, toolName string) (uuid.UUID, context.Context, func(), error) {
-	// Get claims from context
-	claims, ok := auth.GetClaims(ctx)
-	if !ok {
-		return uuid.Nil, nil, nil, fmt.Errorf("authentication required")
-	}
-
-	projectID, err := uuid.Parse(claims.ProjectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("invalid project ID: %w", err)
-	}
-
-	// Acquire connection with tenant scope
-	scope, err := deps.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to acquire database connection: %w", err)
-	}
-
-	// Set tenant context for the query
-	tenantCtx := database.SetTenantScope(ctx, scope)
-
-	// Check if caller is an agent (API key authentication)
-	isAgent := claims.Subject == "agent"
-
-	// Get tool groups state and check access using the unified checker
-	state, err := deps.MCPConfigService.GetToolGroupsState(tenantCtx, projectID)
-	if err != nil {
-		scope.Close()
-		deps.Logger.Error("Failed to get tool groups state",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool configuration: %w", err)
-	}
-
-	// Use the unified ToolAccessChecker for consistent access decisions
-	checker := services.NewToolAccessChecker()
-	if checker.IsToolAccessible(toolName, state, isAgent) {
-		return projectID, tenantCtx, func() { scope.Close() }, nil
-	}
-
-	scope.Close()
-	return uuid.Nil, nil, nil, fmt.Errorf("%s tool is not enabled for this project", toolName)
 }
 
 // registerListOntologyQuestionsTool adds the list_ontology_questions tool for listing questions with filters.
@@ -126,7 +88,7 @@ func registerListOntologyQuestionsTool(s *server.MCPServer, deps *QuestionToolDe
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkQuestionToolEnabled(ctx, deps, "list_ontology_questions")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "list_ontology_questions")
 		if err != nil {
 			return nil, err
 		}
@@ -341,7 +303,7 @@ func registerResolveOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		_, tenantCtx, cleanup, err := checkQuestionToolEnabled(ctx, deps, "resolve_ontology_question")
+		_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "resolve_ontology_question")
 		if err != nil {
 			return nil, err
 		}
@@ -438,7 +400,7 @@ func registerSkipOntologyQuestionTool(s *server.MCPServer, deps *QuestionToolDep
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		_, tenantCtx, cleanup, err := checkQuestionToolEnabled(ctx, deps, "skip_ontology_question")
+		_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "skip_ontology_question")
 		if err != nil {
 			return nil, err
 		}
@@ -528,7 +490,7 @@ func registerEscalateOntologyQuestionTool(s *server.MCPServer, deps *QuestionToo
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		_, tenantCtx, cleanup, err := checkQuestionToolEnabled(ctx, deps, "escalate_ontology_question")
+		_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "escalate_ontology_question")
 		if err != nil {
 			return nil, err
 		}
@@ -618,7 +580,7 @@ func registerDismissOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		_, tenantCtx, cleanup, err := checkQuestionToolEnabled(ctx, deps, "dismiss_ontology_question")
+		_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "dismiss_ontology_question")
 		if err != nil {
 			return nil, err
 		}

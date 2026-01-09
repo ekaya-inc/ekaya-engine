@@ -49,6 +49,11 @@ func (r *entityRelationshipRepository) Create(ctx context.Context, rel *models.E
 		rel.ID = uuid.New()
 	}
 
+	// Default cardinality to "unknown" if not specified
+	if rel.Cardinality == "" {
+		rel.Cardinality = "unknown"
+	}
+
 	query := `
 		INSERT INTO engine_entity_relationships (
 			id, ontology_id, source_entity_id, target_entity_id,

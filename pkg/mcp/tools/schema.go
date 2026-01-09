@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
@@ -24,7 +22,14 @@ type SchemaToolDeps struct {
 	Logger           *zap.Logger
 }
 
-const schemaToolGroup = "schema"
+// GetDB implements ToolAccessDeps.
+func (d *SchemaToolDeps) GetDB() *database.DB { return d.DB }
+
+// GetMCPConfigService implements ToolAccessDeps.
+func (d *SchemaToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
+
+// GetLogger implements ToolAccessDeps.
+func (d *SchemaToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // SchemaToolNames lists all tools in the schema group.
 var SchemaToolNames = map[string]bool{
@@ -34,52 +39,6 @@ var SchemaToolNames = map[string]bool{
 // RegisterSchemaTools registers tools for schema context with entity semantics.
 func RegisterSchemaTools(s *server.MCPServer, deps *SchemaToolDeps) {
 	registerGetSchemaContextTool(s, deps)
-}
-
-// checkSchemaToolEnabled verifies a specific schema tool is enabled for the project.
-// Uses ToolAccessChecker to ensure consistency with tool list filtering.
-func checkSchemaToolEnabled(ctx context.Context, deps *SchemaToolDeps, toolName string) (uuid.UUID, context.Context, func(), error) {
-	// Get claims from context
-	claims, ok := auth.GetClaims(ctx)
-	if !ok {
-		return uuid.Nil, nil, nil, fmt.Errorf("authentication required")
-	}
-
-	projectID, err := uuid.Parse(claims.ProjectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("invalid project ID: %w", err)
-	}
-
-	// Acquire connection with tenant scope
-	scope, err := deps.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to acquire database connection: %w", err)
-	}
-
-	// Set tenant context for the query
-	tenantCtx := database.SetTenantScope(ctx, scope)
-
-	// Check if caller is an agent (API key authentication)
-	isAgent := claims.Subject == "agent"
-
-	// Get tool groups state and check access using the unified checker
-	state, err := deps.MCPConfigService.GetToolGroupsState(tenantCtx, projectID)
-	if err != nil {
-		scope.Close()
-		deps.Logger.Error("Failed to get tool groups state",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool configuration: %w", err)
-	}
-
-	// Use the unified ToolAccessChecker for consistent access decisions
-	checker := services.NewToolAccessChecker()
-	if checker.IsToolAccessible(toolName, state, isAgent) {
-		return projectID, tenantCtx, func() { scope.Close() }, nil
-	}
-
-	scope.Close()
-	return uuid.Nil, nil, nil, fmt.Errorf("%s tool is not enabled for this project", toolName)
 }
 
 // registerGetSchemaContextTool exposes database schema with entity/role annotations for text2sql.
@@ -108,7 +67,7 @@ func registerGetSchemaContextTool(s *server.MCPServer, deps *SchemaToolDeps) {
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Check if get_schema tool is enabled using unified access checker
-		projectID, tenantCtx, cleanup, err := checkSchemaToolEnabled(ctx, deps, "get_schema")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "get_schema")
 		if err != nil {
 			return nil, err
 		}

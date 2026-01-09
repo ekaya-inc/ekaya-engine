@@ -287,12 +287,11 @@ func main() {
 
 	// Register approved queries tools (separate tool group from developer tools)
 	queryToolDeps := &mcptools.QueryToolDeps{
-		DB:                        db,
-		MCPConfigService:          mcpConfigService,
-		ProjectService:            projectService,
-		QueryService:              queryService,
-		Logger:                    logger,
-		QueryHistoryRetentionDays: cfg.QueryHistoryRetentionDays,
+		DB:               db,
+		MCPConfigService: mcpConfigService,
+		ProjectService:   projectService,
+		QueryService:     queryService,
+		Logger:           logger,
 	}
 	mcptools.RegisterApprovedQueriesTools(mcpServer.MCP(), queryToolDeps)
 

@@ -12,9 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
-	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
 )
 
 func TestRegisterApprovedQueriesTools(t *testing.T) {
@@ -1017,98 +1015,4 @@ func TestGetQueryHistory_WithNullQueryName(t *testing.T) {
 // Helper function to create float64 pointer
 func floatPtr(f float64) *float64 {
 	return &f
-}
-
-// Test_Z_Destructive_CleanupOldQueryExecutions tests the cleanup functionality.
-// Named with Z_Destructive prefix to run last (alphabetically) as it modifies the database.
-func Test_Z_Destructive_CleanupOldQueryExecutions(t *testing.T) {
-	// This test requires a real database
-	ctx := context.Background()
-	engineDB := testhelpers.GetEngineDB(t)
-
-	projectID := uuid.New()
-	queryID := uuid.New()
-	datasourceID := uuid.New()
-
-	// Set up tenant context
-	scope, err := engineDB.DB.WithTenant(ctx, projectID)
-	require.NoError(t, err)
-	defer scope.Close()
-
-	tenantCtx := database.SetTenantScope(ctx, scope)
-
-	// Create project (required for foreign key)
-	_, err = scope.Conn.Exec(tenantCtx, `
-		INSERT INTO engine_projects (id, name, created_at, updated_at)
-		VALUES ($1, 'Test Project', NOW(), NOW())
-	`, projectID)
-	require.NoError(t, err)
-
-	// Create datasource (required for query foreign key)
-	_, err = scope.Conn.Exec(tenantCtx, `
-		INSERT INTO engine_datasources (id, project_id, name, datasource_type, datasource_config, created_at, updated_at)
-		VALUES ($1, $2, 'Test Datasource', 'postgres', '{}', NOW(), NOW())
-	`, datasourceID, projectID)
-	require.NoError(t, err)
-
-	// Create query (required for query_executions foreign key)
-	_, err = scope.Conn.Exec(tenantCtx, `
-		INSERT INTO engine_queries (id, project_id, datasource_id, natural_language_prompt, sql_query, dialect, is_enabled, created_at, updated_at)
-		VALUES ($1, $2, $3, 'Test Query', 'SELECT 1', 'postgres', true, NOW(), NOW())
-	`, queryID, projectID, datasourceID)
-	require.NoError(t, err)
-
-	// Insert test execution records with different ages
-	now := "NOW()"
-	insertQuery := `
-		INSERT INTO engine_query_executions
-			(project_id, query_id, sql, row_count, execution_time_ms, executed_at, source)
-		VALUES
-			($1, $2, 'SELECT 1', 1, 10, ` + now + ` - INTERVAL '40 days', 'mcp'),  -- Should be deleted (> 30 days)
-			($1, $2, 'SELECT 2', 1, 10, ` + now + ` - INTERVAL '35 days', 'mcp'),  -- Should be deleted (> 30 days)
-			($1, $2, 'SELECT 3', 1, 10, ` + now + ` - INTERVAL '25 days', 'mcp'),  -- Should remain (< 30 days)
-			($1, $2, 'SELECT 4', 1, 10, ` + now + ` - INTERVAL '5 days', 'mcp'),   -- Should remain (< 30 days)
-			($1, $2, 'SELECT 5', 1, 10, ` + now + `, 'mcp')                         -- Should remain (current)
-	`
-
-	_, err = scope.Conn.Exec(tenantCtx, insertQuery, projectID, queryID)
-	require.NoError(t, err)
-
-	// Verify initial count
-	var initialCount int
-	err = scope.Conn.QueryRow(tenantCtx, "SELECT COUNT(*) FROM engine_query_executions WHERE project_id = $1", projectID).Scan(&initialCount)
-	require.NoError(t, err)
-	assert.Equal(t, 5, initialCount, "Should have 5 initial execution records")
-
-	// Create deps with 30-day retention
-	deps := &QueryToolDeps{
-		DB:                        engineDB.DB,
-		Logger:                    zap.NewNop(),
-		QueryHistoryRetentionDays: 30,
-	}
-
-	// Run cleanup
-	cleanupOldQueryExecutions(tenantCtx, deps, projectID)
-
-	// Verify records older than 30 days were deleted
-	var finalCount int
-	err = scope.Conn.QueryRow(tenantCtx, "SELECT COUNT(*) FROM engine_query_executions WHERE project_id = $1", projectID).Scan(&finalCount)
-	require.NoError(t, err)
-	assert.Equal(t, 3, finalCount, "Should have 3 execution records remaining (records < 30 days old)")
-
-	// Verify the remaining records are the correct ones
-	var remainingSQLs []string
-	rows, err := scope.Conn.Query(tenantCtx, "SELECT sql FROM engine_query_executions WHERE project_id = $1 ORDER BY sql", projectID)
-	require.NoError(t, err)
-	defer rows.Close()
-
-	for rows.Next() {
-		var sql string
-		err := rows.Scan(&sql)
-		require.NoError(t, err)
-		remainingSQLs = append(remainingSQLs, sql)
-	}
-
-	expectedSQLs := []string{"SELECT 3", "SELECT 4", "SELECT 5"}
-	assert.Equal(t, expectedSQLs, remainingSQLs, "Should only have records younger than 30 days")
 }

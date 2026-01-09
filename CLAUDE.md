@@ -43,8 +43,8 @@ make run
 # Build Docker image locally for testing (same as CI/CD)
 make dev-build-docker
 
-# Run tests (all via make check)
-make check          # Comprehensive: format, lint, typecheck, tests (backend + frontend)
+# Run all checks (requires Docker for integration tests)
+make check          # Format, lint, typecheck, unit + integration tests (backend + frontend)
 
 # Format code
 go fmt ./...
@@ -194,13 +194,10 @@ Tables **without** RLS (admin tables): `engine_projects`, `engine_users`
 ## Testing
 
 ```bash
-# Run all tests with summary
-make test
-
-# Run strict checks (formatting, linting, tests)
+# Run all checks including integration tests (requires Docker)
 make check
 
-# Run unit tests only (fast)
+# Run unit tests only (fast, no Docker required)
 make test-short
 ```
 

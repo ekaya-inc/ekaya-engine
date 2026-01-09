@@ -520,6 +520,130 @@ func TestOntologyRepository_GetNextVersion_Increments(t *testing.T) {
 }
 
 // ============================================================================
+// Create Deactivates Prior Ontologies Tests
+// ============================================================================
+
+func TestOntologyRepository_Create_DeactivatesPriorOntologies(t *testing.T) {
+	tc := setupOntologyTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create first ontology (version 1, active)
+	first := tc.createTestOntology(ctx, 1, true)
+	if !first.IsActive {
+		t.Fatal("first ontology should be active")
+	}
+
+	// Create second ontology (version 2, active)
+	// This should automatically deactivate the first one
+	second := &models.TieredOntology{
+		ProjectID: tc.projectID,
+		Version:   2,
+		IsActive:  true,
+		Metadata:  map[string]any{"test": true},
+	}
+	err := tc.repo.Create(ctx, second)
+	if err != nil {
+		t.Fatalf("Create second ontology failed: %v", err)
+	}
+
+	// Verify only one active ontology exists
+	activeCount := tc.countActiveOntologies(ctx)
+	if activeCount != 1 {
+		t.Errorf("expected exactly 1 active ontology, got %d", activeCount)
+	}
+
+	// Verify the active one is version 2
+	active, err := tc.repo.GetActive(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("GetActive failed: %v", err)
+	}
+	if active.Version != 2 {
+		t.Errorf("expected active version to be 2, got %d", active.Version)
+	}
+
+	// Verify first ontology is now inactive
+	firstStatus := tc.getOntologyActiveStatus(ctx, first.ID)
+	if firstStatus {
+		t.Error("first ontology should have been deactivated")
+	}
+}
+
+func TestOntologyRepository_Create_DeactivatesPriorOntologies_MultipleExisting(t *testing.T) {
+	tc := setupOntologyTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create multiple active ontologies (simulating the bug state)
+	tc.createTestOntology(ctx, 1, true)
+	tc.createTestOntology(ctx, 2, true)
+	tc.createTestOntology(ctx, 3, true)
+
+	// Count active before fix - should be 3 with current bug
+	activeBefore := tc.countActiveOntologies(ctx)
+	t.Logf("Active ontologies before new create: %d", activeBefore)
+
+	// Create new ontology - this should deactivate ALL prior ontologies
+	newOntology := &models.TieredOntology{
+		ProjectID: tc.projectID,
+		Version:   4,
+		IsActive:  true,
+		Metadata:  map[string]any{"test": true},
+	}
+	err := tc.repo.Create(ctx, newOntology)
+	if err != nil {
+		t.Fatalf("Create new ontology failed: %v", err)
+	}
+
+	// Verify only one active ontology exists
+	activeCount := tc.countActiveOntologies(ctx)
+	if activeCount != 1 {
+		t.Errorf("expected exactly 1 active ontology after create, got %d", activeCount)
+	}
+
+	// Verify the active one is the new version
+	active, err := tc.repo.GetActive(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("GetActive failed: %v", err)
+	}
+	if active.Version != 4 {
+		t.Errorf("expected active version to be 4, got %d", active.Version)
+	}
+}
+
+// countActiveOntologies counts ontologies with is_active=true for the test project.
+func (tc *ontologyTestContext) countActiveOntologies(ctx context.Context) int {
+	tc.t.Helper()
+	scope, _ := database.GetTenantScope(ctx)
+	var count int
+	err := scope.Conn.QueryRow(ctx,
+		"SELECT COUNT(*) FROM engine_ontologies WHERE project_id = $1 AND is_active = true",
+		tc.projectID).Scan(&count)
+	if err != nil {
+		tc.t.Fatalf("failed to count active ontologies: %v", err)
+	}
+	return count
+}
+
+// getOntologyActiveStatus returns the is_active status for a specific ontology.
+func (tc *ontologyTestContext) getOntologyActiveStatus(ctx context.Context, ontologyID uuid.UUID) bool {
+	tc.t.Helper()
+	scope, _ := database.GetTenantScope(ctx)
+	var isActive bool
+	err := scope.Conn.QueryRow(ctx,
+		"SELECT is_active FROM engine_ontologies WHERE id = $1",
+		ontologyID).Scan(&isActive)
+	if err != nil {
+		tc.t.Fatalf("failed to get ontology status: %v", err)
+	}
+	return isActive
+}
+
+// ============================================================================
 // No Tenant Scope Tests (RLS Enforcement)
 // ============================================================================
 

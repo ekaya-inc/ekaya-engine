@@ -37,7 +37,7 @@ type EntityRelationship struct {
 	DetectionMethod    string    `json:"detection_method"`      // "foreign_key", "pk_match", or "manual"
 	Confidence         float64   `json:"confidence"`            // 1.0 for FK, 0.7-0.95 for pk_match
 	Status             string    `json:"status"`                // "confirmed", "pending", "rejected"
-	Cardinality        string    `json:"cardinality"`           // "1:1", "1:N", "N:1", "N:N", "unknown"
+	Cardinality        string    `json:"cardinality"`           // "1:1", "1:N", "N:1", "N:M", "unknown"
 	Description        *string   `json:"description,omitempty"` // Optional description of the relationship
 	Association        *string   `json:"association,omitempty"` // Semantic association for this direction (e.g., "placed_by", "contains")
 	CreatedAt          time.Time `json:"created_at"`
