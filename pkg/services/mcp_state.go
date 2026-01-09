@@ -152,7 +152,6 @@ func (v *mcpStateValidator) applyUpdate(groupName string, current, update *model
 	current.CustomTools = update.CustomTools
 
 	// Legacy sub-options (backward compatibility)
-	current.EnableExecute = update.EnableExecute
 	current.ForceMode = update.ForceMode
 	current.AllowClientSuggestions = update.AllowClientSuggestions
 }
@@ -182,7 +181,6 @@ func (v *mcpStateValidator) normalizeState(state map[string]*models.ToolGroupCon
 			config.CustomTools = nil
 
 			// Legacy sub-options
-			config.EnableExecute = false
 			config.ForceMode = false
 			config.AllowClientSuggestions = false
 		}
@@ -217,7 +215,6 @@ func (v *mcpStateValidator) deepCopy(state map[string]*models.ToolGroupConfig) m
 				CustomTools:              customToolsCopy,
 
 				// Legacy sub-options
-				EnableExecute:          v.EnableExecute,
 				ForceMode:              v.ForceMode,
 				AllowClientSuggestions: v.AllowClientSuggestions,
 			}

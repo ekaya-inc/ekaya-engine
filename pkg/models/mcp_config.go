@@ -25,7 +25,6 @@ type ToolGroupConfig struct {
 	CustomTools []string `json:"customTools,omitempty"`
 
 	// Legacy fields (kept for backward compatibility during migration)
-	EnableExecute          bool `json:"enableExecute,omitempty"`
 	ForceMode              bool `json:"forceMode,omitempty"`
 	AllowClientSuggestions bool `json:"allowClientSuggestions,omitempty"`
 }
