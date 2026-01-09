@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	_ "github.com/microsoft/go-mssqldb"         // SQL Server driver
+	mssql "github.com/microsoft/go-mssqldb"
 	_ "github.com/microsoft/go-mssqldb/azuread" // Azure AD support
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
@@ -90,7 +90,6 @@ func NewAdapter(ctx context.Context, cfg *Config, connMgr *datasource.Connection
 		if err := extractAndSetAzureToken(ctx, cfg); err != nil {
 			return nil, err
 		}
-		cfg.AzureAccessToken = azureToken
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -251,11 +250,12 @@ func createServicePrincipalConnection(cfg *Config) (*sql.DB, error) {
 
 // createUserDelegationConnection creates a connection using an Azure AD access token.
 // The token is extracted from context by NewAdapter() and stored in cfg.AzureAccessToken.
-// Uses sqlserver driver with fedauth=ActiveDirectoryAccessToken and token as password.
+// Ported from C# pattern: dbConnection.AccessToken = token
+// Uses a custom connector that sets the access token on the connection.
 func createUserDelegationConnection(cfg *Config) (*sql.DB, error) {
+	// Build connection string without authentication
 	query := url.Values{}
 	query.Add("database", cfg.Database)
-	query.Add("fedauth", "ActiveDirectoryAccessToken")
 
 	if cfg.Encrypt {
 		query.Add("encrypt", "true")
@@ -269,25 +269,30 @@ func createUserDelegationConnection(cfg *Config) (*sql.DB, error) {
 		query.Add("connection timeout", fmt.Sprintf("%d", cfg.ConnectionTimeout))
 	}
 
-	// For ActiveDirectoryAccessToken, pass token as password parameter
-	// The sqlserver driver (not azuresql) supports this fedauth type
-	query.Add("password", cfg.AzureAccessToken)
-
 	connStr := fmt.Sprintf("sqlserver://%s:%d?%s",
 		cfg.Host,
 		cfg.Port,
 		query.Encode(),
 	)
 
-	db, err := sql.Open("sqlserver", connStr)
+	// Create connector with access token
+	connector, err := mssql.NewAccessTokenConnector(connStr, func() (string, error) {
+		return cfg.AzureAccessToken, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("open user delegation connection: %w", err)
+		return nil, fmt.Errorf("create access token connector: %w", err)
 	}
 
+	// Open database using the connector
+	db := sql.OpenDB(connector)
 	return db, nil
 }
 
 // TestConnection verifies the database is reachable with valid credentials.
+// It checks:
+// 1. Server connectivity (ping)
+// 2. Database access (simple query)
+// 3. Correct database name (to prevent connecting to wrong/default database)
 func (a *Adapter) TestConnection(ctx context.Context) error {
 	if err := a.db.PingContext(ctx); err != nil {
 		return fmt.Errorf("ping failed: %w", err)
@@ -295,9 +300,20 @@ func (a *Adapter) TestConnection(ctx context.Context) error {
 
 	// Run a simple query to ensure we have database access
 	var result int
-	err := a.db.QueryRowContext(ctx, "SELECT 1").Scan(&result)
-	if err != nil {
+	if err := a.db.QueryRowContext(ctx, "SELECT 1").Scan(&result); err != nil {
 		return fmt.Errorf("test query failed: %w", err)
+	}
+
+	// Verify we're connected to the correct database
+	// SQL Server might connect to 'master' or another database if the specified one doesn't exist
+	var currentDB string
+	if err := a.db.QueryRowContext(ctx, "SELECT DB_NAME()").Scan(&currentDB); err != nil {
+		return fmt.Errorf("failed to get current database name: %w", err)
+	}
+
+	expectedDB := a.config.Database
+	if currentDB != expectedDB {
+		return fmt.Errorf("connected to wrong database: expected %q but connected to %q", expectedDB, currentDB)
 	}
 
 	return nil

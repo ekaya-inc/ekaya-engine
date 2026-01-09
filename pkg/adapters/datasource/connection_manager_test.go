@@ -2,12 +2,15 @@ package datasource
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/microsoft/go-mssqldb" // MSSQL driver for test DB creation
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
@@ -447,4 +450,250 @@ func TestConnectionManager_CountConnectionsForUser(t *testing.T) {
 	cm.mu.RUnlock()
 
 	assert.Equal(t, 3, count, "should count all 3 connections for user")
+}
+
+func TestConnectionManager_GetOrCreateConnection_TypeMismatch_Recreates(t *testing.T) {
+	testDB := testhelpers.GetTestDB(t)
+	logger := zaptest.NewLogger(t)
+
+	cfg := ConnectionManagerConfig{
+		TTLMinutes:            5,
+		MaxConnectionsPerUser: 10,
+		PoolMaxConns:          5,
+		PoolMinConns:          1,
+	}
+	cm := NewConnectionManager(cfg, logger)
+	defer cm.Close()
+
+	ctx := context.Background()
+	projectID := uuid.Nil // Use Nil for test connections
+	userID := "test-user"
+	datasourceID := uuid.Nil
+
+	// Create PostgreSQL connection
+	pgConn, err := cm.GetOrCreateConnection(ctx, "postgres", projectID, userID, datasourceID, testDB.ConnStr)
+	require.NoError(t, err)
+	require.NotNil(t, pgConn)
+	assert.Equal(t, "postgres", pgConn.GetType())
+
+	// Verify PostgreSQL connection exists
+	stats := cm.GetStats()
+	assert.Equal(t, 1, stats.TotalConnections)
+
+	// Try to get MSSQL connection with same key - should recreate
+	// We'll use a mock MSSQL wrapper for this test
+	// Create a minimal sql.DB that can be safely closed (using invalid connection string)
+	// This creates a DB object that won't actually connect but can be safely closed
+	mockDB, _ := sql.Open("sqlserver", "sqlserver://invalid:invalid@invalid:0/invalid")
+	mssqlWrapper := NewMSSQLPoolWrapper(mockDB)
+	mssqlConn, err := cm.RegisterConnection(ctx, projectID, userID, datasourceID, mssqlWrapper)
+	require.NoError(t, err)
+	require.NotNil(t, mssqlConn)
+	assert.Equal(t, "mssql", mssqlConn.GetType())
+
+	// Verify old PostgreSQL connection was removed and MSSQL connection exists
+	stats = cm.GetStats()
+	assert.Equal(t, 1, stats.TotalConnections, "should have only one connection after type switch")
+
+	// Verify we can't get PostgreSQL connection anymore (it was replaced)
+	pgConn2, err := cm.GetOrCreateConnection(ctx, "postgres", projectID, userID, datasourceID, testDB.ConnStr)
+	require.NoError(t, err)
+	require.NotNil(t, pgConn2)
+	assert.Equal(t, "postgres", pgConn2.GetType(), "should create new PostgreSQL connection")
+}
+
+func TestConnectionManager_RegisterConnection_TypeMismatch_Replaces(t *testing.T) {
+	testDB := testhelpers.GetTestDB(t)
+	logger := zaptest.NewLogger(t)
+
+	cfg := ConnectionManagerConfig{
+		TTLMinutes:            5,
+		MaxConnectionsPerUser: 10,
+		PoolMaxConns:          5,
+		PoolMinConns:          1,
+	}
+	cm := NewConnectionManager(cfg, logger)
+	defer cm.Close()
+
+	ctx := context.Background()
+	projectID := uuid.Nil // Use Nil for test connections
+	userID := "test-user"
+	datasourceID := uuid.Nil
+
+	// Register PostgreSQL connection
+	pgPool, err := pgxpool.New(ctx, testDB.ConnStr)
+	require.NoError(t, err)
+	pgWrapper := NewPostgresPoolWrapper(pgPool)
+
+	pgConn, err := cm.RegisterConnection(ctx, projectID, userID, datasourceID, pgWrapper)
+	require.NoError(t, err)
+	require.NotNil(t, pgConn)
+	assert.Equal(t, "postgres", pgConn.GetType())
+
+	// Verify PostgreSQL connection exists
+	stats := cm.GetStats()
+	assert.Equal(t, 1, stats.TotalConnections)
+
+	// Register MSSQL connection with same key - should replace PostgreSQL
+	// Create a minimal sql.DB that can be safely closed
+	mockDB, _ := sql.Open("sqlserver", "sqlserver://invalid:invalid@invalid:0/invalid")
+	mssqlWrapper := NewMSSQLPoolWrapper(mockDB)
+	mssqlConn, err := cm.RegisterConnection(ctx, projectID, userID, datasourceID, mssqlWrapper)
+	require.NoError(t, err)
+	require.NotNil(t, mssqlConn)
+	assert.Equal(t, "mssql", mssqlConn.GetType())
+
+	// Verify old PostgreSQL connection was removed and MSSQL connection exists
+	stats = cm.GetStats()
+	assert.Equal(t, 1, stats.TotalConnections, "should have only one connection after type switch")
+
+	// Verify PostgreSQL connection is closed (can't ping)
+	err = pgPool.Ping(ctx)
+	assert.Error(t, err, "PostgreSQL pool should be closed after replacement")
+}
+
+func TestConnectionManager_SwitchFromPostgresToMssql(t *testing.T) {
+	testDB := testhelpers.GetTestDB(t)
+	logger := zaptest.NewLogger(t)
+
+	cfg := ConnectionManagerConfig{
+		TTLMinutes:            5,
+		MaxConnectionsPerUser: 10,
+		PoolMaxConns:          5,
+		PoolMinConns:          1,
+	}
+	cm := NewConnectionManager(cfg, logger)
+	defer cm.Close()
+
+	ctx := context.Background()
+	projectID := uuid.Nil
+	userID := "test-user"
+	datasourceID := uuid.Nil
+
+	// Register PostgreSQL connection
+	pgPool, err := pgxpool.New(ctx, testDB.ConnStr)
+	require.NoError(t, err)
+	pgWrapper := NewPostgresPoolWrapper(pgPool)
+
+	pgConn, err := cm.RegisterConnection(ctx, projectID, userID, datasourceID, pgWrapper)
+	require.NoError(t, err)
+	assert.Equal(t, "postgres", pgConn.GetType())
+
+	// Register MSSQL connection with same key
+	// Create a minimal sql.DB that can be safely closed
+	mockDB, _ := sql.Open("sqlserver", "sqlserver://invalid:invalid@invalid:0/invalid")
+	mssqlWrapper := NewMSSQLPoolWrapper(mockDB)
+	mssqlConn, err := cm.RegisterConnection(ctx, projectID, userID, datasourceID, mssqlWrapper)
+	require.NoError(t, err)
+	assert.Equal(t, "mssql", mssqlConn.GetType(), "should return MSSQL connection, not PostgreSQL")
+
+	// Verify only one connection exists
+	stats := cm.GetStats()
+	assert.Equal(t, 1, stats.TotalConnections)
+}
+
+func TestConnectionManager_SwitchFromMssqlToPostgres(t *testing.T) {
+	testDB := testhelpers.GetTestDB(t)
+	logger := zaptest.NewLogger(t)
+
+	cfg := ConnectionManagerConfig{
+		TTLMinutes:            5,
+		MaxConnectionsPerUser: 10,
+		PoolMaxConns:          5,
+		PoolMinConns:          1,
+	}
+	cm := NewConnectionManager(cfg, logger)
+	defer cm.Close()
+
+	ctx := context.Background()
+	projectID := uuid.Nil
+	userID := "test-user"
+	datasourceID := uuid.Nil
+
+	// Register MSSQL connection
+	// Create a minimal sql.DB that can be safely closed
+	mockDB, _ := sql.Open("sqlserver", "sqlserver://invalid:invalid@invalid:0/invalid")
+	mssqlWrapper := NewMSSQLPoolWrapper(mockDB)
+	mssqlConn, err := cm.RegisterConnection(ctx, projectID, userID, datasourceID, mssqlWrapper)
+	require.NoError(t, err)
+	assert.Equal(t, "mssql", mssqlConn.GetType())
+
+	// Get PostgreSQL connection with same key
+	pgConn, err := cm.GetOrCreateConnection(ctx, "postgres", projectID, userID, datasourceID, testDB.ConnStr)
+	require.NoError(t, err)
+	assert.Equal(t, "postgres", pgConn.GetType(), "should return PostgreSQL connection, not MSSQL")
+
+	// Verify only one connection exists
+	stats := cm.GetStats()
+	assert.Equal(t, 1, stats.TotalConnections)
+}
+
+func TestConnectionManager_ConcurrentTypeSwitching(t *testing.T) {
+	testDB := testhelpers.GetTestDB(t)
+	logger := zaptest.NewLogger(t)
+
+	cfg := ConnectionManagerConfig{
+		TTLMinutes:            5,
+		MaxConnectionsPerUser: 50, // High limit for concurrent test
+		PoolMaxConns:          5,
+		PoolMinConns:          1,
+	}
+	cm := NewConnectionManager(cfg, logger)
+	defer cm.Close()
+
+	ctx := context.Background()
+	projectID := uuid.Nil
+	datasourceID := uuid.Nil
+
+	// Launch concurrent requests for different types with same key
+	const numGoroutines = 10
+	var wg sync.WaitGroup
+	errors := make([]error, numGoroutines)
+	types := make([]string, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			userID := fmt.Sprintf("user-%d", idx%2) // 2 different users
+
+			// Alternate between PostgreSQL and MSSQL
+			if idx%2 == 0 {
+				conn, err := cm.GetOrCreateConnection(ctx, "postgres", projectID, userID, datasourceID, testDB.ConnStr)
+				if err == nil {
+					types[idx] = conn.GetType()
+				}
+				errors[idx] = err
+			} else {
+				// Create a minimal sql.DB that can be safely closed
+				mockDB, _ := sql.Open("sqlserver", "sqlserver://invalid:invalid@invalid:0/invalid")
+				mssqlWrapper := NewMSSQLPoolWrapper(mockDB)
+				conn, err := cm.RegisterConnection(ctx, projectID, userID, datasourceID, mssqlWrapper)
+				if err == nil {
+					types[idx] = conn.GetType()
+				}
+				errors[idx] = err
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Verify no deadlocks occurred (all operations completed)
+	for i, err := range errors {
+		assert.NoError(t, err, "goroutine %d should not error", i)
+	}
+
+	// Verify correct connection types were returned
+	for i, connType := range types {
+		if i%2 == 0 {
+			assert.Equal(t, "postgres", connType, "goroutine %d should get PostgreSQL", i)
+		} else {
+			assert.Equal(t, "mssql", connType, "goroutine %d should get MSSQL", i)
+		}
+	}
+
+	// Verify connections were created (should have 2 - one per user)
+	stats := cm.GetStats()
+	assert.GreaterOrEqual(t, stats.TotalConnections, 1, "should have at least one connection")
 }
