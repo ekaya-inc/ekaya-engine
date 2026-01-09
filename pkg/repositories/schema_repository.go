@@ -1357,7 +1357,8 @@ func (r *schemaRepository) GetJoinableColumns(ctx context.Context, projectID, ta
 		       distinct_count, null_count, min_length, max_length,
 		       business_name, description, metadata,
 		       created_at, updated_at,
-		       row_count, non_null_count, is_joinable, joinability_reason, stats_updated_at
+		       row_count, non_null_count, is_joinable, joinability_reason, stats_updated_at,
+		       sample_values
 		FROM engine_schema_columns
 		WHERE project_id = $1
 		  AND schema_table_id = $2
@@ -1427,7 +1428,8 @@ func (r *schemaRepository) GetPrimaryKeyColumns(ctx context.Context, projectID, 
 		       c.distinct_count, c.null_count, c.min_length, c.max_length,
 		       c.business_name, c.description, c.metadata,
 		       c.created_at, c.updated_at,
-		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at
+		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at,
+		       c.sample_values
 		FROM engine_schema_columns c
 		JOIN engine_schema_tables t ON c.schema_table_id = t.id
 		WHERE c.project_id = $1
@@ -1472,7 +1474,8 @@ func (r *schemaRepository) GetNonPKColumnsByExactType(ctx context.Context, proje
 		       c.distinct_count, c.null_count, c.min_length, c.max_length,
 		       c.business_name, c.description, c.metadata,
 		       c.created_at, c.updated_at,
-		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at
+		       c.row_count, c.non_null_count, c.is_joinable, c.joinability_reason, c.stats_updated_at,
+		       c.sample_values
 		FROM engine_schema_columns c
 		JOIN engine_schema_tables t ON c.schema_table_id = t.id
 		WHERE c.project_id = $1

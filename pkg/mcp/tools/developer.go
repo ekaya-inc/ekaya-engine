@@ -31,7 +31,14 @@ type MCPToolDeps struct {
 	Logger            *zap.Logger
 }
 
-const developerToolGroup = "developer"
+// GetDB implements ToolAccessDeps.
+func (d *MCPToolDeps) GetDB() *database.DB { return d.DB }
+
+// GetMCPConfigService implements ToolAccessDeps.
+func (d *MCPToolDeps) GetMCPConfigService() services.MCPConfigService { return d.MCPConfigService }
+
+// GetLogger implements ToolAccessDeps.
+func (d *MCPToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // getOptionalString extracts an optional string argument from the request.
 func getOptionalString(req mcp.CallToolRequest, key string) string {
@@ -123,11 +130,11 @@ func buildOntologyToolMap() map[string]bool {
 	}
 }
 
-// buildAgentToolMap returns tools available to agents (from services.agentAllowedTools).
+// buildAgentToolMap returns tools available to agents (Limited Query loadout).
+// Agents get only approved query tools - echo is a developer testing tool.
 // Note: health is handled separately in filterAgentTools.
 func buildAgentToolMap() map[string]bool {
 	return map[string]bool{
-		"echo":                   true,
 		"list_approved_queries":  true,
 		"execute_approved_query": true,
 	}
@@ -323,53 +330,6 @@ func filterOutExecuteTool(tools []mcp.Tool) []mcp.Tool {
 	return filtered
 }
 
-// checkToolEnabled verifies the caller is authorized to use a specific tool.
-// Uses ToolAccessChecker to ensure consistency with tool list filtering.
-// Returns the project ID and a tenant-scoped context if authorized, or an error if not.
-func checkToolEnabled(ctx context.Context, deps *MCPToolDeps, toolName string) (uuid.UUID, context.Context, func(), error) {
-	// Get claims from context
-	claims, ok := auth.GetClaims(ctx)
-	if !ok {
-		return uuid.Nil, nil, nil, fmt.Errorf("authentication required")
-	}
-
-	projectID, err := uuid.Parse(claims.ProjectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("invalid project ID: %w", err)
-	}
-
-	// Acquire connection with tenant scope
-	scope, err := deps.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to acquire database connection: %w", err)
-	}
-
-	// Set tenant context for the query
-	tenantCtx := database.SetTenantScope(ctx, scope)
-
-	// Check if caller is an agent (API key authentication)
-	isAgent := claims.Subject == "agent"
-
-	// Get tool groups state and check access using the unified checker
-	state, err := deps.MCPConfigService.GetToolGroupsState(tenantCtx, projectID)
-	if err != nil {
-		scope.Close()
-		deps.Logger.Error("Failed to get tool groups state",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool group configuration: %w", err)
-	}
-
-	// Use the unified ToolAccessChecker for consistent access decisions
-	checker := services.NewToolAccessChecker()
-	if checker.IsToolAccessible(toolName, state, isAgent) {
-		return projectID, tenantCtx, func() { scope.Close() }, nil
-	}
-
-	scope.Close()
-	return uuid.Nil, nil, nil, fmt.Errorf("%s tool is not enabled for this project", toolName)
-}
-
 // registerEchoTool adds a simple echo tool for testing the developer tool group.
 // This tool verifies that authentication and tool group configuration work correctly.
 func registerEchoTool(s *server.MCPServer, deps *MCPToolDeps) {
@@ -389,7 +349,7 @@ func registerEchoTool(s *server.MCPServer, deps *MCPToolDeps) {
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Check if echo tool is enabled using unified access checker
-		_, _, cleanup, err := checkToolEnabled(ctx, deps, "echo")
+		_, _, cleanup, err := AcquireToolAccess(ctx, deps, "echo")
 		if err != nil {
 			return nil, err
 		}
@@ -451,7 +411,7 @@ func registerQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkToolEnabled(ctx, deps, "query")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "query")
 		if err != nil {
 			return nil, err
 		}
@@ -555,7 +515,7 @@ func registerSampleTool(s *server.MCPServer, deps *MCPToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkToolEnabled(ctx, deps, "sample")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "sample")
 		if err != nil {
 			return nil, err
 		}
@@ -657,7 +617,7 @@ func registerExecuteTool(s *server.MCPServer, deps *MCPToolDeps) {
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Check if execute tool is enabled using unified access checker
-		projectID, tenantCtx, cleanup, err := checkToolEnabled(ctx, deps, "execute")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "execute")
 		if err != nil {
 			return nil, err
 		}
@@ -758,7 +718,7 @@ func registerValidateTool(s *server.MCPServer, deps *MCPToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkToolEnabled(ctx, deps, "validate")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "validate")
 		if err != nil {
 			return nil, err
 		}
@@ -833,7 +793,7 @@ func registerExplainQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkToolEnabled(ctx, deps, "explain_query")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "explain_query")
 		if err != nil {
 			return nil, err
 		}

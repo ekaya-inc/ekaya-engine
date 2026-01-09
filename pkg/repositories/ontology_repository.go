@@ -79,18 +79,39 @@ func (r *ontologyRepository) Create(ctx context.Context, ontology *models.Tiered
 
 	ontology.UpdatedAt = ontology.CreatedAt
 
+	// Use transaction to atomically deactivate prior ontologies and create new one
+	tx, err := scope.Conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback on defer is best-effort
+
+	// Deactivate all existing active ontologies for this project (if creating an active one)
+	if ontology.IsActive {
+		_, err = tx.Exec(ctx,
+			"UPDATE engine_ontologies SET is_active = false, updated_at = $2 WHERE project_id = $1 AND is_active = true",
+			ontology.ProjectID, ontology.UpdatedAt)
+		if err != nil {
+			return fmt.Errorf("failed to deactivate prior ontologies: %w", err)
+		}
+	}
+
 	query := `
 		INSERT INTO engine_ontologies (
 			id, project_id, version, is_active, domain_summary,
 			entity_summaries, column_details, metadata, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
 
-	_, err = scope.Conn.Exec(ctx, query,
+	_, err = tx.Exec(ctx, query,
 		ontology.ID, ontology.ProjectID, ontology.Version, ontology.IsActive,
 		domainJSON, entitiesJSON, columnsJSON, metadataJSON, ontology.CreatedAt, ontology.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create ontology: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return nil

@@ -75,6 +75,12 @@ export default function MCPToolGroup({
                     <span>{subOption.warning}</span>
                   </div>
                 )}
+                {subOption.tip && (
+                  <div className="mt-2 flex items-start gap-2 rounded-md bg-brand-purple/10 p-3 text-sm text-brand-purple dark:bg-brand-purple/20">
+                    <Lightbulb className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div>{subOption.tip}</div>
+                  </div>
+                )}
               </div>
             ))}
             {enabled && children}

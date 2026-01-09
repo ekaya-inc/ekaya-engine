@@ -101,7 +101,7 @@ func TestRegisterContextTools(t *testing.T) {
 	assert.True(t, toolNames["get_context"], "get_context tool should be registered")
 }
 
-// TestCheckContextToolsEnabled tests the checkContextToolEnabled function.
+// TestCheckContextToolsEnabled tests the AcquireToolAccess function for context tools.
 // These tests validate error paths that don't require database access.
 func TestCheckContextToolsEnabled(t *testing.T) {
 	tests := []struct {
@@ -144,8 +144,8 @@ func TestCheckContextToolsEnabled(t *testing.T) {
 				Logger: zap.NewNop(),
 			}
 
-			// Call checkContextToolEnabled
-			projectID, tenantCtx, cleanup, err := checkContextToolEnabled(ctx, deps, "get_context")
+			// Call AcquireToolAccess
+			projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "get_context")
 
 			// Verify results
 			require.Error(t, err)

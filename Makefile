@@ -176,6 +176,17 @@ check: ## Run strict quality checks (fails on any issue)
 		echo "$(GREEN)✓ All frontend tests passed$(NC)"; \
 	fi
 	@echo ""
+	@echo "$(YELLOW)Step 8: Running integration tests (requires Docker)...$(NC)"
+	@TEST_OUTPUT=$$(go test -tags="integration,$(BUILD_TAGS)" ./... -timeout 5m 2>&1); \
+	TEST_EXIT_CODE=$$?; \
+	if [ $$TEST_EXIT_CODE -ne 0 ]; then \
+		echo "$(RED)❌ Integration tests failed:$(NC)"; \
+		echo "$$TEST_OUTPUT"; \
+		exit 1; \
+	else \
+		echo "$(GREEN)✓ All integration tests passed$(NC)"; \
+	fi
+	@echo ""
 	@echo "$(GREEN)✅ All strict checks passed!$(NC)"
 
 run: ## Build website and run the server (no watch)

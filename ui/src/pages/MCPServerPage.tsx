@@ -10,8 +10,8 @@ import { Button } from '../components/ui/Button';
 import {
   TOOL_GROUP_IDS,
   TOOL_GROUP_METADATA,
+  getToolOrder,
 } from '../constants/mcpToolMetadata';
-import { useDatasourceConnection } from '../contexts/DatasourceConnectionContext';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
 import type { MCPConfigResponse, SubOptionInfo, ToolGroupState } from '../types';
@@ -20,6 +20,14 @@ import type { MCPConfigResponse, SubOptionInfo, ToolGroupState } from '../types'
 const getSubOptionEnabled = (state: ToolGroupState | undefined, subOptionName: string): boolean => {
   if (!state) return false;
   switch (subOptionName) {
+    // New sub-options
+    case 'allowOntologyMaintenance':
+      return state.allowOntologyMaintenance ?? false;
+    case 'addQueryTools':
+      return state.addQueryTools ?? false;
+    case 'addOntologyQuestions':
+      return state.addOntologyQuestions ?? false;
+    // Legacy sub-options
     case 'enableExecute':
       return state.enableExecute ?? false;
     case 'forceMode':
@@ -31,30 +39,36 @@ const getSubOptionEnabled = (state: ToolGroupState | undefined, subOptionName: s
   }
 };
 
-const SHOW_AI_DATA_LIAISON = false;
-
 const MCPServerPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
   const { toast } = useToast();
-  const { selectedDatasource } = useDatasourceConnection();
 
   const [config, setConfig] = useState<MCPConfigResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
-  const [enabledQueryCount, setEnabledQueryCount] = useState(0);
-  const [secureAdhocEnabled, setSecureAdhocEnabled] = useState(false);
   const [agentApiKey, setAgentApiKey] = useState<string>('');
 
-  // Read approved_queries config from backend (now flat state structure)
+  // Read tool group configs from backend
   const approvedQueriesState = config?.toolGroups[TOOL_GROUP_IDS.APPROVED_QUERIES];
   const isApprovedQueriesEnabled = approvedQueriesState?.enabled ?? false;
-  const forceMode = approvedQueriesState?.forceMode ?? false;
-  const allowClientSuggestions = approvedQueriesState?.allowClientSuggestions ?? false;
+  const allowOntologyMaintenance = approvedQueriesState?.allowOntologyMaintenance ?? false;
+
+  const developerState = config?.toolGroups[TOOL_GROUP_IDS.DEVELOPER];
+  const isDeveloperEnabled = developerState?.enabled ?? false;
+  const addQueryTools = developerState?.addQueryTools ?? false;
+  const addOntologyQuestions = developerState?.addOntologyQuestions ?? false;
+
   const isAgentToolsEnabled = config?.toolGroups[TOOL_GROUP_IDS.AGENT_TOOLS]?.enabled ?? false;
 
-  // Get metadata for approved_queries
+  // Get metadata for tool groups
   const approvedQueriesMetadata = TOOL_GROUP_METADATA[TOOL_GROUP_IDS.APPROVED_QUERIES];
+  const developerMetadata = TOOL_GROUP_METADATA[TOOL_GROUP_IDS.DEVELOPER];
+
+  // Sort enabled tools by canonical order
+  const sortedEnabledTools = config?.enabledTools
+    ? [...config.enabledTools].sort((a, b) => getToolOrder(a.name) - getToolOrder(b.name))
+    : [];
 
   const fetchConfig = useCallback(async () => {
     if (!pid) return;
@@ -83,25 +97,6 @@ const MCPServerPage = () => {
     fetchConfig();
   }, [fetchConfig]);
 
-  // Fetch enabled query count when datasource is available
-  useEffect(() => {
-    const fetchEnabledQueryCount = async () => {
-      if (!pid || !selectedDatasource?.datasourceId) return;
-
-      try {
-        const response = await engineApi.listQueries(pid, selectedDatasource.datasourceId);
-        if (response.success && response.data) {
-          const count = response.data.queries.filter(q => q.is_enabled).length;
-          setEnabledQueryCount(count);
-        }
-      } catch (error) {
-        console.error('Failed to fetch enabled query count:', error);
-      }
-    };
-
-    fetchEnabledQueryCount();
-  }, [pid, selectedDatasource?.datasourceId]);
-
   // Fetch agent API key when Agent Tools is enabled (for Agent Setup Example display)
   useEffect(() => {
     const fetchAgentKey = async () => {
@@ -123,38 +118,57 @@ const MCPServerPage = () => {
   const handleToggleApprovedQueriesSubOption = async (subOptionName: string, enabled: boolean) => {
     if (!pid || !config) return;
 
-    // Handle UI-only secureAdhocRequests option
-    if (subOptionName === 'secureAdhocRequests') {
-      setSecureAdhocEnabled(enabled);
-      toast({
-        title: 'Success',
-        description: `Secure Ad-Hoc Requests ${enabled ? 'enabled' : 'disabled'}`,
-      });
-      return;
-    }
-
-    // Special handling for FORCE mode
-    if (subOptionName === 'forceMode' && enabled && config.toolGroups[TOOL_GROUP_IDS.DEVELOPER]?.enabled) {
-      // Auto-disable developer tools when enabling FORCE mode
-      await handleToggleToolGroup(TOOL_GROUP_IDS.DEVELOPER, false);
-    }
-
     try {
       setUpdating(true);
       const response = await engineApi.updateMCPConfig(pid, {
         toolGroups: {
           [TOOL_GROUP_IDS.APPROVED_QUERIES]: {
             enabled: isApprovedQueriesEnabled,
-            ...(subOptionName === 'forceMode' ? { forceMode: enabled } : { forceMode }),
-            ...(subOptionName === 'allowClientSuggestions' ? { allowClientSuggestions: enabled } : { allowClientSuggestions }),
+            ...(subOptionName === 'allowOntologyMaintenance' ? { allowOntologyMaintenance: enabled } : { allowOntologyMaintenance }),
           },
         },
       });
 
       if (response.success && response.data) {
         setConfig(response.data);
-        // Get sub-option name from frontend metadata
         const subOptionMeta = approvedQueriesMetadata?.subOptions?.[subOptionName];
+        toast({
+          title: 'Success',
+          description: `${subOptionMeta?.name ?? subOptionName} ${enabled ? 'enabled' : 'disabled'}`,
+        });
+      } else {
+        throw new Error(response.error ?? 'Failed to update configuration');
+      }
+    } catch (error) {
+      console.error('Failed to update MCP config:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to update configuration',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleToggleDeveloperSubOption = async (subOptionName: string, enabled: boolean) => {
+    if (!pid || !config) return;
+
+    try {
+      setUpdating(true);
+      const response = await engineApi.updateMCPConfig(pid, {
+        toolGroups: {
+          [TOOL_GROUP_IDS.DEVELOPER]: {
+            enabled: isDeveloperEnabled,
+            ...(subOptionName === 'addQueryTools' ? { addQueryTools: enabled } : { addQueryTools }),
+            ...(subOptionName === 'addOntologyQuestions' ? { addOntologyQuestions: enabled } : { addOntologyQuestions }),
+          },
+        },
+      });
+
+      if (response.success && response.data) {
+        setConfig(response.data);
+        const subOptionMeta = developerMetadata?.subOptions?.[subOptionName];
         toast({
           title: 'Success',
           description: `${subOptionMeta?.name ?? subOptionName} ${enabled ? 'enabled' : 'disabled'}`,
@@ -177,23 +191,13 @@ const MCPServerPage = () => {
   const handleToggleApprovedQueries = async (enabled: boolean) => {
     if (!pid || !config) return;
 
-    if (enabled && enabledQueryCount === 0) {
-      toast({
-        title: 'No enabled queries',
-        description: 'Create and enable queries first.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
     try {
       setUpdating(true);
       const response = await engineApi.updateMCPConfig(pid, {
         toolGroups: {
           [TOOL_GROUP_IDS.APPROVED_QUERIES]: {
             enabled,
-            forceMode,
-            allowClientSuggestions,
+            allowOntologyMaintenance,
           },
         },
       });
@@ -277,38 +281,38 @@ const MCPServerPage = () => {
     }
   };
 
-  // Note: handleToggleSubOption is no longer used for developer tools (enableExecute removed).
-  // It remains for approved_queries sub-options which are handled by handleToggleApprovedQueriesSubOption.
-
   // Build sub-options for approved_queries by merging state with frontend metadata
   const buildApprovedQueriesSubOptions = (): Record<string, SubOptionInfo> | undefined => {
     if (!approvedQueriesMetadata?.subOptions) return undefined;
 
-    const subOptions: Record<string, SubOptionInfo> = {
-      // UI-only option (not persisted to backend)
-      secureAdhocRequests: {
-        enabled: secureAdhocEnabled,
-        name: 'Secure Ad-Hoc Requests [Recommended]',
-        description: secureAdhocEnabled ? (
-          <>
-            Examine the SQL generated by the MCP Client to prevent injection attacks and detect potential data leakage. This requires Ekaya&apos;s Security models.
-            <p className="mt-2 text-center">
-              Contact <a href="mailto:sales@ekaya.ai?subject=Add Security Models to my installation" className="text-brand-purple hover:underline">sales@ekaya.ai</a> to discuss embedding secure, dedicated models so data never leaves your data boundary.
-            </p>
-          </>
-        ) : (
-          'Examine the SQL generated by the MCP Client to prevent injection attacks and detect potential data leakage. This requires Ekaya\'s Security models.'
-        ),
-      },
-    };
+    const subOptions: Record<string, SubOptionInfo> = {};
 
-    // Add backend-persisted sub-options from metadata
     for (const [subName, subMeta] of Object.entries(approvedQueriesMetadata.subOptions)) {
       subOptions[subName] = {
         enabled: getSubOptionEnabled(approvedQueriesState, subName),
         name: subMeta.name,
         description: subMeta.description,
         warning: subMeta.warning,
+        tip: subMeta.tip,
+      };
+    }
+
+    return subOptions;
+  };
+
+  // Build sub-options for developer tools by merging state with frontend metadata
+  const buildDeveloperSubOptions = (): Record<string, SubOptionInfo> | undefined => {
+    if (!developerMetadata?.subOptions) return undefined;
+
+    const subOptions: Record<string, SubOptionInfo> = {};
+
+    for (const [subName, subMeta] of Object.entries(developerMetadata.subOptions)) {
+      subOptions[subName] = {
+        enabled: getSubOptionEnabled(developerState, subName),
+        name: subMeta.name,
+        description: subMeta.description,
+        warning: subMeta.warning,
+        tip: subMeta.tip,
       };
     }
 
@@ -348,7 +352,7 @@ const MCPServerPage = () => {
               docsUrl={`https://us.ekaya.ai/mcp-setup?mcp_url=${encodeURIComponent(config.serverUrl)}`}
               agentMode={isAgentToolsEnabled}
               agentApiKey={agentApiKey}
-              enabledTools={config.enabledTools}
+              enabledTools={sortedEnabledTools}
             />
 
             {/* Tool Configuration Section */}
@@ -363,34 +367,15 @@ const MCPServerPage = () => {
                 {/* Business User Tools - Pre-Approved Queries */}
                 <MCPToolGroup
                   name="Business User Tools"
-                  description={
-                    enabledQueryCount > 0
-                      ? <>Enable access to <Link to={`/projects/${pid}/queries`} className="text-brand-purple hover:underline">Pre-Approved Queries</Link>. The MCP Client will use the Pre-Approved Queries if they match the Business User&apos;s request and fall back on using the Ontology to craft new SQL queries to answer their questions. This offers the most flexibility in terms of answering ad-hoc requests.</>
-                      : <>No enabled queries. <Link to={`/projects/${pid}/queries`} className="text-brand-purple hover:underline">Create Pre-Approved Queries</Link> to enable this tool.</>
-                  }
-                  enabled={enabledQueryCount > 0 && isApprovedQueriesEnabled}
+                  description={<>Enable pre-approved SQL queries and ad-hoc query capabilities. The MCP Client can use <Link to={`/projects/${pid}/queries`} className="text-brand-purple hover:underline">Pre-Approved Queries</Link> and the Ontology to craft SQL for ad-hoc requests.</>}
+                  enabled={isApprovedQueriesEnabled}
                   onToggle={handleToggleApprovedQueries}
-                  disabled={updating || enabledQueryCount === 0}
+                  disabled={updating}
+                  {...(isApprovedQueriesEnabled ? {
+                    subOptions: buildApprovedQueriesSubOptions(),
+                    onSubOptionToggle: handleToggleApprovedQueriesSubOption,
+                  } : {})}
                 />
-
-                {/* AI Data Liaison */}
-                {SHOW_AI_DATA_LIAISON && (
-                  <MCPToolGroup
-                    name="AI Data Liaison"
-                    description={
-                      enabledQueryCount > 0
-                        ? <>Enable access to <Link to={`/projects/${pid}/queries`} className="text-brand-purple hover:underline">Pre-Approved Queries</Link>. The MCP Client will use the Pre-Approved Queries if they match the Business User&apos;s request and fall back on using the Ontology to craft new SQL queries to answer their questions. This offers the most flexibility in terms of answering ad-hoc requests.</>
-                        : <>No enabled queries. <Link to={`/projects/${pid}/queries`} className="text-brand-purple hover:underline">Create Pre-Approved Queries</Link> to enable this tool.</>
-                    }
-                    enabled={enabledQueryCount > 0 && isApprovedQueriesEnabled}
-                    onToggle={handleToggleApprovedQueries}
-                    disabled={updating || enabledQueryCount === 0}
-                    {...(enabledQueryCount > 0 && isApprovedQueriesEnabled ? {
-                      subOptions: buildApprovedQueriesSubOptions(),
-                      onSubOptionToggle: handleToggleApprovedQueriesSubOption,
-                    } : {})}
-                  />
-                )}
 
                 {/* Agent Tools Section */}
                 {config.toolGroups[TOOL_GROUP_IDS.AGENT_TOOLS] && TOOL_GROUP_METADATA[TOOL_GROUP_IDS.AGENT_TOOLS] && (
@@ -413,49 +398,21 @@ const MCPServerPage = () => {
                   </MCPToolGroup>
                 )}
 
-                {/* Other Tool Groups (excluding approved_queries and agent_tools which are handled above) */}
-                {Object.entries(config.toolGroups)
-                  .filter(([groupName]) => groupName !== TOOL_GROUP_IDS.APPROVED_QUERIES && groupName !== TOOL_GROUP_IDS.AGENT_TOOLS)
-                  .map(([groupName, groupState]) => {
-                    // Get metadata for this tool group
-                    const metadata = TOOL_GROUP_METADATA[groupName];
-                    if (!metadata) {
-                      console.warn(`Unknown tool group: ${groupName}`);
-                      return null;
-                    }
-
-                    // Use custom handler for developer tools
-                    const onToggle = groupName === TOOL_GROUP_IDS.DEVELOPER
-                      ? handleToggleDevTools
-                      : (enabled: boolean) => handleToggleToolGroup(groupName, enabled);
-
-                    // Pro Tip for Developer Tools (only show when enabled)
-                    const developerToolsTip = groupName === TOOL_GROUP_IDS.DEVELOPER && groupState.enabled ? (
-                      <div>
-                        <span className="font-semibold">Pro Tip:</span> Use Developer Tools to help you answer questions about your Ontology{' '}
-                        <details className="inline">
-                          <summary className="inline cursor-pointer underline">(more info)</summary>
-                          <p className="mt-2 font-normal">
-                            After you have extracted your Ontology there might be questions that Ekaya cannot answer from the database schema and values alone. Connect your IDE to the MCP Server so that your LLM can answer questions by reviewing your codebase or other project documents saving you time.
-                          </p>
-                        </details>
-                      </div>
-                    ) : undefined;
-
-                    // Only show warning when the tool group is enabled
-                    const showWarning = groupState.enabled && metadata.warning != null;
-
-                    const props = {
-                      name: metadata.name,
-                      description: metadata.description,
-                      enabled: groupState.enabled,
-                      onToggle,
-                      disabled: updating,
-                      ...(showWarning ? { warning: metadata.warning } : {}),
-                      ...(developerToolsTip != null ? { tip: developerToolsTip } : {}),
-                    };
-                    return <MCPToolGroup key={groupName} {...props} />;
-                  })}
+                {/* Developer Tools */}
+                {config.toolGroups[TOOL_GROUP_IDS.DEVELOPER] && developerMetadata && (
+                  <MCPToolGroup
+                    name={developerMetadata.name}
+                    description={developerMetadata.description}
+                    enabled={isDeveloperEnabled}
+                    onToggle={handleToggleDevTools}
+                    disabled={updating}
+                    {...(isDeveloperEnabled && developerMetadata.warning != null ? { warning: developerMetadata.warning } : {})}
+                    {...(isDeveloperEnabled ? {
+                      subOptions: buildDeveloperSubOptions(),
+                      onSubOptionToggle: handleToggleDeveloperSubOption,
+                    } : {})}
+                  />
+                )}
               </div>
             </div>
           </>

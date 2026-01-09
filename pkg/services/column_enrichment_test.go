@@ -1275,16 +1275,13 @@ type testColEnrichmentRetryableFailureClient struct {
 func (c *testColEnrichmentRetryableFailureClient) GenerateResponse(ctx context.Context, prompt, systemMsg string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
 	c.mu.Lock()
 	c.callCount++
-	count := c.callCount
 	c.mu.Unlock()
 
 	// Fail on all calls for table2 (detect by checking if prompt contains "Table2")
 	// This makes the test deterministic regardless of execution order
+	// Note: Worker pool goroutines race for semaphore, so execution order is non-deterministic
+	// even with MaxConcurrent=1. Using prompt content ensures correct behavior.
 	if strings.Contains(prompt, "Table2") || strings.Contains(prompt, "table2") {
-		return nil, llm.NewError(llm.ErrorTypeEndpoint, "endpoint error", true, errors.New("endpoint error"))
-	}
-	// Also keep the old behavior as fallback for compatibility
-	if count >= 2 && count <= 5 {
 		return nil, llm.NewError(llm.ErrorTypeEndpoint, "endpoint error", true, errors.New("endpoint error"))
 	}
 	return &llm.GenerateResponseResult{Content: c.response}, nil

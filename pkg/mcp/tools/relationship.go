@@ -6,12 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
-	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -28,56 +26,21 @@ type RelationshipToolDeps struct {
 	Logger                 *zap.Logger
 }
 
+// GetDB implements ToolAccessDeps.
+func (d *RelationshipToolDeps) GetDB() *database.DB { return d.DB }
+
+// GetMCPConfigService implements ToolAccessDeps.
+func (d *RelationshipToolDeps) GetMCPConfigService() services.MCPConfigService {
+	return d.MCPConfigService
+}
+
+// GetLogger implements ToolAccessDeps.
+func (d *RelationshipToolDeps) GetLogger() *zap.Logger { return d.Logger }
+
 // RegisterRelationshipTools registers relationship MCP tools.
 func RegisterRelationshipTools(s *server.MCPServer, deps *RelationshipToolDeps) {
 	registerUpdateRelationshipTool(s, deps)
 	registerDeleteRelationshipTool(s, deps)
-}
-
-// checkRelationshipToolEnabled verifies a specific relationship tool is enabled for the project.
-// Uses ToolAccessChecker to ensure consistency with tool list filtering.
-func checkRelationshipToolEnabled(ctx context.Context, deps *RelationshipToolDeps, toolName string) (uuid.UUID, context.Context, func(), error) {
-	// Get claims from context
-	claims, ok := auth.GetClaims(ctx)
-	if !ok {
-		return uuid.Nil, nil, nil, fmt.Errorf("authentication required")
-	}
-
-	projectID, err := uuid.Parse(claims.ProjectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("invalid project ID: %w", err)
-	}
-
-	// Acquire connection with tenant scope
-	scope, err := deps.DB.WithTenant(ctx, projectID)
-	if err != nil {
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to acquire database connection: %w", err)
-	}
-
-	// Set tenant context for the query
-	tenantCtx := database.SetTenantScope(ctx, scope)
-
-	// Check if caller is an agent (API key authentication)
-	isAgent := claims.Subject == "agent"
-
-	// Get tool groups state and check access using the unified checker
-	state, err := deps.MCPConfigService.GetToolGroupsState(tenantCtx, projectID)
-	if err != nil {
-		scope.Close()
-		deps.Logger.Error("Failed to get tool groups state",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return uuid.Nil, nil, nil, fmt.Errorf("failed to check tool configuration: %w", err)
-	}
-
-	// Use the unified ToolAccessChecker for consistent access decisions
-	checker := services.NewToolAccessChecker()
-	if checker.IsToolAccessible(toolName, state, isAgent) {
-		return projectID, tenantCtx, func() { scope.Close() }, nil
-	}
-
-	scope.Close()
-	return uuid.Nil, nil, nil, fmt.Errorf("%s tool is not enabled for this project", toolName)
 }
 
 // registerUpdateRelationshipTool adds the update_relationship tool for creating/updating relationships.
@@ -90,7 +53,7 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 				"If a relationship between these entities already exists, it will be updated with the new values. "+
 				"Optional parameters (description, label, cardinality) replace existing values when provided. "+
 				"Omitted parameters preserve existing values. "+
-				"Cardinality values: '1:1', '1:N', 'N:1', 'N:N', 'unknown' (default). "+
+				"Cardinality values: '1:1', '1:N', 'N:1', 'N:M', 'unknown' (default)."+
 				"Example: update_relationship(from_entity='Account', to_entity='User', label='owns', cardinality='N:1', description='The user who owns this account')",
 		),
 		mcp.WithString(
@@ -113,7 +76,7 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 		),
 		mcp.WithString(
 			"cardinality",
-			mcp.Description("Optional - Cardinality of the relationship: '1:1', '1:N', 'N:1', 'N:N', or 'unknown'"),
+			mcp.Description("Optional - Cardinality of the relationship: '1:1', '1:N', 'N:1', 'N:M', or 'unknown'"),
 		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -122,7 +85,7 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkRelationshipToolEnabled(ctx, deps, "update_relationship")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "update_relationship")
 		if err != nil {
 			return nil, err
 		}
@@ -147,10 +110,10 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 		// Validate cardinality if provided
 		if cardinality != "" {
 			validCardinalities := map[string]bool{
-				"1:1": true, "1:N": true, "N:1": true, "N:N": true, "unknown": true,
+				"1:1": true, "1:N": true, "N:1": true, "N:M": true, "unknown": true,
 			}
 			if !validCardinalities[cardinality] {
-				return nil, fmt.Errorf("invalid cardinality '%s': must be one of '1:1', '1:N', 'N:1', 'N:N', 'unknown'", cardinality)
+				return nil, fmt.Errorf("invalid cardinality '%s': must be one of '1:1', '1:N', 'N:1', 'N:M', 'unknown'", cardinality)
 			}
 		}
 
@@ -285,7 +248,7 @@ func registerDeleteRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projectID, tenantCtx, cleanup, err := checkRelationshipToolEnabled(ctx, deps, "delete_relationship")
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "delete_relationship")
 		if err != nil {
 			return nil, err
 		}
