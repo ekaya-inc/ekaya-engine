@@ -31,29 +31,63 @@ func TestGetEnabledTools_DeveloperEnabled(t *testing.T) {
 	}
 	tools := GetEnabledTools(state)
 
-	// Developer mode enables ALL tools including execute
+	// Developer mode only enables Developer Core loadout
 	toolNames := extractToolNames(tools)
 
-	// Developer-specific tools - execute is now available by default
-	assert.Contains(t, toolNames, "echo")
-	assert.Contains(t, toolNames, "get_schema")
-	assert.Contains(t, toolNames, "execute") // execute is now available when developer mode is on
-
-	// Business user tools are also available in developer mode
-	assert.Contains(t, toolNames, "query")
-	assert.Contains(t, toolNames, "sample")
-	assert.Contains(t, toolNames, "validate")
-	assert.Contains(t, toolNames, "list_approved_queries")
-	assert.Contains(t, toolNames, "execute_approved_query")
-	assert.Contains(t, toolNames, "get_ontology")
-	assert.Contains(t, toolNames, "list_glossary")
-	assert.Contains(t, toolNames, "get_glossary_sql")
-
-	// Health is always included
+	// Developer Core tools
 	assert.Contains(t, toolNames, "health")
+	assert.Contains(t, toolNames, "echo")
+	assert.Contains(t, toolNames, "execute")
+	assert.Contains(t, toolNames, "validate")
+	assert.Contains(t, toolNames, "query")
+	assert.Contains(t, toolNames, "explain_query")
 
-	// Should have all tools from the registry
-	assert.Len(t, tools, len(ToolRegistry))
+	// Query tools should NOT be included without AddQueryTools option
+	assert.NotContains(t, toolNames, "get_schema")
+	assert.NotContains(t, toolNames, "sample")
+	assert.NotContains(t, toolNames, "list_approved_queries")
+	assert.NotContains(t, toolNames, "get_ontology")
+}
+
+func TestGetEnabledTools_DeveloperWithQueryTools(t *testing.T) {
+	state := map[string]*models.ToolGroupConfig{
+		ToolGroupDeveloper: {Enabled: true, AddQueryTools: true},
+	}
+	tools := GetEnabledTools(state)
+
+	toolNames := extractToolNames(tools)
+
+	// Developer Core + Query + Ontology Maintenance
+	assert.Contains(t, toolNames, "health")
+	assert.Contains(t, toolNames, "echo")
+	assert.Contains(t, toolNames, "execute")
+	assert.Contains(t, toolNames, "get_schema")
+	assert.Contains(t, toolNames, "get_ontology")
+	assert.Contains(t, toolNames, "sample")
+	assert.Contains(t, toolNames, "list_approved_queries")
+	assert.Contains(t, toolNames, "update_entity")
+	assert.Contains(t, toolNames, "update_column")
+}
+
+func TestGetEnabledTools_DeveloperWithOntologyQuestions(t *testing.T) {
+	state := map[string]*models.ToolGroupConfig{
+		ToolGroupDeveloper: {Enabled: true, AddOntologyQuestions: true},
+	}
+	tools := GetEnabledTools(state)
+
+	toolNames := extractToolNames(tools)
+
+	// Developer Core + Ontology Questions
+	assert.Contains(t, toolNames, "health")
+	assert.Contains(t, toolNames, "echo")
+	assert.Contains(t, toolNames, "execute")
+	assert.Contains(t, toolNames, "list_ontology_questions")
+	assert.Contains(t, toolNames, "resolve_ontology_question")
+	assert.Contains(t, toolNames, "skip_ontology_question")
+
+	// Query tools should NOT be included
+	assert.NotContains(t, toolNames, "get_schema")
+	assert.NotContains(t, toolNames, "sample")
 }
 
 func TestGetEnabledTools_ApprovedQueriesEnabled(t *testing.T) {
@@ -64,159 +98,146 @@ func TestGetEnabledTools_ApprovedQueriesEnabled(t *testing.T) {
 
 	toolNames := extractToolNames(tools)
 
-	// Should include approved_queries tools plus health
-	// Business user tools (query, sample, validate) are now in approved_queries group
+	// Business User tools (Query loadout) - includes get_schema per spec
+	assert.Contains(t, toolNames, "health")
 	assert.Contains(t, toolNames, "query")
 	assert.Contains(t, toolNames, "sample")
 	assert.Contains(t, toolNames, "validate")
 	assert.Contains(t, toolNames, "list_approved_queries")
 	assert.Contains(t, toolNames, "execute_approved_query")
 	assert.Contains(t, toolNames, "get_ontology")
-	assert.Contains(t, toolNames, "list_glossary")
-	assert.Contains(t, toolNames, "get_glossary_sql")
-	assert.Contains(t, toolNames, "health")
+	assert.Contains(t, toolNames, "get_schema") // Now in Query loadout
+	assert.Contains(t, toolNames, "get_context")
 
-	// developer tools should not be included
+	// Developer-only tools should NOT be included
 	assert.NotContains(t, toolNames, "echo")
 	assert.NotContains(t, toolNames, "execute")
-	assert.NotContains(t, toolNames, "get_schema")
+
+	// Ontology maintenance should NOT be included without option
+	assert.NotContains(t, toolNames, "update_entity")
+	assert.NotContains(t, toolNames, "update_column")
 }
 
-func TestGetEnabledTools_BothGroupsEnabled(t *testing.T) {
+func TestGetEnabledTools_ApprovedQueriesWithOntologyMaintenance(t *testing.T) {
 	state := map[string]*models.ToolGroupConfig{
-		ToolGroupDeveloper:       {Enabled: true, EnableExecute: true},
-		ToolGroupApprovedQueries: {Enabled: true},
+		ToolGroupApprovedQueries: {Enabled: true, AllowOntologyMaintenance: true},
 	}
 	tools := GetEnabledTools(state)
 
 	toolNames := extractToolNames(tools)
 
-	// Should include both groups
+	// Query + Ontology Maintenance
 	assert.Contains(t, toolNames, "query")
-	assert.Contains(t, toolNames, "execute")
-	assert.Contains(t, toolNames, "list_approved_queries")
 	assert.Contains(t, toolNames, "get_ontology")
-	assert.Contains(t, toolNames, "health")
+	assert.Contains(t, toolNames, "update_entity")
+	assert.Contains(t, toolNames, "update_column")
+	assert.Contains(t, toolNames, "update_relationship")
+	assert.Contains(t, toolNames, "delete_entity")
+
+	// Developer-only tools should NOT be included
+	assert.NotContains(t, toolNames, "echo")
+	assert.NotContains(t, toolNames, "execute")
 }
 
-func TestGetEnabledTools_ForceModeNoLongerHidesDeveloper(t *testing.T) {
-	// Note: ForceMode is no longer used with radio button behavior.
-	// With radio buttons, only one group can be enabled at a time.
-	// This test verifies that ForceMode flag is ignored if present.
-	state := map[string]*models.ToolGroupConfig{
-		ToolGroupDeveloper:       {Enabled: true},
-		ToolGroupApprovedQueries: {Enabled: true, ForceMode: true},
-	}
-	tools := GetEnabledTools(state)
-
-	toolNames := extractToolNames(tools)
-
-	// Both groups' tools should be visible (GetEnabledTools doesn't enforce radio button,
-	// that's done by the state machine). Execute is now available by default.
-	assert.Contains(t, toolNames, "echo")
-	assert.Contains(t, toolNames, "execute") // execute is now available when developer mode is on
-	assert.Contains(t, toolNames, "get_schema")
-	assert.Contains(t, toolNames, "query")
-	assert.Contains(t, toolNames, "sample")
-	assert.Contains(t, toolNames, "validate")
-	assert.Contains(t, toolNames, "list_approved_queries")
-	assert.Contains(t, toolNames, "get_ontology")
-	assert.Contains(t, toolNames, "health")
-}
-
-func TestGetEnabledTools_AgentToolsEnabled(t *testing.T) {
-	// GetEnabledTools returns tools for USER perspective (not agent).
-	// When only agent_tools is enabled, from user perspective only health is available
-	// since neither developer nor approved_queries is enabled.
+func TestGetEnabledTools_AgentToolsEnabled_UserPerspective(t *testing.T) {
+	// From USER perspective, enabling agent_tools doesn't add any tools
 	state := map[string]*models.ToolGroupConfig{
 		ToolGroupAgentTools: {Enabled: true},
 	}
-	tools := GetEnabledTools(state)
+	tools := GetEnabledTools(state) // GetEnabledTools uses isAgent=false
+
+	// Only health - agent_tools setting doesn't affect user perspective
+	require.Len(t, tools, 1)
+	assert.Equal(t, "health", tools[0].Name)
+}
+
+func TestGetEnabledToolsForAgent_AgentToolsEnabled(t *testing.T) {
+	// From AGENT perspective, enabling agent_tools gives Limited Query tools
+	state := map[string]*models.ToolGroupConfig{
+		ToolGroupAgentTools: {Enabled: true},
+	}
+	tools := GetEnabledToolsForAgent(state)
 
 	toolNames := extractToolNames(tools)
 
-	// From user perspective with only agent_tools enabled, only health is available
+	// Limited Query loadout
 	assert.Contains(t, toolNames, "health")
-	assert.Len(t, tools, 1)
+	assert.Contains(t, toolNames, "list_approved_queries")
+	assert.Contains(t, toolNames, "execute_approved_query")
+
+	// Should NOT include other tools
+	assert.NotContains(t, toolNames, "query")
+	assert.NotContains(t, toolNames, "execute")
+	assert.NotContains(t, toolNames, "echo")
 }
 
-func TestGetEnabledTools_AgentToolsDoesNotOverrideForUsers(t *testing.T) {
-	// GetEnabledTools returns tools for USER perspective.
-	// When developer is enabled, users get developer tools regardless of agent_tools.
-	// agent_tools only affects actual agent callers (via GetEnabledToolsForAgent).
+func TestGetEnabledTools_CustomToolsEnabled(t *testing.T) {
 	state := map[string]*models.ToolGroupConfig{
-		ToolGroupDeveloper:       {Enabled: true, EnableExecute: true},
-		ToolGroupApprovedQueries: {Enabled: true},
-		ToolGroupAgentTools:      {Enabled: true},
+		ToolGroupCustom: {
+			Enabled:     true,
+			CustomTools: []string{"query", "sample", "get_ontology"},
+		},
 	}
 	tools := GetEnabledTools(state)
 
 	toolNames := extractToolNames(tools)
 
-	// From user perspective, developer mode gives ALL tools
-	assert.Contains(t, toolNames, "echo")
-	assert.Contains(t, toolNames, "execute")
-	assert.Contains(t, toolNames, "get_schema")
-	assert.Contains(t, toolNames, "query")
-	assert.Contains(t, toolNames, "get_ontology")
+	// Selected tools + health (always included)
 	assert.Contains(t, toolNames, "health")
+	assert.Contains(t, toolNames, "query")
+	assert.Contains(t, toolNames, "sample")
+	assert.Contains(t, toolNames, "get_ontology")
 
-	// Should have all tools from the registry
-	assert.Len(t, tools, len(ToolRegistry))
+	// Non-selected tools should NOT be included
+	assert.NotContains(t, toolNames, "execute")
+	assert.NotContains(t, toolNames, "echo")
+	assert.NotContains(t, toolNames, "get_schema")
+}
+
+func TestGetEnabledTools_ToolsInCanonicalOrder(t *testing.T) {
+	state := map[string]*models.ToolGroupConfig{
+		ToolGroupApprovedQueries: {Enabled: true},
+	}
+	tools := GetEnabledTools(state)
+
+	// Tools should be in canonical order (as defined in AllToolsOrdered)
+	toolNames := extractToolNames(tools)
+
+	// health should come first
+	assert.Equal(t, "health", toolNames[0])
+
+	// Verify order matches AllToolsOrdered for tools that are present
+	var lastIndex int
+	for _, name := range toolNames {
+		idx := GetToolOrder(name)
+		require.GreaterOrEqual(t, idx, lastIndex, "Tools should be in canonical order")
+		lastIndex = idx
+	}
 }
 
 func TestToolRegistry_ContainsAllExpectedTools(t *testing.T) {
-	expectedTools := []string{
-		"echo", "query", "sample", "validate", "execute", "get_schema",
-		"get_ontology", "list_glossary", "get_glossary_sql", "list_approved_queries", "execute_approved_query",
-		"health",
-	}
-
-	toolNames := make(map[string]bool)
-	for _, tool := range ToolRegistry {
-		toolNames[tool.Name] = true
-	}
-
-	for _, expected := range expectedTools {
-		assert.True(t, toolNames[expected], "ToolRegistry missing expected tool: %s", expected)
+	// Verify all tools in AllToolsOrdered are defined
+	for _, tool := range AllToolsOrdered {
+		spec := GetToolSpec(tool.Name)
+		require.NotNil(t, spec, "Tool %s should be in AllToolsOrdered", tool.Name)
+		assert.NotEmpty(t, spec.Description, "Tool %s should have a description", tool.Name)
 	}
 }
 
-func TestToolRegistry_AllToolsHaveDescriptions(t *testing.T) {
-	for _, tool := range ToolRegistry {
-		assert.NotEmpty(t, tool.Description, "Tool %s has empty description", tool.Name)
-	}
-}
+func TestMergeLoadouts_Deduplication(t *testing.T) {
+	// Query and Developer Core both have validate, query, explain_query
+	tools := MergeLoadouts(LoadoutDeveloperCore, LoadoutQuery)
 
-func TestToolRegistry_AllToolsHaveValidToolGroup(t *testing.T) {
-	validGroups := map[string]bool{
-		ToolGroupDeveloper:       true,
-		ToolGroupApprovedQueries: true,
-		ToolGroupAgentTools:      true,
-		"always":                 true,
+	// Count occurrences of each tool
+	counts := make(map[string]int)
+	for _, tool := range tools {
+		counts[tool.Name]++
 	}
 
-	for _, tool := range ToolRegistry {
-		assert.True(t, validGroups[tool.ToolGroup],
-			"Tool %s has invalid tool group: %s", tool.Name, tool.ToolGroup)
+	// Each tool should appear exactly once
+	for name, count := range counts {
+		assert.Equal(t, 1, count, "Tool %s should appear exactly once", name)
 	}
-}
-
-func TestToolRegistry_ExecuteToolExists(t *testing.T) {
-	// Execute is a developer tool that allows DDL/DML operations.
-	// It's now available whenever developer mode is enabled (no separate opt-in).
-	found := false
-	for _, tool := range ToolRegistry {
-		if tool.Name == "execute" {
-			assert.Equal(t, ToolGroupDeveloper, tool.ToolGroup,
-				"execute tool should be in developer group")
-			assert.Empty(t, tool.SubOption,
-				"execute tool should not require a sub-option")
-			found = true
-			break
-		}
-	}
-	assert.True(t, found, "execute tool should exist in registry")
 }
 
 func extractToolNames(tools []ToolDefinition) []string {

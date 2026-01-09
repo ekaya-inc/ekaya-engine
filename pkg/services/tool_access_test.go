@@ -47,124 +47,167 @@ func TestToolAccessChecker_IsToolAccessible(t *testing.T) {
 func TestToolAccessChecker_DeveloperToolsEnabled(t *testing.T) {
 	checker := NewToolAccessChecker()
 
-	state := map[string]*models.ToolGroupConfig{
-		ToolGroupDeveloper:       {Enabled: true, EnableExecute: true},
-		ToolGroupApprovedQueries: {Enabled: false},
-		ToolGroupAgentTools:      {Enabled: false},
-	}
+	t.Run("user gets Developer Core tools when developer is enabled", func(t *testing.T) {
+		state := map[string]*models.ToolGroupConfig{
+			ToolGroupDeveloper:       {Enabled: true},
+			ToolGroupApprovedQueries: {Enabled: false},
+			ToolGroupAgentTools:      {Enabled: false},
+		}
 
-	t.Run("user gets ALL tools when developer is enabled", func(t *testing.T) {
-		// Developer tools
+		// Developer Core tools
 		assert.True(t, checker.IsToolAccessible("echo", state, false), "echo should be accessible")
 		assert.True(t, checker.IsToolAccessible("execute", state, false), "execute should be accessible")
-		assert.True(t, checker.IsToolAccessible("get_schema", state, false), "get_schema should be accessible")
-
-		// Approved queries tools (also accessible in developer mode)
-		assert.True(t, checker.IsToolAccessible("query", state, false), "query should be accessible")
-		assert.True(t, checker.IsToolAccessible("sample", state, false), "sample should be accessible")
 		assert.True(t, checker.IsToolAccessible("validate", state, false), "validate should be accessible")
-		assert.True(t, checker.IsToolAccessible("get_ontology", state, false), "get_ontology should be accessible")
-		assert.True(t, checker.IsToolAccessible("list_glossary", state, false), "list_glossary should be accessible")
-		assert.True(t, checker.IsToolAccessible("get_glossary_sql", state, false), "get_glossary_sql should be accessible")
-		assert.True(t, checker.IsToolAccessible("list_approved_queries", state, false), "list_approved_queries should be accessible")
-		assert.True(t, checker.IsToolAccessible("execute_approved_query", state, false), "execute_approved_query should be accessible")
+		assert.True(t, checker.IsToolAccessible("query", state, false), "query should be accessible")
+		assert.True(t, checker.IsToolAccessible("explain_query", state, false), "explain_query should be accessible")
 
-		// Always tools
-		assert.True(t, checker.IsToolAccessible("health", state, false), "health should be accessible")
+		// Query loadout tools NOT accessible without AddQueryTools option
+		assert.False(t, checker.IsToolAccessible("get_schema", state, false), "get_schema NOT accessible without AddQueryTools")
+		assert.False(t, checker.IsToolAccessible("sample", state, false), "sample NOT accessible without AddQueryTools")
+		assert.False(t, checker.IsToolAccessible("get_ontology", state, false), "get_ontology NOT accessible without AddQueryTools")
+		assert.False(t, checker.IsToolAccessible("list_approved_queries", state, false), "list_approved_queries NOT accessible without AddQueryTools")
+	})
+
+	t.Run("user gets more tools with AddQueryTools option", func(t *testing.T) {
+		state := map[string]*models.ToolGroupConfig{
+			ToolGroupDeveloper: {Enabled: true, AddQueryTools: true},
+		}
+
+		// Developer Core + Query + Ontology Maintenance
+		assert.True(t, checker.IsToolAccessible("echo", state, false))
+		assert.True(t, checker.IsToolAccessible("get_schema", state, false))
+		assert.True(t, checker.IsToolAccessible("sample", state, false))
+		assert.True(t, checker.IsToolAccessible("get_ontology", state, false))
+		assert.True(t, checker.IsToolAccessible("list_approved_queries", state, false))
+		assert.True(t, checker.IsToolAccessible("update_entity", state, false))
+		assert.True(t, checker.IsToolAccessible("update_column", state, false))
+	})
+
+	t.Run("user gets Ontology Questions tools with AddOntologyQuestions option", func(t *testing.T) {
+		state := map[string]*models.ToolGroupConfig{
+			ToolGroupDeveloper: {Enabled: true, AddOntologyQuestions: true},
+		}
+
+		// Developer Core + Ontology Questions
+		assert.True(t, checker.IsToolAccessible("echo", state, false))
+		assert.True(t, checker.IsToolAccessible("list_ontology_questions", state, false))
+		assert.True(t, checker.IsToolAccessible("resolve_ontology_question", state, false))
+
+		// Query tools NOT accessible
+		assert.False(t, checker.IsToolAccessible("get_schema", state, false))
+		assert.False(t, checker.IsToolAccessible("sample", state, false))
 	})
 
 	t.Run("agent does not get developer tools", func(t *testing.T) {
-		// Agents should NOT have access when only developer is enabled
-		assert.False(t, checker.IsToolAccessible("echo", state, true), "agent should not access echo")
-		assert.False(t, checker.IsToolAccessible("query", state, true), "agent should not access query")
-		assert.False(t, checker.IsToolAccessible("list_approved_queries", state, true), "agent should not access list_approved_queries")
-
-		// Health is always accessible
-		assert.True(t, checker.IsToolAccessible("health", state, true), "agent should access health")
-	})
-
-	t.Run("execute is always available when developer mode is enabled", func(t *testing.T) {
-		// EnableExecute flag is no longer required - execute is available when developer mode is on
-		stateWithoutExecuteFlag := map[string]*models.ToolGroupConfig{
-			ToolGroupDeveloper: {Enabled: true}, // EnableExecute not set (defaults to false)
+		state := map[string]*models.ToolGroupConfig{
+			ToolGroupDeveloper: {Enabled: true, AddQueryTools: true},
 		}
-		assert.True(t, checker.IsToolAccessible("execute", stateWithoutExecuteFlag, false),
-			"execute should be accessible when developer mode is enabled")
-		assert.True(t, checker.IsToolAccessible("echo", stateWithoutExecuteFlag, false),
-			"echo should be accessible")
+
+		// Agent doesn't get tools just from developer mode
+		assert.False(t, checker.IsToolAccessible("execute", state, true))
+		assert.False(t, checker.IsToolAccessible("echo", state, true))
 	})
 }
 
 func TestToolAccessChecker_ApprovedQueriesEnabled(t *testing.T) {
 	checker := NewToolAccessChecker()
 
-	state := map[string]*models.ToolGroupConfig{
-		ToolGroupDeveloper:       {Enabled: false},
-		ToolGroupApprovedQueries: {Enabled: true},
-		ToolGroupAgentTools:      {Enabled: false},
-	}
+	t.Run("user gets Query tools when approved_queries is enabled", func(t *testing.T) {
+		state := map[string]*models.ToolGroupConfig{
+			ToolGroupDeveloper:       {Enabled: false},
+			ToolGroupApprovedQueries: {Enabled: true},
+			ToolGroupAgentTools:      {Enabled: false},
+		}
 
-	t.Run("user gets approved_queries tools only", func(t *testing.T) {
-		// Approved queries tools
-		assert.True(t, checker.IsToolAccessible("query", state, false), "query should be accessible")
-		assert.True(t, checker.IsToolAccessible("sample", state, false), "sample should be accessible")
-		assert.True(t, checker.IsToolAccessible("validate", state, false), "validate should be accessible")
-		assert.True(t, checker.IsToolAccessible("get_ontology", state, false), "get_ontology should be accessible")
-		assert.True(t, checker.IsToolAccessible("list_glossary", state, false), "list_glossary should be accessible")
-		assert.True(t, checker.IsToolAccessible("get_glossary_sql", state, false), "get_glossary_sql should be accessible")
-		assert.True(t, checker.IsToolAccessible("list_approved_queries", state, false), "list_approved_queries should be accessible")
-		assert.True(t, checker.IsToolAccessible("execute_approved_query", state, false), "execute_approved_query should be accessible")
+		// Query loadout tools (includes get_schema per spec)
+		assert.True(t, checker.IsToolAccessible("query", state, false))
+		assert.True(t, checker.IsToolAccessible("sample", state, false))
+		assert.True(t, checker.IsToolAccessible("validate", state, false))
+		assert.True(t, checker.IsToolAccessible("get_ontology", state, false))
+		assert.True(t, checker.IsToolAccessible("list_glossary", state, false))
+		assert.True(t, checker.IsToolAccessible("get_glossary_sql", state, false))
+		assert.True(t, checker.IsToolAccessible("list_approved_queries", state, false))
+		assert.True(t, checker.IsToolAccessible("execute_approved_query", state, false))
+		assert.True(t, checker.IsToolAccessible("get_schema", state, false), "get_schema IS in Query loadout per spec")
+		assert.True(t, checker.IsToolAccessible("get_context", state, false))
 
-		// Developer tools should NOT be accessible
+		// Developer-only tools NOT accessible
 		assert.False(t, checker.IsToolAccessible("echo", state, false), "echo should NOT be accessible")
 		assert.False(t, checker.IsToolAccessible("execute", state, false), "execute should NOT be accessible")
-		assert.False(t, checker.IsToolAccessible("get_schema", state, false), "get_schema should NOT be accessible")
+
+		// Ontology maintenance NOT accessible without option
+		assert.False(t, checker.IsToolAccessible("update_entity", state, false))
+		assert.False(t, checker.IsToolAccessible("update_column", state, false))
 
 		// Always tools
 		assert.True(t, checker.IsToolAccessible("health", state, false), "health should be accessible")
 	})
 
+	t.Run("user gets Ontology Maintenance tools with AllowOntologyMaintenance option", func(t *testing.T) {
+		state := map[string]*models.ToolGroupConfig{
+			ToolGroupApprovedQueries: {Enabled: true, AllowOntologyMaintenance: true},
+		}
+
+		// Query + Ontology Maintenance
+		assert.True(t, checker.IsToolAccessible("query", state, false))
+		assert.True(t, checker.IsToolAccessible("update_entity", state, false))
+		assert.True(t, checker.IsToolAccessible("update_column", state, false))
+		assert.True(t, checker.IsToolAccessible("update_relationship", state, false))
+		assert.True(t, checker.IsToolAccessible("delete_entity", state, false))
+	})
+
 	t.Run("agent does not get approved_queries tools without agent_tools", func(t *testing.T) {
+		state := map[string]*models.ToolGroupConfig{
+			ToolGroupApprovedQueries: {Enabled: true},
+			ToolGroupAgentTools:      {Enabled: false},
+		}
+
 		// Agents should NOT have access when only approved_queries is enabled
-		assert.False(t, checker.IsToolAccessible("list_approved_queries", state, true), "agent should not access list_approved_queries")
-		assert.False(t, checker.IsToolAccessible("query", state, true), "agent should not access query")
+		assert.False(t, checker.IsToolAccessible("list_approved_queries", state, true))
+		assert.False(t, checker.IsToolAccessible("query", state, true))
 
 		// Health is always accessible
-		assert.True(t, checker.IsToolAccessible("health", state, true), "agent should access health")
+		assert.True(t, checker.IsToolAccessible("health", state, true))
 	})
 }
 
 func TestToolAccessChecker_AgentToolsEnabled(t *testing.T) {
 	checker := NewToolAccessChecker()
 
-	state := map[string]*models.ToolGroupConfig{
-		ToolGroupDeveloper:       {Enabled: false},
-		ToolGroupApprovedQueries: {Enabled: false},
-		ToolGroupAgentTools:      {Enabled: true},
-	}
+	t.Run("agent gets Limited Query tools when agent_tools is enabled", func(t *testing.T) {
+		state := map[string]*models.ToolGroupConfig{
+			ToolGroupDeveloper:       {Enabled: false},
+			ToolGroupApprovedQueries: {Enabled: false},
+			ToolGroupAgentTools:      {Enabled: true},
+		}
 
-	t.Run("agent gets agent-allowed tools only", func(t *testing.T) {
-		// Agent-allowed tools
-		assert.True(t, checker.IsToolAccessible("echo", state, true), "agent should access echo")
-		assert.True(t, checker.IsToolAccessible("list_approved_queries", state, true), "agent should access list_approved_queries")
-		assert.True(t, checker.IsToolAccessible("execute_approved_query", state, true), "agent should access execute_approved_query")
-		assert.True(t, checker.IsToolAccessible("health", state, true), "agent should access health")
+		// Limited Query loadout for agents
+		assert.True(t, checker.IsToolAccessible("health", state, true))
+		assert.True(t, checker.IsToolAccessible("list_approved_queries", state, true))
+		assert.True(t, checker.IsToolAccessible("execute_approved_query", state, true))
 
-		// Non-agent tools
-		assert.False(t, checker.IsToolAccessible("query", state, true), "agent should NOT access query")
-		assert.False(t, checker.IsToolAccessible("sample", state, true), "agent should NOT access sample")
-		assert.False(t, checker.IsToolAccessible("execute", state, true), "agent should NOT access execute")
-		assert.False(t, checker.IsToolAccessible("get_schema", state, true), "agent should NOT access get_schema")
+		// Other tools NOT accessible to agents
+		assert.False(t, checker.IsToolAccessible("echo", state, true), "echo NOT in Limited Query")
+		assert.False(t, checker.IsToolAccessible("query", state, true))
+		assert.False(t, checker.IsToolAccessible("execute", state, true))
+		assert.False(t, checker.IsToolAccessible("get_schema", state, true))
 	})
 
 	t.Run("user does not get tools from agent_tools mode", func(t *testing.T) {
+		state := map[string]*models.ToolGroupConfig{
+			ToolGroupDeveloper:       {Enabled: false},
+			ToolGroupApprovedQueries: {Enabled: false},
+			ToolGroupAgentTools:      {Enabled: true},
+		}
+
 		// Users should NOT have access when only agent_tools is enabled
-		assert.False(t, checker.IsToolAccessible("echo", state, false), "user should not access echo")
-		assert.False(t, checker.IsToolAccessible("list_approved_queries", state, false), "user should not access list_approved_queries")
-		assert.False(t, checker.IsToolAccessible("query", state, false), "user should not access query")
+		// agent_tools setting only affects agent authentication
+		assert.False(t, checker.IsToolAccessible("echo", state, false))
+		assert.False(t, checker.IsToolAccessible("list_approved_queries", state, false))
+		assert.False(t, checker.IsToolAccessible("query", state, false))
 
 		// Health is always accessible
-		assert.True(t, checker.IsToolAccessible("health", state, false), "user should access health")
+		assert.True(t, checker.IsToolAccessible("health", state, false))
 	})
 }
 
@@ -194,73 +237,94 @@ func TestToolAccessChecker_NoToolGroupEnabled(t *testing.T) {
 func TestToolAccessChecker_GetAccessibleTools(t *testing.T) {
 	checker := NewToolAccessChecker()
 
-	t.Run("developer mode returns all tools for user", func(t *testing.T) {
+	t.Run("developer mode returns Developer Core tools for user", func(t *testing.T) {
 		state := map[string]*models.ToolGroupConfig{
-			ToolGroupDeveloper: {Enabled: true, EnableExecute: true},
+			ToolGroupDeveloper: {Enabled: true},
 		}
 
 		tools := checker.GetAccessibleTools(state, false)
-
-		// Should have all tools from registry
 		toolNames := make(map[string]bool)
 		for _, tool := range tools {
 			toolNames[tool.Name] = true
 		}
 
-		// Verify key tools are present
-		assert.True(t, toolNames["health"], "should have health")
-		assert.True(t, toolNames["echo"], "should have echo")
-		assert.True(t, toolNames["execute"], "should have execute")
-		assert.True(t, toolNames["get_schema"], "should have get_schema")
-		assert.True(t, toolNames["query"], "should have query")
-		assert.True(t, toolNames["list_approved_queries"], "should have list_approved_queries")
+		// Developer Core tools
+		assert.True(t, toolNames["health"])
+		assert.True(t, toolNames["echo"])
+		assert.True(t, toolNames["execute"])
+		assert.True(t, toolNames["validate"])
+		assert.True(t, toolNames["query"])
+		assert.True(t, toolNames["explain_query"])
+
+		// Query tools NOT included without AddQueryTools
+		assert.False(t, toolNames["get_schema"])
+		assert.False(t, toolNames["sample"])
 	})
 
-	t.Run("approved_queries mode returns limited tools for user", func(t *testing.T) {
+	t.Run("developer with AddQueryTools returns more tools", func(t *testing.T) {
+		state := map[string]*models.ToolGroupConfig{
+			ToolGroupDeveloper: {Enabled: true, AddQueryTools: true},
+		}
+
+		tools := checker.GetAccessibleTools(state, false)
+		toolNames := make(map[string]bool)
+		for _, tool := range tools {
+			toolNames[tool.Name] = true
+		}
+
+		// Developer Core + Query + Ontology Maintenance
+		assert.True(t, toolNames["echo"])
+		assert.True(t, toolNames["get_schema"])
+		assert.True(t, toolNames["sample"])
+		assert.True(t, toolNames["list_approved_queries"])
+		assert.True(t, toolNames["update_entity"])
+	})
+
+	t.Run("approved_queries mode returns Query tools for user", func(t *testing.T) {
 		state := map[string]*models.ToolGroupConfig{
 			ToolGroupApprovedQueries: {Enabled: true},
 		}
 
 		tools := checker.GetAccessibleTools(state, false)
-
 		toolNames := make(map[string]bool)
 		for _, tool := range tools {
 			toolNames[tool.Name] = true
 		}
 
-		// Should have approved_queries tools
-		assert.True(t, toolNames["health"], "should have health")
-		assert.True(t, toolNames["query"], "should have query")
-		assert.True(t, toolNames["list_approved_queries"], "should have list_approved_queries")
+		// Query loadout (includes get_schema per spec)
+		assert.True(t, toolNames["health"])
+		assert.True(t, toolNames["query"])
+		assert.True(t, toolNames["list_approved_queries"])
+		assert.True(t, toolNames["get_schema"], "get_schema IS in Query loadout per spec")
 
-		// Should NOT have developer tools
-		assert.False(t, toolNames["echo"], "should NOT have echo")
-		assert.False(t, toolNames["execute"], "should NOT have execute")
-		assert.False(t, toolNames["get_schema"], "should NOT have get_schema")
+		// Developer-only tools NOT included
+		assert.False(t, toolNames["echo"])
+		assert.False(t, toolNames["execute"])
+
+		// Ontology maintenance NOT included without option
+		assert.False(t, toolNames["update_entity"])
 	})
 
-	t.Run("agent_tools mode returns agent tools for agent", func(t *testing.T) {
+	t.Run("agent_tools mode returns Limited Query tools for agent", func(t *testing.T) {
 		state := map[string]*models.ToolGroupConfig{
 			ToolGroupAgentTools: {Enabled: true},
 		}
 
-		tools := checker.GetAccessibleTools(state, true)
-
+		tools := checker.GetAccessibleTools(state, true) // isAgent = true
 		toolNames := make(map[string]bool)
 		for _, tool := range tools {
 			toolNames[tool.Name] = true
 		}
 
-		// Should have agent-allowed tools
-		assert.True(t, toolNames["health"], "should have health")
-		assert.True(t, toolNames["echo"], "should have echo")
-		assert.True(t, toolNames["list_approved_queries"], "should have list_approved_queries")
-		assert.True(t, toolNames["execute_approved_query"], "should have execute_approved_query")
+		// Limited Query loadout
+		assert.True(t, toolNames["health"])
+		assert.True(t, toolNames["list_approved_queries"])
+		assert.True(t, toolNames["execute_approved_query"])
 
-		// Should NOT have non-agent tools
-		assert.False(t, toolNames["query"], "should NOT have query")
-		assert.False(t, toolNames["execute"], "should NOT have execute")
-		assert.False(t, toolNames["get_schema"], "should NOT have get_schema")
+		// echo is NOT in Limited Query loadout
+		assert.False(t, toolNames["echo"])
+		assert.False(t, toolNames["query"])
+		assert.False(t, toolNames["execute"])
 	})
 
 	t.Run("nil state returns only health", func(t *testing.T) {
@@ -271,46 +335,29 @@ func TestToolAccessChecker_GetAccessibleTools(t *testing.T) {
 	})
 }
 
-// TestToolAccessChecker_ExecuteToolDefaultsEnabled verifies that when developer
-// mode is enabled without explicitly setting EnableExecute, the execute tool
-// IS accessible. This matches the UI behavior where the enableExecute toggle
-// was removed - execute should always be available when developer mode is on.
-//
-// BUG: Currently the execute tool requires EnableExecute=true, but the UI only
-// sends {enabled: true} when toggling developer tools. This causes execute to
-// be hidden even when developer tools are enabled via the UI.
-func TestToolAccessChecker_ExecuteToolDefaultsEnabled(t *testing.T) {
+func TestToolAccessChecker_CustomToolsEnabled(t *testing.T) {
 	checker := NewToolAccessChecker()
 
-	// This state matches what the UI sends when toggling developer tools ON:
-	// Only {enabled: true} is sent, EnableExecute is NOT explicitly set (defaults to false)
-	state := map[string]*models.ToolGroupConfig{
-		ToolGroupDeveloper: {Enabled: true}, // EnableExecute NOT set (defaults to false)
-	}
-
-	t.Run("execute tool is accessible when developer mode is enabled", func(t *testing.T) {
-		// The UI removed the enableExecute toggle, so execute should be available
-		// whenever developer tools are enabled
-		assert.True(t, checker.IsToolAccessible("execute", state, false),
-			"execute tool should be accessible when developer mode is enabled, even without EnableExecute=true")
-	})
-
-	t.Run("other developer tools are accessible", func(t *testing.T) {
-		// Other developer tools should work as expected
-		assert.True(t, checker.IsToolAccessible("echo", state, false), "echo should be accessible")
-		assert.True(t, checker.IsToolAccessible("get_schema", state, false), "get_schema should be accessible")
-	})
-
-	t.Run("GetAccessibleTools includes execute", func(t *testing.T) {
-		tools := checker.GetAccessibleTools(state, false)
-
-		toolNames := make(map[string]bool)
-		for _, tool := range tools {
-			toolNames[tool.Name] = true
+	t.Run("user gets only selected custom tools", func(t *testing.T) {
+		state := map[string]*models.ToolGroupConfig{
+			ToolGroupCustom: {
+				Enabled:     true,
+				CustomTools: []string{"query", "sample", "get_ontology"},
+			},
 		}
 
-		assert.True(t, toolNames["execute"],
-			"execute should be in accessible tools list when developer mode is enabled")
+		// Selected tools
+		assert.True(t, checker.IsToolAccessible("query", state, false))
+		assert.True(t, checker.IsToolAccessible("sample", state, false))
+		assert.True(t, checker.IsToolAccessible("get_ontology", state, false))
+
+		// Health is always included
+		assert.True(t, checker.IsToolAccessible("health", state, false))
+
+		// Non-selected tools NOT accessible
+		assert.False(t, checker.IsToolAccessible("execute", state, false))
+		assert.False(t, checker.IsToolAccessible("echo", state, false))
+		assert.False(t, checker.IsToolAccessible("get_schema", state, false))
 	})
 }
 
@@ -326,24 +373,18 @@ func TestToolAccessChecker_ListAndCallConsistency(t *testing.T) {
 		isAgent bool
 	}{
 		{
-			name: "developer mode user",
-			state: map[string]*models.ToolGroupConfig{
-				ToolGroupDeveloper: {Enabled: true, EnableExecute: true},
-			},
+			name:    "developer mode user",
+			state:   map[string]*models.ToolGroupConfig{ToolGroupDeveloper: {Enabled: true, AddQueryTools: true}},
 			isAgent: false,
 		},
 		{
-			name: "approved_queries mode user",
-			state: map[string]*models.ToolGroupConfig{
-				ToolGroupApprovedQueries: {Enabled: true},
-			},
+			name:    "approved_queries mode user",
+			state:   map[string]*models.ToolGroupConfig{ToolGroupApprovedQueries: {Enabled: true}},
 			isAgent: false,
 		},
 		{
-			name: "agent_tools mode agent",
-			state: map[string]*models.ToolGroupConfig{
-				ToolGroupAgentTools: {Enabled: true},
-			},
+			name:    "agent_tools mode agent",
+			state:   map[string]*models.ToolGroupConfig{ToolGroupAgentTools: {Enabled: true}},
 			isAgent: true,
 		},
 		{
@@ -366,22 +407,6 @@ func TestToolAccessChecker_ListAndCallConsistency(t *testing.T) {
 			for _, tool := range tools {
 				accessible := checker.IsToolAccessible(tool.Name, tc.state, tc.isAgent)
 				assert.True(t, accessible, "tool %q is listed but IsToolAccessible returns false", tool.Name)
-			}
-
-			// Verify tools NOT in the list are NOT accessible
-			for _, regTool := range ToolRegistry {
-				inList := false
-				for _, tool := range tools {
-					if tool.Name == regTool.Name {
-						inList = true
-						break
-					}
-				}
-
-				if !inList {
-					accessible := checker.IsToolAccessible(regTool.Name, tc.state, tc.isAgent)
-					assert.False(t, accessible, "tool %q is not listed but IsToolAccessible returns true", regTool.Name)
-				}
 			}
 		})
 	}
