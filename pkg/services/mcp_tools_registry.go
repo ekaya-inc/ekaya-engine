@@ -19,7 +19,7 @@ const ToolGroupDeveloper = "developer"
 var ToolRegistry = []ToolDefinition{
 	// Developer tools - all tools are always available when developer is enabled
 	{Name: "echo", Description: "Echo back input message for testing", ToolGroup: ToolGroupDeveloper},
-	{Name: "execute", Description: "Execute DDL/DML statements", ToolGroup: ToolGroupDeveloper, SubOption: "enableExecute"},
+	{Name: "execute", Description: "Execute DDL/DML statements", ToolGroup: ToolGroupDeveloper},
 	{Name: "get_schema", Description: "Get database schema with entity semantics", ToolGroup: ToolGroupDeveloper},
 	{Name: "get_entity", Description: "Retrieve full entity details including aliases, key columns, occurrences, and relationships", ToolGroup: ToolGroupDeveloper},
 	{Name: "update_entity", Description: "Create or update entity metadata with upsert semantics (description, aliases, key_columns)", ToolGroup: ToolGroupDeveloper},

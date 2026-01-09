@@ -85,10 +85,6 @@ func (c *toolAccessChecker) isToolAccessibleForUser(tool *ToolDefinition, state 
 	// Developer mode grants access to ALL tools
 	devConfig := state[ToolGroupDeveloper]
 	if devConfig != nil && devConfig.Enabled {
-		// Check sub-options for specific tools
-		if tool.SubOption == "enableExecute" {
-			return devConfig.EnableExecute
-		}
 		return true
 	}
 

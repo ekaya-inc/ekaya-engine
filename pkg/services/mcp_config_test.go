@@ -625,7 +625,7 @@ func TestMCPConfigService_Get_EnabledToolsIncluded(t *testing.T) {
 }
 
 func TestMCPConfigService_Get_EnabledToolsWithDeveloperEnabled(t *testing.T) {
-	// When developer tools are enabled without EnableExecute, execute should NOT be included
+	// When developer tools are enabled, all developer tools including execute are available
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -658,7 +658,7 @@ func TestMCPConfigService_Get_EnabledToolsWithDeveloperEnabled(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// Developer tools (echo, get_schema) + health, but NOT execute (requires EnableExecute)
+	// All developer tools including execute
 	toolNames := make([]string, len(resp.EnabledTools))
 	for i, tool := range resp.EnabledTools {
 		toolNames[i] = tool.Name
@@ -667,7 +667,7 @@ func TestMCPConfigService_Get_EnabledToolsWithDeveloperEnabled(t *testing.T) {
 	assert.Contains(t, toolNames, "echo", "should include echo tool")
 	assert.Contains(t, toolNames, "get_schema", "should include get_schema tool")
 	assert.Contains(t, toolNames, "health", "should include health tool")
-	assert.NotContains(t, toolNames, "execute", "should NOT include execute without EnableExecute")
+	assert.Contains(t, toolNames, "execute", "should include execute tool when developer mode is on")
 }
 
 func TestMCPConfigService_Get_EnabledToolsWithDeveloperAndExecute(t *testing.T) {

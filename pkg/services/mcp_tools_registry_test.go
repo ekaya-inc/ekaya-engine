@@ -31,13 +31,13 @@ func TestGetEnabledTools_DeveloperEnabled(t *testing.T) {
 	}
 	tools := GetEnabledTools(state)
 
-	// Developer mode enables most tools, but NOT execute (requires EnableExecute)
+	// Developer mode enables ALL tools including execute
 	toolNames := extractToolNames(tools)
 
-	// Developer-specific tools (except execute)
+	// Developer-specific tools - execute is now available by default
 	assert.Contains(t, toolNames, "echo")
 	assert.Contains(t, toolNames, "get_schema")
-	assert.NotContains(t, toolNames, "execute") // execute requires EnableExecute
+	assert.Contains(t, toolNames, "execute") // execute is now available when developer mode is on
 
 	// Business user tools are also available in developer mode
 	assert.Contains(t, toolNames, "query")
@@ -51,26 +51,6 @@ func TestGetEnabledTools_DeveloperEnabled(t *testing.T) {
 
 	// Health is always included
 	assert.Contains(t, toolNames, "health")
-
-	// Should have all tools from the registry except execute
-	assert.Len(t, tools, len(ToolRegistry)-1)
-}
-
-func TestGetEnabledTools_DeveloperWithExecute(t *testing.T) {
-	// With EnableExecute=true, execute tool should be available
-	state := map[string]*models.ToolGroupConfig{
-		ToolGroupDeveloper: {Enabled: true, EnableExecute: true},
-	}
-	tools := GetEnabledTools(state)
-
-	toolNames := extractToolNames(tools)
-
-	// Developer mode with EnableExecute enables ALL tools
-	assert.Contains(t, toolNames, "execute")
-	assert.Contains(t, toolNames, "echo")
-	assert.Contains(t, toolNames, "get_schema")
-	assert.Contains(t, toolNames, "health")
-	assert.Contains(t, toolNames, "query") // All tools available in developer mode
 
 	// Should have all tools from the registry
 	assert.Len(t, tools, len(ToolRegistry))
@@ -132,9 +112,9 @@ func TestGetEnabledTools_ForceModeNoLongerHidesDeveloper(t *testing.T) {
 	toolNames := extractToolNames(tools)
 
 	// Both groups' tools should be visible (GetEnabledTools doesn't enforce radio button,
-	// that's done by the state machine). But execute requires EnableExecute.
+	// that's done by the state machine). Execute is now available by default.
 	assert.Contains(t, toolNames, "echo")
-	assert.NotContains(t, toolNames, "execute") // execute requires EnableExecute
+	assert.Contains(t, toolNames, "execute") // execute is now available when developer mode is on
 	assert.Contains(t, toolNames, "get_schema")
 	assert.Contains(t, toolNames, "query")
 	assert.Contains(t, toolNames, "sample")
@@ -222,17 +202,21 @@ func TestToolRegistry_AllToolsHaveValidToolGroup(t *testing.T) {
 	}
 }
 
-func TestToolRegistry_ExecuteHasSubOption(t *testing.T) {
-	// Execute is a dangerous DDL/DML tool that requires explicit opt-in via EnableExecute
-	// even when developer mode is enabled. This provides an extra safety check.
+func TestToolRegistry_ExecuteToolExists(t *testing.T) {
+	// Execute is a developer tool that allows DDL/DML operations.
+	// It's now available whenever developer mode is enabled (no separate opt-in).
+	found := false
 	for _, tool := range ToolRegistry {
 		if tool.Name == "execute" {
-			assert.Equal(t, "enableExecute", tool.SubOption,
-				"execute tool should have enableExecute sub-option for safety")
-			return
+			assert.Equal(t, ToolGroupDeveloper, tool.ToolGroup,
+				"execute tool should be in developer group")
+			assert.Empty(t, tool.SubOption,
+				"execute tool should not require a sub-option")
+			found = true
+			break
 		}
 	}
-	t.Fatal("execute tool not found in registry")
+	assert.True(t, found, "execute tool should exist in registry")
 }
 
 func extractToolNames(tools []ToolDefinition) []string {

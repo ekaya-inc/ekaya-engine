@@ -83,12 +83,15 @@ func TestToolAccessChecker_DeveloperToolsEnabled(t *testing.T) {
 		assert.True(t, checker.IsToolAccessible("health", state, true), "agent should access health")
 	})
 
-	t.Run("execute requires EnableExecute sub-option", func(t *testing.T) {
-		stateWithoutExecute := map[string]*models.ToolGroupConfig{
-			ToolGroupDeveloper: {Enabled: true, EnableExecute: false},
+	t.Run("execute is always available when developer mode is enabled", func(t *testing.T) {
+		// EnableExecute flag is no longer required - execute is available when developer mode is on
+		stateWithoutExecuteFlag := map[string]*models.ToolGroupConfig{
+			ToolGroupDeveloper: {Enabled: true}, // EnableExecute not set (defaults to false)
 		}
-		assert.False(t, checker.IsToolAccessible("execute", stateWithoutExecute, false), "execute should not be accessible without EnableExecute")
-		assert.True(t, checker.IsToolAccessible("echo", stateWithoutExecute, false), "echo should still be accessible")
+		assert.True(t, checker.IsToolAccessible("execute", stateWithoutExecuteFlag, false),
+			"execute should be accessible when developer mode is enabled")
+		assert.True(t, checker.IsToolAccessible("echo", stateWithoutExecuteFlag, false),
+			"echo should be accessible")
 	})
 }
 
@@ -265,6 +268,49 @@ func TestToolAccessChecker_GetAccessibleTools(t *testing.T) {
 
 		require.Len(t, tools, 1)
 		assert.Equal(t, "health", tools[0].Name)
+	})
+}
+
+// TestToolAccessChecker_ExecuteToolDefaultsEnabled verifies that when developer
+// mode is enabled without explicitly setting EnableExecute, the execute tool
+// IS accessible. This matches the UI behavior where the enableExecute toggle
+// was removed - execute should always be available when developer mode is on.
+//
+// BUG: Currently the execute tool requires EnableExecute=true, but the UI only
+// sends {enabled: true} when toggling developer tools. This causes execute to
+// be hidden even when developer tools are enabled via the UI.
+func TestToolAccessChecker_ExecuteToolDefaultsEnabled(t *testing.T) {
+	checker := NewToolAccessChecker()
+
+	// This state matches what the UI sends when toggling developer tools ON:
+	// Only {enabled: true} is sent, EnableExecute is NOT explicitly set (defaults to false)
+	state := map[string]*models.ToolGroupConfig{
+		ToolGroupDeveloper: {Enabled: true}, // EnableExecute NOT set (defaults to false)
+	}
+
+	t.Run("execute tool is accessible when developer mode is enabled", func(t *testing.T) {
+		// The UI removed the enableExecute toggle, so execute should be available
+		// whenever developer tools are enabled
+		assert.True(t, checker.IsToolAccessible("execute", state, false),
+			"execute tool should be accessible when developer mode is enabled, even without EnableExecute=true")
+	})
+
+	t.Run("other developer tools are accessible", func(t *testing.T) {
+		// Other developer tools should work as expected
+		assert.True(t, checker.IsToolAccessible("echo", state, false), "echo should be accessible")
+		assert.True(t, checker.IsToolAccessible("get_schema", state, false), "get_schema should be accessible")
+	})
+
+	t.Run("GetAccessibleTools includes execute", func(t *testing.T) {
+		tools := checker.GetAccessibleTools(state, false)
+
+		toolNames := make(map[string]bool)
+		for _, tool := range tools {
+			toolNames[tool.Name] = true
+		}
+
+		assert.True(t, toolNames["execute"],
+			"execute should be in accessible tools list when developer mode is enabled")
 	})
 }
 
