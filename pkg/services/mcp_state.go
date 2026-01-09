@@ -117,7 +117,14 @@ func (v *mcpStateValidator) Apply(transition MCPStateTransition, ctx MCPStateCon
 	v.normalizeState(newState)
 
 	// Compute enabled tools based on the final state
-	enabledTools := GetEnabledTools(newState)
+	// When agent_tools is enabled, show what agents would see (limited query tools)
+	var enabledTools []ToolDefinition
+	agentConfig := newState[ToolGroupAgentTools]
+	if agentConfig != nil && agentConfig.Enabled {
+		enabledTools = GetEnabledToolsForAgent(newState)
+	} else {
+		enabledTools = GetEnabledTools(newState)
+	}
 
 	return MCPStateResult{
 		State:        newState,
@@ -137,6 +144,14 @@ func (v *mcpStateValidator) validateEnabling(groupName string, state map[string]
 // applyUpdate applies the update config to the current config.
 func (v *mcpStateValidator) applyUpdate(groupName string, current, update *models.ToolGroupConfig) {
 	current.Enabled = update.Enabled
+
+	// New sub-options
+	current.AllowOntologyMaintenance = update.AllowOntologyMaintenance
+	current.AddQueryTools = update.AddQueryTools
+	current.AddOntologyQuestions = update.AddOntologyQuestions
+	current.CustomTools = update.CustomTools
+
+	// Legacy sub-options (backward compatibility)
 	current.EnableExecute = update.EnableExecute
 	current.ForceMode = update.ForceMode
 	current.AllowClientSuggestions = update.AllowClientSuggestions
@@ -160,6 +175,13 @@ func (v *mcpStateValidator) applyMutualExclusivity(state map[string]*models.Tool
 func (v *mcpStateValidator) normalizeState(state map[string]*models.ToolGroupConfig) {
 	for _, config := range state {
 		if config != nil && !config.Enabled {
+			// New sub-options
+			config.AllowOntologyMaintenance = false
+			config.AddQueryTools = false
+			config.AddOntologyQuestions = false
+			config.CustomTools = nil
+
+			// Legacy sub-options
 			config.EnableExecute = false
 			config.ForceMode = false
 			config.AllowClientSuggestions = false
@@ -176,8 +198,25 @@ func (v *mcpStateValidator) deepCopy(state map[string]*models.ToolGroupConfig) m
 	copy := make(map[string]*models.ToolGroupConfig, len(state))
 	for k, v := range state {
 		if v != nil {
+			// Copy CustomTools slice
+			var customToolsCopy []string
+			if v.CustomTools != nil {
+				customToolsCopy = make([]string, len(v.CustomTools))
+				for i, t := range v.CustomTools {
+					customToolsCopy[i] = t
+				}
+			}
+
 			copy[k] = &models.ToolGroupConfig{
-				Enabled:                v.Enabled,
+				Enabled: v.Enabled,
+
+				// New sub-options
+				AllowOntologyMaintenance: v.AllowOntologyMaintenance,
+				AddQueryTools:            v.AddQueryTools,
+				AddOntologyQuestions:     v.AddOntologyQuestions,
+				CustomTools:              customToolsCopy,
+
+				// Legacy sub-options
 				EnableExecute:          v.EnableExecute,
 				ForceMode:              v.ForceMode,
 				AllowClientSuggestions: v.AllowClientSuggestions,
