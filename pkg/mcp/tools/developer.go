@@ -130,11 +130,11 @@ func buildOntologyToolMap() map[string]bool {
 	}
 }
 
-// buildAgentToolMap returns tools available to agents (from services.agentAllowedTools).
+// buildAgentToolMap returns tools available to agents (Limited Query loadout).
+// Agents get only approved query tools - echo is a developer testing tool.
 // Note: health is handled separately in filterAgentTools.
 func buildAgentToolMap() map[string]bool {
 	return map[string]bool{
-		"echo":                   true,
 		"list_approved_queries":  true,
 		"execute_approved_query": true,
 	}
