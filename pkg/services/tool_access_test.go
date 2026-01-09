@@ -54,14 +54,14 @@ func TestToolAccessChecker_DeveloperToolsEnabled(t *testing.T) {
 			ToolGroupAgentTools:      {Enabled: false},
 		}
 
-		// Developer Core tools
+		// Developer Core tools (echo, execute only)
 		assert.True(t, checker.IsToolAccessible("echo", state, false), "echo should be accessible")
 		assert.True(t, checker.IsToolAccessible("execute", state, false), "execute should be accessible")
-		assert.True(t, checker.IsToolAccessible("validate", state, false), "validate should be accessible")
-		assert.True(t, checker.IsToolAccessible("query", state, false), "query should be accessible")
-		assert.True(t, checker.IsToolAccessible("explain_query", state, false), "explain_query should be accessible")
 
 		// Query loadout tools NOT accessible without AddQueryTools option
+		assert.False(t, checker.IsToolAccessible("validate", state, false), "validate NOT accessible without AddQueryTools")
+		assert.False(t, checker.IsToolAccessible("query", state, false), "query NOT accessible without AddQueryTools")
+		assert.False(t, checker.IsToolAccessible("explain_query", state, false), "explain_query NOT accessible without AddQueryTools")
 		assert.False(t, checker.IsToolAccessible("get_schema", state, false), "get_schema NOT accessible without AddQueryTools")
 		assert.False(t, checker.IsToolAccessible("sample", state, false), "sample NOT accessible without AddQueryTools")
 		assert.False(t, checker.IsToolAccessible("get_ontology", state, false), "get_ontology NOT accessible without AddQueryTools")
@@ -248,15 +248,15 @@ func TestToolAccessChecker_GetAccessibleTools(t *testing.T) {
 			toolNames[tool.Name] = true
 		}
 
-		// Developer Core tools
+		// Developer Core tools (health + echo + execute only)
 		assert.True(t, toolNames["health"])
 		assert.True(t, toolNames["echo"])
 		assert.True(t, toolNames["execute"])
-		assert.True(t, toolNames["validate"])
-		assert.True(t, toolNames["query"])
-		assert.True(t, toolNames["explain_query"])
 
 		// Query tools NOT included without AddQueryTools
+		assert.False(t, toolNames["validate"])
+		assert.False(t, toolNames["query"])
+		assert.False(t, toolNames["explain_query"])
 		assert.False(t, toolNames["get_schema"])
 		assert.False(t, toolNames["sample"])
 	})

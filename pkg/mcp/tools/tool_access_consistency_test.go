@@ -391,18 +391,17 @@ func TestBothEnabled_UserSeesApprovedQueries(t *testing.T) {
 	t.Log("CALLING: approved queries tools callable for user")
 }
 
-// TestAgentToolsEnabled_EchoListAndCallConsistency tests that when agent_tools is enabled,
-// the echo tool is both listed AND callable for agent authentication.
-// This is a regression test for the bug where echo was listed but calls failed with
-// "developer tools are not enabled for this project".
-func TestAgentToolsEnabled_EchoListAndCallConsistency(t *testing.T) {
+// TestAgentToolsEnabled_LimitedQueryToolsConsistency tests that when agent_tools is enabled,
+// agents only get Limited Query loadout tools (health, list_approved_queries, execute_approved_query).
+// Echo is a developer tool and should NOT be available to agents.
+func TestAgentToolsEnabled_LimitedQueryToolsConsistency(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
 	// Setup: agent_tools enabled, developer tools NOT enabled
 	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
 		"agent_tools": {Enabled: true},
-		// developer tools is NOT in this config - this is the key test case
+		// developer tools is NOT in this config
 	})
 
 	mcpConfigService := services.NewMCPConfigService(
@@ -413,7 +412,6 @@ func TestAgentToolsEnabled_EchoListAndCallConsistency(t *testing.T) {
 		zap.NewNop(),
 	)
 
-	// Part 1: Verify tool LISTING shows echo for agent auth
 	filterDeps := &MCPToolDeps{
 		DB:               engineDB.DB,
 		MCPConfigService: mcpConfigService,
@@ -430,14 +428,25 @@ func TestAgentToolsEnabled_EchoListAndCallConsistency(t *testing.T) {
 
 	filteredTools := filter(ctx, allTools)
 
-	// Verify echo is in the filtered list
-	if !containsTool(filteredTools, "echo") {
-		t.Fatal("LISTING: echo should be visible when agent_tools is enabled")
+	// Verify Limited Query loadout tools are present
+	if !containsTool(filteredTools, "health") {
+		t.Error("LISTING: health should be visible for agents")
+	}
+	if !containsTool(filteredTools, "list_approved_queries") {
+		t.Error("LISTING: list_approved_queries should be visible for agents")
+	}
+	if !containsTool(filteredTools, "execute_approved_query") {
+		t.Error("LISTING: execute_approved_query should be visible for agents")
 	}
 
-	t.Log("LISTING: echo tool is correctly visible for agent auth with agent_tools enabled")
+	// Verify echo is NOT available for agents (it's a developer tool)
+	if containsTool(filteredTools, "echo") {
+		t.Error("LISTING: echo should NOT be visible for agents (it's a developer tool)")
+	}
 
-	// Part 2: Verify tool CALLING works (this is where the bug was)
+	t.Log("LISTING: agent tools correctly limited to Limited Query loadout")
+
+	// Verify tool CALLING consistency for list_approved_queries
 	devDeps := &MCPToolDeps{
 		DB:               engineDB.DB,
 		MCPConfigService: mcpConfigService,
@@ -445,11 +454,10 @@ func TestAgentToolsEnabled_EchoListAndCallConsistency(t *testing.T) {
 		Logger:           zap.NewNop(),
 	}
 
-	// AcquireToolAccess is called when executing echo tool
-	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, devDeps, "echo")
+	_, tenantCtx, cleanup, err := AcquireToolAccess(ctx, devDeps, "list_approved_queries")
 	if err != nil {
-		t.Fatalf("CALLING: AcquireToolAccess for echo failed: %v\n"+
-			"This means echo is LISTED but cannot be CALLED - list/call inconsistency!", err)
+		t.Fatalf("CALLING: AcquireToolAccess for list_approved_queries failed: %v\n"+
+			"This means it is LISTED but cannot be CALLED - list/call inconsistency!", err)
 	}
 	if cleanup != nil {
 		defer cleanup()
@@ -459,5 +467,5 @@ func TestAgentToolsEnabled_EchoListAndCallConsistency(t *testing.T) {
 		t.Fatal("CALLING: expected tenant context to be set")
 	}
 
-	t.Log("CALLING: echo tool is correctly callable for agent auth with agent_tools enabled")
+	t.Log("CALLING: list_approved_queries is correctly callable for agents")
 }

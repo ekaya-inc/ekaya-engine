@@ -31,18 +31,18 @@ func TestGetEnabledTools_DeveloperEnabled(t *testing.T) {
 	}
 	tools := GetEnabledTools(state)
 
-	// Developer mode only enables Developer Core loadout
+	// Developer mode only enables Developer Core loadout (health, echo, execute)
 	toolNames := extractToolNames(tools)
 
-	// Developer Core tools
+	// Developer Core tools only
 	assert.Contains(t, toolNames, "health")
 	assert.Contains(t, toolNames, "echo")
 	assert.Contains(t, toolNames, "execute")
-	assert.Contains(t, toolNames, "validate")
-	assert.Contains(t, toolNames, "query")
-	assert.Contains(t, toolNames, "explain_query")
 
-	// Query tools should NOT be included without AddQueryTools option
+	// Query loadout tools should NOT be included without AddQueryTools option
+	assert.NotContains(t, toolNames, "validate")
+	assert.NotContains(t, toolNames, "query")
+	assert.NotContains(t, toolNames, "explain_query")
 	assert.NotContains(t, toolNames, "get_schema")
 	assert.NotContains(t, toolNames, "sample")
 	assert.NotContains(t, toolNames, "list_approved_queries")

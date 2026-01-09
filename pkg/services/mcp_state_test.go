@@ -21,13 +21,13 @@ func TestMCPStateValidator_NormalizeState_SubOptionsReset(t *testing.T) {
 		{
 			name: "disabling developer resets enableExecute",
 			current: map[string]*models.ToolGroupConfig{
-				"developer": {Enabled: true, EnableExecute: true},
+				"developer": {Enabled: true},
 			},
 			update: map[string]*models.ToolGroupConfig{
-				"developer": {Enabled: false, EnableExecute: true}, // trying to keep execute
+				"developer": {Enabled: false}, // trying to keep execute
 			},
 			expected: map[string]*models.ToolGroupConfig{
-				"developer": {Enabled: false, EnableExecute: false}, // must be reset
+				"developer": {Enabled: false}, // must be reset
 			},
 		},
 		{
@@ -53,13 +53,13 @@ func TestMCPStateValidator_NormalizeState_SubOptionsReset(t *testing.T) {
 		{
 			name: "enabling group preserves sub-options",
 			current: map[string]*models.ToolGroupConfig{
-				"developer": {Enabled: false, EnableExecute: false},
+				"developer": {Enabled: false},
 			},
 			update: map[string]*models.ToolGroupConfig{
-				"developer": {Enabled: true, EnableExecute: true},
+				"developer": {Enabled: true},
 			},
 			expected: map[string]*models.ToolGroupConfig{
-				"developer": {Enabled: true, EnableExecute: true},
+				"developer": {Enabled: true},
 			},
 		},
 	}
@@ -79,8 +79,6 @@ func TestMCPStateValidator_NormalizeState_SubOptionsReset(t *testing.T) {
 				require.NotNil(t, actualConfig, "group %s should exist", groupName)
 				assert.Equal(t, expectedConfig.Enabled, actualConfig.Enabled,
 					"group %s: Enabled mismatch", groupName)
-				assert.Equal(t, expectedConfig.EnableExecute, actualConfig.EnableExecute,
-					"group %s: EnableExecute mismatch", groupName)
 				assert.Equal(t, expectedConfig.ForceMode, actualConfig.ForceMode,
 					"group %s: ForceMode mismatch", groupName)
 				assert.Equal(t, expectedConfig.AllowClientSuggestions, actualConfig.AllowClientSuggestions,
@@ -298,14 +296,14 @@ func TestMCPStateValidator_DeepCopyPreventsModification(t *testing.T) {
 	validator := NewMCPStateValidator()
 
 	original := map[string]*models.ToolGroupConfig{
-		"developer": {Enabled: false, EnableExecute: false},
+		"developer": {Enabled: false},
 	}
 
 	result := validator.Apply(
 		MCPStateTransition{
 			Current: original,
 			Update: map[string]*models.ToolGroupConfig{
-				"developer": {Enabled: true, EnableExecute: true},
+				"developer": {Enabled: true},
 			},
 		},
 		MCPStateContext{HasEnabledQueries: true},
@@ -315,11 +313,9 @@ func TestMCPStateValidator_DeepCopyPreventsModification(t *testing.T) {
 
 	// New state should be updated
 	assert.True(t, result.State["developer"].Enabled)
-	assert.True(t, result.State["developer"].EnableExecute)
 
 	// Original should be unchanged
 	assert.False(t, original["developer"].Enabled)
-	assert.False(t, original["developer"].EnableExecute)
 }
 
 func TestMCPStateValidator_AllPermutations_NoInvalidStates(t *testing.T) {
@@ -336,8 +332,6 @@ func TestMCPStateValidator_AllPermutations_NoInvalidStates(t *testing.T) {
 			}
 			// CRITICAL: If disabled, all sub-options must be false
 			if !config.Enabled {
-				assert.False(t, config.EnableExecute,
-					"%s: %s disabled but EnableExecute=true", description, groupName)
 				assert.False(t, config.ForceMode,
 					"%s: %s disabled but ForceMode=true", description, groupName)
 				assert.False(t, config.AllowClientSuggestions,
@@ -378,7 +372,7 @@ func TestMCPStateValidator_AllPermutations_NoInvalidStates(t *testing.T) {
 		},
 		{
 			name:    "enable agent_tools over developer",
-			current: map[string]*models.ToolGroupConfig{"developer": {Enabled: true, EnableExecute: true}},
+			current: map[string]*models.ToolGroupConfig{"developer": {Enabled: true}},
 			update:  map[string]*models.ToolGroupConfig{ToolGroupAgentTools: {Enabled: true}},
 			ctx:     MCPStateContext{HasEnabledQueries: true},
 		},
@@ -390,14 +384,14 @@ func TestMCPStateValidator_AllPermutations_NoInvalidStates(t *testing.T) {
 		},
 		{
 			name:    "toggle developer with execute",
-			current: map[string]*models.ToolGroupConfig{"developer": {Enabled: true, EnableExecute: true}},
-			update:  map[string]*models.ToolGroupConfig{"developer": {Enabled: false, EnableExecute: true}},
+			current: map[string]*models.ToolGroupConfig{"developer": {Enabled: true}},
+			update:  map[string]*models.ToolGroupConfig{"developer": {Enabled: false}},
 			ctx:     MCPStateContext{HasEnabledQueries: true},
 		},
 		{
 			name: "complex: all groups with various states",
 			current: map[string]*models.ToolGroupConfig{
-				"developer":              {Enabled: true, EnableExecute: true},
+				"developer":              {Enabled: true},
 				ToolGroupApprovedQueries: {Enabled: true, ForceMode: false, AllowClientSuggestions: true},
 				ToolGroupAgentTools:      {Enabled: false},
 			},
@@ -465,15 +459,15 @@ func TestMCPStateValidator_EnabledTools(t *testing.T) {
 		require.Nil(t, result.Error)
 		require.NotNil(t, result.EnabledTools)
 
-		// Should include Developer Core tools
-		assert.NotNil(t, findTool(result.EnabledTools, "echo"), "echo should be enabled")
-		assert.NotNil(t, findTool(result.EnabledTools, "health"), "health should be enabled")
-		assert.NotNil(t, findTool(result.EnabledTools, "execute"), "execute should be enabled when developer mode is on")
-		assert.NotNil(t, findTool(result.EnabledTools, "validate"), "validate should be enabled")
-		assert.NotNil(t, findTool(result.EnabledTools, "query"), "query should be enabled")
-		assert.NotNil(t, findTool(result.EnabledTools, "explain_query"), "explain_query should be enabled")
+		// Should include Developer Core tools only (Default + DeveloperCore loadouts)
+		assert.NotNil(t, findTool(result.EnabledTools, "health"), "health should be enabled (always available)")
+		assert.NotNil(t, findTool(result.EnabledTools, "echo"), "echo should be enabled (Developer Core)")
+		assert.NotNil(t, findTool(result.EnabledTools, "execute"), "execute should be enabled (Developer Core)")
 
 		// Query loadout tools NOT included without AddQueryTools
+		assert.Nil(t, findTool(result.EnabledTools, "validate"), "validate requires AddQueryTools")
+		assert.Nil(t, findTool(result.EnabledTools, "query"), "query requires AddQueryTools")
+		assert.Nil(t, findTool(result.EnabledTools, "explain_query"), "explain_query requires AddQueryTools")
 		assert.Nil(t, findTool(result.EnabledTools, "get_schema"), "get_schema requires AddQueryTools")
 		assert.Nil(t, findTool(result.EnabledTools, "sample"), "sample requires AddQueryTools")
 	})
@@ -566,7 +560,7 @@ func TestMCPStateValidator_EnabledTools(t *testing.T) {
 
 	t.Run("radio button switch shows new state enabled tools", func(t *testing.T) {
 		// With radio button, enabling developer while agent_tools is active
-		// should succeed and show Developer Core tools
+		// should succeed and show Developer Core tools only
 		result := validator.Apply(
 			MCPStateTransition{
 				Current: map[string]*models.ToolGroupConfig{
@@ -583,15 +577,15 @@ func TestMCPStateValidator_EnabledTools(t *testing.T) {
 		require.Nil(t, result.Error, "radio button switch should not error")
 		require.NotNil(t, result.EnabledTools)
 
-		// Should reflect the new state (Developer Core tools)
-		assert.NotNil(t, findTool(result.EnabledTools, "echo"), "echo should be enabled")
-		assert.NotNil(t, findTool(result.EnabledTools, "execute"), "execute should be enabled when developer mode is on")
-		assert.NotNil(t, findTool(result.EnabledTools, "health"), "health should be enabled")
-		assert.NotNil(t, findTool(result.EnabledTools, "query"), "query should be enabled")
-		assert.NotNil(t, findTool(result.EnabledTools, "validate"), "validate should be enabled")
-		assert.NotNil(t, findTool(result.EnabledTools, "explain_query"), "explain_query should be enabled")
+		// Should reflect the new state (Developer Core tools only)
+		assert.NotNil(t, findTool(result.EnabledTools, "health"), "health should be enabled (always available)")
+		assert.NotNil(t, findTool(result.EnabledTools, "echo"), "echo should be enabled (Developer Core)")
+		assert.NotNil(t, findTool(result.EnabledTools, "execute"), "execute should be enabled (Developer Core)")
 
 		// Query loadout tools NOT included without AddQueryTools
+		assert.Nil(t, findTool(result.EnabledTools, "query"), "query requires AddQueryTools")
+		assert.Nil(t, findTool(result.EnabledTools, "validate"), "validate requires AddQueryTools")
+		assert.Nil(t, findTool(result.EnabledTools, "explain_query"), "explain_query requires AddQueryTools")
 		assert.Nil(t, findTool(result.EnabledTools, "get_schema"), "get_schema requires AddQueryTools")
 		assert.Nil(t, findTool(result.EnabledTools, "sample"), "sample requires AddQueryTools")
 	})
@@ -620,7 +614,7 @@ func TestMCPStateValidator_EnabledToolsConsistency(t *testing.T) {
 		{
 			name: "both groups to agent_tools",
 			current: map[string]*models.ToolGroupConfig{
-				"developer":              {Enabled: true, EnableExecute: true},
+				"developer":              {Enabled: true},
 				ToolGroupApprovedQueries: {Enabled: true},
 			},
 			update: map[string]*models.ToolGroupConfig{ToolGroupAgentTools: {Enabled: true}},
@@ -818,8 +812,7 @@ func TestMCPStateValidator_RadioButton_NoQueriesNotBlocking(t *testing.T) {
 }
 
 func TestMCPStateValidator_DeveloperTools_ExecuteAvailableByDefault(t *testing.T) {
-	// When developer tools is enabled, execute is available by default
-	// (EnableExecute flag is no longer required)
+	// When developer tools is enabled, execute is always available as part of Developer Core loadout
 	validator := NewMCPStateValidator()
 
 	findTool := func(tools []ToolDefinition, name string) *ToolDefinition {
@@ -926,18 +919,19 @@ func TestMCPStateValidator_RadioButton_EnabledToolsReflectSelection(t *testing.T
 
 		require.Nil(t, result.Error)
 
-		// Developer Core tools should be present
+		// Developer Core tools should be present (Default + DeveloperCore loadouts)
+		assert.NotNil(t, findTool(result.EnabledTools, "health"))
 		assert.NotNil(t, findTool(result.EnabledTools, "echo"))
 		assert.NotNil(t, findTool(result.EnabledTools, "execute"))
-		assert.NotNil(t, findTool(result.EnabledTools, "validate"))
-		assert.NotNil(t, findTool(result.EnabledTools, "query"))
-		assert.NotNil(t, findTool(result.EnabledTools, "explain_query"))
 
 		// Query loadout tools should NOT be present (need AddQueryTools option)
+		assert.Nil(t, findTool(result.EnabledTools, "validate"))
+		assert.Nil(t, findTool(result.EnabledTools, "query"))
+		assert.Nil(t, findTool(result.EnabledTools, "explain_query"))
 		assert.Nil(t, findTool(result.EnabledTools, "get_schema"))
 		assert.Nil(t, findTool(result.EnabledTools, "sample"))
 
-		// Developer Core = 5 tools + Default (health) = 6 tools
-		assert.Len(t, result.EnabledTools, 6)
+		// Developer Core = 2 tools (echo, execute) + Default (health) = 3 tools
+		assert.Len(t, result.EnabledTools, 3)
 	})
 }

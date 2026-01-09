@@ -492,12 +492,12 @@ func TestMCPConfigService_Get_SubOptionsResetWhenDisabled(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
-	// Config has developer disabled but with enableExecute=true (inconsistent state)
+	// Config has developer disabled but with ForceMode=true (inconsistent state)
 	configRepo := &mockMCPConfigRepository{
 		config: &models.MCPConfig{
 			ProjectID: projectID,
 			ToolGroups: map[string]*models.ToolGroupConfig{
-				"developer": {Enabled: false, EnableExecute: true},
+				"developer": {Enabled: false, ForceMode: true},
 			},
 		},
 	}
@@ -526,7 +526,7 @@ func TestMCPConfigService_Get_SubOptionsResetWhenDisabled(t *testing.T) {
 	developer, ok := resp.ToolGroups["developer"]
 	require.True(t, ok)
 	assert.False(t, developer.Enabled, "developer should be disabled")
-	assert.False(t, developer.EnableExecute, "enableExecute should be reset when group is disabled")
+	assert.False(t, developer.ForceMode, "ForceMode should be reset when group is disabled")
 }
 
 func TestMCPConfigService_Get_ServerURLConstruction(t *testing.T) {
@@ -625,7 +625,8 @@ func TestMCPConfigService_Get_EnabledToolsIncluded(t *testing.T) {
 }
 
 func TestMCPConfigService_Get_EnabledToolsWithDeveloperEnabled(t *testing.T) {
-	// When developer tools are enabled, Developer Core tools are available
+	// When developer tools are enabled, only Developer Core tools are available
+	// Query loadout tools require AddQueryTools option
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -658,26 +659,27 @@ func TestMCPConfigService_Get_EnabledToolsWithDeveloperEnabled(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// Developer Core tools only
+	// Developer Core tools only (Default + DeveloperCore loadouts)
 	toolNames := make([]string, len(resp.EnabledTools))
 	for i, tool := range resp.EnabledTools {
 		toolNames[i] = tool.Name
 	}
 
-	assert.Contains(t, toolNames, "echo", "should include echo tool")
-	assert.Contains(t, toolNames, "health", "should include health tool")
-	assert.Contains(t, toolNames, "execute", "should include execute tool when developer mode is on")
-	assert.Contains(t, toolNames, "validate", "should include validate tool")
-	assert.Contains(t, toolNames, "query", "should include query tool")
-	assert.Contains(t, toolNames, "explain_query", "should include explain_query tool")
+	// Should include Developer Core tools
+	assert.Contains(t, toolNames, "health", "should include health tool (always available)")
+	assert.Contains(t, toolNames, "echo", "should include echo tool (Developer Core)")
+	assert.Contains(t, toolNames, "execute", "should include execute tool (Developer Core)")
 
 	// Query loadout tools NOT included without AddQueryTools option
+	assert.NotContains(t, toolNames, "validate", "validate requires AddQueryTools option")
+	assert.NotContains(t, toolNames, "query", "query requires AddQueryTools option")
+	assert.NotContains(t, toolNames, "explain_query", "explain_query requires AddQueryTools option")
 	assert.NotContains(t, toolNames, "get_schema", "get_schema requires AddQueryTools option")
 	assert.NotContains(t, toolNames, "sample", "sample requires AddQueryTools option")
 }
 
-func TestMCPConfigService_Get_EnabledToolsWithDeveloperAndExecute(t *testing.T) {
-	// When developer tools and enableExecute are enabled, execute tool should be included
+func TestMCPConfigService_Get_EnabledToolsWithDeveloperCoreIncludesExecute(t *testing.T) {
+	// When developer tools are enabled, execute tool is always included (part of Developer Core)
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -685,7 +687,7 @@ func TestMCPConfigService_Get_EnabledToolsWithDeveloperAndExecute(t *testing.T) 
 		config: &models.MCPConfig{
 			ProjectID: projectID,
 			ToolGroups: map[string]*models.ToolGroupConfig{
-				"developer": {Enabled: true, EnableExecute: true},
+				"developer": {Enabled: true},
 			},
 		},
 	}
@@ -715,7 +717,7 @@ func TestMCPConfigService_Get_EnabledToolsWithDeveloperAndExecute(t *testing.T) 
 		toolNames[i] = tool.Name
 	}
 
-	assert.Contains(t, toolNames, "execute", "should include execute tool when enableExecute is true")
+	assert.Contains(t, toolNames, "execute", "should include execute tool in Developer Core")
 }
 
 func TestMCPConfigService_Get_EnabledToolsWithApprovedQueries(t *testing.T) {
