@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -14,6 +15,7 @@ import (
 
 // Adapter provides PostgreSQL connectivity.
 type Adapter struct {
+	config       *Config
 	pool         *pgxpool.Pool
 	connMgr      *datasource.ConnectionManager
 	projectID    uuid.UUID
@@ -60,6 +62,7 @@ func NewAdapter(ctx context.Context, cfg *Config, connMgr *datasource.Connection
 		}
 
 		return &Adapter{
+			config:    cfg,
 			pool:      pool,
 			ownedPool: true,
 		}, nil
@@ -78,6 +81,7 @@ func NewAdapter(ctx context.Context, cfg *Config, connMgr *datasource.Connection
 	}
 
 	return &Adapter{
+		config:       cfg,
 		pool:         pool,
 		connMgr:      connMgr,
 		projectID:    projectID,
@@ -88,8 +92,36 @@ func NewAdapter(ctx context.Context, cfg *Config, connMgr *datasource.Connection
 }
 
 // TestConnection verifies the database is reachable with valid credentials.
+// It checks:
+// 1. Server connectivity (ping)
+// 2. Database access (simple query)
+// 3. Correct database name (to prevent connecting to wrong/default database)
 func (a *Adapter) TestConnection(ctx context.Context) error {
-	return a.pool.Ping(ctx)
+	if err := a.pool.Ping(ctx); err != nil {
+		return fmt.Errorf("ping failed: %w", err)
+	}
+
+	// Run a simple query to ensure we have database access
+	var result int
+	if err := a.pool.QueryRow(ctx, "SELECT 1").Scan(&result); err != nil {
+		return fmt.Errorf("test query failed: %w", err)
+	}
+
+	// Verify we're connected to the correct database
+	// PostgreSQL connection strings include the database, but we should verify
+	var currentDB string
+	if err := a.pool.QueryRow(ctx, "SELECT current_database()").Scan(&currentDB); err != nil {
+		return fmt.Errorf("failed to get current database name: %w", err)
+	}
+
+	expectedDB := a.config.Database
+	// PostgreSQL database names are case-sensitive, but we'll do case-insensitive comparison
+	// to match MSSQL behavior and handle common configuration issues
+	if !strings.EqualFold(currentDB, expectedDB) {
+		return fmt.Errorf("connected to wrong database: expected %q but connected to %q", expectedDB, currentDB)
+	}
+
+	return nil
 }
 
 // Close releases the adapter (but NOT the pool if managed).

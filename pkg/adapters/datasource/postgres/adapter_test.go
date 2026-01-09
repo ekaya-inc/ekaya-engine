@@ -5,6 +5,7 @@ package postgres
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -215,5 +216,82 @@ func TestAdapter_ConnectionFailure(t *testing.T) {
 	// If adapter was created, ping should fail
 	if err := adapter.TestConnection(ctx); err == nil {
 		t.Error("expected connection test to fail with invalid credentials")
+	}
+}
+
+// TestAdapter_TestConnection_VerifiesDatabaseName tests that TestConnection
+// verifies the database name matches the configured database.
+func TestAdapter_TestConnection_VerifiesDatabaseName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	// Check for required environment variables
+	host := os.Getenv("PGHOST")
+	user := os.Getenv("PGUSER")
+	database := os.Getenv("PGDATABASE")
+
+	if host == "" || user == "" || database == "" {
+		t.Skip("skipping integration test: PGHOST, PGUSER, or PGDATABASE not set")
+	}
+
+	// Test with correct database name
+	cfg := &Config{
+		Host:     host,
+		Port:     5432,
+		User:     user,
+		Password: os.Getenv("PGPASSWORD"),
+		Database: database,
+		SSLMode:  "disable",
+	}
+
+	if port := os.Getenv("PGPORT"); port != "" {
+		// Parse port if provided
+		var p int
+		if _, err := os.Stat(port); err == nil {
+			p = 5432
+		} else {
+			p = 5432 // default
+		}
+		cfg.Port = p
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	adapter, err := NewAdapter(ctx, cfg, nil, uuid.Nil, uuid.Nil, "")
+	if err != nil {
+		t.Fatalf("failed to create adapter: %v", err)
+	}
+	defer adapter.Close()
+
+	// TestConnection should succeed with correct database
+	if err := adapter.TestConnection(ctx); err != nil {
+		t.Fatalf("connection test should succeed with correct database: %v", err)
+	}
+
+	// Test with wrong database name (should fail)
+	wrongCfg := &Config{
+		Host:     host,
+		Port:     cfg.Port,
+		User:     user,
+		Password: os.Getenv("PGPASSWORD"),
+		Database: "nonexistent_database_12345",
+		SSLMode:  "disable",
+	}
+
+	// Try to connect to wrong database - connection might succeed but TestConnection should fail
+	wrongAdapter, err := NewAdapter(ctx, wrongCfg, nil, uuid.Nil, uuid.Nil, "")
+	if err != nil {
+		// Connection failed at creation - this is acceptable
+		return
+	}
+	defer wrongAdapter.Close()
+
+	// TestConnection should fail because database name doesn't match
+	if err := wrongAdapter.TestConnection(ctx); err == nil {
+		t.Error("expected connection test to fail with wrong database name")
+	} else if !strings.Contains(strings.ToLower(err.Error()), "wrong database") {
+		t.Errorf("expected error about wrong database, got: %v", err)
 	}
 }

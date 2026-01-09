@@ -115,25 +115,46 @@ func (m *ConnectionManager) RegisterConnection(
 	// Check if connection already exists
 	if managed, exists := m.connections[key]; exists && managed != nil {
 		managed.mu.Lock()
-		defer managed.mu.Unlock()
 
-		// Health check existing connection
-		healthCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
+		// Validate that the existing connection type matches the new connector type
+		// This prevents returning a PostgreSQL connector when MSSQL is being registered (or vice versa)
+		// when using test connections with uuid.Nil keys
+		if managed.connector.GetType() != connector.GetType() {
+			m.logger.Info("existing connection type mismatch, replacing",
+				zap.String("key", key),
+				zap.String("existingType", managed.connector.GetType()),
+				zap.String("newType", connector.GetType()),
+			)
+			// Close the existing connection of wrong type
+			if managed.connector != nil {
+				managed.connector.Close()
+			}
+			managed.mu.Unlock()
+			// Remove the old connection (we already hold m.mu, so inline the removal)
+			delete(m.connections, key)
+		} else {
+			// Types match - health check existing connection
+			healthCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
 
-		err := retry.Do(healthCtx, retry.DefaultConfig(), func() error {
-			return managed.connector.Ping(healthCtx)
-		})
+			err := retry.Do(healthCtx, retry.DefaultConfig(), func() error {
+				return managed.connector.Ping(healthCtx)
+			})
 
-		if err == nil {
-			// Existing connection is healthy, return it
-			managed.lastUsed = time.Now()
-			return managed.connector, nil
-		}
+			if err == nil {
+				// Existing connection is healthy, return it
+				managed.lastUsed = time.Now()
+				managed.mu.Unlock()
+				return managed.connector, nil
+			}
 
-		// Existing connection is unhealthy, close it and replace
-		if managed.connector != nil {
-			managed.connector.Close()
+			// Existing connection is unhealthy, close it and replace
+			if managed.connector != nil {
+				managed.connector.Close()
+			}
+			managed.mu.Unlock()
+			// Remove the unhealthy connection (we already hold m.mu, so inline the removal)
+			delete(m.connections, key)
 		}
 	}
 
@@ -210,6 +231,20 @@ func (m *ConnectionManager) GetOrCreateConnection(
 
 	if exists {
 		managed.mu.Lock()
+
+		// Validate that the existing connection matches the requested type
+		// This prevents returning a PostgreSQL connector when MSSQL is requested (or vice versa)
+		// when using test connections with uuid.Nil keys
+		if managed.connector.GetType() != dsType {
+			m.logger.Info("existing connection type mismatch, recreating",
+				zap.String("key", key),
+				zap.String("existingType", managed.connector.GetType()),
+				zap.String("requestedType", dsType),
+			)
+			managed.mu.Unlock() // Unlock before calling removeConnection
+			m.removeConnection(key)
+			return m.createNewConnection(ctx, dsType, key, projectID, userID, datasourceID, connString)
+		}
 
 		// Health check with retry and timeout
 		healthCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

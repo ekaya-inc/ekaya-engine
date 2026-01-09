@@ -19,7 +19,6 @@ import { useDatasourceConnection } from "../contexts/DatasourceConnectionContext
 import { useToast } from "../hooks/useToast";
 import engineApi from "../services/engineApi";
 import type { DatasourceType, SSLMode } from "../types";
-import type { ConnectionDetails } from "../types/datasource";
 import { parsePostgresUrl } from "../utils/connectionString";
 
 import { Button } from "./ui/Button";
@@ -102,6 +101,7 @@ const DatasourceConfiguration = ({
     ProviderInfo | undefined
   >(selectedProvider);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const hasAutoSelectedAuthMethod = useRef<boolean>(false);
 
   // Use provider info for display if available, otherwise fall back to adapter info
   // activeProvider takes precedence (can be updated from connection string parsing)
@@ -112,7 +112,10 @@ const DatasourceConfiguration = ({
 
   const [config, setConfig] = useState<DatasourceFormConfig>({
     host: "",
-    port: selectedAdapter === "mssql" ? "1433" : "5432",
+    port:
+      selectedAdapter === "mssql"
+        ? "1433"
+        : selectedProvider?.defaultPort?.toString() ?? "5432",
     user: "",
     password: "",
     name: "",
@@ -202,6 +205,17 @@ const DatasourceConfiguration = ({
     }
   }, [selectedProvider]);
 
+  // Update port when provider changes
+  useEffect(() => {
+    const currentProvider = activeProvider ?? selectedProvider;
+    if (currentProvider?.defaultPort && selectedAdapter !== "mssql") {
+      setConfig((prev) => ({
+        ...prev,
+        port: currentProvider.defaultPort.toString(),
+      }));
+    }
+  }, [activeProvider, selectedProvider, selectedAdapter]);
+
   // Load provider from existing config when editing
   useEffect(() => {
     if (connectionDetails?.provider) {
@@ -227,6 +241,33 @@ const DatasourceConfiguration = ({
         displayName: connectionDetails.displayName ?? displayInfo.name,
       };
 
+      // Load MSSQL-specific fields from connectionDetails
+      // These are stored in the config map and spread into connectionDetails
+      if (selectedAdapter === "mssql") {
+        const mssqlConfig = connectionDetails as any;
+        if (mssqlConfig.auth_method) {
+          formData.authMethod = mssqlConfig.auth_method as "sql" | "service_principal" | "user_delegation";
+        }
+        if (mssqlConfig.tenant_id) {
+          formData.tenantId = mssqlConfig.tenant_id;
+        }
+        if (mssqlConfig.client_id) {
+          formData.clientId = mssqlConfig.client_id;
+        }
+        if (mssqlConfig.client_secret) {
+          formData.clientSecret = mssqlConfig.client_secret;
+        }
+        if (mssqlConfig.encrypt !== undefined) {
+          formData.encrypt = mssqlConfig.encrypt;
+        }
+        if (mssqlConfig.trust_server_certificate !== undefined) {
+          formData.trustServerCertificate = mssqlConfig.trust_server_certificate;
+        }
+        if (mssqlConfig.connection_timeout !== undefined) {
+          formData.connectionTimeout = mssqlConfig.connection_timeout?.toString();
+        }
+      }
+
       setConfig(formData);
     } else {
       // New datasource - set default displayName from provider/adapter
@@ -235,7 +276,7 @@ const DatasourceConfiguration = ({
         displayName: displayInfo.name,
       }));
     }
-  }, [connectionDetails, displayInfo.name]);
+  }, [connectionDetails, displayInfo.name, selectedAdapter]);
 
   // Focus name input when entering edit mode
   useEffect(() => {
@@ -245,26 +286,43 @@ const DatasourceConfiguration = ({
     }
   }, [isEditingName]);
 
-  // Check if user has Azure token for MSSQL user delegation
+  // Check if user has Azure token for MSSQL user delegation (for new datasources)
   useEffect(() => {
+    // Only check for new datasources (not when editing existing)
+    if (isEditingExisting) {
+      // When editing, check if existing datasource uses user_delegation
+      const mssqlConfig = connectionDetails as any;
+      const existingAuthMethod = mssqlConfig?.auth_method;
+      if (existingAuthMethod === "user_delegation") {
+        setHasAzureToken(true);
+      }
+      return;
+    }
+
     if (selectedAdapter === "mssql") {
       fetch("/api/auth/me")
         .then((res) => res.json())
         .then((data) => {
-          setHasAzureToken(data.hasAzureToken || false);
+          const tokenAvailable = data.hasAzureToken || false;
+          setHasAzureToken(tokenAvailable);
           setUserEmail(data.email || "");
 
           // Auto-select user delegation if token available
-          if (data.hasAzureToken && !isEditingExisting) {
+          // Only auto-select once on initial load (not when user changes selection)
+          if (tokenAvailable && !hasAutoSelectedAuthMethod.current) {
             setConfig((prev) => ({ ...prev, authMethod: "user_delegation" }));
+            hasAutoSelectedAuthMethod.current = true;
           }
         })
         .catch((error) => {
           console.error("Failed to check Azure token:", error);
-          // Continue without token check
+          // Continue without token check - validation happens server-side
         });
+    } else {
+      // Reset the ref when switching away from MSSQL
+      hasAutoSelectedAuthMethod.current = false;
     }
-  }, [selectedAdapter, isEditingExisting]);
+  }, [selectedAdapter, connectionDetails?.type, isEditingExisting]);
 
   const isConnectionReadyToTest = (): boolean => {
     // Basic fields required for all adapters
@@ -284,7 +342,9 @@ const DatasourceConfiguration = ({
       } else if (config.authMethod === "user_delegation") {
         // User Delegation: only requires Azure token from SSO
         // NO username/password/client credentials needed
-        return hasAzureToken;
+        // If editing existing datasource with user_delegation, allow testing
+        // (token might refresh on backend, or was working before)
+        return hasAzureToken || (isEditingExisting && connectionDetails !== null);
       }
       // Unknown auth method
       return false;
@@ -849,7 +909,7 @@ const DatasourceConfiguration = ({
             <p className="text-sm text-blue-700 dark:text-blue-400">
               Need help setting up Service Principal?{" "}
               <a
-                href="https://docs.ekaya.ai/mssql-service-principal"
+                href="https://learn.microsoft.com/en-us/azure/azure-sql/database/authentication-aad-service-principal?view=azuresql"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="underline hover:text-blue-800 dark:hover:text-blue-300"
