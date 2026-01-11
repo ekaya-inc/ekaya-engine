@@ -619,5 +619,5 @@ func setupDatabase(ctx context.Context, cfg *config.DatabaseConfig, logger *zap.
 }
 
 func runMigrations(stdDB *sql.DB, logger *zap.Logger) error {
-	return database.RunMigrations(stdDB, "./migrations", logger)
+	return database.RunMigrations(stdDB, logger)
 }

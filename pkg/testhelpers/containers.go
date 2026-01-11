@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"path/filepath"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -182,11 +180,7 @@ func setupEngineDB(testDB *TestDB) (*EngineDB, error) {
 	}
 	defer sqlDB.Close()
 
-	// Get migrations path relative to this file
-	_, currentFile, _, _ := runtime.Caller(0)
-	migrationsPath := filepath.Join(filepath.Dir(currentFile), "..", "..", "migrations")
-
-	if err := database.RunMigrations(sqlDB, migrationsPath, zap.NewNop()); err != nil {
+	if err := database.RunMigrations(sqlDB, zap.NewNop()); err != nil {
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
