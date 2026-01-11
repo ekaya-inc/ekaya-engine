@@ -9,7 +9,6 @@ Regional controller for Ekaya platform with clean architecture Go backend and Re
 - Go 1.21+
 - Node.js 18+
 - PostgreSQL database
-- Redis (optional, for caching)
 
 ### Setup
 
@@ -40,7 +39,7 @@ Server configuration is auto-derived from defaults for local development:
 | `BIND_ADDR` | 127.0.0.1 | Docker/external access: `0.0.0.0` |
 | `BASE_URL` | http://localhost:$PORT | Behind load balancer or internal server |
 
-Database and Redis use standard PG* and REDIS_* environment variables.
+Database uses standard PG* environment variables.
 
 ### Quality Checks
 

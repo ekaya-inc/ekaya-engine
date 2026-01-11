@@ -42,9 +42,6 @@ type Config struct {
 	// Database configuration (PostgreSQL)
 	Database DatabaseConfig `yaml:"database"`
 
-	// Redis configuration
-	Redis RedisConfig `yaml:"redis"`
-
 	// Datasource connection management configuration
 	Datasource DatasourceConfig `yaml:"datasource"`
 
@@ -72,7 +69,7 @@ type AuthConfig struct {
 
 	// JWKSEndpointsStr is a comma-separated list of issuer=jwks_url pairs.
 	// Format: "issuer1=url1,issuer2=url2"
-	JWKSEndpointsStr string `yaml:"jwks_endpoints" env:"JWKS_ENDPOINTS" env-default:""`
+	JWKSEndpointsStr string `yaml:"jwks_endpoints" env:"JWKS_ENDPOINTS" env-default:"https://auth.ekaya.ai=https://auth.ekaya.ai/.well-known/jwks.json"`
 
 	// JWKSEndpoints is the parsed map from JWKSEndpointsStr (not from config file).
 	JWKSEndpoints map[string]string `yaml:"-"`
@@ -89,15 +86,6 @@ type DatabaseConfig struct {
 	MaxIdleConns   int32  `yaml:"max_idle_conns" env:"PGMAX_IDLE_CONNS" env-default:"5"`
 	Type           string `yaml:"type" env:"PGTYPE" env-default:"postgres"`
 	SSLMode        string `yaml:"ssl_mode" env:"PGSSLMODE" env-default:"disable"`
-}
-
-// RedisConfig holds Redis configuration.
-type RedisConfig struct {
-	Host      string `yaml:"host" env:"REDIS_HOST" env-default:"localhost"`
-	Port      int    `yaml:"port" env:"REDIS_PORT" env-default:"6379"`
-	DB        int    `yaml:"db" env:"REDIS_DB" env-default:"0"`
-	Password  string `yaml:"-" env:"REDIS_PASSWORD" env-default:""` // Secret - not in YAML
-	KeyPrefix string `yaml:"key_prefix" env:"REDIS_KEY_PREFIX" env-default:"project:"`
 }
 
 // DatasourceConfig holds datasource connection management settings.
@@ -142,7 +130,7 @@ func (c *EmbeddedAIConfig) IsAvailable() bool {
 
 // Load reads configuration from config.yaml with environment variable overrides.
 // The version parameter is injected at build time and set on the returned Config.
-// Environment variables override YAML values. Secrets (PGPASSWORD, REDIS_PASSWORD,
+// Environment variables override YAML values. Secrets (PGPASSWORD,
 // PROJECT_CREDENTIALS_KEY) must come from environment variables (yaml:"-" fields).
 func Load(version string) (*Config, error) {
 	cfg := &Config{
@@ -235,11 +223,6 @@ func (c *DatabaseConfig) ConnectionString() string {
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		c.Host, c.Port, c.User, c.Password, c.Database, c.SSLMode,
 	)
-}
-
-// RedisAddr returns the Redis address in host:port format.
-func (c *RedisConfig) RedisAddr() string {
-	return fmt.Sprintf("%s:%d", c.Host, c.Port)
 }
 
 // ValidateAuthURL validates an auth_url against the JWKS endpoints whitelist.

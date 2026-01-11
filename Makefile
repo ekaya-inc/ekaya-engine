@@ -284,13 +284,12 @@ ping: ## Test the /ping endpoint locally and on deployed environments
 	@echo "$(GREEN)✓ Ping tests complete$(NC)"
 
 # Development environment commands
-dev-up: ## Start local Postgres and Redis containers
+dev-up: ## Start local Postgres container
 	@echo "$(YELLOW)Starting local development environment...$(NC)"
 	@docker-compose -f docker-compose.dev.yml up -d
 	@echo "$(YELLOW)Waiting for services to be healthy...$(NC)"
 	@sleep 5
 	@echo "$(GREEN)✓ PostgreSQL available at: localhost:5432$(NC)"
-	@echo "$(GREEN)✓ Redis available at: localhost:7379$(NC)"
 
 dev-down: ## Stop local development containers
 	@echo "$(YELLOW)Stopping local development environment...$(NC)"

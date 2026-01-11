@@ -86,9 +86,6 @@ func TestConfigHandler_DoesNotExposeSensitiveData(t *testing.T) {
 		Database: config.DatabaseConfig{
 			Password: "super-secret-password",
 		},
-		Redis: config.RedisConfig{
-			Password: "redis-secret",
-		},
 		ProjectCredentialsKey: "encryption-key",
 	}
 
@@ -104,9 +101,6 @@ func TestConfigHandler_DoesNotExposeSensitiveData(t *testing.T) {
 	// Verify sensitive data is not in response
 	if containsString(body, "super-secret-password") {
 		t.Error("response should not contain database password")
-	}
-	if containsString(body, "redis-secret") {
-		t.Error("response should not contain redis password")
 	}
 	if containsString(body, "encryption-key") {
 		t.Error("response should not contain project credentials key")

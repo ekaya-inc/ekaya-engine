@@ -1,28 +1,25 @@
 # Production configuration for ekaya-engine
-# Scenario: Localhost ekaya-engine + deployed production auth server
-# Use this when: Developer downloads ekaya-engine and authenticates with production
-# Copy to config.yaml: cp config/config.prod.yaml config.yaml
+# cp config.yaml.example config.yaml
+# Defaults are commented out
+# Environment variables override these settings
 
+#
 # Server configuration
-port: "3443"
-env: "production"
-# base_url: auto-derived as http://localhost:$PORT when not set
-# Set BASE_URL env var only when behind a load balancer or on internal server
-auth_server_url: "https://auth.ekaya.ai"  # WHERE AUTH SERVER IS - deployed production
-cookie_domain: ""  # Auto-derived: localhost → "" (no domain restrictions, works over HTTP)
+#
 
-# TLS Configuration (optional)
-# For local development, leave empty to use HTTP
-# For production deployments with custom domains, provide paths to certificate files
-# Note: Web Crypto API (required for OAuth PKCE) only works in secure contexts (HTTPS or localhost)
-# tls_cert_path: "/path/to/cert.pem"
-# tls_key_path: "/path/to/key.pem"
+# Port to listen on (environment variable PORT overrides this)
+#
+# port: "3443"
 
-# Authentication configuration
-auth:
-  enable_verification: true  # Always enabled in production
-  jwks_endpoints: "https://auth.ekaya.ai=https://auth.ekaya.ai/.well-known/jwks.json"
+# Environment name (environment variable ENVIRONMENT overrides this)
+#   "local" -- use human-readable logs and report "local" in /health endpoint
+#   "anything_else" -- use structured JSON logs and report that value in /health endpoint
+#
+# env: "local"
 
+#
+# Engine Database
+#
 # Database configuration
 # All database connection details should be provided via environment variables
 # PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE, PGTYPE, PGSSLMODE
@@ -32,12 +29,6 @@ database:
   type: "postgres"
   ssl_mode: "require"
 
-# Redis configuration
-# Host and port should be provided via REDIS_HOST and REDIS_PORT
-redis:
-  db: 0
-  key_prefix: "project:"
-
 # Datasource configuration
 datasource:
   connection_ttl_minutes: 5      # How long idle connections are kept
@@ -45,15 +36,59 @@ datasource:
   pool_max_conns: 10             # Max connections per datasource pool
   pool_min_conns: 1              # Min connections per datasource pool
 
-# SDAP configuration
-# SDAP auth settings should be provided via environment variables
-sdap:
-  auth:
-    enabled: false  # Disabled for local testing against prod auth
-    jwks_url: "https://auth.ekaya.ai/.well-known/jwks.json"
-    issuer: "https://auth.ekaya.ai"
-  connection_ttl_minutes: 5
-  max_connections_per_user: 1
+
+
+#
+# Setting up HTTPS and custom domains
+#
+
+# IMPORTANT:
+# OAuth 2.1+ requires HTTPS for domains other than localhost
+# You can test on http://localhost:3443 [OKAY]
+# You can deploy to external servers https://data.acme.com [OKAY]
+# You can deploy to internal domains https://myservice.mydomain:myport [OKAY]
+# You cannot deploy to http://data.acme.com [NOT ALLOWED]
+# You cannot deploy to http://myservice.mydomain:myport [NOT ALLOWED]
+# This means that you will need certificates for TLS:
+#
+# tls_cert_path: "/path/to/cert.pem"
+# tls_key_path: "/path/to/key.pem"
+#
+# You will also need to set the base_url (or env variable BASE_URL)
+# when using HTTPS with a custom domain so that authentication knows where 
+# to send users.
+# (defaults to http://localhost:$PORT) so you only need to set this if
+# you have a custom domain
+#
+# base_url: "https://myservice.mydomain:myport"
+
+#
+# Advanced
+#
+
+# Cookie Domain
+# Controls which domains can read the authentication cookie.
+# Auto-derived from base_url in most cases:
+#   localhost/127.0.0.1  → "" (no restriction)
+#   *.ekaya.ai           → ".ekaya.ai"
+#   *.dev.ekaya.ai       → ".dev.ekaya.ai"
+#   other domains        → "" (isolated to hostname)
+#
+# Only set this if you need cross-subdomain auth on a custom domain.
+# Example: api.acme.com and app.acme.com sharing auth → ".acme.com"
+# 
+# cookie_domain: ""
+
+# Authentication configuration
+# You can bring your own authentication system.
+# There are a few claims you will need.
+# (ex. `pid` ProjectId is how Ekaya Engine supports multitenancy)
+#
+# auth:
+#   enable_verification: true
+#   jwks_endpoints: "https://auth.ekaya.ai=https://auth.ekaya.ai/.well-known/jwks.json"
+
+
 
 # Optional: Ontology extraction configuration
 # Ontology extraction iteration settings

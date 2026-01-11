@@ -77,9 +77,6 @@ database:
   port: 5432
   user: "testuser"
   database: "testdb"
-redis:
-  host: "redis.example.com"
-  port: 6379
 `)
 
 	// Clear env vars that might interfere with test
@@ -125,8 +122,6 @@ port: "5678"
 env: "test"
 database:
   host: "localhost"
-redis:
-  host: "localhost"
 `)
 
 	// Clear env vars to test auto-derivation from YAML
@@ -150,8 +145,6 @@ port: "3443"
 env: "test"
 base_url: "http://my-server.internal:8080"
 database:
-  host: "localhost"
-redis:
   host: "localhost"
 `)
 
@@ -181,8 +174,6 @@ env: "test"
 tls_cert_path: "%s"
 tls_key_path: "%s"
 database:
-  host: "localhost"
-redis:
   host: "localhost"
 `, tls.CertPath, tls.KeyPath), tmpDir)
 
@@ -219,8 +210,6 @@ port: "3443"
 env: "test"
 database:
   host: "localhost"
-redis:
-  host: "localhost"
 `)
 
 	// Clear any env vars that might interfere
@@ -255,8 +244,6 @@ port: "3443"
 env: "test"
 database:
   host: "localhost"
-redis:
-  host: "localhost"
 datasource:
   connection_ttl_minutes: 10
   max_connections_per_user: 20
@@ -289,8 +276,6 @@ func TestLoad_DatasourceConfigFromEnv(t *testing.T) {
 port: "3443"
 env: "test"
 database:
-  host: "localhost"
-redis:
   host: "localhost"
 datasource:
   connection_ttl_minutes: 5
@@ -333,8 +318,6 @@ port: "3443"
 env: "test"
 database:
   host: "localhost"
-redis:
-  host: "localhost"
 `)
 
 	// Clear TLS env vars
@@ -366,8 +349,6 @@ tls_cert_path: "%s"
 tls_key_path: "%s"
 database:
   host: "localhost"
-redis:
-  host: "localhost"
 `, tls.CertPath, tls.KeyPath), tmpDir)
 
 	cfg, err := Load("test-version")
@@ -394,8 +375,6 @@ env: "test"
 tls_cert_path: "%s"
 database:
   host: "localhost"
-redis:
-  host: "localhost"
 `, tls.CertPath), tmpDir)
 
 	_, err := Load("test-version")
@@ -418,8 +397,6 @@ port: "3443"
 env: "test"
 tls_key_path: "%s"
 database:
-  host: "localhost"
-redis:
   host: "localhost"
 `, tls.KeyPath), tmpDir)
 
@@ -446,8 +423,6 @@ tls_cert_path: "%s"
 tls_key_path: "%s"
 database:
   host: "localhost"
-redis:
-  host: "localhost"
 `, nonexistentCert, tls.KeyPath), tmpDir)
 
 	_, err := Load("test-version")
@@ -472,8 +447,6 @@ env: "test"
 tls_cert_path: "%s"
 tls_key_path: "%s"
 database:
-  host: "localhost"
-redis:
   host: "localhost"
 `, tls.CertPath, nonexistentKey), tmpDir)
 
@@ -502,8 +475,6 @@ func TestValidateTLS_TLSFromEnv(t *testing.T) {
 port: "3443"
 env: "test"
 database:
-  host: "localhost"
-redis:
   host: "localhost"
 `, tmpDir)
 

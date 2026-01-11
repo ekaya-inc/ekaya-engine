@@ -35,13 +35,6 @@ database:
   type: "postgres"
   ssl_mode: "require"
 
-# Redis configuration
-redis:
-  host: "localhost"
-  port: 6379
-  db: 0
-  key_prefix: "project:"
-
 # Datasource configuration
 datasource:
   connection_ttl_minutes: 5      # How long idle connections are kept

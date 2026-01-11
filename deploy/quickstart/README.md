@@ -34,7 +34,6 @@ docker volume rm ekaya-data
 ## What's Included
 
 - PostgreSQL 17
-- Redis 7
 - Ekaya Engine with UI
 
 ## Not for Production

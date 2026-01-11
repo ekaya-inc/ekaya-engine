@@ -67,7 +67,6 @@ func main() {
 		zap.Bool("auth_verification", cfg.Auth.EnableVerification),
 		zap.String("auth_server_url", cfg.AuthServerURL),
 		zap.String("database", fmt.Sprintf("%s@%s:%d/%s", cfg.Database.User, cfg.Database.Host, cfg.Database.Port, cfg.Database.Database)),
-		zap.String("redis", fmt.Sprintf("%s:%d", cfg.Redis.Host, cfg.Redis.Port)),
 	)
 
 	// Validate required credentials key (fail fast)
@@ -111,18 +110,6 @@ func main() {
 		logger.Fatal("Failed to setup database", zap.Error(err))
 	}
 	defer db.Close()
-
-	// Connect to Redis (optional - returns nil if not configured)
-	redisClient, err := database.NewRedisClient(&cfg.Redis)
-	if err != nil {
-		logger.Fatal("Failed to connect to Redis", zap.Error(err))
-	}
-	if redisClient != nil {
-		defer func() { _ = redisClient.Close() }()
-		logger.Info("Redis connected")
-	} else {
-		logger.Info("Redis not configured, caching disabled")
-	}
 
 	// Create repositories
 	projectRepo := repositories.NewProjectRepository()
@@ -170,7 +157,7 @@ func main() {
 	centralClient := central.NewClient(logger)
 
 	// Create services
-	projectService := services.NewProjectService(db, projectRepo, userRepo, centralClient, redisClient, cfg.BaseURL, logger)
+	projectService := services.NewProjectService(db, projectRepo, userRepo, centralClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, ontologyRepo, credentialEncryptor, adapterFactory, projectService, logger)
 	schemaService := services.NewSchemaService(schemaRepo, ontologyEntityRepo, ontologyRepo, entityRelationshipRepo, datasourceService, adapterFactory, logger)

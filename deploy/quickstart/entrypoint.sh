@@ -70,11 +70,6 @@ echo "Starting PostgreSQL..."
 su postgres -c "/usr/lib/postgresql/17/bin/postgres -D $PGDATA" &
 PG_PID=$!
 
-# Start Redis
-echo "Starting Redis..."
-redis-server --bind 127.0.0.1 --port 6379 --daemonize no &
-REDIS_PID=$!
-
 # Wait for PostgreSQL to be ready
 echo "Waiting for PostgreSQL to be ready..."
 until su postgres -c "PGUSER=postgres PGDATABASE=postgres pg_isready -q"; do
@@ -82,17 +77,9 @@ until su postgres -c "PGUSER=postgres PGDATABASE=postgres pg_isready -q"; do
 done
 echo "PostgreSQL is ready."
 
-# Wait for Redis to be ready
-echo "Waiting for Redis to be ready..."
-until redis-cli -h 127.0.0.1 -p 6379 ping > /dev/null 2>&1; do
-    sleep 1
-done
-echo "Redis is ready."
-
 # Trap signals to gracefully shutdown
 cleanup() {
     echo "Shutting down..."
-    kill $REDIS_PID 2>/dev/null || true
     su postgres -c "/usr/lib/postgresql/17/bin/pg_ctl -D $PGDATA stop -m fast" 2>/dev/null || true
     exit 0
 }
@@ -109,7 +96,7 @@ echo ""
 ENGINE_PID=$!
 
 # Wait for any process to exit
-wait -n $PG_PID $REDIS_PID $ENGINE_PID
+wait -n $PG_PID $ENGINE_PID
 
 # If we get here, something exited
 echo "A process exited unexpectedly. Shutting down..."

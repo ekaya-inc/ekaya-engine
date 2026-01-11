@@ -33,16 +33,15 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -o ekaya-engine \
     main.go
 
-# Runtime stage with Postgres + Redis
+# Runtime stage with Postgres
 FROM debian:bookworm-slim
 
-# Install Postgres 17, Redis, and iproute2 (for host.docker.internal setup on Linux)
+# Install Postgres 17 and iproute2 (for host.docker.internal setup on Linux)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg2 \
     lsb-release \
     curl \
     ca-certificates \
-    redis-server \
     iproute2 \
     && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
@@ -74,8 +73,6 @@ ENV PORT=3443 \
     PGPASSWORD=quickstart \
     PGDATABASE=ekaya_engine \
     PGSSLMODE=disable \
-    REDIS_HOST=localhost \
-    REDIS_PORT=6379 \
     PROJECT_CREDENTIALS_KEY=iJbJ35cBhYXTxtzKE2tMI2QmxfcKh/QYpqIgl0NNoiI=
 
 # Create postgres data directory mount point

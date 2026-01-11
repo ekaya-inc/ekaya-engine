@@ -2,12 +2,10 @@ package services
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
@@ -47,7 +45,6 @@ type projectService struct {
 	projectRepo   repositories.ProjectRepository
 	userRepo      repositories.UserRepository
 	centralClient *central.Client
-	redis         *redis.Client
 	baseURL       string
 	logger        *zap.Logger
 }
@@ -58,7 +55,6 @@ func NewProjectService(
 	projectRepo repositories.ProjectRepository,
 	userRepo repositories.UserRepository,
 	centralClient *central.Client,
-	redisClient *redis.Client,
 	baseURL string,
 	logger *zap.Logger,
 ) ProjectService {
@@ -67,7 +63,6 @@ func NewProjectService(
 		projectRepo:   projectRepo,
 		userRepo:      userRepo,
 		centralClient: centralClient,
-		redis:         redisClient,
 		baseURL:       baseURL,
 		logger:        logger,
 	}
@@ -134,11 +129,6 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 		return nil, fmt.Errorf("failed to create project: %w", err)
 	}
 
-	// Cache project config in Redis
-	if s.redis != nil {
-		s.cacheProjectConfig(ctx, project)
-	}
-
 	// Extract URLs from parameters
 	var papiURL, projectsPageURL, projectPageURL string
 	if params != nil {
@@ -185,16 +175,7 @@ func (s *projectService) GetByIDWithoutTenant(ctx context.Context, id uuid.UUID)
 // Delete removes a project and all associated data.
 // Assumes tenant context is already set by middleware.
 func (s *projectService) Delete(ctx context.Context, id uuid.UUID) error {
-	if err := s.projectRepo.Delete(ctx, id); err != nil {
-		return err
-	}
-
-	// Clear Redis cache
-	if s.redis != nil {
-		s.clearProjectCache(ctx, id)
-	}
-
-	return nil
+	return s.projectRepo.Delete(ctx, id)
 }
 
 // GetDefaultDatasourceID retrieves the default datasource ID from project parameters.
@@ -238,11 +219,6 @@ func (s *projectService) SetDefaultDatasourceID(ctx context.Context, projectID u
 		return fmt.Errorf("failed to update project: %w", err)
 	}
 
-	// Update Redis cache
-	if s.redis != nil {
-		s.cacheProjectConfig(ctx, project)
-	}
-
 	s.logger.Info("Set default datasource for project",
 		zap.String("project_id", projectID.String()),
 		zap.String("datasource_id", datasourceID.String()))
@@ -273,54 +249,6 @@ func (s *projectService) GetAuthServerURL(ctx context.Context, projectID uuid.UU
 
 	authServerURL, _ := project.Parameters["auth_server_url"].(string)
 	return authServerURL, nil
-}
-
-// cacheProjectConfig caches project configuration in Redis.
-func (s *projectService) cacheProjectConfig(ctx context.Context, project *models.Project) {
-	configKey := fmt.Sprintf("project:%s:config", project.ID)
-	configData, err := json.Marshal(map[string]interface{}{
-		"name":       project.Name,
-		"created_at": project.CreatedAt,
-		"parameters": project.Parameters,
-	})
-	if err != nil {
-		s.logger.Error("Failed to marshal project config for cache",
-			zap.String("project_id", project.ID.String()),
-			zap.Error(err))
-		return
-	}
-
-	if err := s.redis.Set(ctx, configKey, configData, 0).Err(); err != nil {
-		s.logger.Error("Failed to cache project config",
-			zap.String("project_id", project.ID.String()),
-			zap.Error(err))
-	}
-}
-
-// clearProjectCache removes all cached data for a project.
-func (s *projectService) clearProjectCache(ctx context.Context, projectID uuid.UUID) {
-	// Delete main config key
-	configKey := fmt.Sprintf("project:%s:config", projectID)
-	if err := s.redis.Del(ctx, configKey).Err(); err != nil {
-		s.logger.Error("Failed to delete project config cache",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-	}
-
-	// Delete any sub-keys with pattern project:<id>:*
-	pattern := fmt.Sprintf("project:%s:*", projectID)
-	iter := s.redis.Scan(ctx, 0, pattern, 0).Iterator()
-	var keysToDelete []string
-	for iter.Next(ctx) {
-		keysToDelete = append(keysToDelete, iter.Val())
-	}
-	if len(keysToDelete) > 0 {
-		if err := s.redis.Del(ctx, keysToDelete...).Err(); err != nil {
-			s.logger.Error("Failed to delete project cache keys",
-				zap.String("project_id", projectID.String()),
-				zap.Error(err))
-		}
-	}
 }
 
 // ProvisionFromClaims provisions a project and user from JWT claims.
@@ -490,11 +418,6 @@ func (s *projectService) SyncFromCentralAsync(projectID uuid.UUID, papiURL, toke
 			zap.String("project_id", projectID.String()),
 			zap.String("old_name", oldName),
 			zap.String("new_name", projectInfo.Name))
-
-		// Update Redis cache
-		if s.redis != nil {
-			s.cacheProjectConfig(ctx, project)
-		}
 	}()
 }
 
