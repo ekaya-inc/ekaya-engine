@@ -2,6 +2,7 @@ package ui
 
 import (
 	"io/fs"
+	"strings"
 	"testing"
 )
 
@@ -30,18 +31,7 @@ func TestDistFSEmbedded(t *testing.T) {
 	}
 
 	// Check for typical HTML markers
-	hasDoctype := false
-	hasHTML := false
-	for i := 0; i < len(content) && i < 1000; i++ {
-		if i+9 < len(content) && content[i:i+9] == "<!DOCTYPE" {
-			hasDoctype = true
-		}
-		if i+5 < len(content) && content[i:i+5] == "<html" {
-			hasHTML = true
-		}
-	}
-
-	if !hasDoctype && !hasHTML {
+	if !strings.Contains(content, "<!DOCTYPE") && !strings.Contains(content, "<html") {
 		t.Error("index.html does not appear to be valid HTML (missing DOCTYPE or <html>)")
 	}
 }
