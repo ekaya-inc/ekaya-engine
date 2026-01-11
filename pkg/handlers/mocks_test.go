@@ -194,7 +194,7 @@ func (m *mockDatasourceService) Delete(ctx context.Context, id uuid.UUID) error 
 	return m.err
 }
 
-func (m *mockDatasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any) error {
+func (m *mockDatasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any, datasourceID uuid.UUID) error {
 	return m.err
 }
 

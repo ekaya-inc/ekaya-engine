@@ -367,7 +367,7 @@ func (s *testColEnrichmentDatasourceService) Delete(ctx context.Context, id uuid
 	return nil
 }
 
-func (s *testColEnrichmentDatasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any) error {
+func (s *testColEnrichmentDatasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any, datasourceID uuid.UUID) error {
 	return nil
 }
 

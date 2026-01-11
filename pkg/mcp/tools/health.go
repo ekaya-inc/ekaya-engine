@@ -138,8 +138,8 @@ func checkDatasourceHealth(ctx context.Context, deps *HealthToolDeps) *datasourc
 		}
 	}
 
-	// Test connection
-	err = deps.DatasourceService.TestConnection(ctx, ds.DatasourceType, ds.Config)
+	// Test connection using the actual datasource ID for proper pool isolation
+	err = deps.DatasourceService.TestConnection(ctx, ds.DatasourceType, ds.Config, datasourceID)
 	if err != nil {
 		deps.Logger.Warn("Datasource connection test failed",
 			zap.String("project_id", projectID.String()),
