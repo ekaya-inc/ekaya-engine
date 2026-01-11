@@ -213,12 +213,33 @@ No Makefile changes required.
 - Migrations run successfully from embedded filesystem
 - No path resolution issues in test helpers
 
-### Task 2: Embed UI Static Files - [ ] TODO
+### Task 2: Embed UI Static Files - [x] COMPLETE
 
-**Files to Modify:**
-1. `ui/embed.go` - **NEW**
-2. `main.go` - Update UI serving to use embedded FS
-3. `Dockerfile` - Remove UI files COPY in final stage (optional optimization)
+**Files Modified:**
+1. ✅ `ui/embed.go` - Created with `//go:embed dist` directive
+2. ✅ `main.go` - Updated UI serving to use `fs.Sub(ui.DistFS, "dist")` with SPA routing fallback
+3. ✅ `Dockerfile` - Removed `COPY --from=ui-builder /app/ui/dist /app/ui/dist` line from final stage
+4. ✅ `ui/embed_test.go` - Added tests to verify embedded filesystem works correctly
+
+**Implementation Notes:**
+- The UI serving now uses `io/fs` and `http.FS()` to serve from the embedded filesystem
+- `index.html` is read once at startup and cached for SPA routing fallback (optimization for SPA fallback)
+- Removed unused `path/filepath` import from main.go (replaced with `strings.TrimPrefix`)
+- Tests verify that both `index.html` and `assets/` directory are properly embedded and readable
+- Build succeeds and binary size is ~29MB with embedded UI files
+
+**Key Changes to main.go (lines 487-524):**
+- Import `io/fs` and `github.com/ekaya-inc/ekaya-engine/ui`
+- Use `fs.Sub(ui.DistFS, "dist")` to create a filesystem rooted at the `dist` directory
+- Read `index.html` once at startup with `fs.ReadFile(uiFS, "index.html")` for SPA fallback
+- Check file existence with `fs.Stat(uiFS, path)` instead of `os.Stat()`
+- Serve existing files via `http.FileServer(http.FS(uiFS))`
+- For non-existent paths (SPA routes), write cached `indexHTML` bytes directly
+
+**Dockerfile Change (lines 64-66):**
+- Removed UI files copy from final stage since they're now embedded in the binary
+- The UI is still built in the `ui-builder` stage and copied to the Go `builder` stage
+- The Go build embeds the files at compile time via `//go:embed dist` directive
 
 ## Expected Outcome
 
