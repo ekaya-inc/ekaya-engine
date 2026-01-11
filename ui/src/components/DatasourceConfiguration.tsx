@@ -205,8 +205,12 @@ const DatasourceConfiguration = ({
     }
   }, [selectedProvider]);
 
-  // Update port when provider changes
+  // Update port when provider changes (only for new datasources)
   useEffect(() => {
+    // Don't override port when editing an existing datasource - preserve the saved value
+    if (isEditingExisting) {
+      return;
+    }
     const currentProvider = activeProvider ?? selectedProvider;
     if (currentProvider?.defaultPort && selectedAdapter !== "mssql") {
       setConfig((prev) => ({
@@ -214,7 +218,7 @@ const DatasourceConfiguration = ({
         port: currentProvider.defaultPort.toString(),
       }));
     }
-  }, [activeProvider, selectedProvider, selectedAdapter]);
+  }, [activeProvider, selectedProvider, selectedAdapter, isEditingExisting]);
 
   // Load provider from existing config when editing
   useEffect(() => {
