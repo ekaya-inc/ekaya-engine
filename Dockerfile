@@ -61,9 +61,6 @@ RUN addgroup -g 1000 -S ekaya && \
 # Copy binary from builder
 COPY --from=builder /app/ekaya-engine /usr/local/bin/ekaya-engine
 
-# Copy built UI files
-COPY --from=ui-builder /app/ui/dist /app/ui/dist
-
 # Switch to non-root user
 USER ekaya
 

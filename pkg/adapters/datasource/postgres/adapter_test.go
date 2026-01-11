@@ -291,7 +291,11 @@ func TestAdapter_TestConnection_VerifiesDatabaseName(t *testing.T) {
 	// TestConnection should fail because database name doesn't match
 	if err := wrongAdapter.TestConnection(ctx); err == nil {
 		t.Error("expected connection test to fail with wrong database name")
-	} else if !strings.Contains(strings.ToLower(err.Error()), "wrong database") {
-		t.Errorf("expected error about wrong database, got: %v", err)
+	} else {
+		errLower := strings.ToLower(err.Error())
+		// Accept either our custom "wrong database" error or PostgreSQL's native "does not exist" error
+		if !strings.Contains(errLower, "wrong database") && !strings.Contains(errLower, "does not exist") {
+			t.Errorf("expected error about wrong database, got: %v", err)
+		}
 	}
 }

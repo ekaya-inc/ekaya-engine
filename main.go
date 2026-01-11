@@ -5,12 +5,12 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -34,6 +34,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/middleware"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
+	"github.com/ekaya-inc/ekaya-engine/ui"
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -486,9 +487,18 @@ func main() {
 	}
 	mcptools.RegisterQuestionTools(mcpServer.MCP(), questionToolDeps)
 
-	// Serve static UI files from ui/dist with SPA routing
-	uiDir := "./ui/dist"
-	fileServer := http.FileServer(http.Dir(uiDir))
+	// Serve static UI files from embedded filesystem with SPA routing
+	uiFS, err := fs.Sub(ui.DistFS, "dist")
+	if err != nil {
+		logger.Fatal("Failed to create UI filesystem", zap.Error(err))
+	}
+	fileServer := http.FileServer(http.FS(uiFS))
+
+	// Read index.html once at startup for SPA fallback
+	indexHTML, err := fs.ReadFile(uiFS, "index.html")
+	if err != nil {
+		logger.Fatal("Failed to read index.html from embedded filesystem", zap.Error(err))
+	}
 
 	// Handle SPA routing - serve index.html for non-API routes when file doesn't exist
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -498,21 +508,21 @@ func main() {
 			return
 		}
 
-		// Check if the file exists
-		path := filepath.Join(uiDir, r.URL.Path)
-		if _, err := os.Stat(path); err == nil {
+		// Check if the file exists in embedded filesystem
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		if path == "" {
+			path = "index.html"
+		}
+
+		if _, err := fs.Stat(uiFS, path); err == nil {
 			// File exists, serve it
 			fileServer.ServeHTTP(w, r)
 			return
 		}
 
 		// File doesn't exist, serve index.html for SPA routing
-		indexPath := filepath.Join(uiDir, "index.html")
-		if _, err := os.Stat(indexPath); err == nil {
-			http.ServeFile(w, r, indexPath)
-		} else {
-			http.NotFound(w, r)
-		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(indexHTML)
 	})
 
 	// Wrap mux with request logging middleware
@@ -619,5 +629,5 @@ func setupDatabase(ctx context.Context, cfg *config.DatabaseConfig, logger *zap.
 }
 
 func runMigrations(stdDB *sql.DB, logger *zap.Logger) error {
-	return database.RunMigrations(stdDB, "./migrations", logger)
+	return database.RunMigrations(stdDB, logger)
 }

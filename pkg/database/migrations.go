@@ -6,21 +6,26 @@ import (
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"go.uber.org/zap"
+
+	"github.com/ekaya-inc/ekaya-engine/migrations"
 )
 
-// RunMigrations executes pending database migrations from the specified directory.
+// RunMigrations executes pending database migrations from the embedded filesystem.
 // It is idempotent and safe to call multiple times - only pending migrations will be executed.
-func RunMigrations(db *sql.DB, migrationsPath string, logger *zap.Logger) error {
+func RunMigrations(db *sql.DB, logger *zap.Logger) error {
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
 		return fmt.Errorf("failed to create migration driver: %w", err)
 	}
 
-	m, err := migrate.NewWithDatabaseInstance(
-		fmt.Sprintf("file://%s", migrationsPath),
-		"postgres", driver)
+	sourceDriver, err := iofs.New(migrations.FS, ".")
+	if err != nil {
+		return fmt.Errorf("failed to create migration source: %w", err)
+	}
+
+	m, err := migrate.NewWithInstance("iofs", sourceDriver, "postgres", driver)
 	if err != nil {
 		return fmt.Errorf("failed to create migration instance: %w", err)
 	}
