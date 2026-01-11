@@ -1,5 +1,5 @@
 # ekaya-engine Makefile
-.PHONY: help install install-hooks install-air clean test fmt lint check run dev-ui dev-server dev-build-docker ping dev-up dev-down dev-build-container connect-postgres DANGER-recreate-database build-test-image push-test-image pull-test-image quickstart-build quickstart-run quickstart-push
+.PHONY: help install install-hooks install-air clean test fmt lint check run debug build dev-ui dev-server dev-build-docker ping dev-up dev-down dev-build-container connect-postgres DANGER-recreate-database build-test-image push-test-image pull-test-image quickstart-build quickstart-run quickstart-push
 
 # Variables
 # Note: All images are published to GitHub Container Registry
@@ -204,6 +204,16 @@ debug: ## Build and run with LLM conversation logging enabled
 	@echo "$(GREEN)✓ UI built$(NC)"
 	@echo "$(YELLOW)Starting ekaya-engine in DEBUG mode on port $(PORT)...$(NC)"
 	@PORT=$(PORT) go run -tags="debug,$(BUILD_TAGS)" main.go
+
+build: check ## Build binary to bin/ekaya-engine
+	@echo "$(YELLOW)Building UI...$(NC)"
+	@cd ui && if [ ! -f node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then echo "$(YELLOW)Installing UI dependencies...$(NC)" && npm install; fi
+	@cd ui && npm run build
+	@echo "$(GREEN)✓ UI built$(NC)"
+	@echo "$(YELLOW)Building ekaya-engine binary...$(NC)"
+	@mkdir -p bin
+	@go build -tags="$(BUILD_TAGS)" -ldflags="-X main.Version=$(VERSION)" -o bin/ekaya-engine .
+	@echo "$(GREEN)✓ Binary built: bin/ekaya-engine$(NC)"
 
 dev-ui: ## Watch UI files and rebuild to dist/ for Go server
 	@echo "$(YELLOW)Watching UI files and rebuilding to ui/dist/...$(NC)"
