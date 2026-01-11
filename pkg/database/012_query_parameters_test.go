@@ -1,6 +1,6 @@
 //go:build integration
 
-package migrations
+package database_test
 
 import (
 	"context"
