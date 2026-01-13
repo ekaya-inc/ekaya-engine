@@ -5,14 +5,15 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
 )
 
 var (
-	// ErrInvalidKey is returned when the encryption key is not valid (must be 32 bytes base64 encoded).
-	ErrInvalidKey = errors.New("invalid encryption key: must be 32 bytes base64 encoded")
+	// ErrInvalidKey is returned when the encryption key is empty.
+	ErrInvalidKey = errors.New("invalid encryption key: must not be empty")
 	// ErrDecryptionFailed is returned when decryption fails due to invalid ciphertext or wrong key.
 	ErrDecryptionFailed = errors.New("decryption failed: invalid ciphertext or wrong key")
 )
@@ -23,20 +24,29 @@ type CredentialEncryptor struct {
 	gcm cipher.AEAD
 }
 
-// NewCredentialEncryptor creates a new encryptor from a base64-encoded 32-byte key.
-// The key should be generated with: openssl rand -base64 32
-func NewCredentialEncryptor(base64Key string) (*CredentialEncryptor, error) {
-	if base64Key == "" {
+// NewCredentialEncryptor creates a new encryptor from a key string.
+// The key can be:
+//   - A base64-encoded 32-byte key (e.g., from: openssl rand -base64 32)
+//   - Any passphrase (will be hashed to 32 bytes with SHA-256)
+//
+// If the input is valid base64 and decodes to exactly 32 bytes, it's used directly.
+// Otherwise, the input is treated as a passphrase and hashed with SHA-256.
+func NewCredentialEncryptor(keyInput string) (*CredentialEncryptor, error) {
+	if keyInput == "" {
 		return nil, ErrInvalidKey
 	}
 
-	key, err := base64.StdEncoding.DecodeString(base64Key)
-	if err != nil {
-		return nil, fmt.Errorf("%w: base64 decode failed", ErrInvalidKey)
-	}
+	var key []byte
 
-	if len(key) != 32 {
-		return nil, fmt.Errorf("%w: got %d bytes, need 32", ErrInvalidKey, len(key))
+	// Try base64 decode first
+	decoded, err := base64.StdEncoding.DecodeString(keyInput)
+	if err == nil && len(decoded) == 32 {
+		// Valid base64 that decodes to exactly 32 bytes - use directly
+		key = decoded
+	} else {
+		// Not valid base64 or wrong length - hash the input to get 32 bytes
+		hash := sha256.Sum256([]byte(keyInput))
+		key = hash[:]
 	}
 
 	block, err := aes.NewCipher(key)
