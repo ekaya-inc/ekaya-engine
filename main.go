@@ -66,12 +66,12 @@ func main() {
 		zap.String("base_url", cfg.BaseURL),
 		zap.Bool("auth_verification", cfg.Auth.EnableVerification),
 		zap.String("auth_server_url", cfg.AuthServerURL),
-		zap.String("database", fmt.Sprintf("%s@%s:%d/%s", cfg.Database.User, cfg.Database.Host, cfg.Database.Port, cfg.Database.Database)),
+		zap.String("engine_database", fmt.Sprintf("%s@%s:%d/%s", cfg.EngineDatabase.User, cfg.EngineDatabase.Host, cfg.EngineDatabase.Port, cfg.EngineDatabase.Database)),
 	)
 
 	// Validate required credentials key (fail fast)
 	if cfg.ProjectCredentialsKey == "" {
-		logger.Fatal("PROJECT_CREDENTIALS_KEY environment variable is required. Generate with: openssl rand -base64 32")
+		logger.Fatal("project_credentials_key is required in config.yaml. Generate with: openssl rand -base64 32")
 	}
 	credentialEncryptor, err := crypto.NewCredentialEncryptor(cfg.ProjectCredentialsKey)
 	if err != nil {
@@ -79,7 +79,7 @@ func main() {
 	}
 
 	// Initialize OAuth session store
-	auth.InitSessionStore()
+	auth.InitSessionStore(cfg.OAuthSessionSecret)
 
 	// Initialize JWKS client for JWT validation
 	jwksClient, err := auth.NewJWKSClient(&auth.JWKSConfig{
@@ -105,7 +105,7 @@ func main() {
 
 	// Connect to database
 	ctx := context.Background()
-	db, err := setupDatabase(ctx, &cfg.Database, logger)
+	db, err := setupDatabase(ctx, &cfg.EngineDatabase, logger)
 	if err != nil {
 		logger.Fatal("Failed to setup database", zap.Error(err))
 	}
@@ -123,10 +123,7 @@ func main() {
 	mcpConfigRepo := repositories.NewMCPConfigRepository()
 
 	// Agent API key service (needed for MCP auth middleware)
-	agentAPIKeyService, err := services.NewAgentAPIKeyService(mcpConfigRepo, logger)
-	if err != nil {
-		logger.Fatal("Failed to create agent API key service", zap.Error(err))
-	}
+	agentAPIKeyService := services.NewAgentAPIKeyService(mcpConfigRepo, credentialEncryptor, logger)
 
 	// Ontology repositories
 	ontologyRepo := repositories.NewOntologyRepository()
@@ -582,7 +579,7 @@ func main() {
 	logger.Info("Server shutdown complete")
 }
 
-func setupDatabase(ctx context.Context, cfg *config.DatabaseConfig, logger *zap.Logger) (*database.DB, error) {
+func setupDatabase(ctx context.Context, cfg *config.EngineDatabaseConfig, logger *zap.Logger) (*database.DB, error) {
 	logger.Info("Connecting to database",
 		zap.String("user", cfg.User),
 		zap.String("host", cfg.Host),

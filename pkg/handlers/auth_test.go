@@ -35,7 +35,7 @@ func (m *mockOAuthService) ValidateAuthURL(authURL string) (string, error) {
 
 func TestAuthHandler_CompleteOAuth_Success(t *testing.T) {
 	// Initialize session store for testing
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 
 	cfg := &config.Config{
 		BaseURL:      "http://localhost:3443",
@@ -101,7 +101,7 @@ func TestAuthHandler_CompleteOAuth_Success(t *testing.T) {
 }
 
 func TestAuthHandler_CompleteOAuth_MissingCode(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 
 	cfg := &config.Config{
 		BaseURL: "http://localhost:3443",
@@ -137,7 +137,7 @@ func TestAuthHandler_CompleteOAuth_MissingCode(t *testing.T) {
 }
 
 func TestAuthHandler_CompleteOAuth_MissingState(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 
 	cfg := &config.Config{
 		BaseURL: "http://localhost:3443",
@@ -164,7 +164,7 @@ func TestAuthHandler_CompleteOAuth_MissingState(t *testing.T) {
 }
 
 func TestAuthHandler_CompleteOAuth_MissingCodeVerifier(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 
 	cfg := &config.Config{
 		BaseURL: "http://localhost:3443",
@@ -191,7 +191,7 @@ func TestAuthHandler_CompleteOAuth_MissingCodeVerifier(t *testing.T) {
 }
 
 func TestAuthHandler_CompleteOAuth_InvalidAuthURL(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 
 	cfg := &config.Config{
 		BaseURL: "http://localhost:3443",
@@ -229,7 +229,7 @@ func TestAuthHandler_CompleteOAuth_InvalidAuthURL(t *testing.T) {
 }
 
 func TestAuthHandler_CompleteOAuth_TokenExchangeFailed(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 
 	cfg := &config.Config{
 		BaseURL: "http://localhost:3443",
@@ -266,7 +266,7 @@ func TestAuthHandler_CompleteOAuth_TokenExchangeFailed(t *testing.T) {
 }
 
 func TestAuthHandler_CompleteOAuth_InvalidJSON(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 
 	cfg := &config.Config{
 		BaseURL: "http://localhost:3443",
@@ -295,7 +295,7 @@ func TestAuthHandler_CompleteOAuth_InvalidJSON(t *testing.T) {
 }
 
 func TestAuthHandler_CookieSettingsForLocalhost(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 
 	cfg := &config.Config{
 		BaseURL:      "http://localhost:3443",

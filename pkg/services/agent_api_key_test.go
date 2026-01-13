@@ -2,42 +2,30 @@ package services
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
 )
 
 // agentKeyTestEncryptionKey is a 32-byte test key for agent API key tests.
-// This is only used for tests; real key should come from environment.
 const agentKeyTestEncryptionKey = "dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXRlc3Q="
 
 func setupAgentAPIKeyTest(t *testing.T) (AgentAPIKeyService, *mockMCPConfigRepository) {
 	t.Helper()
 
-	// Set environment variable for encryption key
-	originalKey := os.Getenv("PROJECT_CREDENTIALS_KEY")
-	if err := os.Setenv("PROJECT_CREDENTIALS_KEY", agentKeyTestEncryptionKey); err != nil {
-		t.Fatalf("failed to set env: %v", err)
-	}
-	t.Cleanup(func() {
-		if originalKey == "" {
-			os.Unsetenv("PROJECT_CREDENTIALS_KEY")
-		} else {
-			os.Setenv("PROJECT_CREDENTIALS_KEY", originalKey)
-		}
-	})
+	encryptor, err := crypto.NewCredentialEncryptor(agentKeyTestEncryptionKey)
+	require.NoError(t, err)
 
 	repo := &mockMCPConfigRepository{
 		agentAPIKeyByProject: make(map[uuid.UUID]string),
 	}
 
-	svc, err := NewAgentAPIKeyService(repo, zap.NewNop())
-	require.NoError(t, err)
-
+	svc := NewAgentAPIKeyService(repo, encryptor, zap.NewNop())
 	return svc, repo
 }
 
@@ -185,35 +173,25 @@ func TestAgentAPIKeyService_ValidateKey_AfterRegenerate(t *testing.T) {
 	assert.True(t, validNew, "new key should be valid after regeneration")
 }
 
-func TestAgentAPIKeyService_NewService_MissingEnvVar(t *testing.T) {
-	// Remove the environment variable
-	originalKey := os.Getenv("PROJECT_CREDENTIALS_KEY")
-	os.Unsetenv("PROJECT_CREDENTIALS_KEY")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("PROJECT_CREDENTIALS_KEY", originalKey)
-		}
-	}()
+func TestAgentAPIKeyService_WithPassphraseKey(t *testing.T) {
+	// Non-base64 strings are valid - they get SHA-256 hashed to 32 bytes
+	encryptor, err := crypto.NewCredentialEncryptor("my-simple-passphrase")
+	require.NoError(t, err)
 
-	repo := &mockMCPConfigRepository{}
-	_, err := NewAgentAPIKeyService(repo, zap.NewNop())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "PROJECT_CREDENTIALS_KEY not set")
-}
+	repo := &mockMCPConfigRepository{
+		agentAPIKeyByProject: make(map[uuid.UUID]string),
+	}
 
-func TestAgentAPIKeyService_NewService_InvalidKey(t *testing.T) {
-	originalKey := os.Getenv("PROJECT_CREDENTIALS_KEY")
-	os.Setenv("PROJECT_CREDENTIALS_KEY", "not-valid-base64!")
-	defer func() {
-		if originalKey != "" {
-			os.Setenv("PROJECT_CREDENTIALS_KEY", originalKey)
-		} else {
-			os.Unsetenv("PROJECT_CREDENTIALS_KEY")
-		}
-	}()
+	svc := NewAgentAPIKeyService(repo, encryptor, zap.NewNop())
+	assert.NotNil(t, svc)
 
-	repo := &mockMCPConfigRepository{}
-	_, err := NewAgentAPIKeyService(repo, zap.NewNop())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to create encryptor")
+	// Verify it can generate and retrieve keys
+	projectID := uuid.New()
+	key, err := svc.GenerateKey(context.Background(), projectID)
+	require.NoError(t, err)
+	assert.Len(t, key, 64)
+
+	retrieved, err := svc.GetKey(context.Background(), projectID)
+	require.NoError(t, err)
+	assert.Equal(t, key, retrieved)
 }
