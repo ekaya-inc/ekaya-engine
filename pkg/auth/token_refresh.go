@@ -118,25 +118,31 @@ func RefreshAzureToken(ctx context.Context) (string, int64, error) {
 	}
 
 	// Extract Azure token and expiry from new JWT claims
-	azureToken := claims.AzureAccessToken
 	azureExp := claims.AzureTokenExpiry
 
-	if azureToken == "" {
-		// Check if the original JWT had an Azure token
+	if claims.AzureTokenRefID == "" {
+		// Check if the original JWT had a token reference
 		originalClaims, hasOriginalClaims := GetClaims(ctx)
-		hadOriginalToken := hasOriginalClaims && originalClaims != nil && originalClaims.AzureAccessToken != ""
+		hadOriginalToken := hasOriginalClaims && originalClaims != nil && originalClaims.AzureTokenRefID != ""
 
 		// Provide a more helpful error message
 		if !refreshResp.AzureTokenRefreshed {
 			if hadOriginalToken {
-				return "", 0, fmt.Errorf("refreshed JWT does not contain Azure token: Azure token refresh was not performed by auth server (azure_token_refreshed=false). The Azure token may have expired and could not be refreshed. User may need to re-authenticate")
+				return "", 0, fmt.Errorf("refreshed JWT does not contain Azure token reference: Azure token refresh was not performed by auth server (azure_token_refreshed=false). The Azure token may have expired and could not be refreshed. User may need to re-authenticate")
 			}
-			return "", 0, fmt.Errorf("refreshed JWT does not contain Azure token: Azure token refresh was not performed by auth server. User may need to re-authenticate")
+			return "", 0, fmt.Errorf("refreshed JWT does not contain Azure token reference: Azure token refresh was not performed by auth server. User may need to re-authenticate")
 		}
 		if hadOriginalToken {
-			return "", 0, fmt.Errorf("refreshed JWT does not contain Azure token: Azure token was present in original JWT but missing in refreshed JWT")
+			return "", 0, fmt.Errorf("refreshed JWT does not contain Azure token reference: Azure token reference was present in original JWT but missing in refreshed JWT")
 		}
-		return "", 0, fmt.Errorf("refreshed JWT does not contain Azure token")
+		return "", 0, fmt.Errorf("refreshed JWT does not contain Azure token reference")
+	}
+
+	// Fetch token using reference ID
+	tokenClient := GetTokenClient()
+	azureToken, err := tokenClient.FetchTokenByReference(ctx, claims.AzureTokenRefID, claims.PAPI, refreshResp.AccessToken)
+	if err != nil {
+		return "", 0, fmt.Errorf("fetch token by reference from refreshed JWT: %w", err)
 	}
 
 	return azureToken, azureExp, nil
