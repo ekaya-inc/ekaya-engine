@@ -33,7 +33,7 @@ type Config struct {
 
 	// AuthServerURL is the OAuth authorization server base URL.
 	// Used for constructing OAuth redirect URLs.
-	AuthServerURL string `yaml:"auth_server_url" env:"AUTH_SERVER_URL" env-default:""`
+	AuthServerURL string `yaml:"auth_server_url" env:"AUTH_SERVER_URL" env-default:"https://auth.ekaya.ai"`
 
 	// CookieDomain is the domain for auth cookies (optional).
 	// If empty, it will be auto-derived from BaseURL.
