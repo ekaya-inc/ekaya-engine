@@ -59,21 +59,14 @@ COPY --from=ui-builder /app/ui/dist /app/ui/dist
 # Copy migrations (engine runs these on startup)
 COPY migrations/ /app/migrations/
 
-# Copy quickstart config and scripts
-COPY deploy/quickstart/config.quickstart.yaml /app/config.yaml
+# Copy config and scripts
+COPY config.yaml.example /app/config.yaml
 COPY deploy/quickstart/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Environment variables
 ENV PORT=3443 \
-    BIND_ADDR=0.0.0.0 \
-    PGHOST=localhost \
-    PGPORT=5432 \
-    PGUSER=ekaya \
-    PGPASSWORD=quickstart \
-    PGDATABASE=ekaya_engine \
-    PGSSLMODE=disable \
-    PROJECT_CREDENTIALS_KEY=iJbJ35cBhYXTxtzKE2tMI2QmxfcKh/QYpqIgl0NNoiI=
+    BIND_ADDR=0.0.0.0
 
 # Create postgres data directory mount point
 VOLUME ["/var/lib/postgresql/data"]

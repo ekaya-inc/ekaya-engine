@@ -28,11 +28,6 @@ The project has full operational infrastructure but a minimal Go backend:
 ### Essential Commands
 
 ```bash
-# Configure authentication (choose ONE)
-make setup-auth-dev   # Localhost server + dev auth (WORKING - use this)
-make setup-auth-local # Localhost server + localhost auth (needs ekaya-central emulator)
-make setup-auth-prod  # Localhost server + prod auth (not tested)
-
 # Development mode - run UI and API separately for hot reload
 make dev-ui         # Terminal 1: UI dev server (http://localhost:5173)
 make dev-server     # Terminal 2: Go API with auto-reload (port 3443)
@@ -170,7 +165,40 @@ Version is managed through git tags and injected at build time:
 
 ## Configuration
 
-Configuration files are in `config/` subdirectory. The `make setup-auth-*` commands copy the appropriate template to `config.yaml` (gitignored).
+### Initial Setup
+
+**Required:**
+1. Copy `config.yaml.example` to `config.yaml`
+
+That's it - `config.yaml.example` includes working defaults for local development.
+
+**Optional:**
+- Copy `.env.example` to `.env` for environment-specific overrides
+
+### Configuration Files
+
+- `config.yaml` (gitignored) - Main configuration file with all settings
+- `.env` (gitignored, optional) - Environment variables that override config.yaml values
+
+### Secrets
+
+Both secrets accept any passphrase (SHA-256 hashed to derive a key). For production, generate with: `openssl rand -base64 32`
+
+| Secret | Purpose | Warning |
+|--------|---------|---------|
+| `project_credentials_key` | Encrypts datasource credentials in database | Cannot change after storing credentials |
+| `oauth_session_secret` | Signs OAuth session cookies (~10 min lifetime) | All servers in cluster must share same value |
+
+Environment variables `PROJECT_CREDENTIALS_KEY` and `OAUTH_SESSION_SECRET` override config.yaml values.
+
+### Other Configuration
+
+**Database Connection** - Configure in `config.yaml` under `engine_database:` or use `PG*` environment variables:
+- `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, etc.
+
+**TLS/HTTPS** - Optional, for custom domains:
+- Set `base_url`, `tls_cert_path`, `tls_key_path` in config.yaml
+- Or use environment variables: `BASE_URL`, `TLS_CERT_PATH`, `TLS_KEY_PATH`
 
 ## Database Access
 

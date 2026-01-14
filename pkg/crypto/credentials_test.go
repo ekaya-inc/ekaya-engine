@@ -17,7 +17,7 @@ func TestNewCredentialEncryptor(t *testing.T) {
 		errMsg  string
 	}{
 		{
-			name:    "valid 32-byte key",
+			name:    "valid 32-byte base64 key",
 			key:     testKey,
 			wantErr: false,
 		},
@@ -28,22 +28,24 @@ func TestNewCredentialEncryptor(t *testing.T) {
 			errMsg:  "invalid encryption key",
 		},
 		{
-			name:    "invalid base64",
-			key:     "not-valid-base64!!!",
-			wantErr: true,
-			errMsg:  "base64 decode failed",
+			name:    "passphrase (not base64) - hashed to 32 bytes",
+			key:     "my-simple-passphrase",
+			wantErr: false,
 		},
 		{
-			name:    "key too short (16 bytes)",
+			name:    "short base64 key - hashed to 32 bytes",
 			key:     base64.StdEncoding.EncodeToString([]byte("sixteen-byte-key")),
-			wantErr: true,
-			errMsg:  "got 16 bytes, need 32",
+			wantErr: false,
 		},
 		{
-			name:    "key too long (64 bytes)",
+			name:    "long base64 key - hashed to 32 bytes",
 			key:     base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", 64))),
-			wantErr: true,
-			errMsg:  "got 64 bytes, need 32",
+			wantErr: false,
+		},
+		{
+			name:    "quickstart demo key",
+			key:     "quickstart-demo-key",
+			wantErr: false,
 		},
 	}
 
@@ -66,6 +68,37 @@ func TestNewCredentialEncryptor(t *testing.T) {
 				t.Error("expected non-nil encryptor")
 			}
 		})
+	}
+}
+
+func TestPassphraseKeyConsistency(t *testing.T) {
+	// Same passphrase should produce same encryption/decryption behavior
+	passphrase := "my-consistent-passphrase"
+
+	enc1, err := NewCredentialEncryptor(passphrase)
+	if err != nil {
+		t.Fatalf("failed to create first encryptor: %v", err)
+	}
+
+	enc2, err := NewCredentialEncryptor(passphrase)
+	if err != nil {
+		t.Fatalf("failed to create second encryptor: %v", err)
+	}
+
+	plaintext := "secret-data"
+	encrypted, err := enc1.Encrypt(plaintext)
+	if err != nil {
+		t.Fatalf("failed to encrypt: %v", err)
+	}
+
+	// Second encryptor with same passphrase should decrypt successfully
+	decrypted, err := enc2.Decrypt(encrypted)
+	if err != nil {
+		t.Fatalf("failed to decrypt with same passphrase: %v", err)
+	}
+
+	if decrypted != plaintext {
+		t.Errorf("decrypted mismatch: got %q, want %q", decrypted, plaintext)
 	}
 }
 

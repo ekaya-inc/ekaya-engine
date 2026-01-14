@@ -39,8 +39,8 @@ type Config struct {
 	// If empty, it will be auto-derived from BaseURL.
 	CookieDomain string `yaml:"cookie_domain" env:"COOKIE_DOMAIN" env-default:""`
 
-	// Database configuration (PostgreSQL)
-	Database DatabaseConfig `yaml:"database"`
+	// Engine database configuration (PostgreSQL) - this is the ekaya-engine metadata store
+	EngineDatabase EngineDatabaseConfig `yaml:"engine_database"`
 
 	// Datasource connection management configuration
 	Datasource DatasourceConfig `yaml:"datasource"`
@@ -50,9 +50,18 @@ type Config struct {
 	EmbeddedAI  EmbeddedAIConfig  `yaml:"embedded_ai"`
 
 	// Credential encryption key for project secrets (AI keys, database passwords, etc.)
-	// Must be a 32-byte key, base64 encoded. Generate with: openssl rand -base64 32
+	// Can be a 32-byte base64-encoded key (generate with: openssl rand -base64 32)
+	// or any passphrase (will be hashed to 32 bytes with SHA-256).
 	// Server will fail to start if this is not set.
-	ProjectCredentialsKey string `yaml:"-" env:"PROJECT_CREDENTIALS_KEY"` // Secret - not in YAML
+	// Environment variable PROJECT_CREDENTIALS_KEY overrides this.
+	ProjectCredentialsKey string `yaml:"project_credentials_key" env:"PROJECT_CREDENTIALS_KEY" env-default:""`
+
+	// OAuth session secret for signing temporary OAuth session cookies.
+	// These cookies store PKCE state (code verifier, state parameter) during the
+	// OAuth redirect flow. They only live ~10 minutes during login.
+	// Should be at least 32 characters. Any string works (used as HMAC key).
+	// Environment variable OAUTH_SESSION_SECRET overrides this.
+	OAuthSessionSecret string `yaml:"oauth_session_secret" env:"OAUTH_SESSION_SECRET" env-default:"default-oauth-session-secret-change-in-production"`
 }
 
 // OAuthConfig holds OAuth client configuration.
@@ -75,17 +84,17 @@ type AuthConfig struct {
 	JWKSEndpoints map[string]string `yaml:"-"`
 }
 
-// DatabaseConfig holds PostgreSQL database configuration.
-type DatabaseConfig struct {
-	Host           string `yaml:"host" env:"PGHOST" env-default:"localhost"`
-	Port           int    `yaml:"port" env:"PGPORT" env-default:"5432"`
-	User           string `yaml:"user" env:"PGUSER" env-default:"ekaya"`
-	Password       string `yaml:"-" env:"PGPASSWORD"` // Secret - not in YAML
-	Database       string `yaml:"database" env:"PGDATABASE" env-default:"ekaya_engine"`
-	MaxConnections int32  `yaml:"max_connections" env:"PGMAX_CONNECTIONS" env-default:"25"`
-	MaxIdleConns   int32  `yaml:"max_idle_conns" env:"PGMAX_IDLE_CONNS" env-default:"5"`
-	Type           string `yaml:"type" env:"PGTYPE" env-default:"postgres"`
-	SSLMode        string `yaml:"ssl_mode" env:"PGSSLMODE" env-default:"disable"`
+// EngineDatabaseConfig holds PostgreSQL configuration for the ekaya-engine metadata store.
+// All fields can be set in config.yaml; environment variables override yaml values.
+type EngineDatabaseConfig struct {
+	Host           string `yaml:"pg_host" env:"PGHOST" env-default:"localhost"`
+	Port           int    `yaml:"pg_port" env:"PGPORT" env-default:"5432"`
+	User           string `yaml:"pg_user" env:"PGUSER" env-default:"ekaya"`
+	Password       string `yaml:"pg_password" env:"PGPASSWORD" env-default:""`
+	Database       string `yaml:"pg_database" env:"PGDATABASE" env-default:"ekaya_engine"`
+	SSLMode        string `yaml:"pg_sslmode" env:"PGSSLMODE" env-default:"disable"`
+	MaxConnections int32  `yaml:"pg_max_connections" env:"PGMAX_CONNECTIONS" env-default:"25"`
+	MaxIdleConns   int32  `yaml:"pg_max_idle_conns" env:"PGMAX_IDLE_CONNS" env-default:"5"`
 }
 
 // DatasourceConfig holds datasource connection management settings.
@@ -218,7 +227,7 @@ func parseJWKSEndpoints(value string) map[string]string {
 }
 
 // ConnectionString returns a PostgreSQL connection string.
-func (c *DatabaseConfig) ConnectionString() string {
+func (c *EngineDatabaseConfig) ConnectionString() string {
 	return fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		c.Host, c.Port, c.User, c.Password, c.Database, c.SSLMode,

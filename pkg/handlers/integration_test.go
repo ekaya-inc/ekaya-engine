@@ -50,7 +50,7 @@ func mockTokenServer(t *testing.T, expectedCode string, shouldFail bool) *httpte
 }
 
 func TestCompleteOAuthFlow_Success(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 	logger := zap.NewNop()
 
 	mockServer := mockTokenServer(t, "test-code-123", false)
@@ -136,7 +136,7 @@ func TestCompleteOAuthFlow_Success(t *testing.T) {
 }
 
 func TestCompleteOAuthFlow_InvalidAuthURL(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 	logger := zap.NewNop()
 
 	cfg := &config.Config{
@@ -185,7 +185,7 @@ func TestCompleteOAuthFlow_InvalidAuthURL(t *testing.T) {
 }
 
 func TestProtectedEndpoint_WithCookieAuth(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 	logger := zap.NewNop()
 
 	// Create JWKS client with verification disabled
@@ -231,7 +231,7 @@ func TestProtectedEndpoint_WithCookieAuth(t *testing.T) {
 }
 
 func TestProtectedEndpoint_WithBearerAuth(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 	logger := zap.NewNop()
 
 	jwksClient, _ := auth.NewJWKSClient(&auth.JWKSConfig{EnableVerification: false})
@@ -268,7 +268,7 @@ func TestProtectedEndpoint_WithBearerAuth(t *testing.T) {
 }
 
 func TestProtectedEndpoint_CookiePreferredOverHeader(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 	logger := zap.NewNop()
 
 	jwksClient, _ := auth.NewJWKSClient(&auth.JWKSConfig{EnableVerification: false})
@@ -308,7 +308,7 @@ func TestProtectedEndpoint_CookiePreferredOverHeader(t *testing.T) {
 }
 
 func TestProtectedEndpoint_ProjectIDMismatch(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 	logger := zap.NewNop()
 
 	jwksClient, _ := auth.NewJWKSClient(&auth.JWKSConfig{EnableVerification: false})
@@ -340,7 +340,7 @@ func TestProtectedEndpoint_ProjectIDMismatch(t *testing.T) {
 }
 
 func TestProtectedEndpoint_NoAuth(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 	logger := zap.NewNop()
 
 	jwksClient, _ := auth.NewJWKSClient(&auth.JWKSConfig{EnableVerification: false})
@@ -366,7 +366,7 @@ func TestProtectedEndpoint_NoAuth(t *testing.T) {
 }
 
 func TestProtectedEndpoint_MissingProjectID(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 	logger := zap.NewNop()
 
 	jwksClient, _ := auth.NewJWKSClient(&auth.JWKSConfig{EnableVerification: false})

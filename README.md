@@ -4,50 +4,30 @@ Regional controller for Ekaya platform with clean architecture Go backend and Re
 
 ## Development
 
-### Prerequisites
-
-- Go 1.21+
-- Node.js 18+
-- PostgreSQL database
-
 ### Setup
 
 ```bash
 # Install dependencies
 cd ui && npm install && cd ..
 
-# Configure authentication (choose one)
-make setup-auth-dev    # Recommended: uses auth.dev.ekaya.ai
-make setup-auth-local  # Requires ekaya-central emulator running locally
-
-# Set required environment variables
-export PGPASSWORD=your_db_password
-export PROJECT_CREDENTIALS_KEY=$(openssl rand -base64 32)
+# Copy configuration template (includes working defaults for quickstart)
+cp config.yaml.example config.yaml
 
 # Start development (two terminals)
 make dev-server  # Terminal 1: Go API with auto-reload
 make dev-ui      # Terminal 2: UI with hot reload
 ```
 
-### Configuration
-
-Server configuration is auto-derived from defaults for local development:
-
-| Variable | Default | When to set |
-|----------|---------|-------------|
-| `PORT` | 3443 | Different local port |
-| `BIND_ADDR` | 127.0.0.1 | Docker/external access: `0.0.0.0` |
-| `BASE_URL` | http://localhost:$PORT | Behind load balancer or internal server |
-
-Database uses standard PG* environment variables.
+For production, generate secure secrets in `config.yaml`:
+```bash
+openssl rand -base64 32  # For project_credentials_key and oauth_session_secret
+```
 
 ### Quality Checks
 
 ```bash
-make check  # Format, lint, typecheck, unit tests, integration tests (backend + frontend)
+make check  # Format, lint, typecheck, tests (requires Docker for integration tests)
 ```
-
-**Note:** Integration tests require Docker to be running (spins up a PostgreSQL container).
 
 ## Deployment
 

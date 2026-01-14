@@ -72,11 +72,11 @@ func TestLoad_EnvOverridesYAML(t *testing.T) {
 	setupConfigTest(t, `
 port: "3443"
 env: "test"
-database:
-  host: "db.example.com"
-  port: 5432
-  user: "testuser"
-  database: "testdb"
+engine_database:
+  pg_host: "db.example.com"
+  pg_port: 5432
+  pg_user: "testuser"
+  pg_database: "testdb"
 `)
 
 	// Clear env vars that might interfere with test
@@ -111,8 +111,8 @@ database:
 	}
 
 	// Verify YAML value used for database host (proves YAML was read)
-	if cfg.Database.Host != "db.example.com" {
-		t.Errorf("expected Database.Host=db.example.com (from yaml), got %s", cfg.Database.Host)
+	if cfg.EngineDatabase.Host != "db.example.com" {
+		t.Errorf("expected EngineDatabase.Host=db.example.com (from yaml), got %s", cfg.EngineDatabase.Host)
 	}
 }
 
@@ -120,8 +120,8 @@ func TestLoad_BaseURLAutoDerive(t *testing.T) {
 	setupConfigTest(t, `
 port: "5678"
 env: "test"
-database:
-  host: "localhost"
+engine_database:
+  pg_host: "localhost"
 `)
 
 	// Clear env vars to test auto-derivation from YAML
@@ -144,8 +144,8 @@ func TestLoad_BaseURLExplicit(t *testing.T) {
 port: "3443"
 env: "test"
 base_url: "http://my-server.internal:8080"
-database:
-  host: "localhost"
+engine_database:
+  pg_host: "localhost"
 `)
 
 	// Clear env vars
@@ -173,8 +173,8 @@ port: "8443"
 env: "test"
 tls_cert_path: "%s"
 tls_key_path: "%s"
-database:
-  host: "localhost"
+engine_database:
+  pg_host: "localhost"
 `, tls.CertPath, tls.KeyPath), tmpDir)
 
 	// Clear env vars to test auto-derivation from YAML
@@ -208,8 +208,8 @@ func TestLoad_DatasourceConfigDefaults(t *testing.T) {
 	setupConfigTest(t, `
 port: "3443"
 env: "test"
-database:
-  host: "localhost"
+engine_database:
+  pg_host: "localhost"
 `)
 
 	// Clear any env vars that might interfere
@@ -242,8 +242,8 @@ func TestLoad_DatasourceConfigFromYAML(t *testing.T) {
 	setupConfigTest(t, `
 port: "3443"
 env: "test"
-database:
-  host: "localhost"
+engine_database:
+  pg_host: "localhost"
 datasource:
   connection_ttl_minutes: 10
   max_connections_per_user: 20
@@ -275,8 +275,8 @@ func TestLoad_DatasourceConfigFromEnv(t *testing.T) {
 	setupConfigTest(t, `
 port: "3443"
 env: "test"
-database:
-  host: "localhost"
+engine_database:
+  pg_host: "localhost"
 datasource:
   connection_ttl_minutes: 5
   max_connections_per_user: 10
@@ -316,8 +316,8 @@ func TestLoad_NoTLS(t *testing.T) {
 	setupConfigTest(t, `
 port: "3443"
 env: "test"
-database:
-  host: "localhost"
+engine_database:
+  pg_host: "localhost"
 `)
 
 	// Clear TLS env vars
@@ -347,8 +347,8 @@ port: "3443"
 env: "test"
 tls_cert_path: "%s"
 tls_key_path: "%s"
-database:
-  host: "localhost"
+engine_database:
+  pg_host: "localhost"
 `, tls.CertPath, tls.KeyPath), tmpDir)
 
 	cfg, err := Load("test-version")
@@ -373,8 +373,8 @@ func TestValidateTLS_OnlyCertProvided(t *testing.T) {
 port: "3443"
 env: "test"
 tls_cert_path: "%s"
-database:
-  host: "localhost"
+engine_database:
+  pg_host: "localhost"
 `, tls.CertPath), tmpDir)
 
 	_, err := Load("test-version")
@@ -396,8 +396,8 @@ func TestValidateTLS_OnlyKeyProvided(t *testing.T) {
 port: "3443"
 env: "test"
 tls_key_path: "%s"
-database:
-  host: "localhost"
+engine_database:
+  pg_host: "localhost"
 `, tls.KeyPath), tmpDir)
 
 	_, err := Load("test-version")
@@ -421,8 +421,8 @@ port: "3443"
 env: "test"
 tls_cert_path: "%s"
 tls_key_path: "%s"
-database:
-  host: "localhost"
+engine_database:
+  pg_host: "localhost"
 `, nonexistentCert, tls.KeyPath), tmpDir)
 
 	_, err := Load("test-version")
@@ -446,8 +446,8 @@ port: "3443"
 env: "test"
 tls_cert_path: "%s"
 tls_key_path: "%s"
-database:
-  host: "localhost"
+engine_database:
+  pg_host: "localhost"
 `, tls.CertPath, nonexistentKey), tmpDir)
 
 	_, err := Load("test-version")
@@ -474,8 +474,8 @@ func TestValidateTLS_TLSFromEnv(t *testing.T) {
 	setupConfigTest(t, `
 port: "3443"
 env: "test"
-database:
-  host: "localhost"
+engine_database:
+  pg_host: "localhost"
 `, tmpDir)
 
 	// Set TLS paths via environment variables
