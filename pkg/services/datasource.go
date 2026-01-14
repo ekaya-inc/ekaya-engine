@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/crypto"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -34,8 +35,10 @@ type DatasourceService interface {
 	// Delete removes a datasource.
 	Delete(ctx context.Context, id uuid.UUID) error
 
-	// TestConnection tests connectivity to a datasource without saving it.
-	TestConnection(ctx context.Context, dsType string, config map[string]any) error
+	// TestConnection tests connectivity to a datasource.
+	// Uses the authenticated user's connection pool for proper isolation.
+	// Pass datasourceID if testing an existing datasource, or uuid.Nil for new/unsaved datasources.
+	TestConnection(ctx context.Context, dsType string, config map[string]any, datasourceID uuid.UUID) error
 }
 
 // datasourceService implements DatasourceService.
@@ -271,13 +274,28 @@ func (s *datasourceService) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// TestConnection tests connectivity to a datasource without saving it.
-// Uses unmanaged connection pools (no connection manager) since this is a one-off test.
-func (s *datasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any) error {
-	// Pass uuid.Nil and empty string for identity parameters since this is a test connection
-	// that hasn't been saved yet. Connection manager will be nil in the factory, which
-	// triggers unmanaged pool creation.
-	adapter, err := s.adapterFactory.NewConnectionTester(ctx, dsType, config, uuid.Nil, uuid.Nil, "")
+// TestConnection tests connectivity to a datasource.
+// Uses the authenticated user's connection pool for proper tenant isolation.
+// Pass datasourceID if testing an existing datasource, or uuid.Nil for new/unsaved datasources.
+func (s *datasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any, datasourceID uuid.UUID) error {
+	// Extract projectID and userID from auth claims
+	var projectID uuid.UUID
+	var userID string
+
+	claims, ok := auth.GetClaims(ctx)
+	if ok {
+		if pid, err := uuid.Parse(claims.ProjectID); err == nil {
+			projectID = pid
+		}
+		userID = claims.Email
+	}
+
+	// For new/unsaved datasources, generate a temporary ID to avoid pool key collisions
+	if datasourceID == uuid.Nil {
+		datasourceID = uuid.New()
+	}
+
+	adapter, err := s.adapterFactory.NewConnectionTester(ctx, dsType, config, projectID, datasourceID, userID)
 	if err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
 	}

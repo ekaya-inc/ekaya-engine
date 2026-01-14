@@ -500,7 +500,8 @@ func (h *DatasourcesHandler) TestConnection(w http.ResponseWriter, r *http.Reque
 
 	config := req.ToConfig()
 
-	if err := h.datasourceService.TestConnection(r.Context(), req.Type, config); err != nil {
+	// Pass uuid.Nil for datasourceID since this is testing a new/unsaved datasource config
+	if err := h.datasourceService.TestConnection(r.Context(), req.Type, config, uuid.Nil); err != nil {
 		h.logger.Info("Connection test failed",
 			zap.String("type", req.Type),
 			zap.String("host", req.Host),

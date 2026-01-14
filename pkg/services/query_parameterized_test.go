@@ -514,7 +514,7 @@ func (m *mockDatasourceSvc) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (m *mockDatasourceSvc) TestConnection(ctx context.Context, dsType string, config map[string]any) error {
+func (m *mockDatasourceSvc) TestConnection(ctx context.Context, dsType string, config map[string]any, datasourceID uuid.UUID) error {
 	return nil
 }
 

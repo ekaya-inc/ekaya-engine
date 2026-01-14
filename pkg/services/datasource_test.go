@@ -509,7 +509,7 @@ func TestDatasourceService_TestConnection_Success(t *testing.T) {
 		"database": "testdb",
 	}
 
-	err := service.TestConnection(context.Background(), "postgres", config)
+	err := service.TestConnection(context.Background(), "postgres", config, uuid.Nil)
 	if err != nil {
 		t.Fatalf("TestConnection failed: %v", err)
 	}
@@ -524,7 +524,7 @@ func TestDatasourceService_TestConnection_FactoryError(t *testing.T) {
 	ontologyRepo := &mockDatasourceTestOntologyRepo{}
 	service := NewDatasourceService(repo, ontologyRepo, encryptor, factory, nil, zap.NewNop())
 
-	err := service.TestConnection(context.Background(), "unknown", nil)
+	err := service.TestConnection(context.Background(), "unknown", nil, uuid.Nil)
 	if err == nil {
 		t.Fatal("expected error from factory")
 	}
@@ -547,7 +547,7 @@ func TestDatasourceService_TestConnection_ConnectionError(t *testing.T) {
 		"database": "testdb",
 	}
 
-	err := service.TestConnection(context.Background(), "postgres", config)
+	err := service.TestConnection(context.Background(), "postgres", config, uuid.Nil)
 	if err == nil {
 		t.Fatal("expected connection error")
 	}

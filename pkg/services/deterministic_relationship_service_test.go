@@ -973,7 +973,7 @@ func (m *mockTestDatasourceService) GetByName(ctx context.Context, projectID uui
 	return nil, nil
 }
 
-func (m *mockTestDatasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any) error {
+func (m *mockTestDatasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any, datasourceID uuid.UUID) error {
 	return nil
 }
 
