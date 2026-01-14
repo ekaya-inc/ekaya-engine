@@ -9,7 +9,7 @@ interface ServiceInfo {
 }
 
 /**
- * HomePage - Landing page for ekaya-region service
+ * HomePage - Landing page for ekaya-engine service
  *
  * Simple landing page that:
  * - Shows service information and branding
@@ -38,7 +38,7 @@ export default function HomePage() {
     // Simple redirect to auth server projects page
     // User will sign in (if needed) and select a project
     // Auth server will then redirect to localhost:3443/projects/{pid}
-    // At that point, ekaya-region will initiate OAuth if no valid JWT exists
+    // At that point, ekaya-engine will initiate OAuth if no valid JWT exists
     window.location.href = `${config.authServerUrl}/projects`;
   };
 
@@ -47,8 +47,8 @@ export default function HomePage() {
       <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-lg">
         {/* Header */}
         <div className="mb-8 text-center">
-          <h1 className="mb-2 text-3xl font-bold text-gray-900">Ekaya Region</h1>
-          <p className="text-sm text-gray-500">Regional Data Access Service</p>
+          <h1 className="mb-2 text-3xl font-bold text-gray-900">Ekaya Engine</h1>
+          <p className="text-sm text-gray-500">AI-Enabled Data Access Platform</p>
         </div>
 
         {/* Service Info */}
@@ -88,8 +88,7 @@ export default function HomePage() {
 
         {/* Footer */}
         <div className="mt-8 border-t border-gray-200 pt-4 text-center text-xs text-gray-400">
-          <p>Ekaya Regional Controller</p>
-          <p className="mt-1">Secure multi-tenant data access</p>
+          <p>Secure AI access to your databases</p>
         </div>
       </div>
     </div>
