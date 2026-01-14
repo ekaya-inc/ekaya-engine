@@ -88,7 +88,7 @@ const DatasourceAdapterSelection = ({
   // Check if postgres adapter is available from the API
   const hasPostgresAdapter = availableAdapters.some((a) => a.id === "postgres");
 
-  // Get non-postgres adapters for the "Other Databases" section
+  // Get non-postgres adapters (e.g., SQL Server) to show first in the list
   const otherAdapters = availableAdapters.filter((a) => a.id !== "postgres");
 
   const handleProviderSelect = (provider: ProviderInfo) => {
@@ -151,138 +151,115 @@ const DatasourceAdapterSelection = ({
         </div>
       </div>
 
-      {/* PostgreSQL-Compatible Databases Section */}
-      {hasPostgresAdapter && (
-        <div className="mb-8">
-          <h2 className="text-lg font-semibold text-text-primary mb-4">
-            PostgreSQL-Compatible
-          </h2>
-          <div className="grid gap-4 md:grid-cols-3">
-            {POSTGRES_PROVIDERS.map((provider) => {
-              const isDisabled = getAdapterDisabledState(provider.adapterType);
-              const isSelected = selectedAdapter === provider.adapterType;
+      {/* Single unified list: SQL Server first, then PostgreSQL-compatible providers */}
+      <div className="grid gap-4 md:grid-cols-3">
+        {/* Other adapters (SQL Server) first */}
+        {otherAdapters.map((adapter) => {
+          const isDisabled = getAdapterDisabledState(adapter.id);
+          const isSelected = selectedAdapter === adapter.id;
 
-              return (
-                <Card
-                  key={provider.id}
-                  className={`transition-all ${
-                    isDisabled
-                      ? "cursor-not-allowed opacity-50 bg-gray-100 dark:bg-gray-800"
-                      : "cursor-pointer hover:shadow-md"
-                  } ${
-                    isSelected
-                      ? "ring-2 ring-blue-500 bg-blue-50 dark:bg-blue-950"
-                      : ""
-                  }`}
-                  onClick={() => !isDisabled && handleProviderSelect(provider)}
-                >
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-3">
-                      {provider.icon ? (
-                        <img
-                          src={provider.icon}
-                          alt={provider.name}
-                          className={`h-10 w-10 object-contain ${
-                            isDisabled ? "grayscale" : ""
-                          }`}
-                        />
-                      ) : (
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-200 dark:bg-gray-700">
-                          <span className="text-lg font-bold text-gray-500 dark:text-gray-400">
-                            ?
-                          </span>
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <h3
-                          className={`font-semibold truncate ${
-                            isDisabled
-                              ? "text-text-tertiary"
-                              : "text-text-primary"
-                          }`}
-                        >
-                          {provider.name}
-                        </h3>
-                      </div>
+          return (
+            <Card
+              key={adapter.id}
+              className={`transition-all ${
+                isDisabled
+                  ? "cursor-not-allowed opacity-50 bg-gray-100 dark:bg-gray-800"
+                  : "cursor-pointer hover:shadow-md"
+              } ${
+                isSelected
+                  ? "ring-2 ring-blue-500 bg-blue-50 dark:bg-blue-950"
+                  : ""
+              }`}
+              onClick={() => !isDisabled && handleAdapterSelect(adapter)}
+            >
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  {adapter.icon ? (
+                    <img
+                      src={adapter.icon}
+                      alt={adapter.name}
+                      className={`h-10 w-10 object-contain ${
+                        isDisabled ? "grayscale" : ""
+                      }`}
+                    />
+                  ) : (
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-200 dark:bg-gray-700">
+                      <span className="text-lg font-bold text-gray-500 dark:text-gray-400">
+                        ?
+                      </span>
                     </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        </div>
-      )}
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <h3
+                      className={`font-semibold truncate ${
+                        isDisabled
+                          ? "text-text-tertiary"
+                          : "text-text-primary"
+                      }`}
+                    >
+                      {adapter.name}
+                    </h3>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
 
-      {/* Other Databases Section */}
-      {otherAdapters.length > 0 && (
-        <div>
-          <h2 className="text-lg font-semibold text-text-primary mb-4">
-            Other Databases
-          </h2>
-          <div className="grid gap-4 md:grid-cols-3">
-            {otherAdapters.map((adapter) => {
-              const isDisabled = getAdapterDisabledState(adapter.id);
-              const isSelected = selectedAdapter === adapter.id;
+        {/* PostgreSQL-compatible providers */}
+        {hasPostgresAdapter &&
+          POSTGRES_PROVIDERS.map((provider) => {
+            const isDisabled = getAdapterDisabledState(provider.adapterType);
+            const isSelected = selectedAdapter === provider.adapterType;
 
-              return (
-                <Card
-                  key={adapter.id}
-                  className={`transition-all ${
-                    isDisabled
-                      ? "cursor-not-allowed opacity-50 bg-gray-100 dark:bg-gray-800"
-                      : "cursor-pointer hover:shadow-md"
-                  } ${
-                    isSelected
-                      ? "ring-2 ring-blue-500 bg-blue-50 dark:bg-blue-950"
-                      : ""
-                  }`}
-                  onClick={() => !isDisabled && handleAdapterSelect(adapter)}
-                >
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-3">
-                      {adapter.icon ? (
-                        <img
-                          src={adapter.icon}
-                          alt={adapter.name}
-                          className={`h-10 w-10 object-contain ${
-                            isDisabled ? "grayscale" : ""
-                          }`}
-                        />
-                      ) : (
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-200 dark:bg-gray-700">
-                          <span className="text-lg font-bold text-gray-500 dark:text-gray-400">
-                            ?
-                          </span>
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <h3
-                          className={`font-semibold truncate ${
-                            isDisabled
-                              ? "text-text-tertiary"
-                              : "text-text-primary"
-                          }`}
-                        >
-                          {adapter.name}
-                        </h3>
-                        <p
-                          className={`text-xs truncate ${
-                            isDisabled
-                              ? "text-text-tertiary"
-                              : "text-text-secondary"
-                          }`}
-                        >
-                          {adapter.description}
-                        </p>
+            return (
+              <Card
+                key={provider.id}
+                className={`transition-all ${
+                  isDisabled
+                    ? "cursor-not-allowed opacity-50 bg-gray-100 dark:bg-gray-800"
+                    : "cursor-pointer hover:shadow-md"
+                } ${
+                  isSelected
+                    ? "ring-2 ring-blue-500 bg-blue-50 dark:bg-blue-950"
+                    : ""
+                }`}
+                onClick={() => !isDisabled && handleProviderSelect(provider)}
+              >
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    {provider.icon ? (
+                      <img
+                        src={provider.icon}
+                        alt={provider.name}
+                        className={`h-10 w-10 object-contain ${
+                          isDisabled ? "grayscale" : ""
+                        }`}
+                      />
+                    ) : (
+                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-200 dark:bg-gray-700">
+                        <span className="text-lg font-bold text-gray-500 dark:text-gray-400">
+                          ?
+                        </span>
                       </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <h3
+                        className={`font-semibold truncate ${
+                          isDisabled
+                            ? "text-text-tertiary"
+                            : "text-text-primary"
+                        }`}
+                      >
+                        {provider.name}
+                      </h3>
                     </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        </div>
-      )}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+      </div>
     </div>
   );
 };

@@ -57,6 +57,7 @@ export const getAdapterInfo = (adapterId?: string): AdapterInfo => {
 };
 
 // PostgreSQL-compatible database providers
+// Ordered by enterprise customer popularity
 export const POSTGRES_PROVIDERS: ProviderInfo[] = [
   {
     id: "postgres",
@@ -89,6 +90,26 @@ export const POSTGRES_PROVIDERS: ProviderInfo[] = [
     connectionStringHelp: "Find in: Dashboard → Connection Details",
   },
   {
+    id: "redshift",
+    name: "Amazon Redshift",
+    icon: ADAPTER_ICON_PATHS.redshift ?? null,
+    adapterType: "postgres",
+    defaultPort: 5439,
+    defaultSSL: "require",
+    urlPattern: /\.redshift\.amazonaws\.com/i,
+    helpUrl: "https://docs.aws.amazon.com/redshift/latest/mgmt/connecting-to-cluster.html",
+  },
+  {
+    id: "aurora",
+    name: "Amazon Aurora PostgreSQL",
+    icon: ADAPTER_ICON_PATHS.aurora ?? null,
+    adapterType: "postgres",
+    defaultPort: 5432,
+    defaultSSL: "require",
+    urlPattern: /\.rds\.amazonaws\.com/i,
+    helpUrl: "https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Connecting.html",
+  },
+  {
     id: "cockroachdb",
     name: "CockroachDB",
     icon: ADAPTER_ICON_PATHS.cockroachdb ?? null,
@@ -109,16 +130,6 @@ export const POSTGRES_PROVIDERS: ProviderInfo[] = [
     helpUrl: "https://docs.yugabyte.com/preview/drivers-orms/",
   },
   {
-    id: "aurora",
-    name: "Amazon Aurora PostgreSQL",
-    icon: ADAPTER_ICON_PATHS.aurora ?? null,
-    adapterType: "postgres",
-    defaultPort: 5432,
-    defaultSSL: "require",
-    urlPattern: /\.rds\.amazonaws\.com/i,
-    helpUrl: "https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Connecting.html",
-  },
-  {
     id: "alloydb",
     name: "Google AlloyDB",
     icon: ADAPTER_ICON_PATHS.alloydb ?? null,
@@ -136,16 +147,6 @@ export const POSTGRES_PROVIDERS: ProviderInfo[] = [
     defaultSSL: "require",
     urlPattern: /\.timescaledb\.io|tsdb\.cloud\.timescale\.com/i,
     helpUrl: "https://docs.timescale.com/getting-started/latest/",
-  },
-  {
-    id: "redshift",
-    name: "Amazon Redshift",
-    icon: ADAPTER_ICON_PATHS.redshift ?? null,
-    adapterType: "postgres",
-    defaultPort: 5439,
-    defaultSSL: "require",
-    urlPattern: /\.redshift\.amazonaws\.com/i,
-    helpUrl: "https://docs.aws.amazon.com/redshift/latest/mgmt/connecting-to-cluster.html",
   },
 ];
 

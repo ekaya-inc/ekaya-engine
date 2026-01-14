@@ -14,7 +14,7 @@ func init() {
 	datasource.Register(datasource.DatasourceAdapterRegistration{
 		Info: datasource.DatasourceAdapterInfo{
 			Type:        "mssql",
-			DisplayName: "SQL Server",
+			DisplayName: "Microsoft SQL Server",
 			Description: "Connect to SQL Server 2019+, Azure SQL Database",
 			Icon:        "mssql",
 		},
