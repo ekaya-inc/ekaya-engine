@@ -335,7 +335,7 @@ func (m *mockDatasourceServiceForGlossary) Delete(ctx context.Context, id uuid.U
 	return nil
 }
 
-func (m *mockDatasourceServiceForGlossary) TestConnection(ctx context.Context, dsType string, config map[string]any) error {
+func (m *mockDatasourceServiceForGlossary) TestConnection(ctx context.Context, dsType string, config map[string]any, datasourceID uuid.UUID) error {
 	return nil
 }
 

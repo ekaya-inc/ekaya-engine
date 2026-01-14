@@ -404,7 +404,7 @@ func (m *mockDatasourceService) Delete(ctx context.Context, id uuid.UUID) error 
 	return errors.New("not implemented")
 }
 
-func (m *mockDatasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any) error {
+func (m *mockDatasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any, datasourceID uuid.UUID) error {
 	return errors.New("not implemented")
 }
 
