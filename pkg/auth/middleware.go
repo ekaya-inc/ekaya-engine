@@ -3,9 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"os"
 
 	"go.uber.org/zap"
 )
