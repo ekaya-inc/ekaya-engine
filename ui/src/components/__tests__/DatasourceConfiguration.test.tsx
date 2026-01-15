@@ -442,6 +442,84 @@ describe("DatasourceConfiguration", () => {
       // Should show Neon in the header
       expect(screen.getByText("Configure Neon")).toBeInTheDocument();
     });
+
+    it("preserves custom port when editing existing datasource", async () => {
+      // BUG: When editing a datasource with a custom port (e.g., 7432),
+      // the port was being overwritten by the provider's default (e.g., 5432)
+      // because the useEffect that updates port when provider changes
+      // did not check if we were editing an existing datasource.
+      mockUseDatasourceConnection.mockReturnValue({
+        testConnection: mockTestConnection,
+        connectionStatus: null,
+        error: null,
+        isConnected: true,
+        connectionDetails: {
+          datasourceId: "ds-1",
+          type: "postgres",
+          host: "localhost",
+          port: 7432, // Custom port - NOT the default 5432
+          user: "test",
+          name: "testdb",
+          ssl_mode: "require",
+          displayName: "My Database",
+        },
+        selectedDatasource: {
+          datasourceId: "ds-1",
+        },
+        clearError: mockClearError,
+        saveDataSource: mockSaveDataSource,
+        updateDataSource: mockUpdateDataSource,
+        deleteDataSource: mockDeleteDataSource,
+      });
+
+      renderComponent({ selectedAdapter: "postgres" });
+
+      // Wait for effects to settle
+      await waitFor(() => {
+        // The custom port (7432) should be preserved, NOT overwritten to default (5432)
+        expect(screen.getByLabelText("Port")).toHaveValue(7432);
+      });
+    });
+
+    it("preserves custom port when editing Supabase datasource with non-default port", async () => {
+      // Supabase default port is 6543, but user might use a different port
+      const supabaseProvider = getProvider("supabase");
+      mockUseDatasourceConnection.mockReturnValue({
+        testConnection: mockTestConnection,
+        connectionStatus: null,
+        error: null,
+        isConnected: true,
+        connectionDetails: {
+          datasourceId: "ds-1",
+          type: "postgres",
+          provider: "supabase",
+          host: "db.supabase.co",
+          port: 5432, // Non-default for Supabase (default is 6543)
+          user: "postgres",
+          name: "postgres",
+          ssl_mode: "require",
+          displayName: "My Supabase DB",
+        },
+        selectedDatasource: {
+          datasourceId: "ds-1",
+        },
+        clearError: mockClearError,
+        saveDataSource: mockSaveDataSource,
+        updateDataSource: mockUpdateDataSource,
+        deleteDataSource: mockDeleteDataSource,
+      });
+
+      renderComponent({
+        selectedAdapter: "postgres",
+        selectedProvider: supabaseProvider,
+      });
+
+      // Wait for effects to settle
+      await waitFor(() => {
+        // The saved port (5432) should be preserved, NOT overwritten to Supabase default (6543)
+        expect(screen.getByLabelText("Port")).toHaveValue(5432);
+      });
+    });
   });
 
   describe("MSSQL Auth Method Selection", () => {

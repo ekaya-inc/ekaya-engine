@@ -1,8 +1,8 @@
 package auth
 
 import (
+	"crypto/sha256"
 	"net/http"
-	"os"
 
 	"github.com/gorilla/sessions"
 )
@@ -25,6 +25,11 @@ const (
 // InitSessionStore initializes the cookie-based session store
 // for managing OAuth state during the authentication flow.
 //
+// The secret parameter is used to sign session cookies. It can be any
+// passphrase - it will be SHA-256 hashed to derive a 32-byte key.
+// The secret must be consistent across server restarts and multiple
+// servers in a load-balanced deployment.
+//
 // The session has a short TTL (10 minutes) since it only needs
 // to persist during the OAuth redirect flow.
 //
@@ -32,14 +37,11 @@ const (
 // - HttpOnly: true (inaccessible to JavaScript)
 // - Secure: true (HTTPS only in production)
 // - SameSite: Strict (prevents CSRF)
-func InitSessionStore() {
-	secret := os.Getenv("SESSION_SECRET")
-	if secret == "" {
-		// Default for development - should be overridden in production
-		secret = "dev-secret-change-in-production-min-32-chars"
-	}
+func InitSessionStore(secret string) {
+	// Hash the secret to get a consistent 32-byte key
+	key := sha256.Sum256([]byte(secret))
 
-	Store = sessions.NewCookieStore([]byte(secret))
+	Store = sessions.NewCookieStore(key[:])
 	Store.Options = &sessions.Options{
 		Path:     "/",
 		MaxAge:   600, // 10 minutes (OAuth flow duration)

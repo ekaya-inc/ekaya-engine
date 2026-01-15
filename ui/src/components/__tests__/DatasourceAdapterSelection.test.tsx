@@ -97,14 +97,6 @@ describe("DatasourceAdapterSelection", () => {
     });
   });
 
-  it("renders PostgreSQL-Compatible section header when postgres adapter is available", async () => {
-    renderComponent();
-
-    await waitFor(() => {
-      expect(screen.getByText("PostgreSQL-Compatible")).toBeInTheDocument();
-    });
-  });
-
   it("renders all PostgreSQL providers when postgres adapter is available", async () => {
     renderComponent();
 
@@ -116,15 +108,7 @@ describe("DatasourceAdapterSelection", () => {
     });
   });
 
-  it("renders Other Databases section header when non-postgres adapters are available", async () => {
-    renderComponent();
-
-    await waitFor(() => {
-      expect(screen.getByText("Other Databases")).toBeInTheDocument();
-    });
-  });
-
-  it("renders non-postgres adapters in Other Databases section", async () => {
+  it("renders non-postgres adapters in the unified list", async () => {
     renderComponent();
 
     await waitFor(() => {
@@ -169,7 +153,7 @@ describe("DatasourceAdapterSelection", () => {
     expect(onAdapterSelect).toHaveBeenCalledWith("mysql");
   });
 
-  it("does not render PostgreSQL-Compatible section when postgres adapter is not available", async () => {
+  it("does not render PostgreSQL providers when postgres adapter is not available", async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: () =>
@@ -189,7 +173,6 @@ describe("DatasourceAdapterSelection", () => {
       expect(screen.getByText("MySQL")).toBeInTheDocument();
     });
 
-    expect(screen.queryByText("PostgreSQL-Compatible")).not.toBeInTheDocument();
     // PostgreSQL providers should not be rendered
     expect(screen.queryByText("Supabase")).not.toBeInTheDocument();
     expect(screen.queryByText("Neon")).not.toBeInTheDocument();
@@ -199,7 +182,7 @@ describe("DatasourceAdapterSelection", () => {
     renderComponent();
 
     await waitFor(() => {
-      expect(screen.getByText("PostgreSQL-Compatible")).toBeInTheDocument();
+      expect(screen.getByText("PostgreSQL")).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole("button", { name: /back/i }));

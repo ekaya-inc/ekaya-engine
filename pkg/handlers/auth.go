@@ -19,6 +19,7 @@ type CompleteOAuthRequest struct {
 	State        string `json:"state"`
 	CodeVerifier string `json:"code_verifier"`
 	AuthURL      string `json:"auth_url"`
+	RedirectURI  string `json:"redirect_uri"`
 }
 
 // CompleteOAuthResponse represents the response for OAuth completion.
@@ -84,6 +85,7 @@ func (h *AuthHandler) CompleteOAuth(w http.ResponseWriter, r *http.Request) {
 		Code:         req.Code,
 		CodeVerifier: req.CodeVerifier,
 		AuthURL:      req.AuthURL,
+		RedirectURI:  req.RedirectURI,
 	})
 	if err != nil {
 		if err == services.ErrInvalidAuthURL {

@@ -83,7 +83,7 @@ func TestConfigHandler_DoesNotExposeSensitiveData(t *testing.T) {
 		OAuth: config.OAuthConfig{
 			ClientID: "test-client-id",
 		},
-		Database: config.DatabaseConfig{
+		EngineDatabase: config.EngineDatabaseConfig{
 			Password: "super-secret-password",
 		},
 		ProjectCredentialsKey: "encryption-key",

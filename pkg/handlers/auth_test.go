@@ -20,9 +20,12 @@ import (
 type mockOAuthService struct {
 	token string
 	err   error
+	// capturedRequest stores the last request for verification
+	capturedRequest *services.TokenExchangeRequest
 }
 
 func (m *mockOAuthService) ExchangeCodeForToken(ctx context.Context, req *services.TokenExchangeRequest) (string, error) {
+	m.capturedRequest = req
 	if m.err != nil {
 		return "", m.err
 	}
@@ -35,7 +38,7 @@ func (m *mockOAuthService) ValidateAuthURL(authURL string) (string, error) {
 
 func TestAuthHandler_CompleteOAuth_Success(t *testing.T) {
 	// Initialize session store for testing
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 
 	cfg := &config.Config{
 		BaseURL:      "http://localhost:3443",
@@ -101,7 +104,7 @@ func TestAuthHandler_CompleteOAuth_Success(t *testing.T) {
 }
 
 func TestAuthHandler_CompleteOAuth_MissingCode(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 
 	cfg := &config.Config{
 		BaseURL: "http://localhost:3443",
@@ -137,7 +140,7 @@ func TestAuthHandler_CompleteOAuth_MissingCode(t *testing.T) {
 }
 
 func TestAuthHandler_CompleteOAuth_MissingState(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 
 	cfg := &config.Config{
 		BaseURL: "http://localhost:3443",
@@ -164,7 +167,7 @@ func TestAuthHandler_CompleteOAuth_MissingState(t *testing.T) {
 }
 
 func TestAuthHandler_CompleteOAuth_MissingCodeVerifier(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 
 	cfg := &config.Config{
 		BaseURL: "http://localhost:3443",
@@ -191,7 +194,7 @@ func TestAuthHandler_CompleteOAuth_MissingCodeVerifier(t *testing.T) {
 }
 
 func TestAuthHandler_CompleteOAuth_InvalidAuthURL(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 
 	cfg := &config.Config{
 		BaseURL: "http://localhost:3443",
@@ -229,7 +232,7 @@ func TestAuthHandler_CompleteOAuth_InvalidAuthURL(t *testing.T) {
 }
 
 func TestAuthHandler_CompleteOAuth_TokenExchangeFailed(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 
 	cfg := &config.Config{
 		BaseURL: "http://localhost:3443",
@@ -266,7 +269,7 @@ func TestAuthHandler_CompleteOAuth_TokenExchangeFailed(t *testing.T) {
 }
 
 func TestAuthHandler_CompleteOAuth_InvalidJSON(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 
 	cfg := &config.Config{
 		BaseURL: "http://localhost:3443",
@@ -294,8 +297,53 @@ func TestAuthHandler_CompleteOAuth_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestAuthHandler_CompleteOAuth_PassesRedirectURI(t *testing.T) {
+	// This test verifies that redirect_uri from the request is passed to the OAuth service.
+	// This is critical for cases where the frontend runs on a different port than configured
+	// in the backend (e.g., quickstart Docker image mapped to different port).
+	auth.InitSessionStore("test-secret")
+
+	cfg := &config.Config{
+		BaseURL:      "http://localhost:3443",
+		CookieDomain: "",
+	}
+
+	oauthService := &mockOAuthService{token: "test-jwt-token"}
+	handler := NewAuthHandler(oauthService, &mockProjectService{}, cfg, zap.NewNop())
+
+	// Frontend sends redirect_uri based on window.location.origin (e.g., port 5443)
+	reqBody := CompleteOAuthRequest{
+		Code:         "auth-code-123",
+		State:        "state-456",
+		CodeVerifier: "verifier-789",
+		AuthURL:      "https://us.ekaya.ai",
+		RedirectURI:  "http://localhost:5443/oauth/callback",
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/complete-oauth", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.CompleteOAuth(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify redirect_uri was passed to the OAuth service
+	if oauthService.capturedRequest == nil {
+		t.Fatal("expected OAuth service to receive a request")
+	}
+
+	if oauthService.capturedRequest.RedirectURI != "http://localhost:5443/oauth/callback" {
+		t.Errorf("expected redirect_uri 'http://localhost:5443/oauth/callback', got %q",
+			oauthService.capturedRequest.RedirectURI)
+	}
+}
+
 func TestAuthHandler_CookieSettingsForLocalhost(t *testing.T) {
-	auth.InitSessionStore()
+	auth.InitSessionStore("test-secret")
 
 	cfg := &config.Config{
 		BaseURL:      "http://localhost:3443",

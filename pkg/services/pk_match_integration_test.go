@@ -507,7 +507,7 @@ func (m *pkMatchMockDatasourceService) GetByName(ctx context.Context, projectID 
 	return nil, nil
 }
 
-func (m *pkMatchMockDatasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any) error {
+func (m *pkMatchMockDatasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any, datasourceID uuid.UUID) error {
 	return nil
 }
 

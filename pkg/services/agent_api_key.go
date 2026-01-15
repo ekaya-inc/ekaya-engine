@@ -6,7 +6,6 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
-	"os"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -37,26 +36,17 @@ type agentAPIKeyService struct {
 }
 
 // NewAgentAPIKeyService creates a new agent API key service.
+// The encryptor must be initialized with the project credentials key.
 func NewAgentAPIKeyService(
 	repo repositories.MCPConfigRepository,
+	encryptor *crypto.CredentialEncryptor,
 	logger *zap.Logger,
-) (AgentAPIKeyService, error) {
-	// Get encryption key from environment
-	encKey := os.Getenv("PROJECT_CREDENTIALS_KEY")
-	if encKey == "" {
-		return nil, fmt.Errorf("PROJECT_CREDENTIALS_KEY not set")
-	}
-
-	encryptor, err := crypto.NewCredentialEncryptor(encKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create encryptor: %w", err)
-	}
-
+) AgentAPIKeyService {
 	return &agentAPIKeyService{
 		repo:      repo,
 		encryptor: encryptor,
 		logger:    logger,
-	}, nil
+	}
 }
 
 // GenerateKey creates a new random 32-byte API key (64 hex chars).

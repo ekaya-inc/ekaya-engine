@@ -82,6 +82,7 @@ export default function OAuthCallbackPage() {
             state: state,
             code_verifier: codeVerifier,
             auth_url: authServerUrl,
+            redirect_uri: `${window.location.origin}/oauth/callback`,
           }),
         });
 

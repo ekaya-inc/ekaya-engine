@@ -1,0 +1,116 @@
+# Production configuration for ekaya-engine
+# cp config.yaml.example config.yaml
+# Environment variables override these settings
+
+#
+# Server configuration
+#
+
+# Port to listen on (environment variable PORT overrides this)
+#
+# port: "3443"
+
+# Environment name (environment variable ENVIRONMENT overrides this)
+# This value is reported from the /health endpoint:
+#   "local" -- use human-readable logs and report "local" in /health endpoint
+#   "dev, stage, prod, etc" -- use structured JSON logs
+#
+# env: "local"
+
+#
+# Engine Database (PostgreSQL)
+#
+# This is the metadata store for ekaya-engine, not the target datasources.
+# All fields can be set here or overridden with PG* environment variables.
+#
+engine_database:
+  pg_host: "localhost"
+  pg_port: 5432
+  pg_user: "ekaya"
+  # pg_password: ""
+  pg_database: "ekaya_engine"
+  pg_sslmode: "disable"
+  pg_max_connections: 25
+  pg_max_idle_conns: 5
+
+#
+# Secrets
+#
+# Both secrets below accept any passphrase (SHA-256 hashed to derive a key).
+# For production, generate secure values with: openssl rand -base64 32
+#
+
+# Credential Encryption Key
+# Encrypts datasource credentials (passwords, API keys) stored in the database.
+# WARNING: Do NOT change after storing credentials - existing data becomes unrecoverable.
+# Environment variable: PROJECT_CREDENTIALS_KEY
+project_credentials_key: quickstart-not-for-production
+
+# OAuth Session Secret
+# Signs temporary cookies during OAuth login (PKCE state, ~10 minute lifetime).
+# For multi-server deployments, all servers must share the same secret.
+# Environment variable: OAUTH_SESSION_SECRET
+oauth_session_secret: quickstart-not-for-production
+
+#
+# Setting up HTTPS and custom domains
+#
+
+# IMPORTANT:
+# Ekaya uses OAuth 2.1 with PKCE for authentication. PKCE requires the
+# browser's Web Crypto API, which only works in "secure contexts" (HTTPS
+# or localhost). This affects your deployment options:
+#
+# 1. [OKAY] http://localhost:3443
+#    Browsers treat localhost as a secure context, so HTTP works.
+#
+# 2. [OKAY] https://data.acme.com
+#    Any HTTPS domain works if you have a valid TLS certificate.
+#
+# 3. [OKAY] https://internal.yourcompany:1234
+#    Self-signed certificates work if users' browsers trust your ROOT CA.
+#
+# 4. [NOT ALLOWED] http://anydomain:anyport
+#    HTTP on non-localhost domains will fail (browser blocks Web Crypto API).
+#
+# CONFIGURATION:
+#
+# Tell Ekaya Engine your public URL (auto-derived as http://localhost:$PORT
+# if not set, or https://localhost:$PORT if TLS certificates are configured):
+#
+# base_url: "https://yourservice.yourdomain:yourport"
+#
+# Provide TLS certificates for your domain:
+#
+# tls_cert_path: "/path/to/cert.pem"
+# tls_key_path: "/path/to/key.pem"
+#
+# Environment variables: BASE_URL, TLS_CERT_PATH, TLS_KEY_PATH will override
+# config file variables
+
+#
+# Advanced
+#
+
+# Cookie Domain
+#
+# Only set this if you need cross-subdomain auth on a custom domain.
+# Example: api.acme.com and app.acme.com sharing auth → ".acme.com"
+#
+# Controls which domains can read the authentication cookie.
+# Auto-derived from base_url in most cases:
+#   localhost/127.0.0.1  → "" (no restriction)
+#   *.ekaya.ai           → ".ekaya.ai"
+#   *.dev.ekaya.ai       → ".dev.ekaya.ai"
+#   other domains        → "" (isolated to hostname)
+#
+# cookie_domain: ".yourinternaldomain"
+
+# Authentication configuration
+# You can bring your own authentication system and not use Ekaya at all!
+# Not recommended and not tested but there is that option.
+# Contact support@ekaya.ai if you need your own authentication.
+#
+# auth:
+#   jwks_endpoints: "https://auth.yourauthservice=https://auth.yourauthservice/.well-known/jwks.json"
+#
