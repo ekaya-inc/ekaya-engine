@@ -18,7 +18,7 @@ type FKDiscoveryResult struct {
 
 // FKDiscoveryMethods defines the interface for FK relationship discovery.
 type FKDiscoveryMethods interface {
-	DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*FKDiscoveryResult, error)
+	DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback ProgressCallback) (*FKDiscoveryResult, error)
 }
 
 // FKDiscoveryNode wraps FK relationship discovery from database constraints.
@@ -50,8 +50,15 @@ func (n *FKDiscoveryNode) Execute(ctx context.Context, dag *models.OntologyDAG) 
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 
+	// Create progress callback that wraps ReportProgress
+	progressCallback := func(current, total int, message string) {
+		if err := n.ReportProgress(ctx, current, total, message); err != nil {
+			n.Logger().Warn("Failed to report progress", zap.Error(err))
+		}
+	}
+
 	// Call the underlying service method
-	result, err := n.fkDiscoverySvc.DiscoverFKRelationships(ctx, dag.ProjectID, dag.DatasourceID)
+	result, err := n.fkDiscoverySvc.DiscoverFKRelationships(ctx, dag.ProjectID, dag.DatasourceID, progressCallback)
 	if err != nil {
 		return fmt.Errorf("discover FK relationships: %w", err)
 	}

@@ -22,14 +22,14 @@ type mockDeterministicRelationshipService struct {
 	err           error
 }
 
-func (m *mockDeterministicRelationshipService) DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*services.FKDiscoveryResult, error) {
+func (m *mockDeterministicRelationshipService) DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, _ services.RelationshipProgressCallback) (*services.FKDiscoveryResult, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
 	return m.fkResult, nil
 }
 
-func (m *mockDeterministicRelationshipService) DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*services.PKMatchDiscoveryResult, error) {
+func (m *mockDeterministicRelationshipService) DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, _ services.RelationshipProgressCallback) (*services.PKMatchDiscoveryResult, error) {
 	if m.err != nil {
 		return nil, m.err
 	}

@@ -185,7 +185,7 @@ func main() {
 		ontologyEntityRepo, entityRelationshipRepo,
 		llmFactory, datasourceService, adapterFactory, logger)
 	deterministicRelationshipService := services.NewDeterministicRelationshipService(
-		datasourceService, adapterFactory, ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo)
+		datasourceService, adapterFactory, ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, logger)
 	ontologyFinalizationService := services.NewOntologyFinalizationService(
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, convRepo, llmFactory, getTenantCtx, logger)
 	entityService := services.NewEntityService(ontologyEntityRepo, entityRelationshipRepo, ontologyRepo, logger)

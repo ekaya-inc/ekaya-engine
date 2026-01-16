@@ -71,8 +71,13 @@ func NewFKDiscoveryAdapter(svc DeterministicRelationshipService) dag.FKDiscovery
 	return &FKDiscoveryAdapter{svc: svc}
 }
 
-func (a *FKDiscoveryAdapter) DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*dag.FKDiscoveryResult, error) {
-	result, err := a.svc.DiscoverFKRelationships(ctx, projectID, datasourceID)
+func (a *FKDiscoveryAdapter) DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback dag.ProgressCallback) (*dag.FKDiscoveryResult, error) {
+	// Convert dag.ProgressCallback to services.RelationshipProgressCallback
+	var svcCallback RelationshipProgressCallback
+	if progressCallback != nil {
+		svcCallback = RelationshipProgressCallback(progressCallback)
+	}
+	result, err := a.svc.DiscoverFKRelationships(ctx, projectID, datasourceID, svcCallback)
 	if err != nil {
 		return nil, err
 	}
@@ -91,8 +96,13 @@ func NewPKMatchDiscoveryAdapter(svc DeterministicRelationshipService) dag.PKMatc
 	return &PKMatchDiscoveryAdapter{svc: svc}
 }
 
-func (a *PKMatchDiscoveryAdapter) DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*dag.PKMatchDiscoveryResult, error) {
-	result, err := a.svc.DiscoverPKMatchRelationships(ctx, projectID, datasourceID)
+func (a *PKMatchDiscoveryAdapter) DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback dag.ProgressCallback) (*dag.PKMatchDiscoveryResult, error) {
+	// Convert dag.ProgressCallback to services.RelationshipProgressCallback
+	var svcCallback RelationshipProgressCallback
+	if progressCallback != nil {
+		svcCallback = RelationshipProgressCallback(progressCallback)
+	}
+	result, err := a.svc.DiscoverPKMatchRelationships(ctx, projectID, datasourceID, svcCallback)
 	if err != nil {
 		return nil, err
 	}

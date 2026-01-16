@@ -163,10 +163,11 @@ func TestPKMatchDiscovery_ChannelsOwnerToUsersUserID(t *testing.T) {
 		entityRepo,
 		relationshipRepo,
 		schemaRepo,
+		zap.NewNop(),
 	)
 
 	// Step 4: Run pk_match discovery
-	result, err := detRelService.DiscoverPKMatchRelationships(ctx, projectID, datasourceID)
+	result, err := detRelService.DiscoverPKMatchRelationships(ctx, projectID, datasourceID, nil)
 	if err != nil {
 		t.Fatalf("DiscoverPKMatchRelationships failed: %v", err)
 	}
