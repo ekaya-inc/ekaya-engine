@@ -64,13 +64,15 @@ func NewQueryExecutor(ctx context.Context, cfg *Config, connMgr *datasource.Conn
 	}, nil
 }
 
-// ExecuteQuery runs a SQL query and returns the results.
-func (e *QueryExecutor) ExecuteQuery(ctx context.Context, sqlQuery string, limit int) (*datasource.QueryExecutionResult, error) {
-	// Apply limit if specified
-	queryToRun := sqlQuery
-	if limit > 0 {
-		queryToRun = fmt.Sprintf("SELECT * FROM (%s) AS _limited LIMIT %d", sqlQuery, limit)
+// Query runs a SELECT statement and returns bounded results.
+// See datasource.QueryExecutor.Query for limit behavior.
+func (e *QueryExecutor) Query(ctx context.Context, sqlQuery string, limit int) (*datasource.QueryExecutionResult, error) {
+	// Apply limit - always wrap query with bounded limit
+	effectiveLimit := limit
+	if effectiveLimit <= 0 || effectiveLimit > datasource.MaxQueryLimit {
+		effectiveLimit = datasource.MaxQueryLimit
 	}
+	queryToRun := fmt.Sprintf("SELECT * FROM (%s) AS _limited LIMIT %d", sqlQuery, effectiveLimit)
 
 	rows, err := e.pool.Query(ctx, queryToRun)
 	if err != nil {
@@ -114,15 +116,17 @@ func (e *QueryExecutor) ExecuteQuery(ctx context.Context, sqlQuery string, limit
 	}, nil
 }
 
-// ExecuteQueryWithParams runs a parameterized SQL query with positional parameters.
+// QueryWithParams runs a parameterized SELECT with bounded results.
 // The SQL should use $1, $2, etc. for parameter placeholders.
 // pgx handles parameterized queries natively, preventing SQL injection.
-func (e *QueryExecutor) ExecuteQueryWithParams(ctx context.Context, sqlQuery string, params []any, limit int) (*datasource.QueryExecutionResult, error) {
-	// Apply limit if specified
-	queryToRun := sqlQuery
-	if limit > 0 {
-		queryToRun = fmt.Sprintf("SELECT * FROM (%s) AS _limited LIMIT %d", sqlQuery, limit)
+// See datasource.QueryExecutor.Query for limit behavior.
+func (e *QueryExecutor) QueryWithParams(ctx context.Context, sqlQuery string, params []any, limit int) (*datasource.QueryExecutionResult, error) {
+	// Apply limit - always wrap query with bounded limit
+	effectiveLimit := limit
+	if effectiveLimit <= 0 || effectiveLimit > datasource.MaxQueryLimit {
+		effectiveLimit = datasource.MaxQueryLimit
 	}
+	queryToRun := fmt.Sprintf("SELECT * FROM (%s) AS _limited LIMIT %d", sqlQuery, effectiveLimit)
 
 	// Execute with parameters - pgx handles parameterized queries natively
 	rows, err := e.pool.Query(ctx, queryToRun, params...)

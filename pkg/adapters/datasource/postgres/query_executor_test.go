@@ -72,7 +72,7 @@ func TestQueryExecutor_ExecuteQuery_Simple(t *testing.T) {
 	tc := setupQueryExecutorTest(t)
 	ctx := context.Background()
 
-	result, err := tc.executor.ExecuteQuery(ctx, "SELECT 1 as num, 'hello' as greeting", 0)
+	result, err := tc.executor.Query(ctx, "SELECT 1 as num, 'hello' as greeting", 0)
 	if err != nil {
 		t.Fatalf("ExecuteQuery failed: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestQueryExecutor_ExecuteQuery_FromTable(t *testing.T) {
 	ctx := context.Background()
 
 	// Query the events table which should exist in test data
-	result, err := tc.executor.ExecuteQuery(ctx, "SELECT * FROM events LIMIT 5", 0)
+	result, err := tc.executor.Query(ctx, "SELECT * FROM events LIMIT 5", 0)
 	if err != nil {
 		t.Fatalf("ExecuteQuery failed: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestQueryExecutor_ExecuteQuery_WithLimit(t *testing.T) {
 	ctx := context.Background()
 
 	// Query without limit first to see how many rows exist
-	resultNoLimit, err := tc.executor.ExecuteQuery(ctx, "SELECT * FROM events", 0)
+	resultNoLimit, err := tc.executor.Query(ctx, "SELECT * FROM events", 0)
 	if err != nil {
 		t.Fatalf("ExecuteQuery without limit failed: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestQueryExecutor_ExecuteQuery_WithLimit(t *testing.T) {
 	}
 
 	// Now query with limit
-	result, err := tc.executor.ExecuteQuery(ctx, "SELECT * FROM events", 2)
+	result, err := tc.executor.Query(ctx, "SELECT * FROM events", 2)
 	if err != nil {
 		t.Fatalf("ExecuteQuery with limit failed: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestQueryExecutor_ExecuteQuery_NoResults(t *testing.T) {
 	tc := setupQueryExecutorTest(t)
 	ctx := context.Background()
 
-	result, err := tc.executor.ExecuteQuery(ctx, "SELECT * FROM events WHERE 1=0", 0)
+	result, err := tc.executor.Query(ctx, "SELECT * FROM events WHERE 1=0", 0)
 	if err != nil {
 		t.Fatalf("ExecuteQuery failed: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestQueryExecutor_ExecuteQuery_InvalidSQL(t *testing.T) {
 	tc := setupQueryExecutorTest(t)
 	ctx := context.Background()
 
-	_, err := tc.executor.ExecuteQuery(ctx, "SELECT * FROM nonexistent_table_xyz", 0)
+	_, err := tc.executor.Query(ctx, "SELECT * FROM nonexistent_table_xyz", 0)
 	if err == nil {
 		t.Fatal("expected error for invalid SQL")
 	}
@@ -179,7 +179,7 @@ func TestQueryExecutor_ExecuteQuery_SyntaxError(t *testing.T) {
 	tc := setupQueryExecutorTest(t)
 	ctx := context.Background()
 
-	_, err := tc.executor.ExecuteQuery(ctx, "SELEC * FORM events", 0)
+	_, err := tc.executor.Query(ctx, "SELEC * FORM events", 0)
 	if err == nil {
 		t.Fatal("expected error for SQL syntax error")
 	}
@@ -190,7 +190,7 @@ func TestQueryExecutor_ExecuteQuery_Join(t *testing.T) {
 	ctx := context.Background()
 
 	// Test a simple self-join query using events table
-	result, err := tc.executor.ExecuteQuery(ctx, `
+	result, err := tc.executor.Query(ctx, `
 		SELECT e1.id, e2.id as e2_id
 		FROM events e1
 		CROSS JOIN events e2
@@ -210,7 +210,7 @@ func TestQueryExecutor_ExecuteQuery_Aggregation(t *testing.T) {
 	tc := setupQueryExecutorTest(t)
 	ctx := context.Background()
 
-	result, err := tc.executor.ExecuteQuery(ctx, `
+	result, err := tc.executor.Query(ctx, `
 		SELECT COUNT(*) as total, MIN(created_at) as earliest
 		FROM events
 	`, 0)
@@ -297,7 +297,7 @@ func TestQueryExecutor_DataTypes(t *testing.T) {
 	ctx := context.Background()
 
 	// Test various PostgreSQL data types
-	result, err := tc.executor.ExecuteQuery(ctx, `
+	result, err := tc.executor.Query(ctx, `
 		SELECT
 			1::integer as int_val,
 			1.5::numeric as numeric_val,
@@ -348,7 +348,7 @@ func TestQueryExecutor_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	_, err := tc.executor.ExecuteQuery(ctx, "SELECT pg_sleep(10)", 0)
+	_, err := tc.executor.Query(ctx, "SELECT pg_sleep(10)", 0)
 	if err == nil {
 		t.Error("expected error when context is cancelled")
 	}
@@ -522,7 +522,7 @@ func TestQueryExecutor_Execute_DropTable(t *testing.T) {
 	}
 
 	// Verify it's gone by trying to query it
-	_, err = tc.executor.ExecuteQuery(ctx, "SELECT * FROM test_drop_table", 0)
+	_, err = tc.executor.Query(ctx, "SELECT * FROM test_drop_table", 0)
 	if err == nil {
 		t.Error("expected error querying dropped table")
 	}
@@ -608,7 +608,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_Simple(t *testing.T) {
 	sql := "SELECT $1::integer as num, $2::text as greeting"
 	params := []any{42, "hello"}
 
-	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 0)
 	if err != nil {
 		t.Fatalf("ExecuteQueryWithParams failed: %v", err)
 	}
@@ -644,7 +644,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_WhereClause(t *testing.T) {
 	sql := "SELECT * FROM events WHERE id > $1 LIMIT 5"
 	params := []any{0}
 
-	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 0)
 	if err != nil {
 		t.Fatalf("ExecuteQueryWithParams with WHERE failed: %v", err)
 	}
@@ -668,7 +668,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_MultipleParams(t *testing.T) {
 	`
 	params := []any{0, "2020-01-01"}
 
-	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 0)
 	if err != nil {
 		t.Fatalf("ExecuteQueryWithParams with multiple params failed: %v", err)
 	}
@@ -691,7 +691,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_NumericTypes(t *testing.T) {
 	`
 	params := []any{42, int64(9999999999), 123.45, 67.89}
 
-	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 0)
 	if err != nil {
 		t.Fatalf("ExecuteQueryWithParams with numeric types failed: %v", err)
 	}
@@ -722,7 +722,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_BooleanType(t *testing.T) {
 	sql := "SELECT $1::boolean as bool_true, $2::boolean as bool_false"
 	params := []any{true, false}
 
-	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 0)
 	if err != nil {
 		t.Fatalf("ExecuteQueryWithParams with boolean failed: %v", err)
 	}
@@ -748,7 +748,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_DateTypes(t *testing.T) {
 	`
 	params := []any{"2024-01-15", "2024-01-15 10:30:00", "2024-01-15T10:30:00Z"}
 
-	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 0)
 	if err != nil {
 		t.Fatalf("ExecuteQueryWithParams with date types failed: %v", err)
 	}
@@ -773,7 +773,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_UUIDType(t *testing.T) {
 	sql := "SELECT $1::uuid as uuid_val"
 	params := []any{testUUID}
 
-	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 0)
 	if err != nil {
 		t.Fatalf("ExecuteQueryWithParams with UUID failed: %v", err)
 	}
@@ -795,7 +795,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_ArrayTypes(t *testing.T) {
 	`
 	params := []any{[]string{"one", "two", "three"}, []int64{1, 2, 3}}
 
-	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 0)
 	if err != nil {
 		t.Fatalf("ExecuteQueryWithParams with arrays failed: %v", err)
 	}
@@ -816,7 +816,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_INClause(t *testing.T) {
 	sql := "SELECT * FROM events WHERE id = ANY($1::integer[]) LIMIT 10"
 	params := []any{[]int64{1, 2, 3}}
 
-	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 0)
 	if err != nil {
 		t.Fatalf("ExecuteQueryWithParams with IN clause failed: %v", err)
 	}
@@ -834,7 +834,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_NullValue(t *testing.T) {
 	sql := "SELECT $1::text as null_val, $2::text as non_null_val"
 	params := []any{nil, "not null"}
 
-	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 0)
 	if err != nil {
 		t.Fatalf("ExecuteQueryWithParams with null failed: %v", err)
 	}
@@ -854,7 +854,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_WithLimit(t *testing.T) {
 
 	// First check we have enough rows
 	checkSQL := "SELECT COUNT(*) as cnt FROM events WHERE id > $1"
-	checkResult, err := tc.executor.ExecuteQueryWithParams(ctx, checkSQL, []any{0}, 0)
+	checkResult, err := tc.executor.QueryWithParams(ctx, checkSQL, []any{0}, 0)
 	if err != nil {
 		t.Fatalf("check query failed: %v", err)
 	}
@@ -868,7 +868,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_WithLimit(t *testing.T) {
 	sql := "SELECT * FROM events WHERE id > $1"
 	params := []any{0}
 
-	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 3)
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 3)
 	if err != nil {
 		t.Fatalf("ExecuteQueryWithParams with limit failed: %v", err)
 	}
@@ -886,7 +886,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_SameParamMultipleTimes(t *testing.
 	sql := "SELECT $1::text as first, $1::text as second, $2::integer as num"
 	params := []any{"repeated", 42}
 
-	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 0)
 	if err != nil {
 		t.Fatalf("ExecuteQueryWithParams with repeated param failed: %v", err)
 	}
@@ -907,7 +907,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_NoResults(t *testing.T) {
 	sql := "SELECT * FROM events WHERE id = $1 AND 1=0"
 	params := []any{99999}
 
-	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 0)
 	if err != nil {
 		t.Fatalf("ExecuteQueryWithParams failed: %v", err)
 	}
@@ -932,7 +932,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_WrongParamCount(t *testing.T) {
 	sql := "SELECT $1::integer as first, $2::integer as second"
 	params := []any{42}
 
-	_, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	_, err := tc.executor.QueryWithParams(ctx, sql, params, 0)
 	if err == nil {
 		t.Fatal("expected error when param count doesn't match")
 	}
@@ -946,7 +946,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_InvalidType(t *testing.T) {
 	sql := "SELECT $1::integer as num"
 	params := []any{"not a number"}
 
-	_, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	_, err := tc.executor.QueryWithParams(ctx, sql, params, 0)
 	if err == nil {
 		t.Fatal("expected error for type mismatch")
 	}
@@ -964,7 +964,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_SQLInjectionPrevention(t *testing.
 	params := []any{maliciousInput}
 
 	// This should NOT drop the table - it should just find no results
-	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 0)
 	if err != nil {
 		t.Fatalf("ExecuteQueryWithParams failed: %v", err)
 	}
@@ -975,7 +975,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_SQLInjectionPrevention(t *testing.
 	}
 
 	// Verify the events table still exists by querying it
-	verifyResult, err := tc.executor.ExecuteQuery(ctx, "SELECT COUNT(*) as cnt FROM events", 0)
+	verifyResult, err := tc.executor.Query(ctx, "SELECT COUNT(*) as cnt FROM events", 0)
 	if err != nil {
 		t.Fatalf("SECURITY FAILURE: events table was affected by injection attempt: %v", err)
 	}
@@ -1004,7 +1004,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_ComplexQuery(t *testing.T) {
 	`
 	params := []any{0, "2020-01-01", 0}
 
-	result, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 0)
 	if err != nil {
 		t.Fatalf("ExecuteQueryWithParams with complex query failed: %v", err)
 	}
@@ -1023,7 +1023,7 @@ func TestQueryExecutor_ExecuteQueryWithParams_ContextCancellation(t *testing.T) 
 	sql := "SELECT pg_sleep(10), $1::integer"
 	params := []any{42}
 
-	_, err := tc.executor.ExecuteQueryWithParams(ctx, sql, params, 0)
+	_, err := tc.executor.QueryWithParams(ctx, sql, params, 0)
 	if err == nil {
 		t.Error("expected error when context is cancelled")
 	}

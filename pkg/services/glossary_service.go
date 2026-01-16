@@ -304,17 +304,9 @@ func (s *glossaryService) TestSQL(ctx context.Context, projectID uuid.UUID, sql 
 	}
 	defer executor.Close()
 
-	// First, validate SQL syntax using EXPLAIN (doesn't execute the query)
-	// Note: ValidateQuery might not be available on all adapters, so we'll try to execute with LIMIT 1 directly
-	// and catch any syntax errors
-
-	// Execute query with LIMIT 1 to capture output columns
-	sqlWithLimit := sql
-	if !strings.Contains(strings.ToUpper(sql), "LIMIT") {
-		sqlWithLimit = fmt.Sprintf("%s LIMIT 1", sql)
-	}
-
-	result, err := executor.ExecuteQuery(ctx, sqlWithLimit, 1)
+	// Execute query with limit 1 to capture output columns
+	// The adapter handles dialect-specific limit wrapping (LIMIT for PostgreSQL, TOP for SQL Server)
+	result, err := executor.Query(ctx, sql, 1)
 	if err != nil {
 		return &SQLTestResult{
 			Valid: false,

@@ -20,6 +20,11 @@ import (
 	sqlvalidator "github.com/ekaya-inc/ekaya-engine/pkg/sql"
 )
 
+// DefaultPreviewLimit is the default row limit for query preview/test operations.
+// This provides a sensible default for validating queries and seeing sample output
+// without fetching excessive data. Users can override by specifying a limit.
+const DefaultPreviewLimit = 100
+
 // QueryService orchestrates query management and execution.
 type QueryService interface {
 	// CRUD Operations
@@ -82,7 +87,7 @@ type ExecuteQueryRequest struct {
 // TestQueryRequest contains a SQL query to test without saving.
 type TestQueryRequest struct {
 	SQLQuery             string                  `json:"sql_query"`
-	Limit                int                     `json:"limit,omitempty"` // 0 = no limit
+	Limit                int                     `json:"limit,omitempty"` // 0 = use DefaultPreviewLimit (100)
 	ParameterDefinitions []models.QueryParameter `json:"parameter_definitions,omitempty"`
 	ParameterValues      map[string]any          `json:"parameter_values,omitempty"`
 }
@@ -398,7 +403,7 @@ func (s *queryService) Execute(ctx context.Context, projectID, queryID uuid.UUID
 		limit = req.Limit
 	}
 
-	result, err := executor.ExecuteQuery(ctx, query.SQLQuery, limit)
+	result, err := executor.Query(ctx, query.SQLQuery, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
@@ -454,6 +459,12 @@ func (s *queryService) Test(ctx context.Context, projectID, datasourceID uuid.UU
 	}
 	defer executor.Close()
 
+	// Apply default preview limit if not specified
+	limit := req.Limit
+	if limit <= 0 {
+		limit = DefaultPreviewLimit
+	}
+
 	// Execute query with or without parameters
 	// Check for parameter definitions (not just values) since defaults may apply
 	var result *datasource.QueryExecutionResult
@@ -485,12 +496,12 @@ func (s *queryService) Test(ctx context.Context, projectID, datasourceID uuid.UU
 			return nil, err
 		}
 
-		result, err = executor.ExecuteQueryWithParams(ctx, preparedSQL, orderedValues, req.Limit)
+		result, err = executor.QueryWithParams(ctx, preparedSQL, orderedValues, limit)
 		if err != nil {
 			return nil, fmt.Errorf("failed to execute parameterized query: %w", err)
 		}
 	} else {
-		result, err = executor.ExecuteQuery(ctx, req.SQLQuery, req.Limit)
+		result, err = executor.Query(ctx, req.SQLQuery, limit)
 		if err != nil {
 			return nil, fmt.Errorf("failed to execute query: %w", err)
 		}
@@ -637,7 +648,7 @@ func (s *queryService) ExecuteWithParameters(
 		limit = req.Limit
 	}
 
-	result, err := executor.ExecuteQueryWithParams(ctx, preparedSQL, orderedValues, limit)
+	result, err := executor.QueryWithParams(ctx, preparedSQL, orderedValues, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}

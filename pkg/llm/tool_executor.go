@@ -122,11 +122,12 @@ func (e *OntologyToolExecutor) queryColumnValues(ctx context.Context, arguments 
 	quotedTable := e.queryExecutor.QuoteIdentifier(args.TableName)
 	quotedCol := e.queryExecutor.QuoteIdentifier(args.ColumnName)
 	query := fmt.Sprintf(
-		`SELECT DISTINCT %s FROM %s WHERE %s IS NOT NULL LIMIT %d`,
-		quotedCol, quotedTable, quotedCol, limit,
+		`SELECT DISTINCT %s FROM %s WHERE %s IS NOT NULL`,
+		quotedCol, quotedTable, quotedCol,
 	)
 
-	result, err := e.queryExecutor.ExecuteQuery(ctx, query, limit)
+	// Adapter handles dialect-specific limit (LIMIT for PostgreSQL, TOP for SQL Server)
+	result, err := e.queryExecutor.Query(ctx, query, limit)
 	if err != nil {
 		e.logger.Error("Failed to query column values",
 			zap.String("table", args.TableName),

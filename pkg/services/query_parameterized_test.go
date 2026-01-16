@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/audit"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
@@ -803,4 +804,212 @@ func TestExecute_DelegatesToExecuteWithParameters(t *testing.T) {
 			assert.Contains(t, err.Error(), "failed to get datasource")
 		})
 	}
+}
+
+// ============================================================================
+// Tests for Test() default preview limit
+// ============================================================================
+
+// mockQueryExecutorForTest captures the limit passed to Query for testing.
+type mockQueryExecutorForTest struct {
+	capturedLimit int
+}
+
+func (m *mockQueryExecutorForTest) Query(ctx context.Context, sqlQuery string, limit int) (*datasource.QueryExecutionResult, error) {
+	m.capturedLimit = limit
+	return &datasource.QueryExecutionResult{
+		Columns:  []datasource.ColumnInfo{{Name: "id", Type: "INT"}},
+		Rows:     []map[string]any{{"id": 1}},
+		RowCount: 1,
+	}, nil
+}
+
+func (m *mockQueryExecutorForTest) QueryWithParams(ctx context.Context, sqlQuery string, params []any, limit int) (*datasource.QueryExecutionResult, error) {
+	m.capturedLimit = limit
+	return &datasource.QueryExecutionResult{
+		Columns:  []datasource.ColumnInfo{{Name: "id", Type: "INT"}},
+		Rows:     []map[string]any{{"id": 1}},
+		RowCount: 1,
+	}, nil
+}
+
+func (m *mockQueryExecutorForTest) Execute(ctx context.Context, sqlStatement string) (*datasource.ExecuteResult, error) {
+	return &datasource.ExecuteResult{RowsAffected: 0}, nil
+}
+
+func (m *mockQueryExecutorForTest) ValidateQuery(ctx context.Context, sqlQuery string) error {
+	return nil
+}
+
+func (m *mockQueryExecutorForTest) ExplainQuery(ctx context.Context, sqlQuery string) (*datasource.ExplainResult, error) {
+	return &datasource.ExplainResult{Plan: "mock"}, nil
+}
+
+func (m *mockQueryExecutorForTest) QuoteIdentifier(name string) string {
+	return `"` + name + `"`
+}
+
+func (m *mockQueryExecutorForTest) Close() error {
+	return nil
+}
+
+// mockAdapterFactoryForTest returns a mock query executor that captures the limit.
+type mockAdapterFactoryForTest struct {
+	mockExecutor *mockQueryExecutorForTest
+}
+
+func (m *mockAdapterFactoryForTest) NewConnectionTester(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.ConnectionTester, error) {
+	return nil, nil
+}
+
+func (m *mockAdapterFactoryForTest) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.SchemaDiscoverer, error) {
+	return nil, nil
+}
+
+func (m *mockAdapterFactoryForTest) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.QueryExecutor, error) {
+	return m.mockExecutor, nil
+}
+
+func (m *mockAdapterFactoryForTest) ListTypes() []datasource.DatasourceAdapterInfo {
+	return []datasource.DatasourceAdapterInfo{}
+}
+
+// mockDatasourceSvcForTest returns a mock datasource for testing.
+type mockDatasourceSvcForTest struct{}
+
+func (m *mockDatasourceSvcForTest) Create(ctx context.Context, projectID uuid.UUID, name, dsType, provider string, config map[string]any) (*models.Datasource, error) {
+	return nil, nil
+}
+
+func (m *mockDatasourceSvcForTest) Get(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.Datasource, error) {
+	return &models.Datasource{
+		ID:             datasourceID,
+		ProjectID:      projectID,
+		DatasourceType: "postgres",
+		Config:         map[string]any{"host": "localhost"},
+	}, nil
+}
+
+func (m *mockDatasourceSvcForTest) GetByName(ctx context.Context, projectID uuid.UUID, name string) (*models.Datasource, error) {
+	return nil, nil
+}
+
+func (m *mockDatasourceSvcForTest) List(ctx context.Context, projectID uuid.UUID) ([]*models.Datasource, error) {
+	return nil, nil
+}
+
+func (m *mockDatasourceSvcForTest) Update(ctx context.Context, id uuid.UUID, name, dsType, provider string, config map[string]any) error {
+	return nil
+}
+
+func (m *mockDatasourceSvcForTest) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (m *mockDatasourceSvcForTest) TestConnection(ctx context.Context, dsType string, config map[string]any, datasourceID uuid.UUID) error {
+	return nil
+}
+
+func TestTest_DefaultPreviewLimit(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	userID := uuid.New().String()
+
+	tests := []struct {
+		name          string
+		requestLimit  int
+		expectedLimit int
+	}{
+		{
+			name:          "zero limit uses default preview limit",
+			requestLimit:  0,
+			expectedLimit: DefaultPreviewLimit, // 100
+		},
+		{
+			name:          "negative limit uses default preview limit",
+			requestLimit:  -1,
+			expectedLimit: DefaultPreviewLimit, // 100
+		},
+		{
+			name:          "explicit limit is respected",
+			requestLimit:  50,
+			expectedLimit: 50,
+		},
+		{
+			name:          "large limit is respected (adapter caps at 1000)",
+			requestLimit:  500,
+			expectedLimit: 500,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockExecutor := &mockQueryExecutorForTest{}
+			mockFactory := &mockAdapterFactoryForTest{mockExecutor: mockExecutor}
+			mockDS := &mockDatasourceSvcForTest{}
+
+			svc := &queryService{
+				logger:         zap.NewNop(),
+				datasourceSvc:  mockDS,
+				adapterFactory: mockFactory,
+			}
+
+			// Create context with user claims
+			ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{
+				RegisteredClaims: jwt.RegisteredClaims{
+					Subject: userID,
+				},
+			})
+
+			req := &TestQueryRequest{
+				SQLQuery: "SELECT * FROM users",
+				Limit:    tt.requestLimit,
+			}
+
+			_, err := svc.Test(ctx, projectID, datasourceID, req)
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.expectedLimit, mockExecutor.capturedLimit,
+				"Expected limit %d but got %d", tt.expectedLimit, mockExecutor.capturedLimit)
+		})
+	}
+}
+
+func TestTest_DefaultPreviewLimitWithParams(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	userID := uuid.New().String()
+
+	mockExecutor := &mockQueryExecutorForTest{}
+	mockFactory := &mockAdapterFactoryForTest{mockExecutor: mockExecutor}
+	mockDS := &mockDatasourceSvcForTest{}
+
+	svc := &queryService{
+		logger:         zap.NewNop(),
+		datasourceSvc:  mockDS,
+		adapterFactory: mockFactory,
+	}
+
+	// Create context with user claims
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, &auth.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject: userID,
+		},
+	})
+
+	// Test with parameterized query and no limit specified
+	req := &TestQueryRequest{
+		SQLQuery: "SELECT * FROM users WHERE status = {{status}}",
+		Limit:    0, // Should use DefaultPreviewLimit
+		ParameterDefinitions: []models.QueryParameter{
+			{Name: "status", Type: "string", Required: true},
+		},
+		ParameterValues: map[string]any{"status": "active"},
+	}
+
+	_, err := svc.Test(ctx, projectID, datasourceID, req)
+	require.NoError(t, err)
+
+	assert.Equal(t, DefaultPreviewLimit, mockExecutor.capturedLimit,
+		"Expected default preview limit %d but got %d", DefaultPreviewLimit, mockExecutor.capturedLimit)
 }
