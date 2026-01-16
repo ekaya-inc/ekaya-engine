@@ -34,10 +34,10 @@ type Claims struct {
 	PAPI          string   `json:"papi,omitempty"`  // ekaya-central API base URL
 
 	// Azure AD tokens for SQL Server authentication (optional, only present if user requested Azure SQL scope)
-	Scope             string `json:"scp,omitempty"`            // OAuth scope (e.g., "project:access https://database.windows.net/.default")
+	Scope             string `json:"scp,omitempty"`                // OAuth scope (e.g., "project:access https://database.windows.net/.default")
 	AzureTokenRefID   string `json:"azure_token_ref_id,omitempty"` // Token reference ID for fetching token from ekaya-central
-	AzureRefreshToken string `json:"azure_rt,omitempty"`       // Azure AD refresh token for token renewal
-	AzureTokenExpiry  int64  `json:"azure_exp,omitempty"`       // Azure token expiration timestamp (Unix epoch)
+	AzureRefreshToken string `json:"azure_rt,omitempty"`           // Azure AD refresh token for token renewal
+	AzureTokenExpiry  int64  `json:"azure_exp,omitempty"`          // Azure token expiration timestamp (Unix epoch)
 }
 
 // GetClaims retrieves JWT claims from the request context.
