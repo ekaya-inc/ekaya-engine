@@ -291,14 +291,24 @@ const DatasourceConfiguration = ({
   }, [isEditingName]);
 
   // Check if user has Azure token for MSSQL user delegation (for new datasources)
+  // Also fetch email when editing existing datasource with user_delegation
   useEffect(() => {
-    // Only check for new datasources (not when editing existing)
     if (isEditingExisting) {
       // When editing, check if existing datasource uses user_delegation
       const mssqlConfig = connectionDetails as any;
       const existingAuthMethod = mssqlConfig?.auth_method;
       if (existingAuthMethod === "user_delegation") {
         setHasAzureToken(true);
+        // Fetch email from current authenticated user's session
+        fetch("/api/auth/me")
+          .then((res) => res.json())
+          .then((data) => {
+            setUserEmail(data.email || "");
+          })
+          .catch((error) => {
+            console.error("Failed to fetch user email:", error);
+            // Continue without email - validation happens server-side
+          });
       }
       return;
     }
