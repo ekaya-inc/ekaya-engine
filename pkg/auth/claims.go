@@ -18,8 +18,8 @@ const (
 	ClaimsKey contextKey = "claims"
 	// TokenKey is the context key for storing the raw JWT token string.
 	TokenKey contextKey = "token"
-	// AzureAccessTokenKey is the context key for storing Azure AD access token.
-	AzureAccessTokenKey contextKey = "azure_access_token"
+	// AzureTokenRefIDKey is the context key for storing Azure token reference ID.
+	AzureTokenRefIDKey contextKey = "azure_token_ref_id"
 )
 
 // Claims represents the JWT claims structure from ekaya-central.
@@ -34,10 +34,10 @@ type Claims struct {
 	PAPI          string   `json:"papi,omitempty"`  // ekaya-central API base URL
 
 	// Azure AD tokens for SQL Server authentication (optional, only present if user requested Azure SQL scope)
-	Scope             string `json:"scp,omitempty"`       // OAuth scope (e.g., "project:access https://database.windows.net/.default")
-	AzureAccessToken  string `json:"azure_at,omitempty"`  // Azure AD access token for SQL Server
-	AzureRefreshToken string `json:"azure_rt,omitempty"`  // Azure AD refresh token for token renewal
-	AzureTokenExpiry  int64  `json:"azure_exp,omitempty"` // Azure token expiration timestamp (Unix epoch)
+	Scope             string `json:"scp,omitempty"`                // OAuth scope (e.g., "project:access https://database.windows.net/.default")
+	AzureTokenRefID   string `json:"azure_token_ref_id,omitempty"` // Token reference ID for fetching token from ekaya-central
+	AzureRefreshToken string `json:"azure_rt,omitempty"`           // Azure AD refresh token for token renewal
+	AzureTokenExpiry  int64  `json:"azure_exp,omitempty"`          // Azure token expiration timestamp (Unix epoch)
 }
 
 // GetClaims retrieves JWT claims from the request context.
@@ -54,11 +54,11 @@ func GetToken(ctx context.Context) (string, bool) {
 	return token, ok
 }
 
-// GetAzureAccessToken retrieves the Azure AD access token from the request context.
-// Returns empty string and false if token is not present.
-func GetAzureAccessToken(ctx context.Context) (string, bool) {
-	token, ok := ctx.Value(AzureAccessTokenKey).(string)
-	return token, ok
+// GetAzureTokenRefID retrieves the Azure token reference ID from the request context.
+// Returns empty string and false if reference ID is not present.
+func GetAzureTokenRefID(ctx context.Context) (string, bool) {
+	refID, ok := ctx.Value(AzureTokenRefIDKey).(string)
+	return refID, ok
 }
 
 // ExtractClaimsFromContext extracts project ID and user ID from JWT claims in context.

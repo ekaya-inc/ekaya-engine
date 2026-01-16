@@ -27,9 +27,8 @@ type Adapter struct {
 	ownedDB      bool // true if we created the DB (for tests or TestConnection case)
 }
 
-// extractAndSetAzureToken extracts the Azure access token from context and sets it in the config.
-// It also validates token expiry if available in claims, and automatically refreshes expired tokens.
-// This mirrors how JWT expiration is handled automatically by the jwt-go library.
+// extractAndSetAzureToken extracts the Azure access token from context using token reference ID.
+// It fetches the token from ekaya-central API and caches it in memory.
 // This function is idempotent - if token is already set in config, it does nothing.
 func extractAndSetAzureToken(ctx context.Context, cfg *Config) error {
 	// If token is already set, skip extraction (idempotent)
@@ -37,42 +36,53 @@ func extractAndSetAzureToken(ctx context.Context, cfg *Config) error {
 		return nil
 	}
 
-	azureToken, hasToken := auth.GetAzureAccessToken(ctx)
-	if !hasToken || azureToken == "" {
-		return fmt.Errorf("user_delegation auth requires Azure access token in request context")
-	}
-
-	// Check token expiry if available in claims
 	claims, hasClaims := auth.GetClaims(ctx)
-	if hasClaims && claims != nil {
-		if claims.AzureTokenExpiry > 0 {
-			expiry := time.Unix(claims.AzureTokenExpiry, 0)
-			now := time.Now()
-			if expiry.Before(now) {
-				// Token expired - automatically refresh it (same pattern as JWT expiration handling)
-				refreshedToken, refreshedExp, err := auth.RefreshAzureToken(ctx)
-				if err != nil {
-					return fmt.Errorf("Azure access token expired and refresh failed: %w", err)
-				}
-				// Use the refreshed token
-				cfg.AzureAccessToken = refreshedToken
-				// Update claims with new expiry for future checks (optional, but helpful)
-				claims.AzureTokenExpiry = refreshedExp
-				return nil
-			}
-			// Warn if token expires within 5 minutes
-			if expiry.Before(now.Add(5 * time.Minute)) {
-				// Log warning but don't fail - token is still valid
-				// The connection will fail later with a clearer error if token actually expires during connection
-			}
-		}
-		// If azure_exp is not set in claims, we can't validate expiry
-		// The connection attempt will reveal if token is expired
+	if !hasClaims || claims == nil {
+		return fmt.Errorf("user_delegation auth requires claims in request context")
 	}
-	// If claims are not available, proceed with connection attempt
-	// Azure SQL Database will return an error if token is expired
 
-	cfg.AzureAccessToken = azureToken
+	if claims.AzureTokenRefID == "" {
+		return fmt.Errorf("user_delegation auth requires Azure token reference ID in JWT claims")
+	}
+
+	// Get JWT token from context for API call
+	jwtToken, hasJWT := auth.GetToken(ctx)
+	if !hasJWT || jwtToken == "" {
+		return fmt.Errorf("user_delegation auth requires JWT token in context for token reference lookup")
+	}
+
+	if claims.PAPI == "" {
+		return fmt.Errorf("user_delegation auth requires PAPI (auth server URL) in claims")
+	}
+
+	// Check cache first
+	tokenCache := auth.GetTokenCache()
+	cacheKey := fmt.Sprintf("%s:%s", claims.Subject, claims.AzureTokenRefID)
+	if cachedToken, found := tokenCache.Get(cacheKey); found {
+		cfg.AzureAccessToken = cachedToken
+		return nil
+	}
+
+	// Fetch from API
+	tokenClient := auth.GetTokenClient()
+	token, err := tokenClient.FetchTokenByReference(ctx, claims.AzureTokenRefID, claims.PAPI, jwtToken)
+	if err != nil {
+		return fmt.Errorf("fetch token by reference: %w", err)
+	}
+
+	// Cache token
+	var expiresAt time.Time
+	if claims.AzureTokenExpiry > 0 {
+		expiresAt = time.Unix(claims.AzureTokenExpiry, 0)
+	} else {
+		// Default to 1 hour if expiry not available
+		expiresAt = time.Now().Add(1 * time.Hour)
+	}
+	// Cache with 5 minute buffer before expiry
+	cacheExpiry := expiresAt.Add(-5 * time.Minute)
+	tokenCache.Set(cacheKey, token, cacheExpiry)
+
+	cfg.AzureAccessToken = token
 	return nil
 }
 

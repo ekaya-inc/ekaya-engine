@@ -112,13 +112,7 @@ func (c *JWKSClient) ValidateToken(tokenString string) (*Claims, error) {
 
 	// #region agent log
 	if logFile, err := os.OpenFile(debugLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-		tokenPreview := ""
-		if len(claims.AzureAccessToken) > 50 {
-			tokenPreview = claims.AzureAccessToken[:50] + "..."
-		} else {
-			tokenPreview = claims.AzureAccessToken
-		}
-		logFile.WriteString(fmt.Sprintf(`{"location":"auth/jwks.go:105","message":"JWT claims parsed","data":{"hasAzureToken":%t,"tokenLength":%d,"tokenPreview":"%s","tokenExpiry":%d,"projectID":"%s"},"timestamp":%d,"sessionId":"debug-session","runId":"jwks-debug","hypothesisId":"D"}`+"\n", claims.AzureAccessToken != "", len(claims.AzureAccessToken), tokenPreview, claims.AzureTokenExpiry, claims.ProjectID, 0))
+		logFile.WriteString(fmt.Sprintf(`{"location":"auth/jwks.go:105","message":"JWT claims parsed","data":{"hasAzureTokenRef":%t,"tokenRefID":"%s","tokenExpiry":%d,"projectID":"%s"},"timestamp":%d,"sessionId":"debug-session","runId":"jwks-debug","hypothesisId":"D"}`+"\n", claims.AzureTokenRefID != "", claims.AzureTokenRefID, claims.AzureTokenExpiry, claims.ProjectID, 0))
 		logFile.Close()
 	}
 	// #endregion
@@ -148,13 +142,7 @@ func (c *JWKSClient) parseUnverifiedToken(tokenString string) (*Claims, error) {
 
 	// #region agent log
 	if logFile, err := os.OpenFile(debugLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-		tokenPreview := ""
-		if len(claims.AzureAccessToken) > 50 {
-			tokenPreview = claims.AzureAccessToken[:50] + "..."
-		} else {
-			tokenPreview = claims.AzureAccessToken
-		}
-		logFile.WriteString(fmt.Sprintf(`{"location":"auth/jwks.go:128","message":"JWT claims parsed (unverified)","data":{"hasAzureToken":%t,"tokenLength":%d,"tokenPreview":"%s","tokenExpiry":%d,"projectID":"%s"},"timestamp":%d,"sessionId":"debug-session","runId":"jwks-debug","hypothesisId":"D"}`+"\n", claims.AzureAccessToken != "", len(claims.AzureAccessToken), tokenPreview, claims.AzureTokenExpiry, claims.ProjectID, 0))
+		logFile.WriteString(fmt.Sprintf(`{"location":"auth/jwks.go:128","message":"JWT claims parsed (unverified)","data":{"hasAzureTokenRef":%t,"tokenRefID":"%s","tokenExpiry":%d,"projectID":"%s"},"timestamp":%d,"sessionId":"debug-session","runId":"jwks-debug","hypothesisId":"D"}`+"\n", claims.AzureTokenRefID != "", claims.AzureTokenRefID, claims.AzureTokenExpiry, claims.ProjectID, 0))
 		logFile.Close()
 	}
 	// #endregion

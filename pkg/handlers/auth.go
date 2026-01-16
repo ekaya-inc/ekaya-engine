@@ -223,11 +223,11 @@ func (h *AuthHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 		Email:         claims.Email,
 		ProjectID:     claims.ProjectID,
 		Roles:         claims.Roles,
-		HasAzureToken: claims.AzureAccessToken != "",
+		HasAzureToken: claims.AzureTokenRefID != "",
 	}
 
-	// Only include expiry if token is present
-	if claims.AzureAccessToken != "" && claims.AzureTokenExpiry > 0 {
+	// Only include expiry if token reference is present
+	if claims.AzureTokenRefID != "" && claims.AzureTokenExpiry > 0 {
 		response.AzureTokenExp = &claims.AzureTokenExpiry
 	}
 
