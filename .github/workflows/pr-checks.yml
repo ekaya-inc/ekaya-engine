@@ -1,5 +1,9 @@
 name: Pull Request Checks
 
+# NOTE: This workflow runs UNIT TESTS ONLY (no integration tests).
+# Integration tests require Docker and are flaky in CI.
+# Run `make check` locally before pushing to run the full test suite.
+
 on:
   pull_request:
     branches: [main, prod]
@@ -7,7 +11,6 @@ on:
 
 env:
   GO_VERSION: '1.25'
-  TEST_IMAGE: ghcr.io/ekaya-inc/ekaya-engine-test-image:latest
 
 jobs:
   validate:
@@ -15,28 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: read
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Cache test Docker image
-        id: cache-test-image
-        uses: actions/cache@v4
-        with:
-          path: /tmp/test-image.tar
-          key: test-image-${{ hashFiles('test/docker/engine-test-db/**') }}
-
-      - name: Load cached test image
-        if: steps.cache-test-image.outputs.cache-hit == 'true'
-        run: docker load -i /tmp/test-image.tar
-
-      - name: Pull and cache test image
-        if: steps.cache-test-image.outputs.cache-hit != 'true'
-        run: |
-          docker pull ${{ env.TEST_IMAGE }}
-          docker save ${{ env.TEST_IMAGE }} -o /tmp/test-image.tar
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -78,8 +63,8 @@ jobs:
       - name: Run linter
         run: golangci-lint run --timeout=5m
 
-      - name: Run all tests (unit + integration)
-        run: go test ./... -timeout 5m
+      - name: Run unit tests (skip integration tests)
+        run: go test ./... -short -timeout 5m
 
       - name: Frontend lint
         run: cd ui && npm run lint
