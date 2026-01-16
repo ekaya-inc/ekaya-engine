@@ -93,8 +93,8 @@ func (h *EntityRelationshipHandler) Discover(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Discover FK relationships first
-	fkResult, err := h.relationshipService.DiscoverFKRelationships(r.Context(), projectID, datasourceID)
+	// Discover FK relationships first (nil callback since no DAG progress to report)
+	fkResult, err := h.relationshipService.DiscoverFKRelationships(r.Context(), projectID, datasourceID, nil)
 	if err != nil {
 		h.logger.Error("Failed to discover FK relationships",
 			zap.String("project_id", projectID.String()),
@@ -106,8 +106,8 @@ func (h *EntityRelationshipHandler) Discover(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Discover pk_match relationships
-	pkMatchResult, err := h.relationshipService.DiscoverPKMatchRelationships(r.Context(), projectID, datasourceID)
+	// Discover pk_match relationships (nil callback since no DAG progress to report)
+	pkMatchResult, err := h.relationshipService.DiscoverPKMatchRelationships(r.Context(), projectID, datasourceID, nil)
 	if err != nil {
 		h.logger.Error("Failed to discover pk_match relationships",
 			zap.String("project_id", projectID.String()),

@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
@@ -22,16 +24,22 @@ type PKMatchDiscoveryResult struct {
 	InferredRelationships int `json:"inferred_relationships"`
 }
 
+// RelationshipProgressCallback is called to report progress during relationship discovery.
+// Parameters: current (items processed), total (total items), message (human-readable status).
+type RelationshipProgressCallback func(current, total int, message string)
+
 // DeterministicRelationshipService discovers entity relationships from FK constraints
 // and PK-match inference.
 type DeterministicRelationshipService interface {
 	// DiscoverFKRelationships discovers relationships from database FK constraints.
 	// Requires entities to exist before calling.
-	DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*FKDiscoveryResult, error)
+	// The progressCallback is called to report progress (can be nil).
+	DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback RelationshipProgressCallback) (*FKDiscoveryResult, error)
 
 	// DiscoverPKMatchRelationships discovers relationships via pairwise SQL join testing.
 	// Requires entities and column enrichment to exist before calling.
-	DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*PKMatchDiscoveryResult, error)
+	// The progressCallback is called to report progress (can be nil).
+	DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback RelationshipProgressCallback) (*PKMatchDiscoveryResult, error)
 
 	// GetByProject returns all entity relationships for a project.
 	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error)
@@ -44,6 +52,7 @@ type deterministicRelationshipService struct {
 	entityRepo        repositories.OntologyEntityRepository
 	relationshipRepo  repositories.EntityRelationshipRepository
 	schemaRepo        repositories.SchemaRepository
+	logger            *zap.Logger
 }
 
 // NewDeterministicRelationshipService creates a new DeterministicRelationshipService.
@@ -54,6 +63,7 @@ func NewDeterministicRelationshipService(
 	entityRepo repositories.OntologyEntityRepository,
 	relationshipRepo repositories.EntityRelationshipRepository,
 	schemaRepo repositories.SchemaRepository,
+	logger *zap.Logger,
 ) DeterministicRelationshipService {
 	return &deterministicRelationshipService{
 		datasourceService: datasourceService,
@@ -62,6 +72,7 @@ func NewDeterministicRelationshipService(
 		entityRepo:        entityRepo,
 		relationshipRepo:  relationshipRepo,
 		schemaRepo:        schemaRepo,
+		logger:            logger.Named("relationship-discovery"),
 	}
 }
 
@@ -99,7 +110,7 @@ func (s *deterministicRelationshipService) createBidirectionalRelationship(ctx c
 	return nil
 }
 
-func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*FKDiscoveryResult, error) {
+func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback RelationshipProgressCallback) (*FKDiscoveryResult, error) {
 	// Get active ontology for the project
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
 	if err != nil {
@@ -218,7 +229,7 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 
 	// Collect column stats for pk_match discovery
 	// This must happen after FK discovery but before pk_match runs
-	if err := s.collectColumnStats(ctx, projectID, datasourceID, tables, columns); err != nil {
+	if err := s.collectColumnStats(ctx, projectID, datasourceID, tables, columns, progressCallback); err != nil {
 		return nil, fmt.Errorf("collect column stats: %w", err)
 	}
 
@@ -234,7 +245,13 @@ func (s *deterministicRelationshipService) collectColumnStats(
 	projectID, datasourceID uuid.UUID,
 	tables []*models.SchemaTable,
 	columns []*models.SchemaColumn,
+	progressCallback RelationshipProgressCallback,
 ) error {
+	startTime := time.Now()
+	s.logger.Info("Starting column stats collection",
+		zap.Int("table_count", len(tables)),
+		zap.Int("column_count", len(columns)))
+
 	// Get datasource to create schema discoverer
 	ds, err := s.datasourceService.Get(ctx, projectID, datasourceID)
 	if err != nil {
@@ -258,11 +275,16 @@ func (s *deterministicRelationshipService) collectColumnStats(
 	}
 
 	// Process each table
+	tableCount := len(columnsByTable)
+	processedTables := 0
 	for tableID, tableCols := range columnsByTable {
 		table := tableByID[tableID]
 		if table == nil {
 			continue
 		}
+
+		processedTables++
+		tableStartTime := time.Now()
 
 		// Get row count for the table (needed for joinability classification)
 		var tableRowCount int64
@@ -279,8 +301,23 @@ func (s *deterministicRelationshipService) collectColumnStats(
 		// Analyze column stats from target database
 		stats, err := discoverer.AnalyzeColumnStats(ctx, table.SchemaName, table.TableName, columnNames)
 		if err != nil {
-			// Log warning but continue with other tables
+			s.logger.Warn("Failed to analyze column stats",
+				zap.String("table", fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)),
+				zap.Error(err))
 			continue
+		}
+
+		s.logger.Debug("Analyzed table column stats",
+			zap.String("table", fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)),
+			zap.Int("columns", len(tableCols)),
+			zap.Int("progress", processedTables),
+			zap.Int("total", tableCount),
+			zap.Duration("duration", time.Since(tableStartTime)))
+
+		// Report progress to UI
+		if progressCallback != nil {
+			msg := fmt.Sprintf("Analyzing table %s.%s (%d/%d)", table.SchemaName, table.TableName, processedTables, tableCount)
+			progressCallback(processedTables, tableCount, msg)
 		}
 
 		// Build stats lookup
@@ -310,6 +347,10 @@ func (s *deterministicRelationshipService) collectColumnStats(
 			}
 		}
 	}
+
+	s.logger.Info("Column stats collection complete",
+		zap.Int("tables_processed", processedTables),
+		zap.Duration("total_duration", time.Since(startTime)))
 
 	return nil
 }
@@ -375,7 +416,10 @@ func isExcludedJoinType(baseType string) bool {
 	return excludedTypes[baseType]
 }
 
-func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*PKMatchDiscoveryResult, error) {
+func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback RelationshipProgressCallback) (*PKMatchDiscoveryResult, error) {
+	startTime := time.Now()
+	s.logger.Info("Starting PK-match relationship discovery")
+
 	// Get active ontology for the project
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
 	if err != nil {
@@ -528,8 +572,18 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 		candidatesByType[col.DataType] = append(candidatesByType[col.DataType], cwt)
 	}
 
+	// Calculate total candidates for progress logging
+	totalCandidates := 0
+	for _, candidates := range candidatesByType {
+		totalCandidates += len(candidates)
+	}
+	s.logger.Info("PK-match discovery setup complete",
+		zap.Int("entity_ref_columns", len(entityRefColumns)),
+		zap.Int("total_candidates", totalCandidates))
+
 	// For each entity reference column, find candidates with matching type and test joins
 	var inferredCount int
+	processedRefs := 0
 	for _, ref := range entityRefColumns {
 		refType := ref.column.DataType
 		candidates := candidatesByType[refType]
@@ -615,7 +669,25 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 
 			inferredCount++
 		}
+
+		processedRefs++
+		if processedRefs%10 == 0 || processedRefs == len(entityRefColumns) {
+			s.logger.Debug("PK-match discovery progress",
+				zap.Int("processed", processedRefs),
+				zap.Int("total", len(entityRefColumns)),
+				zap.Int("inferred_so_far", inferredCount))
+		}
+
+		// Report progress to UI
+		if progressCallback != nil {
+			msg := fmt.Sprintf("Testing join candidates (%d/%d)", processedRefs, len(entityRefColumns))
+			progressCallback(processedRefs, len(entityRefColumns), msg)
+		}
 	}
+
+	s.logger.Info("PK-match relationship discovery complete",
+		zap.Int("inferred_relationships", inferredCount),
+		zap.Duration("total_duration", time.Since(startTime)))
 
 	return &PKMatchDiscoveryResult{
 		InferredRelationships: inferredCount,

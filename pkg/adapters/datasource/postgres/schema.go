@@ -115,6 +115,8 @@ func (d *SchemaDiscoverer) DiscoverTables(ctx context.Context) ([]datasource.Tab
 }
 
 // DiscoverColumns returns columns for a specific table.
+// Uses pg_index for primary key and unique detection, which correctly identifies
+// primary keys even when created as unique indexes (common with GORM/ORMs).
 func (d *SchemaDiscoverer) DiscoverColumns(ctx context.Context, schemaName, tableName string) ([]datasource.ColumnMetadata, error) {
 	const query = `
 		SELECT
@@ -127,28 +129,32 @@ func (d *SchemaDiscoverer) DiscoverColumns(ctx context.Context, schemaName, tabl
 			c.column_default
 		FROM information_schema.columns c
 		LEFT JOIN (
-			SELECT kcu.column_name, true as is_pk
-			FROM information_schema.table_constraints tc
-			JOIN information_schema.key_column_usage kcu
-				ON tc.constraint_name = kcu.constraint_name
-				AND tc.table_schema = kcu.table_schema
-			WHERE tc.constraint_type = 'PRIMARY KEY'
-			  AND tc.table_schema = $1
-			  AND tc.table_name = $2
+			-- Use pg_index.indisprimary which correctly detects PKs even when
+			-- created as unique indexes (e.g., GORM creates "tablename_pkey" indexes)
+			SELECT a.attname as column_name, true as is_pk
+			FROM pg_index ix
+			JOIN pg_class t ON t.oid = ix.indrelid
+			JOIN pg_class i ON i.oid = ix.indexrelid
+			JOIN pg_namespace n ON n.oid = t.relnamespace
+			JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
+			WHERE ix.indisprimary = true
+			  AND n.nspname = $1
+			  AND t.relname = $2
+			  AND array_length(ix.indkey, 1) = 1  -- Single-column PKs only
 		) pk ON c.column_name = pk.column_name
 		LEFT JOIN (
-			SELECT kcu.column_name, true as is_unique
-			FROM information_schema.table_constraints tc
-			JOIN information_schema.key_column_usage kcu
-				ON tc.constraint_name = kcu.constraint_name
-				AND tc.table_schema = kcu.table_schema
-			WHERE tc.constraint_type = 'UNIQUE'
-			  AND tc.table_schema = $1
-			  AND tc.table_name = $2
-			  -- Only single-column unique constraints
-			  AND (SELECT COUNT(*) FROM information_schema.key_column_usage k2
-			       WHERE k2.constraint_name = tc.constraint_name
-			         AND k2.table_schema = tc.table_schema) = 1
+			-- Use pg_index.indisunique for unique constraint detection
+			SELECT a.attname as column_name, true as is_unique
+			FROM pg_index ix
+			JOIN pg_class t ON t.oid = ix.indrelid
+			JOIN pg_class i ON i.oid = ix.indexrelid
+			JOIN pg_namespace n ON n.oid = t.relnamespace
+			JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
+			WHERE ix.indisunique = true
+			  AND ix.indisprimary = false  -- Exclude PKs (they're handled above)
+			  AND n.nspname = $1
+			  AND t.relname = $2
+			  AND array_length(ix.indkey, 1) = 1  -- Single-column unique indexes only
 		) uq ON c.column_name = uq.column_name
 		WHERE c.table_schema = $1 AND c.table_name = $2
 		ORDER BY c.ordinal_position

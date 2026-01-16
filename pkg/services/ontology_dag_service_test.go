@@ -175,13 +175,13 @@ func (t *testEntityEnrichment) EnrichEntitiesWithLLM(_ context.Context, _, _, _ 
 
 type testFKDiscovery struct{}
 
-func (t *testFKDiscovery) DiscoverFKRelationships(_ context.Context, _, _ uuid.UUID) (*dag.FKDiscoveryResult, error) {
+func (t *testFKDiscovery) DiscoverFKRelationships(_ context.Context, _, _ uuid.UUID, _ dag.ProgressCallback) (*dag.FKDiscoveryResult, error) {
 	return nil, nil
 }
 
 type testPKMatchDiscovery struct{}
 
-func (t *testPKMatchDiscovery) DiscoverPKMatchRelationships(_ context.Context, _, _ uuid.UUID) (*dag.PKMatchDiscoveryResult, error) {
+func (t *testPKMatchDiscovery) DiscoverPKMatchRelationships(_ context.Context, _, _ uuid.UUID, _ dag.ProgressCallback) (*dag.PKMatchDiscoveryResult, error) {
 	return nil, nil
 }
 

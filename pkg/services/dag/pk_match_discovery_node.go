@@ -18,7 +18,7 @@ type PKMatchDiscoveryResult struct {
 
 // PKMatchDiscoveryMethods defines the interface for pk_match relationship discovery.
 type PKMatchDiscoveryMethods interface {
-	DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (*PKMatchDiscoveryResult, error)
+	DiscoverPKMatchRelationships(ctx context.Context, projectID, datasourceID uuid.UUID, progressCallback ProgressCallback) (*PKMatchDiscoveryResult, error)
 }
 
 // PKMatchDiscoveryNode wraps pk_match relationship discovery via pairwise SQL joins.
@@ -50,8 +50,15 @@ func (n *PKMatchDiscoveryNode) Execute(ctx context.Context, dag *models.Ontology
 		n.Logger().Warn("Failed to report progress", zap.Error(err))
 	}
 
+	// Create progress callback that wraps ReportProgress
+	progressCallback := func(current, total int, message string) {
+		if err := n.ReportProgress(ctx, current, total, message); err != nil {
+			n.Logger().Warn("Failed to report progress", zap.Error(err))
+		}
+	}
+
 	// Call the underlying service method
-	result, err := n.pkMatchDiscoverySvc.DiscoverPKMatchRelationships(ctx, dag.ProjectID, dag.DatasourceID)
+	result, err := n.pkMatchDiscoverySvc.DiscoverPKMatchRelationships(ctx, dag.ProjectID, dag.DatasourceID, progressCallback)
 	if err != nil {
 		return fmt.Errorf("discover pk_match relationships: %w", err)
 	}

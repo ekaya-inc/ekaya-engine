@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
@@ -37,6 +38,7 @@ func TestCreateBidirectionalRelationship(t *testing.T) {
 		mocks.entityRepo,
 		mocks.relationshipRepo,
 		mocks.schemaRepo,
+		zap.NewNop(),
 	)
 
 	// Create a test relationship
@@ -333,10 +335,11 @@ func TestPKMatch_RequiresDistinctCount(t *testing.T) {
 		mocks.entityRepo,
 		mocks.relationshipRepo,
 		mocks.schemaRepo,
+		zap.NewNop(),
 	)
 
 	// Execute PK match discovery
-	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -439,10 +442,11 @@ func TestPKMatch_WorksWithoutRowCount(t *testing.T) {
 		mocks.entityRepo,
 		mocks.relationshipRepo,
 		mocks.schemaRepo,
+		zap.NewNop(),
 	)
 
 	// Execute PK match discovery
-	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -644,9 +648,10 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 			mocks.entityRepo,
 			mocks.relationshipRepo,
 			mocks.schemaRepo,
+			zap.NewNop(),
 		)
 
-		result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+		result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -749,9 +754,10 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 			mocks.entityRepo,
 			mocks.relationshipRepo,
 			mocks.schemaRepo,
+			zap.NewNop(),
 		)
 
-		result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+		result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -850,9 +856,10 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 			mocks.entityRepo,
 			mocks.relationshipRepo,
 			mocks.schemaRepo,
+			zap.NewNop(),
 		)
 
-		result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+		result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1487,9 +1494,10 @@ func TestPKMatch_SmallIntegerValues(t *testing.T) {
 		mocks.entityRepo,
 		mocks.relationshipRepo,
 		mocks.schemaRepo,
+		zap.NewNop(),
 	)
 
-	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1598,9 +1606,10 @@ func TestPKMatch_SmallIntegerValues_LookupTable(t *testing.T) {
 		mocks.entityRepo,
 		mocks.relationshipRepo,
 		mocks.schemaRepo,
+		zap.NewNop(),
 	)
 
-	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1720,9 +1729,10 @@ func TestPKMatch_LowCardinality_Excluded(t *testing.T) {
 		mocks.entityRepo,
 		mocks.relationshipRepo,
 		mocks.schemaRepo,
+		zap.NewNop(),
 	)
 
-	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1841,9 +1851,10 @@ func TestPKMatch_CountColumns_NeverJoined(t *testing.T) {
 		mocks.entityRepo,
 		mocks.relationshipRepo,
 		mocks.schemaRepo,
+		zap.NewNop(),
 	)
 
-	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1964,9 +1975,10 @@ func TestPKMatch_RatingColumns_NeverJoined(t *testing.T) {
 		mocks.entityRepo,
 		mocks.relationshipRepo,
 		mocks.schemaRepo,
+		zap.NewNop(),
 	)
 
-	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2079,9 +2091,10 @@ func TestPKMatch_NoGarbageRelationships(t *testing.T) {
 		mocks.entityRepo,
 		mocks.relationshipRepo,
 		mocks.schemaRepo,
+		zap.NewNop(),
 	)
 
-	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2179,9 +2192,10 @@ func TestFKDiscovery_ManualRelationshipType(t *testing.T) {
 		mocks.entityRepo,
 		mocks.relationshipRepo,
 		mocks.schemaRepo,
+		zap.NewNop(),
 	)
 
-	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID)
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2287,9 +2301,10 @@ func TestFKDiscovery_ForeignKeyRelationshipType(t *testing.T) {
 		mocks.entityRepo,
 		mocks.relationshipRepo,
 		mocks.schemaRepo,
+		zap.NewNop(),
 	)
 
-	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID)
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2403,9 +2418,10 @@ func TestPKMatch_LowCardinalityRatio(t *testing.T) {
 		mocks.entityRepo,
 		mocks.relationshipRepo,
 		mocks.schemaRepo,
+		zap.NewNop(),
 	)
 
-	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID)
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
