@@ -97,21 +97,42 @@ type SchemaDiscoverer interface {
 	Close() error
 }
 
-// QueryExecutor executes SQL queries against a datasource.
-// Used for running saved queries from the Queries feature.
+// MaxQueryLimit is the hard cap on rows returned by Query methods.
+// This protects against unbounded queries that could crash the server.
+const MaxQueryLimit = 1000
+
+// QueryExecutor executes SQL against a datasource.
+// Provides two access patterns:
+//   - Query/QueryWithParams: Safe, bounded SELECT queries (always wrapped with limit)
+//   - Execute: Dangerous, unrestricted DDL/DML (for Developer Tools only)
+//
 // Each implementation owns its connection and must be closed when done.
 type QueryExecutor interface {
-	// ExecuteQuery runs a SQL query and returns the results.
-	// The limit parameter caps the number of rows returned (0 = no limit).
-	ExecuteQuery(ctx context.Context, sqlQuery string, limit int) (*QueryExecutionResult, error)
+	// Query runs a SELECT statement and returns bounded results.
+	// The query is ALWAYS wrapped with a dialect-specific limit:
+	//   - PostgreSQL: SELECT * FROM (query) AS _q LIMIT n
+	//   - SQL Server: SELECT TOP (n) * FROM (query) AS _q
+	//
+	// Limit behavior:
+	//   - limit <= 0: uses MaxQueryLimit (1000)
+	//   - limit > MaxQueryLimit: capped to MaxQueryLimit (1000)
+	//   - otherwise: uses specified limit
+	//
+	// This ensures all queries are bounded and prevents runaway results.
+	Query(ctx context.Context, sqlQuery string, limit int) (*QueryExecutionResult, error)
 
-	// ExecuteQueryWithParams runs a parameterized SQL query with positional parameters.
+	// QueryWithParams runs a parameterized SELECT with bounded results.
 	// The SQL should use $1, $2, etc. for parameter placeholders.
 	// The params slice provides values in order corresponding to the placeholders.
-	// The limit parameter caps the number of rows returned (0 = no limit).
-	ExecuteQueryWithParams(ctx context.Context, sqlQuery string, params []any, limit int) (*QueryExecutionResult, error)
+	// See Query for limit behavior - same wrapping and capping applies.
+	QueryWithParams(ctx context.Context, sqlQuery string, params []any, limit int) (*QueryExecutionResult, error)
 
-	// Execute runs any SQL statement (DDL/DML) and returns results.
+	// Execute runs any SQL statement (DDL/DML) without modification.
+	// DANGEROUS: No wrapping, no limits. Use only for:
+	//   - CREATE/DROP/ALTER statements
+	//   - INSERT/UPDATE/DELETE operations
+	//   - Other statements that modify the database
+	//
 	// For statements with RETURNING clauses, returns rows in the result.
 	// For INSERT/UPDATE/DELETE without RETURNING, returns RowsAffected.
 	Execute(ctx context.Context, sqlStatement string) (*ExecuteResult, error)

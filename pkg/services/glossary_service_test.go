@@ -342,7 +342,7 @@ func (m *mockDatasourceServiceForGlossary) TestConnection(ctx context.Context, d
 // Mock adapter factory (minimal implementation for tests)
 type mockQueryExecutorForGlossary struct{}
 
-func (m *mockQueryExecutorForGlossary) ExecuteQuery(ctx context.Context, sqlQuery string, limit int) (*datasource.QueryExecutionResult, error) {
+func (m *mockQueryExecutorForGlossary) Query(ctx context.Context, sqlQuery string, limit int) (*datasource.QueryExecutionResult, error) {
 	// Return a successful result with one column
 	return &datasource.QueryExecutionResult{
 		Columns: []datasource.ColumnInfo{
@@ -353,8 +353,8 @@ func (m *mockQueryExecutorForGlossary) ExecuteQuery(ctx context.Context, sqlQuer
 	}, nil
 }
 
-func (m *mockQueryExecutorForGlossary) ExecuteQueryWithParams(ctx context.Context, sqlQuery string, params []any, limit int) (*datasource.QueryExecutionResult, error) {
-	return m.ExecuteQuery(ctx, sqlQuery, limit)
+func (m *mockQueryExecutorForGlossary) QueryWithParams(ctx context.Context, sqlQuery string, params []any, limit int) (*datasource.QueryExecutionResult, error) {
+	return m.Query(ctx, sqlQuery, limit)
 }
 
 func (m *mockQueryExecutorForGlossary) Execute(ctx context.Context, sqlStatement string) (*datasource.ExecuteResult, error) {
@@ -930,12 +930,12 @@ type mockQueryExecutorWithInvalidSQL struct {
 	mockQueryExecutorForGlossary
 }
 
-func (m *mockQueryExecutorWithInvalidSQL) ExecuteQuery(ctx context.Context, sqlQuery string, limit int) (*datasource.QueryExecutionResult, error) {
+func (m *mockQueryExecutorWithInvalidSQL) Query(ctx context.Context, sqlQuery string, limit int) (*datasource.QueryExecutionResult, error) {
 	// Check if SQL contains "INVALID" keyword to simulate syntax error
 	if len(sqlQuery) >= 7 && sqlQuery[:7] == "INVALID" {
 		return nil, errors.New("SQL syntax error: invalid statement")
 	}
-	return m.mockQueryExecutorForGlossary.ExecuteQuery(ctx, sqlQuery, limit)
+	return m.mockQueryExecutorForGlossary.Query(ctx, sqlQuery, limit)
 }
 
 type mockAdapterFactoryWithInvalidSQL struct{}

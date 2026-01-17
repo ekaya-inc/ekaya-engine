@@ -455,7 +455,7 @@ func registerQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 		defer executor.Close()
 
 		// Execute with limit + 1 to detect truncation
-		queryResult, err := executor.ExecuteQuery(tenantCtx, sql, limit+1)
+		queryResult, err := executor.Query(tenantCtx, sql, limit+1)
 		if err != nil {
 			return nil, fmt.Errorf("query execution failed: %w", err)
 		}
@@ -564,10 +564,10 @@ func registerSampleTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Use adapter's QuoteIdentifier for database-agnostic quoting
 		quotedSchema := executor.QuoteIdentifier(schemaName)
 		quotedTable := executor.QuoteIdentifier(tableName)
-		sql := fmt.Sprintf(`SELECT * FROM %s.%s LIMIT %d`, quotedSchema, quotedTable, limit)
+		sql := fmt.Sprintf(`SELECT * FROM %s.%s`, quotedSchema, quotedTable)
 
-		// Execute query
-		queryResult, err := executor.ExecuteQuery(tenantCtx, sql, 0)
+		// Execute query - adapter handles dialect-specific limit (LIMIT for PostgreSQL, TOP for SQL Server)
+		queryResult, err := executor.Query(tenantCtx, sql, limit)
 		if err != nil {
 			return nil, fmt.Errorf("sample query failed: %w", err)
 		}

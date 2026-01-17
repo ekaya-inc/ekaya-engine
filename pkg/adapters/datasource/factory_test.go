@@ -78,11 +78,11 @@ type mockQueryExecutor struct {
 	connMgr      *ConnectionManager
 }
 
-func (m *mockQueryExecutor) ExecuteQuery(ctx context.Context, sqlQuery string, limit int) (*QueryExecutionResult, error) {
+func (m *mockQueryExecutor) Query(ctx context.Context, sqlQuery string, limit int) (*QueryExecutionResult, error) {
 	return &QueryExecutionResult{}, nil
 }
 
-func (m *mockQueryExecutor) ExecuteQueryWithParams(ctx context.Context, sqlQuery string, params []any, limit int) (*QueryExecutionResult, error) {
+func (m *mockQueryExecutor) QueryWithParams(ctx context.Context, sqlQuery string, params []any, limit int) (*QueryExecutionResult, error) {
 	return &QueryExecutionResult{}, nil
 }
 
