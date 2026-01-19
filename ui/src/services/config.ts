@@ -19,6 +19,35 @@ let cachedConfig: AppConfig | null = null;
 let cachedAuthUrl: string | null = null;
 
 /**
+ * Extract project ID from the current page's URL path
+ * Matches paths like /projects/{uuid}/...
+ */
+function getProjectIdFromPath(): string | null {
+  const match = window.location.pathname.match(/\/projects\/([a-f0-9-]+)/);
+  return match?.[1] ?? null;
+}
+
+/**
+ * Save auth_url to project parameters in the backend
+ * This persists the auth server URL so re-authentication uses the correct server
+ */
+async function saveAuthUrlToProject(
+  projectId: string,
+  authUrl: string
+): Promise<void> {
+  const response = await fetch(`/api/projects/${projectId}/auth-server-url`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ auth_server_url: authUrl }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to save auth_url: ${response.status}`);
+  }
+}
+
+/**
  * Extract auth_url from the current page's URL query parameters
  * This is passed by ekaya-central when redirecting users to ekaya-region
  */
@@ -83,6 +112,16 @@ export async function fetchConfig(): Promise<AppConfig> {
     authServerUrl: discoveryData.issuer,
   };
   cachedAuthUrl = authUrl;
+
+  // If auth_url was provided via query param and matches the returned config,
+  // persist it to the project so re-authentication uses the correct server
+  const projectId = getProjectIdFromPath();
+  if (authUrl && projectId && cachedConfig.authServerUrl === authUrl) {
+    saveAuthUrlToProject(projectId, authUrl).catch((err) => {
+      console.warn('Failed to persist auth_url to project:', err);
+      // Non-fatal - continue with cached value
+    });
+  }
 
   return cachedConfig;
 }

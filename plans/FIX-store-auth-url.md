@@ -312,16 +312,21 @@ export async function fetchConfig(): Promise<OAuthConfig> {
 - Auth URL validation reuses `config.ValidateAuthURL()` which checks against the JWKSEndpoints whitelist
 - The endpoint is protected by `authMiddleware.RequireAuthWithPathValidation("pid")` - only authenticated users can update their own project's auth URL
 
-### [ ] Task 2: Frontend - Save auth_url after successful config fetch
+### [x] Task 2: Frontend - Save auth_url after successful config fetch
 
-**Files to modify:**
-- `ui/src/services/config.ts` - Add `saveAuthUrlToProject()` function and call it after successful config fetch when auth_url was provided via query param
+**Status:** Complete
 
-**Implementation notes:**
-- Call `PATCH /api/projects/{projectId}/auth-server-url` with `{ auth_server_url: authUrl }`
-- Only call when `authUrl` (from query param) exists and matches `config.authServerUrl`
-- Non-fatal failure - log warning and continue (user experience shouldn't break if save fails)
-- Use `credentials: 'include'` to send cookies for auth
+**What was implemented:**
+
+1. **`ui/src/services/config.ts`** - Added two helper functions and modified `fetchConfig()`:
+   - `getProjectIdFromPath()` - Extracts project ID from URL path (e.g., `/projects/{uuid}/...`)
+   - `saveAuthUrlToProject(projectId, authUrl)` - Calls `PATCH /api/projects/{projectId}/auth-server-url` with `{ auth_server_url: authUrl }`
+   - Modified `fetchConfig()` to call `saveAuthUrlToProject()` after successful config fetch when:
+     - `authUrl` (from query param) exists
+     - `projectId` exists (from URL path)
+     - `config.authServerUrl === authUrl` (they match)
+   - Uses `credentials: 'include'` to send cookies for auth
+   - Failure is non-fatal - logs warning and continues
 
 ### [ ] Task 3: End-to-end testing
 
