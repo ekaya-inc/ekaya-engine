@@ -35,7 +35,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 	"github.com/ekaya-inc/ekaya-engine/ui"
-	"github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/lib/pq" // PostgreSQL driver for migrations
 )
 
 // Version is set at build time via ldflags
@@ -590,6 +590,15 @@ func setupDatabase(ctx context.Context, cfg *config.EngineDatabaseConfig, logger
 	databaseURL := fmt.Sprintf("postgresql://%s:%s@%s:%d/%s?sslmode=%s",
 		cfg.User, url.QueryEscape(cfg.Password), cfg.Host, cfg.Port, cfg.Database, cfg.SSLMode)
 
+	// Run database migrations first, using a separate connection with timeout.
+	// This avoids the hang issue with stdlib.OpenDBFromPool + golang-migrate.
+	logger.Info("Running database migrations")
+	if err := runMigrations(databaseURL, logger); err != nil {
+		return nil, err // Error already formatted with helpful guidance
+	}
+	logger.Info("Database migrations completed successfully")
+
+	// Now establish the main connection pool
 	db, err := database.NewConnection(ctx, &database.Config{
 		URL:            databaseURL,
 		MaxConnections: cfg.MaxConnections,
@@ -598,20 +607,76 @@ func setupDatabase(ctx context.Context, cfg *config.EngineDatabaseConfig, logger
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	// Convert pgxpool to *sql.DB for migrations
-	stdDB := stdlib.OpenDBFromPool(db.Pool)
-
-	// Run database migrations automatically
-	logger.Info("Running database migrations")
-	if err := runMigrations(stdDB, logger); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to run migrations: %w", err)
-	}
-	logger.Info("Database migrations completed successfully")
-
 	return db, nil
 }
 
-func runMigrations(stdDB *sql.DB, logger *zap.Logger) error {
-	return database.RunMigrations(stdDB, logger)
+// migrationTimeout is the maximum time to wait for migrations to complete.
+// This prevents indefinite hangs when the database user lacks schema permissions.
+const migrationTimeout = 30 * time.Second
+
+func runMigrations(databaseURL string, logger *zap.Logger) error {
+	// Create a separate connection for migrations with statement_timeout set in the URL.
+	// This is critical: using stdlib.OpenDBFromPool + golang-migrate can hang indefinitely
+	// on permission errors. A direct sql.Open connection with timeout avoids this issue.
+	timeoutMS := int(migrationTimeout.Milliseconds())
+
+	// Add statement_timeout to the connection URL
+	separator := "&"
+	if !strings.Contains(databaseURL, "?") {
+		separator = "?"
+	}
+	migrationURL := fmt.Sprintf("%s%sstatement_timeout=%d", databaseURL, separator, timeoutMS)
+
+	db, err := sql.Open("postgres", migrationURL)
+	if err != nil {
+		return formatMigrationError(fmt.Errorf("failed to open migration connection: %w", err))
+	}
+	defer db.Close()
+
+	// Verify connection before running migrations
+	if err := db.Ping(); err != nil {
+		return formatMigrationError(fmt.Errorf("failed to connect for migrations: %w", err))
+	}
+
+	err = database.RunMigrations(db, logger)
+	if err != nil {
+		return formatMigrationError(err)
+	}
+	return nil
+}
+
+// formatMigrationError wraps migration errors with helpful guidance for common issues.
+func formatMigrationError(err error) error {
+	errStr := err.Error()
+
+	// Check for permission denied errors
+	if strings.Contains(errStr, "permission denied") {
+		return fmt.Errorf(`failed to run migrations: %w
+
+This error typically occurs when the database user lacks CREATE privileges on the public schema.
+
+To fix, run as a PostgreSQL superuser:
+    \c <your_database>
+    GRANT ALL ON SCHEMA public TO <your_user>;
+
+Note: In PostgreSQL 15+, 'GRANT ALL ON DATABASE' does NOT grant schema privileges.
+You must explicitly grant permissions on the public schema.`, err)
+	}
+
+	// Check for timeout errors (indicates possible permission issues causing hang)
+	if strings.Contains(errStr, "statement timeout") || strings.Contains(errStr, "canceling statement") {
+		return fmt.Errorf(`failed to run migrations (timed out after %v): %w
+
+Migration timed out, which often indicates insufficient database permissions.
+The database user may lack CREATE privileges on the public schema.
+
+To fix, run as a PostgreSQL superuser:
+    \c <your_database>
+    GRANT ALL ON SCHEMA public TO <your_user>;
+
+Note: In PostgreSQL 15+, 'GRANT ALL ON DATABASE' does NOT grant schema privileges.
+You must explicitly grant permissions on the public schema.`, migrationTimeout, err)
+	}
+
+	return fmt.Errorf("failed to run migrations: %w", err)
 }
