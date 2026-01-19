@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	_ "github.com/lib/pq" // PostgreSQL driver for database/sql (used by migrations)
+	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL driver for database/sql (migrations)
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"go.uber.org/zap"

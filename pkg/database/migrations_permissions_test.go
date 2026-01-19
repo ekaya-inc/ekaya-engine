@@ -12,7 +12,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
-	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -84,7 +83,7 @@ func Test_Migrations_InsufficientPermissions(t *testing.T) {
 	connStr := "postgres://" + testUser + ":" + testPassword + "@" + host + ":" + port.Port() + "/" + testDBName + "?sslmode=disable"
 
 	// Open connection as the restricted user
-	restrictedDB, err := sql.Open("postgres", connStr)
+	restrictedDB, err := sql.Open("pgx", connStr)
 	require.NoError(t, err, "Failed to open connection as restricted user")
 	defer restrictedDB.Close()
 
@@ -156,7 +155,7 @@ func Test_Migrations_SuccessWithProperPermissions(t *testing.T) {
 
 	// Connect as superuser to the new database to grant schema permissions
 	superConnStr := "postgres://ekaya:test_password@" + host + ":" + port.Port() + "/" + testDBName + "?sslmode=disable"
-	superDB, err := sql.Open("postgres", superConnStr)
+	superDB, err := sql.Open("pgx", superConnStr)
 	require.NoError(t, err)
 	defer superDB.Close()
 
@@ -183,7 +182,7 @@ func Test_Migrations_SuccessWithProperPermissions(t *testing.T) {
 	connStr := "postgres://" + testUser + ":" + testPassword + "@" + host + ":" + port.Port() + "/" + testDBName + "?sslmode=disable"
 
 	// Open connection
-	userDB, err := sql.Open("postgres", connStr)
+	userDB, err := sql.Open("pgx", connStr)
 	require.NoError(t, err, "Failed to open connection")
 	defer userDB.Close()
 
@@ -206,7 +205,7 @@ func Test_Migrations_SuccessWithProperPermissions(t *testing.T) {
 
 	// Verify migrations actually ran by checking for a table
 	// Note: RunMigrations closes the connection, so we need a fresh one for verification
-	verifyDB, err := sql.Open("postgres", connStr)
+	verifyDB, err := sql.Open("pgx", connStr)
 	require.NoError(t, err, "Failed to open verification connection")
 	defer verifyDB.Close()
 
@@ -252,7 +251,7 @@ func Test_Migrations_ConcurrentAccessBlocking(t *testing.T) {
 
 	// Connect as superuser to grant schema permissions
 	superConnStr := "postgres://ekaya:test_password@" + host + ":" + port.Port() + "/" + testDBName + "?sslmode=disable"
-	superDB, err := sql.Open("postgres", superConnStr)
+	superDB, err := sql.Open("pgx", superConnStr)
 	require.NoError(t, err)
 	defer superDB.Close()
 
@@ -276,7 +275,7 @@ func Test_Migrations_ConcurrentAccessBlocking(t *testing.T) {
 	connStr := "postgres://" + testUser + ":" + testPassword + "@" + host + ":" + port.Port() + "/" + testDBName + "?sslmode=disable"
 
 	// First, run migrations successfully to create schema_migrations table
-	firstDB, err := sql.Open("postgres", connStr)
+	firstDB, err := sql.Open("pgx", connStr)
 	require.NoError(t, err)
 	defer firstDB.Close()
 
@@ -284,7 +283,7 @@ func Test_Migrations_ConcurrentAccessBlocking(t *testing.T) {
 	require.NoError(t, err, "First migration run should succeed")
 
 	// Now open a connection and lock the schema_migrations table
-	lockDB, err := sql.Open("postgres", connStr)
+	lockDB, err := sql.Open("pgx", connStr)
 	require.NoError(t, err)
 	defer lockDB.Close()
 
@@ -299,7 +298,7 @@ func Test_Migrations_ConcurrentAccessBlocking(t *testing.T) {
 
 	// Now try to run migrations from another connection
 	// This should block waiting for the lock
-	secondDB, err := sql.Open("postgres", connStr)
+	secondDB, err := sql.Open("pgx", connStr)
 	require.NoError(t, err)
 	defer secondDB.Close()
 
@@ -461,7 +460,7 @@ func Test_Migrations_InsufficientSchemaPermissions_AppPath(t *testing.T) {
 	timeoutMS := int(migrationTimeout.Milliseconds())
 	migrationURL := fmt.Sprintf("%s&statement_timeout=%d", databaseURL, timeoutMS)
 
-	migrationDB, err := sql.Open("postgres", migrationURL)
+	migrationDB, err := sql.Open("pgx", migrationURL)
 	require.NoError(t, err, "Should be able to open migration connection")
 	defer migrationDB.Close()
 

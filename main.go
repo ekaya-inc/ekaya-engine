@@ -35,7 +35,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 	"github.com/ekaya-inc/ekaya-engine/ui"
-	_ "github.com/lib/pq" // PostgreSQL driver for migrations
+	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL driver for database/sql (migrations)
 )
 
 // Version is set at build time via ldflags
@@ -627,7 +627,7 @@ func runMigrations(databaseURL string, logger *zap.Logger) error {
 	}
 	migrationURL := fmt.Sprintf("%s%sstatement_timeout=%d", databaseURL, separator, timeoutMS)
 
-	db, err := sql.Open("postgres", migrationURL)
+	db, err := sql.Open("pgx", migrationURL)
 	if err != nil {
 		return formatMigrationError(fmt.Errorf("failed to open migration connection: %w", err))
 	}
