@@ -585,6 +585,9 @@ func (m *mockProjectServiceForDatasource) SyncFromCentralAsync(projectID uuid.UU
 func (m *mockProjectServiceForDatasource) GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error) {
 	return "", errors.New("not implemented")
 }
+func (m *mockProjectServiceForDatasource) UpdateAuthServerURL(ctx context.Context, projectID uuid.UUID, authServerURL string) error {
+	return errors.New("not implemented")
+}
 
 // TestDatasourceService_Delete_ClearsDefaultDatasourceID verifies that when the default
 // datasource is deleted, the default_datasource_id is cleared so that a new datasource

@@ -148,6 +148,10 @@ func (m *mockProjectServiceForMCP) GetAuthServerURL(ctx context.Context, project
 	return "", nil
 }
 
+func (m *mockProjectServiceForMCP) UpdateAuthServerURL(ctx context.Context, projectID uuid.UUID, authServerURL string) error {
+	return nil
+}
+
 // Tests
 
 func TestMCPConfigService_Get_ReturnsStoredConfigState(t *testing.T) {

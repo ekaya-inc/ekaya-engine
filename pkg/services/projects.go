@@ -37,6 +37,7 @@ type ProjectService interface {
 	SetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID, datasourceID uuid.UUID) error
 	SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string)
 	GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error)
+	UpdateAuthServerURL(ctx context.Context, projectID uuid.UUID, authServerURL string) error
 }
 
 // projectService implements ProjectService.
@@ -249,6 +250,30 @@ func (s *projectService) GetAuthServerURL(ctx context.Context, projectID uuid.UU
 
 	authServerURL, _ := project.Parameters["auth_server_url"].(string)
 	return authServerURL, nil
+}
+
+// UpdateAuthServerURL updates the auth_server_url in project parameters.
+// Used to persist the auth URL when a user first accesses a project with a custom auth_url.
+func (s *projectService) UpdateAuthServerURL(ctx context.Context, projectID uuid.UUID, authServerURL string) error {
+	project, err := s.projectRepo.Get(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("failed to get project: %w", err)
+	}
+
+	if project.Parameters == nil {
+		project.Parameters = make(map[string]interface{})
+	}
+	project.Parameters["auth_server_url"] = authServerURL
+
+	if err := s.projectRepo.Update(ctx, project); err != nil {
+		return fmt.Errorf("failed to update project: %w", err)
+	}
+
+	s.logger.Info("Updated auth server URL for project",
+		zap.String("project_id", projectID.String()),
+		zap.String("auth_server_url", authServerURL))
+
+	return nil
 }
 
 // ProvisionFromClaims provisions a project and user from JWT claims.
