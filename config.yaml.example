@@ -8,7 +8,7 @@
 
 # Port to listen on (environment variable PORT overrides this)
 #
-# port: "3443"
+# port: 3443
 
 # Environment name (environment variable ENVIRONMENT overrides this)
 # This value is reported from the /health endpoint:
@@ -27,7 +27,7 @@ engine_database:
   pg_host: "localhost"
   pg_port: 5432
   pg_user: "ekaya"
-  # pg_password: ""
+  # pg_password: "" # Use PGPASSWORD environment variable
   pg_database: "ekaya_engine"
   pg_sslmode: "disable"
   pg_max_connections: 25

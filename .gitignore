@@ -71,5 +71,6 @@ certs/*
 !certs/README.md
 !certs/.gitkeep
 
+# Our own instance of Ekaya
 ekaya/
 
