@@ -1,0 +1,16 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Data files
+# We will download from the Contoso BI dataset
+# but users can also provide their own data
+data/*.csv
+
+# You will want to commit code for your own projects
+# but don't check in the code generated for the demo
+*.py
+
+# Environment
+.env

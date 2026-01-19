@@ -1,0 +1,19 @@
+# Place this section in Claude Desktop's config file
+# Claude Connectors only support publicly accessible HTTP servers
+# so we need to use mcp-remote to connect to a local MCP server
+# You can remove the ENV variable you have signed certificates set up
+{
+  "mcpServers": {
+    "ekaya_demo": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "http://localhost:3443/mcp/60681660-6076-4b05-9c34-6703d946fef7"
+      ],
+      "env": {
+        "NODE_TLS_REJECT_UNAUTHORIZED": "0"
+      }
+    }
+  }
+}

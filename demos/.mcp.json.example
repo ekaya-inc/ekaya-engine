@@ -1,0 +1,12 @@
+# Launch the Ekaya Quickstart Docker image
+# Create a Project
+# Replace the URL with your MCP Server
+# (remove these lines)
+{
+  "mcpServers": {
+    "ekaya_demo": {
+      "type": "http",
+      "url": "http://localhost:3443/mcp/11111111-2222-3333-4444-555555555555"
+    },
+  }
+}
