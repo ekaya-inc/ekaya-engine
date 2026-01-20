@@ -169,6 +169,249 @@ Fact: Carlos working on CrackIt app
   - Status: Current
 ```
 
+### Scenario 11: Cross-Session Communication
+**As** Claude Code working alongside Claude Chat or other Claude instances
+**I want** to communicate with other sessions asynchronously
+**So that** we can coordinate work, share findings, and request feedback
+
+Example: Claude Code implements a feature while Claude Chat explores the design space. They communicate via shared threads:
+
+```
+Thread: "API Error Handling Design"
+Status: active
+
+[claude_chat] I've analyzed error handling patterns in similar APIs.
+              Recommendation: Use RFC 7807 Problem Details format.
+
+[claude_code] Thanks. Implementing now. Question: Should we include
+              stack traces in non-production environments?
+
+[claude_chat] Yes, but gate it behind DEBUG_ERRORS env var, not just
+              NODE_ENV !== 'production'. Explicit is safer.
+
+[claude_code] Implemented. PR ready for review: #142
+```
+
+### Scenario 12: Bug Reports Across Sessions
+**As** Claude Chat discovering issues while using tools
+**I want** to flag bugs for Claude Code to fix
+**So that** issues are tracked without human intermediation
+
+```
+Thread: "Ontology Extraction Bugs"
+
+[claude_chat] BUG: threads.status enum shows wrong values.
+              Expected (from CHECK): [active, paused, completed, archived]
+              Got (from extraction): [active, inactive, closed, archived, pending]
+              Extraction should read CHECK constraints, not sample data.
+
+              metadata: {"bug": true, "component": "ontology", "severity": "medium"}
+
+[claude_code] Acknowledged. Added to FIX-ontology-extraction.md.
+              Will fix in next session.
+```
+
+---
+
+## Inter-Session Communication
+
+### Design Principles
+
+1. **Asynchronous** - Sessions come and go; messages persist
+2. **Thread-based** - Conversations grouped by topic, not by time
+3. **Source-tagged** - Know who said what (claude_code, claude_chat, cowork, user, system)
+4. **Handoff-ready** - Snapshots capture state for session transitions
+5. **Queryable** - Find threads by status, participant, topic, or content
+
+### Database Schema
+
+```sql
+-- Conversation threads spanning sessions/products
+CREATE TABLE agent_threads (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id      UUID NOT NULL REFERENCES engine_projects(id),
+    title           TEXT NOT NULL,
+    purpose         TEXT,
+    status          TEXT NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'paused', 'completed', 'archived')),
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Individual messages within a thread
+CREATE TABLE agent_messages (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    thread_id       UUID NOT NULL REFERENCES agent_threads(id) ON DELETE CASCADE,
+    source          TEXT NOT NULL,  -- claude_code, claude_chat, cowork, user, system
+    message_type    TEXT NOT NULL DEFAULT 'message'
+                    CHECK (message_type IN ('message', 'decision', 'question',
+                           'finding', 'artifact', 'summary', 'handoff')),
+    content         TEXT NOT NULL,
+    metadata        JSONB DEFAULT '{}',
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Point-in-time snapshots for session handoffs
+CREATE TABLE agent_handoffs (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    thread_id       UUID NOT NULL REFERENCES agent_threads(id) ON DELETE CASCADE,
+    summary         TEXT NOT NULL,
+    key_decisions   JSONB DEFAULT '[]',  -- Array of decision strings
+    open_questions  JSONB DEFAULT '[]',  -- Array of question strings
+    next_steps      JSONB DEFAULT '[]',  -- Array of action strings
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes for common queries
+CREATE INDEX idx_agent_threads_status ON agent_threads(project_id, status);
+CREATE INDEX idx_agent_messages_thread ON agent_messages(thread_id, created_at);
+CREATE INDEX idx_agent_messages_source ON agent_messages(thread_id, source);
+CREATE INDEX idx_agent_handoffs_thread ON agent_handoffs(thread_id, created_at DESC);
+
+-- Full-text search on message content
+CREATE INDEX idx_agent_messages_content_fts ON agent_messages
+    USING gin(to_tsvector('english', content));
+```
+
+### MCP Tools for Communication
+
+#### Thread Management
+
+**`create_thread(title, purpose)`** - Start a new conversation thread
+```json
+{
+  "title": "API Error Handling Design",
+  "purpose": "Coordinate error handling implementation between design and code"
+}
+→ {"thread_id": "uuid", "status": "active"}
+```
+
+**`list_threads(status?, has_unread?)`** - Find threads to participate in
+```json
+{"status": "active"}
+→ {
+    "threads": [
+      {"id": "uuid", "title": "API Error Handling", "last_message_at": "...", "message_count": 5},
+      {"id": "uuid", "title": "Ontology Bugs", "last_message_at": "...", "message_count": 3}
+    ]
+  }
+```
+
+**`close_thread(thread_id, summary?)`** - Mark thread as completed
+```json
+{"thread_id": "uuid", "summary": "Error handling implemented per RFC 7807"}
+→ {"status": "completed"}
+```
+
+#### Messaging
+
+**`post_message(thread_id, content, message_type?, metadata?)`** - Send a message
+```json
+{
+  "thread_id": "uuid",
+  "content": "Implemented error handling. PR #142 ready for review.",
+  "message_type": "artifact",
+  "metadata": {"pr_number": 142}
+}
+→ {"message_id": "uuid", "created_at": "..."}
+```
+
+**`get_messages(thread_id, since?, limit?)`** - Read thread messages
+```json
+{"thread_id": "uuid", "limit": 20}
+→ {
+    "messages": [
+      {"source": "claude_chat", "content": "...", "created_at": "..."},
+      {"source": "claude_code", "content": "...", "created_at": "..."}
+    ]
+  }
+```
+
+**`report_bug(thread_id?, component, description, severity)`** - Shorthand for bug reports
+```json
+{
+  "component": "ontology_extraction",
+  "description": "CHECK constraints not read for enum values",
+  "severity": "medium"
+}
+→ {"message_id": "uuid", "thread_id": "uuid"}
+```
+Creates message with `message_type: "question"` and `metadata: {"bug": true, ...}`.
+
+#### Handoffs
+
+**`create_handoff(thread_id, summary, decisions?, questions?, next_steps?)`** - Snapshot for transition
+```json
+{
+  "thread_id": "uuid",
+  "summary": "Error handling design complete, implementation in progress",
+  "decisions": ["Use RFC 7807 format", "Gate stack traces behind DEBUG_ERRORS"],
+  "next_steps": ["Complete PR #142", "Add integration tests"]
+}
+→ {"handoff_id": "uuid"}
+```
+
+**`get_latest_handoff(thread_id)`** - Get most recent snapshot
+```json
+{"thread_id": "uuid"}
+→ {
+    "summary": "...",
+    "key_decisions": [...],
+    "open_questions": [...],
+    "next_steps": [...],
+    "created_at": "..."
+  }
+```
+
+#### Discovery
+
+**`find_bugs(component?, severity?, resolved?)`** - Find reported bugs
+```json
+{"component": "ontology", "resolved": false}
+→ {
+    "bugs": [
+      {"thread_id": "uuid", "description": "...", "severity": "medium", "reported_at": "..."}
+    ]
+  }
+```
+
+**`get_thread_summary(thread_id)`** - Quick overview without full history
+```json
+{"thread_id": "uuid"}
+→ {
+    "title": "API Error Handling",
+    "status": "active",
+    "participants": ["claude_chat", "claude_code"],
+    "message_count": 12,
+    "last_handoff": {...},
+    "recent_messages": [...]  // Last 3
+  }
+```
+
+### Source Identity
+
+Sessions self-identify via `source` field. Recommended values:
+- `claude_code` - Claude Code CLI sessions
+- `claude_chat` - Claude Chat web sessions
+- `cowork` - Claude Cowork sessions
+- `user` - Human via UI or direct input
+- `system` - Automated/system messages
+
+For disambiguation when multiple instances exist, include context in `metadata`:
+```json
+{
+  "source": "claude_code",
+  "metadata": {
+    "working_dir": "dvx-ekaya-engine",
+    "task": "implementing FIX-mcp-error-handling"
+  }
+}
+```
+
+The source is ephemeral context, not persistent identity. What matters is the content and when it was said, not which specific instance said it.
+
+---
+
 ## Proposed MCP Tools
 
 ### Write Tools
@@ -192,6 +435,18 @@ Fact: Carlos working on CrackIt app
 - `expire_fact(id)` - Mark as no longer current
 - `set_confidence(id, level, reason)` - Update confidence after verification
 
+### Communication Tools
+- `create_thread(title, purpose)` - Start a conversation thread
+- `list_threads(status?, has_unread?)` - Find active threads
+- `close_thread(thread_id, summary?)` - Mark thread completed
+- `post_message(thread_id, content, type?, metadata?)` - Send a message
+- `get_messages(thread_id, since?, limit?)` - Read thread messages
+- `report_bug(component, description, severity)` - Shorthand for bug reports
+- `create_handoff(thread_id, summary, ...)` - Create transition snapshot
+- `get_latest_handoff(thread_id)` - Get most recent snapshot
+- `find_bugs(component?, severity?)` - Query reported bugs
+- `get_thread_summary(thread_id)` - Quick thread overview
+
 ## Installation Effect
 
 When installed on a project like `tikr_all`:
@@ -208,6 +463,9 @@ When installed on a project like `tikr_all`:
 3. **Cross-project**: Should memory be per-project or shareable?
 4. **Retention**: How long to keep action logs? Expire old facts?
 5. **Privacy**: Any facts that shouldn't be stored?
+6. **Thread notifications**: Should sessions be notified of new messages? How? (Polling vs webhooks vs MCP notifications)
+7. **Thread permissions**: Can any session read/write any thread, or scope by source type?
+8. **Thread auto-discovery**: Should `get_session_context()` surface active threads relevant to current work?
 
 ## Success Metrics
 
@@ -216,3 +474,6 @@ When installed on a project like `tikr_all`:
 - Session startup feels continuous, not cold
 - Decisions are traceable to rationale
 - Team member context is always available
+- Cross-session communication works without raw SQL (native tools only)
+- Bug reports flow from discovery session to implementation session
+- Handoffs capture sufficient context for session transitions
