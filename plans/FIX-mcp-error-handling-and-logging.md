@@ -532,7 +532,33 @@ func sanitizeArguments(args map[string]any) map[string]any {
 
 ### Phase 3: Rollout to All Tools
 
-1. [ ] Audit all MCP tools for error handling patterns
+1. [x] **COMPLETED** - Audit all MCP tools for error handling patterns
+   - **Implementation:** Comprehensive audit completed and documented in `plans/FIX-all-mcp-tool-error-handling.md`
+   - **Tools audited:** All 30+ MCP tools in `pkg/mcp/tools/` reviewed and categorized
+   - **Error patterns documented:**
+     - Actionable errors (parameter validation, resource not found, business rule violations) → Use `NewErrorResult`
+     - System errors (database failures, auth failures, panics) → Keep as Go errors
+   - **Standard error codes defined:** TABLE_NOT_FOUND, COLUMN_NOT_FOUND, ENTITY_NOT_FOUND, RELATIONSHIP_NOT_FOUND, invalid_parameters, ontology_not_found, permission_denied, resource_conflict, validation_error, query_error
+   - **Implementation checklist created:** Parameter validation, resource lookups, business logic, system errors
+   - **Testing requirements documented:** Unit test patterns and integration test approach
+   - **Migration priority established:** High priority (update_column, query, execute, get_schema, probe tools), Medium priority (exploration and query management), Low priority (admin tools)
+   - **Current status:**
+     - ✅ Completed: `get_ontology`, `update_entity`, `errors.go`
+     - ⏳ Remaining: 30+ tools need error handling pattern applied
+   - **Files created:** `plans/FIX-all-mcp-tool-error-handling.md` (comprehensive audit document, 1132 lines)
+   - **Audit methodology:**
+     - Used Grep to identify all tool implementations in `pkg/mcp/tools/`
+     - Read each tool file to understand error handling patterns
+     - Categorized errors as actionable (→ NewErrorResult) vs system errors (→ Go error)
+     - Documented current state, desired state, and migration approach for each tool
+   - **Key findings:**
+     - Most tools currently return all errors as Go errors (generic "Tool execution failed" in Claude)
+     - Parameter validation errors should be converted to error results (highest priority)
+     - Resource lookups (entity_not_found, table_not_found, etc.) should be actionable errors
+     - Database connection failures, auth failures, panics should remain Go errors
+   - **Error code standards established:** Consistent naming convention for error codes across all tools
+   - **Testing standards defined:** Each tool update should include unit tests verifying error result structure
+   - **Next implementer:** Use the audit document at `plans/FIX-all-mcp-tool-error-handling.md` as the guide for applying error handling to remaining tools. Start with high-priority tools: `update_column`, `query`, `execute`, `get_schema`, `probe_column`. The audit document provides specific recommendations for each tool including error scenarios, suggested error codes, and migration notes.
 2. [ ] Convert actionable errors to error results
 3. [ ] Keep system errors as Go errors
 4. [ ] Document the error handling pattern
