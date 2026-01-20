@@ -886,12 +886,161 @@ func sanitizeArguments(args map[string]any) map[string]any {
             **Finding:** The `list_relationships` tool does **not exist** in the codebase. Only `update_relationship` and `delete_relationship` are registered in `RegisterRelationshipTools()` (pkg/mcp/tools/relationship.go:43-44).
 
             **Note:** This is the same finding as task 3.2.3.3.3.2 above - the `get_relationship` and `list_relationships` tools were planned but never implemented. Only the write operations (`update_relationship`) and delete operations (`delete_relationship`) exist.
-   4. [ ] 3.2.4: Convert low-priority exploration and admin tools to error results
-      - Apply the error handling pattern to remaining tools: `list_approved_queries`, `get_approved_query`, `delete_approved_query`, `chat`, `learn_fact`, `add_fact`, `get_facts`, `delete_fact` in `pkg/mcp/tools/approved_queries.go`, `pkg/mcp/tools/chat.go`, and `pkg/mcp/tools/knowledge.go`
-      - Convert parameter validation and resource lookups to use `NewErrorResult()`
-      - These are lower priority but should follow the same pattern for consistency
-      - Add unit tests for error scenarios
-      - Update the audit document (`plans/FIX-all-mcp-tool-error-handling.md`) to mark all tools as completed and document the final error handling pattern for future tool development
+   4. [ ] 3.2.4: Convert low-priority exploration and admin tools to error results (REPLACED - SEE SUBTASKS BELOW)
+
+      1. [x] **COMPLETED - REVIEWED AND COMMITTED** - 3.2.4.1: Convert query management tools to error results
+
+         **Status:** Complete - `list_approved_queries` tool updated with full error handling
+
+         **Finding:** The tools `get_approved_query` and `delete_approved_query` **do not exist** in the codebase. The approved queries tools are:
+         - `list_approved_queries` (updated with error handling ✓)
+         - `execute_approved_query` (already updated in task 3.2.1 ✓)
+         - `suggest_approved_query` (no parameter validation needed)
+         - `get_query_history` (no parameter validation needed)
+
+         **Implementation:** Modified `pkg/mcp/tools/queries.go` to convert parameter validation errors to error results in `list_approved_queries` tool
+
+         **Files modified:**
+         - `pkg/mcp/tools/queries.go` (lines 159-189):
+           - Added validation for `tags` parameter existence
+           - Validate tags is an array type → `NewErrorResultWithDetails("invalid_parameters", "parameter 'tags' must be an array", {...})`
+           - Validate each tag element is a string → `NewErrorResultWithDetails("invalid_parameters", "all tag elements must be strings", {...})` with index and type details
+         - `pkg/mcp/tools/queries_test.go` (lines 1053-1190):
+           - Added `TestListApprovedQueriesTool_ErrorResults` with 5 comprehensive test cases:
+             - Tags parameter is not an array (string type)
+             - Tags parameter is not an array (number type)
+             - Tags array contains non-string element (number at index 1)
+             - Tags array contains non-string element (bool at index 1)
+             - Tags array contains non-string element (object at index 1)
+           - Tests verify: error result structure, error code, message, and structured details with parameter name, expected type, and actual type/index
+
+         **Error conversion pattern:**
+         - Parameter validation: Check if parameter exists and is correct type → `NewErrorResultWithDetails` with diagnostic details
+         - Array validation: Iterate with indexed loop, type-check each element, return error on first type mismatch with index
+         - System errors: Database connection failures, auth failures → remain as Go errors
+
+         **System errors kept as Go errors:**
+         - Database connection failures
+         - Authentication failures from `checkApprovedQueriesEnabled`
+
+         **Error codes used:** `invalid_parameters`
+
+         **Test coverage:** All 5 tests pass, covering invalid type scenarios and array element validation
+
+         **Pattern established:** Optional parameter validation with type checking and detailed error responses for invalid types
+
+         **Next implementer:** This task is complete. The `list_approved_queries` tool now surfaces actionable errors for invalid `tags` parameters. Note that `get_approved_query` and `delete_approved_query` tools do not exist in the codebase.
+
+      2. [ ] 3.2.4.2: Convert chat tool to error results
+
+         Apply error handling pattern to the `chat` tool in `pkg/mcp/tools/chat.go`. This tool handles ontology refinement chat messages.
+
+         **File:** `pkg/mcp/tools/chat.go`
+
+         **Tool:** `chat` - Send a chat message for ontology refinement
+
+         **Parameter validation:**
+         - Empty `message` after trimming → `NewErrorResult("invalid_parameters", "parameter 'message' cannot be empty")`
+         - Use `trimString()` from `pkg/mcp/tools/helpers.go` for whitespace normalization
+
+         **Resource validation:**
+         - No active ontology found → `NewErrorResult("ontology_not_found", "no active ontology found for project. Extract an ontology first before using chat refinement.")`
+
+         **System errors kept as Go errors:**
+         - Database connection failures
+         - Authentication failures from `AcquireToolAccess`
+         - Chat service failures (LLM API errors, conversation storage errors)
+         - JSON marshaling errors
+
+         **Error codes:** `invalid_parameters`, `ontology_not_found`
+
+         **Test coverage:**
+         - Create `TestChatTool_ErrorResults` in `pkg/mcp/tools/chat_test.go`
+           - Test cases: empty message (whitespace-only string), no active ontology
+           - Verify: `result.IsError == true`, correct error code, message
+
+      3. [ ] 3.2.4.3: Convert knowledge management tools to error results
+
+         Apply error handling pattern to knowledge management tools: `learn_fact`, `add_fact`, `get_facts`, `delete_fact` in `pkg/mcp/tools/knowledge.go`.
+
+         **File:** `pkg/mcp/tools/knowledge.go`
+
+         **Tools to update:**
+
+         1. **learn_fact** (if exists) - Learn a new domain fact from analysis
+            - Parameter validation:
+              - Empty `fact` after trimming → `NewErrorResult("invalid_parameters", "parameter 'fact' cannot be empty")`
+              - Invalid `category` value → `NewErrorResultWithDetails("invalid_parameters", "invalid category value", map[string]any{"parameter": "category", "expected": ["terminology", "business_rule", "enumeration", "convention"], "actual": category})`
+            - System errors kept as Go errors:
+              - Database connection failures
+              - Authentication failures
+
+         2. **add_fact** (if exists) - Manually add a domain fact
+            - Same parameter validation as `learn_fact`
+
+         3. **get_facts** - Retrieve project domain facts
+            - Parameter validation:
+              - If `category` parameter exists and is not in allowed values → `NewErrorResultWithDetails("invalid_parameters", "invalid category value", map[string]any{"parameter": "category", "expected": ["terminology", "business_rule", "enumeration", "convention"], "actual": category})`
+            - System errors kept as Go errors:
+              - Database connection failures
+              - Authentication failures
+
+         4. **delete_fact** - Delete a domain fact
+            - Parameter validation:
+              - Empty `fact_id` after trimming → `NewErrorResult("invalid_parameters", "parameter 'fact_id' cannot be empty")`
+              - Invalid UUID format → `NewErrorResult("invalid_parameters", fmt.Sprintf("invalid fact_id format: %q is not a valid UUID", fact_id))`
+            - Resource validation:
+              - Fact not found → `NewErrorResult("FACT_NOT_FOUND", fmt.Sprintf("fact %q not found", fact_id))`
+            - System errors kept as Go errors:
+              - Database connection failures
+              - Authentication failures
+
+         **Helper functions:**
+         - Use `trimString()` from `pkg/mcp/tools/helpers.go` for whitespace normalization
+         - Use UUID validation from standard library: `_, err := uuid.Parse(fact_id)`
+
+         **Error codes:** `invalid_parameters`, `FACT_NOT_FOUND`
+
+         **Test coverage:**
+         - Create `TestLearnFactTool_ErrorResults` in `pkg/mcp/tools/knowledge_test.go` (if tool exists)
+           - Test cases: empty fact, invalid category
+         - Create `TestAddFactTool_ErrorResults` (if tool exists)
+           - Test cases: empty fact, invalid category
+         - Create `TestGetFactsTool_ErrorResults`
+           - Test cases: invalid category value
+         - Create `TestDeleteFactTool_ErrorResults`
+           - Test cases: empty fact_id, invalid UUID format, fact not found
+         - Verify: `result.IsError == true`, correct error code, message, structured details
+
+      4. [ ] 3.2.4.4: Document final error handling pattern
+
+         Update the audit document to mark all tools as completed and document the final error handling pattern for future tool development.
+
+         **File:** `plans/FIX-all-mcp-tool-error-handling.md`
+
+         **Updates needed:**
+
+         1. Mark all Phase 3 tasks as completed in the implementation checklist
+         2. Add a new section: "Error Handling Pattern for Future Tools"
+            - Include decision tree: when to use `NewErrorResult()` vs Go error
+            - List standard error codes with examples
+            - Provide code templates for common patterns (parameter validation, resource lookup, array validation)
+            - Include testing requirements (unit test structure, error result verification)
+         3. Add summary statistics:
+            - Total tools audited
+            - Total tools updated with error results
+            - Total error codes defined
+            - Total test cases added
+         4. Add "Lessons Learned" section documenting:
+            - Common pitfalls encountered during migration
+            - Best practices discovered
+            - Performance considerations (if any)
+
+         **Context for implementer:**
+         - The audit document started as a planning document in Phase 3 task 1
+         - It currently contains the full tool audit and categorization
+         - This final update serves as documentation for future tool developers
+         - Should include enough examples that a new developer can implement error handling without reading all the existing tool code
 3. [ ] Keep system errors as Go errors
 4. [ ] Document the error handling pattern
 

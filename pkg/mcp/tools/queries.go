@@ -156,14 +156,34 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 			return nil, fmt.Errorf("failed to get default datasource: %w", err)
 		}
 
-		// Parse optional tags filter
+		// Parse and validate optional tags filter
 		var tags []string
 		if args, ok := req.Params.Arguments.(map[string]any); ok {
-			if tagsArray, ok := args["tags"].([]any); ok {
-				for _, tag := range tagsArray {
-					if str, ok := tag.(string); ok {
-						tags = append(tags, str)
+			if tagsVal, exists := args["tags"]; exists {
+				// Validate that tags is an array
+				tagsArray, ok := tagsVal.([]any)
+				if !ok {
+					return NewErrorResultWithDetails("invalid_parameters",
+						"parameter 'tags' must be an array",
+						map[string]any{
+							"parameter":     "tags",
+							"expected_type": "array",
+							"actual_type":   fmt.Sprintf("%T", tagsVal),
+						}), nil
+				}
+				// Validate that each element is a string
+				for i, tag := range tagsArray {
+					str, ok := tag.(string)
+					if !ok {
+						return NewErrorResultWithDetails("invalid_parameters",
+							"all tag elements must be strings",
+							map[string]any{
+								"parameter":            "tags",
+								"invalid_element_index": i,
+								"invalid_element_type":  fmt.Sprintf("%T", tag),
+							}), nil
 					}
+					tags = append(tags, str)
 				}
 			}
 		}

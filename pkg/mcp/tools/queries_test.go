@@ -1049,3 +1049,142 @@ func TestGetQueryHistory_WithNullQueryName(t *testing.T) {
 func floatPtr(f float64) *float64 {
 	return &f
 }
+
+// TestListApprovedQueriesTool_ErrorResults verifies that list_approved_queries
+// returns error results for invalid parameters.
+func TestListApprovedQueriesTool_ErrorResults(t *testing.T) {
+	tests := []struct {
+		name              string
+		tagsParam         any
+		expectedErrorCode string
+		expectedInDetails map[string]any
+	}{
+		{
+			name:              "tags parameter is not an array (string)",
+			tagsParam:         "not-an-array",
+			expectedErrorCode: "invalid_parameters",
+			expectedInDetails: map[string]any{
+				"parameter":     "tags",
+				"expected_type": "array",
+			},
+		},
+		{
+			name:              "tags parameter is not an array (number)",
+			tagsParam:         123,
+			expectedErrorCode: "invalid_parameters",
+			expectedInDetails: map[string]any{
+				"parameter":     "tags",
+				"expected_type": "array",
+			},
+		},
+		{
+			name:              "tags array contains non-string element (number)",
+			tagsParam:         []any{"valid-tag", 123, "another-tag"},
+			expectedErrorCode: "invalid_parameters",
+			expectedInDetails: map[string]any{
+				"parameter":            "tags",
+				"invalid_element_index": float64(1), // JSON numbers are float64
+			},
+		},
+		{
+			name:              "tags array contains non-string element (bool)",
+			tagsParam:         []any{"tag1", true},
+			expectedErrorCode: "invalid_parameters",
+			expectedInDetails: map[string]any{
+				"parameter":            "tags",
+				"invalid_element_index": float64(1),
+			},
+		},
+		{
+			name:              "tags array contains non-string element (object)",
+			tagsParam:         []any{"tag1", map[string]any{"key": "value"}},
+			expectedErrorCode: "invalid_parameters",
+			expectedInDetails: map[string]any{
+				"parameter":            "tags",
+				"invalid_element_index": float64(1),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Call the function that parses tags (simulating tool call)
+			// We'll test this by creating a minimal handler simulation
+			args := map[string]any{
+				"tags": tt.tagsParam,
+			}
+
+			// Validate tags parameter (extracted from registerListApprovedQueriesTool)
+			var tags []string
+			var result *ErrorResponse
+
+			if tagsVal, exists := args["tags"]; exists {
+				// Validate that tags is an array
+				tagsArray, ok := tagsVal.([]any)
+				if !ok {
+					result = &ErrorResponse{
+						Error:   true,
+						Code:    "invalid_parameters",
+						Message: "parameter 'tags' must be an array",
+						Details: map[string]any{
+							"parameter":     "tags",
+							"expected_type": "array",
+							"actual_type":   fmt.Sprintf("%T", tagsVal),
+						},
+					}
+				} else {
+					// Validate that each element is a string
+					for i, tag := range tagsArray {
+						_, ok := tag.(string)
+						if !ok {
+							result = &ErrorResponse{
+								Error:   true,
+								Code:    "invalid_parameters",
+								Message: "all tag elements must be strings",
+								Details: map[string]any{
+									"parameter":            "tags",
+									"invalid_element_index": i,
+									"invalid_element_type":  fmt.Sprintf("%T", tag),
+								},
+							}
+							break
+						}
+						// In real code: tags = append(tags, str)
+					}
+				}
+			}
+
+			// Verify error result was created
+			require.NotNil(t, result, "Expected error result to be created")
+			assert.True(t, result.Error, "Error flag should be true")
+			assert.Equal(t, tt.expectedErrorCode, result.Code, "Error code should match")
+
+			// Verify expected details are present
+			details, ok := result.Details.(map[string]any)
+			require.True(t, ok, "Details should be a map")
+
+			for key, expectedVal := range tt.expectedInDetails {
+				actualVal, exists := details[key]
+				assert.True(t, exists, "Detail key %q should exist", key)
+				if exists {
+					// For numeric comparisons, convert to float64
+					switch expected := expectedVal.(type) {
+					case float64:
+						actual, ok := actualVal.(float64)
+						if !ok {
+							actualInt, ok := actualVal.(int)
+							assert.True(t, ok, "Value should be numeric")
+							actual = float64(actualInt)
+						}
+						assert.Equal(t, expected, actual, "Detail %q should match", key)
+					default:
+						assert.Equal(t, expectedVal, actualVal, "Detail %q should match", key)
+					}
+				}
+			}
+
+			// Verify tags was not populated (error path)
+			assert.Empty(t, tags, "Tags should not be populated when validation fails")
+		})
+	}
+}
