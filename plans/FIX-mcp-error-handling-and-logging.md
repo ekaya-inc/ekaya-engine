@@ -82,10 +82,10 @@ When debugging MCP integrations, two issues make troubleshooting difficult:
 
    2. [ ] 3.3.2: Convert ontology question tools to error results
       1. [x] 3.3.2.1: Convert resolve_ontology_question tool
-      2. [ ] 3.3.2.2: Convert skip, dismiss, escalate tools
+      2. [x] 3.3.2.2: Convert skip, dismiss, escalate tools
          1. [x] 3.3.2.2.1: Add common validation helpers (`validateQuestionID`, `validateReasonParameter`)
          2. [x] 3.3.2.2.2: Convert skip_ontology_question tool
-         3. [ ] 3.3.2.2.3: Convert dismiss and escalate tools
+         3. [x] 3.3.2.2.3: Convert dismiss and escalate tools
             1. [x] 3.3.2.2.3.1: Verify shared validation helpers exist
             2. [x] 3.3.2.2.3.2: Convert dismiss_ontology_question tool
             3. [x] 3.3.2.2.3.3: Convert escalate_ontology_question tool
