@@ -57,11 +57,11 @@ When debugging MCP integrations, two issues make troubleshooting difficult:
    4. [ ] 3.2.4: Convert low-priority exploration and admin tools
       1. [x] 3.2.4.1: Convert query management tools (`list_approved_queries`)
       2. [x] 3.2.4.2: Convert chat tool (N/A - tool does not exist as MCP tool)
-      3. [ ] 3.2.4.3: Convert knowledge management tools
+      3. [x] 3.2.4.3: Convert knowledge management tools
          1. [x] 3.2.4.3.1: Convert update_project_knowledge tool
          2. [N/A] 3.2.4.3.2: list_project_knowledge (tool does not exist)
          3. [x] 3.2.4.3.3: Convert delete_project_knowledge tool
-         4. [ ] 3.2.4.3.4: Add comprehensive test coverage
+         4. [x] 3.2.4.3.4: Add comprehensive test coverage
             1. [x] 3.2.4.3.4.1: Set up test infrastructure
             2. [x] 3.2.4.3.4.2: Add parameter validation tests for update_project_knowledge
             3. [x] 3.2.4.3.4.3: Add resource validation tests for delete_project_knowledge
