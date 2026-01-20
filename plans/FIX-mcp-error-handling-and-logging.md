@@ -46,7 +46,7 @@ When debugging MCP integrations, two issues make troubleshooting difficult:
       1. [x] 3.2.2.1: Convert get_schema tool
       2. [x] 3.2.2.2: Convert update_column tool
       3. [x] 3.2.2.3: Convert probe_column tool
-   3. [ ] 3.2.3: Convert medium-priority entity and relationship tools
+   3. [x] 3.2.3: Convert medium-priority entity and relationship tools
       1. [x] 3.2.3.1: Convert delete_entity tool
       2. [x] 3.2.3.2: Convert get_entity tool (note: list_entities does not exist)
       3. [x] 3.2.3.3: Convert relationship tools
