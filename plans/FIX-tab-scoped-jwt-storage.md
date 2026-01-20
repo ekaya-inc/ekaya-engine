@@ -262,7 +262,63 @@ if (data.token && data.project_id) {
 }
 ```
 
-### Task 4: Update fetchWithAuth to Use Bearer Token
+### Task 4: Update fetchWithAuth to Use Bearer Token ✅
+
+**Status: COMPLETE** ✅
+
+**Files Modified:**
+- `ui/src/lib/api.ts:1-84` - Complete rewrite to use Bearer token authentication
+- `ui/src/lib/api.test.ts:1-235` - Updated all tests to verify Bearer token behavior
+
+**Implementation Summary:**
+
+Replaced cookie-based authentication with Bearer token authentication from sessionStorage. The new implementation:
+
+1. **Pre-request Token Check:** Before making any request, checks if a valid token exists in sessionStorage
+   - Calls `getProjectToken()` to retrieve token
+   - Calls `isTokenExpired()` to verify token is still valid
+   - If no token or expired, clears token and initiates OAuth flow
+
+2. **Bearer Token Header:** Sends JWT as Authorization header instead of cookies
+   - Added `Authorization: Bearer ${token}` header to all authenticated requests
+   - Removed `credentials: 'include'` (no longer using cookies)
+   - Preserves any custom headers provided by caller
+
+3. **Response Error Handling:** Handles 401/403 by clearing token and re-authenticating
+   - 401 Unauthorized: Invalid or missing token
+   - 403 Forbidden: Token valid but project ID mismatch
+   - Both cases: call `clearProjectToken()` and initiate OAuth flow
+
+4. **Helper Function:** Added `extractProjectIdFromPath()` helper (lines 13-17)
+   - Extracts project ID from URL patterns: `/projects/:id` or `/sdap/v1/:id`
+   - Used when initiating OAuth flow to pass correct project_id
+
+**Key Changes:**
+- **Lines 3-4:** Import auth-token utilities (`getProjectToken`, `clearProjectToken`, `isTokenExpired`)
+- **Lines 13-17:** New helper function to extract project ID from path
+- **Lines 35-52:** Pre-request token validation and OAuth initiation
+- **Lines 54-61:** Send Bearer token in Authorization header (no credentials)
+- **Lines 66-80:** Handle 401/403 responses by clearing token and re-authenticating
+
+**Test Coverage (7 tests):**
+- ✅ Sends Authorization Bearer header with valid token
+- ✅ Does NOT send credentials (no cookies)
+- ✅ Initiates OAuth flow when no token present
+- ✅ Clears token and re-auths on 401 response
+- ✅ Clears token and re-auths on 403 response
+- ✅ Extracts project_id from URL when re-authenticating
+- ✅ Preserves custom headers and merges with Authorization
+
+**Why This Approach:**
+- Tab-scoped sessionStorage enables multi-tab project isolation (solves the root problem)
+- Pre-request token validation reduces unnecessary API calls with expired tokens
+- Bearer token is standard OAuth 2.0 pattern (better than cookies)
+- Helper function centralizes URL parsing logic for maintainability
+
+**Next Task Context:**
+Task 5 will verify that the backend reads Authorization header before falling back to cookies. The frontend is now fully migrated to Bearer token authentication. Cookie support in backend is only needed for backward compatibility during transition.
+
+**Original Spec:**
 
 **File: `ui/src/lib/api.ts`**
 
