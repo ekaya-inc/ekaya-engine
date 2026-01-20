@@ -80,7 +80,20 @@ const headers: HeadersInit = {
 
 ## Implementation Plan
 
-### Task 1: Create Frontend Auth Token Utilities
+### Task 1: Create Frontend Auth Token Utilities ✅
+
+**Status: COMPLETE**
+
+**Files created:**
+- `ui/src/lib/auth-token.ts` - Tab-scoped JWT storage utilities
+- `ui/src/lib/auth-token.test.ts` - Comprehensive unit tests (13 tests covering all functions)
+
+**Implementation notes:**
+- Uses sessionStorage (inherently tab-scoped) instead of cookies
+- Includes token expiry checking with 1-minute buffer
+- All functions are pure and side-effect free (easy to test)
+- Test coverage includes edge cases: malformed JWTs, expired tokens, missing claims
+- Pattern matches ekaya-central's implementation exactly
 
 **New file: `ui/src/lib/auth-token.ts`**
 
