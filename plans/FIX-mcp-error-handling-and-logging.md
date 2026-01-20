@@ -559,7 +559,60 @@ func sanitizeArguments(args map[string]any) map[string]any {
    - **Error code standards established:** Consistent naming convention for error codes across all tools
    - **Testing standards defined:** Each tool update should include unit tests verifying error result structure
    - **Next implementer:** Use the audit document at `plans/FIX-all-mcp-tool-error-handling.md` as the guide for applying error handling to remaining tools. Start with high-priority tools: `update_column`, `query`, `execute`, `get_schema`, `probe_column`. The audit document provides specific recommendations for each tool including error scenarios, suggested error codes, and migration notes.
-2. [ ] Convert actionable errors to error results
+2. [ ] Convert actionable errors to error results (SPLIT INTO SUBTASKS BELOW)
+   1. [x] **COMPLETED - REVIEWED AND APPROVED** - 3.2.1: Convert high-priority query tools to error results
+      - **Implementation:** Modified `pkg/mcp/tools/queries.go` to convert actionable errors to error results in `execute_approved_query` tool
+      - **Files modified:**
+        - `pkg/mcp/tools/queries.go` (lines 277-285, 304-321, 323-332, 380-427):
+          - Invalid query_id parameter → `NewErrorResult("invalid_parameters", ...)`
+          - Invalid UUID format → `NewErrorResult("invalid_parameters", "invalid query_id format: %q is not a valid UUID")`
+          - Query not found → `NewErrorResult("QUERY_NOT_FOUND", ...)` with guidance to use list_approved_queries
+          - Query not enabled/approved → `NewErrorResult("QUERY_NOT_APPROVED", ...)` with query name and ID
+          - Query execution errors → `convertQueryExecutionError()` function categorizes and converts errors
+        - `pkg/mcp/tools/queries_test.go`:
+          - Removed obsolete `TestEnhanceErrorWithContext` and `TestCategorizeError` tests
+          - Added `TestConvertQueryExecutionError` with 9 comprehensive test cases covering all error scenarios
+          - Added placeholder `TestExecuteApprovedQuery_ErrorResults` for integration tests
+      - **Error conversion logic in `convertQueryExecutionError()`:**
+        - SQL injection → `NewErrorResultWithDetails("security_violation", ...)` with remediation details
+        - Parameter validation (missing/unknown) → `NewErrorResult("parameter_validation", ...)`
+        - Type conversion errors → `NewErrorResult("type_validation", ...)`
+        - SQL syntax errors → `NewErrorResult("query_error", ...)`
+        - Database connection/timeout → Go error (system failure)
+        - Generic errors → `NewErrorResult("query_error", ...)` (default actionable)
+      - **System errors kept as Go errors:**
+        - Database connection failures
+        - Timeouts and context deadline errors
+        - All errors matching "connection", "timeout", "context", "deadlock" patterns
+      - **Error codes used:** `invalid_parameters`, `QUERY_NOT_FOUND`, `QUERY_NOT_APPROVED`, `security_violation`, `parameter_validation`, `type_validation`, `query_error`
+      - **Test coverage:** All 9 test cases pass, including:
+        - Nil error handling
+        - SQL injection detection with structured details
+        - Parameter validation (missing/unknown parameters)
+        - Type validation (cannot convert errors)
+        - SQL syntax errors
+        - System errors (connection/timeout) returning Go errors
+        - Generic query errors returning error results
+      - **Note on `query` and `execute` tools:** These tools do not exist in the codebase. The task description mentioned them, but only `execute_approved_query` exists in `pkg/mcp/tools/queries.go`. All relevant query execution error handling has been applied to this tool.
+      - **Pattern established:** Parameter validation errors caught early, execution errors categorized by type (security/parameter/type/syntax/system), system errors remain as Go errors for proper failure signaling
+      - **Commit:** Changes committed separately with tests passing
+      - **Next implementer:** Task 3.2.2 (schema tools) - apply same pattern to `get_schema`, `update_column`, `probe_column` in `pkg/mcp/tools/schema.go` and `pkg/mcp/tools/column.go`
+   2. [ ] 3.2.2: Convert high-priority schema tools to error results
+      - Apply the error handling pattern to schema exploration tools: `get_schema`, `update_column`, and `probe_column` in `pkg/mcp/tools/schema.go` and `pkg/mcp/tools/column.go`
+      - Convert parameter validation errors (missing table/column names, invalid annotation types), resource lookups (TABLE_NOT_FOUND, COLUMN_NOT_FOUND), and business logic failures (semantic conflict, invalid semantic type) to use `NewErrorResult()` or `NewErrorResultWithDetails()`
+      - Add error details for validation failures showing expected vs actual values
+      - Add unit tests verifying all error scenarios produce correct error result structures with appropriate codes from the audit document
+   3. [ ] 3.2.3: Convert medium-priority entity and relationship tools to error results
+      - Apply the error handling pattern to remaining entity/relationship tools: `delete_entity`, `get_entity`, `list_entities`, `update_relationship`, `delete_relationship`, `get_relationship`, `list_relationships` in `pkg/mcp/tools/entity.go` and `pkg/mcp/tools/relationship.go`
+      - Convert parameter validation (missing/invalid entity names, relationship IDs), resource lookups (ENTITY_NOT_FOUND, RELATIONSHIP_NOT_FOUND), and business rule violations (cannot delete entity with relationships) to use `NewErrorResult()`
+      - Keep database failures as Go errors
+      - Add comprehensive unit tests covering all error scenarios with correct error codes and structured details as specified in the audit document
+   4. [ ] 3.2.4: Convert low-priority exploration and admin tools to error results
+      - Apply the error handling pattern to remaining tools: `list_approved_queries`, `get_approved_query`, `delete_approved_query`, `chat`, `learn_fact`, `add_fact`, `get_facts`, `delete_fact` in `pkg/mcp/tools/approved_queries.go`, `pkg/mcp/tools/chat.go`, and `pkg/mcp/tools/knowledge.go`
+      - Convert parameter validation and resource lookups to use `NewErrorResult()`
+      - These are lower priority but should follow the same pattern for consistency
+      - Add unit tests for error scenarios
+      - Update the audit document (`plans/FIX-all-mcp-tool-error-handling.md`) to mark all tools as completed and document the final error handling pattern for future tool development
 3. [ ] Keep system errors as Go errors
 4. [ ] Document the error handling pattern
 

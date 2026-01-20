@@ -276,11 +276,12 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		// Get query_id parameter
 		queryIDStr, err := req.RequireString("query_id")
 		if err != nil {
-			return nil, err
+			return NewErrorResult("invalid_parameters", "query_id parameter is required"), nil
 		}
 		queryID, err := uuid.Parse(queryIDStr)
 		if err != nil {
-			return nil, fmt.Errorf("invalid query_id format: %w", err)
+			return NewErrorResult("invalid_parameters",
+				fmt.Sprintf("invalid query_id format: %q is not a valid UUID", queryIDStr)), nil
 		}
 
 		// Get optional parameters
@@ -303,7 +304,20 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		// Get query metadata before execution
 		query, err := deps.QueryService.Get(tenantCtx, projectID, queryID)
 		if err != nil {
+			// Check if this is a "not found" error
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "no rows") {
+				return NewErrorResult("QUERY_NOT_FOUND",
+					fmt.Sprintf("query with ID %q not found. Use list_approved_queries to see available queries.", queryID)), nil
+			}
+			// Database/system errors remain as Go errors
 			return nil, fmt.Errorf("failed to get query metadata: %w", err)
+		}
+
+		// Check if query is enabled (approved)
+		if !query.IsEnabled {
+			return NewErrorResult("QUERY_NOT_APPROVED",
+				fmt.Sprintf("query %q (ID: %s) is not enabled. Only enabled queries can be executed.", query.NaturalLanguagePrompt, queryID)), nil
 		}
 
 		// Execute with parameters (includes injection detection)
@@ -313,8 +327,8 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			tenantCtx, projectID, queryID, params, execReq)
 		executionTimeMs := time.Since(startTime).Milliseconds()
 		if err != nil {
-			// Enhance error message with query context
-			return nil, enhanceErrorWithContext(err, query.NaturalLanguagePrompt)
+			// Convert actionable errors to error results
+			return convertQueryExecutionError(err, query.NaturalLanguagePrompt, queryID.String())
 		}
 
 		// Log execution to history (best effort - don't fail request if logging fails)
@@ -363,44 +377,53 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 	})
 }
 
-// enhanceErrorWithContext wraps an error with query context and categorizes the error type.
-func enhanceErrorWithContext(err error, queryName string) error {
+// convertQueryExecutionError converts actionable query execution errors to error results.
+// System errors (database connection failures, internal errors) remain as Go errors.
+func convertQueryExecutionError(err error, queryName, queryID string) (*mcp.CallToolResult, error) {
 	if err == nil {
-		return nil
+		return nil, nil
 	}
 
 	errMsg := err.Error()
-	errorType := categorizeError(errMsg)
 
-	// Format: [error_type] query "Query Name": original error message
-	return fmt.Errorf("[%s] query %q: %w", errorType, queryName, err)
-}
-
-// categorizeError determines the error type based on error message content.
-// More specific checks come first to avoid false matches.
-func categorizeError(errMsg string) string {
-	// Check for SQL injection detection (most specific)
+	// SQL injection detection - security violation (actionable)
 	if containsAny(errMsg, []string{"injection", "SQL injection"}) {
-		return "security_violation"
+		return NewErrorResultWithDetails("security_violation",
+			fmt.Sprintf("SQL injection attempt detected in query %q", queryName),
+			map[string]any{
+				"query_id":    queryID,
+				"query_name":  queryName,
+				"error":       errMsg,
+				"remediation": "Do not attempt to inject SQL. Use parameterized queries only.",
+			}), nil
 	}
 
-	// Check for type conversion errors (before general parameter check)
-	if containsAny(errMsg, []string{"cannot convert", "invalid format"}) {
-		return "type_validation"
+	// Parameter validation errors (actionable - Claude can fix parameters)
+	if containsAny(errMsg, []string{"required parameter", "missing parameter", "unknown parameter"}) {
+		return NewErrorResult("parameter_validation",
+			fmt.Sprintf("parameter validation failed for query %q: %s. Use list_approved_queries to see required parameters.", queryName, errMsg)), nil
 	}
 
-	// Check for parameter-related errors (validation, missing, unknown)
-	if containsAny(errMsg, []string{"required", "missing", "unknown parameter"}) {
-		return "parameter_validation"
+	// Type conversion errors (actionable - Claude can provide correct types)
+	if containsAny(errMsg, []string{"cannot convert", "invalid format", "type mismatch"}) {
+		return NewErrorResult("type_validation",
+			fmt.Sprintf("parameter type mismatch in query %q: %s. Check parameter types in list_approved_queries.", queryName, errMsg)), nil
 	}
 
-	// Check for execution errors
-	if containsAny(errMsg, []string{"execute", "execution", "query failed"}) {
-		return "execution_error"
+	// SQL syntax errors (actionable - indicates query definition issue)
+	if containsAny(errMsg, []string{"syntax error", "invalid syntax", "parse error"}) {
+		return NewErrorResult("query_error",
+			fmt.Sprintf("SQL syntax error in query %q: %s. This query may need to be updated.", queryName, errMsg)), nil
 	}
 
-	// Default category
-	return "query_error"
+	// Database connection failures and system errors remain as Go errors
+	if containsAny(errMsg, []string{"connection", "timeout", "context", "deadlock"}) {
+		return nil, fmt.Errorf("[system_error] query %q (ID: %s): %w", queryName, queryID, err)
+	}
+
+	// Default: treat as actionable query execution error
+	return NewErrorResult("query_error",
+		fmt.Sprintf("query execution failed for %q: %s", queryName, errMsg)), nil
 }
 
 // containsAny checks if a string contains any of the given substrings (case-insensitive).

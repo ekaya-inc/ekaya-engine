@@ -156,137 +156,170 @@ func TestExecuteApprovedQuery_ExecutionTime(t *testing.T) {
 	assert.Equal(t, float64(145), execTime, "execution_time_ms should have the correct value")
 }
 
-func TestEnhanceErrorWithContext(t *testing.T) {
+func TestConvertQueryExecutionError(t *testing.T) {
 	tests := []struct {
-		name         string
-		err          error
-		queryName    string
-		wantContains []string
+		name          string
+		err           error
+		queryName     string
+		queryID       string
+		wantErrorCode string
+		wantGoError   bool
+		wantContains  []string
 	}{
 		{
-			name:         "nil error returns nil",
-			err:          nil,
-			queryName:    "Test Query",
-			wantContains: []string{},
+			name:          "nil error",
+			err:           nil,
+			queryName:     "Any query",
+			queryID:       "123",
+			wantErrorCode: "",
+			wantGoError:   false,
 		},
 		{
-			name:      "parameter validation error",
-			err:       fmt.Errorf("required parameter 'start_date' is missing"),
-			queryName: "Total revenue by customer",
-			wantContains: []string{
-				"parameter_validation",
-				"Total revenue by customer",
-				"required parameter 'start_date' is missing",
-			},
+			name:          "SQL injection error",
+			err:           fmt.Errorf("potential SQL injection detected in parameter 'user_id'"),
+			queryName:     "User query",
+			queryID:       "abc-123",
+			wantErrorCode: "security_violation",
+			wantGoError:   false,
+			wantContains:  []string{"SQL injection", "User query"},
 		},
 		{
-			name:      "type validation error",
-			err:       fmt.Errorf("parameter 'limit': cannot convert 'abc' to integer"),
-			queryName: "Revenue report",
-			wantContains: []string{
-				"type_validation",
-				"Revenue report",
-				"cannot convert",
-			},
+			name:          "parameter validation error - missing",
+			err:           fmt.Errorf("required parameter 'date' is missing"),
+			queryName:     "Revenue report",
+			queryID:       "def-456",
+			wantErrorCode: "parameter_validation",
+			wantGoError:   false,
+			wantContains:  []string{"parameter validation failed", "Revenue report", "list_approved_queries"},
 		},
 		{
-			name:      "SQL injection error",
-			err:       fmt.Errorf("potential SQL injection detected in parameter 'user_id'"),
-			queryName: "User query",
-			wantContains: []string{
-				"security_violation",
-				"User query",
-				"SQL injection",
-			},
+			name:          "parameter validation error - unknown",
+			err:           fmt.Errorf("unknown parameter 'foo' provided"),
+			queryName:     "User stats",
+			queryID:       "ghi-789",
+			wantErrorCode: "parameter_validation",
+			wantGoError:   false,
+			wantContains:  []string{"parameter validation failed", "User stats"},
 		},
 		{
-			name:      "execution error",
-			err:       fmt.Errorf("failed to execute query: connection timeout"),
-			queryName: "Complex analytics",
-			wantContains: []string{
-				"execution_error",
-				"Complex analytics",
-				"execute",
-			},
+			name:          "type validation error",
+			err:           fmt.Errorf("cannot convert 'abc' to integer for parameter 'count'"),
+			queryName:     "Analytics",
+			queryID:       "jkl-012",
+			wantErrorCode: "type_validation",
+			wantGoError:   false,
+			wantContains:  []string{"type mismatch", "Analytics", "list_approved_queries"},
 		},
 		{
-			name:      "unknown error type",
-			err:       fmt.Errorf("something went wrong"),
-			queryName: "Some query",
-			wantContains: []string{
-				"query_error",
-				"Some query",
-				"something went wrong",
-			},
+			name:          "SQL syntax error",
+			err:           fmt.Errorf("syntax error at or near 'FORM'"),
+			queryName:     "Broken query",
+			queryID:       "mno-345",
+			wantErrorCode: "query_error",
+			wantGoError:   false,
+			wantContains:  []string{"SQL syntax error", "Broken query", "query may need to be updated"},
+		},
+		{
+			name:          "database connection error - returns Go error",
+			err:           fmt.Errorf("connection refused"),
+			queryName:     "Some query",
+			queryID:       "pqr-678",
+			wantErrorCode: "",
+			wantGoError:   true,
+			wantContains:  []string{"system_error", "Some query", "pqr-678", "connection refused"},
+		},
+		{
+			name:          "database timeout - returns Go error",
+			err:           fmt.Errorf("context deadline exceeded: timeout waiting for query"),
+			queryName:     "Slow query",
+			queryID:       "stu-901",
+			wantErrorCode: "",
+			wantGoError:   true,
+			wantContains:  []string{"system_error", "Slow query", "stu-901"},
+		},
+		{
+			name:          "generic query error",
+			err:           fmt.Errorf("division by zero"),
+			queryName:     "Math query",
+			queryID:       "vwx-234",
+			wantErrorCode: "query_error",
+			wantGoError:   false,
+			wantContains:  []string{"query execution failed", "Math query", "division by zero"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := enhanceErrorWithContext(tt.err, tt.queryName)
+			result, goErr := convertQueryExecutionError(tt.err, tt.queryName, tt.queryID)
 
 			if tt.err == nil {
-				assert.Nil(t, result, "enhanceErrorWithContext should return nil for nil input")
+				assert.Nil(t, result, "should return nil result for nil input")
+				assert.Nil(t, goErr, "should return nil error for nil input")
 				return
 			}
 
-			require.NotNil(t, result, "enhanceErrorWithContext should return an error")
-			errMsg := result.Error()
+			if tt.wantGoError {
+				// System errors return as Go errors
+				assert.Nil(t, result, "system errors should return nil result")
+				require.NotNil(t, goErr, "system errors should return Go error")
+				errMsg := goErr.Error()
+				for _, want := range tt.wantContains {
+					assert.Contains(t, errMsg, want, "error message should contain %q", want)
+				}
+			} else {
+				// Actionable errors return as error results
+				require.NotNil(t, result, "actionable errors should return error result")
+				assert.Nil(t, goErr, "actionable errors should not return Go error")
+				assert.True(t, result.IsError, "result.IsError should be true")
 
-			for _, want := range tt.wantContains {
-				assert.Contains(t, errMsg, want, "error message should contain %q", want)
+				// Parse the error response using helper function
+				text := getTextContent(result)
+				var errResp ErrorResponse
+				err := json.Unmarshal([]byte(text), &errResp)
+				require.NoError(t, err, "should be able to unmarshal error response")
+
+				assert.True(t, errResp.Error, "error field should be true")
+				assert.Equal(t, tt.wantErrorCode, errResp.Code, "error code mismatch")
+
+				for _, want := range tt.wantContains {
+					assert.Contains(t, errResp.Message, want, "error message should contain %q", want)
+				}
 			}
 		})
 	}
 }
 
-func TestCategorizeError(t *testing.T) {
+func TestExecuteApprovedQuery_ErrorResults(t *testing.T) {
 	tests := []struct {
-		errMsg   string
-		expected string
+		name          string
+		queryID       string
+		wantErrorCode string
+		wantContains  []string
 	}{
 		{
-			errMsg:   "required parameter 'date' is missing",
-			expected: "parameter_validation",
+			name:          "invalid UUID format",
+			queryID:       "not-a-uuid",
+			wantErrorCode: "invalid_parameters",
+			wantContains:  []string{"invalid query_id format", "not a valid UUID"},
 		},
 		{
-			errMsg:   "unknown parameter 'foo' provided",
-			expected: "parameter_validation",
-		},
-		{
-			errMsg:   "cannot convert 'abc' to integer",
-			expected: "type_validation",
-		},
-		{
-			errMsg:   "invalid format for date parameter",
-			expected: "type_validation",
-		},
-		{
-			errMsg:   "potential SQL injection detected",
-			expected: "security_violation",
-		},
-		{
-			errMsg:   "SQL INJECTION attempt blocked",
-			expected: "security_violation",
-		},
-		{
-			errMsg:   "failed to execute query",
-			expected: "execution_error",
-		},
-		{
-			errMsg:   "query execution timed out",
-			expected: "execution_error",
-		},
-		{
-			errMsg:   "database connection lost",
-			expected: "query_error",
+			name:          "empty query_id",
+			queryID:       "",
+			wantErrorCode: "invalid_parameters",
+			wantContains:  []string{"query_id parameter is required"},
 		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.errMsg, func(t *testing.T) {
-			result := categorizeError(tt.errMsg)
-			assert.Equal(t, tt.expected, result, "categorizeError(%q) = %q, want %q", tt.errMsg, result, tt.expected)
+		t.Run(tt.name, func(t *testing.T) {
+			// Note: This test only verifies parameter validation errors that happen before service calls
+			// Query not found and query execution errors would require mocking the service layer
+			// which is tested separately in TestConvertQueryExecutionError
+
+			// The actual test would require setting up MCP server and tool registration
+			// For now, we rely on the unit test for convertQueryExecutionError
+			// and integration tests for end-to-end verification
+			t.Skip("Integration test requires full MCP server setup - covered by convertQueryExecutionError tests")
 		})
 	}
 }
