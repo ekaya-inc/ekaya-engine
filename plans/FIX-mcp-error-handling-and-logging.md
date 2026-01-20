@@ -1315,7 +1315,7 @@ func sanitizeArguments(args map[string]any) map[string]any {
                - No `getTextContent()` helper needed - already exists in `errors_test.go`
                - Pattern follows entity and column test infrastructure
 
-            2. [ ] 3.2.4.3.4.2: Add parameter validation tests for update_project_knowledge
+            2. [x] 3.2.4.3.4.2: Add parameter validation tests for update_project_knowledge
 
                Add comprehensive parameter validation tests for the `update_project_knowledge` tool in `pkg/mcp/tools/knowledge_test.go`.
 
@@ -1389,6 +1389,14 @@ func sanitizeArguments(args map[string]any) map[string]any {
                - Tests verify structured details (for category validation)
 
                **Next subtask dependency:** This verifies parameter validation. Subtask 3.2.4.3.4.3 will test resource validation.
+
+               **Implementation notes (completed):**
+               - Added `TestUpdateProjectKnowledgeTool_ParameterValidation` with 6 test cases in pkg/mcp/tools/knowledge_test.go:438-642
+               - Tests simulate parameter validation logic (not full integration tests) following the pattern from delete_project_knowledge tests
+               - All tests verify error result structure, error codes, and descriptive error messages
+               - Edge cases covered: whitespace-only fact, newlines/tabs in fact, mixed case category, empty string fact_id
+               - Tests document that empty fact_id is treated as optional (no validation error) per tool design
+               - Pattern matches existing knowledge tool tests: simulates validation, verifies NewErrorResult() output structure
 
             3. [ ] 3.2.4.3.4.3: Add resource validation tests for delete_project_knowledge
 
