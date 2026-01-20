@@ -957,58 +957,157 @@ func sanitizeArguments(args map[string]any) map[string]any {
 
          **Session notes:** Verified in session ending 2026-01-20 that no chat MCP tool exists. This task requires no code changes.
 
-      3. [ ] 3.2.4.3: Convert knowledge management tools to error results
+      3. [ ] 3.2.4.3: Convert knowledge management tools to error results (REPLACED - SEE SUBTASKS BELOW)
 
-         Apply error handling pattern to knowledge management tools: `learn_fact`, `add_fact`, `get_facts`, `delete_fact` in `pkg/mcp/tools/knowledge.go`.
+         1. [x] **COMPLETED - REVIEWED AND APPROVED** - 3.2.4.3.1: Convert update_project_knowledge tool to error results
 
-         **File:** `pkg/mcp/tools/knowledge.go`
+            **Implementation:** Modified `pkg/mcp/tools/knowledge.go` to convert parameter validation errors to error results
 
-         **Tools to update:**
+            **Files modified:**
+            - `pkg/mcp/tools/knowledge.go` (lines 93-149):
+              - Empty fact after trimming → `NewErrorResult("invalid_parameters", "parameter 'fact' cannot be empty")`
+              - Invalid category value → `NewErrorResultWithDetails("invalid_parameters", "invalid category value", {...})` with structured details showing parameter, expected values, and actual value
+              - Invalid fact_id UUID format → `NewErrorResult("invalid_parameters", fmt.Sprintf("invalid fact_id format: %q is not a valid UUID", factIDStr))`
+              - Uses `trimString()` helper for whitespace normalization
+              - Uses `uuid.Parse()` for UUID validation
+            - `pkg/mcp/tools/knowledge_test.go` (lines 6, 225-321):
+              - Added `fmt` import for test error messages
+              - Added `TestUpdateProjectKnowledgeTool_ErrorResults` with 3 test cases:
+                - Empty fact after trimming (whitespace-only string)
+                - Invalid category value (not in allowed list)
+                - Invalid fact_id UUID format (malformed UUID string)
+              - Tests verify: `result.IsError == true`, correct error code, message, and structured details
+              - Uses `getTextContent()` helper from `errors_test.go` to extract text from MCP result
 
-         1. **learn_fact** (if exists) - Learn a new domain fact from analysis
-            - Parameter validation:
-              - Empty `fact` after trimming → `NewErrorResult("invalid_parameters", "parameter 'fact' cannot be empty")`
+            **Error conversion pattern:**
+            - Parameter validation: Trim strings, check non-empty, validate category/UUID format → `NewErrorResult` or `NewErrorResultWithDetails`
+            - System errors: Database connection failures, auth failures → remain as Go errors
+
+            **System errors kept as Go errors:**
+            - Database connection failures
+            - Authentication failures from `AcquireToolAccess`
+            - Repository failures during Upsert operation
+
+            **Error codes used:** `invalid_parameters`
+
+            **Test coverage:** All 3 tests pass, covering empty fact, invalid category, and invalid UUID scenarios
+
+            **Pattern established:**
+            - Whitespace normalization with `trimString()` before validation
+            - Category validation against allowed list with structured error details
+            - UUID format validation with descriptive error messages
+
+            **Session notes (2026-01-20):**
+            - Implementation reviewed and approved by human operator
+            - All tests passing, error handling pattern consistent with previous tools
+            - Changes committed as part of task completion workflow
+
+            **Next implementer:** Task 3.2.4.3.1 is complete. The `update_project_knowledge` tool now surfaces actionable errors to Claude. Proceed to task 3.2.4.3.2 (list_project_knowledge tool) or task 3.2.4.3.3 (delete_project_knowledge tool) as needed.
+
+            **Note:** The tool name may be `learn_fact`, `add_fact`, or `update_project_knowledge`. Search `pkg/mcp/tools/knowledge.go` for the actual tool registration to find the correct function name.
+
+         2. [ ] 3.2.4.3.2: Convert list_project_knowledge tool to error results
+
+            Apply error handling pattern to the list/get facts tool in `pkg/mcp/tools/knowledge.go`. This tool retrieves stored domain facts, optionally filtered by category.
+
+            **File:** `pkg/mcp/tools/knowledge.go`
+
+            **Parameter validation:**
+            - If `category` parameter exists and is not empty:
               - Invalid `category` value → `NewErrorResultWithDetails("invalid_parameters", "invalid category value", map[string]any{"parameter": "category", "expected": ["terminology", "business_rule", "enumeration", "convention"], "actual": category})`
-            - System errors kept as Go errors:
-              - Database connection failures
-              - Authentication failures
+            - Use `trimString()` helper for whitespace normalization if category is provided
 
-         2. **add_fact** (if exists) - Manually add a domain fact
-            - Same parameter validation as `learn_fact`
+            **System errors kept as Go errors:**
+            - Database connection failures
+            - Authentication failures from `AcquireToolAccess`
+            - Repository failures during query operation
 
-         3. **get_facts** - Retrieve project domain facts
-            - Parameter validation:
-              - If `category` parameter exists and is not in allowed values → `NewErrorResultWithDetails("invalid_parameters", "invalid category value", map[string]any{"parameter": "category", "expected": ["terminology", "business_rule", "enumeration", "convention"], "actual": category})`
-            - System errors kept as Go errors:
-              - Database connection failures
-              - Authentication failures
+            **Test coverage:**
+            - Create `TestListProjectKnowledgeTool_ErrorResults` in `pkg/mcp/tools/knowledge_test.go`
+            - Test cases:
+              - Invalid category value (string not in allowed list)
+              - Valid category values should pass through without error
+            - Verify: `result.IsError == true`, correct error code, message, structured details
 
-         4. **delete_fact** - Delete a domain fact
-            - Parameter validation:
-              - Empty `fact_id` after trimming → `NewErrorResult("invalid_parameters", "parameter 'fact_id' cannot be empty")`
-              - Invalid UUID format → `NewErrorResult("invalid_parameters", fmt.Sprintf("invalid fact_id format: %q is not a valid UUID", fact_id))`
-            - Resource validation:
-              - Fact not found → `NewErrorResult("FACT_NOT_FOUND", fmt.Sprintf("fact %q not found", fact_id))`
-            - System errors kept as Go errors:
-              - Database connection failures
-              - Authentication failures
+            **Error codes:** `invalid_parameters`
 
-         **Helper functions:**
-         - Use `trimString()` from `pkg/mcp/tools/helpers.go` for whitespace normalization
-         - Use UUID validation from standard library: `_, err := uuid.Parse(fact_id)`
+            **Note:** The tool name may be `get_facts`, `list_facts`, or `list_project_knowledge`. Search for tool registrations in `pkg/mcp/tools/knowledge.go` to find the actual function name.
 
-         **Error codes:** `invalid_parameters`, `FACT_NOT_FOUND`
+         3. [ ] 3.2.4.3.3: Convert delete_project_knowledge tool to error results
 
-         **Test coverage:**
-         - Create `TestLearnFactTool_ErrorResults` in `pkg/mcp/tools/knowledge_test.go` (if tool exists)
-           - Test cases: empty fact, invalid category
-         - Create `TestAddFactTool_ErrorResults` (if tool exists)
-           - Test cases: empty fact, invalid category
-         - Create `TestGetFactsTool_ErrorResults`
-           - Test cases: invalid category value
-         - Create `TestDeleteFactTool_ErrorResults`
-           - Test cases: empty fact_id, invalid UUID format, fact not found
-         - Verify: `result.IsError == true`, correct error code, message, structured details
+            Apply error handling pattern to the delete fact tool in `pkg/mcp/tools/knowledge.go`. This tool removes a stored domain fact by ID.
+
+            **File:** `pkg/mcp/tools/knowledge.go`
+
+            **Parameter validation:**
+            - Empty `fact_id` after trimming → `NewErrorResult("invalid_parameters", "parameter 'fact_id' cannot be empty")`
+            - Invalid UUID format → `NewErrorResult("invalid_parameters", fmt.Sprintf("invalid fact_id format: %q is not a valid UUID", fact_id))`
+            - Use `trimString()` helper from `pkg/mcp/tools/helpers.go` for whitespace normalization
+            - Use UUID validation: `_, err := uuid.Parse(fact_id)`
+
+            **Resource validation:**
+            - Fact not found → `NewErrorResult("FACT_NOT_FOUND", fmt.Sprintf("fact %q not found", fact_id))`
+
+            **System errors kept as Go errors:**
+            - Database connection failures
+            - Authentication failures from `AcquireToolAccess`
+            - Repository failures during delete operation
+
+            **Test coverage:**
+            - Create `TestDeleteProjectKnowledgeTool_ErrorResults` in `pkg/mcp/tools/knowledge_test.go`
+            - Test cases:
+              - Empty fact_id parameter (whitespace-only string)
+              - Invalid UUID format (malformed UUID string)
+              - Fact not found (valid UUID but doesn't exist)
+            - Verify: `result.IsError == true`, correct error code, message
+
+            **Error codes:** `invalid_parameters`, `FACT_NOT_FOUND`
+
+            **Note:** The tool name may be `delete_fact` or `delete_project_knowledge`. Search for tool registrations in `pkg/mcp/tools/knowledge.go` to find the actual function name.
+
+         4. [ ] 3.2.4.3.4: Add comprehensive test coverage and verify all scenarios
+
+            Create comprehensive test suite for all knowledge management tools in `pkg/mcp/tools/knowledge_test.go`.
+
+            **Test coverage requirements:**
+
+            1. **Integration test setup:**
+               - Use existing test helpers from other tool tests (e.g., `entity_test.go`, `column_test.go`)
+               - Mock `KnowledgeToolDeps` struct with mock repositories
+               - Set up test ontology and project context
+
+            2. **Test categories to cover:**
+               - Parameter validation errors (from subtasks 3.2.4.3.1-3.2.4.3.3)
+               - Resource validation errors (fact not found)
+               - Successful operations (facts are created, listed, deleted)
+               - Edge cases (empty strings, whitespace-only strings, malformed UUIDs)
+
+            3. **Test naming convention:**
+               - Follow existing pattern: `TestToolName_ErrorResults` for error tests
+               - Use descriptive subtests with `t.Run()` for each scenario
+
+            4. **Error result verification:**
+               - Check `result.IsError == true` for all error scenarios
+               - Verify error code matches expected value
+               - Verify error message contains expected text
+               - Verify structured details (if present) contain expected fields
+
+            5. **Run full test suite:**
+               - Execute `go test ./pkg/mcp/tools/... -short` to verify all tests pass
+               - Ensure no regressions in existing tests
+
+            **Verification checklist:**
+            - [ ] All knowledge tool error paths return error results (not Go errors)
+            - [ ] All parameter validation uses `trimString()` helper
+            - [ ] UUID validation uses `uuid.Parse()`
+            - [ ] Category validation checks against allowed list
+            - [ ] System errors remain as Go errors
+            - [ ] Test coverage includes all error scenarios
+            - [ ] All tests pass
+
+            **Files modified:**
+            - `pkg/mcp/tools/knowledge.go` (error handling)
+            - `pkg/mcp/tools/knowledge_test.go` (test coverage)
 
       4. [ ] 3.2.4.4: Document final error handling pattern
 

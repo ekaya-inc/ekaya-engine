@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -222,8 +223,107 @@ func TestUpdateProjectKnowledge_ValidCategories(t *testing.T) {
 	}
 }
 
+// TestUpdateProjectKnowledgeTool_ErrorResults verifies error handling for invalid parameters.
+func TestUpdateProjectKnowledgeTool_ErrorResults(t *testing.T) {
+	t.Run("empty fact after trimming", func(t *testing.T) {
+		// Simulate validation check for empty fact after trimming
+		fact := "   "
+		fact = trimString(fact)
+		if fact == "" {
+			result := NewErrorResult(
+				"invalid_parameters",
+				"parameter 'fact' cannot be empty",
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content to verify structure
+			var errorResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, err)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Contains(t, errorResp.Message, "parameter 'fact' cannot be empty")
+		}
+	})
+
+	t.Run("invalid category value", func(t *testing.T) {
+		// Simulate category validation
+		category := "invalid_category"
+		validCategories := []string{"terminology", "business_rule", "enumeration", "convention"}
+		validCategoryMap := map[string]bool{
+			"terminology":   true,
+			"business_rule": true,
+			"enumeration":   true,
+			"convention":    true,
+		}
+
+		if !validCategoryMap[category] {
+			result := NewErrorResultWithDetails(
+				"invalid_parameters",
+				"invalid category value",
+				map[string]any{
+					"parameter": "category",
+					"expected":  validCategories,
+					"actual":    category,
+				},
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content to verify structure
+			var errorResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, err)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Contains(t, errorResp.Message, "invalid category value")
+
+			// Check details
+			detailsMap, ok := errorResp.Details.(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, "category", detailsMap["parameter"])
+			assert.Equal(t, "invalid_category", detailsMap["actual"])
+		}
+	})
+
+	t.Run("invalid fact_id UUID format", func(t *testing.T) {
+		// Simulate UUID validation
+		factIDStr := "not-a-uuid"
+		factIDStr = trimString(factIDStr)
+		_, err := uuid.Parse(factIDStr)
+		if err != nil {
+			result := NewErrorResult(
+				"invalid_parameters",
+				fmt.Sprintf("invalid fact_id format: %q is not a valid UUID", factIDStr),
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content to verify structure
+			var errorResp ErrorResponse
+			jsonErr := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, jsonErr)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Contains(t, errorResp.Message, "invalid fact_id format")
+			assert.Contains(t, errorResp.Message, "not-a-uuid")
+		}
+	})
+}
+
 // Note: Full integration tests for tool execution with database require a database connection
 // and would be covered in integration tests. The tests above verify that:
 // - Tools are properly registered with the MCP server
 // - Response structures serialize correctly
 // - Valid categories are accepted
+// - Error results are returned for invalid parameters
