@@ -68,16 +68,21 @@ export function getAuthUrlFromQuery(): string | null {
  * @throws Error if auth_url is provided but not in the backend's whitelist
  */
 export async function fetchConfig(): Promise<AppConfig> {
-  // Extract auth_url from current page URL
+  // Extract auth_url from current page URL and project_id from path
   const authUrl = getAuthUrlFromQuery();
+  const projectId = getProjectIdFromPath();
 
   // Return cached config only if auth_url hasn't changed
   if (cachedConfig && cachedAuthUrl === authUrl) {
     return cachedConfig;
   }
 
-  // Build query string if auth_url is present
-  const queryString = authUrl ? `?auth_url=${encodeURIComponent(authUrl)}` : '';
+  // Build query string with auth_url and/or project_id
+  // project_id is needed so backend can look up saved auth_server_url when auth_url is not in URL
+  const params = new URLSearchParams();
+  if (authUrl) params.set('auth_url', authUrl);
+  if (projectId) params.set('project_id', projectId);
+  const queryString = params.toString() ? `?${params.toString()}` : '';
 
   // Fetch both endpoints in parallel
   // Note: auth_url is only needed for well-known endpoint (determines which auth server metadata to return)
@@ -115,7 +120,6 @@ export async function fetchConfig(): Promise<AppConfig> {
 
   // If auth_url was provided via query param and matches the returned config,
   // persist it to the project so re-authentication uses the correct server
-  const projectId = getProjectIdFromPath();
   if (authUrl && projectId && cachedConfig.authServerUrl === authUrl) {
     saveAuthUrlToProject(projectId, authUrl).catch((err) => {
       console.warn('Failed to persist auth_url to project:', err);
