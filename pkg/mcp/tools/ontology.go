@@ -167,6 +167,11 @@ func registerGetOntologyTool(s *server.MCPServer, deps *OntologyToolDeps) {
 			return nil, fmt.Errorf("failed to get ontology at depth '%s': %w", depth, err)
 		}
 
+		// Check if result is already a CallToolResult (error result from handleColumnsDepth)
+		if toolResult, ok := result.(*mcp.CallToolResult); ok {
+			return toolResult, nil
+		}
+
 		jsonResult, err := json.Marshal(result)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal result: %w", err)
