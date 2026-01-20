@@ -100,7 +100,7 @@ When debugging MCP integrations, two issues make troubleshooting difficult:
          - Verify database state changes
          - Use proper cleanup for test isolation
 
-   3. [ ] 3.4: Update remaining medium/low priority tools
+   3. [x] 3.4: Update remaining medium/low priority tools
 
       **entity.go - delete_entity:**
       - Validate name parameter (non-empty after trim)
