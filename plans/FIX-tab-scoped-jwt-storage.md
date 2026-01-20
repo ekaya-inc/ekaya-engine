@@ -913,7 +913,77 @@ describe('OAuthCallbackPage - Token Storage', () => {
 });
 ```
 
-### Task 10: Backend Unit Tests
+### Task 10: Backend Unit Tests ✅
+
+**Status: COMPLETE** ✅
+
+**Files Verified:**
+- `pkg/handlers/auth_test.go:401-472` - `TestAuthHandler_CompleteOAuth_ReturnsTokenInBody`
+- `pkg/handlers/auth_test.go:474-520` - `TestAuthHandler_CompleteOAuth_HandlesInvalidJWTGracefully`
+- `pkg/auth/service_test.go:75-97` - `TestAuthService_ValidateRequest_AuthorizationHeaderTakesPrecedence`
+- `pkg/auth/service_test.go:99-124` - `TestAuthService_ValidateRequest_FallsBackToCookie`
+- `pkg/auth/service_test.go:126-141` - `TestAuthService_ValidateRequest_MissingAuth`
+
+**Implementation Summary:**
+
+All required backend unit tests are already implemented and passing. No new code was needed - verification confirmed existing test coverage was complete.
+
+**Handler Tests (`pkg/handlers/auth_test.go`):**
+
+1. **`TestAuthHandler_CompleteOAuth_ReturnsTokenInBody` (lines 401-472):** Verifies that the `/api/auth/complete-oauth` endpoint returns both `token` and `project_id` in the response body
+   - Uses a valid JWT with embedded `pid` claim
+   - Verifies `resp.Token` matches the JWT returned by OAuth service
+   - Verifies `resp.ProjectID` is correctly extracted from JWT payload
+   - Confirms cookie is still set for backward compatibility
+
+2. **`TestAuthHandler_CompleteOAuth_HandlesInvalidJWTGracefully` (lines 474-520):** Verifies graceful handling of malformed JWTs
+   - Uses malformed JWT: `"not.a.valid.jwt"`
+   - Verifies request still returns 200 OK (doesn't fail)
+   - Verifies token is still returned in response body
+   - Verifies `project_id` is empty string when JWT parsing fails
+
+**Auth Service Tests (`pkg/auth/service_test.go`):**
+
+3. **`TestAuthService_ValidateRequest_AuthorizationHeaderTakesPrecedence` (lines 75-97):** Verifies Authorization header is preferred over cookie
+   - Sends both `Authorization: Bearer header-token` and `ekaya_jwt` cookie with different values
+   - Verifies that `header-token` is extracted (not `cookie-token`)
+   - Confirms header wins when both authentication methods are present
+
+4. **`TestAuthService_ValidateRequest_FallsBackToCookie` (lines 99-124):** Verifies cookie fallback when no Authorization header
+   - Sends only `ekaya_jwt` cookie (no Authorization header)
+   - Verifies that cookie token is extracted
+   - Confirms backward compatibility for cookie-based authentication
+
+5. **`TestAuthService_ValidateRequest_MissingAuth` (lines 126-141):** Verifies error when no authentication is provided
+   - Sends request with neither Authorization header nor cookie
+   - Verifies `ErrMissingAuthorization` error is returned
+   - Confirms proper error handling for unauthenticated requests
+
+**Test Results:**
+```bash
+# Handler tests
+✓ TestAuthHandler_CompleteOAuth_ReturnsTokenInBody (0.00s)
+✓ TestAuthHandler_CompleteOAuth_HandlesInvalidJWTGracefully (0.00s)
+PASS: pkg/handlers
+
+# Auth service tests
+✓ TestAuthService_ValidateRequest_AuthorizationHeaderTakesPrecedence (0.00s)
+✓ TestAuthService_ValidateRequest_FallsBackToCookie (0.00s)
+✓ TestAuthService_ValidateRequest_MissingAuth (0.00s)
+PASS: pkg/auth
+```
+
+**Why This Approach:**
+- Handler tests verify end-to-end response body structure (token + project_id)
+- Service tests verify token extraction precedence (header > cookie)
+- Tests cover both happy path and error cases (malformed JWT, missing auth)
+- Test naming clearly describes behavior being verified
+- All tests use table-driven or scenario-based patterns for readability
+
+**Next Task Context:**
+Task 11 (Integration Tests) should verify the complete OAuth flow end-to-end, including token exchange and subsequent API calls using Bearer tokens. The unit tests completed here provide comprehensive coverage of the individual components. Note that this task was verification-only - all required tests already existed in the codebase from previous tasks.
+
+**Original Spec:**
 
 **Update file: `pkg/handlers/auth_test.go`**
 
