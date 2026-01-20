@@ -12,10 +12,20 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/config"
 	"github.com/ekaya-inc/ekaya-engine/pkg/mcp"
 	mcpauth "github.com/ekaya-inc/ekaya-engine/pkg/mcp/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/mcp/tools"
 )
+
+// defaultMCPConfig returns the default MCP logging configuration for tests.
+func defaultMCPConfig() config.MCPConfig {
+	return config.MCPConfig{
+		LogRequests:  true,
+		LogResponses: false,
+		LogErrors:    true,
+	}
+}
 
 // mcpPassingAuthService is a mock that always allows requests through.
 type mcpPassingAuthService struct {
@@ -47,7 +57,7 @@ func TestNewMCPHandler(t *testing.T) {
 	logger := zap.NewNop()
 	mcpServer := mcp.NewServer("test", "1.0.0", logger)
 
-	handler := NewMCPHandler(mcpServer, logger)
+	handler := NewMCPHandler(mcpServer, logger, defaultMCPConfig())
 
 	if handler == nil {
 		t.Fatal("expected non-nil handler")
@@ -64,7 +74,7 @@ func TestMCPHandler_RegisterRoutes(t *testing.T) {
 	logger := zap.NewNop()
 	mcpServer := mcp.NewServer("test", "1.0.0", logger)
 	tools.RegisterHealthTool(mcpServer.MCP(), "1.0.0", nil)
-	handler := NewMCPHandler(mcpServer, logger)
+	handler := NewMCPHandler(mcpServer, logger, defaultMCPConfig())
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, newTestMCPAuthMiddleware())
@@ -99,7 +109,7 @@ func TestMCPHandler_ToolsCall(t *testing.T) {
 	logger := zap.NewNop()
 	mcpServer := mcp.NewServer("test", "test-version", logger)
 	tools.RegisterHealthTool(mcpServer.MCP(), "test-version", nil)
-	handler := NewMCPHandler(mcpServer, logger)
+	handler := NewMCPHandler(mcpServer, logger, defaultMCPConfig())
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, newTestMCPAuthMiddleware())
@@ -154,7 +164,7 @@ func TestMCPHandler_GETReturnsMethodNotAllowed(t *testing.T) {
 	logger := zap.NewNop()
 	mcpServer := mcp.NewServer("test", "1.0.0", logger)
 	tools.RegisterHealthTool(mcpServer.MCP(), "1.0.0", nil)
-	handler := NewMCPHandler(mcpServer, logger)
+	handler := NewMCPHandler(mcpServer, logger, defaultMCPConfig())
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, newTestMCPAuthMiddleware())
@@ -178,7 +188,7 @@ func TestMCPHandler_GETReturnsMethodNotAllowed(t *testing.T) {
 func TestMCPHandler_UnsupportedMethodsReturnMethodNotAllowed(t *testing.T) {
 	logger := zap.NewNop()
 	mcpServer := mcp.NewServer("test", "1.0.0", logger)
-	handler := NewMCPHandler(mcpServer, logger)
+	handler := NewMCPHandler(mcpServer, logger, defaultMCPConfig())
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, newTestMCPAuthMiddleware())
@@ -206,7 +216,7 @@ func TestMCPHandler_LoggingMiddlewareIntegration(t *testing.T) {
 
 	mcpServer := mcp.NewServer("test", "1.0.0", logger)
 	tools.RegisterHealthTool(mcpServer.MCP(), "1.0.0", nil)
-	handler := NewMCPHandler(mcpServer, logger)
+	handler := NewMCPHandler(mcpServer, logger, defaultMCPConfig())
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, newTestMCPAuthMiddleware())

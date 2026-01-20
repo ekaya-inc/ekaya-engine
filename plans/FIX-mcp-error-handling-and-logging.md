@@ -477,7 +477,38 @@ func sanitizeArguments(args map[string]any) map[string]any {
      DEBUG MCP response success {"tool": "get_ontology", "duration": "4.2ms"}
      ```
    - **Next implementer:** Task 2.2 is complete. The logging middleware is now active and will log all MCP requests/responses at DEBUG level. Phase 2 task 3 (configuration options) is optional but could add value if you want per-environment control over log verbosity.
-3. [ ] Add configuration options (OPTIONAL - basic redaction already implemented)
+3. [x] **COMPLETED** - Add configuration options
+   - **Implementation:** Added `MCPConfig` struct to `pkg/config/config.go` with three configuration flags:
+     - `LogRequests` (default: true) - Log tool names and request parameters at DEBUG level
+     - `LogResponses` (default: false) - Log full response content (verbose)
+     - `LogErrors` (default: true) - Log error responses with code and message
+   - **Configuration sources:** Both `config.yaml` and environment variables (`MCP_LOG_REQUESTS`, `MCP_LOG_RESPONSES`, `MCP_LOG_ERRORS`)
+   - **Files modified:**
+     - `pkg/config/config.go` (lines 13-31): Added MCPConfig struct with field documentation
+     - `config.yaml.example` (lines 92-109): Added MCP logging section with examples and defaults
+     - `pkg/middleware/mcp_logging.go` (lines 17-24, 46-52, 72-94): Updated middleware to accept MCPConfig and respect flags
+     - `pkg/handlers/mcp_handler.go` (lines 7, 16, 21-26, 35): Pass MCPConfig from server config to middleware
+     - `main.go` (line 308): Pass `cfg.MCP` to NewMCPHandler
+   - **Middleware behavior:**
+     - When `LogRequests=false`: No request logging (silent)
+     - When `LogResponses=true`: Logs full response content including result field
+     - When `LogResponses=false` + `LogRequests=true`: Logs minimal success message (tool name + duration only)
+     - When `LogErrors=false`: Errors are not logged (for high-throughput prod environments)
+     - When all flags=false: No MCP logging at all (fully silent)
+   - **Test coverage:** `pkg/middleware/mcp_logging_test.go` includes `TestMCPRequestLogger_ConfigurableLogging` with 6 test cases:
+     - `log_requests disabled - no request logs`
+     - `log_responses enabled - logs response content`
+     - `log_responses disabled - logs minimal success`
+     - `log_errors enabled - logs error details`
+     - `log_errors disabled - no error logs`
+     - `all logging disabled - no logs`
+   - **Integration tests:** `pkg/handlers/mcp_integration_test.go` includes `TestMCPHandler_LoggingMiddleware_IntegrationTest`:
+     - Verifies end-to-end logging with real MCP server and actual tool calls
+     - Tests multiple scenarios: successful tool call, tool error, invalid tool name
+     - Confirms logs appear with correct tool names, arguments, error codes, and messages
+     - Uses real HTTP requests to simulate production flow
+   - **Design decision:** Logging behavior is configured at server startup (not per-project). All MCP endpoints share the same logging config. This keeps it simple and avoids per-request overhead.
+   - **Next implementer:** MCP logging is now fully configurable. Recommended prod settings: `log_requests=true, log_responses=false, log_errors=true` (default values). For debugging, enable `log_responses=true` to see full tool results.
 4. [ ] ~~Add sensitive data redaction~~ (COMPLETED - included in 2.1)
 
 ### Phase 3: Rollout to All Tools

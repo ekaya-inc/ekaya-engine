@@ -6,6 +6,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/config"
 	"github.com/ekaya-inc/ekaya-engine/pkg/mcp"
 	mcpauth "github.com/ekaya-inc/ekaya-engine/pkg/mcp/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/middleware"
@@ -15,13 +16,15 @@ import (
 type MCPHandler struct {
 	httpServer *server.StreamableHTTPServer
 	logger     *zap.Logger
+	mcpConfig  config.MCPConfig
 }
 
 // NewMCPHandler creates a new MCP handler from an MCP server.
-func NewMCPHandler(mcpServer *mcp.Server, logger *zap.Logger) *MCPHandler {
+func NewMCPHandler(mcpServer *mcp.Server, logger *zap.Logger, mcpConfig config.MCPConfig) *MCPHandler {
 	return &MCPHandler{
 		httpServer: mcpServer.NewStreamableHTTPServer(),
 		logger:     logger,
+		mcpConfig:  mcpConfig,
 	}
 }
 
@@ -32,7 +35,7 @@ func (h *MCPHandler) RegisterRoutes(mux *http.ServeMux, mcpAuthMiddleware *mcpau
 	// 1. MCP request/response logging (innermost - logs JSON-RPC details)
 	// 2. Authentication (middle - validates JWT token)
 	// 3. Method check (outermost - rejects non-POST before auth)
-	loggedHandler := middleware.MCPRequestLogger(h.logger)(h.httpServer)
+	loggedHandler := middleware.MCPRequestLogger(h.logger, h.mcpConfig)(h.httpServer)
 	authHandler := mcpAuthMiddleware.RequireAuth("pid")(loggedHandler)
 	methodCheckedHandler := h.requirePOST(authHandler)
 	mux.Handle("/mcp/{pid}", methodCheckedHandler)

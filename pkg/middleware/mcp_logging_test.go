@@ -6,11 +6,21 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/config"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 )
+
+// defaultMCPConfig returns the default MCP logging configuration for tests.
+func defaultMCPConfig() config.MCPConfig {
+	return config.MCPConfig{
+		LogRequests:  true,
+		LogResponses: false,
+		LogErrors:    true,
+	}
+}
 
 func TestMCPRequestLogger(t *testing.T) {
 	t.Run("logs successful tool call", func(t *testing.T) {
@@ -26,7 +36,7 @@ func TestMCPRequestLogger(t *testing.T) {
 		})
 
 		// Wrap with MCP logging middleware
-		wrapped := MCPRequestLogger(logger)(handler)
+		wrapped := MCPRequestLogger(logger, defaultMCPConfig())(handler)
 
 		// Create test request with JSON-RPC tool call
 		reqBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_ontology","arguments":{"depth":"domain"}}}`
@@ -64,7 +74,7 @@ func TestMCPRequestLogger(t *testing.T) {
 			w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"no active ontology found"}}`))
 		})
 
-		wrapped := MCPRequestLogger(logger)(handler)
+		wrapped := MCPRequestLogger(logger, defaultMCPConfig())(handler)
 
 		reqBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_ontology","arguments":{"depth":"columns"}}}`
 		req := httptest.NewRequest(http.MethodPost, "/mcp/test-project", bytes.NewBufferString(reqBody))
@@ -92,7 +102,7 @@ func TestMCPRequestLogger(t *testing.T) {
 			w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
 		})
 
-		wrapped := MCPRequestLogger(logger)(handler)
+		wrapped := MCPRequestLogger(logger, defaultMCPConfig())(handler)
 
 		// Request with sensitive parameters
 		reqBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"test_tool","arguments":{"password":"secret123","api_key":"abc123","normal_param":"visible"}}}`
@@ -118,7 +128,7 @@ func TestMCPRequestLogger(t *testing.T) {
 			w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
 		})
 
-		wrapped := MCPRequestLogger(logger)(handler)
+		wrapped := MCPRequestLogger(logger, defaultMCPConfig())(handler)
 
 		// Create a string longer than 200 characters
 		longString := string(make([]byte, 250))
@@ -149,7 +159,7 @@ func TestMCPRequestLogger(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		wrapped := MCPRequestLogger(nil)(handler)
+		wrapped := MCPRequestLogger(nil, defaultMCPConfig())(handler)
 
 		req := httptest.NewRequest(http.MethodPost, "/mcp/test", bytes.NewBufferString(`{}`))
 		rec := httptest.NewRecorder()
@@ -169,7 +179,7 @@ func TestMCPRequestLogger(t *testing.T) {
 			w.Write([]byte(`{"error":"bad request"}`))
 		})
 
-		wrapped := MCPRequestLogger(logger)(handler)
+		wrapped := MCPRequestLogger(logger, defaultMCPConfig())(handler)
 
 		// Send malformed JSON
 		req := httptest.NewRequest(http.MethodPost, "/mcp/test", bytes.NewBufferString(`{invalid json`))
@@ -189,7 +199,7 @@ func TestMCPRequestLogger(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		wrapped := MCPRequestLogger(logger)(handler)
+		wrapped := MCPRequestLogger(logger, defaultMCPConfig())(handler)
 
 		req := httptest.NewRequest(http.MethodPost, "/mcp/test", bytes.NewBufferString(""))
 		rec := httptest.NewRecorder()
@@ -282,5 +292,213 @@ func TestSanitizeArguments(t *testing.T) {
 		assert.Equal(t, "[REDACTED]", result["PASSWORD"])
 		assert.Equal(t, "[REDACTED]", result["Api_Key"])
 		assert.Equal(t, "[REDACTED]", result["AccessToken"])
+	})
+}
+
+func TestMCPRequestLogger_ConfigurableLogging(t *testing.T) {
+	t.Run("log_requests disabled - no request logs", func(t *testing.T) {
+		// Setup observer to capture logs
+		core, logs := observer.New(zapcore.DebugLevel)
+		logger := zap.New(core)
+
+		// Create test handler
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"success"}]}}`))
+		})
+
+		// Configure with log_requests disabled
+		cfg := config.MCPConfig{
+			LogRequests:  false,
+			LogResponses: false,
+			LogErrors:    true,
+		}
+		wrapped := MCPRequestLogger(logger, cfg)(handler)
+
+		// Create test request
+		reqBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_ontology","arguments":{"depth":"domain"}}}`
+		req := httptest.NewRequest(http.MethodPost, "/mcp/test-project", bytes.NewBufferString(reqBody))
+		rec := httptest.NewRecorder()
+
+		// Execute request
+		wrapped.ServeHTTP(rec, req)
+
+		// Verify no logs when log_requests is disabled
+		assert.Equal(t, 0, logs.Len(), "Should not log when log_requests is disabled")
+	})
+
+	t.Run("log_responses enabled - logs response content", func(t *testing.T) {
+		// Setup observer to capture logs
+		core, logs := observer.New(zapcore.DebugLevel)
+		logger := zap.New(core)
+
+		// Create test handler
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"success"}]}}`))
+		})
+
+		// Configure with log_responses enabled
+		cfg := config.MCPConfig{
+			LogRequests:  true,
+			LogResponses: true,
+			LogErrors:    true,
+		}
+		wrapped := MCPRequestLogger(logger, cfg)(handler)
+
+		// Create test request
+		reqBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_ontology","arguments":{"depth":"domain"}}}`
+		req := httptest.NewRequest(http.MethodPost, "/mcp/test-project", bytes.NewBufferString(reqBody))
+		rec := httptest.NewRecorder()
+
+		// Execute request
+		wrapped.ServeHTTP(rec, req)
+
+		// Verify response content is logged
+		assert.Equal(t, 2, logs.Len(), "Should log request and response")
+		responseLog := logs.All()[1]
+		assert.Equal(t, "MCP response success", responseLog.Message)
+		assert.NotNil(t, responseLog.ContextMap()["result"], "Should include result when log_responses is enabled")
+	})
+
+	t.Run("log_responses disabled - logs minimal success", func(t *testing.T) {
+		// Setup observer to capture logs
+		core, logs := observer.New(zapcore.DebugLevel)
+		logger := zap.New(core)
+
+		// Create test handler
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"success"}]}}`))
+		})
+
+		// Configure with log_responses disabled (default)
+		cfg := config.MCPConfig{
+			LogRequests:  true,
+			LogResponses: false,
+			LogErrors:    true,
+		}
+		wrapped := MCPRequestLogger(logger, cfg)(handler)
+
+		// Create test request
+		reqBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_ontology","arguments":{"depth":"domain"}}}`
+		req := httptest.NewRequest(http.MethodPost, "/mcp/test-project", bytes.NewBufferString(reqBody))
+		rec := httptest.NewRecorder()
+
+		// Execute request
+		wrapped.ServeHTTP(rec, req)
+
+		// Verify minimal success log
+		assert.Equal(t, 2, logs.Len(), "Should log request and response")
+		responseLog := logs.All()[1]
+		assert.Equal(t, "MCP response success", responseLog.Message)
+		// Should NOT include result when log_responses is disabled
+		assert.Nil(t, responseLog.ContextMap()["result"], "Should not include result when log_responses is disabled")
+		assert.NotNil(t, responseLog.ContextMap()["duration"], "Should include duration")
+	})
+
+	t.Run("log_errors enabled - logs error details", func(t *testing.T) {
+		// Setup observer to capture logs
+		core, logs := observer.New(zapcore.DebugLevel)
+		logger := zap.New(core)
+
+		// Create test handler that returns error
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"internal error"}}`))
+		})
+
+		// Configure with log_errors enabled (default)
+		cfg := config.MCPConfig{
+			LogRequests:  true,
+			LogResponses: false,
+			LogErrors:    true,
+		}
+		wrapped := MCPRequestLogger(logger, cfg)(handler)
+
+		// Create test request
+		reqBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_ontology","arguments":{"depth":"domain"}}}`
+		req := httptest.NewRequest(http.MethodPost, "/mcp/test-project", bytes.NewBufferString(reqBody))
+		rec := httptest.NewRecorder()
+
+		// Execute request
+		wrapped.ServeHTTP(rec, req)
+
+		// Verify error is logged
+		assert.Equal(t, 2, logs.Len(), "Should log request and error")
+		errorLog := logs.All()[1]
+		assert.Equal(t, "MCP response error", errorLog.Message)
+		assert.Equal(t, int64(-32603), errorLog.ContextMap()["error_code"])
+		assert.Equal(t, "internal error", errorLog.ContextMap()["error_message"])
+	})
+
+	t.Run("log_errors disabled - no error logs", func(t *testing.T) {
+		// Setup observer to capture logs
+		core, logs := observer.New(zapcore.DebugLevel)
+		logger := zap.New(core)
+
+		// Create test handler that returns error
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"internal error"}}`))
+		})
+
+		// Configure with log_errors disabled
+		cfg := config.MCPConfig{
+			LogRequests:  true,
+			LogResponses: false,
+			LogErrors:    false,
+		}
+		wrapped := MCPRequestLogger(logger, cfg)(handler)
+
+		// Create test request
+		reqBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_ontology","arguments":{"depth":"domain"}}}`
+		req := httptest.NewRequest(http.MethodPost, "/mcp/test-project", bytes.NewBufferString(reqBody))
+		rec := httptest.NewRecorder()
+
+		// Execute request
+		wrapped.ServeHTTP(rec, req)
+
+		// Verify only request is logged, not error
+		assert.Equal(t, 1, logs.Len(), "Should only log request, not error")
+		requestLog := logs.All()[0]
+		assert.Equal(t, "MCP request", requestLog.Message)
+	})
+
+	t.Run("all logging disabled - no logs", func(t *testing.T) {
+		// Setup observer to capture logs
+		core, logs := observer.New(zapcore.DebugLevel)
+		logger := zap.New(core)
+
+		// Create test handler
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"success"}]}}`))
+		})
+
+		// Configure with all logging disabled
+		cfg := config.MCPConfig{
+			LogRequests:  false,
+			LogResponses: false,
+			LogErrors:    false,
+		}
+		wrapped := MCPRequestLogger(logger, cfg)(handler)
+
+		// Create test request
+		reqBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_ontology","arguments":{"depth":"domain"}}}`
+		req := httptest.NewRequest(http.MethodPost, "/mcp/test-project", bytes.NewBufferString(reqBody))
+		rec := httptest.NewRecorder()
+
+		// Execute request
+		wrapped.ServeHTTP(rec, req)
+
+		// Verify no logs
+		assert.Equal(t, 0, logs.Len(), "Should not log anything when all options disabled")
 	})
 }

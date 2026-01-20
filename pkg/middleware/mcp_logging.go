@@ -8,13 +8,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/config"
 	"go.uber.org/zap"
 )
 
 // MCPRequestLogger returns middleware that logs MCP JSON-RPC requests/responses.
 // It intercepts request/response bodies to extract tool names, parameters, and error details.
+// Logging behavior is controlled by the MCPConfig:
+// - LogRequests: Log tool names and parameters (default: true)
+// - LogResponses: Log full response content (default: false, verbose)
+// - LogErrors: Log error responses with code/message (default: true)
 // Pass nil logger to disable logging.
-func MCPRequestLogger(logger *zap.Logger) func(http.Handler) http.Handler {
+func MCPRequestLogger(logger *zap.Logger, cfg config.MCPConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		// If no logger provided, pass through without logging
 		if logger == nil {
@@ -42,12 +47,14 @@ func MCPRequestLogger(logger *zap.Logger) func(http.Handler) http.Handler {
 			toolName := rpcReq.Params.Name
 			sanitizedArgs := sanitizeArguments(rpcReq.Params.Arguments)
 
-			// Log the incoming request
-			logger.Debug("MCP request",
-				zap.String("method", rpcReq.Method),
-				zap.String("tool", toolName),
-				zap.Any("arguments", sanitizedArgs),
-			)
+			// Log the incoming request if enabled
+			if cfg.LogRequests {
+				logger.Debug("MCP request",
+					zap.String("method", rpcReq.Method),
+					zap.String("tool", toolName),
+					zap.Any("arguments", sanitizedArgs),
+				)
+			}
 
 			// Capture response body using a recorder
 			recorder := &mcpResponseRecorder{
@@ -68,19 +75,32 @@ func MCPRequestLogger(logger *zap.Logger) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Log based on success/failure
+			// Log based on success/failure and configuration
 			if rpcResp.Error != nil {
-				logger.Debug("MCP response error",
-					zap.String("tool", toolName),
-					zap.Int("error_code", rpcResp.Error.Code),
-					zap.String("error_message", rpcResp.Error.Message),
-					zap.Duration("duration", duration),
-				)
+				// Log errors if enabled (default: true)
+				if cfg.LogErrors {
+					logger.Debug("MCP response error",
+						zap.String("tool", toolName),
+						zap.Int("error_code", rpcResp.Error.Code),
+						zap.String("error_message", rpcResp.Error.Message),
+						zap.Duration("duration", duration),
+					)
+				}
 			} else {
-				logger.Debug("MCP response success",
-					zap.String("tool", toolName),
-					zap.Duration("duration", duration),
-				)
+				// Log successful responses if enabled (default: false)
+				if cfg.LogResponses {
+					logger.Debug("MCP response success",
+						zap.String("tool", toolName),
+						zap.Any("result", rpcResp.Result),
+						zap.Duration("duration", duration),
+					)
+				} else if cfg.LogRequests {
+					// If logging requests but not responses, log a minimal success message
+					logger.Debug("MCP response success",
+						zap.String("tool", toolName),
+						zap.Duration("duration", duration),
+					)
+				}
 			}
 		})
 	}
