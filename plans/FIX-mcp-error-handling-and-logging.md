@@ -80,7 +80,7 @@ When debugging MCP integrations, two issues make troubleshooting difficult:
 
       **Test coverage:** Add `TestUpdateGlossaryTermTool_ErrorResults`, `TestGetGlossarySQLTool_ErrorResults`
 
-   2. [ ] 3.3.2: Convert ontology question tools to error results
+   2. [x] 3.3.2: Convert ontology question tools to error results
       1. [x] 3.3.2.1: Convert resolve_ontology_question tool
       2. [x] 3.3.2.2: Convert skip, dismiss, escalate tools
          1. [x] 3.3.2.2.1: Add common validation helpers (`validateQuestionID`, `validateReasonParameter`)
@@ -91,7 +91,7 @@ When debugging MCP integrations, two issues make troubleshooting difficult:
             3. [x] 3.3.2.2.3.3: Convert escalate_ontology_question tool
             4. [x] 3.3.2.2.3.4: Run full test suite and verify no regressions
       3. [x] 3.3.2.3: Convert list_ontology_questions tool
-      4. [ ] 3.3.2.4: Add comprehensive integration tests
+      4. [x] 3.3.2.4: Add comprehensive integration tests
 
          Create `pkg/mcp/tools/questions_integration_test.go` with:
          - Use `testhelpers.GetEngineDB(t)` for test database
