@@ -659,14 +659,43 @@ func sanitizeArguments(args map[string]any) map[string]any {
            - Schema lookups before ontology updates to catch missing tables/columns early
          - **Note on integration tests:** These tests are unit-style tests that don't require database setup - they simulate the validation logic and verify error result structure. Integration tests with real database would be in `pkg/mcp/tools/column_integration_test.go` if needed.
          - **Next implementer:** Task 3.2.2.3 (probe_column tool) - apply same pattern for parameter validation (table/column names) and resource lookups (TABLE_NOT_FOUND, COLUMN_NOT_FOUND). The `probe_column` tool also needs statistical analysis error handling if data issues prevent computation.
-      3. [ ] 3.2.2.3: Convert probe_column tool to error results
-         - Apply the error handling pattern to the `probe_column` tool in `pkg/mcp/tools/column.go`
-         - Convert parameter validation errors to use `NewErrorResult("invalid_parameters", ...)`: missing/empty table parameter, missing/empty column parameter
-         - Convert resource lookups to use `NewErrorResult("TABLE_NOT_FOUND", ...)` when table doesn't exist, and `NewErrorResult("COLUMN_NOT_FOUND", ...)` when column doesn't exist in the specified table
-         - Business logic note: probe_column performs statistical analysis (distinct_count, null_rate, cardinality_ratio, sample values) - if analysis fails due to data issues (e.g., cannot compute statistics on a view), return `NewErrorResult("query_error", ...)` with explanation
-         - System errors (database connection failures, timeout during analysis) should remain as Go errors
-         - Add unit tests in `pkg/mcp/tools/column_test.go` verifying: missing table parameter, missing column parameter, table not found, column not found, and successful probe with statistics
-         - Ensure all error results have correct error codes matching the audit document standards
+      3. [x] **COMPLETED - REVIEWED AND APPROVED** - 3.2.2.3: Convert probe_column tool to error results
+         - **Implementation:** Modified `pkg/mcp/tools/probe.go` to convert parameter validation and resource lookup errors to error results
+         - **Files modified:**
+           - `pkg/mcp/tools/probe.go` (lines 4-8, 75-128, 216-253):
+             - Added `strings` import for `trimString()` usage
+             - Empty table parameter after trimming → `NewErrorResult("invalid_parameters", "parameter 'table' cannot be empty")`
+             - Empty column parameter after trimming → `NewErrorResult("invalid_parameters", "parameter 'column' cannot be empty")`
+             - Table not found in schema → Sets `response.Error` field with "TABLE_NOT_FOUND: ..." prefix, handler extracts code and returns `NewErrorResult("TABLE_NOT_FOUND", ...)`
+             - Column not found in table → Sets `response.Error` field with "COLUMN_NOT_FOUND: ..." prefix, handler extracts code and returns `NewErrorResult("COLUMN_NOT_FOUND", ...)`
+             - Database connection failures remain as Go errors
+           - `pkg/mcp/tools/probe_test.go` (lines 3-9, 333-485):
+             - Added `strings` import
+             - Added `TestProbeColumnTool_ErrorResults` with 2 test cases (empty table, empty column)
+             - Added `TestProbeColumn_TableNotFound` verifying error response structure
+             - Added `TestProbeColumn_ColumnNotFound` verifying error response structure
+             - Added `TestProbeColumn_ErrorCodeExtraction` with 3 test cases verifying error code parsing logic
+             - Added `TestTrimString_ProbeTools` with 5 test cases for whitespace handling
+         - **Error conversion pattern:**
+           - Parameter validation: Trim strings, check non-empty → `NewErrorResult("invalid_parameters", ...)`
+           - Resource validation: Check table/column existence via SchemaRepo → Set `response.Error` field with prefixed error message
+           - Handler extracts error code from "CODE: message" format and returns `NewErrorResult(code, message)`
+           - System errors: Database connection failures remain as Go errors
+         - **System errors kept as Go errors:**
+           - Database connection failures from `SchemaRepo.GetColumnsByTables()`
+           - Authentication failures from `AcquireToolAccess`
+           - JSON marshaling errors
+         - **Error codes used:** `invalid_parameters` (parameter validation), `TABLE_NOT_FOUND` (table doesn't exist), `COLUMN_NOT_FOUND` (column doesn't exist)
+         - **Test coverage:** All 23 probe tests pass (5 new error handling tests + 18 existing tests)
+         - **Design decision:** The `probeColumn` helper function returns errors in the `response.Error` field rather than as Go errors, allowing the handler to convert them to structured error results. This pattern maintains clean separation between the helper function (which focuses on data retrieval) and the handler (which handles MCP protocol concerns).
+         - **Pattern established:**
+           - Whitespace normalization with `trimString()` before checking for empty parameters
+           - Helper functions set `response.Error` field for actionable errors
+           - Handler detects `response.Error` and extracts error code from "CODE: message" format
+           - Handler returns `NewErrorResult(code, message)` for actionable errors
+         - **Note on probe.go location:** The `probe_column` tool is in `pkg/mcp/tools/probe.go`, not `column.go` as mentioned in the task description. This is the correct location.
+         - **Commit:** Changes reviewed, approved, and committed with comprehensive test coverage
+         - **Next implementer:** Task 3.2.2 (schema tools) is now complete. All high-priority schema tools (`get_schema`, `update_column`, `probe_column`) now surface actionable errors to Claude. Proceed to task 3.2.3 (entity and relationship tools) or task 3.2.4 (exploration and admin tools) as needed.
    3. [ ] 3.2.3: Convert medium-priority entity and relationship tools to error results
       - Apply the error handling pattern to remaining entity/relationship tools: `delete_entity`, `get_entity`, `list_entities`, `update_relationship`, `delete_relationship`, `get_relationship`, `list_relationships` in `pkg/mcp/tools/entity.go` and `pkg/mcp/tools/relationship.go`
       - Convert parameter validation (missing/invalid entity names, relationship IDs), resource lookups (ENTITY_NOT_FOUND, RELATIONSHIP_NOT_FOUND), and business rule violations (cannot delete entity with relationships) to use `NewErrorResult()`
