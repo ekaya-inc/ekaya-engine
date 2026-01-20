@@ -1671,7 +1671,736 @@ func sanitizeArguments(args map[string]any) map[string]any {
          - Migration checklist for future tools
 
          The document serves as a complete reference guide for implementing error handling in new MCP tools and provides all necessary context for future implementers.
-3. [ ] Keep system errors as Go errors
+3. [ ] Keep system errors as Go errors (SPLIT INTO SUBTASKS BELOW)
+   1. [ ] 3.1: Identify actionable errors in MCP tools
+
+      Audit all MCP tools to identify which errors should be converted to error results (actionable by Claude) vs kept as Go errors (system failures).
+
+      **Context:** When MCP tools encounter errors, we need to distinguish between errors Claude can fix (parameter validation, resource not found) and system failures (database down, auth failure).
+
+      **Implementation:**
+      1. Use Grep to find all tool handler functions in `pkg/mcp/tools/*.go`
+      2. For each tool, analyze error returns and categorize:
+         - **Actionable errors** → Should use `NewErrorResult()`
+           - Parameter validation (missing, wrong type, out of range)
+           - Resource not found (entity, table, column, etc.)
+           - Business rule violations (invalid state transitions)
+         - **System errors** → Keep as Go errors
+           - Database connection failures
+           - Authentication failures
+           - Context deadline exceeded
+      3. Create `plans/FIX-mcp-tool-error-audit.md` documenting findings with format:
+         ```
+         ## Tool: tool_name
+
+         ### Actionable errors (convert to error results):
+         - Description (file:line)
+
+         ### System errors (keep as Go errors):
+         - Description (file:line)
+         ```
+
+      **Acceptance criteria:**
+      - Audit covers all 30+ MCP tools in `pkg/mcp/tools/`
+      - Each error return is categorized as actionable or system
+      - Audit includes file paths and line numbers
+      - Clear criteria documented for future tools
+
+      **Note:** This is purely analysis/documentation work - no code changes.
+
+   2. [ ] 3.2: Define standard error codes and helper patterns (SPLIT INTO SUBTASKS BELOW)
+
+      1. [ ] 3.2.1: Create error code constants and documentation
+
+         Create `pkg/mcp/tools/error_codes.go` with standard error code constants and documentation.
+
+         **Context:** Tools need consistent error codes so Claude can recognize and handle specific error conditions. The existing `NewErrorResult()` and `NewErrorResultWithDetails()` helpers in `pkg/mcp/tools/errors.go` are a good foundation, but we need standard error code constants.
+
+         **File to create:** `pkg/mcp/tools/error_codes.go`
+
+         **Implementation:**
+
+         1. Create new file with error code constants:
+         ```go
+         package tools
+
+         // Standard error codes for MCP tool responses.
+         //
+         // Error code naming conventions:
+         // - Resource not found: SCREAMING_SNAKE_CASE (e.g., TABLE_NOT_FOUND)
+         // - Validation errors: snake_case (e.g., invalid_parameters)
+         // - Conflicts: snake_case (e.g., resource_conflict)
+         //
+         // Usage:
+         //   return NewErrorResult(ErrCodeTableNotFound, "table \"foo\" not found")
+         const (
+             // Parameter validation errors
+             ErrCodeInvalidParameters = "invalid_parameters"
+             ErrCodeValidationError   = "validation_error"
+
+             // Resource not found errors
+             ErrCodeTableNotFound        = "TABLE_NOT_FOUND"
+             ErrCodeColumnNotFound       = "COLUMN_NOT_FOUND"
+             ErrCodeEntityNotFound       = "ENTITY_NOT_FOUND"
+             ErrCodeRelationshipNotFound = "RELATIONSHIP_NOT_FOUND"
+             ErrCodeOntologyNotFound     = "ontology_not_found"
+             ErrCodeQueryNotFound        = "QUERY_NOT_FOUND"
+             ErrCodeFactNotFound         = "FACT_NOT_FOUND"
+             ErrCodeTermNotFound         = "TERM_NOT_FOUND"
+             ErrCodeQuestionNotFound     = "QUESTION_NOT_FOUND"
+
+             // Business logic errors
+             ErrCodeResourceConflict  = "resource_conflict"
+             ErrCodeQueryError        = "query_error"
+             ErrCodeQueryNotApproved  = "QUERY_NOT_APPROVED"
+             ErrCodeSecurityViolation = "security_violation"
+             ErrCodeParameterValidation = "parameter_validation"
+             ErrCodeTypeValidation      = "type_validation"
+         )
+         ```
+
+         2. Add package-level documentation explaining when to use which code:
+         ```go
+         // Error Code Usage Guide:
+         //
+         // ErrCodeInvalidParameters: Use when required parameters are missing, empty, or wrong type
+         //   Example: "parameter 'name' cannot be empty"
+         //
+         // ErrCodeTableNotFound: Use when a table doesn't exist in schema
+         //   Example: "table \"users\" not found in schema registry"
+         //
+         // ErrCodeEntityNotFound: Use when an entity doesn't exist in ontology
+         //   Example: "entity \"User\" not found"
+         //
+         // ... (document each code)
+         ```
+
+         **Test coverage:**
+
+         Create `pkg/mcp/tools/error_codes_test.go` with basic validation:
+         ```go
+         func TestErrorCodeConstants(t *testing.T) {
+             // Verify constants are non-empty
+             assert.NotEmpty(t, ErrCodeInvalidParameters)
+             assert.NotEmpty(t, ErrCodeTableNotFound)
+             // ... test each constant
+         }
+
+         func TestErrorCodeNamingConventions(t *testing.T) {
+             // Verify SCREAMING_SNAKE_CASE for not-found errors
+             assert.Regexp(t, `^[A-Z_]+$`, ErrCodeTableNotFound)
+             assert.Regexp(t, `^[A-Z_]+$`, ErrCodeColumnNotFound)
+
+             // Verify snake_case for validation errors
+             assert.Regexp(t, `^[a-z_]+$`, ErrCodeInvalidParameters)
+             assert.Regexp(t, `^[a-z_]+$`, ErrCodeValidationError)
+         }
+         ```
+
+         **Acceptance criteria:**
+         - Error codes defined as constants
+         - Naming convention documented in code comments
+         - Usage guide included for each code
+         - All tests pass: `go test ./pkg/mcp/tools/ -run TestErrorCode -short`
+
+      2. [ ] 3.2.2: Create specialized error helper functions
+
+         Create specialized helper functions in `pkg/mcp/tools/errors.go` for common error patterns.
+
+         **Context:** The existing `NewErrorResult()` and `NewErrorResultWithDetails()` are good generic helpers, but many tools repeat the same error patterns (empty parameters, resource not found, invalid enums). Specialized helpers reduce boilerplate and ensure consistency.
+
+         **File to modify:** `pkg/mcp/tools/errors.go`
+
+         **Implementation:**
+
+         1. Add import for error codes:
+         ```go
+         import (
+             // ... existing imports
+         )
+
+         // Note: error codes defined in error_codes.go
+         ```
+
+         2. Add specialized helper functions:
+         ```go
+         // NewParameterError creates error result for invalid parameters.
+         // Use when a required parameter is missing, empty, or wrong type.
+         //
+         // Example:
+         //   return NewParameterError("name", "cannot be empty"), nil
+         func NewParameterError(param string, reason string) *mcp.CallToolResult {
+             return NewErrorResult(ErrCodeInvalidParameters,
+                 fmt.Sprintf("parameter %q %s", param, reason))
+         }
+
+         // NewNotFoundError creates error result for missing resources.
+         // The error code is automatically formatted as RESOURCE_TYPE_NOT_FOUND.
+         //
+         // Example:
+         //   return NewNotFoundError("table", "users"), nil
+         //   // Returns error with code "TABLE_NOT_FOUND"
+         func NewNotFoundError(resourceType, identifier string) *mcp.CallToolResult {
+             code := fmt.Sprintf("%s_NOT_FOUND", strings.ToUpper(resourceType))
+             return NewErrorResult(code,
+                 fmt.Sprintf("%s %q not found", resourceType, identifier))
+         }
+
+         // NewValidationError creates error result for business rule violations.
+         // Use when input fails business logic validation (not just syntax).
+         //
+         // Example:
+         //   return NewValidationError("cannot delete entity with relationships",
+         //       map[string]any{"relationship_count": 5}), nil
+         func NewValidationError(rule string, details any) *mcp.CallToolResult {
+             return NewErrorResultWithDetails(ErrCodeValidationError, rule, details)
+         }
+
+         // NewEnumError creates error result for invalid enum values.
+         // Includes expected values in structured details.
+         //
+         // Example:
+         //   return NewEnumError("status", "INVALID", []string{"ACTIVE", "SUSPENDED"}), nil
+         func NewEnumError(param string, actual string, expected []string) *mcp.CallToolResult {
+             return NewErrorResultWithDetails(ErrCodeInvalidParameters,
+                 fmt.Sprintf("invalid %s value", param),
+                 map[string]any{
+                     "parameter": param,
+                     "expected":  expected,
+                     "actual":    actual,
+                 })
+         }
+
+         // NewArrayElementError creates error result for invalid array elements.
+         // Reports the index and type of the first invalid element.
+         //
+         // Example:
+         //   return NewArrayElementError("aliases", 1, "int"), nil
+         func NewArrayElementError(param string, index int, actualType string) *mcp.CallToolResult {
+             return NewErrorResultWithDetails(ErrCodeInvalidParameters,
+                 fmt.Sprintf("all %s elements must be strings", param),
+                 map[string]any{
+                     "parameter":            param,
+                     "invalid_element_index": index,
+                     "invalid_element_type":  actualType,
+                 })
+         }
+         ```
+
+         **Test coverage:**
+
+         Add tests in `pkg/mcp/tools/errors_test.go`:
+         ```go
+         func TestNewParameterError(t *testing.T) {
+             result := NewParameterError("name", "cannot be empty")
+
+             assert.True(t, result.IsError)
+
+             text := getTextContent(result)
+             var response ErrorResponse
+             require.NoError(t, json.Unmarshal([]byte(text), &response))
+
+             assert.Equal(t, ErrCodeInvalidParameters, response.Code)
+             assert.Contains(t, response.Message, "name")
+             assert.Contains(t, response.Message, "cannot be empty")
+         }
+
+         func TestNewNotFoundError(t *testing.T) {
+             result := NewNotFoundError("table", "users")
+
+             assert.True(t, result.IsError)
+
+             text := getTextContent(result)
+             var response ErrorResponse
+             require.NoError(t, json.Unmarshal([]byte(text), &response))
+
+             assert.Equal(t, "TABLE_NOT_FOUND", response.Code)
+             assert.Contains(t, response.Message, "table")
+             assert.Contains(t, response.Message, "users")
+         }
+
+         func TestNewEnumError(t *testing.T) {
+             result := NewEnumError("status", "INVALID", []string{"ACTIVE", "SUSPENDED"})
+
+             assert.True(t, result.IsError)
+
+             text := getTextContent(result)
+             var response ErrorResponse
+             require.NoError(t, json.Unmarshal([]byte(text), &response))
+
+             assert.Equal(t, ErrCodeInvalidParameters, response.Code)
+             assert.Contains(t, response.Message, "status")
+
+             details, ok := response.Details.(map[string]any)
+             require.True(t, ok)
+             assert.Equal(t, "status", details["parameter"])
+             assert.Equal(t, "INVALID", details["actual"])
+             assert.Contains(t, details["expected"], "ACTIVE")
+         }
+
+         // ... similar tests for NewValidationError, NewArrayElementError
+         ```
+
+         **Acceptance criteria:**
+         - All helper functions implemented
+         - Each helper has clear documentation with examples
+         - All tests pass: `go test ./pkg/mcp/tools/ -run TestError -short`
+         - Helpers reduce boilerplate compared to calling `NewErrorResult()` directly
+
+      3. [ ] 3.2.3: Update existing tools to use error code constants
+
+         Update the 6 completed tools (get_ontology, update_entity, update_column, probe_column, execute_approved_query, list_approved_queries) to use error code constants instead of hardcoded strings.
+
+         **Context:** Tasks 1.1-1.4 and 3.2.1 implemented error handling with hardcoded error code strings. Now that we have constants in `error_codes.go`, update existing tools to use them for consistency.
+
+         **Files to modify:**
+         - `pkg/mcp/tools/ontology.go`
+         - `pkg/mcp/tools/entity.go`
+         - `pkg/mcp/tools/column.go`
+         - `pkg/mcp/tools/probe.go`
+         - `pkg/mcp/tools/queries.go`
+
+         **Implementation:**
+
+         1. For each file, find calls to `NewErrorResult()` and `NewErrorResultWithDetails()`
+         2. Replace hardcoded strings with constants from `error_codes.go`:
+            - `"invalid_parameters"` → `ErrCodeInvalidParameters`
+            - `"TABLE_NOT_FOUND"` → `ErrCodeTableNotFound`
+            - `"COLUMN_NOT_FOUND"` → `ErrCodeColumnNotFound`
+            - `"ENTITY_NOT_FOUND"` → `ErrCodeEntityNotFound`
+            - `"ontology_not_found"` → `ErrCodeOntologyNotFound`
+            - `"QUERY_NOT_FOUND"` → `ErrCodeQueryNotFound`
+            - `"QUERY_NOT_APPROVED"` → `ErrCodeQueryNotApproved`
+            - `"security_violation"` → `ErrCodeSecurityViolation`
+            - `"parameter_validation"` → `ErrCodeParameterValidation`
+            - `"type_validation"` → `ErrCodeTypeValidation`
+            - `"query_error"` → `ErrCodeQueryError`
+
+         3. Optionally, replace common patterns with helper functions from task 3.2.2:
+            - Empty parameter checks → `NewParameterError()`
+            - Resource not found → `NewNotFoundError()`
+            - Enum validation → `NewEnumError()`
+            - Array validation → `NewArrayElementError()`
+
+         **Example changes:**
+
+         Before (ontology.go:122):
+         ```go
+         return NewErrorResult("invalid_parameters", "invalid depth value..."), nil
+         ```
+
+         After:
+         ```go
+         return NewErrorResult(ErrCodeInvalidParameters, "invalid depth value..."), nil
+         ```
+
+         Or with helper:
+         ```go
+         return NewEnumError("depth", depth, []string{"domain", "entities", "tables", "columns"}), nil
+         ```
+
+         **Test verification:**
+
+         Run existing tests to ensure no regressions:
+         ```bash
+         go test ./pkg/mcp/tools/ -run "Test.*ErrorResult" -short
+         ```
+
+         All tests should pass without modification (error codes are functionally equivalent).
+
+         **Acceptance criteria:**
+         - All hardcoded error code strings replaced with constants
+         - All existing tests pass without modification
+         - Optionally, use helper functions where they reduce code size/complexity
+
+      4. [ ] 3.2.4: Document error handling pattern in plan file
+
+         Update `plans/FIX-mcp-error-handling-and-logging.md` to document the completed error handling pattern with examples and guidelines for future tool development.
+
+         **Context:** The error code constants and helpers are now complete. Document the pattern so future tool developers know how to implement error handling correctly.
+
+         **File to modify:** `plans/FIX-mcp-error-handling-and-logging.md`
+
+         **Implementation:**
+
+         Add new section after "Issue 3: MCP Error Messages Not Reaching Client":
+
+         ```markdown
+         ---
+
+         ## Error Handling Pattern Reference
+
+         ### Decision Tree: When to Use Error Results vs Go Errors
+
+         ```
+         Is this error actionable by Claude (can adjust parameters and retry)?
+           YES → Use NewErrorResult() or specialized helper
+             - Parameter validation (missing, wrong type, out of range)
+             - Resource not found (entity, table, column, etc.)
+             - Business rule violations (invalid state, conflicts)
+           NO → Return Go error
+             - Database connection failures
+             - Authentication failures
+             - Context deadline exceeded
+             - Unexpected panics
+         ```
+
+         ### Standard Error Codes
+
+         | Code | Use Case | Example |
+         |------|----------|---------|
+         | `ErrCodeInvalidParameters` | Required parameter missing/empty/wrong type | "parameter 'name' cannot be empty" |
+         | `ErrCodeTableNotFound` | Table doesn't exist in schema | "table \"users\" not found in schema registry" |
+         | `ErrCodeColumnNotFound` | Column doesn't exist in table | "column \"status\" not found in table \"users\"" |
+         | `ErrCodeEntityNotFound` | Entity doesn't exist in ontology | "entity \"User\" not found" |
+         | `ErrCodeRelationshipNotFound` | Relationship doesn't exist | "relationship from \"Account\" to \"User\" not found" |
+         | `ErrCodeOntologyNotFound` | No active ontology for project | "no active ontology found for project" |
+         | `ErrCodeValidationError` | Business rule violation | "cannot delete entity with existing relationships" |
+         | `ErrCodeResourceConflict` | Resource already exists | "entity \"User\" already exists" |
+         | `ErrCodeQueryError` | SQL execution error | "syntax error near \"SELCT\"" |
+
+         (See `pkg/mcp/tools/error_codes.go` for complete list)
+
+         ### Code Templates for Common Patterns
+
+         #### Required Parameter Validation
+         ```go
+         func myTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+             name := trimString(req.Params.Arguments["name"].(string))
+             if name == "" {
+                 return NewParameterError("name", "cannot be empty"), nil
+             }
+             // ... continue processing
+         }
+         ```
+
+         #### Optional Parameter Validation
+         ```go
+         var category string
+         if catVal, ok := req.Params.Arguments["category"]; ok {
+             category = trimString(catVal.(string))
+             if category == "" {
+                 return NewParameterError("category", "cannot be empty when provided"), nil
+             }
+         }
+         ```
+
+         #### Resource Lookup (Not Found)
+         ```go
+         entity, err := repo.GetByName(ctx, projectID, name)
+         if err != nil {
+             // System error - database failure
+             return nil, fmt.Errorf("failed to get entity: %w", err)
+         }
+         if entity == nil {
+             // Actionable error - entity doesn't exist
+             return NewNotFoundError("entity", name), nil
+         }
+         ```
+
+         #### Enum Validation
+         ```go
+         allowedRoles := []string{"dimension", "measure", "identifier", "attribute"}
+         if role != "" && !contains(allowedRoles, role) {
+             return NewEnumError("role", role, allowedRoles), nil
+         }
+         ```
+
+         #### Array Element Validation
+         ```go
+         aliases, ok := req.Params.Arguments["aliases"].([]any)
+         if ok {
+             for i, elem := range aliases {
+                 if _, ok := elem.(string); !ok {
+                     return NewArrayElementError("aliases", i, reflect.TypeOf(elem).String()), nil
+                 }
+             }
+         }
+         ```
+
+         #### Business Rule Validation
+         ```go
+         if entity.HasRelationships {
+             return NewValidationError("cannot delete entity with existing relationships",
+                 map[string]any{
+                     "relationship_count": entity.RelationshipCount,
+                     "related_entities":   entity.RelatedEntityNames,
+                 }), nil
+         }
+         ```
+
+         ### Testing Requirements
+
+         Every tool that returns error results must have test coverage:
+
+         ```go
+         func TestMyTool_ErrorResults(t *testing.T) {
+             t.Run("empty required parameter", func(t *testing.T) {
+                 // Setup
+                 mockRepo, deps := setupMyToolTest(t)
+                 tool := myTool(deps)
+
+                 // Execute with invalid input
+                 req := mcp.CallToolRequest{
+                     Params: mcp.CallToolRequestParams{
+                         Arguments: map[string]any{"name": "   "}, // whitespace only
+                     },
+                 }
+
+                 result, err := tool.Handler(context.Background(), req)
+
+                 // Verify error result structure
+                 require.NoError(t, err) // Go error should be nil
+                 require.True(t, result.IsError) // MCP error flag
+
+                 // Parse and verify error details
+                 text := getTextContent(result)
+                 var response ErrorResponse
+                 require.NoError(t, json.Unmarshal([]byte(text), &response))
+
+                 assert.Equal(t, ErrCodeInvalidParameters, response.Code)
+                 assert.Contains(t, response.Message, "name")
+                 assert.Contains(t, response.Message, "empty")
+             })
+
+             // ... more test cases for each error path
+         }
+         ```
+
+         ### Common Pitfalls
+
+         1. **Forgetting `IsError` flag**: Always set `result.IsError = true` when returning error results
+         2. **Double-wrapping**: If a helper function returns `*mcp.CallToolResult`, return it directly (don't marshal again)
+         3. **Inconsistent error codes**: Use constants from `error_codes.go`, not hardcoded strings
+         4. **System errors as error results**: Database failures should be Go errors, not error results
+         5. **Not trimming whitespace**: Always use `trimString()` before checking if parameter is empty
+
+         ### Best Practices
+
+         1. **Validate early**: Check parameters before making any repository calls
+         2. **Specific error messages**: Include parameter name, resource identifier, and what went wrong
+         3. **Consistent patterns**: Use helper functions (`NewParameterError`, `NewNotFoundError`, etc.)
+         4. **Structured details**: For complex errors, include diagnostic information in `details` field
+         5. **Test coverage**: Every error path should have a unit test
+
+         ---
+         ```
+
+         **Acceptance criteria:**
+         - Section added to plan file after Issue 3
+         - Decision tree clearly explains when to use error results vs Go errors
+         - Error code table includes all codes from `error_codes.go`
+         - Code templates cover all common patterns (parameter validation, resource lookup, etc.)
+         - Testing requirements specify test structure and verification
+         - Common pitfalls and best practices documented from lessons learned
+
+   3. [x] 3.3.1: Convert glossary tools to error results
+
+      Convert glossary management tools to use error results for actionable errors. Update `pkg/mcp/tools/glossary.go` (update_glossary_term, get_glossary_sql, list_glossary). Add test coverage for all modified tools.
+
+      **Context:** This subtask converts glossary tools to return structured error results instead of Go errors for parameter validation and resource lookup failures. This allows Claude to see and act on error details.
+
+      **Files to modify:**
+      - `pkg/mcp/tools/glossary.go`
+      - `pkg/mcp/tools/glossary_test.go` (add new test cases)
+
+      **Implementation details:**
+
+      **update_glossary_term tool:**
+      1. Parameter validation:
+         - Empty term name after `trimString()` → `NewErrorResult("invalid_parameters", "parameter 'term' cannot be empty")`
+         - Invalid aliases array (non-string elements) → `NewErrorResultWithDetails("invalid_parameters", "all alias elements must be strings", map[string]any{"parameter": "aliases", "invalid_element_index": i, "invalid_element_type": reflect.TypeOf(element).String()})`
+         - SQL syntax validation (if SQL provided) - if there's existing validation, convert to error result
+      2. System errors kept as Go errors: Database failures, auth failures from `AcquireToolAccess`
+
+      **get_glossary_sql tool:**
+      1. Parameter validation:
+         - Empty term parameter after `trimString()` → `NewErrorResult("invalid_parameters", "parameter 'term' cannot be empty")`
+      2. Resource validation:
+         - Term not found → `NewErrorResult("TERM_NOT_FOUND", fmt.Sprintf("glossary term %q not found", term))`
+      3. System errors kept as Go errors: Database failures, auth failures
+
+      **list_glossary tool:**
+      - No parameter validation needed (tool has no parameters)
+      - Only system errors possible (database failures, auth failures) - keep as Go errors
+
+      **Test coverage:**
+      Add test functions in `pkg/mcp/tools/glossary_test.go`:
+      - `TestUpdateGlossaryTermTool_ErrorResults`: empty term, invalid aliases array (test non-string element with index)
+      - `TestGetGlossarySQLTool_ErrorResults`: empty term, term not found
+      - All tests should verify: `result.IsError == true`, correct error code, message, and structured details (where applicable)
+
+      **Error codes used:** `invalid_parameters`, `TERM_NOT_FOUND`
+
+      **Pattern reference:** Follow pattern from `pkg/mcp/tools/column.go` (update_column tool) for parameter validation and `pkg/mcp/tools/entity.go` (get_entity tool) for resource lookups.
+
+      **Acceptance criteria:**
+      - All glossary tools return actionable errors as error results
+      - System errors remain as Go errors
+      - Test coverage added for error paths
+      - All tests pass: `go test ./pkg/mcp/tools/ -run TestGlossary -short`
+
+   4. [ ] 3.3.2: Convert ontology question tools to error results
+
+      Convert ontology question management tools to use error results for actionable errors. Update `pkg/mcp/tools/questions.go` (resolve_ontology_question, skip_ontology_question, dismiss_ontology_question, escalate_ontology_question, list_ontology_questions). Add test coverage for all modified tools.
+
+      **Context:** This subtask converts ontology question tools to return structured error results for parameter validation, resource lookups, and business rule violations. These tools are frequently used during ontology refinement workflow.
+
+      **Files to modify:**
+      - `pkg/mcp/tools/questions.go`
+      - `pkg/mcp/tools/questions_test.go` (add new test cases)
+
+      **Implementation details:**
+
+      **Common validation for all question tools (resolve, skip, dismiss, escalate):**
+      1. Parameter validation:
+         - Empty `question_id` after `trimString()` → `NewErrorResult("invalid_parameters", "parameter 'question_id' cannot be empty")`
+         - Invalid UUID format → `NewErrorResult("invalid_parameters", fmt.Sprintf("invalid question_id format: %q is not a valid UUID", questionIDStr))`
+         - Empty `reason` parameter (where applicable: skip, dismiss, escalate) → `NewErrorResult("invalid_parameters", "parameter 'reason' cannot be empty")`
+         - Use `uuid.Parse()` for UUID validation
+         - Use `trimString()` helper for whitespace normalization
+
+      2. Resource validation:
+         - Question not found → `NewErrorResult("QUESTION_NOT_FOUND", fmt.Sprintf("ontology question %q not found", questionIDStr))`
+
+      3. Business rule validation (if status checks exist):
+         - Question already resolved/dismissed/etc. → `NewErrorResultWithDetails("validation_error", "question cannot be modified in current status", map[string]any{"question_id": questionIDStr, "current_status": status, "allowed_statuses": []string{...}})`
+
+      4. System errors kept as Go errors: Database failures, auth failures
+
+      **list_ontology_questions tool:**
+      1. Parameter validation (optional parameters):
+         - Invalid `status` enum (if provided and not in allowed values) → `NewErrorResultWithDetails("invalid_parameters", "invalid status value", map[string]any{"parameter": "status", "expected": []string{"pending", "skipped", "answered", "deleted"}, "actual": value})`
+         - Invalid `category` enum (if provided) → Similar pattern with allowed categories
+         - Invalid `priority` (if provided, must be 1-5) → `NewErrorResultWithDetails("invalid_parameters", "invalid priority value", map[string]any{"parameter": "priority", "expected": "1-5", "actual": value})`
+         - Invalid `limit` (if provided, must be positive and <= max) → Similar pattern
+         - Invalid `offset` (if provided, must be non-negative) → Similar pattern
+
+      2. System errors kept as Go errors: Database failures, auth failures
+
+      **Test coverage:**
+      Add test functions in `pkg/mcp/tools/questions_test.go`:
+      - `TestResolveOntologyQuestionTool_ErrorResults`: empty question_id, invalid UUID, question not found, invalid status (if applicable)
+      - `TestSkipOntologyQuestionTool_ErrorResults`: empty question_id, invalid UUID, empty reason, question not found
+      - `TestDismissOntologyQuestionTool_ErrorResults`: empty question_id, invalid UUID, empty reason, question not found
+      - `TestEscalateOntologyQuestionTool_ErrorResults`: empty question_id, invalid UUID, empty reason, question not found
+      - `TestListOntologyQuestionsTool_ErrorResults`: invalid status enum, invalid category enum, invalid priority range, invalid limit/offset
+
+      All tests should verify: `result.IsError == true`, correct error code, message, and structured details (where applicable)
+
+      **Error codes used:** `invalid_parameters`, `QUESTION_NOT_FOUND`, `validation_error`
+
+      **Pattern reference:** Follow pattern from `pkg/mcp/tools/knowledge.go` (update_project_knowledge, delete_project_knowledge tools) for parameter validation with UUIDs and enums.
+
+      **Acceptance criteria:**
+      - All ontology question tools return actionable errors as error results
+      - System errors remain as Go errors
+      - Test coverage added for error paths
+      - All tests pass: `go test ./pkg/mcp/tools/ -run TestOntologyQuestion -short` and `go test ./pkg/mcp/tools/ -run TestListOntologyQuestions -short`
+
+   5. [ ] 3.4: Update remaining medium/low priority tools
+
+      Convert remaining entity, relationship, and admin tools to complete the error handling migration.
+
+      **Context:** After high-priority tools are done, convert remaining tools identified in the audit (task 3.1) to complete the migration.
+
+      **Files to modify:**
+      - `pkg/mcp/tools/entity.go` - `delete_entity` (if not already done in previous tasks)
+      - `pkg/mcp/tools/relationship.go` - `update_relationship`, `delete_relationship` (note: `get_relationship` and `list_relationships` do not exist)
+      - Any other tools identified in audit (task 3.1) not yet converted
+
+      **Implementation:**
+      - Follow same pattern as tasks 3.3.1 and 3.3.2
+      - Use error code constants and helpers from task 3.2
+      - Add test coverage for error paths
+
+      **Specific tools to update:**
+
+      **entity.go - delete_entity:**
+      - Validate name parameter (non-empty after trim)
+      - Return error result if entity not found
+      - Return error result if entity has relationships (CASCADE would delete) - use `NewErrorResultWithDetails` with relationship count and related entity names
+      - Return error result if entity has occurrences in tables - use `NewErrorResultWithDetails` with occurrence count and table names
+
+      **relationship.go - update_relationship:**
+      - Validate `from_entity` and `to_entity` parameters (non-empty after trim)
+      - Validate `cardinality` enum (if provided): ["1:1", "1:N", "N:1", "N:M", "unknown"]
+      - Return error result if from_entity or to_entity not found
+
+      **relationship.go - delete_relationship:**
+      - Validate `from_entity` and `to_entity` parameters (non-empty after trim)
+      - Return error result if from_entity or to_entity not found
+      - Return error result if relationship not found
+
+      **Test coverage:**
+      - Add `TestDeleteEntityTool_ErrorResults` in `entity_test.go`
+      - Add `TestUpdateRelationshipTool_ErrorResults` and `TestDeleteRelationshipTool_ErrorResults` in `relationship_test.go`
+      - Test cases: parameter validation, resource lookups, business rule violations
+      - Verify error result structure and codes
+
+      **Acceptance criteria:**
+      - All remaining tools converted
+      - Consistent error handling across all MCP tools
+      - No regressions in existing functionality
+      - All tests pass: `go test ./pkg/mcp/tools/... -short`
+
+   6. [ ] 3.5: Document final error handling pattern for future tool development
+
+      Update the plan document to mark all tasks complete and create comprehensive documentation of the error handling pattern for future tool developers.
+
+      **Context:** After completing the migration, we need to document the final pattern so future tool developers know how to implement error handling correctly.
+
+      **File to modify:** `plans/FIX-mcp-error-handling-and-logging.md`
+
+      **Updates needed:**
+
+      1. **Mark Phase 3 complete**: Update implementation task list to show all subtasks complete
+
+      2. **Add section: "Error Handling Pattern for Future Tools"** with:
+         - Decision tree: When to use `NewErrorResult()` vs Go error
+           ```
+           Is this error actionable by Claude (can adjust parameters and retry)?
+             YES → Use NewErrorResult() or helper
+             NO → Return Go error
+           ```
+         - Standard error codes table with usage examples:
+           ```
+           | Code | Use Case | Example |
+           |------|----------|---------|
+           | invalid_parameters | Parameter validation | Empty required field |
+           | TABLE_NOT_FOUND | Resource not found | Table doesn't exist |
+           | ... | ... | ... |
+           ```
+         - Code templates for common patterns:
+           - Required parameter validation
+           - Optional parameter validation
+           - Resource lookup (entity, table, column)
+           - Array element validation
+           - Business rule validation
+           - Enum validation
+
+      3. **Add summary statistics:**
+         - Total tools audited
+         - Total tools updated with error results
+         - Total error codes defined
+         - Total test cases added
+
+      4. **Add "Lessons Learned" section** documenting:
+         - Common pitfalls: Double-wrapping error results, forgetting `IsError` flag, inconsistent error codes
+         - Best practices: Use `trimString()` before validation, validate early, provide actionable error messages
+         - Performance considerations: Error result creation is cheap (no database queries)
+
+      5. **Add "Testing Requirements"** section:
+         - Unit test structure for error results
+         - How to verify error result structure
+         - Integration test approach (if needed)
+
+      **Acceptance criteria:**
+      - Plan document updated with all sections
+      - Pattern documented with enough examples that a new developer can implement error handling without reading all existing tool code
+      - Statistics accurate
+      - Lessons learned capture key insights from the migration
+
 4. [ ] Document the error handling pattern
 
 ---

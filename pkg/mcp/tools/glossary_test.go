@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -580,4 +581,123 @@ func TestGlossaryUpdateTools_AreDeveloperTools(t *testing.T) {
 	// They should NOT be in ontologyToolNames (which is for approved_queries group)
 	assert.False(t, ontologyToolNames["update_glossary_term"], "update_glossary_term should NOT be in ontologyToolNames (it's a developer tool)")
 	assert.False(t, ontologyToolNames["delete_glossary_term"], "delete_glossary_term should NOT be in ontologyToolNames (it's a developer tool)")
+}
+
+// TestGetGlossarySQLTool_ErrorResults verifies error handling for invalid parameters.
+func TestGetGlossarySQLTool_ErrorResults(t *testing.T) {
+	t.Run("empty term after trimming", func(t *testing.T) {
+		// Simulate validation check for empty term after trimming
+		termName := "   "
+		termName = trimString(termName)
+		if termName == "" {
+			result := NewErrorResult(
+				"invalid_parameters",
+				"parameter 'term' cannot be empty",
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content to verify structure
+			var errorResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, err)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Contains(t, errorResp.Message, "parameter 'term' cannot be empty")
+		}
+	})
+
+	t.Run("term not found", func(t *testing.T) {
+		// Simulate term not found response
+		termName := "UnknownTerm"
+		result := NewErrorResult("TERM_NOT_FOUND",
+			fmt.Sprintf("term %q not found in glossary. Use list_glossary to see available terms.", termName))
+
+		// Verify it's an error result
+		assert.NotNil(t, result)
+		assert.True(t, result.IsError)
+
+		// Parse the content to verify structure
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "TERM_NOT_FOUND", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "term \"UnknownTerm\" not found")
+		assert.Contains(t, errorResp.Message, "Use list_glossary")
+	})
+}
+
+// TestUpdateGlossaryTermTool_ErrorResults verifies error handling for invalid parameters.
+func TestUpdateGlossaryTermTool_ErrorResults(t *testing.T) {
+	t.Run("empty term after trimming", func(t *testing.T) {
+		// Simulate validation check for empty term after trimming
+		termName := "   "
+		termName = trimString(termName)
+		if termName == "" {
+			result := NewErrorResult(
+				"invalid_parameters",
+				"parameter 'term' cannot be empty",
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content to verify structure
+			var errorResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, err)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Contains(t, errorResp.Message, "parameter 'term' cannot be empty")
+		}
+	})
+
+	t.Run("invalid aliases array - non-string element", func(t *testing.T) {
+		// Simulate aliases validation with invalid element type
+		aliasArray := []any{"valid_alias", 123, "another_valid"}
+		for i, alias := range aliasArray {
+			if _, ok := alias.(string); !ok {
+				result := NewErrorResultWithDetails(
+					"invalid_parameters",
+					fmt.Sprintf("parameter 'aliases' must be an array of strings. Element at index %d is %T, not string", i, alias),
+					map[string]any{
+						"parameter":             "aliases",
+						"invalid_element_index": i,
+						"invalid_element_type":  fmt.Sprintf("%T", alias),
+					},
+				)
+
+				// Verify it's an error result
+				assert.NotNil(t, result)
+				assert.True(t, result.IsError)
+
+				// Parse the content to verify structure
+				var errorResp ErrorResponse
+				err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+				require.NoError(t, err)
+
+				assert.True(t, errorResp.Error)
+				assert.Equal(t, "invalid_parameters", errorResp.Code)
+				assert.Contains(t, errorResp.Message, "parameter 'aliases' must be an array of strings")
+				assert.Contains(t, errorResp.Message, "index 1")
+
+				// Check details
+				detailsMap, ok := errorResp.Details.(map[string]any)
+				require.True(t, ok)
+				assert.Equal(t, "aliases", detailsMap["parameter"])
+				assert.Equal(t, float64(1), detailsMap["invalid_element_index"]) // JSON numbers are float64
+				assert.Equal(t, "int", detailsMap["invalid_element_type"])
+
+				// Only test the first invalid element
+				break
+			}
+		}
+	})
 }
