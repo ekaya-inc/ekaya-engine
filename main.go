@@ -434,6 +434,8 @@ func main() {
 		DB:               db,
 		MCPConfigService: mcpConfigService,
 		OntologyRepo:     ontologyRepo,
+		SchemaRepo:       schemaRepo,
+		ProjectService:   projectService,
 		Logger:           logger,
 	}
 	mcptools.RegisterColumnTools(mcpServer.MCP(), columnToolDeps)
