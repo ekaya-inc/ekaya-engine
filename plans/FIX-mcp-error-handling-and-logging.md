@@ -842,31 +842,16 @@ func sanitizeArguments(args map[string]any) map[string]any {
               - Relationship existence check returns actionable error result (allows Claude to understand the relationship doesn't exist)
             - **Note on idempotency:** The tool is still idempotent in behavior (calling it twice has the same effect), but now surfaces the state explicitly via error results instead of silently succeeding. This follows the fail-fast philosophy and gives Claude better feedback.
             - **Next implementer:** Task 3.2.3.3 (relationship tools) is now complete. All relationship tools (`update_relationship`, `delete_relationship`) now surface actionable errors to Claude. Proceed to task 3.2.3.4 (get_relationship and list_relationships tools) or task 3.2.4 (exploration and admin tools) as needed.
-      4. [ ] 3.2.3.4: Convert get_relationship and list_relationships tools to error results
-         - **Implementation:** Apply error handling pattern to `get_relationship` and `list_relationships` in `pkg/mcp/tools/relationship.go`
-         - **For get_relationship:**
-           - **Parameter validation errors to convert:**
-             - Empty from_entity after trimming → `NewErrorResult("invalid_parameters", "parameter 'from_entity' cannot be empty")`
-             - Empty to_entity after trimming → `NewErrorResult("invalid_parameters", "parameter 'to_entity' cannot be empty")`
-           - **Resource lookup errors to convert:**
-             - Relationship not found → `NewErrorResult("RELATIONSHIP_NOT_FOUND", "relationship from \"<from>\" to \"<to>\" not found")`
-           - **System errors to keep as Go errors:**
-             - Database connection failures
-             - Authentication failures
-         - **For list_relationships:**
-           - **Parameter validation errors to convert:**
-             - If optional filter parameters exist (from_entity, to_entity), validate they are non-empty after trimming
-           - **Other considerations:**
-             - Empty result set is NOT an error - return empty list
-             - Database connection failures remain as Go errors
-         - **Test coverage required:**
-           - Add to `pkg/mcp/tools/relationship_test.go`:
-             - `TestGetRelationshipTool_ErrorResults` covering:
-               - Empty from_entity/to_entity
-               - Relationship not found
-             - `TestListRelationshipsTool_EmptyResult` verifying empty list returns successfully
-             - `TestListRelationshipsTool_FilterValidation` if filter parameters exist
-         - **Pattern:** Simple read operations like get_entity/list_entities - parameter validation and resource not found errors
+      4. [x] **N/A - TOOLS DO NOT EXIST** - 3.2.3.4: Convert get_relationship and list_relationships tools to error results
+         - **Status:** Task skipped - `get_relationship` and `list_relationships` tools do not exist in the codebase
+         - **Investigation:**
+           - Searched `pkg/mcp/tools/relationship.go` and entire `pkg/mcp/tools/` directory
+           - Only relationship tools that exist are:
+             - `update_relationship` (already converted in task 3.2.3.3.1)
+             - `delete_relationship` (already converted in task 3.2.3.3.2)
+             - `probe_relationship` (in `pkg/mcp/tools/probe.go`, used for deep-dive metrics, not a simple get/list operation)
+         - **Conclusion:** All existing relationship tools have been converted to use error results. There are no read-only relationship tools (get/list) to convert.
+         - **Next implementer:** Task 3.2.3 (entity and relationship tools) is now complete. All existing relationship tools (`update_relationship`, `delete_relationship`) surface actionable errors to Claude. Proceed to task 3.2.4 (exploration and admin tools) as needed.
       - **Dependencies:** All subtasks use the same helper functions: `trimString()` (already in column.go), `NewErrorResult()`, `NewErrorResultWithDetails()` (already in errors.go)
       - **Error codes to use:** `invalid_parameters`, `ENTITY_NOT_FOUND`, `RELATIONSHIP_NOT_FOUND`, `resource_conflict`
       - **Testing pattern:** Create focused test files for each tool category (entity_delete_test.go, relationship_test.go). Each test should verify: `result.IsError == true`, correct error code, correct message, structured details if applicable. Follow the test structure from `column_test.go:TestUpdateColumnTool_ErrorResults`
