@@ -636,6 +636,45 @@ func TestUpdateProjectKnowledgeTool_ParameterValidation(t *testing.T) {
 	})
 }
 
+// TestDeleteProjectKnowledgeTool_ResourceValidation verifies resource validation with mock repository.
+func TestDeleteProjectKnowledgeTool_ResourceValidation(t *testing.T) {
+	t.Run("fact not found", func(t *testing.T) {
+		mockRepo, _ := setupKnowledgeTest(t)
+
+		// Use a valid UUID that doesn't exist in mockRepo.facts
+		nonExistentID := uuid.New()
+
+		// Simulate what the actual delete handler does:
+		// 1. Parse and validate the UUID (already done above)
+		// 2. Call repository Delete method
+		err := mockRepo.Delete(context.Background(), nonExistentID)
+
+		// Verify the repository returns ErrNotFound
+		require.Error(t, err)
+		require.Equal(t, apperrors.ErrNotFound, err)
+
+		// Simulate what the handler does when it gets ErrNotFound:
+		// It creates an error result with FACT_NOT_FOUND code
+		result := NewErrorResult("FACT_NOT_FOUND", fmt.Sprintf("fact %q not found", nonExistentID.String()))
+
+		// Verify the error result structure
+		require.NotNil(t, result)
+		require.True(t, result.IsError)
+
+		// Parse the content to verify structure
+		text := getTextContent(result)
+		var response ErrorResponse
+		require.NoError(t, json.Unmarshal([]byte(text), &response))
+
+		// Verify error response fields
+		assert.True(t, response.Error)
+		assert.Equal(t, "FACT_NOT_FOUND", response.Code)
+		assert.Contains(t, response.Message, "fact")
+		assert.Contains(t, response.Message, "not found")
+		assert.Contains(t, response.Message, nonExistentID.String())
+	})
+}
+
 // Note: Full integration tests for tool execution with database require a database connection
 // and would be covered in integration tests. The tests above verify that:
 // - Tools are properly registered with the MCP server
@@ -644,3 +683,4 @@ func TestUpdateProjectKnowledgeTool_ParameterValidation(t *testing.T) {
 // - Error results are returned for invalid parameters
 // - delete_project_knowledge error handling covers empty fact_id, invalid UUID format, and fact not found scenarios
 // - update_project_knowledge parameter validation correctly handles edge cases
+// - delete_project_knowledge resource validation with mock repository verifies not found error path

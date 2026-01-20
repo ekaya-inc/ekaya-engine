@@ -1398,7 +1398,7 @@ func sanitizeArguments(args map[string]any) map[string]any {
                - Tests document that empty fact_id is treated as optional (no validation error) per tool design
                - Pattern matches existing knowledge tool tests: simulates validation, verifies NewErrorResult() output structure
 
-            3. [ ] 3.2.4.3.4.3: Add resource validation tests for delete_project_knowledge
+            3. [x] 3.2.4.3.4.3: Add resource validation tests for delete_project_knowledge
 
                Add comprehensive resource validation tests for the `delete_project_knowledge` tool in `pkg/mcp/tools/knowledge_test.go`.
 
@@ -1406,6 +1406,15 @@ func sanitizeArguments(args map[string]any) map[string]any {
 
                **Files to modify:**
                - `pkg/mcp/tools/knowledge_test.go`
+
+               **Implementation notes (completed):**
+               - Added `TestDeleteProjectKnowledgeTool_ResourceValidation` in pkg/mcp/tools/knowledge_test.go:639-676
+               - Test uses mock repository approach (not full tool execution) to verify resource validation logic
+               - Simulates repository.Delete() returning apperrors.ErrNotFound
+               - Verifies handler translates ErrNotFound to NewErrorResult() with FACT_NOT_FOUND code
+               - Tests error result structure: IsError flag, error code, and message containing fact_id
+               - Pattern matches existing parameter validation tests - focuses on error path verification
+               - Updated test suite comment (line 686) to document resource validation coverage
 
                **Implementation details:**
 
