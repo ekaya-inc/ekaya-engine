@@ -1464,7 +1464,7 @@ func sanitizeArguments(args map[string]any) map[string]any {
 
                **Next subtask dependency:** This verifies resource validation. Subtask 3.2.4.3.4.4 will test successful operations.
 
-            4. [ ] 3.2.4.3.4.4: Add successful operation tests for knowledge management tools
+            4. [x] 3.2.4.3.4.4: Add successful operation tests for knowledge management tools
 
                Add tests verifying successful operations (create, update, delete) for knowledge management tools in `pkg/mcp/tools/knowledge_test.go`.
 
@@ -1472,6 +1472,20 @@ func sanitizeArguments(args map[string]any) map[string]any {
 
                **Files to modify:**
                - `pkg/mcp/tools/knowledge_test.go`
+
+               **Implementation notes:**
+               - Added `TestUpdateProjectKnowledgeTool_Success` with 4 test cases:
+                 - create new fact (verifies fact creation with all fields)
+                 - update existing fact (verifies context updates preserve ID)
+                 - create fact with all optional parameters (verifies explicit fact_id handling)
+                 - create fact with minimal parameters (verifies defaults: category="terminology", empty context)
+               - Added `TestDeleteProjectKnowledgeTool_Success` with 2 test cases:
+                 - delete existing fact (verifies deletion and response structure)
+                 - delete one of multiple facts (verifies targeted deletion doesn't affect others)
+               - Tests use mock repository to verify operations without database dependency
+               - Tests verify JSON serialization of response structures
+               - Tests verify response fields match expected success criteria
+               - Updated test file comments to document new success test coverage
 
                **Implementation details:**
 
