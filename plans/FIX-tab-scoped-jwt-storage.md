@@ -620,7 +620,51 @@ describe('Tab-Scoped JWT Storage', () => {
 });
 ```
 
-### Task 8: Unit Tests for fetchWithAuth Bearer Token
+### Task 8: Unit Tests for fetchWithAuth Bearer Token ✅
+
+**Status: COMPLETE** ✅
+
+**Files Modified:**
+- `ui/src/lib/api.test.ts:1-235` - Comprehensive unit tests for Bearer token authentication
+
+**Implementation Summary:**
+
+All required tests have been implemented and are passing (7/7 tests):
+
+1. ✅ **Sends Authorization Bearer header** (line 55-77) - Verifies JWT sent as `Authorization: Bearer <token>`
+2. ✅ **Does NOT send credentials: include** (line 79-95) - Verifies no cookie credentials are sent
+3. ✅ **Initiates OAuth flow when no token** (line 97-123) - Verifies OAuth redirect when token missing
+4. ✅ **Clears token and re-auths on 401** (line 125-150) - Verifies `clearProjectToken()` called on unauthorized
+5. ✅ **Clears token and re-auths on 403** (line 152-177) - Verifies `clearProjectToken()` called on forbidden
+6. ✅ **Extracts project_id from URL** (line 179-209) - Verifies project ID passed to OAuth flow
+7. ✅ **Preserves custom headers** (line 211-234) - Verifies Authorization header merges with custom headers
+
+**Test Coverage:**
+
+All mocking is correctly configured:
+- `auth-token` module mocked (`getProjectToken`, `clearProjectToken`, `isTokenExpired`)
+- `config` module mocked (`getCachedConfig`)
+- `auth` module mocked (`generatePKCE`)
+- `window.location` properly mocked for redirect testing
+- `global.fetch` mocked for request verification
+
+**Test Results:**
+```bash
+✓ src/lib/api.test.ts (7 tests) 216ms
+  Test Files  1 passed (1)
+  Tests      7 passed (7)
+```
+
+**Why This Approach:**
+
+The tests verify the complete Bearer token authentication flow:
+1. Token validation happens before making requests
+2. Authorization header is sent instead of cookies
+3. 401/403 errors trigger token clearing and re-authentication
+4. Project ID is extracted from URL and passed to OAuth flow
+5. Custom headers are preserved when adding Authorization header
+
+**Original Spec:**
 
 **Update file: `ui/src/lib/api.test.ts`**
 
