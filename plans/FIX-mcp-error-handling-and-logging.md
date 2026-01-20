@@ -2662,11 +2662,13 @@ func sanitizeArguments(args map[string]any) map[string]any {
 
                **Dependencies:** None (should already be complete from task 3.3.2.2.1)
 
-            2. [ ] 3.3.2.2.3.2: Convert dismiss_ontology_question tool to use validation helpers
+            2. [x] 3.3.2.2.3.2: Convert dismiss_ontology_question tool to use validation helpers
 
                Apply error result pattern to `dismiss_ontology_question` tool using the shared validation helpers from subtask 3.3.2.2.3.1.
 
                **Context:** The `dismiss_ontology_question` tool marks a question as "dismissed" when it's not worth pursuing. It has the same validation requirements as `skip_ontology_question` (completed in task 3.3.2.2.2).
+
+               **Completion notes:** Refactored `dismiss_ontology_question` tool in `pkg/mcp/tools/questions.go` to use the shared `validateQuestionID()` and `validateReasonParameter()` helpers. Added comprehensive test coverage in `pkg/mcp/tools/questions_test.go` for all validation error cases (empty/whitespace parameters, invalid UUID format, question not found). Pattern matches `skip_ontology_question` implementation for consistency.
 
                **File to modify:** `pkg/mcp/tools/questions.go`
 
