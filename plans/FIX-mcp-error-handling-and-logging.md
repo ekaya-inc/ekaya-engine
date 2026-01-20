@@ -509,7 +509,26 @@ func sanitizeArguments(args map[string]any) map[string]any {
      - Uses real HTTP requests to simulate production flow
    - **Design decision:** Logging behavior is configured at server startup (not per-project). All MCP endpoints share the same logging config. This keeps it simple and avoids per-request overhead.
    - **Next implementer:** MCP logging is now fully configurable. Recommended prod settings: `log_requests=true, log_responses=false, log_errors=true` (default values). For debugging, enable `log_responses=true` to see full tool results.
-4. [ ] ~~Add sensitive data redaction~~ (COMPLETED - included in 2.1)
+4. [x] **COMPLETED** - Add sensitive data redaction
+   - **Status:** This task was completed during task 2.1 - no additional work needed
+   - **Implementation:** The `sanitizeArguments()` function was already implemented as part of task 2.1 (Create MCP logging middleware)
+   - **Location:** `pkg/middleware/mcp_logging.go:142-176`
+   - **Features:**
+     - Redacts fields containing sensitive keywords: password, secret, token, key, credential (case-insensitive)
+     - Truncates string values over 200 characters to prevent log bloat
+     - Preserves non-string values (numbers, booleans, arrays, objects)
+     - Handles nil and empty argument maps gracefully
+   - **Test coverage:** `pkg/middleware/mcp_logging_test.go:214-296` includes `TestSanitizeArguments` with 6 comprehensive test cases:
+     - Redacts sensitive keywords (password, api_key, access_token, client_secret, credential)
+     - Truncates long strings (250 chars → 200 + "...")
+     - Handles nil arguments (returns nil)
+     - Handles empty arguments (returns empty map)
+     - Preserves non-string values (numbers, booleans, arrays, objects)
+     - Case insensitive keyword matching (PASSWORD, Api_Key, AccessToken)
+   - **Integration:** Function is called automatically on line 48 of `mcp_logging.go` before logging request arguments
+   - **Result verification:** All 27 MCP handler tests pass, including integration tests that verify redaction works end-to-end
+   - **Production readiness:** The sensitive data redaction is production-ready and active in all environments where MCP logging is enabled
+   - **Next implementer:** This task is complete. **All Phase 2 tasks are done.** The MCP logging middleware is fully implemented with configurable logging levels and automatic sensitive data redaction. Proceed to Phase 3 if you want to apply the error handling pattern to remaining MCP tools.
 
 ### Phase 3: Rollout to All Tools
 
