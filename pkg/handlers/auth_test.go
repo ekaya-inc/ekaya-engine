@@ -80,6 +80,14 @@ func TestAuthHandler_CompleteOAuth_Success(t *testing.T) {
 		t.Errorf("expected redirect_url '/', got %q", resp.RedirectURL)
 	}
 
+	// Verify token is returned in response body
+	if resp.Token == "" {
+		t.Error("expected token in response body")
+	}
+
+	// Note: project_id may be empty if JWT doesn't have valid claims
+	// (this test uses a simple string "test-jwt-token")
+
 	// Check that cookie was set
 	cookies := rec.Result().Cookies()
 	var jwtCookie *http.Cookie
@@ -387,5 +395,126 @@ func TestAuthHandler_CookieSettingsForLocalhost(t *testing.T) {
 	// Localhost should have empty Domain
 	if jwtCookie.Domain != "" {
 		t.Errorf("expected empty Domain for localhost, got %q", jwtCookie.Domain)
+	}
+}
+
+func TestAuthHandler_CompleteOAuth_ReturnsTokenInBody(t *testing.T) {
+	auth.InitSessionStore("test-secret")
+
+	cfg := &config.Config{
+		BaseURL:      "http://localhost:3443",
+		CookieDomain: "",
+	}
+
+	// Create a valid JWT token manually (header.payload.signature)
+	// Using a base64-encoded payload with the project_id
+	// Payload: {"pid":"123e4567-e89b-12d3-a456-426614174000","email":"test@example.com","sub":"user-123","aud":["engine"]}
+	testProjectID := "123e4567-e89b-12d3-a456-426614174000"
+	testJWT := "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJwaWQiOiIxMjNlNDU2Ny1lODliLTEyZDMtYTQ1Ni00MjY2MTQxNzQwMDAiLCJlbWFpbCI6InRlc3RAZXhhbXBsZS5jb20iLCJzdWIiOiJ1c2VyLTEyMyIsImF1ZCI6WyJlbmdpbmUiXX0.signature"
+
+	oauthService := &mockOAuthService{token: testJWT}
+	handler := NewAuthHandler(oauthService, &mockProjectService{}, cfg, zap.NewNop())
+
+	reqBody := CompleteOAuthRequest{
+		Code:         "auth-code-123",
+		State:        "state-456",
+		CodeVerifier: "verifier-789",
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/complete-oauth", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.CompleteOAuth(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Check response body
+	var resp CompleteOAuthResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	// Verify token is in response body
+	if resp.Token == "" {
+		t.Error("expected token in response body")
+	}
+
+	if resp.Token != testJWT {
+		t.Errorf("expected token %q, got %q", testJWT, resp.Token)
+	}
+
+	// Verify project_id is in response body
+	if resp.ProjectID == "" {
+		t.Error("expected project_id in response body")
+	}
+
+	if resp.ProjectID != testProjectID {
+		t.Errorf("expected project_id %q, got %q", testProjectID, resp.ProjectID)
+	}
+
+	// Cookie should still be set for backward compatibility
+	cookies := rec.Result().Cookies()
+	var jwtCookie *http.Cookie
+	for _, c := range cookies {
+		if c.Name == "ekaya_jwt" {
+			jwtCookie = c
+			break
+		}
+	}
+
+	if jwtCookie == nil {
+		t.Error("expected ekaya_jwt cookie to be set for backward compatibility")
+	}
+}
+
+func TestAuthHandler_CompleteOAuth_HandlesInvalidJWTGracefully(t *testing.T) {
+	auth.InitSessionStore("test-secret")
+
+	cfg := &config.Config{
+		BaseURL:      "http://localhost:3443",
+		CookieDomain: "",
+	}
+
+	// Use a malformed JWT (won't parse correctly)
+	malformedJWT := "not.a.valid.jwt"
+
+	oauthService := &mockOAuthService{token: malformedJWT}
+	handler := NewAuthHandler(oauthService, &mockProjectService{}, cfg, zap.NewNop())
+
+	reqBody := CompleteOAuthRequest{
+		Code:         "auth-code-123",
+		State:        "state-456",
+		CodeVerifier: "verifier-789",
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/complete-oauth", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.CompleteOAuth(rec, req)
+
+	// Should still return 200 even if JWT parsing fails
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp CompleteOAuthResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	// Token should still be returned even if it can't be parsed
+	if resp.Token != malformedJWT {
+		t.Errorf("expected token %q, got %q", malformedJWT, resp.Token)
+	}
+
+	// project_id should be empty string when JWT parsing fails
+	if resp.ProjectID != "" {
+		t.Errorf("expected empty project_id for invalid JWT, got %q", resp.ProjectID)
 	}
 }
