@@ -254,7 +254,16 @@ func (s *projectService) GetAuthServerURL(ctx context.Context, projectID uuid.UU
 
 // UpdateAuthServerURL updates the auth_server_url in project parameters.
 // Used to persist the auth URL when a user first accesses a project with a custom auth_url.
+// Uses WithoutTenant since this is called during OAuth flow before full authentication.
 func (s *projectService) UpdateAuthServerURL(ctx context.Context, projectID uuid.UUID, authServerURL string) error {
+	scope, err := s.db.WithoutTenant(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to acquire connection: %w", err)
+	}
+	defer scope.Close()
+
+	ctx = database.SetTenantScope(ctx, scope)
+
 	project, err := s.projectRepo.Get(ctx, projectID)
 	if err != nil {
 		return fmt.Errorf("failed to get project: %w", err)
