@@ -392,7 +392,7 @@ func (m *mockDatasourceService) GetByName(ctx context.Context, projectID uuid.UU
 	return nil, errors.New("not implemented")
 }
 
-func (m *mockDatasourceService) List(ctx context.Context, projectID uuid.UUID) ([]*models.Datasource, error) {
+func (m *mockDatasourceService) List(ctx context.Context, projectID uuid.UUID) ([]*models.DatasourceWithStatus, error) {
 	return nil, errors.New("not implemented")
 }
 

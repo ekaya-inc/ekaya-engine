@@ -964,7 +964,7 @@ func (m *mockTestDatasourceService) Get(ctx context.Context, projectID, datasour
 	return m.datasource, nil
 }
 
-func (m *mockTestDatasourceService) List(ctx context.Context, projectID uuid.UUID) ([]*models.Datasource, error) {
+func (m *mockTestDatasourceService) List(ctx context.Context, projectID uuid.UUID) ([]*models.DatasourceWithStatus, error) {
 	return nil, nil
 }
 

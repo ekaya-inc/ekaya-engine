@@ -295,10 +295,18 @@ func (s *glossaryService) TestSQL(ctx context.Context, projectID uuid.UUID, sql 
 		}, nil
 	}
 
-	ds := datasources[0] // Use first datasource
+	dsWithStatus := datasources[0] // Use first datasource
+
+	// Check if decryption failed
+	if dsWithStatus.DecryptionFailed {
+		return &SQLTestResult{
+			Valid: false,
+			Error: "datasource credentials were encrypted with a different key",
+		}, nil
+	}
 
 	// Create query executor (empty userID uses shared pool for system operations)
-	executor, err := s.adapterFactory.NewQueryExecutor(ctx, ds.DatasourceType, ds.Config, projectID, ds.ID, "")
+	executor, err := s.adapterFactory.NewQueryExecutor(ctx, dsWithStatus.DatasourceType, dsWithStatus.Config, projectID, dsWithStatus.ID, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create query executor: %w", err)
 	}
