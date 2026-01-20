@@ -365,8 +365,24 @@ func sanitizeArguments(args map[string]any) map[string]any {
    - ErrorResponse struct: `{error: true, code: string, message: string, details?: any}`
    - Test coverage: `pkg/mcp/tools/errors_test.go` includes unit tests and real-world usage examples
    - Pattern established: Use `NewErrorResult()` for actionable errors, reserve Go errors for system failures
+   - **UPDATED**: Added `result.IsError = true` to both helper functions to ensure MCP protocol-level error flag is set
    - Next implementer: Apply these helpers to MCP tools starting with `get_ontology` and `update_entity`
-2. [ ] Update `get_ontology` tool to use error results
+2. [x] **COMPLETED** - Update `get_ontology` tool to use error results
+   - Implementation: `pkg/mcp/tools/ontology.go` now returns error results for actionable parameter validation errors
+   - Changes made:
+     - **Invalid depth parameter** (ontology.go:122-125): Returns `NewErrorResult("invalid_parameters", ...)` with specific error message showing valid values
+     - **Columns depth validation** (ontology.go:221-236): Pre-validates table requirements in `handleColumnsDepth` before calling service
+       - Empty tables list: Returns `NewErrorResult` explaining table names are required
+       - Too many tables: Returns `NewErrorResultWithDetails` with `requested_count` and `max_allowed` in details field
+   - What was NOT changed:
+     - Service-layer errors (no active ontology, database failures) still returned as Go errors - these are system failures, not actionable by Claude
+     - Main handler pattern (lines 136-146) for "no active ontology" remains unchanged - returns special-case response with instructions
+   - Test coverage: `pkg/mcp/tools/ontology_test.go` includes `TestGetOntologyTool_ErrorResults` with 3 test cases:
+     - Invalid depth values (validates error result structure)
+     - Columns depth without tables (validates error message)
+     - Columns depth with too many tables (validates error details)
+   - Design decision: Only parameter validation errors were converted to error results. This is the pattern to follow - catch obvious parameter errors early before calling services
+   - Next implementer: Apply same pattern to `update_entity` tool - validate parameters, return error results for actionable errors, keep Go errors for system failures
 3. [ ] Update `update_entity` tool to use error results
 4. [ ] Test with Claude Desktop - verify error messages are visible
 

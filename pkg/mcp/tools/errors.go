@@ -36,7 +36,9 @@ func NewErrorResult(code, message string) *mcp.CallToolResult {
 		Message: message,
 	}
 	jsonBytes, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(jsonBytes))
+	result := mcp.NewToolResultText(string(jsonBytes))
+	result.IsError = true
+	return result
 }
 
 // NewErrorResultWithDetails creates an error result with additional context.
@@ -61,5 +63,7 @@ func NewErrorResultWithDetails(code, message string, details any) *mcp.CallToolR
 		Details: details,
 	}
 	jsonBytes, _ := json.Marshal(resp)
-	return mcp.NewToolResultText(string(jsonBytes))
+	result := mcp.NewToolResultText(string(jsonBytes))
+	result.IsError = true
+	return result
 }

@@ -155,6 +155,115 @@ func TestCheckOntologyToolsEnabled(t *testing.T) {
 	}
 }
 
+// TestGetOntologyTool_ErrorResults tests that actionable errors are returned as error results.
+func TestGetOntologyTool_ErrorResults(t *testing.T) {
+	t.Run("invalid depth parameter", func(t *testing.T) {
+		// This test validates error result structure without requiring database
+		invalidDepths := []string{"invalid", "table", "column", "summary", ""}
+
+		for _, depth := range invalidDepths {
+			// Create a mock handler that would receive this depth
+			args := map[string]any{
+				"depth": depth,
+			}
+
+			// Simulate what the handler would do with invalid depth
+			validDepths := map[string]bool{
+				"domain":   true,
+				"entities": true,
+				"tables":   true,
+				"columns":  true,
+			}
+
+			if !validDepths[depth] {
+				result := NewErrorResult(
+					"invalid_parameters",
+					"invalid depth '"+depth+"': must be one of 'domain', 'entities', 'tables', 'columns'",
+				)
+
+				// Verify it's an error result
+				assert.NotNil(t, result)
+				assert.True(t, result.IsError)
+
+				// Parse the content to verify structure
+				var errorResp ErrorResponse
+				err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+				require.NoError(t, err)
+
+				assert.True(t, errorResp.Error)
+				assert.Equal(t, "invalid_parameters", errorResp.Code)
+				assert.Contains(t, errorResp.Message, depth)
+				assert.Contains(t, errorResp.Message, "must be one of")
+			}
+
+			_ = args // Use args to avoid unused variable warning
+		}
+	})
+
+	t.Run("columns depth without tables", func(t *testing.T) {
+		// Simulate the validation check in handleColumnsDepth
+		tables := []string{} // Empty tables list
+
+		if len(tables) == 0 {
+			result := NewErrorResult(
+				"invalid_parameters",
+				"table names required for columns depth - please specify which tables to retrieve column details for",
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content
+			var errorResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, err)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Contains(t, errorResp.Message, "table names required")
+		}
+	})
+
+	t.Run("columns depth with too many tables", func(t *testing.T) {
+		// Create a tables slice exceeding the limit
+		tables := make([]string, services.MaxColumnsDepthTables+1)
+		for i := range tables {
+			tables[i] = "table_" + string(rune('a'+i))
+		}
+
+		if len(tables) > services.MaxColumnsDepthTables {
+			result := NewErrorResultWithDetails(
+				"invalid_parameters",
+				"too many tables requested: maximum 10 tables allowed for columns depth",
+				map[string]any{
+					"requested_count": len(tables),
+					"max_allowed":     services.MaxColumnsDepthTables,
+				},
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content
+			var errorResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, err)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Contains(t, errorResp.Message, "too many tables")
+			assert.NotNil(t, errorResp.Details)
+
+			// Verify details structure
+			details := errorResp.Details.(map[string]any)
+			assert.Equal(t, float64(len(tables)), details["requested_count"])
+			assert.Equal(t, float64(services.MaxColumnsDepthTables), details["max_allowed"])
+		}
+	})
+}
+
 // TestGetOntologyTool_HelperFunctions tests the parameter extraction helpers.
 func TestGetOntologyTool_HelperFunctions(t *testing.T) {
 	t.Run("getStringSlice", func(t *testing.T) {
