@@ -501,7 +501,28 @@ document.cookie = 'ekaya_jwt=; Max-Age=0; path=/; SameSite=Strict';
 
 ## Testing
 
-### Task 7: Unit Tests for auth-token.ts
+### Task 7: Unit Tests for auth-token.ts ✅
+
+**Status: COMPLETE** ✅
+
+**Files Created:**
+- `ui/src/lib/auth-token.test.ts` - Comprehensive unit tests (10 tests, all passing)
+
+**Test Coverage:**
+- ✅ `storeProjectToken()` - Stores JWT and project ID in sessionStorage
+- ✅ `storeProjectToken()` - Overwrites existing values
+- ✅ `getProjectToken()` - Returns null when no token stored
+- ✅ `getProjectToken()` - Returns stored token
+- ✅ `clearProjectToken()` - Removes both JWT and project ID
+- ✅ `isTokenExpired()` - Returns true for malformed JWTs (3 cases: not-a-jwt, only.two parts, empty string)
+- ✅ `isTokenExpired()` - Returns true for expired token (1 hour ago)
+- ✅ `isTokenExpired()` - Returns true for token expiring within buffer window (30 seconds)
+- ✅ `isTokenExpired()` - Returns false for valid non-expired token (1 hour from now)
+- ✅ `isTokenExpired()` - Returns true for token without exp claim
+
+All tests pass successfully (10/10).
+
+**Original Spec:**
 
 **New file: `ui/src/lib/auth-token.test.ts`**
 
