@@ -49,9 +49,9 @@ When debugging MCP integrations, two issues make troubleshooting difficult:
    3. [ ] 3.2.3: Convert medium-priority entity and relationship tools
       1. [x] 3.2.3.1: Convert delete_entity tool
       2. [x] 3.2.3.2: Convert get_entity tool (note: list_entities does not exist)
-      3. [ ] 3.2.3.3: Convert relationship tools
+      3. [x] 3.2.3.3: Convert relationship tools
          1. [x] 3.2.3.3.1: Convert update_relationship tool
-         2. [ ] 3.2.3.3.2: Convert delete_relationship tool
+         2. [x] 3.2.3.3.2: Convert delete_relationship tool
          3. [N/A] 3.2.3.3.3: get_relationship (tool does not exist)
          4. [N/A] 3.2.3.3.4: list_relationships (tool does not exist)
    4. [ ] 3.2.4: Convert low-priority exploration and admin tools
