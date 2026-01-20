@@ -311,19 +311,24 @@ func registerResolveOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 
 		// Extract question_id (required)
 		questionIDStr := getOptionalString(req, "question_id")
+		questionIDStr = trimString(questionIDStr)
 		if questionIDStr == "" {
-			return nil, fmt.Errorf("question_id is required")
+			return NewErrorResult("invalid_parameters", "parameter 'question_id' cannot be empty"), nil
 		}
 
+		// Validate UUID format
 		questionID, err := uuid.Parse(questionIDStr)
 		if err != nil {
-			return nil, fmt.Errorf("invalid question_id format: %w", err)
+			return NewErrorResult(
+				"invalid_parameters",
+				fmt.Sprintf("invalid question_id format: %q is not a valid UUID", questionIDStr),
+			), nil
 		}
 
 		// Extract resolution_notes (optional)
 		resolutionNotes := getOptionalString(req, "resolution_notes")
 
-		// Get the question to verify it exists and is pending
+		// Get the question to verify it exists
 		question, err := deps.QuestionRepo.GetByID(tenantCtx, questionID)
 		if err != nil {
 			deps.Logger.Error("Failed to get question",
@@ -333,7 +338,7 @@ func registerResolveOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 		}
 
 		if question == nil {
-			return nil, fmt.Errorf("question not found: %s", questionID)
+			return NewErrorResult("QUESTION_NOT_FOUND", fmt.Sprintf("ontology question %q not found", questionIDStr)), nil
 		}
 
 		// Mark question as answered with optional resolution notes

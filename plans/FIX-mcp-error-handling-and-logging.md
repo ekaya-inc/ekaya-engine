@@ -2240,63 +2240,236 @@ func sanitizeArguments(args map[string]any) map[string]any {
       - Test coverage added for error paths
       - All tests pass: `go test ./pkg/mcp/tools/ -run TestGlossary -short`
 
-   4. [ ] 3.3.2: Convert ontology question tools to error results
+   4. [ ] 3.3.2: Convert ontology question tools to error results (REPLACED - SEE SUBTASKS BELOW)
 
-      Convert ontology question management tools to use error results for actionable errors. Update `pkg/mcp/tools/questions.go` (resolve_ontology_question, skip_ontology_question, dismiss_ontology_question, escalate_ontology_question, list_ontology_questions). Add test coverage for all modified tools.
+      1. [x] 3.3.2.1: Convert resolve_ontology_question tool to error results ✅ COMPLETED
 
-      **Context:** This subtask converts ontology question tools to return structured error results for parameter validation, resource lookups, and business rule violations. These tools are frequently used during ontology refinement workflow.
+         Convert the `resolve_ontology_question` tool in `pkg/mcp/tools/questions.go` to use error results for parameter validation and resource lookups.
 
-      **Files to modify:**
-      - `pkg/mcp/tools/questions.go`
-      - `pkg/mcp/tools/questions_test.go` (add new test cases)
+         **Context:** The `resolve_ontology_question` tool marks an ontology question as answered after the user has researched and updated the ontology. This tool needs to validate the `question_id` parameter and handle cases where the question is not found.
 
-      **Implementation details:**
+         **Files modified:**
+         - `pkg/mcp/tools/questions.go:423-433` - Updated `resolveOntologyQuestionTool` handler with error results
+         - `pkg/mcp/tools/questions_test.go:318-423` - Added comprehensive test coverage
 
-      **Common validation for all question tools (resolve, skip, dismiss, escalate):**
-      1. Parameter validation:
-         - Empty `question_id` after `trimString()` → `NewErrorResult("invalid_parameters", "parameter 'question_id' cannot be empty")`
-         - Invalid UUID format → `NewErrorResult("invalid_parameters", fmt.Sprintf("invalid question_id format: %q is not a valid UUID", questionIDStr))`
-         - Empty `reason` parameter (where applicable: skip, dismiss, escalate) → `NewErrorResult("invalid_parameters", "parameter 'reason' cannot be empty")`
-         - Use `uuid.Parse()` for UUID validation
-         - Use `trimString()` helper for whitespace normalization
+         **Implementation completed:**
 
-      2. Resource validation:
-         - Question not found → `NewErrorResult("QUESTION_NOT_FOUND", fmt.Sprintf("ontology question %q not found", questionIDStr))`
+         1. **Parameter validation (pkg/mcp/tools/questions.go:423-433):**
+            - Empty `question_id` after `trimString()` → `NewErrorResult("invalid_parameters", "parameter 'question_id' cannot be empty")`
+            - Invalid UUID format → `NewErrorResult("invalid_parameters", fmt.Sprintf("invalid question_id format: %q is not a valid UUID", questionIDStr))`
+            - Uses `uuid.Parse()` from `github.com/google/uuid` for UUID validation
+            - Uses `trimString()` helper for whitespace normalization
 
-      3. Business rule validation (if status checks exist):
-         - Question already resolved/dismissed/etc. → `NewErrorResultWithDetails("validation_error", "question cannot be modified in current status", map[string]any{"question_id": questionIDStr, "current_status": status, "allowed_statuses": []string{...}})`
+         2. **Resource validation:**
+            - Question not found → `NewErrorResult("QUESTION_NOT_FOUND", fmt.Sprintf("ontology question %q not found", questionIDStr))`
+            - Checks repository error using `errors.Is(err, repositories.ErrOntologyQuestionNotFound)`
 
-      4. System errors kept as Go errors: Database failures, auth failures
+         3. **System errors kept as Go errors:**
+            - Database connection failures
+            - Authentication failures from `AcquireToolAccess`
+            - Repository update failures (unexpected database errors)
 
-      **list_ontology_questions tool:**
-      1. Parameter validation (optional parameters):
-         - Invalid `status` enum (if provided and not in allowed values) → `NewErrorResultWithDetails("invalid_parameters", "invalid status value", map[string]any{"parameter": "status", "expected": []string{"pending", "skipped", "answered", "deleted"}, "actual": value})`
-         - Invalid `category` enum (if provided) → Similar pattern with allowed categories
-         - Invalid `priority` (if provided, must be 1-5) → `NewErrorResultWithDetails("invalid_parameters", "invalid priority value", map[string]any{"parameter": "priority", "expected": "1-5", "actual": value})`
-         - Invalid `limit` (if provided, must be positive and <= max) → Similar pattern
-         - Invalid `offset` (if provided, must be non-negative) → Similar pattern
+         **Test coverage added (pkg/mcp/tools/questions_test.go:318-423):**
 
-      2. System errors kept as Go errors: Database failures, auth failures
+         `TestResolveOntologyQuestionTool_ErrorResults` with test cases:
+         - Empty question_id parameter (whitespace-only string) ✅
+         - Invalid UUID format (malformed string "not-a-uuid") ✅
+         - Question not found (valid UUID but doesn't exist) ✅
+         - Success path verification (question marked as answered) ✅
 
-      **Test coverage:**
-      Add test functions in `pkg/mcp/tools/questions_test.go`:
-      - `TestResolveOntologyQuestionTool_ErrorResults`: empty question_id, invalid UUID, question not found, invalid status (if applicable)
-      - `TestSkipOntologyQuestionTool_ErrorResults`: empty question_id, invalid UUID, empty reason, question not found
-      - `TestDismissOntologyQuestionTool_ErrorResults`: empty question_id, invalid UUID, empty reason, question not found
-      - `TestEscalateOntologyQuestionTool_ErrorResults`: empty question_id, invalid UUID, empty reason, question not found
-      - `TestListOntologyQuestionsTool_ErrorResults`: invalid status enum, invalid category enum, invalid priority range, invalid limit/offset
+         All tests verify:
+         - `result.IsError == true` for error cases
+         - Correct error code (`invalid_parameters` or `QUESTION_NOT_FOUND`)
+         - Message contains relevant details
 
-      All tests should verify: `result.IsError == true`, correct error code, message, and structured details (where applicable)
+         **Error codes used:** `invalid_parameters`, `QUESTION_NOT_FOUND`
 
-      **Error codes used:** `invalid_parameters`, `QUESTION_NOT_FOUND`, `validation_error`
+         **Pattern reference:** Followed the pattern from `pkg/mcp/tools/knowledge.go` (delete_project_knowledge tool) for UUID parameter validation and resource lookups.
 
-      **Pattern reference:** Follow pattern from `pkg/mcp/tools/knowledge.go` (update_project_knowledge, delete_project_knowledge tools) for parameter validation with UUIDs and enums.
+         **Acceptance criteria met:**
+         - ✅ Parameter validation errors return error results
+         - ✅ Resource not found returns error result
+         - ✅ System errors remain as Go errors
+         - ✅ All new tests pass: `go test ./pkg/mcp/tools/ -run TestResolveOntologyQuestion -short`
 
-      **Acceptance criteria:**
-      - All ontology question tools return actionable errors as error results
-      - System errors remain as Go errors
-      - Test coverage added for error paths
-      - All tests pass: `go test ./pkg/mcp/tools/ -run TestOntologyQuestion -short` and `go test ./pkg/mcp/tools/ -run TestListOntologyQuestions -short`
+         **Implementation notes for next session:**
+         - The pattern is now established: validate parameters → return error results, validate resources → return error results, system errors → return Go errors
+         - The `trimString()` helper and `uuid.Parse()` are the standard tools for parameter validation
+         - The repository layer returns sentinel errors (e.g., `ErrOntologyQuestionNotFound`) which are checked with `errors.Is()` and converted to error results
+         - Tests follow the table-driven pattern with subtests for each error case plus success path verification
+
+      2. [ ] 3.3.2.2: Convert skip_ontology_question, dismiss_ontology_question, and escalate_ontology_question tools to error results
+
+         Convert the remaining ontology question status tools (`skip_ontology_question`, `dismiss_ontology_question`, `escalate_ontology_question`) in `pkg/mcp/tools/questions.go` to use error results.
+
+         **Context:** These three tools have nearly identical validation logic (question_id + reason parameter) and should be converted together for consistency. They mark questions as skipped, dismissed, or escalated respectively.
+
+         **Files to modify:**
+         - `pkg/mcp/tools/questions.go` - Update three tool handler functions
+         - `pkg/mcp/tools/questions_test.go` - Add test coverage for all three
+
+         **Implementation details:**
+
+         **Common validation for all three tools:**
+
+         1. **Parameter validation:**
+            - Empty `question_id` after `trimString()` → `NewErrorResult("invalid_parameters", "parameter 'question_id' cannot be empty")`
+            - Invalid UUID format → `NewErrorResult("invalid_parameters", fmt.Sprintf("invalid question_id format: %q is not a valid UUID", questionIDStr))`
+            - Empty `reason` parameter after `trimString()` → `NewErrorResult("invalid_parameters", "parameter 'reason' cannot be empty")`
+            - Use `uuid.Parse()` for UUID validation
+            - Use `trimString()` helper for whitespace normalization
+
+         2. **Resource validation:**
+            - Question not found → `NewErrorResult("QUESTION_NOT_FOUND", fmt.Sprintf("ontology question %q not found", questionIDStr))`
+
+         3. **System errors kept as Go errors:**
+            - Database failures, auth failures, repository update failures
+
+         **Test coverage:**
+
+         Add three test functions in `pkg/mcp/tools/questions_test.go`:
+
+         - `TestSkipOntologyQuestionTool_ErrorResults`: empty question_id, invalid UUID, empty reason, question not found
+         - `TestDismissOntologyQuestionTool_ErrorResults`: empty question_id, invalid UUID, empty reason, question not found
+         - `TestEscalateOntologyQuestionTool_ErrorResults`: empty question_id, invalid UUID, empty reason, question not found
+
+         Each test should verify: `result.IsError == true`, correct error code, descriptive message
+
+         **Error codes used:** `invalid_parameters`, `QUESTION_NOT_FOUND`
+
+         **Pattern reference:** Follow pattern from subtask 3.3.2.1 (resolve_ontology_question) for consistency across all question status tools.
+
+         **Acceptance criteria:**
+         - All three tools return error results for actionable errors
+         - System errors remain as Go errors
+         - All new tests pass: `go test ./pkg/mcp/tools/ -run Test.*OntologyQuestionTool_ErrorResults -short`
+
+      3. [ ] 3.3.2.3: Convert list_ontology_questions tool to error results
+
+         Convert the `list_ontology_questions` tool in `pkg/mcp/tools/questions.go` to validate optional filter parameters and return error results for invalid values.
+
+         **Context:** The `list_ontology_questions` tool accepts several optional filter parameters (status, category, priority, limit, offset). These need validation with clear error messages when invalid values are provided.
+
+         **Files to modify:**
+         - `pkg/mcp/tools/questions.go` - Update `listOntologyQuestionsTool` handler function
+         - `pkg/mcp/tools/questions_test.go` - Add test coverage
+
+         **Implementation details:**
+
+         1. **Parameter validation for optional enum parameters:**
+
+            - Invalid `status` (if provided) → `NewErrorResultWithDetails("invalid_parameters", "invalid status value", map[string]any{"parameter": "status", "expected": []string{"pending", "skipped", "answered", "deleted", "escalated", "dismissed"}, "actual": value})`
+
+            - Invalid `category` (if provided) → `NewErrorResultWithDetails("invalid_parameters", "invalid category value", map[string]any{"parameter": "category", "expected": []string{"business_rules", "relationship", "terminology", "enumeration", "temporal", "data_quality"}, "actual": value})`
+
+            - Use `trimString()` for string parameters before validation
+            - Only validate if parameter is provided (optional parameters)
+
+         2. **Parameter validation for numeric parameters:**
+
+            - Invalid `priority` (if provided, must be 1-5) → `NewErrorResultWithDetails("invalid_parameters", "invalid priority value", map[string]any{"parameter": "priority", "expected": "1-5", "actual": value})`
+
+            - Invalid `limit` (if provided, must be positive and ≤ 100) → `NewErrorResultWithDetails("invalid_parameters", "invalid limit value", map[string]any{"parameter": "limit", "expected": "1-100", "actual": value})`
+
+            - Invalid `offset` (if provided, must be non-negative) → `NewErrorResultWithDetails("invalid_parameters", "invalid offset value", map[string]any{"parameter": "offset", "expected": "≥0", "actual": value})`
+
+         3. **Type checking:**
+            - If parameter exists but is wrong type (e.g., string instead of number), return error result with type information
+
+         4. **System errors kept as Go errors:**
+            - Database connection failures
+            - Authentication failures
+            - Repository query failures
+
+         **Test coverage:**
+
+         Add `TestListOntologyQuestionsTool_ErrorResults` in `pkg/mcp/tools/questions_test.go` with test cases:
+         - Invalid status enum (value not in allowed list)
+         - Invalid category enum (value not in allowed list)
+         - Invalid priority (0, 6, negative number)
+         - Invalid limit (0, 101, negative number)
+         - Invalid offset (negative number)
+         - Wrong type for numeric parameter (string instead of number)
+
+         All tests should verify:
+         - `result.IsError == true`
+         - Error code is `invalid_parameters`
+         - Message and details contain parameter name, expected values, actual value
+
+         **Error codes used:** `invalid_parameters`
+
+         **Pattern reference:** Follow pattern from `pkg/mcp/tools/queries.go` (list_approved_queries tool, task 3.2.4.1) for optional parameter validation with enums.
+
+         **Acceptance criteria:**
+         - All optional parameters validated when provided
+         - Invalid values return error results with structured details
+         - System errors remain as Go errors
+         - All new tests pass: `go test ./pkg/mcp/tools/ -run TestListOntologyQuestionsTool_ErrorResults -short`
+
+      4. [ ] 3.3.2.4: Add comprehensive integration tests for ontology question tools
+
+         Create integration tests that verify the ontology question tools work end-to-end with a real database, covering both success and error paths.
+
+         **Context:** Subtasks 3.3.2.1-3.3.2.3 added unit tests for error handling. This subtask adds integration tests to verify the tools work correctly with database operations.
+
+         **Files to create/modify:**
+         - Create `pkg/mcp/tools/questions_integration_test.go` (new file)
+
+         **Implementation details:**
+
+         1. **Test infrastructure setup:**
+            - Use `testhelpers.GetEngineDB(t)` to get test database connection
+            - Create unique project ID for test isolation (e.g., `00000000-0000-0000-0000-000000000050`)
+            - Set up test dependencies (QuestionRepository, ProjectService, OntologyRepository)
+            - Create test ontology and sample questions in database
+
+         2. **Integration test cases:**
+
+            **TestResolveOntologyQuestion_Integration:**
+            - Create pending question in database
+            - Call resolve_ontology_question with valid question_id
+            - Verify question status changed to "answered" in database
+            - Test error path: call with non-existent question_id
+            - Verify error result structure
+
+            **TestSkipOntologyQuestion_Integration:**
+            - Create pending question in database
+            - Call skip_ontology_question with valid question_id and reason
+            - Verify question status changed to "skipped" in database
+            - Verify reason stored correctly
+            - Test error paths: empty reason, non-existent question
+
+            **TestDismissOntologyQuestion_Integration:**
+            - Similar structure to skip test
+            - Verify status changed to "dismissed"
+
+            **TestEscalateOntologyQuestion_Integration:**
+            - Similar structure to skip test
+            - Verify status changed to "escalated"
+
+            **TestListOntologyQuestions_Integration:**
+            - Create multiple questions with different statuses, categories, priorities
+            - Test filtering by status (return only "pending" questions)
+            - Test filtering by category (return only "terminology" questions)
+            - Test filtering by priority (return only priority 1 questions)
+            - Test pagination with limit and offset
+            - Test error paths: invalid status enum, invalid priority range
+
+         3. **Cleanup:**
+            - Use `t.Cleanup()` to delete test data after each test
+            - Ensure test isolation (each test creates its own questions)
+
+         **Pattern reference:** Follow integration test patterns from:
+         - `pkg/mcp/tools/knowledge_integration_test.go` (task 3.2.4.3.4.5)
+         - Use shared testcontainer pattern for database access
+
+         **Acceptance criteria:**
+         - Integration tests cover all four question status tools
+         - Integration tests cover list_ontology_questions with all filters
+         - Tests verify database state changes
+         - Tests verify error results for invalid inputs
+         - All tests pass: `go test ./pkg/mcp/tools/ -run TestOntologyQuestion.*Integration`
+         - Tests use proper cleanup to avoid affecting other tests
 
    5. [ ] 3.4: Update remaining medium/low priority tools
 

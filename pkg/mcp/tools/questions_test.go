@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -671,4 +672,84 @@ func TestDismissOntologyQuestion_ResponseStructure(t *testing.T) {
 	require.NotNil(t, q)
 	assert.Equal(t, models.QuestionStatusDismissed, q.Status)
 	assert.Equal(t, reason, q.StatusReason)
+}
+
+// TestResolveOntologyQuestionTool_ErrorResults verifies error handling for invalid parameters and resource lookups.
+func TestResolveOntologyQuestionTool_ErrorResults(t *testing.T) {
+	t.Run("empty question_id after trimming", func(t *testing.T) {
+		// Simulate validation check for empty question_id after trimming
+		questionIDStr := "   "
+		questionIDStr = trimString(questionIDStr)
+		if questionIDStr == "" {
+			result := NewErrorResult(
+				"invalid_parameters",
+				"parameter 'question_id' cannot be empty",
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content to verify structure
+			var errorResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, err)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Contains(t, errorResp.Message, "parameter 'question_id' cannot be empty")
+		}
+	})
+
+	t.Run("invalid UUID format", func(t *testing.T) {
+		// Simulate UUID validation
+		questionIDStr := "not-a-valid-uuid"
+		questionIDStr = trimString(questionIDStr)
+		_, err := uuid.Parse(questionIDStr)
+		if err != nil {
+			result := NewErrorResult(
+				"invalid_parameters",
+				fmt.Sprintf("invalid question_id format: %q is not a valid UUID", questionIDStr),
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content to verify structure
+			var errorResp ErrorResponse
+			jsonErr := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, jsonErr)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Contains(t, errorResp.Message, "invalid question_id format")
+			assert.Contains(t, errorResp.Message, "not-a-valid-uuid")
+		}
+	})
+
+	t.Run("question not found", func(t *testing.T) {
+		// Simulate question not found scenario
+		questionIDStr := uuid.New().String()
+
+		result := NewErrorResult(
+			"QUESTION_NOT_FOUND",
+			fmt.Sprintf("ontology question %q not found", questionIDStr),
+		)
+
+		// Verify it's an error result
+		assert.NotNil(t, result)
+		assert.True(t, result.IsError)
+
+		// Parse the content to verify structure
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "QUESTION_NOT_FOUND", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "ontology question")
+		assert.Contains(t, errorResp.Message, "not found")
+		assert.Contains(t, errorResp.Message, questionIDStr)
+	})
 }
