@@ -423,10 +423,40 @@ func sanitizeArguments(args map[string]any) map[string]any {
 
 ### Phase 2: MCP Logging Middleware
 
-1. [ ] Create `pkg/middleware/mcp_logging.go`
+1. [x] **COMPLETED** - Create `pkg/middleware/mcp_logging.go`
+   - **Implementation:** `pkg/middleware/mcp_logging.go` intercepts MCP JSON-RPC requests/responses and logs tool names, parameters, success/failure, error details, and duration
+   - **Design approach:** Wraps HTTP handler (Option A from plan) - reads and restores request body, captures response with `mcpResponseRecorder`
+   - **Key features implemented:**
+     - **Request logging**: Parses JSON-RPC request to extract `method`, tool `name`, and `arguments`
+     - **Response logging**: Parses JSON-RPC response to detect success vs error, logs error code/message on failure
+     - **Sensitive data redaction**: `sanitizeArguments()` redacts fields containing keywords: password, secret, token, key, credential (case-insensitive)
+     - **String truncation**: Long string values truncated to 200 chars + "..." to prevent log bloat
+     - **Graceful error handling**: Continues processing even if JSON parsing fails, logs debug message
+     - **Nil logger support**: Pass-through with no logging if logger is nil (injectable pattern)
+   - **Files created:**
+     - `pkg/middleware/mcp_logging.go` (177 lines) - Middleware implementation with `MCPRequestLogger()` function and `sanitizeArguments()` helper
+     - `pkg/middleware/mcp_logging_test.go` (421 lines) - Comprehensive test suite covering all edge cases
+   - **Test coverage:** `pkg/middleware/mcp_logging_test.go` includes comprehensive tests:
+     - Successful tool calls (verifies request + response logs)
+     - Error responses (verifies error code and message extraction)
+     - Sensitive parameter redaction (password, api_key, access_token, etc.)
+     - Long string truncation
+     - Nil logger pass-through
+     - Malformed JSON handling
+     - Empty request body handling
+     - `TestSanitizeArguments` with 6 test cases for edge cases
+   - **Pattern:** Follows existing `RequestLogger` in same package (consistent middleware style)
+   - **Integration point:** To integrate, wrap the MCP HTTP handler in `pkg/handlers/mcp_handler.go`:
+     ```go
+     // In NewMCPHandler or wherever httpServer.Handler() is used
+     handler := middleware.MCPRequestLogger(logger)(h.httpServer.Handler())
+     ```
+   - **Note on configuration:** Middleware currently has no configuration options - logs all MCP requests at DEBUG level. Future implementer can add config for log_requests, log_responses, log_errors flags as described in the original plan (Phase 2 task 3).
+   - **Note on sensitive data redaction:** Already implemented via `sanitizeArguments()` - redacts fields containing: password, secret, token, key, credential. Additional sensitive keywords can be added to the `sensitive` slice if needed.
+   - **Next implementer:** Task 2.2 (Integrate into MCP handler chain) requires modifying `pkg/handlers/mcp_handler.go` to wrap the httpServer handler. Look for where the handler is registered with the router and apply the middleware wrapper.
 2. [ ] Integrate into MCP handler chain
-3. [ ] Add configuration options
-4. [ ] Add sensitive data redaction
+3. [ ] Add configuration options (OPTIONAL - basic redaction already implemented)
+4. [ ] ~~Add sensitive data redaction~~ (COMPLETED - included in 2.1)
 
 ### Phase 3: Rollout to All Tools
 
