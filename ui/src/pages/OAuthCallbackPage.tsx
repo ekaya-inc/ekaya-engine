@@ -1,5 +1,25 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { storeProjectToken } from '../lib/auth-token';
+
+/**
+ * Extract project_id from JWT payload
+ * Returns null if extraction fails
+ */
+function extractProjectIdFromJwt(jwt: string): string | null {
+  try {
+    const parts = jwt.split('.');
+    if (parts.length !== 3) return null;
+
+    const payloadPart = parts[1];
+    if (!payloadPart) return null;
+
+    const payload = JSON.parse(atob(payloadPart));
+    return typeof payload.project_id === 'string' ? payload.project_id : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * OAuth callback page - handles authorization code and completes flow
@@ -92,6 +112,17 @@ export default function OAuthCallbackPage() {
         }
 
         const data = await response.json();
+
+        // Store JWT in sessionStorage (tab-scoped)
+        if (data.token && data.project_id) {
+          storeProjectToken(data.token, data.project_id);
+        } else if (data.token) {
+          // Fallback: extract project_id from JWT if not in response
+          const projectId = extractProjectIdFromJwt(data.token);
+          if (projectId) {
+            storeProjectToken(data.token, projectId);
+          }
+        }
 
         // Clean up sessionStorage
         sessionStorage.removeItem('oauth_code_verifier');

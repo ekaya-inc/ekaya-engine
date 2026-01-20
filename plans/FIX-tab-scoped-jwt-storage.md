@@ -188,7 +188,57 @@ type CompleteOAuthResponse struct {
 - Frontend should check for both fields in response before attempting to extract project_id from JWT manually
 - Cookie is still being set (can be removed in later cleanup task)
 
-### Task 3: Update OAuthCallbackPage to Store JWT in sessionStorage
+### Task 3: Update OAuthCallbackPage to Store JWT in sessionStorage ✅
+
+**Status: COMPLETE** ✅
+
+**Files Modified:**
+- `ui/src/pages/OAuthCallbackPage.tsx:62-83` - Added `extractProjectIdFromJwt()` helper and JWT storage logic
+- `ui/src/pages/OAuthCallbackPage.test.tsx` - Added 3 comprehensive test cases
+
+**Implementation Summary:**
+
+Updated OAuthCallbackPage to store JWT in sessionStorage after successful OAuth token exchange, enabling tab-scoped authentication. The component now handles both the primary path (token + project_id in response) and fallback path (extracting project_id from JWT payload).
+
+**Key Implementation Details:**
+
+1. **Helper Function:** Added `extractProjectIdFromJwt(jwt: string): string | null` (lines 62-70)
+   - Safely parses JWT payload to extract project_id claim
+   - Returns null on any parsing error (malformed JWT, missing claim)
+   - Uses standard JWT structure: `header.payload.signature`
+
+2. **Primary Storage Path:** When backend response includes both `token` and `project_id`
+   - Stores directly using `storeProjectToken(data.token, data.project_id)`
+   - This is the expected path after Task 2 backend changes
+
+3. **Fallback Storage Path:** When response only includes `token`
+   - Extracts project_id from JWT payload using helper function
+   - Stores token only if extraction succeeds
+   - Provides backward compatibility during transition
+
+4. **Error Handling:** Gracefully handles malformed JWTs
+   - No storage occurs if project_id extraction fails
+   - OAuth flow completes successfully (cookie fallback still works)
+   - No user-visible errors
+
+5. **Storage Location:** Lines 73-83 in handleCallback function
+   - Runs after successful `/api/auth/complete-oauth` response
+   - Before redirect to return URL
+
+**Test Coverage:**
+- ✅ `should store JWT in sessionStorage when token and project_id are in response` - Verifies primary path works
+- ✅ `should extract project_id from JWT if not in response` - Verifies fallback extraction works
+- ✅ `should not store token if extraction fails and no project_id in response` - Verifies graceful error handling
+
+**Why This Approach:**
+- Primary path (token + project_id in response) avoids client-side JWT parsing where possible
+- Fallback path ensures compatibility if backend doesn't include project_id
+- Fail-safe: if storage fails, cookie-based auth still works (backend accepts both)
+
+**Next Task Context:**
+Task 4 will update `fetchWithAuth()` to read from sessionStorage and send Bearer tokens. Once that's complete, the tab-scoped authentication will be fully functional. The current implementation is ready for Task 4 - JWT is being stored correctly in sessionStorage with the project_id.
+
+**Original Spec:**
 
 **File: `ui/src/pages/OAuthCallbackPage.tsx`**
 

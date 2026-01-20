@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import OAuthCallbackPage from './OAuthCallbackPage';
+import * as authToken from '../lib/auth-token';
 
 // Mock navigate
 const mockNavigate = vi.fn();
@@ -11,6 +12,15 @@ vi.mock('react-router-dom', async () => {
   return {
     ...actual,
     useNavigate: () => mockNavigate,
+  };
+});
+
+// Mock auth-token module
+vi.mock('../lib/auth-token', async () => {
+  const actual = await vi.importActual('../lib/auth-token');
+  return {
+    ...actual,
+    storeProjectToken: vi.fn(),
   };
 });
 
@@ -214,5 +224,102 @@ describe('OAuthCallbackPage', () => {
     expect(sessionStorage.getItem('oauth_code_verifier')).toBeNull();
     expect(sessionStorage.getItem('oauth_auth_server_url')).toBeNull();
     expect(sessionStorage.getItem('oauth_return_url')).toBeNull();
+  });
+
+  it('should store JWT in sessionStorage when token and project_id are in response', async () => {
+    sessionStorage.setItem('oauth_state', 'test-state-123');
+    sessionStorage.setItem('oauth_code_verifier', 'test-verifier-456');
+    sessionStorage.setItem('oauth_auth_server_url', 'https://auth.dev.ekaya.ai');
+    sessionStorage.setItem('oauth_return_url', '/projects/test-project');
+
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          success: true,
+          redirect_url: '/projects/test-project',
+          token: 'new-jwt-token',
+          project_id: 'project-123',
+        }),
+      } as Response)
+    ) as any;
+
+    render(
+      <MemoryRouter initialEntries={['/oauth/callback?code=auth-code&state=test-state-123']}>
+        <OAuthCallbackPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(authToken.storeProjectToken).toHaveBeenCalledWith('new-jwt-token', 'project-123');
+    });
+  });
+
+  it('should extract project_id from JWT if not in response', async () => {
+    // JWT with project_id in payload
+    const payload = { project_id: 'extracted-project-456', exp: Date.now() / 1000 + 3600 };
+    const mockJwt = `header.${btoa(JSON.stringify(payload))}.signature`;
+
+    sessionStorage.setItem('oauth_state', 'test-state-123');
+    sessionStorage.setItem('oauth_code_verifier', 'test-verifier-456');
+    sessionStorage.setItem('oauth_auth_server_url', 'https://auth.dev.ekaya.ai');
+    sessionStorage.setItem('oauth_return_url', '/projects/test-project');
+
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          success: true,
+          redirect_url: '/projects/test-project',
+          token: mockJwt,
+          // No project_id in response - should extract from JWT
+        }),
+      } as Response)
+    ) as any;
+
+    render(
+      <MemoryRouter initialEntries={['/oauth/callback?code=auth-code&state=test-state-123']}>
+        <OAuthCallbackPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(authToken.storeProjectToken).toHaveBeenCalledWith(mockJwt, 'extracted-project-456');
+    });
+  });
+
+  it('should not store token if extraction fails and no project_id in response', async () => {
+    // Malformed JWT
+    const malformedJwt = 'not.a.valid.jwt';
+
+    sessionStorage.setItem('oauth_state', 'test-state-123');
+    sessionStorage.setItem('oauth_code_verifier', 'test-verifier-456');
+    sessionStorage.setItem('oauth_auth_server_url', 'https://auth.dev.ekaya.ai');
+    sessionStorage.setItem('oauth_return_url', '/projects/test-project');
+
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          success: true,
+          redirect_url: '/projects/test-project',
+          token: malformedJwt,
+          // No project_id in response and JWT is malformed
+        }),
+      } as Response)
+    ) as any;
+
+    render(
+      <MemoryRouter initialEntries={['/oauth/callback?code=auth-code&state=test-state-123']}>
+        <OAuthCallbackPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Authentication successful/i)).toBeInTheDocument();
+    });
+
+    // Should not call storeProjectToken when extraction fails
+    expect(authToken.storeProjectToken).not.toHaveBeenCalled();
   });
 });
