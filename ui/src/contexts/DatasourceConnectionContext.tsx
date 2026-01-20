@@ -115,6 +115,8 @@ export const DatasourceConnectionProvider = ({
               ...(ds.provider ? { provider: ds.provider } : {}),
               displayName: ds.name,
               ...ds.config,
+              ...(ds.decryption_failed !== undefined ? { decryption_failed: ds.decryption_failed } : {}),
+              ...(ds.error_message ? { error_message: ds.error_message } : {}),
             }));
           setDatasources(loadedDatasources);
 

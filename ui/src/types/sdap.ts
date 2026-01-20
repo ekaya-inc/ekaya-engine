@@ -17,6 +17,8 @@ export interface Datasource {
   config: DatasourceConfig;
   created_at: string;
   updated_at: string;
+  decryption_failed?: boolean;
+  error_message?: string;
 }
 
 /**
