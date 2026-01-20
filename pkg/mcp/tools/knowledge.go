@@ -11,6 +11,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -206,14 +207,29 @@ func registerDeleteProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 			return nil, err
 		}
 
+		// Validate fact_id is not empty after trimming
+		factIDStr = trimString(factIDStr)
+		if factIDStr == "" {
+			return NewErrorResult("invalid_parameters", "parameter 'fact_id' cannot be empty"), nil
+		}
+
+		// Validate UUID format
 		factID, err := uuid.Parse(factIDStr)
 		if err != nil {
-			return nil, fmt.Errorf("invalid fact_id: %w", err)
+			return NewErrorResult(
+				"invalid_parameters",
+				fmt.Sprintf("invalid fact_id format: %q is not a valid UUID", factIDStr),
+			), nil
 		}
 
 		// Delete the fact
 		err = deps.KnowledgeRepository.Delete(tenantCtx, factID)
 		if err != nil {
+			// Check if fact was not found
+			if err == apperrors.ErrNotFound {
+				return NewErrorResult("FACT_NOT_FOUND", fmt.Sprintf("fact %q not found", factIDStr)), nil
+			}
+			// Database/system errors remain as Go errors
 			return nil, fmt.Errorf("failed to delete project knowledge: %w", err)
 		}
 

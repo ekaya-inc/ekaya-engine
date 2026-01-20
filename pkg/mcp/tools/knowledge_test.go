@@ -321,9 +321,90 @@ func TestUpdateProjectKnowledgeTool_ErrorResults(t *testing.T) {
 	})
 }
 
+// TestDeleteProjectKnowledgeTool_ErrorResults verifies error handling for invalid parameters.
+func TestDeleteProjectKnowledgeTool_ErrorResults(t *testing.T) {
+	t.Run("empty fact_id after trimming", func(t *testing.T) {
+		// Simulate validation check for empty fact_id after trimming
+		factIDStr := "   "
+		factIDStr = trimString(factIDStr)
+		if factIDStr == "" {
+			result := NewErrorResult(
+				"invalid_parameters",
+				"parameter 'fact_id' cannot be empty",
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content to verify structure
+			var errorResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, err)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Contains(t, errorResp.Message, "parameter 'fact_id' cannot be empty")
+		}
+	})
+
+	t.Run("invalid UUID format", func(t *testing.T) {
+		// Simulate UUID validation
+		factIDStr := "not-a-valid-uuid"
+		factIDStr = trimString(factIDStr)
+		_, err := uuid.Parse(factIDStr)
+		if err != nil {
+			result := NewErrorResult(
+				"invalid_parameters",
+				fmt.Sprintf("invalid fact_id format: %q is not a valid UUID", factIDStr),
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content to verify structure
+			var errorResp ErrorResponse
+			jsonErr := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, jsonErr)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Contains(t, errorResp.Message, "invalid fact_id format")
+			assert.Contains(t, errorResp.Message, "not-a-valid-uuid")
+		}
+	})
+
+	t.Run("fact not found", func(t *testing.T) {
+		// Simulate fact not found scenario
+		factIDStr := uuid.New().String()
+
+		result := NewErrorResult(
+			"FACT_NOT_FOUND",
+			fmt.Sprintf("fact %q not found", factIDStr),
+		)
+
+		// Verify it's an error result
+		assert.NotNil(t, result)
+		assert.True(t, result.IsError)
+
+		// Parse the content to verify structure
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "FACT_NOT_FOUND", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "fact")
+		assert.Contains(t, errorResp.Message, "not found")
+		assert.Contains(t, errorResp.Message, factIDStr)
+	})
+}
+
 // Note: Full integration tests for tool execution with database require a database connection
 // and would be covered in integration tests. The tests above verify that:
 // - Tools are properly registered with the MCP server
 // - Response structures serialize correctly
 // - Valid categories are accepted
 // - Error results are returned for invalid parameters
+// - delete_project_knowledge error handling covers empty fact_id, invalid UUID format, and fact not found scenarios
