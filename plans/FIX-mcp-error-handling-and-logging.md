@@ -1006,32 +1006,30 @@ func sanitizeArguments(args map[string]any) map[string]any {
 
             **Note:** The tool name may be `learn_fact`, `add_fact`, or `update_project_knowledge`. Search `pkg/mcp/tools/knowledge.go` for the actual tool registration to find the correct function name.
 
-         2. [ ] 3.2.4.3.2: Convert list_project_knowledge tool to error results
+         2. [N/A] 3.2.4.3.2: Convert list_project_knowledge tool to error results
 
-            Apply error handling pattern to the list/get facts tool in `pkg/mcp/tools/knowledge.go`. This tool retrieves stored domain facts, optionally filtered by category.
+            **Status:** N/A - Tool does not exist
 
-            **File:** `pkg/mcp/tools/knowledge.go`
+            **Finding:** The `list_project_knowledge` tool (also known as `list_facts` or `get_facts`) does **not exist** in the codebase.
 
-            **Parameter validation:**
-            - If `category` parameter exists and is not empty:
-              - Invalid `category` value → `NewErrorResultWithDetails("invalid_parameters", "invalid category value", map[string]any{"parameter": "category", "expected": ["terminology", "business_rule", "enumeration", "convention"], "actual": category})`
-            - Use `trimString()` helper for whitespace normalization if category is provided
+            **Verification:**
+            - Searched `pkg/mcp/tools/knowledge.go` for tool registrations
+            - Only 2 tools exist: `update_project_knowledge` and `delete_project_knowledge`
+            - No list/get functionality for project knowledge facts in MCP tools
+            - Verified in `RegisterKnowledgeTools()` function (lines 40-43)
 
-            **System errors kept as Go errors:**
-            - Database connection failures
-            - Authentication failures from `AcquireToolAccess`
-            - Repository failures during query operation
+            **Note:** If listing project knowledge is needed, it would require implementing a new MCP tool (separate feature request). Currently, knowledge facts can only be created/updated (`update_project_knowledge`) or deleted (`delete_project_knowledge`).
 
-            **Test coverage:**
-            - Create `TestListProjectKnowledgeTool_ErrorResults` in `pkg/mcp/tools/knowledge_test.go`
-            - Test cases:
-              - Invalid category value (string not in allowed list)
-              - Valid category values should pass through without error
-            - Verify: `result.IsError == true`, correct error code, message, structured details
+            **Subtasks marked N/A:**
 
-            **Error codes:** `invalid_parameters`
+            1. [N/A] 3.2.4.3.2.1: Add trimString import and parameter extraction
+               - **Status:** N/A - Tool does not exist
 
-            **Note:** The tool name may be `get_facts`, `list_facts`, or `list_project_knowledge`. Search for tool registrations in `pkg/mcp/tools/knowledge.go` to find the actual function name.
+            2. [N/A] 3.2.4.3.2.2: Add category validation logic
+               - **Status:** N/A - Tool does not exist
+
+            3. [N/A] 3.2.4.3.2.3: Add comprehensive test coverage
+               - **Status:** N/A - Tool does not exist
 
          3. [ ] 3.2.4.3.3: Convert delete_project_knowledge tool to error results
 
