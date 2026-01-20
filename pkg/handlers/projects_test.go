@@ -24,9 +24,9 @@ func testConfig() *config.Config {
 		AuthServerURL: "https://auth.ekaya.ai",
 		Auth: config.AuthConfig{
 			JWKSEndpoints: map[string]string{
-				"https://auth.ekaya.ai":    "https://auth.ekaya.ai/.well-known/jwks.json",
-				"http://localhost:5002":    "http://localhost:5002/.well-known/jwks.json",
-				"https://us.dev.ekaya.ai":  "https://us.dev.ekaya.ai/.well-known/jwks.json",
+				"https://auth.ekaya.ai":   "https://auth.ekaya.ai/.well-known/jwks.json",
+				"http://localhost:5002":   "http://localhost:5002/.well-known/jwks.json",
+				"https://us.dev.ekaya.ai": "https://us.dev.ekaya.ai/.well-known/jwks.json",
 			},
 		},
 	}
