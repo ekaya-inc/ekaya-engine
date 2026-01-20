@@ -761,25 +761,11 @@ func sanitizeArguments(args map[string]any) map[string]any {
             - **Test coverage:** All 2 tests in `TestGetEntityTool_ErrorResults` pass
             - **Pattern established:** Simple read operation with minimal error handling - parameter validation and resource not found errors
             - **Next implementer:** Task 3.2.3.2.2 (list_entities tool) - apply same pattern, but remember that empty result sets are NOT errors (return empty list)
-         2. [ ] 3.2.3.2.2: Convert list_entities tool to error results
-            - **Implementation:** Apply error handling pattern to `list_entities` in `pkg/mcp/tools/entity.go`
-            - **Key principle:** Empty result set is NOT an error - this is a successful query that found no entities
-            - **Parameter validation errors to convert:**
-              - None expected (list_entities typically has no required parameters)
-              - If optional filter parameters exist, validate they are non-empty after trimming
-            - **Resource lookup errors to convert:**
-              - None - empty list is a valid success response
-            - **System errors to keep as Go errors:**
-              - Database connection failures from `OntologyRepo.ListEntities()`
-              - Authentication failures from `AcquireToolAccess()`
-              - Ontology not active errors from `OntologyRepo.GetActive()`
-            - **Test coverage required:**
-              - Add `TestListEntitiesTool_EmptyResult` to `pkg/mcp/tools/entity_test.go`:
-                - Verify that when repository returns empty list, tool returns success (NOT an error result)
-                - Verify `result.IsError == false` or result is not an error result type
-                - Verify response contains empty array/list
-            - **Pattern:** Simple read operation with minimal error handling. Focus test on confirming empty results are handled correctly as success cases, not errors. This establishes the pattern that "no results found" is different from "resource not found" errors.
-            - **Dependencies:** No new dependencies needed. May use `NewErrorResult()` if filter parameter validation is added.
+         2. [x] **N/A - TOOL DOES NOT EXIST** - 3.2.3.2.2: Convert list_entities tool to error results
+            - **Status:** Task skipped - `list_entities` tool does not exist in the codebase
+            - **Investigation:** Searched `pkg/mcp/tools/entity.go` and entire `pkg/mcp/tools/` directory - no `list_entities` tool found
+            - **Note:** A bug fix for `main.go` (adding `SchemaRepo` and `ProjectService` to `ColumnToolDeps`) was committed during this task's attempted implementation. This fix should have been part of task 3.2.2.2 (update_column) but was missed.
+            - **Next implementer:** Skip this task and proceed to 3.2.3.3 (relationship tools)
       3. [ ] 3.2.3.3: Convert relationship tools to error results (update_relationship, delete_relationship)
          - **Implementation:** Apply error handling pattern to `update_relationship` and `delete_relationship` in `pkg/mcp/tools/relationship.go`
          - **For update_relationship:**

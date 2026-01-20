@@ -140,29 +140,32 @@ Every MCP tool must be audited against this checklist:
 
 Based on `pkg/mcp/tools/`:
 
-### Completed (Phase 1)
+### Completed
+- [x] `errors.go` - helper functions created (`NewErrorResult`, `NewErrorResultWithDetails`)
 - [x] `get_ontology` - parameter validation errors converted
 - [x] `update_entity` - parameter validation errors converted
-- [x] `errors.go` - helper functions created
+- [x] `get_schema` - parameter validation errors converted
+- [x] `update_column` - TABLE_NOT_FOUND, COLUMN_NOT_FOUND, parameter validation
+- [x] `probe_column` - TABLE_NOT_FOUND, COLUMN_NOT_FOUND, parameter validation
+- [x] `execute_approved_query` - query_not_found, parameter validation, query errors
+- [x] `delete_entity` - ENTITY_NOT_FOUND, resource_conflict (relationships/occurrences)
+- [x] `get_entity` - ENTITY_NOT_FOUND, parameter validation
+
+### Does Not Exist (Skip)
+- [N/A] `list_entities` - tool does not exist in codebase
+- [N/A] `query` - tool does not exist (use `execute_approved_query`)
+- [N/A] `execute` - tool does not exist (use `execute_approved_query`)
 
 ### Needs Audit and Update
-- [ ] `update_column` - needs TABLE_NOT_FOUND, COLUMN_NOT_FOUND (see FIX-update-column-validation.md)
 - [ ] `delete_column_metadata` - needs validation
 - [ ] `update_relationship` - needs entity validation
 - [ ] `delete_relationship` - needs entity validation
-- [ ] `get_entity` - needs ENTITY_NOT_FOUND
-- [ ] `delete_entity` - needs ENTITY_NOT_FOUND
-- [ ] `probe_column` - needs TABLE_NOT_FOUND, COLUMN_NOT_FOUND
 - [ ] `probe_columns` - needs validation for each column
 - [ ] `probe_relationship` - needs entity validation
-- [ ] `query` - needs query_error handling
-- [ ] `execute` - needs query_error handling
 - [ ] `sample` - needs TABLE_NOT_FOUND
 - [ ] `search_schema` - parameter validation
-- [ ] `get_schema` - parameter validation
 - [ ] `get_context` - parameter validation
 - [ ] `list_approved_queries` - parameter validation
-- [ ] `execute_approved_query` - needs query_not_found, parameter validation
 - [ ] `suggest_approved_query` - parameter validation
 - [ ] `list_glossary` - parameter validation
 - [ ] `get_glossary_sql` - needs TERM_NOT_FOUND
