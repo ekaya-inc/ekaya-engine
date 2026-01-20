@@ -87,6 +87,40 @@ func (m *mockKnowledgeRepository) DeleteByProject(ctx context.Context, projectID
 	return nil
 }
 
+// setupKnowledgeTest creates a test setup with mock dependencies for knowledge tools.
+func setupKnowledgeTest(t *testing.T) (*mockKnowledgeRepository, *KnowledgeToolDeps) {
+	t.Helper()
+
+	mockRepo := &mockKnowledgeRepository{
+		facts: make([]*models.KnowledgeFact, 0),
+	}
+
+	deps := &KnowledgeToolDeps{
+		MCPConfigService:    &mockMCPConfigService{},
+		KnowledgeRepository: mockRepo,
+		Logger:              zap.NewNop(),
+	}
+
+	return mockRepo, deps
+}
+
+// TestSetupKnowledgeTest verifies the setupKnowledgeTest helper function.
+func TestSetupKnowledgeTest(t *testing.T) {
+	mockRepo, deps := setupKnowledgeTest(t)
+
+	// Verify mock repository is initialized
+	assert.NotNil(t, mockRepo, "mock repository should be initialized")
+	assert.NotNil(t, mockRepo.facts, "facts slice should be initialized")
+	assert.Len(t, mockRepo.facts, 0, "facts slice should be empty initially")
+
+	// Verify deps are initialized
+	assert.NotNil(t, deps, "deps should be initialized")
+	assert.NotNil(t, deps.MCPConfigService, "MCPConfigService should be set")
+	assert.NotNil(t, deps.KnowledgeRepository, "KnowledgeRepository should be set")
+	assert.NotNil(t, deps.Logger, "Logger should be set")
+	assert.Equal(t, mockRepo, deps.KnowledgeRepository, "KnowledgeRepository should be the mock")
+}
+
 // TestKnowledgeToolDeps_Structure verifies the KnowledgeToolDeps struct has all required fields.
 func TestKnowledgeToolDeps_Structure(t *testing.T) {
 	deps := &KnowledgeToolDeps{}
