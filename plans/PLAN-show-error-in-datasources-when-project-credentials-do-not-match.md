@@ -87,7 +87,7 @@ The GCM auth failure is the key indicator of a wrong encryption key.
 5. [x] Update frontend `DatasourcePage` to detect and display the error
 6. [x] Add "Disconnect Datasource" action that calls DELETE endpoint
 7. [x] Add informational text about restarting with correct key
-8. [x] Write tests for the error detection and handling
+8. [x] Write tests for error detection and handling
 
 ## Files to Modify
 
