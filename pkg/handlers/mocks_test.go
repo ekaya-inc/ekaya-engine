@@ -126,10 +126,10 @@ func (m *mockAuthService) ValidateProjectIDMatch(claims *auth.Claims, urlProject
 
 // mockDatasourceService is a configurable mock for datasource handler tests.
 type mockDatasourceService struct {
-	datasource         *models.Datasource
-	datasources        []*models.Datasource
+	datasource            *models.Datasource
+	datasources           []*models.Datasource
 	datasourcesWithStatus []*models.DatasourceWithStatus
-	err                error
+	err                   error
 }
 
 func (m *mockDatasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType, provider string, config map[string]any) (*models.Datasource, error) {
