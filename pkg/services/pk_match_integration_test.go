@@ -492,7 +492,7 @@ func (m *pkMatchMockDatasourceService) Get(ctx context.Context, projectID, datas
 	return m.datasource, nil
 }
 
-func (m *pkMatchMockDatasourceService) List(ctx context.Context, projectID uuid.UUID) ([]*models.Datasource, error) {
+func (m *pkMatchMockDatasourceService) List(ctx context.Context, projectID uuid.UUID) ([]*models.DatasourceWithStatus, error) {
 	return nil, nil
 }
 

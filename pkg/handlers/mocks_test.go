@@ -126,9 +126,10 @@ func (m *mockAuthService) ValidateProjectIDMatch(claims *auth.Claims, urlProject
 
 // mockDatasourceService is a configurable mock for datasource handler tests.
 type mockDatasourceService struct {
-	datasource  *models.Datasource
-	datasources []*models.Datasource
-	err         error
+	datasource            *models.Datasource
+	datasources           []*models.Datasource
+	datasourcesWithStatus []*models.DatasourceWithStatus
+	err                   error
 }
 
 func (m *mockDatasourceService) Create(ctx context.Context, projectID uuid.UUID, name, dsType, provider string, config map[string]any) (*models.Datasource, error) {
@@ -180,14 +181,22 @@ func (m *mockDatasourceService) GetByName(ctx context.Context, projectID uuid.UU
 	}, nil
 }
 
-func (m *mockDatasourceService) List(ctx context.Context, projectID uuid.UUID) ([]*models.Datasource, error) {
+func (m *mockDatasourceService) List(ctx context.Context, projectID uuid.UUID) ([]*models.DatasourceWithStatus, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
-	if m.datasources != nil {
-		return m.datasources, nil
+	if m.datasourcesWithStatus != nil {
+		return m.datasourcesWithStatus, nil
 	}
-	return []*models.Datasource{}, nil
+	// Convert old datasources to DatasourceWithStatus for backwards compatibility
+	if m.datasources != nil {
+		result := make([]*models.DatasourceWithStatus, len(m.datasources))
+		for i, ds := range m.datasources {
+			result[i] = &models.DatasourceWithStatus{Datasource: ds}
+		}
+		return result, nil
+	}
+	return []*models.DatasourceWithStatus{}, nil
 }
 
 func (m *mockDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType, provider string, config map[string]any) error {

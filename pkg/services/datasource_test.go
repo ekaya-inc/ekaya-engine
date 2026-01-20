@@ -651,3 +651,91 @@ func TestDatasourceService_Delete_ClearsDefaultDatasourceID(t *testing.T) {
 			dsB.ID, projectService.defaultDatasourceID)
 	}
 }
+
+func TestDatasourceService_List_PartialDecryptionFailure(t *testing.T) {
+	repo := &mockDatasourceRepository{}
+	service, encryptor := newTestService(repo)
+
+	// Create a second encryptor with a different key
+	wrongEncryptor, err := crypto.NewCredentialEncryptor("wrong-key")
+	if err != nil {
+		t.Fatalf("failed to create wrong encryptor: %v", err)
+	}
+
+	// Setup two datasources: one encrypted with correct key, one with wrong key
+	goodConfig, _ := encryptor.Encrypt(`{"host":"good.example.com"}`)
+	badConfig, _ := wrongEncryptor.Encrypt(`{"host":"bad.example.com"}`)
+
+	projectID := uuid.New()
+	repo.datasources = []*models.Datasource{
+		{ID: uuid.New(), ProjectID: projectID, Name: "good-db", DatasourceType: "postgres"},
+		{ID: uuid.New(), ProjectID: projectID, Name: "bad-db", DatasourceType: "postgres"},
+	}
+	repo.encryptedConfigs = []string{goodConfig, badConfig}
+
+	datasources, err := service.List(context.Background(), projectID)
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+
+	if len(datasources) != 2 {
+		t.Fatalf("expected 2 datasources, got %d", len(datasources))
+	}
+
+	// First datasource should have decrypted successfully
+	if datasources[0].DecryptionFailed {
+		t.Error("expected first datasource to decrypt successfully")
+	}
+	if datasources[0].Config["host"] != "good.example.com" {
+		t.Errorf("expected first host 'good.example.com', got %v", datasources[0].Config["host"])
+	}
+
+	// Second datasource should have decryption failure
+	if !datasources[1].DecryptionFailed {
+		t.Error("expected second datasource to have decryption failure")
+	}
+	if datasources[1].ErrorMessage != "datasource credentials were encrypted with a different key" {
+		t.Errorf("unexpected error message: %s", datasources[1].ErrorMessage)
+	}
+	// Config should be nil/empty when decryption fails
+	if datasources[1].Config != nil {
+		t.Error("expected config to be nil when decryption fails")
+	}
+}
+
+func TestDatasourceService_List_AllDecryptionFailures(t *testing.T) {
+	repo := &mockDatasourceRepository{}
+	service, _ := newTestService(repo)
+
+	// Create a different encryptor with wrong key
+	wrongEncryptor, err := crypto.NewCredentialEncryptor("wrong-key")
+	if err != nil {
+		t.Fatalf("failed to create wrong encryptor: %v", err)
+	}
+
+	// Setup datasource encrypted with wrong key
+	badConfig, _ := wrongEncryptor.Encrypt(`{"host":"bad.example.com"}`)
+
+	projectID := uuid.New()
+	repo.datasources = []*models.Datasource{
+		{ID: uuid.New(), ProjectID: projectID, Name: "bad-db", DatasourceType: "postgres"},
+	}
+	repo.encryptedConfigs = []string{badConfig}
+
+	datasources, err := service.List(context.Background(), projectID)
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+
+	if len(datasources) != 1 {
+		t.Fatalf("expected 1 datasource, got %d", len(datasources))
+	}
+
+	// Datasource should have decryption failure
+	if !datasources[0].DecryptionFailed {
+		t.Error("expected datasource to have decryption failure")
+	}
+	if datasources[0].ErrorMessage != "datasource credentials were encrypted with a different key" {
+		t.Errorf("unexpected error message: %s", datasources[0].ErrorMessage)
+	}
+}

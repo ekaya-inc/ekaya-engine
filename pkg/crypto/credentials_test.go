@@ -218,13 +218,13 @@ func TestDecryptWithWrongKey(t *testing.T) {
 		t.Fatalf("failed to encrypt: %v", err)
 	}
 
-	// Decrypting with wrong key should fail
+	// Decrypting with wrong key should fail with ErrAuthenticationFailed
 	_, err = enc2.Decrypt(encrypted)
 	if err == nil {
 		t.Error("expected decryption to fail with wrong key")
 	}
-	if !strings.Contains(err.Error(), "decryption failed") {
-		t.Errorf("expected 'decryption failed' error, got: %v", err)
+	if err != ErrAuthenticationFailed {
+		t.Errorf("expected ErrAuthenticationFailed, got: %v", err)
 	}
 }
 

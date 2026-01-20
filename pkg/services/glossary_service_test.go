@@ -314,15 +314,17 @@ func (m *mockDatasourceServiceForGlossary) GetByName(ctx context.Context, projec
 	return nil, nil
 }
 
-func (m *mockDatasourceServiceForGlossary) List(ctx context.Context, projectID uuid.UUID) ([]*models.Datasource, error) {
+func (m *mockDatasourceServiceForGlossary) List(ctx context.Context, projectID uuid.UUID) ([]*models.DatasourceWithStatus, error) {
 	// Return a mock datasource for SQL validation tests
-	return []*models.Datasource{
+	return []*models.DatasourceWithStatus{
 		{
-			ID:             uuid.New(),
-			ProjectID:      projectID,
-			Name:           "test-datasource",
-			DatasourceType: "postgres",
-			Config:         map[string]any{},
+			Datasource: &models.Datasource{
+				ID:             uuid.New(),
+				ProjectID:      projectID,
+				Name:           "test-datasource",
+				DatasourceType: "postgres",
+				Config:         map[string]any{},
+			},
 		},
 	}, nil
 }
