@@ -454,7 +454,29 @@ func sanitizeArguments(args map[string]any) map[string]any {
    - **Note on configuration:** Middleware currently has no configuration options - logs all MCP requests at DEBUG level. Future implementer can add config for log_requests, log_responses, log_errors flags as described in the original plan (Phase 2 task 3).
    - **Note on sensitive data redaction:** Already implemented via `sanitizeArguments()` - redacts fields containing: password, secret, token, key, credential. Additional sensitive keywords can be added to the `sensitive` slice if needed.
    - **Next implementer:** Task 2.2 (Integrate into MCP handler chain) requires modifying `pkg/handlers/mcp_handler.go` to wrap the httpServer handler. Look for where the handler is registered with the router and apply the middleware wrapper.
-2. [ ] Integrate into MCP handler chain
+2. [x] **COMPLETED** - Integrate into MCP handler chain
+   - **Implementation:** Modified `pkg/handlers/mcp_handler.go` to wrap the MCP HTTP server with logging middleware
+   - **Files modified:**
+     - `pkg/handlers/mcp_handler.go` (line 11): Added middleware import
+     - `pkg/handlers/mcp_handler.go` (lines 30-38): Refactored `RegisterRoutes` to build middleware chain
+   - **Middleware chain order (outermost to innermost):**
+     1. `requirePOST` - Method check (rejects non-POST before auth)
+     2. `mcpAuthMiddleware.RequireAuth("pid")` - Authentication (validates JWT token)
+     3. `middleware.MCPRequestLogger(h.logger)` - Logging (logs JSON-RPC details)
+     4. `h.httpServer` - MCP handler (processes requests)
+   - **Design decision:** Logging placed after authentication so only authenticated requests are logged, reducing noise from failed auth attempts
+   - **Test coverage:** `pkg/handlers/mcp_handler_test.go:TestMCPHandler_LoggingMiddlewareIntegration`
+     - Uses `zaptest/observer` to capture log output and verify middleware is called
+     - Verifies request log contains: method, tool name, arguments
+     - Verifies response log contains: tool name, duration, success/error status
+     - Confirms middleware integrates correctly without breaking existing functionality
+   - **Verification:** All existing MCP handler tests pass (27 tests), confirming no regressions
+   - **Real-world benefit:** MCP requests/responses now visible in server logs at DEBUG level. Example log output:
+     ```
+     DEBUG MCP request {"method": "tools/call", "tool": "get_ontology", "arguments": {"depth": "columns"}}
+     DEBUG MCP response success {"tool": "get_ontology", "duration": "4.2ms"}
+     ```
+   - **Next implementer:** Task 2.2 is complete. The logging middleware is now active and will log all MCP requests/responses at DEBUG level. Phase 2 task 3 (configuration options) is optional but could add value if you want per-environment control over log verbosity.
 3. [ ] Add configuration options (OPTIONAL - basic redaction already implemented)
 4. [ ] ~~Add sensitive data redaction~~ (COMPLETED - included in 2.1)
 

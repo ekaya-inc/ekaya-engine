@@ -8,6 +8,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/mcp"
 	mcpauth "github.com/ekaya-inc/ekaya-engine/pkg/mcp/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/middleware"
 )
 
 // MCPHandler handles MCP protocol requests over HTTP.
@@ -27,9 +28,13 @@ func NewMCPHandler(mcpServer *mcp.Server, logger *zap.Logger) *MCPHandler {
 // RegisterRoutes registers the MCP endpoint with project-scoped authentication.
 // Route: /mcp/{pid} where {pid} must match the project ID in the JWT token.
 func (h *MCPHandler) RegisterRoutes(mux *http.ServeMux, mcpAuthMiddleware *mcpauth.Middleware) {
-	// Wrap the MCP HTTP server with method check and authentication middleware
-	// Method check must come first to reject non-POST requests before auth
-	methodCheckedHandler := h.requirePOST(mcpAuthMiddleware.RequireAuth("pid")(h.httpServer))
+	// Wrap the MCP HTTP server with middleware layers:
+	// 1. MCP request/response logging (innermost - logs JSON-RPC details)
+	// 2. Authentication (middle - validates JWT token)
+	// 3. Method check (outermost - rejects non-POST before auth)
+	loggedHandler := middleware.MCPRequestLogger(h.logger)(h.httpServer)
+	authHandler := mcpAuthMiddleware.RequireAuth("pid")(loggedHandler)
+	methodCheckedHandler := h.requirePOST(authHandler)
 	mux.Handle("/mcp/{pid}", methodCheckedHandler)
 }
 
