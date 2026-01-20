@@ -1567,11 +1567,19 @@ func sanitizeArguments(args map[string]any) map[string]any {
 
                **Next subtask dependency:** This completes functional testing. Subtask 3.2.4.3.4.5 will verify all scenarios run together.
 
-            5. [ ] 3.2.4.3.4.5: Run full test suite and verify all knowledge tool scenarios
+            5. [x] 3.2.4.3.4.5: Run full test suite and verify all knowledge tool scenarios
 
                Run the complete test suite for knowledge management tools and verify all scenarios pass.
 
                **Context:** Subtasks 3.2.4.3.4.1-3.2.4.3.4.4 created test infrastructure and individual test cases. This subtask runs everything together and verifies no regressions.
+
+               **Implementation notes:**
+               - Created `pkg/mcp/tools/knowledge_integration_test.go` with comprehensive test coverage
+               - Tests verify all knowledge tool operations: create, update, delete, and error conditions
+               - Fixed `knowledge_repository.go` to return `apperrors.ErrNotFound` instead of generic error for consistency
+               - All tests pass with proper MCP error response validation
+               - Test infrastructure uses shared testcontainer pattern (project ID: 00000000-0000-0000-0000-000000000044)
+               - Covers success paths, validation errors, not-found errors, and resource format handling
 
                **Files involved:**
                - `pkg/mcp/tools/knowledge_test.go`

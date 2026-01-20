@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
@@ -168,7 +169,7 @@ func (r *knowledgeRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("knowledge fact not found")
+		return apperrors.ErrNotFound
 	}
 
 	return nil
