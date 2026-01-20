@@ -2513,162 +2513,60 @@ func sanitizeArguments(args map[string]any) map[string]any {
             - Pattern: `paramValue, errResult := validateXXX(req.Params.Arguments); if errResult != nil { return errResult, nil }`
             - No changes needed to helper functions themselves
 
-         2. [ ] 3.3.2.2.2: Convert skip_ontology_question tool to error results
+         2. [x] 3.3.2.2.2: Convert skip_ontology_question tool to error results
 
             Apply error result pattern to `skip_ontology_question` tool using the validation helpers from subtask 3.3.2.2.1.
 
-            **Context:** The `skip_ontology_question` tool marks an ontology question as skipped for later revisiting. It requires `question_id` (UUID) and `reason` (string) parameters. This subtask uses the shared validation helpers to convert parameter validation errors to error results.
+            ---
 
-            **File to modify:** `pkg/mcp/tools/questions.go`
+            **IMPLEMENTATION NOTES (Completed):**
 
-            **Implementation details:**
+            ✅ **What was done:**
+            - Converted `skip_ontology_question` tool to use shared validation helpers
+            - Replaced inline validation with `validateQuestionID()` and `validateReasonParameter()` calls
+            - Updated "question not found" error to use `NewErrorResult("QUESTION_NOT_FOUND", ...)` pattern
+            - Added comprehensive test coverage in `pkg/mcp/tools/questions_test.go`
 
-            1. **Locate `skipOntologyQuestionTool` handler function** (search for "func skipOntologyQuestionTool")
+            **Error handling:**
+            - Parameter validation errors (empty/whitespace question_id, invalid UUID, empty reason) → error results
+            - Question not found → `QUESTION_NOT_FOUND` error result (consistent with resolve/dismiss/escalate tools)
+            - Database failures → Go errors (system errors)
 
-            2. **Add parameter validation using helpers** (add at beginning of handler, after `AcquireToolAccess`):
+            **Test coverage added:**
+            - `TestSkipOntologyQuestionTool_ErrorResults`: 6 test cases covering all error scenarios
+              - Empty question_id
+              - Whitespace-only question_id
+              - Invalid UUID format
+              - Empty reason
+              - Whitespace-only reason
+              - Question not found
 
+            **Files modified:**
+            - `pkg/mcp/tools/questions.go`: Refactored `registerSkipOntologyQuestionTool` handler
+            - `pkg/mcp/tools/questions_test.go`: Added comprehensive test function
+
+            **Pattern established:**
             ```go
-            // Validate question_id parameter
-            questionID, errResult := validateQuestionID(req.Params.Arguments)
+            // 1. Parameter validation with early return
+            questionID, errResult := validateQuestionID(args)
             if errResult != nil {
                 return errResult, nil
             }
 
-            // Validate reason parameter
-            reason, errResult := validateReasonParameter(req.Params.Arguments)
-            if errResult != nil {
-                return errResult, nil
+            // 2. Resource lookup
+            question, err := deps.QuestionRepo.GetByID(ctx, projectID, questionID)
+            
+            // 3. Resource validation
+            if question == nil {
+                return NewErrorResult("QUESTION_NOT_FOUND", ...), nil
             }
+            
+            // 4. Business logic
             ```
 
-            3. **Add resource validation** (after repository call):
-
-            ```go
-            err := deps.QuestionRepo.Skip(ctx, projectID, questionID, reason)
-            if err != nil {
-                if errors.Is(err, repositories.ErrOntologyQuestionNotFound) {
-                    return NewErrorResult("QUESTION_NOT_FOUND",
-                        fmt.Sprintf("ontology question %q not found", questionID.String())), nil
-                }
-                // System error - database failure
-                return nil, fmt.Errorf("failed to skip ontology question: %w", err)
-            }
-            ```
-
-            4. **System errors kept as Go errors:**
-               - Database connection failures
-               - Authentication failures from `AcquireToolAccess`
-               - Repository update failures (unexpected database errors)
-
-            **Test coverage:**
-
-            Add test function in `pkg/mcp/tools/questions_test.go`:
-
-            ```go
-            func TestSkipOntologyQuestionTool_ErrorResults(t *testing.T) {
-                tests := []struct {
-                    name        string
-                    args        map[string]any
-                    setupMock   func(*mockQuestionRepository)
-                    wantErr     bool
-                    expectedCode string
-                    checkMessage func(t *testing.T, message string)
-                }{
-                    {
-                        name:        "empty question_id",
-                        args:        map[string]any{"question_id": "  ", "reason": "Some reason"},
-                        wantErr:     true,
-                        expectedCode: "invalid_parameters",
-                        checkMessage: func(t *testing.T, msg string) {
-                            assert.Contains(t, msg, "question_id")
-                            assert.Contains(t, msg, "empty")
-                        },
-                    },
-                    {
-                        name:        "invalid UUID format",
-                        args:        map[string]any{"question_id": "not-a-uuid", "reason": "Some reason"},
-                        wantErr:     true,
-                        expectedCode: "invalid_parameters",
-                        checkMessage: func(t *testing.T, msg string) {
-                            assert.Contains(t, msg, "UUID")
-                        },
-                    },
-                    {
-                        name:        "empty reason",
-                        args:        map[string]any{"question_id": "550e8400-e29b-41d4-a716-446655440000", "reason": "  "},
-                        wantErr:     true,
-                        expectedCode: "invalid_parameters",
-                        checkMessage: func(t *testing.T, msg string) {
-                            assert.Contains(t, msg, "reason")
-                            assert.Contains(t, msg, "empty")
-                        },
-                    },
-                    {
-                        name:        "question not found",
-                        args:        map[string]any{
-                            "question_id": "550e8400-e29b-41d4-a716-446655440000",
-                            "reason":      "Need access to frontend repo",
-                        },
-                        setupMock: func(repo *mockQuestionRepository) {
-                            repo.skipErr = repositories.ErrOntologyQuestionNotFound
-                        },
-                        wantErr:     true,
-                        expectedCode: "QUESTION_NOT_FOUND",
-                        checkMessage: func(t *testing.T, msg string) {
-                            assert.Contains(t, msg, "550e8400-e29b-41d4-a716-446655440000")
-                        },
-                    },
-                }
-
-                for _, tt := range tests {
-                    t.Run(tt.name, func(t *testing.T) {
-                        mockRepo, deps := setupQuestionTest(t)
-                        if tt.setupMock != nil {
-                            tt.setupMock(mockRepo)
-                        }
-
-                        tool := skipOntologyQuestionTool(deps)
-
-                        req := mcp.CallToolRequest{
-                            Params: mcp.CallToolRequestParams{
-                                Arguments: tt.args,
-                            },
-                        }
-
-                        result, err := tool.Handler(context.Background(), req)
-
-                        if tt.wantErr {
-                            require.NoError(t, err, "Go error should be nil")
-                            require.True(t, result.IsError, "MCP error flag should be true")
-
-                            text := getTextContent(result)
-                            var response map[string]any
-                            require.NoError(t, json.Unmarshal([]byte(text), &response))
-
-                            assert.Equal(t, tt.expectedCode, response["code"])
-                            if tt.checkMessage != nil {
-                                tt.checkMessage(t, response["message"].(string))
-                            }
-                        } else {
-                            require.NoError(t, err)
-                            require.False(t, result.IsError)
-                        }
-                    })
-                }
-            }
-            ```
-
-            **Note:** You may need to add `skipErr` field to `mockQuestionRepository` struct if it doesn't exist.
-
-            **Acceptance criteria:**
-            - Parameter validation errors return error results using shared helpers
-            - Question not found returns error result
-            - System errors remain as Go errors
-            - All tests pass: `go test ./pkg/mcp/tools/ -run TestSkipOntologyQuestionTool -short`
-
-            **Error codes used:** `invalid_parameters`, `QUESTION_NOT_FOUND`
-
-            **Dependencies:** Requires subtask 3.3.2.2.1 (validation helpers)
+            **For next session:**
+            - Same pattern ready to apply to dismiss_ontology_question (3.3.2.2.3) and escalate_ontology_question (3.3.2.2.4)
+            - All four question management tools will have consistent error handling
 
          3. [ ] 3.3.2.2.3: Convert dismiss_ontology_question and escalate_ontology_question tools to error results
 
