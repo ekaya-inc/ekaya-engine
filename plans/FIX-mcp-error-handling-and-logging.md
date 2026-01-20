@@ -3118,7 +3118,7 @@ func sanitizeArguments(args map[string]any) map[string]any {
 
                **Next phase:** After completing this subtask, task 3.3.2.2 is complete. Proceed to task 3.3.2.3 (convert `list_ontology_questions` tool) or task 3.3.2.4 (integration tests) as needed.
 
-      3. [ ] 3.3.2.3: Convert list_ontology_questions tool to error results
+      3. [x] 3.3.2.3: Convert list_ontology_questions tool to error results
 
          Convert the `list_ontology_questions` tool in `pkg/mcp/tools/questions.go` to validate optional filter parameters and return error results for invalid values.
 
@@ -3179,6 +3179,26 @@ func sanitizeArguments(args map[string]any) map[string]any {
          - Invalid values return error results with structured details
          - System errors remain as Go errors
          - All new tests pass: `go test ./pkg/mcp/tools/ -run TestListOntologyQuestionsTool_ErrorResults -short`
+
+         **Completion notes (2026-01-20):**
+         - Converted all 5 filter parameter validations to return error results:
+           - `status` - Validates against valid enum values, returns expected list dynamically from models.ValidQuestionStatuses
+           - `category` - Validates against models.ValidQuestionCategories enum
+           - `priority` - Validates range 1-5, rejects values outside range
+           - `limit` - Changed behavior: now rejects invalid values (≤0 or >100) instead of clamping to defaults
+           - `offset` - Changed behavior: now rejects negative values instead of clamping to 0
+         - Added `trimString()` calls for status and category parameters before validation
+         - All error results use consistent structure with parameter name, expected values, and actual value in details
+         - Added comprehensive test coverage (13 test cases) in `TestListOntologyQuestionsTool_ErrorResults`:
+           - Invalid enum values (status, category)
+           - Out-of-range numeric values (priority, limit, offset)
+           - Type errors (string instead of number for priority, limit, offset)
+         - All tests verify IsError=true, code="invalid_parameters", and structured details
+         - **Behavioral change from previous implementation:** Previously invalid limit/offset were silently clamped to defaults, now they are explicitly rejected with error results
+         - Test output: 13 tests pass covering all validation scenarios
+         - Files modified: `pkg/mcp/tools/questions.go` (validation logic), `pkg/mcp/tools/questions_test.go` (13 new test cases)
+
+         **Next phase:** Task 3.3.2.3 complete. Proceed to task 3.3.2.4 (integration tests for ontology question tools) as needed.
 
       4. [ ] 3.3.2.4: Add comprehensive integration tests for ontology question tools
 

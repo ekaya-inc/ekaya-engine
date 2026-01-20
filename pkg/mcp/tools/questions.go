@@ -137,16 +137,30 @@ func registerListOntologyQuestionsTool(s *server.MCPServer, deps *QuestionToolDe
 
 		// Status filter
 		if statusStr := getOptionalString(req, "status"); statusStr != "" {
+			statusStr = trimString(statusStr)
 			status := models.QuestionStatus(statusStr)
 			// Validate status
 			if !models.IsValidQuestionStatus(status) {
-				return nil, fmt.Errorf("invalid status: %s (must be one of: pending, skipped, answered, deleted)", statusStr)
+				validStatuses := make([]string, len(models.ValidQuestionStatuses))
+				for i, s := range models.ValidQuestionStatuses {
+					validStatuses[i] = string(s)
+				}
+				return NewErrorResultWithDetails(
+					"invalid_parameters",
+					"invalid status value",
+					map[string]any{
+						"parameter": "status",
+						"expected":  validStatuses,
+						"actual":    statusStr,
+					},
+				), nil
 			}
 			filters.Status = &status
 		}
 
 		// Category filter
 		if categoryStr := getOptionalString(req, "category"); categoryStr != "" {
+			categoryStr = trimString(categoryStr)
 			// Validate category
 			validCategory := false
 			for _, vc := range models.ValidQuestionCategories {
@@ -156,7 +170,15 @@ func registerListOntologyQuestionsTool(s *server.MCPServer, deps *QuestionToolDe
 				}
 			}
 			if !validCategory {
-				return nil, fmt.Errorf("invalid category: %s (must be one of: %v)", categoryStr, models.ValidQuestionCategories)
+				return NewErrorResultWithDetails(
+					"invalid_parameters",
+					"invalid category value",
+					map[string]any{
+						"parameter": "category",
+						"expected":  models.ValidQuestionCategories,
+						"actual":    categoryStr,
+					},
+				), nil
 			}
 			filters.Category = &categoryStr
 		}
@@ -174,11 +196,27 @@ func registerListOntologyQuestionsTool(s *server.MCPServer, deps *QuestionToolDe
 					// Try string conversion
 					priorityStr, ok := priorityVal.(string)
 					if !ok {
-						return nil, fmt.Errorf("priority must be a number")
+						return NewErrorResultWithDetails(
+							"invalid_parameters",
+							"priority must be a number",
+							map[string]any{
+								"parameter": "priority",
+								"expected":  "number",
+								"actual":    fmt.Sprintf("%T", priorityVal),
+							},
+						), nil
 					}
 					parsed, err := strconv.Atoi(priorityStr)
 					if err != nil {
-						return nil, fmt.Errorf("priority must be a number: %w", err)
+						return NewErrorResultWithDetails(
+							"invalid_parameters",
+							"priority must be a number",
+							map[string]any{
+								"parameter": "priority",
+								"expected":  "number",
+								"actual":    priorityStr,
+							},
+						), nil
 					}
 					priorityInt := int(parsed)
 					filters.Priority = &priorityInt
@@ -189,7 +227,15 @@ func registerListOntologyQuestionsTool(s *server.MCPServer, deps *QuestionToolDe
 
 				// Validate priority range
 				if *filters.Priority < 1 || *filters.Priority > 5 {
-					return nil, fmt.Errorf("priority must be between 1 and 5")
+					return NewErrorResultWithDetails(
+						"invalid_parameters",
+						"invalid priority value",
+						map[string]any{
+							"parameter": "priority",
+							"expected":  "1-5",
+							"actual":    *filters.Priority,
+						},
+					), nil
 				}
 			}
 		}
@@ -203,21 +249,44 @@ func registerListOntologyQuestionsTool(s *server.MCPServer, deps *QuestionToolDe
 					// Try string conversion
 					limitStr, ok := limitVal.(string)
 					if !ok {
-						return nil, fmt.Errorf("limit must be a number")
+						return NewErrorResultWithDetails(
+							"invalid_parameters",
+							"limit must be a number",
+							map[string]any{
+								"parameter": "limit",
+								"expected":  "number",
+								"actual":    fmt.Sprintf("%T", limitVal),
+							},
+						), nil
 					}
 					parsed, err := strconv.Atoi(limitStr)
 					if err != nil {
-						return nil, fmt.Errorf("limit must be a number: %w", err)
+						return NewErrorResultWithDetails(
+							"invalid_parameters",
+							"limit must be a number",
+							map[string]any{
+								"parameter": "limit",
+								"expected":  "number",
+								"actual":    limitStr,
+							},
+						), nil
 					}
 					filters.Limit = int(parsed)
 				} else {
 					filters.Limit = int(limitFloat)
 				}
 
-				if filters.Limit <= 0 {
-					filters.Limit = 20
-				} else if filters.Limit > 100 {
-					filters.Limit = 100
+				// Validate limit range
+				if filters.Limit <= 0 || filters.Limit > 100 {
+					return NewErrorResultWithDetails(
+						"invalid_parameters",
+						"invalid limit value",
+						map[string]any{
+							"parameter": "limit",
+							"expected":  "1-100",
+							"actual":    filters.Limit,
+						},
+					), nil
 				}
 			}
 		}
@@ -231,19 +300,44 @@ func registerListOntologyQuestionsTool(s *server.MCPServer, deps *QuestionToolDe
 					// Try string conversion
 					offsetStr, ok := offsetVal.(string)
 					if !ok {
-						return nil, fmt.Errorf("offset must be a number")
+						return NewErrorResultWithDetails(
+							"invalid_parameters",
+							"offset must be a number",
+							map[string]any{
+								"parameter": "offset",
+								"expected":  "number",
+								"actual":    fmt.Sprintf("%T", offsetVal),
+							},
+						), nil
 					}
 					parsed, err := strconv.Atoi(offsetStr)
 					if err != nil {
-						return nil, fmt.Errorf("offset must be a number: %w", err)
+						return NewErrorResultWithDetails(
+							"invalid_parameters",
+							"offset must be a number",
+							map[string]any{
+								"parameter": "offset",
+								"expected":  "number",
+								"actual":    offsetStr,
+							},
+						), nil
 					}
 					filters.Offset = int(parsed)
 				} else {
 					filters.Offset = int(offsetFloat)
 				}
 
+				// Validate offset is non-negative
 				if filters.Offset < 0 {
-					filters.Offset = 0
+					return NewErrorResultWithDetails(
+						"invalid_parameters",
+						"invalid offset value",
+						map[string]any{
+							"parameter": "offset",
+							"expected":  "≥0",
+							"actual":    filters.Offset,
+						},
+					), nil
 				}
 			}
 		}
