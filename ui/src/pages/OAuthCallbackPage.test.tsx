@@ -2,8 +2,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+import * as authToken from '@/lib/auth-token';
+
 import OAuthCallbackPage from './OAuthCallbackPage';
-import * as authToken from '../lib/auth-token';
 
 // Mock navigate
 const mockNavigate = vi.fn();

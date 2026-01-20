@@ -2,9 +2,7 @@ package auth
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"go.uber.org/zap"
@@ -88,13 +86,6 @@ func (s *authService) ValidateRequest(r *http.Request) (*Claims, string, error) 
 			zap.String("token_source", tokenSource))
 		return nil, "", err
 	}
-
-	// #region agent log
-	if logFile, err2 := os.OpenFile("/Users/kofimupati/Dev/Tikr/ekaya/ekaya-engine/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err2 == nil {
-		logFile.WriteString(fmt.Sprintf(`{"location":"auth/service.go:82","message":"ValidateRequest completed","data":{"hasAzureTokenRef":%t,"tokenRefID":"%s","tokenSource":"%s","path":"%s"},"timestamp":%d,"sessionId":"debug-session","runId":"service-debug","hypothesisId":"A"}`+"\n", claims.AzureTokenRefID != "", claims.AzureTokenRefID, tokenSource, r.URL.Path, 0))
-		logFile.Close()
-	}
-	// #endregion
 
 	return claims, tokenString, nil
 }
