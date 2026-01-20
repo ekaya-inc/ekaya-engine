@@ -827,11 +827,7 @@ func sanitizeArguments(args map[string]any) map[string]any {
            - Schema lookups before ontology updates to catch missing tables/columns early
          - **Note on integration tests:** These tests are unit-style tests that don't require database setup - they simulate the validation logic and verify error result structure. Integration tests with real database would be in `pkg/mcp/tools/column_integration_test.go` if needed.
          - **Next implementer:** Task 3.2.2.3 (probe_column tool) - apply same pattern for parameter validation (table/column names) and resource lookups (TABLE_NOT_FOUND, COLUMN_NOT_FOUND). The `probe_column` tool also needs statistical analysis error handling if data issues prevent computation.
-      3. [x] **COMPLETED - REVIEWED AND APPROVED** - 3.2.2.3: Convert probe_column tool to error results
-         - **Implementation:** Modified `pkg/mcp/tools/probe.go` to convert parameter validation and resource lookup errors to error results
-         - **Files modified:**
-           - `pkg/mcp/tools/probe.go` (lines 4-8, 75-128, 216-253):
-             - Added `strings` import for `trimString()` usage
+      3. [x] 3.2.2.3: Convert probe_column tool to error results
              - Empty table parameter after trimming → `NewErrorResult("invalid_parameters", "parameter 'table' cannot be empty")`
              - Empty column parameter after trimming → `NewErrorResult("invalid_parameters", "parameter 'column' cannot be empty")`
              - Table not found in schema → Sets `response.Error` field with "TABLE_NOT_FOUND: ..." prefix, handler extracts code and returns `NewErrorResult("TABLE_NOT_FOUND", ...)`
