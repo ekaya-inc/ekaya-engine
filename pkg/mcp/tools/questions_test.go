@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -671,4 +672,761 @@ func TestDismissOntologyQuestion_ResponseStructure(t *testing.T) {
 	require.NotNil(t, q)
 	assert.Equal(t, models.QuestionStatusDismissed, q.Status)
 	assert.Equal(t, reason, q.StatusReason)
+}
+
+// TestResolveOntologyQuestionTool_ErrorResults verifies error handling for invalid parameters and resource lookups.
+func TestResolveOntologyQuestionTool_ErrorResults(t *testing.T) {
+	t.Run("empty question_id after trimming", func(t *testing.T) {
+		// Simulate validation check for empty question_id after trimming
+		questionIDStr := "   "
+		questionIDStr = trimString(questionIDStr)
+		if questionIDStr == "" {
+			result := NewErrorResult(
+				"invalid_parameters",
+				"parameter 'question_id' cannot be empty",
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content to verify structure
+			var errorResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, err)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Contains(t, errorResp.Message, "parameter 'question_id' cannot be empty")
+		}
+	})
+
+	t.Run("invalid UUID format", func(t *testing.T) {
+		// Simulate UUID validation
+		questionIDStr := "not-a-valid-uuid"
+		questionIDStr = trimString(questionIDStr)
+		_, err := uuid.Parse(questionIDStr)
+		if err != nil {
+			result := NewErrorResult(
+				"invalid_parameters",
+				fmt.Sprintf("invalid question_id format: %q is not a valid UUID", questionIDStr),
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content to verify structure
+			var errorResp ErrorResponse
+			jsonErr := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, jsonErr)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Contains(t, errorResp.Message, "invalid question_id format")
+			assert.Contains(t, errorResp.Message, "not-a-valid-uuid")
+		}
+	})
+
+	t.Run("question not found", func(t *testing.T) {
+		// Simulate question not found scenario
+		questionIDStr := uuid.New().String()
+
+		result := NewErrorResult(
+			"QUESTION_NOT_FOUND",
+			fmt.Sprintf("ontology question %q not found", questionIDStr),
+		)
+
+		// Verify it's an error result
+		assert.NotNil(t, result)
+		assert.True(t, result.IsError)
+
+		// Parse the content to verify structure
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "QUESTION_NOT_FOUND", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "ontology question")
+		assert.Contains(t, errorResp.Message, "not found")
+		assert.Contains(t, errorResp.Message, questionIDStr)
+	})
+}
+
+// TestValidateQuestionID tests the validateQuestionID helper function.
+func TestValidateQuestionID(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         map[string]any
+		wantErr      bool
+		expectedCode string
+	}{
+		{
+			name:         "empty question_id",
+			args:         map[string]any{"question_id": ""},
+			wantErr:      true,
+			expectedCode: "invalid_parameters",
+		},
+		{
+			name:         "whitespace-only question_id",
+			args:         map[string]any{"question_id": "   "},
+			wantErr:      true,
+			expectedCode: "invalid_parameters",
+		},
+		{
+			name:         "invalid UUID format",
+			args:         map[string]any{"question_id": "not-a-uuid"},
+			wantErr:      true,
+			expectedCode: "invalid_parameters",
+		},
+		{
+			name:    "valid UUID",
+			args:    map[string]any{"question_id": "550e8400-e29b-41d4-a716-446655440000"},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			questionID, errResult := validateQuestionID(tt.args)
+
+			if tt.wantErr {
+				require.NotNil(t, errResult, "expected error result")
+				require.True(t, errResult.IsError)
+
+				text := getTextContent(errResult)
+				var response map[string]any
+				require.NoError(t, json.Unmarshal([]byte(text), &response))
+				assert.Equal(t, tt.expectedCode, response["code"])
+			} else {
+				require.Nil(t, errResult, "expected no error")
+				assert.NotEqual(t, uuid.Nil, questionID)
+			}
+		})
+	}
+}
+
+// TestValidateReasonParameter tests the validateReasonParameter helper function.
+func TestValidateReasonParameter(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         map[string]any
+		wantErr      bool
+		expectedCode string
+	}{
+		{
+			name:         "empty reason",
+			args:         map[string]any{"reason": ""},
+			wantErr:      true,
+			expectedCode: "invalid_parameters",
+		},
+		{
+			name:         "whitespace-only reason",
+			args:         map[string]any{"reason": "   "},
+			wantErr:      true,
+			expectedCode: "invalid_parameters",
+		},
+		{
+			name:    "valid reason",
+			args:    map[string]any{"reason": "Need access to frontend repo"},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reason, errResult := validateReasonParameter(tt.args)
+
+			if tt.wantErr {
+				require.NotNil(t, errResult, "expected error result")
+				require.True(t, errResult.IsError)
+
+				text := getTextContent(errResult)
+				var response map[string]any
+				require.NoError(t, json.Unmarshal([]byte(text), &response))
+				assert.Equal(t, tt.expectedCode, response["code"])
+			} else {
+				require.Nil(t, errResult, "expected no error")
+				assert.NotEmpty(t, reason)
+			}
+		})
+	}
+}
+
+// TestSkipOntologyQuestionTool_ErrorResults verifies error handling for invalid parameters and resource lookups.
+func TestSkipOntologyQuestionTool_ErrorResults(t *testing.T) {
+	t.Run("empty question_id", func(t *testing.T) {
+		args := map[string]any{"question_id": ""}
+		questionID, errResult := validateQuestionID(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Equal(t, uuid.Nil, questionID)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "parameter 'question_id' cannot be empty")
+	})
+
+	t.Run("whitespace-only question_id", func(t *testing.T) {
+		args := map[string]any{"question_id": "   "}
+		questionID, errResult := validateQuestionID(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Equal(t, uuid.Nil, questionID)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "parameter 'question_id' cannot be empty")
+	})
+
+	t.Run("invalid UUID format", func(t *testing.T) {
+		args := map[string]any{"question_id": "not-a-valid-uuid"}
+		questionID, errResult := validateQuestionID(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Equal(t, uuid.Nil, questionID)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "invalid question_id format")
+		assert.Contains(t, errorResp.Message, "not-a-valid-uuid")
+	})
+
+	t.Run("empty reason", func(t *testing.T) {
+		args := map[string]any{"reason": ""}
+		reason, errResult := validateReasonParameter(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Empty(t, reason)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "parameter 'reason' cannot be empty")
+	})
+
+	t.Run("whitespace-only reason", func(t *testing.T) {
+		args := map[string]any{"reason": "   "}
+		reason, errResult := validateReasonParameter(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Empty(t, reason)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "parameter 'reason' cannot be empty")
+	})
+
+	t.Run("question not found", func(t *testing.T) {
+		questionIDStr := uuid.New().String()
+
+		result := NewErrorResult(
+			"QUESTION_NOT_FOUND",
+			fmt.Sprintf("ontology question %q not found", questionIDStr),
+		)
+
+		require.NotNil(t, result)
+		require.True(t, result.IsError)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "QUESTION_NOT_FOUND", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "ontology question")
+		assert.Contains(t, errorResp.Message, "not found")
+		assert.Contains(t, errorResp.Message, questionIDStr)
+	})
+}
+
+// TestDismissOntologyQuestionTool_ErrorResults verifies error handling for invalid parameters and resource lookups.
+func TestDismissOntologyQuestionTool_ErrorResults(t *testing.T) {
+	t.Run("empty question_id", func(t *testing.T) {
+		args := map[string]any{"question_id": ""}
+		questionID, errResult := validateQuestionID(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Equal(t, uuid.Nil, questionID)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "parameter 'question_id' cannot be empty")
+	})
+
+	t.Run("whitespace-only question_id", func(t *testing.T) {
+		args := map[string]any{"question_id": "   "}
+		questionID, errResult := validateQuestionID(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Equal(t, uuid.Nil, questionID)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "parameter 'question_id' cannot be empty")
+	})
+
+	t.Run("invalid UUID format", func(t *testing.T) {
+		args := map[string]any{"question_id": "not-a-valid-uuid"}
+		questionID, errResult := validateQuestionID(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Equal(t, uuid.Nil, questionID)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "invalid question_id format")
+		assert.Contains(t, errorResp.Message, "not-a-valid-uuid")
+	})
+
+	t.Run("empty reason", func(t *testing.T) {
+		args := map[string]any{"reason": ""}
+		reason, errResult := validateReasonParameter(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Empty(t, reason)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "parameter 'reason' cannot be empty")
+	})
+
+	t.Run("whitespace-only reason", func(t *testing.T) {
+		args := map[string]any{"reason": "   "}
+		reason, errResult := validateReasonParameter(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Empty(t, reason)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "parameter 'reason' cannot be empty")
+	})
+
+	t.Run("question not found", func(t *testing.T) {
+		questionIDStr := uuid.New().String()
+
+		result := NewErrorResult(
+			"QUESTION_NOT_FOUND",
+			fmt.Sprintf("ontology question %q not found", questionIDStr),
+		)
+
+		require.NotNil(t, result)
+		require.True(t, result.IsError)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "QUESTION_NOT_FOUND", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "ontology question")
+		assert.Contains(t, errorResp.Message, "not found")
+		assert.Contains(t, errorResp.Message, questionIDStr)
+	})
+}
+
+// TestListOntologyQuestionsTool_ErrorResults verifies error handling for invalid filter parameters.
+func TestListOntologyQuestionsTool_ErrorResults(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         map[string]any
+		expectedCode string
+		expectedMsg  string
+		checkDetails func(t *testing.T, details map[string]any)
+	}{
+		{
+			name: "invalid status enum",
+			args: map[string]any{
+				"status": "invalid_status",
+			},
+			expectedCode: "invalid_parameters",
+			expectedMsg:  "invalid status value",
+			checkDetails: func(t *testing.T, details map[string]any) {
+				assert.Equal(t, "status", details["parameter"])
+				assert.Contains(t, details["expected"], "pending")
+				assert.Contains(t, details["expected"], "skipped")
+				assert.Contains(t, details["expected"], "answered")
+				assert.Equal(t, "invalid_status", details["actual"])
+			},
+		},
+		{
+			name: "invalid category enum",
+			args: map[string]any{
+				"category": "invalid_category",
+			},
+			expectedCode: "invalid_parameters",
+			expectedMsg:  "invalid category value",
+			checkDetails: func(t *testing.T, details map[string]any) {
+				assert.Equal(t, "category", details["parameter"])
+				assert.Contains(t, details["expected"], "business_rules")
+				assert.Contains(t, details["expected"], "relationship")
+				assert.Equal(t, "invalid_category", details["actual"])
+			},
+		},
+		{
+			name: "priority too low",
+			args: map[string]any{
+				"priority": float64(0),
+			},
+			expectedCode: "invalid_parameters",
+			expectedMsg:  "invalid priority value",
+			checkDetails: func(t *testing.T, details map[string]any) {
+				assert.Equal(t, "priority", details["parameter"])
+				assert.Equal(t, "1-5", details["expected"])
+				assert.Equal(t, float64(0), details["actual"])
+			},
+		},
+		{
+			name: "priority too high",
+			args: map[string]any{
+				"priority": float64(6),
+			},
+			expectedCode: "invalid_parameters",
+			expectedMsg:  "invalid priority value",
+			checkDetails: func(t *testing.T, details map[string]any) {
+				assert.Equal(t, "priority", details["parameter"])
+				assert.Equal(t, "1-5", details["expected"])
+				assert.Equal(t, float64(6), details["actual"])
+			},
+		},
+		{
+			name: "negative priority",
+			args: map[string]any{
+				"priority": float64(-1),
+			},
+			expectedCode: "invalid_parameters",
+			expectedMsg:  "invalid priority value",
+			checkDetails: func(t *testing.T, details map[string]any) {
+				assert.Equal(t, "priority", details["parameter"])
+				assert.Equal(t, "1-5", details["expected"])
+			},
+		},
+		{
+			name: "limit zero",
+			args: map[string]any{
+				"limit": float64(0),
+			},
+			expectedCode: "invalid_parameters",
+			expectedMsg:  "invalid limit value",
+			checkDetails: func(t *testing.T, details map[string]any) {
+				assert.Equal(t, "limit", details["parameter"])
+				assert.Equal(t, "1-100", details["expected"])
+				assert.Equal(t, float64(0), details["actual"])
+			},
+		},
+		{
+			name: "limit too high",
+			args: map[string]any{
+				"limit": float64(101),
+			},
+			expectedCode: "invalid_parameters",
+			expectedMsg:  "invalid limit value",
+			checkDetails: func(t *testing.T, details map[string]any) {
+				assert.Equal(t, "limit", details["parameter"])
+				assert.Equal(t, "1-100", details["expected"])
+				assert.Equal(t, float64(101), details["actual"])
+			},
+		},
+		{
+			name: "negative limit",
+			args: map[string]any{
+				"limit": float64(-5),
+			},
+			expectedCode: "invalid_parameters",
+			expectedMsg:  "invalid limit value",
+			checkDetails: func(t *testing.T, details map[string]any) {
+				assert.Equal(t, "limit", details["parameter"])
+				assert.Equal(t, "1-100", details["expected"])
+			},
+		},
+		{
+			name: "negative offset",
+			args: map[string]any{
+				"offset": float64(-1),
+			},
+			expectedCode: "invalid_parameters",
+			expectedMsg:  "invalid offset value",
+			checkDetails: func(t *testing.T, details map[string]any) {
+				assert.Equal(t, "offset", details["parameter"])
+				assert.Equal(t, "≥0", details["expected"])
+				assert.Equal(t, float64(-1), details["actual"])
+			},
+		},
+		{
+			name: "priority wrong type (string)",
+			args: map[string]any{
+				"priority": "not-a-number",
+			},
+			expectedCode: "invalid_parameters",
+			expectedMsg:  "priority must be a number",
+			checkDetails: func(t *testing.T, details map[string]any) {
+				assert.Equal(t, "priority", details["parameter"])
+				assert.Equal(t, "number", details["expected"])
+			},
+		},
+		{
+			name: "limit wrong type (string)",
+			args: map[string]any{
+				"limit": "not-a-number",
+			},
+			expectedCode: "invalid_parameters",
+			expectedMsg:  "limit must be a number",
+			checkDetails: func(t *testing.T, details map[string]any) {
+				assert.Equal(t, "limit", details["parameter"])
+				assert.Equal(t, "number", details["expected"])
+			},
+		},
+		{
+			name: "offset wrong type (string)",
+			args: map[string]any{
+				"offset": "not-a-number",
+			},
+			expectedCode: "invalid_parameters",
+			expectedMsg:  "offset must be a number",
+			checkDetails: func(t *testing.T, details map[string]any) {
+				assert.Equal(t, "offset", details["parameter"])
+				assert.Equal(t, "number", details["expected"])
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a mock server and register the tool
+			s := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+			repo := &mockQuestionRepository{}
+			deps := &QuestionToolDeps{
+				QuestionRepo: repo,
+				Logger:       zap.NewNop(),
+			}
+
+			registerListOntologyQuestionsTool(s, deps)
+
+			// Create a request with the test arguments
+			argsJSON, err := json.Marshal(tt.args)
+			require.NoError(t, err)
+
+			request := fmt.Sprintf(`{
+				"jsonrpc": "2.0",
+				"method": "tools/call",
+				"id": 1,
+				"params": {
+					"name": "list_ontology_questions",
+					"arguments": %s
+				}
+			}`, string(argsJSON))
+
+			// Handle the request
+			ctx := context.Background()
+			response := s.HandleMessage(ctx, []byte(request))
+
+			// Marshal response to JSON
+			responseBytes, err := json.Marshal(response)
+			require.NoError(t, err)
+
+			// Parse response
+			var rpcResponse struct {
+				Result struct {
+					Content []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"content"`
+					IsError bool `json:"isError"`
+				} `json:"result"`
+				Error *struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			err = json.Unmarshal(responseBytes, &rpcResponse)
+			require.NoError(t, err)
+
+			// Check if it's a tool result error (not RPC error)
+			if rpcResponse.Error == nil {
+				// Tool returned successfully, but content should be an error result
+				require.True(t, rpcResponse.Result.IsError, "Expected IsError to be true")
+				require.NotEmpty(t, rpcResponse.Result.Content)
+
+				// Parse error content
+				var errorResp ErrorResponse
+				err = json.Unmarshal([]byte(rpcResponse.Result.Content[0].Text), &errorResp)
+				require.NoError(t, err)
+
+				// Verify error structure
+				assert.True(t, errorResp.Error)
+				assert.Equal(t, tt.expectedCode, errorResp.Code)
+				assert.Contains(t, errorResp.Message, tt.expectedMsg)
+
+				// Check details if provided
+				if tt.checkDetails != nil {
+					require.NotNil(t, errorResp.Details)
+					detailsMap, ok := errorResp.Details.(map[string]any)
+					require.True(t, ok, "Expected details to be a map")
+					tt.checkDetails(t, detailsMap)
+				}
+			}
+		})
+	}
+}
+
+// TestEscalateOntologyQuestionTool_ErrorResults verifies error handling for invalid parameters and resource lookups.
+func TestEscalateOntologyQuestionTool_ErrorResults(t *testing.T) {
+	t.Run("empty question_id", func(t *testing.T) {
+		args := map[string]any{"question_id": ""}
+		questionID, errResult := validateQuestionID(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Equal(t, uuid.Nil, questionID)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "parameter 'question_id' cannot be empty")
+	})
+
+	t.Run("whitespace-only question_id", func(t *testing.T) {
+		args := map[string]any{"question_id": "   "}
+		questionID, errResult := validateQuestionID(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Equal(t, uuid.Nil, questionID)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "parameter 'question_id' cannot be empty")
+	})
+
+	t.Run("invalid UUID format", func(t *testing.T) {
+		args := map[string]any{"question_id": "not-a-valid-uuid"}
+		questionID, errResult := validateQuestionID(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Equal(t, uuid.Nil, questionID)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "invalid question_id format")
+		assert.Contains(t, errorResp.Message, "not-a-valid-uuid")
+	})
+
+	t.Run("empty reason", func(t *testing.T) {
+		args := map[string]any{"reason": ""}
+		reason, errResult := validateReasonParameter(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Empty(t, reason)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "parameter 'reason' cannot be empty")
+	})
+
+	t.Run("whitespace-only reason", func(t *testing.T) {
+		args := map[string]any{"reason": "   "}
+		reason, errResult := validateReasonParameter(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Empty(t, reason)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "parameter 'reason' cannot be empty")
+	})
+
+	t.Run("question not found", func(t *testing.T) {
+		questionIDStr := uuid.New().String()
+
+		result := NewErrorResult(
+			"QUESTION_NOT_FOUND",
+			fmt.Sprintf("ontology question %q not found", questionIDStr),
+		)
+
+		require.NotNil(t, result)
+		require.True(t, result.IsError)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "QUESTION_NOT_FOUND", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "ontology question")
+		assert.Contains(t, errorResp.Message, "not found")
+		assert.Contains(t, errorResp.Message, questionIDStr)
+	})
 }

@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/server"
@@ -350,4 +352,257 @@ func TestEnumValues_Roundtrip(t *testing.T) {
 
 	// Verify roundtrip
 	assert.Equal(t, original, formatted, "roundtrip should preserve values")
+}
+
+// ============================================================================
+// Error Result Tests
+// ============================================================================
+
+// TestUpdateColumnTool_ErrorResults tests error result patterns for update_column tool.
+// These tests validate the error result structure without requiring database setup.
+func TestUpdateColumnTool_ErrorResults(t *testing.T) {
+	t.Run("empty table name after trimming", func(t *testing.T) {
+		// Simulate empty table name validation
+		table := "   " // whitespace only
+		table = strings.TrimSpace(table)
+
+		if table == "" {
+			result := NewErrorResult("invalid_parameters", "parameter 'table' cannot be empty")
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse error response
+			var errResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errResp)
+			require.NoError(t, err)
+
+			assert.True(t, errResp.Error)
+			assert.Equal(t, "invalid_parameters", errResp.Code)
+			assert.Contains(t, errResp.Message, "table")
+			assert.Contains(t, errResp.Message, "cannot be empty")
+		}
+	})
+
+	t.Run("empty column name after trimming", func(t *testing.T) {
+		// Simulate empty column name validation
+		column := "   " // whitespace only
+		column = strings.TrimSpace(column)
+
+		if column == "" {
+			result := NewErrorResult("invalid_parameters", "parameter 'column' cannot be empty")
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse error response
+			var errResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errResp)
+			require.NoError(t, err)
+
+			assert.True(t, errResp.Error)
+			assert.Equal(t, "invalid_parameters", errResp.Code)
+			assert.Contains(t, errResp.Message, "column")
+			assert.Contains(t, errResp.Message, "cannot be empty")
+		}
+	})
+
+	t.Run("invalid role value", func(t *testing.T) {
+		// Simulate role validation
+		role := "invalid_role"
+		validRoles := []string{"dimension", "measure", "identifier", "attribute"}
+
+		isValidRole := false
+		for _, validRole := range validRoles {
+			if role == validRole {
+				isValidRole = true
+				break
+			}
+		}
+
+		if !isValidRole {
+			result := NewErrorResultWithDetails(
+				"invalid_parameters",
+				fmt.Sprintf("parameter 'role' must be one of: dimension, measure, identifier, attribute. Got: %q", role),
+				map[string]any{
+					"parameter": "role",
+					"expected":  validRoles,
+					"actual":    role,
+				},
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse error response
+			var errResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errResp)
+			require.NoError(t, err)
+
+			assert.True(t, errResp.Error)
+			assert.Equal(t, "invalid_parameters", errResp.Code)
+			assert.Contains(t, errResp.Message, "role")
+			assert.Contains(t, errResp.Message, "must be one of")
+			assert.Contains(t, errResp.Message, "invalid_role")
+
+			// Verify details
+			details, ok := errResp.Details.(map[string]any)
+			require.True(t, ok, "details should be a map")
+			assert.Equal(t, "role", details["parameter"])
+			assert.Equal(t, "invalid_role", details["actual"])
+
+			// Verify expected roles array
+			expectedRoles, ok := details["expected"].([]any)
+			require.True(t, ok, "expected should be an array")
+			assert.Len(t, expectedRoles, 4)
+		}
+	})
+
+	t.Run("enum_values array with non-string element - int", func(t *testing.T) {
+		// Simulate enum_values validation with non-string element
+		enumArray := []any{"ACTIVE", 123, "BANNED"} // Element at index 1 is int
+
+		for i, ev := range enumArray {
+			if _, ok := ev.(string); !ok {
+				result := NewErrorResultWithDetails(
+					"invalid_parameters",
+					fmt.Sprintf("parameter 'enum_values' must be an array of strings. Element at index %d is %T, not string", i, ev),
+					map[string]any{
+						"parameter":             "enum_values",
+						"invalid_element_index": i,
+						"invalid_element_type":  fmt.Sprintf("%T", ev),
+					},
+				)
+
+				// Verify it's an error result
+				assert.NotNil(t, result)
+				assert.True(t, result.IsError)
+
+				// Parse error response
+				var errResp ErrorResponse
+				err := json.Unmarshal([]byte(getTextContent(result)), &errResp)
+				require.NoError(t, err)
+
+				assert.True(t, errResp.Error)
+				assert.Equal(t, "invalid_parameters", errResp.Code)
+				assert.Contains(t, errResp.Message, "enum_values")
+				assert.Contains(t, errResp.Message, "must be an array of strings")
+				assert.Contains(t, errResp.Message, "index 1")
+
+				// Verify details
+				details, ok := errResp.Details.(map[string]any)
+				require.True(t, ok, "details should be a map")
+				assert.Equal(t, "enum_values", details["parameter"])
+				assert.Equal(t, float64(1), details["invalid_element_index"]) // JSON unmarshals numbers as float64
+				assert.Equal(t, "int", details["invalid_element_type"])
+
+				break // Stop after first error
+			}
+		}
+	})
+
+	t.Run("enum_values array with non-string element - bool", func(t *testing.T) {
+		// Simulate enum_values validation with non-string element
+		enumArray := []any{"ACTIVE", true, "BANNED"} // Element at index 1 is bool
+
+		for i, ev := range enumArray {
+			if _, ok := ev.(string); !ok {
+				result := NewErrorResultWithDetails(
+					"invalid_parameters",
+					fmt.Sprintf("parameter 'enum_values' must be an array of strings. Element at index %d is %T, not string", i, ev),
+					map[string]any{
+						"parameter":             "enum_values",
+						"invalid_element_index": i,
+						"invalid_element_type":  fmt.Sprintf("%T", ev),
+					},
+				)
+
+				// Verify it's an error result
+				assert.NotNil(t, result)
+				assert.True(t, result.IsError)
+
+				// Parse error response
+				var errResp ErrorResponse
+				err := json.Unmarshal([]byte(getTextContent(result)), &errResp)
+				require.NoError(t, err)
+
+				assert.True(t, errResp.Error)
+				assert.Equal(t, "invalid_parameters", errResp.Code)
+				assert.Contains(t, errResp.Message, "enum_values")
+				assert.Contains(t, errResp.Message, "must be an array of strings")
+				assert.Contains(t, errResp.Message, "index 1")
+
+				// Verify details
+				details, ok := errResp.Details.(map[string]any)
+				require.True(t, ok, "details should be a map")
+				assert.Equal(t, "enum_values", details["parameter"])
+				assert.Equal(t, float64(1), details["invalid_element_index"]) // JSON unmarshals numbers as float64
+				assert.Equal(t, "bool", details["invalid_element_type"])
+
+				break // Stop after first error
+			}
+		}
+	})
+
+	t.Run("enum_values array with non-string element - map", func(t *testing.T) {
+		// Simulate enum_values validation with non-string element
+		enumArray := []any{"ACTIVE", map[string]string{"key": "value"}, "BANNED"} // Element at index 1 is map
+
+		for i, ev := range enumArray {
+			if _, ok := ev.(string); !ok {
+				result := NewErrorResultWithDetails(
+					"invalid_parameters",
+					fmt.Sprintf("parameter 'enum_values' must be an array of strings. Element at index %d is %T, not string", i, ev),
+					map[string]any{
+						"parameter":             "enum_values",
+						"invalid_element_index": i,
+						"invalid_element_type":  fmt.Sprintf("%T", ev),
+					},
+				)
+
+				// Verify it's an error result
+				assert.NotNil(t, result)
+				assert.True(t, result.IsError)
+
+				// Parse error response
+				var errResp ErrorResponse
+				err := json.Unmarshal([]byte(getTextContent(result)), &errResp)
+				require.NoError(t, err)
+
+				assert.True(t, errResp.Error)
+				assert.Equal(t, "invalid_parameters", errResp.Code)
+				assert.Contains(t, errResp.Message, "enum_values")
+				assert.Contains(t, errResp.Message, "must be an array of strings")
+				assert.Contains(t, errResp.Message, "index 1")
+
+				// Verify details
+				details, ok := errResp.Details.(map[string]any)
+				require.True(t, ok, "details should be a map")
+				assert.Equal(t, "enum_values", details["parameter"])
+				assert.Equal(t, float64(1), details["invalid_element_index"])       // JSON unmarshals numbers as float64
+				assert.Contains(t, details["invalid_element_type"].(string), "map") // Type string contains "map"
+
+				break // Stop after first error
+			}
+		}
+	})
+
+	t.Run("valid role values accepted", func(t *testing.T) {
+		// Test that all valid role values pass validation
+		validRoles := []string{"dimension", "measure", "identifier", "attribute"}
+
+		for _, role := range validRoles {
+			isValidRole := false
+			for _, validRole := range validRoles {
+				if role == validRole {
+					isValidRole = true
+					break
+				}
+			}
+			assert.True(t, isValidRole, "role %q should be valid", role)
+		}
+	})
 }

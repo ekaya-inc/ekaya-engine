@@ -305,7 +305,7 @@ func main() {
 	}
 	mcptools.RegisterOntologyTools(mcpServer.MCP(), ontologyToolDeps)
 
-	mcpHandler := handlers.NewMCPHandler(mcpServer, logger)
+	mcpHandler := handlers.NewMCPHandler(mcpServer, logger, cfg.MCP)
 	tenantScopeProvider := database.NewTenantScopeProvider(db)
 	mcpAuthMiddleware := mcpauth.NewMiddleware(authService, agentAPIKeyService, tenantScopeProvider, logger)
 	mcpHandler.RegisterRoutes(mux, mcpAuthMiddleware)
@@ -434,6 +434,8 @@ func main() {
 		DB:               db,
 		MCPConfigService: mcpConfigService,
 		OntologyRepo:     ontologyRepo,
+		SchemaRepo:       schemaRepo,
+		ProjectService:   projectService,
 		Logger:           logger,
 	}
 	mcptools.RegisterColumnTools(mcpServer.MCP(), columnToolDeps)

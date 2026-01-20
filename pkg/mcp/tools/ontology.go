@@ -119,7 +119,10 @@ func registerGetOntologyTool(s *server.MCPServer, deps *OntologyToolDeps) {
 			"columns":  true,
 		}
 		if !validDepths[depth] {
-			return nil, fmt.Errorf("invalid depth: must be one of 'domain', 'entities', 'tables', 'columns'")
+			return NewErrorResult(
+				"invalid_parameters",
+				fmt.Sprintf("invalid depth '%s': must be one of 'domain', 'entities', 'tables', 'columns'", depth),
+			), nil
 		}
 
 		// Parse optional parameters
@@ -162,6 +165,11 @@ func registerGetOntologyTool(s *server.MCPServer, deps *OntologyToolDeps) {
 
 		if err != nil {
 			return nil, fmt.Errorf("failed to get ontology at depth '%s': %w", depth, err)
+		}
+
+		// Check if result is already a CallToolResult (error result from handleColumnsDepth)
+		if toolResult, ok := result.(*mcp.CallToolResult); ok {
+			return toolResult, nil
 		}
 
 		jsonResult, err := json.Marshal(result)
@@ -215,6 +223,24 @@ func handleTablesDepth(ctx context.Context, deps *OntologyToolDeps, projectID uu
 
 // handleColumnsDepth returns full column details for specified tables.
 func handleColumnsDepth(ctx context.Context, deps *OntologyToolDeps, projectID uuid.UUID, tables []string) (any, error) {
+	// Check for actionable parameter errors before calling service
+	if len(tables) == 0 {
+		return NewErrorResult(
+			"invalid_parameters",
+			"table names required for columns depth - please specify which tables to retrieve column details for",
+		), nil
+	}
+	if len(tables) > services.MaxColumnsDepthTables {
+		return NewErrorResultWithDetails(
+			"invalid_parameters",
+			fmt.Sprintf("too many tables requested: maximum %d tables allowed for columns depth", services.MaxColumnsDepthTables),
+			map[string]any{
+				"requested_count": len(tables),
+				"max_allowed":     services.MaxColumnsDepthTables,
+			},
+		), nil
+	}
+
 	result, err := deps.OntologyContextService.GetColumnsContext(ctx, projectID, tables)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns context: %w", err)

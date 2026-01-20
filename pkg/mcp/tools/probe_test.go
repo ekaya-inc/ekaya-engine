@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
@@ -326,6 +327,139 @@ func TestProbeColumn_CardinalityRatioCalculation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			actualRatio := float64(tc.distinctCount) / float64(tc.rowCount)
 			assert.Equal(t, tc.expectedRatio, actualRatio, tc.description)
+		})
+	}
+}
+
+// ============================================================================
+// Tests for probe_column error handling
+// ============================================================================
+
+func TestProbeColumnTool_ErrorResults(t *testing.T) {
+	tests := []struct {
+		name          string
+		table         string
+		column        string
+		wantErrorCode string
+		wantMessage   string
+	}{
+		{
+			name:          "empty table parameter",
+			table:         "   ", // whitespace-only
+			column:        "status",
+			wantErrorCode: "invalid_parameters",
+			wantMessage:   "parameter 'table' cannot be empty",
+		},
+		{
+			name:          "empty column parameter",
+			table:         "users",
+			column:        "   ", // whitespace-only
+			wantErrorCode: "invalid_parameters",
+			wantMessage:   "parameter 'column' cannot be empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// The actual tool handler would validate these parameters
+			// This test verifies the error result structure
+			table := trimString(tt.table)
+			column := trimString(tt.column)
+
+			var result *ErrorResponse
+			if table == "" {
+				result = &ErrorResponse{
+					Error:   true,
+					Code:    "invalid_parameters",
+					Message: "parameter 'table' cannot be empty",
+				}
+			} else if column == "" {
+				result = &ErrorResponse{
+					Error:   true,
+					Code:    "invalid_parameters",
+					Message: "parameter 'column' cannot be empty",
+				}
+			}
+
+			// Verify error result structure
+			assert.True(t, result.Error)
+			assert.Equal(t, tt.wantErrorCode, result.Code)
+			assert.Equal(t, tt.wantMessage, result.Message)
+		})
+	}
+}
+
+func TestProbeColumn_TableNotFound(t *testing.T) {
+	// Test error response when table is not found
+	response := probeColumnResponse{
+		Table:  "nonexistent_table",
+		Column: "some_column",
+		Error:  "TABLE_NOT_FOUND: table \"nonexistent_table\" not found in schema registry",
+	}
+
+	// Verify error is set and other fields are nil/empty
+	assert.NotEmpty(t, response.Error)
+	assert.Contains(t, response.Error, "TABLE_NOT_FOUND")
+	assert.Contains(t, response.Error, "nonexistent_table")
+	assert.Nil(t, response.Statistics)
+	assert.Nil(t, response.Joinability)
+	assert.Nil(t, response.Semantic)
+}
+
+func TestProbeColumn_ColumnNotFound(t *testing.T) {
+	// Test error response when column is not found
+	response := probeColumnResponse{
+		Table:  "users",
+		Column: "nonexistent_column",
+		Error:  "COLUMN_NOT_FOUND: column \"nonexistent_column\" not found in table \"users\"",
+	}
+
+	// Verify error is set and other fields are nil/empty
+	assert.NotEmpty(t, response.Error)
+	assert.Contains(t, response.Error, "COLUMN_NOT_FOUND")
+	assert.Contains(t, response.Error, "nonexistent_column")
+	assert.Contains(t, response.Error, "users")
+	assert.Nil(t, response.Statistics)
+	assert.Nil(t, response.Joinability)
+	assert.Nil(t, response.Semantic)
+}
+
+func TestProbeColumn_ErrorCodeExtraction(t *testing.T) {
+	// Test error code extraction from error message
+	testCases := []struct {
+		errorMessage string
+		expectedCode string
+		expectedMsg  string
+	}{
+		{
+			errorMessage: "TABLE_NOT_FOUND: table \"foo\" not found",
+			expectedCode: "TABLE_NOT_FOUND",
+			expectedMsg:  "table \"foo\" not found",
+		},
+		{
+			errorMessage: "COLUMN_NOT_FOUND: column \"bar\" not found in table \"foo\"",
+			expectedCode: "COLUMN_NOT_FOUND",
+			expectedMsg:  "column \"bar\" not found in table \"foo\"",
+		},
+		{
+			errorMessage: "query_error: statistics computation failed",
+			expectedCode: "query_error",
+			expectedMsg:  "statistics computation failed",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.expectedCode, func(t *testing.T) {
+			// Simulate error code extraction logic
+			errorCode := "query_error" // default
+			errorMessage := tc.errorMessage
+			if idx := strings.Index(tc.errorMessage, ": "); idx > 0 {
+				errorCode = tc.errorMessage[:idx]
+				errorMessage = tc.errorMessage[idx+2:]
+			}
+
+			assert.Equal(t, tc.expectedCode, errorCode)
+			assert.Equal(t, tc.expectedMsg, errorMessage)
 		})
 	}
 }

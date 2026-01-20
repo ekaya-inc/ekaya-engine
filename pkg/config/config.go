@@ -9,6 +9,24 @@ import (
 	"github.com/ilyakaznacheev/cleanenv"
 )
 
+// MCPConfig holds MCP server logging configuration.
+type MCPConfig struct {
+	// LogRequests enables logging of tool names and request parameters at DEBUG level.
+	// Sensitive fields (password, secret, token, key, credential) are automatically redacted.
+	// Default: true (log all requests in dev, can be disabled in prod for performance)
+	LogRequests bool `yaml:"log_requests" env:"MCP_LOG_REQUESTS" env-default:"true"`
+
+	// LogResponses enables logging of response content at DEBUG level (verbose).
+	// This logs the full response body for successful tool calls.
+	// Default: false (disabled to reduce log volume)
+	LogResponses bool `yaml:"log_responses" env:"MCP_LOG_RESPONSES" env-default:"false"`
+
+	// LogErrors enables logging of error responses at DEBUG level.
+	// Always logs errors with error code, message, and duration.
+	// Default: true (always log errors for troubleshooting)
+	LogErrors bool `yaml:"log_errors" env:"MCP_LOG_ERRORS" env-default:"true"`
+}
+
 // Config holds all configuration for ekaya-engine.
 // Configuration can come from YAML file (config.yaml) or environment variables.
 // Environment variables always override YAML values for fields that support both.
@@ -62,6 +80,9 @@ type Config struct {
 	// Should be at least 32 characters. Any string works (used as HMAC key).
 	// Environment variable OAUTH_SESSION_SECRET overrides this.
 	OAuthSessionSecret string `yaml:"oauth_session_secret" env:"OAUTH_SESSION_SECRET" env-default:"default-oauth-session-secret-change-in-production"`
+
+	// MCP server configuration
+	MCP MCPConfig `yaml:"mcp"`
 }
 
 // OAuthConfig holds OAuth client configuration.

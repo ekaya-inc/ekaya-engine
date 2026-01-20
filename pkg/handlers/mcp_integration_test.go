@@ -23,7 +23,7 @@ func TestMCPIntegration_FullFlow(t *testing.T) {
 	// Set up MCP server with health tool
 	mcpServer := mcp.NewServer("ekaya-engine", "1.0.0-test", logger)
 	tools.RegisterHealthTool(mcpServer.MCP(), "1.0.0-test", nil)
-	mcpHandler := NewMCPHandler(mcpServer, logger)
+	mcpHandler := NewMCPHandler(mcpServer, logger, defaultMCPConfig())
 
 	mux := http.NewServeMux()
 	mcpHandler.RegisterRoutes(mux, newTestMCPAuthMiddleware())
@@ -171,7 +171,7 @@ func TestMCPIntegration_AuthFailures(t *testing.T) {
 
 	mcpServer := mcp.NewServer("ekaya-engine", "1.0.0-test", logger)
 	tools.RegisterHealthTool(mcpServer.MCP(), "1.0.0-test", nil)
-	mcpHandler := NewMCPHandler(mcpServer, logger)
+	mcpHandler := NewMCPHandler(mcpServer, logger, defaultMCPConfig())
 
 	t.Run("missing token returns 401 with WWW-Authenticate", func(t *testing.T) {
 		// Use auth service that rejects all requests

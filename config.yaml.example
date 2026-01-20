@@ -89,6 +89,26 @@ oauth_session_secret: quickstart-not-for-production
 # config file variables
 
 #
+# MCP Server Logging
+#
+# Control MCP request/response logging verbosity.
+# All logs are at DEBUG level - set your logger to DEBUG to see them.
+# Sensitive fields (password, secret, token, key, credential) are automatically redacted.
+#
+mcp:
+  # Log tool names and request parameters (default: true)
+  log_requests: true
+
+  # Log full response content (default: false, verbose)
+  log_responses: false
+
+  # Log error responses with error code and message (default: true)
+  log_errors: true
+
+# Environment variable overrides:
+# MCP_LOG_REQUESTS, MCP_LOG_RESPONSES, MCP_LOG_ERRORS
+
+#
 # Advanced
 #
 

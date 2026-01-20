@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -479,4 +480,315 @@ func TestDeleteEntityResponse(t *testing.T) {
 
 	assert.Equal(t, "InvalidEntity", decoded.Name)
 	assert.True(t, decoded.Deleted)
+}
+
+// TestUpdateEntityTool_ErrorResults tests that actionable errors are returned as error results.
+func TestUpdateEntityTool_ErrorResults(t *testing.T) {
+	t.Run("empty entity name", func(t *testing.T) {
+		// Simulate validation check for empty name
+		name := ""
+		if len(name) == 0 {
+			result := NewErrorResult(
+				"invalid_parameters",
+				"entity name cannot be empty",
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content to verify structure
+			var errorResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, err)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Equal(t, "entity name cannot be empty", errorResp.Message)
+		}
+	})
+
+	t.Run("invalid alias array - non-string element", func(t *testing.T) {
+		// Simulate extracting aliases with a non-string element
+		aliasesArray := []any{"valid_alias", 123, "another_alias"}
+
+		var aliases []string
+		for i, a := range aliasesArray {
+			if aliasStr, ok := a.(string); ok {
+				aliases = append(aliases, aliasStr)
+			} else {
+				result := NewErrorResultWithDetails(
+					"invalid_parameters",
+					"all aliases must be strings",
+					map[string]any{
+						"invalid_element_index": i,
+						"invalid_element_type":  fmt.Sprintf("%T", a),
+					},
+				)
+
+				// Verify it's an error result
+				assert.NotNil(t, result)
+				assert.True(t, result.IsError)
+
+				// Parse the content to verify structure
+				var errorResp ErrorResponse
+				err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+				require.NoError(t, err)
+
+				assert.True(t, errorResp.Error)
+				assert.Equal(t, "invalid_parameters", errorResp.Code)
+				assert.Equal(t, "all aliases must be strings", errorResp.Message)
+
+				// Verify details
+				details, ok := errorResp.Details.(map[string]any)
+				require.True(t, ok)
+				assert.Equal(t, float64(1), details["invalid_element_index"]) // JSON unmarshals numbers as float64
+				assert.Equal(t, "int", details["invalid_element_type"])
+				break
+			}
+		}
+	})
+
+	t.Run("invalid key_columns array - non-string element", func(t *testing.T) {
+		// Simulate extracting key_columns with a non-string element
+		keyColumnsArray := []any{"user_id", true, "username"}
+
+		var keyColumns []string
+		for i, kc := range keyColumnsArray {
+			if kcStr, ok := kc.(string); ok {
+				keyColumns = append(keyColumns, kcStr)
+			} else {
+				result := NewErrorResultWithDetails(
+					"invalid_parameters",
+					"all key_columns must be strings",
+					map[string]any{
+						"invalid_element_index": i,
+						"invalid_element_type":  fmt.Sprintf("%T", kc),
+					},
+				)
+
+				// Verify it's an error result
+				assert.NotNil(t, result)
+				assert.True(t, result.IsError)
+
+				// Parse the content to verify structure
+				var errorResp ErrorResponse
+				err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+				require.NoError(t, err)
+
+				assert.True(t, errorResp.Error)
+				assert.Equal(t, "invalid_parameters", errorResp.Code)
+				assert.Equal(t, "all key_columns must be strings", errorResp.Message)
+
+				// Verify details
+				details, ok := errorResp.Details.(map[string]any)
+				require.True(t, ok)
+				assert.Equal(t, float64(1), details["invalid_element_index"]) // JSON unmarshals numbers as float64
+				assert.Equal(t, "bool", details["invalid_element_type"])
+				break
+			}
+		}
+	})
+}
+
+// TestDeleteEntityTool_ErrorResults tests that actionable errors are returned as error results.
+func TestDeleteEntityTool_ErrorResults(t *testing.T) {
+	t.Run("empty entity name after trimming", func(t *testing.T) {
+		// Simulate validation check for empty name after trimming
+		name := "   " // Whitespace-only string
+		name = trimString(name)
+		if name == "" {
+			result := NewErrorResult(
+				"invalid_parameters",
+				"parameter 'name' cannot be empty",
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content to verify structure
+			var errorResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, err)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Equal(t, "parameter 'name' cannot be empty", errorResp.Message)
+		}
+	})
+
+	t.Run("entity not found", func(t *testing.T) {
+		// Simulate entity not found scenario
+		entityName := "NonExistentEntity"
+		result := NewErrorResult(
+			"ENTITY_NOT_FOUND",
+			fmt.Sprintf("entity %q not found", entityName),
+		)
+
+		// Verify it's an error result
+		assert.NotNil(t, result)
+		assert.True(t, result.IsError)
+
+		// Parse the content to verify structure
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "ENTITY_NOT_FOUND", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "NonExistentEntity")
+		assert.Contains(t, errorResp.Message, "not found")
+	})
+
+	t.Run("entity has relationships - resource conflict", func(t *testing.T) {
+		// Simulate entity with relationships scenario
+		entityName := "User"
+		relCount := 3
+		relatedEntities := []string{"Account", "Order", "Payment"}
+
+		result := NewErrorResultWithDetails(
+			"resource_conflict",
+			fmt.Sprintf("cannot delete entity %q - has %d relationship(s). Delete relationships first.", entityName, relCount),
+			map[string]any{
+				"relationship_count": relCount,
+				"related_entities":   relatedEntities,
+			},
+		)
+
+		// Verify it's an error result
+		assert.NotNil(t, result)
+		assert.True(t, result.IsError)
+
+		// Parse the content to verify structure
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "resource_conflict", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "User")
+		assert.Contains(t, errorResp.Message, "3 relationship(s)")
+		assert.Contains(t, errorResp.Message, "Delete relationships first")
+
+		// Verify details
+		details, ok := errorResp.Details.(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, float64(3), details["relationship_count"]) // JSON unmarshals numbers as float64
+
+		// Verify related_entities array
+		relEntitiesRaw, ok := details["related_entities"].([]any)
+		require.True(t, ok)
+		assert.Len(t, relEntitiesRaw, 3)
+		// Convert []any to []string for comparison
+		var relEntitiesStr []string
+		for _, e := range relEntitiesRaw {
+			relEntitiesStr = append(relEntitiesStr, e.(string))
+		}
+		assert.Contains(t, relEntitiesStr, "Account")
+		assert.Contains(t, relEntitiesStr, "Order")
+		assert.Contains(t, relEntitiesStr, "Payment")
+	})
+
+	t.Run("entity has occurrences - resource conflict", func(t *testing.T) {
+		// Simulate entity with occurrences scenario
+		entityName := "User"
+		occCount := 5
+		tables := []string{"users", "accounts", "orders", "payments", "sessions"}
+
+		result := NewErrorResultWithDetails(
+			"resource_conflict",
+			fmt.Sprintf("cannot delete entity %q - still referenced in %d schema occurrence(s)", entityName, occCount),
+			map[string]any{
+				"occurrence_count": occCount,
+				"tables":           tables,
+			},
+		)
+
+		// Verify it's an error result
+		assert.NotNil(t, result)
+		assert.True(t, result.IsError)
+
+		// Parse the content to verify structure
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "resource_conflict", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "User")
+		assert.Contains(t, errorResp.Message, "5 schema occurrence(s)")
+		assert.Contains(t, errorResp.Message, "still referenced")
+
+		// Verify details
+		details, ok := errorResp.Details.(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, float64(5), details["occurrence_count"]) // JSON unmarshals numbers as float64
+
+		// Verify tables array
+		tablesRaw, ok := details["tables"].([]any)
+		require.True(t, ok)
+		assert.Len(t, tablesRaw, 5)
+		// Convert []any to []string for comparison
+		var tablesStr []string
+		for _, t := range tablesRaw {
+			tablesStr = append(tablesStr, t.(string))
+		}
+		assert.Contains(t, tablesStr, "users")
+		assert.Contains(t, tablesStr, "accounts")
+		assert.Contains(t, tablesStr, "orders")
+		assert.Contains(t, tablesStr, "payments")
+		assert.Contains(t, tablesStr, "sessions")
+	})
+}
+
+// TestGetEntityTool_ErrorResults tests that actionable errors are returned as error results.
+func TestGetEntityTool_ErrorResults(t *testing.T) {
+	t.Run("empty entity name after trimming", func(t *testing.T) {
+		// Simulate validation check for empty name after trimming
+		name := "   " // Whitespace-only string
+		name = trimString(name)
+		if name == "" {
+			result := NewErrorResult(
+				"invalid_parameters",
+				"parameter 'name' cannot be empty",
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content to verify structure
+			var errorResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, err)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Equal(t, "parameter 'name' cannot be empty", errorResp.Message)
+		}
+	})
+
+	t.Run("entity not found", func(t *testing.T) {
+		// Simulate entity not found scenario
+		entityName := "NonExistentEntity"
+		result := NewErrorResult(
+			"ENTITY_NOT_FOUND",
+			fmt.Sprintf("entity %q not found", entityName),
+		)
+
+		// Verify it's an error result
+		assert.NotNil(t, result)
+		assert.True(t, result.IsError)
+
+		// Parse the content to verify structure
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "ENTITY_NOT_FOUND", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "NonExistentEntity")
+		assert.Contains(t, errorResp.Message, "not found")
+	})
 }

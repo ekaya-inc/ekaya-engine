@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -84,15 +85,38 @@ func registerProbeColumnTool(s *server.MCPServer, deps *ProbeToolDeps) {
 		if err != nil {
 			return nil, err
 		}
+		// Validate table is not empty after trimming whitespace
+		tableName = trimString(tableName)
+		if tableName == "" {
+			return NewErrorResult("invalid_parameters", "parameter 'table' cannot be empty"), nil
+		}
+
 		columnName, err := req.RequireString("column")
 		if err != nil {
 			return nil, err
+		}
+		// Validate column is not empty after trimming whitespace
+		columnName = trimString(columnName)
+		if columnName == "" {
+			return NewErrorResult("invalid_parameters", "parameter 'column' cannot be empty"), nil
 		}
 
 		// Probe the column
 		result, err := probeColumn(tenantCtx, deps, projectID, tableName, columnName)
 		if err != nil {
 			return nil, err
+		}
+
+		// Check if probe returned an error result (table/column not found)
+		if result.Error != "" {
+			// Extract error code from error message (format: "CODE: message")
+			errorCode := "query_error" // default
+			errorMessage := result.Error
+			if idx := strings.Index(result.Error, ": "); idx > 0 {
+				errorCode = result.Error[:idx]
+				errorMessage = result.Error[idx+2:]
+			}
+			return NewErrorResult(errorCode, errorMessage), nil
 		}
 
 		jsonResult, err := json.Marshal(result)
@@ -202,6 +226,8 @@ func registerProbeColumnsTool(s *server.MCPServer, deps *ProbeToolDeps) {
 }
 
 // probeColumn retrieves detailed information about a specific column.
+// Returns error results for table not found and column not found.
+// Returns Go errors for database connection failures.
 func probeColumn(ctx context.Context, deps *ProbeToolDeps, projectID uuid.UUID, tableName, columnName string) (*probeColumnResponse, error) {
 	response := &probeColumnResponse{
 		Table:  tableName,
@@ -212,12 +238,15 @@ func probeColumn(ctx context.Context, deps *ProbeToolDeps, projectID uuid.UUID, 
 	// TODO: Support multi-datasource projects
 	tables, err := deps.SchemaRepo.GetColumnsByTables(ctx, projectID, []string{tableName})
 	if err != nil {
+		// Database connection failures remain as Go errors
 		return nil, fmt.Errorf("failed to get columns for table: %w", err)
 	}
 
 	columns, ok := tables[tableName]
 	if !ok || len(columns) == 0 {
-		return nil, fmt.Errorf("table '%s' not found", tableName)
+		// Table not found - return error result for Claude to see
+		response.Error = fmt.Sprintf("TABLE_NOT_FOUND: table %q not found in schema registry", tableName)
+		return response, nil
 	}
 
 	// Find the specific column
@@ -230,7 +259,9 @@ func probeColumn(ctx context.Context, deps *ProbeToolDeps, projectID uuid.UUID, 
 	}
 
 	if column == nil {
-		return nil, fmt.Errorf("column '%s' not found in table '%s'", columnName, tableName)
+		// Column not found - return error result for Claude to see
+		response.Error = fmt.Sprintf("COLUMN_NOT_FOUND: column %q not found in table %q", columnName, tableName)
+		return response, nil
 	}
 
 	// Build statistics section

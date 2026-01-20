@@ -8,12 +8,24 @@ import (
 	"testing"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/config"
 	"github.com/ekaya-inc/ekaya-engine/pkg/mcp"
 	mcpauth "github.com/ekaya-inc/ekaya-engine/pkg/mcp/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/mcp/tools"
 )
+
+// defaultMCPConfig returns the default MCP logging configuration for tests.
+func defaultMCPConfig() config.MCPConfig {
+	return config.MCPConfig{
+		LogRequests:  true,
+		LogResponses: false,
+		LogErrors:    true,
+	}
+}
 
 // mcpPassingAuthService is a mock that always allows requests through.
 type mcpPassingAuthService struct {
@@ -45,7 +57,7 @@ func TestNewMCPHandler(t *testing.T) {
 	logger := zap.NewNop()
 	mcpServer := mcp.NewServer("test", "1.0.0", logger)
 
-	handler := NewMCPHandler(mcpServer, logger)
+	handler := NewMCPHandler(mcpServer, logger, defaultMCPConfig())
 
 	if handler == nil {
 		t.Fatal("expected non-nil handler")
@@ -62,7 +74,7 @@ func TestMCPHandler_RegisterRoutes(t *testing.T) {
 	logger := zap.NewNop()
 	mcpServer := mcp.NewServer("test", "1.0.0", logger)
 	tools.RegisterHealthTool(mcpServer.MCP(), "1.0.0", nil)
-	handler := NewMCPHandler(mcpServer, logger)
+	handler := NewMCPHandler(mcpServer, logger, defaultMCPConfig())
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, newTestMCPAuthMiddleware())
@@ -97,7 +109,7 @@ func TestMCPHandler_ToolsCall(t *testing.T) {
 	logger := zap.NewNop()
 	mcpServer := mcp.NewServer("test", "test-version", logger)
 	tools.RegisterHealthTool(mcpServer.MCP(), "test-version", nil)
-	handler := NewMCPHandler(mcpServer, logger)
+	handler := NewMCPHandler(mcpServer, logger, defaultMCPConfig())
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, newTestMCPAuthMiddleware())
@@ -152,7 +164,7 @@ func TestMCPHandler_GETReturnsMethodNotAllowed(t *testing.T) {
 	logger := zap.NewNop()
 	mcpServer := mcp.NewServer("test", "1.0.0", logger)
 	tools.RegisterHealthTool(mcpServer.MCP(), "1.0.0", nil)
-	handler := NewMCPHandler(mcpServer, logger)
+	handler := NewMCPHandler(mcpServer, logger, defaultMCPConfig())
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, newTestMCPAuthMiddleware())
@@ -176,7 +188,7 @@ func TestMCPHandler_GETReturnsMethodNotAllowed(t *testing.T) {
 func TestMCPHandler_UnsupportedMethodsReturnMethodNotAllowed(t *testing.T) {
 	logger := zap.NewNop()
 	mcpServer := mcp.NewServer("test", "1.0.0", logger)
-	handler := NewMCPHandler(mcpServer, logger)
+	handler := NewMCPHandler(mcpServer, logger, defaultMCPConfig())
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, newTestMCPAuthMiddleware())
@@ -194,5 +206,58 @@ func TestMCPHandler_UnsupportedMethodsReturnMethodNotAllowed(t *testing.T) {
 				t.Errorf("%s /mcp/{pid}: expected status %d, got %d", method, http.StatusMethodNotAllowed, rec.Code)
 			}
 		})
+	}
+}
+
+func TestMCPHandler_LoggingMiddlewareIntegration(t *testing.T) {
+	// Create an observer logger to capture log output
+	core, logs := observer.New(zapcore.DebugLevel)
+	logger := zap.New(core)
+
+	mcpServer := mcp.NewServer("test", "1.0.0", logger)
+	tools.RegisterHealthTool(mcpServer.MCP(), "1.0.0", nil)
+	handler := NewMCPHandler(mcpServer, logger, defaultMCPConfig())
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux, newTestMCPAuthMiddleware())
+
+	// Make a successful tools/call request
+	body := `{"jsonrpc":"2.0","method":"tools/call","params":{"name":"health"},"id":1}`
+	req := httptest.NewRequest(http.MethodPost, "/mcp/test-project", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	// Verify MCP request logging
+	requestLogs := logs.FilterMessage("MCP request").All()
+	if len(requestLogs) != 1 {
+		t.Errorf("expected 1 MCP request log entry, got %d", len(requestLogs))
+	} else {
+		log := requestLogs[0]
+		if log.ContextMap()["method"] != "tools/call" {
+			t.Errorf("expected method 'tools/call', got '%v'", log.ContextMap()["method"])
+		}
+		if log.ContextMap()["tool"] != "health" {
+			t.Errorf("expected tool 'health', got '%v'", log.ContextMap()["tool"])
+		}
+	}
+
+	// Verify MCP response logging
+	responseLogs := logs.FilterMessage("MCP response success").All()
+	if len(responseLogs) != 1 {
+		t.Errorf("expected 1 MCP response success log entry, got %d", len(responseLogs))
+	} else {
+		log := responseLogs[0]
+		if log.ContextMap()["tool"] != "health" {
+			t.Errorf("expected tool 'health', got '%v'", log.ContextMap()["tool"])
+		}
+		if _, ok := log.ContextMap()["duration"]; !ok {
+			t.Error("expected duration to be logged")
+		}
 	}
 }

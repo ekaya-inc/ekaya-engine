@@ -4,11 +4,11 @@ package postgres
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
 	"github.com/google/uuid"
 )
 
@@ -133,39 +133,44 @@ func TestDefaultSSLMode(t *testing.T) {
 	}
 }
 
-// Integration test - skipped if no database is available
+// Integration test - uses test container for isolation
 func TestAdapter_Integration(t *testing.T) {
-	// Skip if not running integration tests
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
-	}
+	// GetTestDB handles short mode skip internally
+	testDB := testhelpers.GetTestDB(t)
 
-	// Check for required environment variables
-	host := os.Getenv("PGHOST")
-	user := os.Getenv("PGUSER")
-	database := os.Getenv("PGDATABASE")
+	// Parse connection info from the test container's connection string
+	// Format: postgres://ekaya:test_password@host:port/test_data?sslmode=disable
+	connStr := testDB.ConnStr
+	// Extract host:port from connection string
+	hostPortDB := strings.TrimPrefix(connStr, "postgres://ekaya:test_password@")
+	hostPortDB = strings.Split(hostPortDB, "?")[0] // Remove query params
+	parts := strings.Split(hostPortDB, "/")
+	hostPort := parts[0]
+	database := parts[1]
 
-	if host == "" || user == "" || database == "" {
-		t.Skip("skipping integration test: PGHOST, PGUSER, or PGDATABASE not set")
+	hostParts := strings.Split(hostPort, ":")
+	host := hostParts[0]
+	port := 5432
+	if len(hostParts) > 1 {
+		// Parse port
+		for i, c := range hostParts[1] {
+			if c < '0' || c > '9' {
+				break
+			}
+			if i == 0 {
+				port = 0
+			}
+			port = port*10 + int(c-'0')
+		}
 	}
 
 	config := map[string]any{
 		"host":     host,
-		"user":     user,
-		"password": os.Getenv("PGPASSWORD"),
+		"port":     float64(port),
+		"user":     "ekaya",
+		"password": "test_password",
 		"database": database,
 		"ssl_mode": "disable",
-	}
-
-	if port := os.Getenv("PGPORT"); port != "" {
-		// Parse port
-		var p int
-		if _, err := os.Stat(port); err == nil {
-			p = 5432
-		} else {
-			p = 5432 // default
-		}
-		config["port"] = float64(p)
 	}
 
 	cfg, err := FromMap(config)
@@ -222,38 +227,40 @@ func TestAdapter_ConnectionFailure(t *testing.T) {
 // TestAdapter_TestConnection_VerifiesDatabaseName tests that TestConnection
 // verifies the database name matches the configured database.
 func TestAdapter_TestConnection_VerifiesDatabaseName(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
-	}
+	// GetTestDB handles short mode skip internally
+	testDB := testhelpers.GetTestDB(t)
 
-	// Check for required environment variables
-	host := os.Getenv("PGHOST")
-	user := os.Getenv("PGUSER")
-	database := os.Getenv("PGDATABASE")
+	// Parse connection info from the test container's connection string
+	connStr := testDB.ConnStr
+	hostPortDB := strings.TrimPrefix(connStr, "postgres://ekaya:test_password@")
+	hostPortDB = strings.Split(hostPortDB, "?")[0]
+	parts := strings.Split(hostPortDB, "/")
+	hostPort := parts[0]
+	database := parts[1]
 
-	if host == "" || user == "" || database == "" {
-		t.Skip("skipping integration test: PGHOST, PGUSER, or PGDATABASE not set")
+	hostParts := strings.Split(hostPort, ":")
+	host := hostParts[0]
+	port := 5432
+	if len(hostParts) > 1 {
+		for i, c := range hostParts[1] {
+			if c < '0' || c > '9' {
+				break
+			}
+			if i == 0 {
+				port = 0
+			}
+			port = port*10 + int(c-'0')
+		}
 	}
 
 	// Test with correct database name
 	cfg := &Config{
 		Host:     host,
-		Port:     5432,
-		User:     user,
-		Password: os.Getenv("PGPASSWORD"),
+		Port:     port,
+		User:     "ekaya",
+		Password: "test_password",
 		Database: database,
 		SSLMode:  "disable",
-	}
-
-	if port := os.Getenv("PGPORT"); port != "" {
-		// Parse port if provided
-		var p int
-		if _, err := os.Stat(port); err == nil {
-			p = 5432
-		} else {
-			p = 5432 // default
-		}
-		cfg.Port = p
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -273,9 +280,9 @@ func TestAdapter_TestConnection_VerifiesDatabaseName(t *testing.T) {
 	// Test with wrong database name (should fail)
 	wrongCfg := &Config{
 		Host:     host,
-		Port:     cfg.Port,
-		User:     user,
-		Password: os.Getenv("PGPASSWORD"),
+		Port:     port,
+		User:     "ekaya",
+		Password: "test_password",
 		Database: "nonexistent_database_12345",
 		SSLMode:  "disable",
 	}

@@ -21,6 +21,8 @@ type ColumnToolDeps struct {
 	DB               *database.DB
 	MCPConfigService services.MCPConfigService
 	OntologyRepo     repositories.OntologyRepository
+	SchemaRepo       repositories.SchemaRepository
+	ProjectService   services.ProjectService
 	Logger           *zap.Logger
 }
 
@@ -94,10 +96,20 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 		if err != nil {
 			return nil, err
 		}
+		// Validate table is not empty after trimming whitespace
+		table = trimString(table)
+		if table == "" {
+			return NewErrorResult("invalid_parameters", "parameter 'table' cannot be empty"), nil
+		}
 
 		column, err := req.RequireString("column")
 		if err != nil {
 			return nil, err
+		}
+		// Validate column is not empty after trimming whitespace
+		column = trimString(column)
+		if column == "" {
+			return NewErrorResult("invalid_parameters", "parameter 'column' cannot be empty"), nil
 		}
 
 		// Get optional parameters
@@ -105,16 +117,75 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 		entity := getOptionalString(req, "entity")
 		role := getOptionalString(req, "role")
 
-		var enumValues []string
-		if args, ok := req.Params.Arguments.(map[string]any); ok {
-			// Extract enum_values array
-			if enumArray, ok := args["enum_values"].([]any); ok {
-				for _, ev := range enumArray {
-					if evStr, ok := ev.(string); ok {
-						enumValues = append(enumValues, evStr)
-					}
+		// Validate role if provided
+		if role != "" {
+			validRoles := []string{"dimension", "measure", "identifier", "attribute"}
+			isValidRole := false
+			for _, validRole := range validRoles {
+				if role == validRole {
+					isValidRole = true
+					break
 				}
 			}
+			if !isValidRole {
+				return NewErrorResultWithDetails(
+					"invalid_parameters",
+					fmt.Sprintf("parameter 'role' must be one of: dimension, measure, identifier, attribute. Got: %q", role),
+					map[string]any{
+						"parameter": "role",
+						"expected":  validRoles,
+						"actual":    role,
+					},
+				), nil
+			}
+		}
+
+		// Extract and validate enum_values array
+		var enumValues []string
+		if args, ok := req.Params.Arguments.(map[string]any); ok {
+			if enumArray, ok := args["enum_values"].([]any); ok {
+				for i, ev := range enumArray {
+					evStr, ok := ev.(string)
+					if !ok {
+						return NewErrorResultWithDetails(
+							"invalid_parameters",
+							fmt.Sprintf("parameter 'enum_values' must be an array of strings. Element at index %d is %T, not string", i, ev),
+							map[string]any{
+								"parameter":             "enum_values",
+								"invalid_element_index": i,
+								"invalid_element_type":  fmt.Sprintf("%T", ev),
+							},
+						), nil
+					}
+					enumValues = append(enumValues, evStr)
+				}
+			}
+		}
+
+		// Validate table and column exist in schema registry
+		datasourceID, err := deps.ProjectService.GetDefaultDatasourceID(tenantCtx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get datasource: %w", err)
+		}
+
+		// Validate table exists in schema registry
+		schemaTable, err := deps.SchemaRepo.FindTableByName(tenantCtx, projectID, datasourceID, table)
+		if err != nil {
+			return nil, fmt.Errorf("failed to lookup table: %w", err)
+		}
+		if schemaTable == nil {
+			return NewErrorResult("TABLE_NOT_FOUND",
+				fmt.Sprintf("table %q not found in schema registry. Run refresh_schema() after creating tables.", table)), nil
+		}
+
+		// Validate column exists in table
+		schemaColumn, err := deps.SchemaRepo.GetColumnByName(tenantCtx, schemaTable.ID, column)
+		if err != nil {
+			return nil, fmt.Errorf("failed to lookup column: %w", err)
+		}
+		if schemaColumn == nil {
+			return NewErrorResult("COLUMN_NOT_FOUND",
+				fmt.Sprintf("column %q not found in table %q", column, table)), nil
 		}
 
 		// Get active ontology

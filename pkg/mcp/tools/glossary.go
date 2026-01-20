@@ -126,6 +126,11 @@ func registerGetGlossarySQLTool(s *server.MCPServer, deps *GlossaryToolDeps) {
 		if err != nil {
 			return nil, err
 		}
+		// Validate term is not empty after trimming whitespace
+		termName = trimString(termName)
+		if termName == "" {
+			return NewErrorResult("invalid_parameters", "parameter 'term' cannot be empty"), nil
+		}
 
 		// Look up term by name or alias
 		term, err := deps.GlossaryService.GetTermByName(tenantCtx, projectID, termName)
@@ -133,22 +138,10 @@ func registerGetGlossarySQLTool(s *server.MCPServer, deps *GlossaryToolDeps) {
 			return nil, fmt.Errorf("failed to get glossary term: %w", err)
 		}
 
-		// Handle not found case gracefully
+		// Handle not found case with error result
 		if term == nil {
-			notFoundResult := struct {
-				Error string `json:"error"`
-				Term  string `json:"term"`
-			}{
-				Error: "Term not found",
-				Term:  termName,
-			}
-
-			jsonResult, err := json.Marshal(notFoundResult)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal result: %w", err)
-			}
-
-			return mcp.NewToolResultText(string(jsonResult)), nil
+			return NewErrorResult("TERM_NOT_FOUND",
+				fmt.Sprintf("term %q not found in glossary. Use list_glossary to see available terms.", termName)), nil
 		}
 
 		// Build full response with SQL definition
@@ -250,19 +243,34 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 		if err != nil {
 			return nil, err
 		}
+		// Validate term is not empty after trimming whitespace
+		termName = trimString(termName)
+		if termName == "" {
+			return NewErrorResult("invalid_parameters", "parameter 'term' cannot be empty"), nil
+		}
 
 		// Get optional parameters
 		definition := getOptionalString(req, "definition")
 		sql := getOptionalString(req, "sql")
+
+		// Extract and validate aliases array
 		var aliases []string
 		if args, ok := req.Params.Arguments.(map[string]any); ok {
-			if aliasesRaw, ok := args["aliases"]; ok && aliasesRaw != nil {
-				if aliasArray, ok := aliasesRaw.([]interface{}); ok {
-					for _, alias := range aliasArray {
-						if aliasStr, ok := alias.(string); ok {
-							aliases = append(aliases, aliasStr)
-						}
+			if aliasArray, ok := args["aliases"].([]any); ok {
+				for i, alias := range aliasArray {
+					aliasStr, ok := alias.(string)
+					if !ok {
+						return NewErrorResultWithDetails(
+							"invalid_parameters",
+							fmt.Sprintf("parameter 'aliases' must be an array of strings. Element at index %d is %T, not string", i, alias),
+							map[string]any{
+								"parameter":             "aliases",
+								"invalid_element_index": i,
+								"invalid_element_type":  fmt.Sprintf("%T", alias),
+							},
+						), nil
 					}
+					aliases = append(aliases, aliasStr)
 				}
 			}
 		}
