@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -102,6 +103,17 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 			return nil, err
 		}
 
+		// Validate from_entity and to_entity are not empty after trimming
+		fromEntityName = strings.TrimSpace(fromEntityName)
+		if fromEntityName == "" {
+			return NewErrorResult("invalid_parameters", "parameter 'from_entity' cannot be empty"), nil
+		}
+
+		toEntityName = strings.TrimSpace(toEntityName)
+		if toEntityName == "" {
+			return NewErrorResult("invalid_parameters", "parameter 'to_entity' cannot be empty"), nil
+		}
+
 		// Get optional parameters
 		description := getOptionalString(req, "description")
 		label := getOptionalString(req, "label")
@@ -109,11 +121,20 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 
 		// Validate cardinality if provided
 		if cardinality != "" {
-			validCardinalities := map[string]bool{
+			validCardinalities := []string{"1:1", "1:N", "N:1", "N:M", "unknown"}
+			validCardinalitiesMap := map[string]bool{
 				"1:1": true, "1:N": true, "N:1": true, "N:M": true, "unknown": true,
 			}
-			if !validCardinalities[cardinality] {
-				return nil, fmt.Errorf("invalid cardinality '%s': must be one of '1:1', '1:N', 'N:1', 'N:M', 'unknown'", cardinality)
+			if !validCardinalitiesMap[cardinality] {
+				return NewErrorResultWithDetails(
+					"invalid_parameters",
+					fmt.Sprintf("invalid cardinality value: %q", cardinality),
+					map[string]any{
+						"parameter": "cardinality",
+						"expected":  validCardinalities,
+						"actual":    cardinality,
+					},
+				), nil
 			}
 		}
 
@@ -132,7 +153,7 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 			return nil, fmt.Errorf("failed to get from_entity: %w", err)
 		}
 		if fromEntity == nil {
-			return nil, fmt.Errorf("from_entity '%s' not found", fromEntityName)
+			return NewErrorResult("ENTITY_NOT_FOUND", fmt.Sprintf("from_entity %q not found", fromEntityName)), nil
 		}
 
 		// Get to entity
@@ -141,7 +162,7 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 			return nil, fmt.Errorf("failed to get to_entity: %w", err)
 		}
 		if toEntity == nil {
-			return nil, fmt.Errorf("to_entity '%s' not found", toEntityName)
+			return NewErrorResult("ENTITY_NOT_FOUND", fmt.Sprintf("to_entity %q not found", toEntityName)), nil
 		}
 
 		// Check if relationship already exists
