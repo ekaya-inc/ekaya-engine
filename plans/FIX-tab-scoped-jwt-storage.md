@@ -1096,7 +1096,66 @@ func TestExtractToken_ReturnsEmptyWhenNoAuth(t *testing.T) {
 }
 ```
 
-### Task 11: Integration Tests
+### Task 11: Integration Tests ✅ [x]
+
+**Status: COMPLETE** ✅
+
+**Files Created:**
+- `pkg/handlers/auth_integration_test.go` - End-to-end OAuth flow integration tests (3 tests, all passing)
+
+**Implementation Summary:**
+
+Created comprehensive integration tests that verify the complete OAuth flow with Bearer token authentication:
+
+1. **`TestOAuthFlow_EndToEnd_BearerToken`** - Verifies complete OAuth flow:
+   - Step 1: Complete OAuth flow returns JWT and project_id in response body
+   - Step 2: Verify JWT and project_id are present in response
+   - Step 3: Use JWT as Bearer token for subsequent API request (`GET /api/projects/{pid}`)
+   - Step 4: Verify API call succeeds with Bearer token authentication
+
+2. **`TestOAuthFlow_BearerToken_ProjectIDMismatch`** - Verifies 403 Forbidden when Bearer token project ID doesn't match URL project ID
+
+3. **`TestOAuthFlow_BearerToken_MissingToken`** - Verifies 401 Unauthorized when request has no Authorization header
+
+**Test Results:**
+```bash
+✓ TestOAuthFlow_EndToEnd_BearerToken (0.00s)
+✓ TestOAuthFlow_BearerToken_ProjectIDMismatch (0.00s)
+✓ TestOAuthFlow_BearerToken_MissingToken (0.00s)
+PASS: 3/3 tests passing
+```
+
+**Implementation Details:**
+
+- Uses `testhelpers.GenerateTestJWT()` to create test JWTs with project_id claims
+- Uses mock services (`mockOAuthService`, `mockProjectService`, `mockAuthService`) to isolate integration test from external dependencies
+- Verifies Bearer token authentication works end-to-end through middleware and handlers
+- Tests both success and error cases (missing token, project ID mismatch)
+- Uses `//go:build integration` tag to run only with `-tags=integration` flag
+
+**Key Implementation Decisions:**
+
+1. **Mock vs Real JWKS Validation:** Used mock auth service that bypasses JWKS validation but still verifies token extraction and claims handling. This allows tests to run without external auth server dependency while still testing the complete authentication flow.
+
+2. **Test Scope:** Tests cover the complete flow from OAuth completion through Bearer token usage, verifying the entire tab-scoped authentication pattern works end-to-end.
+
+3. **Error Cases:** Included tests for common error scenarios (missing token, project mismatch) to ensure proper error handling.
+
+**Why This Approach:**
+- Integration tests verify the complete OAuth flow works with Bearer tokens
+- Tests are isolated from external dependencies but still test real handler and middleware code
+- Clear test names and step-by-step logging make test failures easy to debug
+- Tests complement unit tests by verifying end-to-end integration
+
+**Next Task Context:**
+All 11 tasks are now complete! The tab-scoped JWT storage implementation is fully tested with:
+- Frontend unit tests (auth-token.ts, api.ts, OAuthCallbackPage.tsx)
+- Backend unit tests (auth.go, auth_service.go)
+- Integration tests (complete OAuth flow with Bearer tokens)
+
+The implementation is ready for manual testing following the checklist below.
+
+**Original Spec:**
 
 **New file: `pkg/handlers/auth_integration_test.go`**
 
