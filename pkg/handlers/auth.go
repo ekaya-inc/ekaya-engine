@@ -27,8 +27,8 @@ type CompleteOAuthRequest struct {
 type CompleteOAuthResponse struct {
 	Success     bool   `json:"success"`
 	RedirectURL string `json:"redirect_url"`
-	Token       string `json:"token"`       // JWT for sessionStorage
-	ProjectID   string `json:"project_id"`  // Project ID extracted from JWT
+	Token       string `json:"token"`      // JWT for sessionStorage
+	ProjectID   string `json:"project_id"` // Project ID extracted from JWT
 }
 
 // LogoutResponse represents the response for logout.
