@@ -789,7 +789,54 @@ describe('fetchWithAuth - Bearer Token', () => {
 });
 ```
 
-### Task 9: Unit Tests for OAuthCallbackPage Token Storage
+### Task 9: Unit Tests for OAuthCallbackPage Token Storage ✅
+
+**Status: COMPLETE** ✅
+
+**Files Modified:**
+- `ui/src/pages/OAuthCallbackPage.test.tsx:229-324` - Added comprehensive token storage tests
+
+**Implementation Summary:**
+
+Added three comprehensive test cases to verify JWT storage in sessionStorage after successful OAuth authentication (lines 229-324). All tests properly mock the auth-token module and use `waitFor()` for async assertions.
+
+**Test Coverage (3 tests, all passing):**
+
+1. **Primary Path Test (lines 229-256):** `should store JWT in sessionStorage when token and project_id are in response`
+   - **What it tests:** When backend response includes both `token` and `project_id` fields
+   - **Expected behavior:** `storeProjectToken('new-jwt-token', 'project-123')` is called
+   - **Why important:** This is the happy path after Task 2 backend changes - backend should provide both fields to avoid client-side JWT parsing
+
+2. **Fallback Path Test (lines 258-289):** `should extract project_id from JWT if not in response`
+   - **What it tests:** When response only includes `token` field (no `project_id`)
+   - **Test setup:** Creates valid JWT with `project_id` in payload: `{ project_id: 'extracted-project-456', exp: ... }`
+   - **Expected behavior:** Component extracts `project_id` from JWT payload and calls `storeProjectToken(mockJwt, 'extracted-project-456')`
+   - **Why important:** Provides backward compatibility if backend doesn't include `project_id` in response
+
+3. **Error Handling Test (lines 291-324):** `should not store token if extraction fails and no project_id in response`
+   - **What it tests:** Malformed JWT that cannot be parsed: `'not.a.valid.jwt'`
+   - **Expected behavior:** `storeProjectToken()` is NOT called
+   - **Graceful degradation:** OAuth flow completes successfully (shows "Authentication successful" message)
+   - **Why important:** Ensures no errors when JWT parsing fails - cookie fallback in backend still works
+
+**Test Implementation Details:**
+- All tests properly set up OAuth session state in sessionStorage (state, verifier, auth_server_url, return_url)
+- Uses `vi.fn()` to mock `global.fetch` with controlled responses
+- Mocks `auth-token` module at file level (lines 18-25) to isolate component behavior
+- Uses `waitFor()` to handle async token storage operations
+- Total test count: 12/12 tests passing in file
+
+**Why This Approach:**
+- Covers all three code paths in OAuthCallbackPage token storage logic
+- Verifies both primary path (backend provides both fields) and fallback path (extract from JWT)
+- Tests graceful error handling when extraction fails
+- Mocking isolates component behavior from auth-token implementation details
+- Proper async handling with `waitFor()` prevents race conditions
+
+**Next Task Context:**
+Task 10 (Backend Unit Tests) should verify that `pkg/handlers/auth.go` returns both `token` and `project_id` in the response body, and that `pkg/auth/service.go` prioritizes Authorization header over cookies. These backend tests complement the frontend tests completed here.
+
+**Original Spec:**
 
 **Update file: `ui/src/pages/OAuthCallbackPage.test.tsx`**
 
