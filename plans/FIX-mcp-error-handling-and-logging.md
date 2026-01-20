@@ -3056,7 +3056,7 @@ func sanitizeArguments(args map[string]any) map[string]any {
 
                **Pattern reference:** Follow identical pattern from subtasks 3.3.2.2.3.2 (dismiss tool) and task 3.3.2.2.2 (skip tool)
 
-            4. [ ] 3.3.2.2.3.4: Run full test suite and verify no regressions
+            4. [x] 3.3.2.2.3.4: Run full test suite and verify no regressions
 
                Run the complete test suite for ontology question tools and verify all tools work correctly with consistent error handling.
 
@@ -3105,6 +3105,16 @@ func sanitizeArguments(args map[string]any) map[string]any {
                - ✅ `dismiss_ontology_question` returns error results (subtask 3.3.2.2.3.2)
                - ✅ `escalate_ontology_question` returns error results (subtask 3.3.2.2.3.3)
                - ✅ All tests pass with no regressions
+
+               **Completion notes (2026-01-20):**
+               - Ran full test suite: `go test ./pkg/mcp/tools/... -short`
+               - All 12 tests passed, including error result tests for all 4 question status tools
+               - Test coverage verified:
+                 - Validation helper tests (7 test cases in `TestValidateQuestionID` and `TestValidateReasonParameter`)
+                 - Error result tests for all 4 tools (resolve, skip, dismiss, escalate)
+                 - All tools consistently use shared validators and return proper error results
+               - No regressions detected - existing tests continue to pass
+               - Task complete and verified - all 4 ontology question tools now use consistent error handling
 
                **Next phase:** After completing this subtask, task 3.3.2.2 is complete. Proceed to task 3.3.2.3 (convert `list_ontology_questions` tool) or task 3.3.2.4 (integration tests) as needed.
 
