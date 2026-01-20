@@ -597,11 +597,46 @@ func sanitizeArguments(args map[string]any) map[string]any {
       - **Pattern established:** Parameter validation errors caught early, execution errors categorized by type (security/parameter/type/syntax/system), system errors remain as Go errors for proper failure signaling
       - **Commit:** Changes committed separately with tests passing
       - **Next implementer:** Task 3.2.2 (schema tools) - apply same pattern to `get_schema`, `update_column`, `probe_column` in `pkg/mcp/tools/schema.go` and `pkg/mcp/tools/column.go`
-   2. [ ] 3.2.2: Convert high-priority schema tools to error results
-      - Apply the error handling pattern to schema exploration tools: `get_schema`, `update_column`, and `probe_column` in `pkg/mcp/tools/schema.go` and `pkg/mcp/tools/column.go`
-      - Convert parameter validation errors (missing table/column names, invalid annotation types), resource lookups (TABLE_NOT_FOUND, COLUMN_NOT_FOUND), and business logic failures (semantic conflict, invalid semantic type) to use `NewErrorResult()` or `NewErrorResultWithDetails()`
-      - Add error details for validation failures showing expected vs actual values
-      - Add unit tests verifying all error scenarios produce correct error result structures with appropriate codes from the audit document
+   2. [ ] 3.2.2: Convert high-priority schema tools to error results (SPLIT INTO SUBTASKS BELOW)
+      1. [x] **COMPLETED - REVIEWED AND APPROVED** - 3.2.2.1: Convert get_schema tool to error results
+         - **Implementation:** Modified `pkg/mcp/tools/schema.go` to convert actionable errors to error results
+         - **Files modified:**
+           - `pkg/mcp/tools/schema.go` (lines 82-119, 127-135, 171-178):
+             - Invalid boolean parameter `selected_only` → `NewErrorResultWithDetails("invalid_parameters", ...)` with parameter, expected_type, and actual_type details
+             - Invalid boolean parameter `include_entities` → `NewErrorResultWithDetails("invalid_parameters", ...)` with parameter, expected_type, and actual_type details
+             - No active ontology when semantic annotations requested → `NewErrorResult("ontology_not_found", ...)` with guidance to use `include_entities=false` or extract ontology first
+             - Added `isOntologyNotFoundError()` helper function to detect ontology-related errors via string matching
+           - `pkg/mcp/tools/schema_test.go` (created, 249 lines):
+             - `TestGetSchemaToolErrorResults` with 6 test cases covering invalid boolean parameters (string, number, array types), ontology not found errors, and system error distinction
+             - `TestIsOntologyNotFoundError` with 8 test cases verifying error detection logic
+             - `TestSchemaToolDeps_Structure` to verify struct definition
+         - **Error conversion pattern:**
+           - Parameter validation: Check if parameter exists and is correct type → `NewErrorResultWithDetails` with diagnostic details
+           - Ontology errors: Check error message with `isOntologyNotFoundError()` → `NewErrorResult("ontology_not_found", ...)` with actionable guidance
+           - System errors: Database connection, timeout, auth failures → remain as Go errors
+         - **System errors kept as Go errors:**
+           - Database connection failures (not ontology-related)
+           - Timeout and context deadline errors
+           - Authentication failures from `AcquireToolAccess`
+         - **Test coverage:** All 9 tests pass (6 error result tests + 8 helper tests + 1 struct test)
+         - **Pattern established:** Boolean parameter validation with type checking and detailed error responses for invalid types
+         - **Next implementer:** Task 3.2.2.2 (update_column tool) - apply same pattern for parameter validation and resource lookups
+      2. [ ] 3.2.2.2: Convert update_column tool to error results
+         - Apply the error handling pattern to the `update_column` tool in `pkg/mcp/tools/column.go`
+         - Convert parameter validation errors to use `NewErrorResult("invalid_parameters", ...)` with detailed messages: missing/empty table name, missing/empty column name, invalid `role` value (must be one of: dimension, measure, identifier, attribute), invalid `enum_values` array (elements must be strings)
+         - Convert resource lookups to use `NewErrorResult("COLUMN_NOT_FOUND", ...)` when the specified table/column doesn't exist in the schema
+         - Convert business logic failures to use `NewErrorResult("validation_error", ...)`: semantic conflicts (column already has conflicting entity annotation), invalid semantic type combinations
+         - Add error details using `NewErrorResultWithDetails()` for validation failures showing expected vs actual values (e.g., `details: {expected: ["dimension", "measure", "identifier", "attribute"], actual: "invalid_role"}`)
+         - Keep database connection failures and auth failures as Go errors
+         - Add comprehensive unit tests in `pkg/mcp/tools/column_test.go` (create if needed) covering all error scenarios with correct error codes, messages, and structured details as specified in the audit document
+      3. [ ] 3.2.2.3: Convert probe_column tool to error results
+         - Apply the error handling pattern to the `probe_column` tool in `pkg/mcp/tools/column.go`
+         - Convert parameter validation errors to use `NewErrorResult("invalid_parameters", ...)`: missing/empty table parameter, missing/empty column parameter
+         - Convert resource lookups to use `NewErrorResult("TABLE_NOT_FOUND", ...)` when table doesn't exist, and `NewErrorResult("COLUMN_NOT_FOUND", ...)` when column doesn't exist in the specified table
+         - Business logic note: probe_column performs statistical analysis (distinct_count, null_rate, cardinality_ratio, sample values) - if analysis fails due to data issues (e.g., cannot compute statistics on a view), return `NewErrorResult("query_error", ...)` with explanation
+         - System errors (database connection failures, timeout during analysis) should remain as Go errors
+         - Add unit tests in `pkg/mcp/tools/column_test.go` verifying: missing table parameter, missing column parameter, table not found, column not found, and successful probe with statistics
+         - Ensure all error results have correct error codes matching the audit document standards
    3. [ ] 3.2.3: Convert medium-priority entity and relationship tools to error results
       - Apply the error handling pattern to remaining entity/relationship tools: `delete_entity`, `get_entity`, `list_entities`, `update_relationship`, `delete_relationship`, `get_relationship`, `list_relationships` in `pkg/mcp/tools/entity.go` and `pkg/mcp/tools/relationship.go`
       - Convert parameter validation (missing/invalid entity names, relationship IDs), resource lookups (ENTITY_NOT_FOUND, RELATIONSHIP_NOT_FOUND), and business rule violations (cannot delete entity with relationships) to use `NewErrorResult()`

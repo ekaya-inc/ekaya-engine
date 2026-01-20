@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -79,15 +80,43 @@ func registerGetSchemaContextTool(s *server.MCPServer, deps *SchemaToolDeps) {
 			return nil, fmt.Errorf("failed to get default datasource: %w", err)
 		}
 
-		// Parse options
+		// Parse and validate options
 		selectedOnly := false
-		if val, ok := getOptionalBool(req, "selected_only"); ok {
-			selectedOnly = val
+		if args, ok := req.Params.Arguments.(map[string]any); ok {
+			if val, exists := args["selected_only"]; exists {
+				boolVal, ok := val.(bool)
+				if !ok {
+					return NewErrorResultWithDetails(
+						"invalid_parameters",
+						fmt.Sprintf("parameter 'selected_only' must be a boolean, got %T", val),
+						map[string]any{
+							"parameter":     "selected_only",
+							"expected_type": "boolean",
+							"actual_type":   fmt.Sprintf("%T", val),
+						},
+					), nil
+				}
+				selectedOnly = boolVal
+			}
 		}
 
 		includeEntities := true
-		if val, ok := getOptionalBool(req, "include_entities"); ok {
-			includeEntities = val
+		if args, ok := req.Params.Arguments.(map[string]any); ok {
+			if val, exists := args["include_entities"]; exists {
+				boolVal, ok := val.(bool)
+				if !ok {
+					return NewErrorResultWithDetails(
+						"invalid_parameters",
+						fmt.Sprintf("parameter 'include_entities' must be a boolean, got %T", val),
+						map[string]any{
+							"parameter":     "include_entities",
+							"expected_type": "boolean",
+							"actual_type":   fmt.Sprintf("%T", val),
+						},
+					), nil
+				}
+				includeEntities = boolVal
+			}
 		}
 
 		// Get schema context with or without entity enrichment
@@ -98,6 +127,14 @@ func registerGetSchemaContextTool(s *server.MCPServer, deps *SchemaToolDeps) {
 			schemaContext, err = deps.SchemaService.GetDatasourceSchemaForPrompt(tenantCtx, projectID, dsID, selectedOnly)
 		}
 		if err != nil {
+			// Check if this is a "no ontology" error - actionable
+			if isOntologyNotFoundError(err) {
+				return NewErrorResult(
+					"ontology_not_found",
+					"no active ontology found for project - cannot provide semantic annotations. Use include_entities=false for raw schema, or extract ontology first",
+				), nil
+			}
+			// System errors (database connection, timeout, etc.) remain as Go errors
 			return nil, fmt.Errorf("failed to get schema context: %w", err)
 		}
 
@@ -129,4 +166,14 @@ func getOptionalBool(req mcp.CallToolRequest, key string) (bool, bool) {
 		}
 	}
 	return false, false
+}
+
+// isOntologyNotFoundError checks if an error is related to missing ontology.
+func isOntologyNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "no active ontology") ||
+		strings.Contains(errMsg, "ontology not found")
 }
