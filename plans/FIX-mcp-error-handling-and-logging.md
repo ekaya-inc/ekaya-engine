@@ -747,7 +747,7 @@ func sanitizeArguments(args map[string]any) map[string]any {
          - **Error codes used:** `invalid_parameters`, `ENTITY_NOT_FOUND`
          - **Test coverage:** All tests pass (2 test cases covering empty name and entity not found scenarios)
          - **Pattern established:** Whitespace normalization with `trimString()` before checking for empty parameters, early validation before repository calls
-         - **Next implementer:** Task 3.2.3.2 is complete. The `get_entity` tool now surfaces actionable errors to Claude. Proceed to task 3.2.3.3 (relationship tools) for converting `update_relationship`, `delete_relationship`, `get_relationship` tools.
+         - **Next implementer:** Task 3.2.3.2 is complete. The `get_entity` tool now surfaces actionable errors to Claude. Proceed to task 3.2.3.3 (relationship tools) for converting `update_relationship`, `delete_relationship` tools. (Note: `get_relationship` tool doesn't exist - see task 3.2.3.3.3.2)
          - **Session notes:** This task was implemented and tested successfully. The error handling pattern matches previous entity tools (`update_entity`) and provides clear, actionable error messages that Claude can use to adjust parameters and retry.
 
       3. [ ] 3.2.3.3: Convert relationship tools to error results (REPLACED - SEE SUBTASKS BELOW)
@@ -842,161 +842,50 @@ func sanitizeArguments(args map[string]any) map[string]any {
                  - All usages continue to work correctly after refactoring
                - **Rationale:** Consolidating the helper function eliminates code duplication across three different tool files and provides a single, well-tested implementation for string trimming that can be reused by all MCP tools. This improves maintainability and consistency.
                - **Commit:** Changes reviewed, approved, and committed with comprehensive test coverage
-               - **Next implementer:** The `trimString()` helper is now available to all MCP tools. Proceed to task 3.2.3.3.3.2 to add parameter validation to the `get_relationship` tool using this helper.
+               - **Next implementer:** The `trimString()` helper is now available to all MCP tools. Note: Tasks 3.2.3.3.3.2-3.2.3.3.3.3 are marked N/A as the `get_relationship` tool does not exist.
 
-            2. [ ] 3.2.3.3.3.2: Convert parameter validation to error results in get_relationship (REPLACED - SEE SUBTASKS BELOW)
+            2. [N/A] 3.2.3.3.3.2: Convert parameter validation to error results in get_relationship
 
-               1. [x] **COMPLETED - REVIEWED AND APPROVED** - 3.2.3.3.3.2.1: Add trimString import to relationship.go
-                  - **Implementation:** Task was already completed in commit d4d3a92 as part of consolidating `trimString()` helper to shared `helpers.go`
-                  - **Context:** This task was preemptively completed when the `trimString()` helper was moved from `column.go` to `pkg/mcp/tools/helpers.go` in commit d4d3a92
-                  - **Result:**
-                    - The `trimString()` helper is available to all files in the `pkg/mcp/tools/` package
-                    - No import changes needed since `helpers.go` is in the same package as `relationship.go`
-                    - `pkg/mcp/tools/helpers.go` exists with comprehensive test coverage in `helpers_test.go`
-                  - **Verification:**
-                    - Ran `go build ./pkg/mcp/tools/...` - no import errors ✅
-                    - Helper is accessible without explicit import (same package) ✅
-                    - All existing tests pass: `go test ./pkg/mcp/tools/... -short` ✅
-                  - **Files involved:**
-                    - `pkg/mcp/tools/helpers.go` - Contains shared `trimString()` function
-                    - `pkg/mcp/tools/helpers_test.go` - Contains comprehensive tests (9 test cases)
-                  - **Current usage:** Already in use by `column.go`, `entity.go`, and `probe.go`
-                  - **Next implementer:** The `trimString()` helper is ready for use in `relationship.go`. Proceed to task 3.2.3.3.3.2.2 to add parameter validation for `from_entity` using this helper.
+               **Status:** N/A - Tool does not exist
 
-               2. [ ] 3.2.3.3.3.2.2: Add parameter validation for from_entity
+               **Finding:** The `get_relationship` tool does **not exist** in the codebase. Only `update_relationship` and `delete_relationship` are registered in `RegisterRelationshipTools()` (pkg/mcp/tools/relationship.go:43-44).
 
-                  **File:** `pkg/mcp/tools/relationship.go`
+               **Verification:**
+               - Searched for "get_relationship" and "registerGetRelationship" - no matches
+               - Checked RegisterRelationshipTools() - only registers update_relationship and delete_relationship
+               - No implementation of get_relationship tool found
 
-                  **Function:** `getRelationshipTool()`
+               **Note:** Both existing relationship tools (`update_relationship` and `delete_relationship`) already have proper parameter validation with `strings.TrimSpace()` and empty checks for both `from_entity` and `to_entity` parameters.
 
-                  **Implementation:**
-                  1. After extracting `from_entity` parameter from the request arguments, apply `trimString()` to normalize whitespace
-                  2. Check if the trimmed value is empty
-                  3. If empty, return `NewErrorResult("invalid_parameters", "parameter 'from_entity' cannot be empty"), nil`
+               **Subtasks marked N/A:**
 
-                  **Code pattern:**
-                  ```go
-                  fromEntity := trimString(params["from_entity"].(string))
-                  if fromEntity == "" {
-                      return NewErrorResult("invalid_parameters", "parameter 'from_entity' cannot be empty"), nil
-                  }
-                  ```
+               1. [N/A] 3.2.3.3.3.2.1: Add trimString import to relationship.go
+                  - **Status:** N/A - Completed as part of consolidating trimString() helper, but target tool (get_relationship) doesn't exist
+                  - Note: The trimString() helper is available in pkg/mcp/tools/helpers.go for use by all MCP tools
 
-                  **Test coverage:**
-                  - Create `TestGetRelationshipTool_FromEntityValidation` in `pkg/mcp/tools/relationship_test.go`
-                  - Test cases:
-                    - Empty string `""`
-                    - Whitespace-only string `"   "`
-                    - Tab/newline variations `"\t\n"`
-                  - Verify each test: `result.IsError == true`, `error code == "invalid_parameters"`, message contains "from_entity"
+               2. [N/A] **REVIEWED AND COMPLETE** - 3.2.3.3.3.2.2: Add parameter validation for from_entity
+                  - **Status:** N/A - Tool does not exist (verified in session ending 2026-01-20)
+                  - **Finding:** The `get_relationship` tool is not implemented in the codebase
+                  - **Verification completed:** Searched pkg/mcp/tools/relationship.go and confirmed only `update_relationship` and `delete_relationship` exist
+                  - **Note:** Both existing relationship tools already have proper parameter validation with trimString() checks
 
-               3. [ ] 3.2.3.3.3.2.3: Add parameter validation for to_entity
+               3. [N/A] 3.2.3.3.3.2.3: Add parameter validation for to_entity
+                  - **Status:** N/A - Tool does not exist
 
-                  **File:** `pkg/mcp/tools/relationship.go`
+               4. [N/A] 3.2.3.3.3.2.4: Add comprehensive test and verify all scenarios
+                  - **Status:** N/A - Tool does not exist
 
-                  **Function:** `getRelationshipTool()`
+            3. [N/A] 3.2.3.3.3.3: Convert resource validation to error results in get_relationship
 
-                  **Implementation:**
-                  1. After extracting `to_entity` parameter from the request arguments, apply `trimString()` to normalize whitespace
-                  2. Check if the trimmed value is empty
-                  3. If empty, return `NewErrorResult("invalid_parameters", "parameter 'to_entity' cannot be empty"), nil`
+               **Status:** N/A - Tool does not exist (see task 3.2.3.3.3.2 above)
 
-                  **Code pattern:**
-                  ```go
-                  toEntity := trimString(params["to_entity"].(string))
-                  if toEntity == "" {
-                      return NewErrorResult("invalid_parameters", "parameter 'to_entity' cannot be empty"), nil
-                  }
-                  ```
+         4. [N/A] 3.2.3.3.4: Convert list_relationships tool to error results
 
-                  **Test coverage:**
-                  - Create `TestGetRelationshipTool_ToEntityValidation` in `pkg/mcp/tools/relationship_test.go`
-                  - Test cases:
-                    - Empty string `""`
-                    - Whitespace-only string `"   "`
-                    - Tab/newline variations `"\t\n"`
-                  - Verify each test: `result.IsError == true`, `error code == "invalid_parameters"`, message contains "to_entity"
+            **Status:** N/A - Tool does not exist
 
-               4. [ ] 3.2.3.3.3.2.4: Add comprehensive test and verify all scenarios
+            **Finding:** The `list_relationships` tool does **not exist** in the codebase. Only `update_relationship` and `delete_relationship` are registered in `RegisterRelationshipTools()` (pkg/mcp/tools/relationship.go:43-44).
 
-                  **File:** `pkg/mcp/tools/relationship_test.go`
-
-                  **Implementation:**
-                  1. Create `TestGetRelationshipTool_ParameterValidation` that combines both parameter validation scenarios
-                  2. Test matrix:
-                     - Empty from_entity with valid to_entity
-                     - Valid from_entity with empty to_entity
-                     - Both empty (verify first error is returned)
-                     - Whitespace-only variations for both parameters
-
-                  **Verification:**
-                  - Run `go test ./pkg/mcp/tools/... -run TestGetRelationshipTool_ParameterValidation -v`
-                  - All test cases should pass
-                  - Error results should have `IsError == true`, correct error code, and descriptive messages
-
-                  **Pattern consistency:**
-                  - Compare with `TestUpdateColumnTool_ErrorResults` in `column_test.go` for reference implementation
-                  - Follow same test structure: arrange, act, assert with clear error message verification
-
-            3. [ ] 3.2.3.3.3.3: Convert resource validation to error results
-
-               Apply error handling pattern to validate entity and relationship existence in the `get_relationship` tool.
-
-               **File:** `pkg/mcp/tools/relationship.go`, function: `getRelationshipTool()`
-
-               **Resource validation to add:**
-               1. From entity not found → `NewErrorResult("ENTITY_NOT_FOUND", fmt.Sprintf("from_entity %q not found", fromEntity))`
-               2. To entity not found → `NewErrorResult("ENTITY_NOT_FOUND", fmt.Sprintf("to_entity %q not found", toEntity))`
-               3. Relationship not found → `NewErrorResult("RELATIONSHIP_NOT_FOUND", fmt.Sprintf("relationship from %q to %q not found", fromEntity, toEntity))`
-
-               **Implementation approach:**
-               - After parameter validation, check if entities exist (may require calling `EntityRepository.GetByName()` for each entity)
-               - If either entity not found, return ENTITY_NOT_FOUND error result
-               - Call relationship repository to get relationship
-               - If relationship not found (nil result or specific error), return RELATIONSHIP_NOT_FOUND error result
-               - Keep database connection failures and auth failures as Go errors
-
-               **System errors kept as Go errors:**
-               - Database connection failures
-               - Authentication failures from `AcquireToolAccess`
-               - Relationship repository failures (GetByEntityPair or similar method)
-
-               **Test coverage:**
-               - Add `TestGetRelationshipTool_ResourceValidation` in `pkg/mcp/tools/relationship_test.go`
-               - Test cases: from_entity not found, to_entity not found, relationship not found
-               - Verify: `result.IsError == true`, correct error code, message includes entity/relationship names
-
-               **Error codes:** `ENTITY_NOT_FOUND`, `RELATIONSHIP_NOT_FOUND`
-
-         4. [ ] 3.2.3.3.4: Convert list_relationships tool to error results (if applicable)
-
-            Review `list_relationships` tool in `pkg/mcp/tools/relationship.go` to determine if error handling is needed.
-
-            **File:** `pkg/mcp/tools/relationship.go`, function: `listRelationshipsTool()`
-
-            **Analysis:**
-            - Check if tool has any required parameters that need validation
-            - Empty result set is NOT an error (return empty list with success)
-            - Only convert parameter validation errors if any exist
-
-            **If parameters exist:**
-            - Apply same validation pattern as other relationship tools
-            - Use `trimString()` for whitespace normalization
-            - Return `NewErrorResult("invalid_parameters", ...)` for validation failures
-
-            **System errors kept as Go errors:**
-            - Database connection failures
-            - Authentication failures from `AcquireToolAccess`
-            - Relationship repository failures (GetAll or similar)
-
-            **Test coverage:**
-            - If parameter validation added, create `TestListRelationshipsTool_ErrorResults` in `pkg/mcp/tools/relationship_test.go`
-            - Test cases depend on actual parameters
-            - Verify: `result.IsError == true`, correct error code, message
-
-            **Error codes:** `invalid_parameters` (only if parameters exist)
-
-            **Note:** If `list_relationships` has no required parameters and no validation logic, this subtask can be marked as N/A after review.
+            **Note:** This is the same finding as task 3.2.3.3.3.2 above - the `get_relationship` and `list_relationships` tools were planned but never implemented. Only the write operations (`update_relationship`) and delete operations (`delete_relationship`) exist.
    4. [ ] 3.2.4: Convert low-priority exploration and admin tools to error results
       - Apply the error handling pattern to remaining tools: `list_approved_queries`, `get_approved_query`, `delete_approved_query`, `chat`, `learn_fact`, `add_fact`, `get_facts`, `delete_fact` in `pkg/mcp/tools/approved_queries.go`, `pkg/mcp/tools/chat.go`, and `pkg/mcp/tools/knowledge.go`
       - Convert parameter validation and resource lookups to use `NewErrorResult()`
