@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/apperrors"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
+	"github.com/ekaya-inc/ekaya-engine/pkg/config"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
@@ -29,13 +31,15 @@ type ProjectResponse struct {
 // ProjectsHandler handles project-related HTTP requests.
 type ProjectsHandler struct {
 	projectService services.ProjectService
+	cfg            *config.Config
 	logger         *zap.Logger
 }
 
 // NewProjectsHandler creates a new projects handler.
-func NewProjectsHandler(projectService services.ProjectService, logger *zap.Logger) *ProjectsHandler {
+func NewProjectsHandler(projectService services.ProjectService, cfg *config.Config, logger *zap.Logger) *ProjectsHandler {
 	return &ProjectsHandler{
 		projectService: projectService,
+		cfg:            cfg,
 		logger:         logger,
 	}
 }
@@ -51,6 +55,8 @@ func (h *ProjectsHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *aut
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Get)))
 	mux.HandleFunc("DELETE /api/projects/{pid}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Delete)))
+	mux.HandleFunc("PATCH /api/projects/{pid}/auth-server-url",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.UpdateAuthServerURL)))
 }
 
 // GetCurrent handles GET /projects
@@ -195,6 +201,64 @@ func (h *ProjectsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			zap.String("project_id", projectID.String()),
 			zap.Error(err))
 		if err := ErrorResponse(w, http.StatusInternalServerError, "internal_error", "Failed to delete project"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// UpdateAuthServerURLRequest is the request body for updating auth server URL.
+type UpdateAuthServerURLRequest struct {
+	AuthServerURL string `json:"auth_server_url"`
+}
+
+// UpdateAuthServerURL handles PATCH /api/projects/{pid}/auth-server-url
+// Updates the auth_server_url in project parameters after validation.
+func (h *ProjectsHandler) UpdateAuthServerURL(w http.ResponseWriter, r *http.Request) {
+	pidStr := r.PathValue("pid")
+
+	projectID, err := uuid.Parse(pidStr)
+	if err != nil {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_project_id", "Invalid project ID format"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	var req UpdateAuthServerURLRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Validate auth_server_url against whitelist
+	_, errMsg := h.cfg.ValidateAuthURL(req.AuthServerURL)
+	if errMsg != "" {
+		h.logger.Warn("Auth server URL validation failed",
+			zap.String("project_id", projectID.String()),
+			zap.String("auth_server_url", req.AuthServerURL),
+			zap.String("error", errMsg))
+		if err := ErrorResponse(w, http.StatusForbidden, "auth_url_not_allowed", "Auth server URL not in allowed list"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if err := h.projectService.UpdateAuthServerURL(r.Context(), projectID, req.AuthServerURL); err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			if err := ErrorResponse(w, http.StatusNotFound, "not_found", "Project not found"); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
+		h.logger.Error("Failed to update auth server URL",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "internal_error", "Failed to update auth server URL"); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))
 		}
 		return

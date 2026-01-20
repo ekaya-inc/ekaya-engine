@@ -68,3 +68,5 @@ certs/*
 !certs/README.md
 !certs/.gitkeep
 
+ekaya/
+

@@ -324,7 +324,7 @@ func main() {
 	aiConfigHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register projects handler (includes provisioning via POST /projects)
-	projectsHandler := handlers.NewProjectsHandler(projectService, logger)
+	projectsHandler := handlers.NewProjectsHandler(projectService, cfg, logger)
 	projectsHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register users handler (protected)

@@ -96,6 +96,10 @@ func (m *mockProjectService) GetAuthServerURL(ctx context.Context, projectID uui
 	return "", nil
 }
 
+func (m *mockProjectService) UpdateAuthServerURL(ctx context.Context, projectID uuid.UUID, authServerURL string) error {
+	return m.err
+}
+
 // mockAuthService is a mock AuthService for integration testing.
 type mockAuthService struct {
 	claims *auth.Claims

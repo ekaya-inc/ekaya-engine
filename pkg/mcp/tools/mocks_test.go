@@ -179,6 +179,10 @@ func (m *mockProjectService) GetAuthServerURL(ctx context.Context, projectID uui
 	return "", nil
 }
 
+func (m *mockProjectService) UpdateAuthServerURL(ctx context.Context, projectID uuid.UUID, authServerURL string) error {
+	return nil
+}
+
 // mockDatasourceService implements services.DatasourceService for testing.
 type mockDatasourceService struct {
 	datasource      *models.Datasource

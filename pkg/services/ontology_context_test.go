@@ -265,6 +265,10 @@ func (m *mockProjectServiceForOntology) GetAuthServerURL(ctx context.Context, pr
 	return "", nil
 }
 
+func (m *mockProjectServiceForOntology) UpdateAuthServerURL(ctx context.Context, projectID uuid.UUID, authServerURL string) error {
+	return nil
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

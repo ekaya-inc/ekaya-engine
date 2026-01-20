@@ -195,7 +195,7 @@ func TestProtectedEndpoint_WithCookieAuth(t *testing.T) {
 
 	// Create projects handler with mock service
 	projectService := &mockProjectService{}
-	projectsHandler := NewProjectsHandler(projectService, logger)
+	projectsHandler := NewProjectsHandler(projectService, testConfig(), logger)
 
 	// Set up mux with protected route - use a no-op tenant middleware for testing
 	mux := http.NewServeMux()
@@ -239,7 +239,7 @@ func TestProtectedEndpoint_WithBearerAuth(t *testing.T) {
 	authMiddleware := auth.NewMiddleware(authService, logger)
 
 	projectService := &mockProjectService{}
-	projectsHandler := NewProjectsHandler(projectService, logger)
+	projectsHandler := NewProjectsHandler(projectService, testConfig(), logger)
 
 	mux := http.NewServeMux()
 	noopTenantMiddleware := func(next http.HandlerFunc) http.HandlerFunc { return next }
@@ -276,7 +276,7 @@ func TestProtectedEndpoint_CookiePreferredOverHeader(t *testing.T) {
 	authMiddleware := auth.NewMiddleware(authService, logger)
 
 	projectService := &mockProjectService{}
-	projectsHandler := NewProjectsHandler(projectService, logger)
+	projectsHandler := NewProjectsHandler(projectService, testConfig(), logger)
 
 	mux := http.NewServeMux()
 	noopTenantMiddleware := func(next http.HandlerFunc) http.HandlerFunc { return next }
@@ -316,7 +316,7 @@ func TestProtectedEndpoint_ProjectIDMismatch(t *testing.T) {
 	authMiddleware := auth.NewMiddleware(authService, logger)
 
 	projectService := &mockProjectService{}
-	projectsHandler := NewProjectsHandler(projectService, logger)
+	projectsHandler := NewProjectsHandler(projectService, testConfig(), logger)
 
 	mux := http.NewServeMux()
 	noopTenantMiddleware := func(next http.HandlerFunc) http.HandlerFunc { return next }
@@ -348,7 +348,7 @@ func TestProtectedEndpoint_NoAuth(t *testing.T) {
 	authMiddleware := auth.NewMiddleware(authService, logger)
 
 	projectService := &mockProjectService{}
-	projectsHandler := NewProjectsHandler(projectService, logger)
+	projectsHandler := NewProjectsHandler(projectService, testConfig(), logger)
 
 	mux := http.NewServeMux()
 	noopTenantMiddleware := func(next http.HandlerFunc) http.HandlerFunc { return next }
@@ -374,7 +374,7 @@ func TestProtectedEndpoint_MissingProjectID(t *testing.T) {
 	authMiddleware := auth.NewMiddleware(authService, logger)
 
 	projectService := &mockProjectService{}
-	projectsHandler := NewProjectsHandler(projectService, logger)
+	projectsHandler := NewProjectsHandler(projectService, testConfig(), logger)
 
 	mux := http.NewServeMux()
 	noopTenantMiddleware := func(next http.HandlerFunc) http.HandlerFunc { return next }

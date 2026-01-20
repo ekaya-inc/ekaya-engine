@@ -78,6 +78,10 @@ func (m *mockProjectServiceForIntegration) GetAuthServerURL(ctx context.Context,
 	return "", nil
 }
 
+func (m *mockProjectServiceForIntegration) UpdateAuthServerURL(ctx context.Context, projectID uuid.UUID, authServerURL string) error {
+	return nil
+}
+
 // setupOntologyContextTest creates a test context with real database.
 func setupOntologyContextTest(t *testing.T) *ontologyContextTestContext {
 	t.Helper()
