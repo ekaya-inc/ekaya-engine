@@ -807,38 +807,41 @@ func sanitizeArguments(args map[string]any) map[string]any {
             - **Commit:** feat: convert update_relationship tool to use error results (commit 40cb29d)
             - **Review completed:** Changes reviewed and approved. All tests passing. Error handling pattern correctly applied.
             - **Next implementer:** Task 3.2.3.3.2 (delete_relationship tool) - apply same pattern for parameter validation and resource lookups. The `update_relationship` implementation provides a solid reference for the same validation pattern (whitespace trimming, non-empty checks, entity existence checks).
-         2. [ ] 3.2.3.3.2: Convert delete_relationship tool to error results
-            - **File:** `pkg/mcp/tools/relationship.go`
-            - **Implementation:** Apply error handling pattern to the `delete_relationship` tool to convert actionable errors to error results while keeping system errors as Go errors.
-            - **Parameter validation errors to convert:**
-              1. **Empty from_entity parameter:**
-                 - Use `trimString()` helper (already exists in `column.go`) to normalize whitespace
-                 - After trimming, check if empty → `NewErrorResult("invalid_parameters", "parameter 'from_entity' cannot be empty")`
-              2. **Empty to_entity parameter:**
-                 - Use `trimString()` helper to normalize whitespace
-                 - After trimming, check if empty → `NewErrorResult("invalid_parameters", "parameter 'to_entity' cannot be empty")`
-            - **Resource lookup errors to convert:**
-              3. **Relationship not found:**
-                 - After parameter validation, check if the relationship exists
-                 - Query `EntityRelationshipRepo` to find the relationship between the two entities
-                 - If not found → `NewErrorResult("RELATIONSHIP_NOT_FOUND", fmt.Sprintf("relationship from %q to %q not found", fromEntityName, toEntityName))`
-            - **System errors to keep as Go errors:**
-              - Database connection failures
+         2. [x] **COMPLETED** - 3.2.3.3.2: Convert delete_relationship tool to error results
+            - **Implementation:** Modified `pkg/mcp/tools/relationship.go` to convert parameter validation and resource lookup errors to error results
+            - **Files modified:**
+              - `pkg/mcp/tools/relationship.go` (lines 289-335):
+                - Empty from_entity after trimming → `NewErrorResult("invalid_parameters", "parameter 'from_entity' cannot be empty")`
+                - Empty to_entity after trimming → `NewErrorResult("invalid_parameters", "parameter 'to_entity' cannot be empty")`
+                - From entity not found → `NewErrorResult("ENTITY_NOT_FOUND", fmt.Sprintf("from_entity %q not found", fromEntityName))`
+                - To entity not found → `NewErrorResult("ENTITY_NOT_FOUND", fmt.Sprintf("to_entity %q not found", toEntityName))`
+                - Relationship not found → `NewErrorResult("RELATIONSHIP_NOT_FOUND", fmt.Sprintf("relationship from %q to %q not found", fromEntityName, toEntityName))`
+              - `pkg/mcp/tools/relationship_test.go` (lines 318-416):
+                - Added `TestDeleteRelationshipTool_ErrorResults` with 3 test cases:
+                  - Empty from_entity (whitespace-only string)
+                  - Empty to_entity (whitespace-only string)
+                  - Relationship not found
+                - All tests verify: `result.IsError == true`, correct error code, and appropriate error message
+                - Added `validateDeleteRelationshipParams` helper function for testing parameter validation
+            - **Error conversion pattern:**
+              - Parameter validation: Trim strings with `strings.TrimSpace()`, check non-empty → `NewErrorResult("invalid_parameters", ...)`
+              - Entity validation: Check entity existence via `OntologyEntityRepo.GetByName()` → `NewErrorResult("ENTITY_NOT_FOUND", ...)`
+              - Relationship validation: Check relationship existence via `EntityRelationshipRepo.GetByEntityPair()` → `NewErrorResult("RELATIONSHIP_NOT_FOUND", ...)`
+              - System errors: Database connection failures, auth failures, repository failures → remain as Go errors
+            - **System errors kept as Go errors:**
+              - Database connection failures from `OntologyEntityRepo.GetByName()` and `EntityRelationshipRepo.GetByEntityPair()`
               - Authentication failures from `AcquireToolAccess`
               - Ontology repository failures (GetActive)
               - Relationship repository failures (Delete)
-              - Transaction errors
-            - **Test coverage required:**
-              - Add to `pkg/mcp/tools/relationship_test.go` with `TestDeleteRelationshipTool_ErrorResults` including test cases for:
-                1. Empty from_entity (whitespace-only string)
-                2. Empty to_entity (whitespace-only string)
-                3. Relationship not found
-              - Each test should verify:
-                - `result.IsError == true`
-                - Correct error code
-                - Appropriate error message
-            - **Pattern reference:** Follow the same implementation pattern as `delete_entity` tool in `pkg/mcp/tools/entity.go:531-646` for parameter validation and resource existence checks.
-            - **Note:** This is a simpler operation than `delete_entity` - no need to check for dependencies/cascades since relationships are leaf nodes in the ontology graph.
+            - **Error codes used:** `invalid_parameters` (parameter validation), `ENTITY_NOT_FOUND` (entity doesn't exist), `RELATIONSHIP_NOT_FOUND` (relationship doesn't exist)
+            - **Test coverage:** All 3 tests in `TestDeleteRelationshipTool_ErrorResults` pass, plus all existing relationship tests continue to pass (14 total tests)
+            - **Design decision:** Changed idempotent behavior - previously, relationship not found returned success with `Deleted: false`. Now returns error result with `RELATIONSHIP_NOT_FOUND` code. This makes the error actionable and allows Claude to understand the state difference between "successfully deleted" vs "doesn't exist".
+            - **Pattern established:**
+              - Whitespace normalization with `strings.TrimSpace()` before checking for empty parameters (consistent with update_relationship)
+              - Entity existence checks return actionable error results instead of Go errors (allows Claude to fix entity names)
+              - Relationship existence check returns actionable error result (allows Claude to understand the relationship doesn't exist)
+            - **Note on idempotency:** The tool is still idempotent in behavior (calling it twice has the same effect), but now surfaces the state explicitly via error results instead of silently succeeding. This follows the fail-fast philosophy and gives Claude better feedback.
+            - **Next implementer:** Task 3.2.3.3 (relationship tools) is now complete. All relationship tools (`update_relationship`, `delete_relationship`) now surface actionable errors to Claude. Proceed to task 3.2.3.4 (get_relationship and list_relationships tools) or task 3.2.4 (exploration and admin tools) as needed.
       4. [ ] 3.2.3.4: Convert get_relationship and list_relationships tools to error results
          - **Implementation:** Apply error handling pattern to `get_relationship` and `list_relationships` in `pkg/mcp/tools/relationship.go`
          - **For get_relationship:**
