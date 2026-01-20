@@ -844,33 +844,99 @@ func sanitizeArguments(args map[string]any) map[string]any {
                - **Commit:** Changes reviewed, approved, and committed with comprehensive test coverage
                - **Next implementer:** The `trimString()` helper is now available to all MCP tools. Proceed to task 3.2.3.3.3.2 to add parameter validation to the `get_relationship` tool using this helper.
 
-            2. [ ] 3.2.3.3.3.2: Convert parameter validation to error results
+            2. [ ] 3.2.3.3.3.2: Convert parameter validation to error results in get_relationship (REPLACED - SEE SUBTASKS BELOW)
 
-               Apply error handling pattern to validate `from_entity` and `to_entity` parameters in the `get_relationship` tool.
+               1. [x] **COMPLETED - REVIEWED AND APPROVED** - 3.2.3.3.3.2.1: Add trimString import to relationship.go
+                  - **Implementation:** Task was already completed in commit d4d3a92 as part of consolidating `trimString()` helper to shared `helpers.go`
+                  - **Context:** This task was preemptively completed when the `trimString()` helper was moved from `column.go` to `pkg/mcp/tools/helpers.go` in commit d4d3a92
+                  - **Result:**
+                    - The `trimString()` helper is available to all files in the `pkg/mcp/tools/` package
+                    - No import changes needed since `helpers.go` is in the same package as `relationship.go`
+                    - `pkg/mcp/tools/helpers.go` exists with comprehensive test coverage in `helpers_test.go`
+                  - **Verification:**
+                    - Ran `go build ./pkg/mcp/tools/...` - no import errors ✅
+                    - Helper is accessible without explicit import (same package) ✅
+                    - All existing tests pass: `go test ./pkg/mcp/tools/... -short` ✅
+                  - **Files involved:**
+                    - `pkg/mcp/tools/helpers.go` - Contains shared `trimString()` function
+                    - `pkg/mcp/tools/helpers_test.go` - Contains comprehensive tests (9 test cases)
+                  - **Current usage:** Already in use by `column.go`, `entity.go`, and `probe.go`
+                  - **Next implementer:** The `trimString()` helper is ready for use in `relationship.go`. Proceed to task 3.2.3.3.3.2.2 to add parameter validation for `from_entity` using this helper.
 
-               **File:** `pkg/mcp/tools/relationship.go`, function: `getRelationshipTool()`
+               2. [ ] 3.2.3.3.3.2.2: Add parameter validation for from_entity
 
-               **Parameter validation to add:**
-               1. Empty `from_entity` after trimming → `NewErrorResult("invalid_parameters", "parameter 'from_entity' cannot be empty")`
-               2. Empty `to_entity` after trimming → `NewErrorResult("invalid_parameters", "parameter 'to_entity' cannot be empty")`
+                  **File:** `pkg/mcp/tools/relationship.go`
 
-               **Implementation pattern:**
-               ```go
-               fromEntity := trimString(params["from_entity"].(string))
-               if fromEntity == "" {
-                   return NewErrorResult("invalid_parameters", "parameter 'from_entity' cannot be empty"), nil
-               }
+                  **Function:** `getRelationshipTool()`
 
-               toEntity := trimString(params["to_entity"].(string))
-               if toEntity == "" {
-                   return NewErrorResult("invalid_parameters", "parameter 'to_entity' cannot be empty"), nil
-               }
-               ```
+                  **Implementation:**
+                  1. After extracting `from_entity` parameter from the request arguments, apply `trimString()` to normalize whitespace
+                  2. Check if the trimmed value is empty
+                  3. If empty, return `NewErrorResult("invalid_parameters", "parameter 'from_entity' cannot be empty"), nil`
 
-               **Test coverage:**
-               - Create `TestGetRelationshipTool_ParameterValidation` in `pkg/mcp/tools/relationship_test.go`
-               - Test cases: empty from_entity (empty string, whitespace-only), empty to_entity (empty string, whitespace-only)
-               - Verify: `result.IsError == true`, `error code == "invalid_parameters"`, message includes parameter name
+                  **Code pattern:**
+                  ```go
+                  fromEntity := trimString(params["from_entity"].(string))
+                  if fromEntity == "" {
+                      return NewErrorResult("invalid_parameters", "parameter 'from_entity' cannot be empty"), nil
+                  }
+                  ```
+
+                  **Test coverage:**
+                  - Create `TestGetRelationshipTool_FromEntityValidation` in `pkg/mcp/tools/relationship_test.go`
+                  - Test cases:
+                    - Empty string `""`
+                    - Whitespace-only string `"   "`
+                    - Tab/newline variations `"\t\n"`
+                  - Verify each test: `result.IsError == true`, `error code == "invalid_parameters"`, message contains "from_entity"
+
+               3. [ ] 3.2.3.3.3.2.3: Add parameter validation for to_entity
+
+                  **File:** `pkg/mcp/tools/relationship.go`
+
+                  **Function:** `getRelationshipTool()`
+
+                  **Implementation:**
+                  1. After extracting `to_entity` parameter from the request arguments, apply `trimString()` to normalize whitespace
+                  2. Check if the trimmed value is empty
+                  3. If empty, return `NewErrorResult("invalid_parameters", "parameter 'to_entity' cannot be empty"), nil`
+
+                  **Code pattern:**
+                  ```go
+                  toEntity := trimString(params["to_entity"].(string))
+                  if toEntity == "" {
+                      return NewErrorResult("invalid_parameters", "parameter 'to_entity' cannot be empty"), nil
+                  }
+                  ```
+
+                  **Test coverage:**
+                  - Create `TestGetRelationshipTool_ToEntityValidation` in `pkg/mcp/tools/relationship_test.go`
+                  - Test cases:
+                    - Empty string `""`
+                    - Whitespace-only string `"   "`
+                    - Tab/newline variations `"\t\n"`
+                  - Verify each test: `result.IsError == true`, `error code == "invalid_parameters"`, message contains "to_entity"
+
+               4. [ ] 3.2.3.3.3.2.4: Add comprehensive test and verify all scenarios
+
+                  **File:** `pkg/mcp/tools/relationship_test.go`
+
+                  **Implementation:**
+                  1. Create `TestGetRelationshipTool_ParameterValidation` that combines both parameter validation scenarios
+                  2. Test matrix:
+                     - Empty from_entity with valid to_entity
+                     - Valid from_entity with empty to_entity
+                     - Both empty (verify first error is returned)
+                     - Whitespace-only variations for both parameters
+
+                  **Verification:**
+                  - Run `go test ./pkg/mcp/tools/... -run TestGetRelationshipTool_ParameterValidation -v`
+                  - All test cases should pass
+                  - Error results should have `IsError == true`, correct error code, and descriptive messages
+
+                  **Pattern consistency:**
+                  - Compare with `TestUpdateColumnTool_ErrorResults` in `column_test.go` for reference implementation
+                  - Follow same test structure: arrange, act, assert with clear error message verification
 
             3. [ ] 3.2.3.3.3.3: Convert resource validation to error results
 
