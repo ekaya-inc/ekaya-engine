@@ -56,20 +56,9 @@ func (s *authService) ValidateRequest(r *http.Request) (*Claims, string, error) 
 	var tokenString string
 	var tokenSource string
 
-	// Try cookie first (browser clients)
-	if cookie, err := r.Cookie("ekaya_jwt"); err == nil {
-		tokenString = cookie.Value
-		tokenSource = "cookie"
-	} else {
-		// Fallback to Authorization header (API clients)
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			s.logger.Debug("No JWT found in request",
-				zap.String("path", r.URL.Path),
-				zap.String("method", r.Method))
-			return nil, "", ErrMissingAuthorization
-		}
-
+	// 1. Check Authorization header first (preferred for tab-scoped auth)
+	authHeader := r.Header.Get("Authorization")
+	if authHeader != "" {
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
 			s.logger.Debug("Invalid Authorization header format",
@@ -79,6 +68,16 @@ func (s *authService) ValidateRequest(r *http.Request) (*Claims, string, error) 
 		}
 		tokenString = parts[1]
 		tokenSource = "header"
+	} else if cookie, err := r.Cookie("ekaya_jwt"); err == nil {
+		// 2. Fall back to cookie (for backward compatibility during transition)
+		tokenString = cookie.Value
+		tokenSource = "cookie"
+	} else {
+		// No authentication found
+		s.logger.Debug("No JWT found in request",
+			zap.String("path", r.URL.Path),
+			zap.String("method", r.Method))
+		return nil, "", ErrMissingAuthorization
 	}
 
 	claims, err := s.jwksClient.ValidateToken(tokenString)

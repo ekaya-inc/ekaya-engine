@@ -379,7 +379,48 @@ function extractProjectIdFromPath(): string | undefined {
 }
 ```
 
-### Task 5: Ensure Backend Reads Authorization Header
+### Task 5: Ensure Backend Reads Authorization Header ✅
+
+**Status: COMPLETE** ✅
+
+**Files Modified:**
+- `pkg/auth/service.go:54-81` - Reordered token extraction to check Authorization header first, then cookie
+- `pkg/auth/service_test.go:75-135` - Updated and added tests for new precedence order
+
+**Implementation Summary:**
+
+Modified `ValidateRequest` function to prefer Authorization header over cookie, enabling tab-scoped authentication while maintaining backward compatibility:
+
+1. **Authorization Header First (Preferred):** Checks `Authorization: Bearer` header as the primary method
+   - If header present but malformed, returns `ErrInvalidAuthFormat`
+   - If header is valid, extracts token and sets source to "header"
+
+2. **Cookie Fallback (Backward Compatibility):** Falls back to `ekaya_jwt` cookie if no Authorization header
+   - Only checked if Authorization header is absent
+   - Sets source to "cookie" for logging/debugging
+
+3. **Error Handling:** Returns `ErrMissingAuthorization` if neither header nor cookie present
+
+**Test Coverage:**
+- ✅ `TestAuthService_ValidateRequest_AuthorizationHeaderTakesPrecedence` - Verifies header wins when both present
+- ✅ `TestAuthService_ValidateRequest_FallsBackToCookie` - Verifies cookie fallback when only cookie present
+- ✅ `TestAuthService_ValidateRequest_MissingAuth` - Verifies error when neither present
+- ✅ All existing tests pass (Cookie, AuthHeader, InvalidAuthFormat, TokenValidationError)
+
+**Why This Approach:**
+- Tab-scoped sessionStorage (frontend) → Bearer token (transport) → Header-first extraction (backend) enables multi-tab project isolation
+- Cookie fallback ensures smooth transition and backward compatibility
+- Source tracking ("header" vs "cookie") enables monitoring migration progress
+
+**Implementation Details for Next Session:**
+The change was straightforward - reversed the order of token extraction logic in `ValidateRequest()`:
+1. First checks `Authorization` header for `Bearer <token>` format
+2. Only falls back to `ekaya_jwt` cookie if no Authorization header present
+3. All tests updated to verify this precedence order
+
+The implementation maintains full backward compatibility - existing clients using cookies will continue to work, while new clients can send Bearer tokens via Authorization header for tab-scoped isolation.
+
+**Original Spec:**
 
 **File: `pkg/auth/service.go`**
 
