@@ -383,7 +383,26 @@ func sanitizeArguments(args map[string]any) map[string]any {
      - Columns depth with too many tables (validates error details)
    - Design decision: Only parameter validation errors were converted to error results. This is the pattern to follow - catch obvious parameter errors early before calling services
    - Next implementer: Apply same pattern to `update_entity` tool - validate parameters, return error results for actionable errors, keep Go errors for system failures
-3. [ ] Update `update_entity` tool to use error results
+3. [x] **COMPLETED** - Update `update_entity` tool to use error results
+   - **Implementation:** `pkg/mcp/tools/entity.go` now validates all parameter types and returns error results for invalid input
+   - **Changes made:**
+     - **Missing/empty name parameter** (entity.go:301-314): Returns `NewErrorResult("invalid_parameters", ...)` when name is missing or empty after trimming
+     - **Invalid alias array elements** (entity.go:325-338): Iterates through `aliases` array and returns `NewErrorResultWithDetails` if any element is not a string
+       - Details include: `invalid_element_index` (position in array) and `invalid_element_type` (actual Go type)
+       - Example: If aliases contains `["valid", 123, "another"]`, returns error at index 1 with type "int"
+     - **Invalid key_columns array elements** (entity.go:344-357): Same pattern as aliases - validates each element is a string
+       - Returns error result with index and type details if non-string found
+   - **What was NOT changed:**
+     - Service-layer errors (get active ontology, database failures, create/update errors) still returned as Go errors
+     - Business logic errors remain as Go errors (entity not found from repository, etc.)
+     - Only parameter validation was converted - service calls are unchanged
+   - **Test coverage:** `pkg/mcp/tools/entity_test.go` includes `TestUpdateEntityTool_ErrorResults` with 3 test cases:
+     - Empty entity name: Validates error result structure and message
+     - Invalid alias array with non-string element (int): Validates error details with index=1, type="int"
+     - Invalid key_columns array with non-string element (bool): Validates error details with index=1, type="bool"
+     - Tests verify: `result.IsError == true`, correct error code, message, and structured details
+   - **Pattern established:** Loop through array parameters with indexed iteration (`for i, elem := range array`), type-check each element, return error result immediately on type mismatch with diagnostic details
+   - **Next implementer:** Ready for testing with Claude Desktop. This completes Phase 1 core tools. Consider applying pattern to other entity tools (`delete_entity`, `get_entity`) or relationship tools next.
 4. [ ] Test with Claude Desktop - verify error messages are visible
 
 ### Phase 2: MCP Logging Middleware

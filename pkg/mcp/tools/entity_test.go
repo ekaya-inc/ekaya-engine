@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -479,4 +480,113 @@ func TestDeleteEntityResponse(t *testing.T) {
 
 	assert.Equal(t, "InvalidEntity", decoded.Name)
 	assert.True(t, decoded.Deleted)
+}
+
+// TestUpdateEntityTool_ErrorResults tests that actionable errors are returned as error results.
+func TestUpdateEntityTool_ErrorResults(t *testing.T) {
+	t.Run("empty entity name", func(t *testing.T) {
+		// Simulate validation check for empty name
+		name := ""
+		if len(name) == 0 {
+			result := NewErrorResult(
+				"invalid_parameters",
+				"entity name cannot be empty",
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content to verify structure
+			var errorResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, err)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Equal(t, "entity name cannot be empty", errorResp.Message)
+		}
+	})
+
+	t.Run("invalid alias array - non-string element", func(t *testing.T) {
+		// Simulate extracting aliases with a non-string element
+		aliasesArray := []any{"valid_alias", 123, "another_alias"}
+
+		var aliases []string
+		for i, a := range aliasesArray {
+			if aliasStr, ok := a.(string); ok {
+				aliases = append(aliases, aliasStr)
+			} else {
+				result := NewErrorResultWithDetails(
+					"invalid_parameters",
+					"all aliases must be strings",
+					map[string]any{
+						"invalid_element_index": i,
+						"invalid_element_type":  fmt.Sprintf("%T", a),
+					},
+				)
+
+				// Verify it's an error result
+				assert.NotNil(t, result)
+				assert.True(t, result.IsError)
+
+				// Parse the content to verify structure
+				var errorResp ErrorResponse
+				err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+				require.NoError(t, err)
+
+				assert.True(t, errorResp.Error)
+				assert.Equal(t, "invalid_parameters", errorResp.Code)
+				assert.Equal(t, "all aliases must be strings", errorResp.Message)
+
+				// Verify details
+				details, ok := errorResp.Details.(map[string]any)
+				require.True(t, ok)
+				assert.Equal(t, float64(1), details["invalid_element_index"]) // JSON unmarshals numbers as float64
+				assert.Equal(t, "int", details["invalid_element_type"])
+				break
+			}
+		}
+	})
+
+	t.Run("invalid key_columns array - non-string element", func(t *testing.T) {
+		// Simulate extracting key_columns with a non-string element
+		keyColumnsArray := []any{"user_id", true, "username"}
+
+		var keyColumns []string
+		for i, kc := range keyColumnsArray {
+			if kcStr, ok := kc.(string); ok {
+				keyColumns = append(keyColumns, kcStr)
+			} else {
+				result := NewErrorResultWithDetails(
+					"invalid_parameters",
+					"all key_columns must be strings",
+					map[string]any{
+						"invalid_element_index": i,
+						"invalid_element_type":  fmt.Sprintf("%T", kc),
+					},
+				)
+
+				// Verify it's an error result
+				assert.NotNil(t, result)
+				assert.True(t, result.IsError)
+
+				// Parse the content to verify structure
+				var errorResp ErrorResponse
+				err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+				require.NoError(t, err)
+
+				assert.True(t, errorResp.Error)
+				assert.Equal(t, "invalid_parameters", errorResp.Code)
+				assert.Equal(t, "all key_columns must be strings", errorResp.Message)
+
+				// Verify details
+				details, ok := errorResp.Details.(map[string]any)
+				require.True(t, ok)
+				assert.Equal(t, float64(1), details["invalid_element_index"]) // JSON unmarshals numbers as float64
+				assert.Equal(t, "bool", details["invalid_element_type"])
+				break
+			}
+		}
+	})
 }

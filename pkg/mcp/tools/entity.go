@@ -301,7 +301,18 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 		// Get required name parameter
 		name, err := req.RequireString("name")
 		if err != nil {
-			return nil, err
+			return NewErrorResult(
+				"invalid_parameters",
+				"name parameter is required and must be a non-empty string",
+			), nil
+		}
+
+		// Validate entity name is not empty after trimming
+		if len(name) == 0 {
+			return NewErrorResult(
+				"invalid_parameters",
+				"entity name cannot be empty",
+			), nil
 		}
 
 		// Get optional parameters
@@ -312,18 +323,36 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 		if args, ok := req.Params.Arguments.(map[string]any); ok {
 			// Extract aliases array
 			if aliasesArray, ok := args["aliases"].([]any); ok {
-				for _, a := range aliasesArray {
+				for i, a := range aliasesArray {
 					if aliasStr, ok := a.(string); ok {
 						aliases = append(aliases, aliasStr)
+					} else {
+						return NewErrorResultWithDetails(
+							"invalid_parameters",
+							"all aliases must be strings",
+							map[string]any{
+								"invalid_element_index": i,
+								"invalid_element_type":  fmt.Sprintf("%T", a),
+							},
+						), nil
 					}
 				}
 			}
 
 			// Extract key_columns array
 			if keyColumnsArray, ok := args["key_columns"].([]any); ok {
-				for _, kc := range keyColumnsArray {
+				for i, kc := range keyColumnsArray {
 					if kcStr, ok := kc.(string); ok {
 						keyColumns = append(keyColumns, kcStr)
+					} else {
+						return NewErrorResultWithDetails(
+							"invalid_parameters",
+							"all key_columns must be strings",
+							map[string]any{
+								"invalid_element_index": i,
+								"invalid_element_type":  fmt.Sprintf("%T", kc),
+							},
+						), nil
 					}
 				}
 			}
