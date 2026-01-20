@@ -2298,51 +2298,641 @@ func sanitizeArguments(args map[string]any) map[string]any {
          - The repository layer returns sentinel errors (e.g., `ErrOntologyQuestionNotFound`) which are checked with `errors.Is()` and converted to error results
          - Tests follow the table-driven pattern with subtests for each error case plus success path verification
 
-      2. [ ] 3.3.2.2: Convert skip_ontology_question, dismiss_ontology_question, and escalate_ontology_question tools to error results
+      2. [ ] 3.3.2.2: Convert skip_ontology_question, dismiss_ontology_question, and escalate_ontology_question tools to error results (REPLACED - SEE SUBTASKS BELOW)
 
-         Convert the remaining ontology question status tools (`skip_ontology_question`, `dismiss_ontology_question`, `escalate_ontology_question`) in `pkg/mcp/tools/questions.go` to use error results.
+         1. [x] 3.3.2.2.1: Add common validation helpers for ontology question tools
 
-         **Context:** These three tools have nearly identical validation logic (question_id + reason parameter) and should be converted together for consistency. They mark questions as skipped, dismissed, or escalated respectively.
+            Create shared validation logic for ontology question tools that will be reused across skip, dismiss, and escalate operations.
 
-         **Files to modify:**
-         - `pkg/mcp/tools/questions.go` - Update three tool handler functions
-         - `pkg/mcp/tools/questions_test.go` - Add test coverage for all three
+            **Context:** The three tools (`skip_ontology_question`, `dismiss_ontology_question`, `escalate_ontology_question`) share identical validation logic for `question_id` (UUID format, non-empty) and `reason` (non-empty string) parameters. Creating helper functions reduces duplication and ensures consistency.
 
-         **Implementation details:**
+            **File to modify:** `pkg/mcp/tools/questions.go`
 
-         **Common validation for all three tools:**
+            **Implementation details:**
 
-         1. **Parameter validation:**
-            - Empty `question_id` after `trimString()` → `NewErrorResult("invalid_parameters", "parameter 'question_id' cannot be empty")`
-            - Invalid UUID format → `NewErrorResult("invalid_parameters", fmt.Sprintf("invalid question_id format: %q is not a valid UUID", questionIDStr))`
-            - Empty `reason` parameter after `trimString()` → `NewErrorResult("invalid_parameters", "parameter 'reason' cannot be empty")`
-            - Use `uuid.Parse()` for UUID validation
-            - Use `trimString()` helper for whitespace normalization
+            1. **Add validation helper functions** (place near top of file after imports):
 
-         2. **Resource validation:**
-            - Question not found → `NewErrorResult("QUESTION_NOT_FOUND", fmt.Sprintf("ontology question %q not found", questionIDStr))`
+            ```go
+            // validateQuestionID validates the question_id parameter.
+            // Returns (uuid.UUID, *mcp.CallToolResult) where result is non-nil on error.
+            func validateQuestionID(args map[string]any) (uuid.UUID, *mcp.CallToolResult) {
+                questionIDStr, ok := args["question_id"].(string)
+                if !ok {
+                    questionIDStr = ""
+                }
+                questionIDStr = trimString(questionIDStr)
 
-         3. **System errors kept as Go errors:**
-            - Database failures, auth failures, repository update failures
+                if questionIDStr == "" {
+                    return uuid.Nil, NewErrorResult("invalid_parameters", "parameter 'question_id' cannot be empty")
+                }
 
-         **Test coverage:**
+                questionID, err := uuid.Parse(questionIDStr)
+                if err != nil {
+                    return uuid.Nil, NewErrorResult("invalid_parameters",
+                        fmt.Sprintf("invalid question_id format: %q is not a valid UUID", questionIDStr))
+                }
 
-         Add three test functions in `pkg/mcp/tools/questions_test.go`:
+                return questionID, nil
+            }
 
-         - `TestSkipOntologyQuestionTool_ErrorResults`: empty question_id, invalid UUID, empty reason, question not found
-         - `TestDismissOntologyQuestionTool_ErrorResults`: empty question_id, invalid UUID, empty reason, question not found
-         - `TestEscalateOntologyQuestionTool_ErrorResults`: empty question_id, invalid UUID, empty reason, question not found
+            // validateReasonParameter validates the reason parameter (required for skip/dismiss/escalate).
+            // Returns (string, *mcp.CallToolResult) where result is non-nil on error.
+            func validateReasonParameter(args map[string]any) (string, *mcp.CallToolResult) {
+                reasonStr, ok := args["reason"].(string)
+                if !ok {
+                    reasonStr = ""
+                }
+                reasonStr = trimString(reasonStr)
 
-         Each test should verify: `result.IsError == true`, correct error code, descriptive message
+                if reasonStr == "" {
+                    return "", NewErrorResult("invalid_parameters", "parameter 'reason' cannot be empty")
+                }
 
-         **Error codes used:** `invalid_parameters`, `QUESTION_NOT_FOUND`
+                return reasonStr, nil
+            }
+            ```
 
-         **Pattern reference:** Follow pattern from subtask 3.3.2.1 (resolve_ontology_question) for consistency across all question status tools.
+            2. **Refactor `resolveOntologyQuestionTool`** to use the new `validateQuestionID` helper:
 
-         **Acceptance criteria:**
-         - All three tools return error results for actionable errors
-         - System errors remain as Go errors
-         - All new tests pass: `go test ./pkg/mcp/tools/ -run Test.*OntologyQuestionTool_ErrorResults -short`
+            Find the existing validation code in `resolveOntologyQuestionTool` and replace with:
+            ```go
+            questionID, errResult := validateQuestionID(req.Params.Arguments)
+            if errResult != nil {
+                return errResult, nil
+            }
+            ```
+
+            **Test coverage:**
+
+            Add test functions in `pkg/mcp/tools/questions_test.go`:
+
+            ```go
+            func TestValidateQuestionID(t *testing.T) {
+                tests := []struct {
+                    name        string
+                    args        map[string]any
+                    wantErr     bool
+                    expectedCode string
+                }{
+                    {
+                        name:        "empty question_id",
+                        args:        map[string]any{"question_id": ""},
+                        wantErr:     true,
+                        expectedCode: "invalid_parameters",
+                    },
+                    {
+                        name:        "whitespace-only question_id",
+                        args:        map[string]any{"question_id": "   "},
+                        wantErr:     true,
+                        expectedCode: "invalid_parameters",
+                    },
+                    {
+                        name:        "invalid UUID format",
+                        args:        map[string]any{"question_id": "not-a-uuid"},
+                        wantErr:     true,
+                        expectedCode: "invalid_parameters",
+                    },
+                    {
+                        name:        "valid UUID",
+                        args:        map[string]any{"question_id": "550e8400-e29b-41d4-a716-446655440000"},
+                        wantErr:     false,
+                    },
+                }
+
+                for _, tt := range tests {
+                    t.Run(tt.name, func(t *testing.T) {
+                        questionID, errResult := validateQuestionID(tt.args)
+
+                        if tt.wantErr {
+                            require.NotNil(t, errResult, "expected error result")
+                            require.True(t, errResult.IsError)
+
+                            text := getTextContent(errResult)
+                            var response map[string]any
+                            require.NoError(t, json.Unmarshal([]byte(text), &response))
+                            assert.Equal(t, tt.expectedCode, response["code"])
+                        } else {
+                            require.Nil(t, errResult, "expected no error")
+                            assert.NotEqual(t, uuid.Nil, questionID)
+                        }
+                    })
+                }
+            }
+
+            func TestValidateReasonParameter(t *testing.T) {
+                tests := []struct {
+                    name        string
+                    args        map[string]any
+                    wantErr     bool
+                    expectedCode string
+                }{
+                    {
+                        name:        "empty reason",
+                        args:        map[string]any{"reason": ""},
+                        wantErr:     true,
+                        expectedCode: "invalid_parameters",
+                    },
+                    {
+                        name:        "whitespace-only reason",
+                        args:        map[string]any{"reason": "   "},
+                        wantErr:     true,
+                        expectedCode: "invalid_parameters",
+                    },
+                    {
+                        name:        "valid reason",
+                        args:        map[string]any{"reason": "Need access to frontend repo"},
+                        wantErr:     false,
+                    },
+                }
+
+                for _, tt := range tests {
+                    t.Run(tt.name, func(t *testing.T) {
+                        reason, errResult := validateReasonParameter(tt.args)
+
+                        if tt.wantErr {
+                            require.NotNil(t, errResult, "expected error result")
+                            require.True(t, errResult.IsError)
+
+                            text := getTextContent(errResult)
+                            var response map[string]any
+                            require.NoError(t, json.Unmarshal([]byte(text), &response))
+                            assert.Equal(t, tt.expectedCode, response["code"])
+                        } else {
+                            require.Nil(t, errResult, "expected no error")
+                            assert.NotEmpty(t, reason)
+                        }
+                    })
+                }
+            }
+            ```
+
+            **Acceptance criteria:**
+            - Both validation helpers implemented and tested
+            - `resolveOntologyQuestionTool` refactored to use `validateQuestionID`
+            - All tests pass: `go test ./pkg/mcp/tools/ -run TestValidate.*Question -short`
+            - No regressions in existing resolve tool tests
+
+            **Error codes used:** `invalid_parameters`
+
+            **Dependencies:** None (standalone implementation)
+
+            ---
+
+            **IMPLEMENTATION NOTES (Completed):**
+
+            ✅ **What was done:**
+            - Added `validateQuestionID()` helper function in `pkg/mcp/tools/questions.go:48-68`
+              - Validates UUID format and non-empty constraint
+              - Returns `(uuid.UUID, *mcp.CallToolResult)` tuple for early return pattern
+              - Uses `NewErrorResult("invalid_parameters", ...)` for consistent error handling
+
+            - Added `validateReasonParameter()` helper function in `pkg/mcp/tools/questions.go:70-84`
+              - Validates non-empty string constraint with trimming
+              - Same return pattern as `validateQuestionID` for consistency
+
+            - Refactored `resolveOntologyQuestionTool` to use `validateQuestionID()` helper
+              - Replaced inline validation with single-line helper call
+              - Maintains same error handling behavior
+
+            - Added comprehensive test coverage in `pkg/mcp/tools/questions_test.go`:
+              - `TestValidateQuestionID`: Validates empty, whitespace, invalid UUID, and valid UUID cases
+              - `TestValidateReasonParameter`: Validates empty, whitespace, and valid reason cases
+              - Both tests verify error codes and response structure
+
+            **Key decisions:**
+            - Helper functions return error result directly (not wrapped) for simple early-return pattern
+            - Used existing `trimString()` helper for whitespace handling consistency
+            - Test helper `getTextContent()` used to extract error JSON from `CallToolResult`
+
+            **Files modified:**
+            - `pkg/mcp/tools/questions.go`: Added validation helpers, refactored resolve tool
+            - `pkg/mcp/tools/questions_test.go`: Added unit tests for both validators
+
+            **For next session:**
+            - These helpers are ready to be used in tasks 3.3.2.2.2, 3.3.2.2.3, and 3.3.2.2.4
+            - Pattern: `paramValue, errResult := validateXXX(req.Params.Arguments); if errResult != nil { return errResult, nil }`
+            - No changes needed to helper functions themselves
+
+         2. [ ] 3.3.2.2.2: Convert skip_ontology_question tool to error results
+
+            Apply error result pattern to `skip_ontology_question` tool using the validation helpers from subtask 3.3.2.2.1.
+
+            **Context:** The `skip_ontology_question` tool marks an ontology question as skipped for later revisiting. It requires `question_id` (UUID) and `reason` (string) parameters. This subtask uses the shared validation helpers to convert parameter validation errors to error results.
+
+            **File to modify:** `pkg/mcp/tools/questions.go`
+
+            **Implementation details:**
+
+            1. **Locate `skipOntologyQuestionTool` handler function** (search for "func skipOntologyQuestionTool")
+
+            2. **Add parameter validation using helpers** (add at beginning of handler, after `AcquireToolAccess`):
+
+            ```go
+            // Validate question_id parameter
+            questionID, errResult := validateQuestionID(req.Params.Arguments)
+            if errResult != nil {
+                return errResult, nil
+            }
+
+            // Validate reason parameter
+            reason, errResult := validateReasonParameter(req.Params.Arguments)
+            if errResult != nil {
+                return errResult, nil
+            }
+            ```
+
+            3. **Add resource validation** (after repository call):
+
+            ```go
+            err := deps.QuestionRepo.Skip(ctx, projectID, questionID, reason)
+            if err != nil {
+                if errors.Is(err, repositories.ErrOntologyQuestionNotFound) {
+                    return NewErrorResult("QUESTION_NOT_FOUND",
+                        fmt.Sprintf("ontology question %q not found", questionID.String())), nil
+                }
+                // System error - database failure
+                return nil, fmt.Errorf("failed to skip ontology question: %w", err)
+            }
+            ```
+
+            4. **System errors kept as Go errors:**
+               - Database connection failures
+               - Authentication failures from `AcquireToolAccess`
+               - Repository update failures (unexpected database errors)
+
+            **Test coverage:**
+
+            Add test function in `pkg/mcp/tools/questions_test.go`:
+
+            ```go
+            func TestSkipOntologyQuestionTool_ErrorResults(t *testing.T) {
+                tests := []struct {
+                    name        string
+                    args        map[string]any
+                    setupMock   func(*mockQuestionRepository)
+                    wantErr     bool
+                    expectedCode string
+                    checkMessage func(t *testing.T, message string)
+                }{
+                    {
+                        name:        "empty question_id",
+                        args:        map[string]any{"question_id": "  ", "reason": "Some reason"},
+                        wantErr:     true,
+                        expectedCode: "invalid_parameters",
+                        checkMessage: func(t *testing.T, msg string) {
+                            assert.Contains(t, msg, "question_id")
+                            assert.Contains(t, msg, "empty")
+                        },
+                    },
+                    {
+                        name:        "invalid UUID format",
+                        args:        map[string]any{"question_id": "not-a-uuid", "reason": "Some reason"},
+                        wantErr:     true,
+                        expectedCode: "invalid_parameters",
+                        checkMessage: func(t *testing.T, msg string) {
+                            assert.Contains(t, msg, "UUID")
+                        },
+                    },
+                    {
+                        name:        "empty reason",
+                        args:        map[string]any{"question_id": "550e8400-e29b-41d4-a716-446655440000", "reason": "  "},
+                        wantErr:     true,
+                        expectedCode: "invalid_parameters",
+                        checkMessage: func(t *testing.T, msg string) {
+                            assert.Contains(t, msg, "reason")
+                            assert.Contains(t, msg, "empty")
+                        },
+                    },
+                    {
+                        name:        "question not found",
+                        args:        map[string]any{
+                            "question_id": "550e8400-e29b-41d4-a716-446655440000",
+                            "reason":      "Need access to frontend repo",
+                        },
+                        setupMock: func(repo *mockQuestionRepository) {
+                            repo.skipErr = repositories.ErrOntologyQuestionNotFound
+                        },
+                        wantErr:     true,
+                        expectedCode: "QUESTION_NOT_FOUND",
+                        checkMessage: func(t *testing.T, msg string) {
+                            assert.Contains(t, msg, "550e8400-e29b-41d4-a716-446655440000")
+                        },
+                    },
+                }
+
+                for _, tt := range tests {
+                    t.Run(tt.name, func(t *testing.T) {
+                        mockRepo, deps := setupQuestionTest(t)
+                        if tt.setupMock != nil {
+                            tt.setupMock(mockRepo)
+                        }
+
+                        tool := skipOntologyQuestionTool(deps)
+
+                        req := mcp.CallToolRequest{
+                            Params: mcp.CallToolRequestParams{
+                                Arguments: tt.args,
+                            },
+                        }
+
+                        result, err := tool.Handler(context.Background(), req)
+
+                        if tt.wantErr {
+                            require.NoError(t, err, "Go error should be nil")
+                            require.True(t, result.IsError, "MCP error flag should be true")
+
+                            text := getTextContent(result)
+                            var response map[string]any
+                            require.NoError(t, json.Unmarshal([]byte(text), &response))
+
+                            assert.Equal(t, tt.expectedCode, response["code"])
+                            if tt.checkMessage != nil {
+                                tt.checkMessage(t, response["message"].(string))
+                            }
+                        } else {
+                            require.NoError(t, err)
+                            require.False(t, result.IsError)
+                        }
+                    })
+                }
+            }
+            ```
+
+            **Note:** You may need to add `skipErr` field to `mockQuestionRepository` struct if it doesn't exist.
+
+            **Acceptance criteria:**
+            - Parameter validation errors return error results using shared helpers
+            - Question not found returns error result
+            - System errors remain as Go errors
+            - All tests pass: `go test ./pkg/mcp/tools/ -run TestSkipOntologyQuestionTool -short`
+
+            **Error codes used:** `invalid_parameters`, `QUESTION_NOT_FOUND`
+
+            **Dependencies:** Requires subtask 3.3.2.2.1 (validation helpers)
+
+         3. [ ] 3.3.2.2.3: Convert dismiss_ontology_question and escalate_ontology_question tools to error results
+
+            Apply error result pattern to the remaining two question status tools (`dismiss_ontology_question`, `escalate_ontology_question`) using the validation helpers.
+
+            **Context:** These two tools have identical validation logic to `skip_ontology_question` (subtask 3.3.2.2.2). This subtask completes the error handling migration for all question status tools.
+
+            **File to modify:** `pkg/mcp/tools/questions.go`
+
+            **Implementation details:**
+
+            **For `dismissOntologyQuestionTool`:**
+
+            1. Locate handler function (search for "func dismissOntologyQuestionTool")
+
+            2. Add parameter validation (same as skip tool):
+            ```go
+            // Validate question_id parameter
+            questionID, errResult := validateQuestionID(req.Params.Arguments)
+            if errResult != nil {
+                return errResult, nil
+            }
+
+            // Validate reason parameter
+            reason, errResult := validateReasonParameter(req.Params.Arguments)
+            if errResult != nil {
+                return errResult, nil
+            }
+            ```
+
+            3. Add resource validation (after repository call):
+            ```go
+            err := deps.QuestionRepo.Dismiss(ctx, projectID, questionID, reason)
+            if err != nil {
+                if errors.Is(err, repositories.ErrOntologyQuestionNotFound) {
+                    return NewErrorResult("QUESTION_NOT_FOUND",
+                        fmt.Sprintf("ontology question %q not found", questionID.String())), nil
+                }
+                return nil, fmt.Errorf("failed to dismiss ontology question: %w", err)
+            }
+            ```
+
+            **For `escalateOntologyQuestionTool`:**
+
+            1. Locate handler function (search for "func escalateOntologyQuestionTool")
+
+            2. Add identical parameter validation as dismiss tool
+
+            3. Add resource validation (after repository call):
+            ```go
+            err := deps.QuestionRepo.Escalate(ctx, projectID, questionID, reason)
+            if err != nil {
+                if errors.Is(err, repositories.ErrOntologyQuestionNotFound) {
+                    return NewErrorResult("QUESTION_NOT_FOUND",
+                        fmt.Sprintf("ontology question %q not found", questionID.String())), nil
+                }
+                return nil, fmt.Errorf("failed to escalate ontology question: %w", err)
+            }
+            ```
+
+            **Test coverage:**
+
+            Add two test functions in `pkg/mcp/tools/questions_test.go`:
+
+            ```go
+            func TestDismissOntologyQuestionTool_ErrorResults(t *testing.T) {
+                tests := []struct {
+                    name        string
+                    args        map[string]any
+                    setupMock   func(*mockQuestionRepository)
+                    wantErr     bool
+                    expectedCode string
+                    checkMessage func(t *testing.T, message string)
+                }{
+                    {
+                        name:        "empty question_id",
+                        args:        map[string]any{"question_id": "  ", "reason": "Some reason"},
+                        wantErr:     true,
+                        expectedCode: "invalid_parameters",
+                        checkMessage: func(t *testing.T, msg string) {
+                            assert.Contains(t, msg, "question_id")
+                            assert.Contains(t, msg, "empty")
+                        },
+                    },
+                    {
+                        name:        "invalid UUID format",
+                        args:        map[string]any{"question_id": "not-a-uuid", "reason": "Some reason"},
+                        wantErr:     true,
+                        expectedCode: "invalid_parameters",
+                        checkMessage: func(t *testing.T, msg string) {
+                            assert.Contains(t, msg, "UUID")
+                        },
+                    },
+                    {
+                        name:        "empty reason",
+                        args:        map[string]any{"question_id": "550e8400-e29b-41d4-a716-446655440000", "reason": "  "},
+                        wantErr:     true,
+                        expectedCode: "invalid_parameters",
+                        checkMessage: func(t *testing.T, msg string) {
+                            assert.Contains(t, msg, "reason")
+                            assert.Contains(t, msg, "empty")
+                        },
+                    },
+                    {
+                        name:        "question not found",
+                        args:        map[string]any{
+                            "question_id": "550e8400-e29b-41d4-a716-446655440000",
+                            "reason":      "Column appears unused (legacy)",
+                        },
+                        setupMock: func(repo *mockQuestionRepository) {
+                            repo.dismissErr = repositories.ErrOntologyQuestionNotFound
+                        },
+                        wantErr:     true,
+                        expectedCode: "QUESTION_NOT_FOUND",
+                        checkMessage: func(t *testing.T, msg string) {
+                            assert.Contains(t, msg, "550e8400-e29b-41d4-a716-446655440000")
+                        },
+                    },
+                }
+
+                for _, tt := range tests {
+                    t.Run(tt.name, func(t *testing.T) {
+                        mockRepo, deps := setupQuestionTest(t)
+                        if tt.setupMock != nil {
+                            tt.setupMock(mockRepo)
+                        }
+
+                        tool := dismissOntologyQuestionTool(deps)
+
+                        req := mcp.CallToolRequest{
+                            Params: mcp.CallToolRequestParams{
+                                Arguments: tt.args,
+                            },
+                        }
+
+                        result, err := tool.Handler(context.Background(), req)
+
+                        if tt.wantErr {
+                            require.NoError(t, err)
+                            require.True(t, result.IsError)
+
+                            text := getTextContent(result)
+                            var response map[string]any
+                            require.NoError(t, json.Unmarshal([]byte(text), &response))
+
+                            assert.Equal(t, tt.expectedCode, response["code"])
+                            if tt.checkMessage != nil {
+                                tt.checkMessage(t, response["message"].(string))
+                            }
+                        } else {
+                            require.NoError(t, err)
+                            require.False(t, result.IsError)
+                        }
+                    })
+                }
+            }
+
+            func TestEscalateOntologyQuestionTool_ErrorResults(t *testing.T) {
+                tests := []struct {
+                    name        string
+                    args        map[string]any
+                    setupMock   func(*mockQuestionRepository)
+                    wantErr     bool
+                    expectedCode string
+                    checkMessage func(t *testing.T, message string)
+                }{
+                    {
+                        name:        "empty question_id",
+                        args:        map[string]any{"question_id": "  ", "reason": "Some reason"},
+                        wantErr:     true,
+                        expectedCode: "invalid_parameters",
+                        checkMessage: func(t *testing.T, msg string) {
+                            assert.Contains(t, msg, "question_id")
+                            assert.Contains(t, msg, "empty")
+                        },
+                    },
+                    {
+                        name:        "invalid UUID format",
+                        args:        map[string]any{"question_id": "not-a-uuid", "reason": "Some reason"},
+                        wantErr:     true,
+                        expectedCode: "invalid_parameters",
+                        checkMessage: func(t *testing.T, msg string) {
+                            assert.Contains(t, msg, "UUID")
+                        },
+                    },
+                    {
+                        name:        "empty reason",
+                        args:        map[string]any{"question_id": "550e8400-e29b-41d4-a716-446655440000", "reason": "  "},
+                        wantErr:     true,
+                        expectedCode: "invalid_parameters",
+                        checkMessage: func(t *testing.T, msg string) {
+                            assert.Contains(t, msg, "reason")
+                            assert.Contains(t, msg, "empty")
+                        },
+                    },
+                    {
+                        name:        "question not found",
+                        args:        map[string]any{
+                            "question_id": "550e8400-e29b-41d4-a716-446655440000",
+                            "reason":      "Business rule not documented in code",
+                        },
+                        setupMock: func(repo *mockQuestionRepository) {
+                            repo.escalateErr = repositories.ErrOntologyQuestionNotFound
+                        },
+                        wantErr:     true,
+                        expectedCode: "QUESTION_NOT_FOUND",
+                        checkMessage: func(t *testing.T, msg string) {
+                            assert.Contains(t, msg, "550e8400-e29b-41d4-a716-446655440000")
+                        },
+                    },
+                }
+
+                for _, tt := range tests {
+                    t.Run(tt.name, func(t *testing.T) {
+                        mockRepo, deps := setupQuestionTest(t)
+                        if tt.setupMock != nil {
+                            tt.setupMock(mockRepo)
+                        }
+
+                        tool := escalateOntologyQuestionTool(deps)
+
+                        req := mcp.CallToolRequest{
+                            Params: mcp.CallToolRequestParams{
+                                Arguments: tt.args,
+                            },
+                        }
+
+                        result, err := tool.Handler(context.Background(), req)
+
+                        if tt.wantErr {
+                            require.NoError(t, err)
+                            require.True(t, result.IsError)
+
+                            text := getTextContent(result)
+                            var response map[string]any
+                            require.NoError(t, json.Unmarshal([]byte(text), &response))
+
+                            assert.Equal(t, tt.expectedCode, response["code"])
+                            if tt.checkMessage != nil {
+                                tt.checkMessage(t, response["message"].(string))
+                            }
+                        } else {
+                            require.NoError(t, err)
+                            require.False(t, result.IsError)
+                        }
+                    })
+                }
+            }
+            ```
+
+            **Note:** You may need to add `dismissErr` and `escalateErr` fields to `mockQuestionRepository` struct if they don't exist.
+
+            **Acceptance criteria:**
+            - Both tools use shared validation helpers
+            - Parameter validation errors return error results
+            - Question not found returns error result
+            - System errors remain as Go errors
+            - All tests pass: `go test ./pkg/mcp/tools/ -run "Test(Dismiss|Escalate)OntologyQuestionTool" -short`
+
+            **Error codes used:** `invalid_parameters`, `QUESTION_NOT_FOUND`
+
+            **Dependencies:** Requires subtask 3.3.2.2.1 (validation helpers)
+
+            **Pattern reference:** Follow identical pattern from subtask 3.3.2.2.2 (skip tool)
 
       3. [ ] 3.3.2.3: Convert list_ontology_questions tool to error results
 

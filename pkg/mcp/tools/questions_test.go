@@ -753,3 +753,103 @@ func TestResolveOntologyQuestionTool_ErrorResults(t *testing.T) {
 		assert.Contains(t, errorResp.Message, questionIDStr)
 	})
 }
+
+// TestValidateQuestionID tests the validateQuestionID helper function.
+func TestValidateQuestionID(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         map[string]any
+		wantErr      bool
+		expectedCode string
+	}{
+		{
+			name:         "empty question_id",
+			args:         map[string]any{"question_id": ""},
+			wantErr:      true,
+			expectedCode: "invalid_parameters",
+		},
+		{
+			name:         "whitespace-only question_id",
+			args:         map[string]any{"question_id": "   "},
+			wantErr:      true,
+			expectedCode: "invalid_parameters",
+		},
+		{
+			name:         "invalid UUID format",
+			args:         map[string]any{"question_id": "not-a-uuid"},
+			wantErr:      true,
+			expectedCode: "invalid_parameters",
+		},
+		{
+			name:    "valid UUID",
+			args:    map[string]any{"question_id": "550e8400-e29b-41d4-a716-446655440000"},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			questionID, errResult := validateQuestionID(tt.args)
+
+			if tt.wantErr {
+				require.NotNil(t, errResult, "expected error result")
+				require.True(t, errResult.IsError)
+
+				text := getTextContent(errResult)
+				var response map[string]any
+				require.NoError(t, json.Unmarshal([]byte(text), &response))
+				assert.Equal(t, tt.expectedCode, response["code"])
+			} else {
+				require.Nil(t, errResult, "expected no error")
+				assert.NotEqual(t, uuid.Nil, questionID)
+			}
+		})
+	}
+}
+
+// TestValidateReasonParameter tests the validateReasonParameter helper function.
+func TestValidateReasonParameter(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         map[string]any
+		wantErr      bool
+		expectedCode string
+	}{
+		{
+			name:         "empty reason",
+			args:         map[string]any{"reason": ""},
+			wantErr:      true,
+			expectedCode: "invalid_parameters",
+		},
+		{
+			name:         "whitespace-only reason",
+			args:         map[string]any{"reason": "   "},
+			wantErr:      true,
+			expectedCode: "invalid_parameters",
+		},
+		{
+			name:    "valid reason",
+			args:    map[string]any{"reason": "Need access to frontend repo"},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reason, errResult := validateReasonParameter(tt.args)
+
+			if tt.wantErr {
+				require.NotNil(t, errResult, "expected error result")
+				require.True(t, errResult.IsError)
+
+				text := getTextContent(errResult)
+				var response map[string]any
+				require.NoError(t, json.Unmarshal([]byte(text), &response))
+				assert.Equal(t, tt.expectedCode, response["code"])
+			} else {
+				require.Nil(t, errResult, "expected no error")
+				assert.NotEmpty(t, reason)
+			}
+		})
+	}
+}

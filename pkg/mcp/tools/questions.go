@@ -45,6 +45,44 @@ func RegisterQuestionTools(s *server.MCPServer, deps *QuestionToolDeps) {
 	registerDismissOntologyQuestionTool(s, deps)
 }
 
+// validateQuestionID validates the question_id parameter.
+// Returns (uuid.UUID, *mcp.CallToolResult) where result is non-nil on error.
+func validateQuestionID(args map[string]any) (uuid.UUID, *mcp.CallToolResult) {
+	questionIDStr, ok := args["question_id"].(string)
+	if !ok {
+		questionIDStr = ""
+	}
+	questionIDStr = trimString(questionIDStr)
+
+	if questionIDStr == "" {
+		return uuid.Nil, NewErrorResult("invalid_parameters", "parameter 'question_id' cannot be empty")
+	}
+
+	questionID, err := uuid.Parse(questionIDStr)
+	if err != nil {
+		return uuid.Nil, NewErrorResult("invalid_parameters",
+			fmt.Sprintf("invalid question_id format: %q is not a valid UUID", questionIDStr))
+	}
+
+	return questionID, nil
+}
+
+// validateReasonParameter validates the reason parameter (required for skip/dismiss/escalate).
+// Returns (string, *mcp.CallToolResult) where result is non-nil on error.
+func validateReasonParameter(args map[string]any) (string, *mcp.CallToolResult) {
+	reasonStr, ok := args["reason"].(string)
+	if !ok {
+		reasonStr = ""
+	}
+	reasonStr = trimString(reasonStr)
+
+	if reasonStr == "" {
+		return "", NewErrorResult("invalid_parameters", "parameter 'reason' cannot be empty")
+	}
+
+	return reasonStr, nil
+}
+
 // registerListOntologyQuestionsTool adds the list_ontology_questions tool for listing questions with filters.
 func registerListOntologyQuestionsTool(s *server.MCPServer, deps *QuestionToolDeps) {
 	tool := mcp.NewTool(
@@ -309,20 +347,14 @@ func registerResolveOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 		}
 		defer cleanup()
 
-		// Extract question_id (required)
-		questionIDStr := getOptionalString(req, "question_id")
-		questionIDStr = trimString(questionIDStr)
-		if questionIDStr == "" {
-			return NewErrorResult("invalid_parameters", "parameter 'question_id' cannot be empty"), nil
+		// Validate question_id parameter
+		args, ok := req.Params.Arguments.(map[string]any)
+		if !ok {
+			args = make(map[string]any)
 		}
-
-		// Validate UUID format
-		questionID, err := uuid.Parse(questionIDStr)
-		if err != nil {
-			return NewErrorResult(
-				"invalid_parameters",
-				fmt.Sprintf("invalid question_id format: %q is not a valid UUID", questionIDStr),
-			), nil
+		questionID, errResult := validateQuestionID(args)
+		if errResult != nil {
+			return errResult, nil
 		}
 
 		// Extract resolution_notes (optional)
@@ -338,7 +370,7 @@ func registerResolveOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 		}
 
 		if question == nil {
-			return NewErrorResult("QUESTION_NOT_FOUND", fmt.Sprintf("ontology question %q not found", questionIDStr)), nil
+			return NewErrorResult("QUESTION_NOT_FOUND", fmt.Sprintf("ontology question %q not found", questionID.String())), nil
 		}
 
 		// Mark question as answered with optional resolution notes
