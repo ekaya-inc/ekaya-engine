@@ -464,27 +464,6 @@ func TestProbeColumn_ErrorCodeExtraction(t *testing.T) {
 	}
 }
 
-func TestTrimString_ProbeTools(t *testing.T) {
-	// Test trimString helper function used in probe tools
-	testCases := []struct {
-		input    string
-		expected string
-	}{
-		{"  users  ", "users"},
-		{"users", "users"},
-		{"   ", ""},
-		{"", ""},
-		{"\t\nstatus\n\t", "status"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.input, func(t *testing.T) {
-			result := trimString(tc.input)
-			assert.Equal(t, tc.expected, result)
-		})
-	}
-}
-
 // ============================================================================
 // Tests for probe_relationship tool
 // ============================================================================

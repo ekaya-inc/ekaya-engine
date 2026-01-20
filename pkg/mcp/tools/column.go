@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -451,10 +450,4 @@ type deleteColumnMetadataResponse struct {
 	Table   string `json:"table"`
 	Column  string `json:"column"`
 	Deleted bool   `json:"deleted"` // true if metadata was deleted, false if not found
-}
-
-// trimString is a helper function to trim whitespace from strings.
-func trimString(s string) string {
-	// Import strings package if not already imported
-	return strings.TrimSpace(s)
 }
