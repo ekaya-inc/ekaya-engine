@@ -2,9 +2,7 @@ package auth
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"go.uber.org/zap"
@@ -56,20 +54,9 @@ func (s *authService) ValidateRequest(r *http.Request) (*Claims, string, error) 
 	var tokenString string
 	var tokenSource string
 
-	// Try cookie first (browser clients)
-	if cookie, err := r.Cookie("ekaya_jwt"); err == nil {
-		tokenString = cookie.Value
-		tokenSource = "cookie"
-	} else {
-		// Fallback to Authorization header (API clients)
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			s.logger.Debug("No JWT found in request",
-				zap.String("path", r.URL.Path),
-				zap.String("method", r.Method))
-			return nil, "", ErrMissingAuthorization
-		}
-
+	// 1. Check Authorization header first (preferred for tab-scoped auth)
+	authHeader := r.Header.Get("Authorization")
+	if authHeader != "" {
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
 			s.logger.Debug("Invalid Authorization header format",
@@ -79,6 +66,16 @@ func (s *authService) ValidateRequest(r *http.Request) (*Claims, string, error) 
 		}
 		tokenString = parts[1]
 		tokenSource = "header"
+	} else if cookie, err := r.Cookie("ekaya_jwt"); err == nil {
+		// 2. Fall back to cookie (for backward compatibility during transition)
+		tokenString = cookie.Value
+		tokenSource = "cookie"
+	} else {
+		// No authentication found
+		s.logger.Debug("No JWT found in request",
+			zap.String("path", r.URL.Path),
+			zap.String("method", r.Method))
+		return nil, "", ErrMissingAuthorization
 	}
 
 	claims, err := s.jwksClient.ValidateToken(tokenString)
@@ -89,13 +86,6 @@ func (s *authService) ValidateRequest(r *http.Request) (*Claims, string, error) 
 			zap.String("token_source", tokenSource))
 		return nil, "", err
 	}
-
-	// #region agent log
-	if logFile, err2 := os.OpenFile("/Users/kofimupati/Dev/Tikr/ekaya/ekaya-engine/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err2 == nil {
-		logFile.WriteString(fmt.Sprintf(`{"location":"auth/service.go:82","message":"ValidateRequest completed","data":{"hasAzureTokenRef":%t,"tokenRefID":"%s","tokenSource":"%s","path":"%s"},"timestamp":%d,"sessionId":"debug-session","runId":"service-debug","hypothesisId":"A"}`+"\n", claims.AzureTokenRefID != "", claims.AzureTokenRefID, tokenSource, r.URL.Path, 0))
-		logFile.Close()
-	}
-	// #endregion
 
 	return claims, tokenString, nil
 }

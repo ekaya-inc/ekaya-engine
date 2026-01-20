@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -27,7 +28,8 @@ type DatasourceService interface {
 	GetByName(ctx context.Context, projectID uuid.UUID, name string) (*models.Datasource, error)
 
 	// List retrieves all datasources for a project with decrypted configs.
-	List(ctx context.Context, projectID uuid.UUID) ([]*models.Datasource, error)
+	// If decryption fails for a datasource, it returns the datasource with DecryptionFailed=true.
+	List(ctx context.Context, projectID uuid.UUID) ([]*models.DatasourceWithStatus, error)
 
 	// Update modifies a datasource with encrypted config.
 	Update(ctx context.Context, id uuid.UUID, name, dsType, provider string, config map[string]any) error
@@ -169,22 +171,40 @@ func (s *datasourceService) GetByName(ctx context.Context, projectID uuid.UUID, 
 }
 
 // List retrieves all datasources for a project with decrypted configs.
-func (s *datasourceService) List(ctx context.Context, projectID uuid.UUID) ([]*models.Datasource, error) {
+// If decryption fails due to key mismatch, returns datasources with DecryptionFailed=true.
+func (s *datasourceService) List(ctx context.Context, projectID uuid.UUID) ([]*models.DatasourceWithStatus, error) {
 	datasources, encryptedConfigs, err := s.repo.List(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Decrypt all configs
+	// Decrypt all configs, handling partial failures
+	result := make([]*models.DatasourceWithStatus, len(datasources))
 	for i, ds := range datasources {
 		config, err := s.decryptConfig(encryptedConfigs[i])
 		if err != nil {
+			// Check if this is a key mismatch error
+			if errors.Is(err, crypto.ErrAuthenticationFailed) {
+				s.logger.Warn("Datasource decryption failed - key mismatch",
+					zap.String("datasource_id", ds.ID.String()),
+					zap.String("project_id", projectID.String()))
+				result[i] = &models.DatasourceWithStatus{
+					Datasource:       ds,
+					DecryptionFailed: true,
+					ErrorMessage:     "datasource credentials were encrypted with a different key",
+				}
+				continue
+			}
+			// For other errors, fail completely
 			return nil, fmt.Errorf("failed to decrypt config for datasource %s: %w", ds.ID, err)
 		}
 		ds.Config = config
+		result[i] = &models.DatasourceWithStatus{
+			Datasource: ds,
+		}
 	}
 
-	return datasources, nil
+	return result, nil
 }
 
 // Update modifies a datasource with encrypted config.

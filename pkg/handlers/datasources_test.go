@@ -633,3 +633,288 @@ func TestDatasourcesHandler_TestConnection_MissingType(t *testing.T) {
 		t.Errorf("expected error 'missing_type', got %q", resp["error"])
 	}
 }
+
+// TestDatasourcesHandler_List_WithDecryptionFailure tests that the handler properly returns
+// datasources with decryption_failed flag when credentials key mismatch occurs.
+func TestDatasourcesHandler_List_WithDecryptionFailure(t *testing.T) {
+	projectID := uuid.New()
+	dsID := uuid.New()
+	now := time.Now()
+
+	// Mock service returns a datasource with decryption failure status
+	service := &mockDatasourceService{
+		datasourcesWithStatus: []*models.DatasourceWithStatus{
+			{
+				Datasource: &models.Datasource{
+					ID:             dsID,
+					ProjectID:      projectID,
+					Name:           "mydb",
+					DatasourceType: "postgres",
+					Config:         nil, // Config is nil when decryption fails
+					CreatedAt:      now,
+					UpdatedAt:      now,
+				},
+				DecryptionFailed: true,
+				ErrorMessage:     "datasource credentials were encrypted with a different key",
+			},
+		},
+	}
+	handler := NewDatasourcesHandler(service, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources", nil)
+	req.SetPathValue("pid", projectID.String())
+
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	ctx := context.WithValue(req.Context(), auth.ClaimsKey, claims)
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	handler.List(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+
+	var resp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Error("expected success to be true")
+	}
+
+	// Extract data from wrapped response
+	dataMap, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be a map, got %T", resp.Data)
+	}
+	datasources, ok := dataMap["datasources"].([]any)
+	if !ok {
+		t.Fatalf("expected datasources to be an array")
+	}
+
+	if len(datasources) != 1 {
+		t.Fatalf("expected 1 datasource, got %d", len(datasources))
+	}
+
+	ds := datasources[0].(map[string]any)
+
+	// Verify decryption_failed flag is set
+	if decryptionFailed, ok := ds["decryption_failed"].(bool); !ok || !decryptionFailed {
+		t.Errorf("expected decryption_failed to be true, got %v", ds["decryption_failed"])
+	}
+
+	// Verify error message is present
+	if errorMsg, ok := ds["error_message"].(string); !ok || errorMsg == "" {
+		t.Errorf("expected error_message to be non-empty, got %q", ds["error_message"])
+	}
+
+	// Verify datasource ID is still returned
+	if ds["datasource_id"] != dsID.String() {
+		t.Errorf("expected datasource_id %q, got %q", dsID.String(), ds["datasource_id"])
+	}
+
+	// Verify config is null when decryption fails
+	if ds["config"] != nil {
+		t.Errorf("expected config to be nil when decryption fails, got %v", ds["config"])
+	}
+}
+
+// TestDatasourcesHandler_List_PartialDecryptionFailure tests that the handler returns
+// both successful and failed datasources when partial decryption failures occur.
+func TestDatasourcesHandler_List_PartialDecryptionFailure(t *testing.T) {
+	projectID := uuid.New()
+	dsID1 := uuid.New()
+	dsID2 := uuid.New()
+	now := time.Now()
+
+	// Mock service returns one successful and one failed datasource
+	service := &mockDatasourceService{
+		datasourcesWithStatus: []*models.DatasourceWithStatus{
+			{
+				Datasource: &models.Datasource{
+					ID:             dsID1,
+					ProjectID:      projectID,
+					Name:           "working-db",
+					DatasourceType: "postgres",
+					Config:         map[string]any{"host": "localhost", "password": "secret"},
+					CreatedAt:      now,
+					UpdatedAt:      now,
+				},
+				DecryptionFailed: false,
+			},
+			{
+				Datasource: &models.Datasource{
+					ID:             dsID2,
+					ProjectID:      projectID,
+					Name:           "broken-db",
+					DatasourceType: "postgres",
+					Config:         nil,
+					CreatedAt:      now,
+					UpdatedAt:      now,
+				},
+				DecryptionFailed: true,
+				ErrorMessage:     "datasource credentials were encrypted with a different key",
+			},
+		},
+	}
+	handler := NewDatasourcesHandler(service, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources", nil)
+	req.SetPathValue("pid", projectID.String())
+
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	ctx := context.WithValue(req.Context(), auth.ClaimsKey, claims)
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	handler.List(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+
+	var resp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Error("expected success to be true")
+	}
+
+	// Extract data from wrapped response
+	dataMap, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be a map, got %T", resp.Data)
+	}
+	datasources, ok := dataMap["datasources"].([]any)
+	if !ok {
+		t.Fatalf("expected datasources to be an array")
+	}
+
+	if len(datasources) != 2 {
+		t.Fatalf("expected 2 datasources, got %d", len(datasources))
+	}
+
+	// First datasource should be working
+	ds1 := datasources[0].(map[string]any)
+	if ds1["datasource_id"] != dsID1.String() {
+		t.Errorf("expected first datasource_id %q, got %q", dsID1.String(), ds1["datasource_id"])
+	}
+	if decryptionFailed, ok := ds1["decryption_failed"].(bool); ok && decryptionFailed {
+		t.Error("expected first datasource decryption_failed to be false or absent")
+	}
+	if ds1["config"] == nil {
+		t.Error("expected first datasource to have config")
+	}
+
+	// Second datasource should have decryption failure
+	ds2 := datasources[1].(map[string]any)
+	if ds2["datasource_id"] != dsID2.String() {
+		t.Errorf("expected second datasource_id %q, got %q", dsID2.String(), ds2["datasource_id"])
+	}
+	if decryptionFailed, ok := ds2["decryption_failed"].(bool); !ok || !decryptionFailed {
+		t.Errorf("expected second datasource decryption_failed to be true, got %v", ds2["decryption_failed"])
+	}
+	if errorMsg, ok := ds2["error_message"].(string); !ok || errorMsg == "" {
+		t.Errorf("expected second datasource error_message to be non-empty, got %q", ds2["error_message"])
+	}
+	if ds2["config"] != nil {
+		t.Errorf("expected second datasource config to be nil, got %v", ds2["config"])
+	}
+}
+
+// TestDatasourcesHandler_List_AllDecryptionFailures tests the edge case where
+// all datasources have decryption failures.
+func TestDatasourcesHandler_List_AllDecryptionFailures(t *testing.T) {
+	projectID := uuid.New()
+	dsID1 := uuid.New()
+	dsID2 := uuid.New()
+	now := time.Now()
+
+	// Mock service returns all failed datasources
+	service := &mockDatasourceService{
+		datasourcesWithStatus: []*models.DatasourceWithStatus{
+			{
+				Datasource: &models.Datasource{
+					ID:             dsID1,
+					ProjectID:      projectID,
+					Name:           "db1",
+					DatasourceType: "postgres",
+					Config:         nil,
+					CreatedAt:      now,
+					UpdatedAt:      now,
+				},
+				DecryptionFailed: true,
+				ErrorMessage:     "datasource credentials were encrypted with a different key",
+			},
+			{
+				Datasource: &models.Datasource{
+					ID:             dsID2,
+					ProjectID:      projectID,
+					Name:           "db2",
+					DatasourceType: "mssql",
+					Config:         nil,
+					CreatedAt:      now,
+					UpdatedAt:      now,
+				},
+				DecryptionFailed: true,
+				ErrorMessage:     "datasource credentials were encrypted with a different key",
+			},
+		},
+	}
+	handler := NewDatasourcesHandler(service, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/datasources", nil)
+	req.SetPathValue("pid", projectID.String())
+
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	ctx := context.WithValue(req.Context(), auth.ClaimsKey, claims)
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	handler.List(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+
+	var resp ApiResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Error("expected success to be true")
+	}
+
+	// Extract data from wrapped response
+	dataMap, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be a map, got %T", resp.Data)
+	}
+	datasources, ok := dataMap["datasources"].([]any)
+	if !ok {
+		t.Fatalf("expected datasources to be an array")
+	}
+
+	if len(datasources) != 2 {
+		t.Fatalf("expected 2 datasources, got %d", len(datasources))
+	}
+
+	// Verify all datasources have decryption failures
+	for i, dsAny := range datasources {
+		ds := dsAny.(map[string]any)
+		if decryptionFailed, ok := ds["decryption_failed"].(bool); !ok || !decryptionFailed {
+			t.Errorf("expected datasource %d decryption_failed to be true, got %v", i, ds["decryption_failed"])
+		}
+		if errorMsg, ok := ds["error_message"].(string); !ok || errorMsg == "" {
+			t.Errorf("expected datasource %d error_message to be non-empty, got %q", i, ds["error_message"])
+		}
+		if ds["config"] != nil {
+			t.Errorf("expected datasource %d config to be nil, got %v", i, ds["config"])
+		}
+	}
+}

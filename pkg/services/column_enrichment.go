@@ -393,7 +393,11 @@ func (s *columnEnrichmentService) getDatasource(ctx context.Context, projectID u
 	// For now, just return the first datasource (most projects have one)
 	// TODO: Match based on schema if multiple datasources
 	if len(datasources) > 0 {
-		return datasources[0], nil
+		// If the datasource failed decryption, return an error
+		if datasources[0].DecryptionFailed {
+			return nil, fmt.Errorf("datasource credentials were encrypted with a different key")
+		}
+		return datasources[0].Datasource, nil
 	}
 
 	return nil, fmt.Errorf("no datasource found for project %s", projectID)

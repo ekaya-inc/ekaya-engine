@@ -72,8 +72,33 @@ func TestAuthService_ValidateRequest_AuthHeader(t *testing.T) {
 	}
 }
 
-func TestAuthService_ValidateRequest_CookieTakesPrecedence(t *testing.T) {
-	// When both cookie and header are present, cookie should win
+func TestAuthService_ValidateRequest_AuthorizationHeaderTakesPrecedence(t *testing.T) {
+	// When both Authorization header and cookie are present, header should win
+	// This enables tab-scoped authentication via Bearer tokens while maintaining
+	// backward compatibility with cookie-based auth during transition.
+	expectedClaims := &Claims{
+		ProjectID: "from-header",
+	}
+
+	service := NewAuthService(&mockJWKSClient{claims: expectedClaims}, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	req.Header.Set("Authorization", "Bearer header-token")
+	req.AddCookie(&http.Cookie{Name: "ekaya_jwt", Value: "cookie-token"})
+
+	_, token, err := service.ValidateRequest(req)
+	if err != nil {
+		t.Fatalf("ValidateRequest failed: %v", err)
+	}
+
+	if token != "header-token" {
+		t.Errorf("expected Authorization header token to take precedence, got %q", token)
+	}
+}
+
+func TestAuthService_ValidateRequest_FallsBackToCookie(t *testing.T) {
+	// When only cookie is present (no Authorization header), cookie should be used
+	// This provides backward compatibility during transition to Bearer tokens.
 	expectedClaims := &Claims{
 		ProjectID: "from-cookie",
 	}
@@ -81,23 +106,29 @@ func TestAuthService_ValidateRequest_CookieTakesPrecedence(t *testing.T) {
 	service := NewAuthService(&mockJWKSClient{claims: expectedClaims}, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	// No Authorization header
 	req.AddCookie(&http.Cookie{Name: "ekaya_jwt", Value: "cookie-token"})
-	req.Header.Set("Authorization", "Bearer header-token")
 
-	_, token, err := service.ValidateRequest(req)
+	claims, token, err := service.ValidateRequest(req)
 	if err != nil {
 		t.Fatalf("ValidateRequest failed: %v", err)
 	}
 
 	if token != "cookie-token" {
-		t.Errorf("expected cookie token to take precedence, got %q", token)
+		t.Errorf("expected cookie token, got %q", token)
+	}
+
+	if claims.ProjectID != "from-cookie" {
+		t.Errorf("expected ProjectID 'from-cookie', got %q", claims.ProjectID)
 	}
 }
 
 func TestAuthService_ValidateRequest_MissingAuth(t *testing.T) {
+	// When neither Authorization header nor cookie is present, should return error
 	service := NewAuthService(&mockJWKSClient{}, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	// No Authorization header, no cookie
 
 	_, _, err := service.ValidateRequest(req)
 	if err == nil {

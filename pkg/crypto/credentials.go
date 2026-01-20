@@ -16,6 +16,8 @@ var (
 	ErrInvalidKey = errors.New("invalid encryption key: must not be empty")
 	// ErrDecryptionFailed is returned when decryption fails due to invalid ciphertext or wrong key.
 	ErrDecryptionFailed = errors.New("decryption failed: invalid ciphertext or wrong key")
+	// ErrAuthenticationFailed is returned when GCM authentication fails, indicating wrong encryption key.
+	ErrAuthenticationFailed = errors.New("authentication failed: wrong encryption key")
 )
 
 // CredentialEncryptor provides AES-256-GCM encryption for sensitive credential data.
@@ -102,7 +104,8 @@ func (e *CredentialEncryptor) Decrypt(encrypted string) (string, error) {
 	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
 	plaintext, err := e.gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return "", fmt.Errorf("%w: authentication failed", ErrDecryptionFailed)
+		// GCM authentication failure indicates wrong encryption key
+		return "", ErrAuthenticationFailed
 	}
 
 	return string(plaintext), nil

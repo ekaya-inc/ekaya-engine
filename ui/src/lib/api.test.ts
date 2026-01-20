@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { fetchWithAuth } from './api';
+import * as authToken from './auth-token';
 
 // Mock the config service
 vi.mock('../services/config', () => ({
@@ -11,6 +12,13 @@ vi.mock('../services/config', () => ({
     authorizationEndpoint: 'http://localhost:5002/authorize',
     tokenEndpoint: 'http://localhost:3443/mcp/oauth/token',
   })),
+}));
+
+// Mock the auth-token utilities
+vi.mock('./auth-token', () => ({
+  getProjectToken: vi.fn(),
+  clearProjectToken: vi.fn(),
+  isTokenExpired: vi.fn(),
 }));
 
 // Mock the generatePKCE function
@@ -44,7 +52,11 @@ describe('api.js - fetchWithAuth', () => {
     vi.restoreAllMocks();
   });
 
-  it('should pass through successful responses (200)', async () => {
+  it('should send Authorization Bearer header with token', async () => {
+    const mockToken = 'valid-jwt-token';
+    vi.mocked(authToken.getProjectToken).mockReturnValue(mockToken);
+    vi.mocked(authToken.isTokenExpired).mockReturnValue(false);
+
     // Mock fetch to return success
     global.fetch = vi.fn(() =>
       Promise.resolve({
@@ -57,21 +69,35 @@ describe('api.js - fetchWithAuth', () => {
     const response = await fetchWithAuth('/api/test');
 
     expect(response.status).toBe(200);
-    expect(global.fetch).toHaveBeenCalledWith('/api/test', {
-      credentials: 'include',
-    });
+    expect(global.fetch).toHaveBeenCalledWith('/api/test', expect.objectContaining({
+      headers: expect.objectContaining({
+        'Authorization': `Bearer ${mockToken}`,
+      }),
+    }));
   });
 
-  it('should store correct sessionStorage keys on 401', async () => {
-    // Mock fetch to return 401
+  it('should NOT send credentials: include (no cookies)', async () => {
+    vi.mocked(authToken.getProjectToken).mockReturnValue('token');
+    vi.mocked(authToken.isTokenExpired).mockReturnValue(false);
+
     global.fetch = vi.fn(() =>
       Promise.resolve({
-        status: 401,
-        ok: false,
+        status: 200,
+        ok: true,
       } as Response)
     ) as any;
 
-    // Prevent actual redirect
+    await fetchWithAuth('/api/test');
+
+    // Should not include credentials: 'include' since we're using Bearer token
+    const fetchCall = vi.mocked(global.fetch).mock.calls[0];
+    expect(fetchCall?.[1]?.credentials).toBeUndefined();
+  });
+
+  it('should initiate OAuth flow when no token present', async () => {
+    vi.mocked(authToken.getProjectToken).mockReturnValue(null);
+
+    // Mock window.location for OAuth redirect
     const originalHref = window.location.href;
     Object.defineProperty(window.location, 'href', {
       writable: true,
@@ -79,10 +105,13 @@ describe('api.js - fetchWithAuth', () => {
     });
 
     // Start the fetchWithAuth call (it will try to redirect)
-    fetchWithAuth('/api/projects');
+    fetchWithAuth('/api/test');
 
-    // Wait a bit for sessionStorage to be set
+    // Wait for async handling
     await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Should not call fetch when no token
+    expect(global.fetch).not.toHaveBeenCalled();
 
     // Verify sessionStorage keys are correct
     expect(sessionStorage.getItem('oauth_code_verifier')).toBe('test-verifier-123');
@@ -93,8 +122,64 @@ describe('api.js - fetchWithAuth', () => {
     expect(sessionStorage.getItem('oauth_return_url')).toBe('/projects/test-123');
   });
 
-  it('should extract project_id from URL path on 401', async () => {
+  it('should clear token and re-auth on 401 response', async () => {
+    vi.mocked(authToken.getProjectToken).mockReturnValue('expired-token');
+    vi.mocked(authToken.isTokenExpired).mockReturnValue(false);
+
+    // Mock fetch to return 401
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        status: 401,
+        ok: false,
+      } as Response)
+    ) as any;
+
+    // Mock window.location for OAuth redirect
+    const originalHref = window.location.href;
+    Object.defineProperty(window.location, 'href', {
+      writable: true,
+      value: originalHref,
+    });
+
+    fetchWithAuth('/api/test');
+
+    // Wait for async handling
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(authToken.clearProjectToken).toHaveBeenCalled();
+  });
+
+  it('should clear token and re-auth on 403 response', async () => {
+    vi.mocked(authToken.getProjectToken).mockReturnValue('wrong-project-token');
+    vi.mocked(authToken.isTokenExpired).mockReturnValue(false);
+
+    // Mock fetch to return 403
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        status: 403,
+        ok: false,
+      } as Response)
+    ) as any;
+
+    // Mock window.location for OAuth redirect
+    const originalHref = window.location.href;
+    Object.defineProperty(window.location, 'href', {
+      writable: true,
+      value: originalHref,
+    });
+
+    fetchWithAuth('/api/test');
+
+    // Wait for async handling
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(authToken.clearProjectToken).toHaveBeenCalled();
+  });
+
+  it('should extract project_id from URL path when re-authenticating', async () => {
     (window as any).location.pathname = '/projects/abc-def-123';
+    vi.mocked(authToken.getProjectToken).mockReturnValue('token');
+    vi.mocked(authToken.isTokenExpired).mockReturnValue(false);
 
     global.fetch = vi.fn(() =>
       Promise.resolve({
@@ -113,7 +198,7 @@ describe('api.js - fetchWithAuth', () => {
     fetchWithAuth('/api/test');
 
     // Wait for redirect
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await new Promise(resolve => setTimeout(resolve, 50));
 
     // Check that redirect URL includes project_id
     expect(hrefSpy).toHaveBeenCalled();
@@ -123,7 +208,10 @@ describe('api.js - fetchWithAuth', () => {
     expect(redirectUrl).toContain('project_id=abc-def-123');
   });
 
-  it('should include credentials in all requests', async () => {
+  it('should preserve custom headers and merge with Authorization', async () => {
+    vi.mocked(authToken.getProjectToken).mockReturnValue('test-token');
+    vi.mocked(authToken.isTokenExpired).mockReturnValue(false);
+
     global.fetch = vi.fn(() =>
       Promise.resolve({
         status: 200,
@@ -138,8 +226,10 @@ describe('api.js - fetchWithAuth', () => {
 
     expect(global.fetch).toHaveBeenCalledWith('/api/test', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer test-token',
+      },
     });
   });
 });

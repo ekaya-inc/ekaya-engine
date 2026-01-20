@@ -354,9 +354,9 @@ func (s *testColEnrichmentDatasourceService) GetByName(ctx context.Context, proj
 	return nil, nil
 }
 
-func (s *testColEnrichmentDatasourceService) List(ctx context.Context, projectID uuid.UUID) ([]*models.Datasource, error) {
+func (s *testColEnrichmentDatasourceService) List(ctx context.Context, projectID uuid.UUID) ([]*models.DatasourceWithStatus, error) {
 	// Return empty list - enum sampling will be skipped
-	return []*models.Datasource{}, nil
+	return []*models.DatasourceWithStatus{}, nil
 }
 
 func (s *testColEnrichmentDatasourceService) Update(ctx context.Context, id uuid.UUID, name, dsType, provider string, config map[string]any) error {

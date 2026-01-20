@@ -19,3 +19,11 @@ type Datasource struct {
 	CreatedAt      time.Time      `json:"created_at"`
 	UpdatedAt      time.Time      `json:"updated_at"`
 }
+
+// DatasourceWithStatus wraps Datasource with decryption status information.
+// Used when listing datasources where some may have been encrypted with a different key.
+type DatasourceWithStatus struct {
+	*Datasource
+	DecryptionFailed bool   `json:"decryption_failed,omitempty"`
+	ErrorMessage     string `json:"error_message,omitempty"`
+}

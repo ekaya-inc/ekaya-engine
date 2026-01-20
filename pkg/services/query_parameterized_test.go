@@ -503,7 +503,7 @@ func (m *mockDatasourceSvc) GetByName(ctx context.Context, projectID uuid.UUID, 
 	return nil, nil
 }
 
-func (m *mockDatasourceSvc) List(ctx context.Context, projectID uuid.UUID) ([]*models.Datasource, error) {
+func (m *mockDatasourceSvc) List(ctx context.Context, projectID uuid.UUID) ([]*models.DatasourceWithStatus, error) {
 	return nil, nil
 }
 
@@ -894,7 +894,7 @@ func (m *mockDatasourceSvcForTest) GetByName(ctx context.Context, projectID uuid
 	return nil, nil
 }
 
-func (m *mockDatasourceSvcForTest) List(ctx context.Context, projectID uuid.UUID) ([]*models.Datasource, error) {
+func (m *mockDatasourceSvcForTest) List(ctx context.Context, projectID uuid.UUID) ([]*models.DatasourceWithStatus, error) {
 	return nil, nil
 }
 
