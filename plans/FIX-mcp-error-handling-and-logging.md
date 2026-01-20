@@ -69,7 +69,7 @@ When debugging MCP integrations, two issues make troubleshooting difficult:
             5. [x] 3.2.4.3.4.5: Run full test suite and verify
       4. [x] 3.2.4.4: Document final error handling pattern (`plans/FIX-all-mcp-tool-error-handling.md`)
 3. [ ] 3.3: Keep system errors as Go errors
-   1. [ ] 3.3.1: Convert glossary tools to error results
+   1. [x] 3.3.1: Convert glossary tools to error results
 
       Convert glossary management tools: `update_glossary_term`, `get_glossary_sql`, `list_glossary` in `pkg/mcp/tools/glossary.go`.
 
