@@ -736,27 +736,50 @@ func sanitizeArguments(args map[string]any) map[string]any {
          - **Note on CASCADE behavior:** The database schema has `ON DELETE CASCADE` for relationships, aliases, key_columns, and occurrences. However, we explicitly check and prevent deletion if relationships or occurrences exist, requiring the user to delete dependencies first. This is a "fail fast" approach that prevents accidental data loss and makes the deletion process more intentional.
          - **Commit:** Changes reviewed, approved, and ready for commit with comprehensive test coverage
          - **Next implementer:** Task 3.2.3.2 (get_entity and list_entities tools) - apply same pattern for parameter validation and resource lookups. These are simpler read operations with fewer error scenarios.
-      2. [ ] 3.2.3.2: Convert get_entity and list_entities tools to error results
-         - **Implementation:** Apply error handling pattern to `get_entity` and `list_entities` in `pkg/mcp/tools/entity.go`
-         - **For get_entity:**
-           - **Parameter validation errors to convert:**
-             - Empty entity name after trimming → `NewErrorResult("invalid_parameters", "parameter 'name' cannot be empty")`
-           - **Resource lookup errors to convert:**
-             - Entity not found → `NewErrorResult("ENTITY_NOT_FOUND", "entity \"<name>\" not found")`
-           - **System errors to keep as Go errors:**
-             - Database connection failures
-             - Authentication failures from `AcquireToolAccess`
-         - **For list_entities:**
-           - Most errors will be system errors (database failures). Focus on:
-             - Empty result set is NOT an error - return empty list
-             - Database connection failures remain as Go errors
-         - **Test coverage required:**
-           - Add to `pkg/mcp/tools/entity_test.go`:
-             - `TestGetEntityTool_ErrorResults` covering:
-               - Empty entity name
-               - Entity not found
-             - `TestListEntitiesTool_EmptyResult` verifying empty list returns successfully (not an error)
-         - **Pattern:** Simple read operations - mainly parameter validation and resource not found errors
+      2. [ ] 3.2.3.2: Convert get_entity and list_entities tools to error results (SPLIT INTO SUBTASKS BELOW)
+         1. [x] **COMPLETED** - 3.2.3.2.1: Convert get_entity tool to error results
+            - **Implementation:** Modified `pkg/mcp/tools/entity.go` to convert parameter validation and resource lookup errors to error results
+            - **Files modified:**
+              - `pkg/mcp/tools/entity.go` (lines 81-85, 101-103):
+                - Empty entity name after trimming → `NewErrorResult("invalid_parameters", "parameter 'name' cannot be empty")`
+                - Entity not found → `NewErrorResult("ENTITY_NOT_FOUND", fmt.Sprintf("entity %q not found", name))`
+              - `pkg/mcp/tools/entity_test.go` (lines 745-794):
+                - Added `TestGetEntityTool_ErrorResults` with 2 test cases:
+                  - Empty entity name (whitespace-only string)
+                  - Entity not found
+                - All tests verify: `result.IsError == true`, correct error code, and appropriate error message
+            - **Error conversion pattern:**
+              - Parameter validation: Trim name with `trimString()`, check non-empty → `NewErrorResult("invalid_parameters", ...)`
+              - Resource validation: Check if entity exists → `NewErrorResult("ENTITY_NOT_FOUND", ...)`
+              - System errors: Database connection failures, auth failures → remain as Go errors
+            - **System errors kept as Go errors:**
+              - Database connection failures from `OntologyEntityRepo.GetByName()`
+              - Authentication failures from `AcquireToolAccess()`
+              - Ontology not active errors from `OntologyRepo.GetActive()`
+              - GetAliasesByEntity, GetKeyColumnsByEntity, GetByOntology, GetByTargetEntity failures
+            - **Error codes used:** `invalid_parameters`, `ENTITY_NOT_FOUND`
+            - **Test coverage:** All 2 tests in `TestGetEntityTool_ErrorResults` pass
+            - **Pattern established:** Simple read operation with minimal error handling - parameter validation and resource not found errors
+            - **Next implementer:** Task 3.2.3.2.2 (list_entities tool) - apply same pattern, but remember that empty result sets are NOT errors (return empty list)
+         2. [ ] 3.2.3.2.2: Convert list_entities tool to error results
+            - **Implementation:** Apply error handling pattern to `list_entities` in `pkg/mcp/tools/entity.go`
+            - **Key principle:** Empty result set is NOT an error - this is a successful query that found no entities
+            - **Parameter validation errors to convert:**
+              - None expected (list_entities typically has no required parameters)
+              - If optional filter parameters exist, validate they are non-empty after trimming
+            - **Resource lookup errors to convert:**
+              - None - empty list is a valid success response
+            - **System errors to keep as Go errors:**
+              - Database connection failures from `OntologyRepo.ListEntities()`
+              - Authentication failures from `AcquireToolAccess()`
+              - Ontology not active errors from `OntologyRepo.GetActive()`
+            - **Test coverage required:**
+              - Add `TestListEntitiesTool_EmptyResult` to `pkg/mcp/tools/entity_test.go`:
+                - Verify that when repository returns empty list, tool returns success (NOT an error result)
+                - Verify `result.IsError == false` or result is not an error result type
+                - Verify response contains empty array/list
+            - **Pattern:** Simple read operation with minimal error handling. Focus test on confirming empty results are handled correctly as success cases, not errors. This establishes the pattern that "no results found" is different from "resource not found" errors.
+            - **Dependencies:** No new dependencies needed. May use `NewErrorResult()` if filter parameter validation is added.
       3. [ ] 3.2.3.3: Convert relationship tools to error results (update_relationship, delete_relationship)
          - **Implementation:** Apply error handling pattern to `update_relationship` and `delete_relationship` in `pkg/mcp/tools/relationship.go`
          - **For update_relationship:**

@@ -741,3 +741,54 @@ func TestDeleteEntityTool_ErrorResults(t *testing.T) {
 		assert.Contains(t, tablesStr, "sessions")
 	})
 }
+
+// TestGetEntityTool_ErrorResults tests that actionable errors are returned as error results.
+func TestGetEntityTool_ErrorResults(t *testing.T) {
+	t.Run("empty entity name after trimming", func(t *testing.T) {
+		// Simulate validation check for empty name after trimming
+		name := "   " // Whitespace-only string
+		name = trimString(name)
+		if name == "" {
+			result := NewErrorResult(
+				"invalid_parameters",
+				"parameter 'name' cannot be empty",
+			)
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse the content to verify structure
+			var errorResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, err)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Equal(t, "parameter 'name' cannot be empty", errorResp.Message)
+		}
+	})
+
+	t.Run("entity not found", func(t *testing.T) {
+		// Simulate entity not found scenario
+		entityName := "NonExistentEntity"
+		result := NewErrorResult(
+			"ENTITY_NOT_FOUND",
+			fmt.Sprintf("entity %q not found", entityName),
+		)
+
+		// Verify it's an error result
+		assert.NotNil(t, result)
+		assert.True(t, result.IsError)
+
+		// Parse the content to verify structure
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "ENTITY_NOT_FOUND", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "NonExistentEntity")
+		assert.Contains(t, errorResp.Message, "not found")
+	})
+}

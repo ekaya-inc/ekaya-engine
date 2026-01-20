@@ -78,6 +78,12 @@ func registerGetEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			return nil, err
 		}
 
+		// Validate name is not empty after trimming
+		name = trimString(name)
+		if name == "" {
+			return NewErrorResult("invalid_parameters", "parameter 'name' cannot be empty"), nil
+		}
+
 		// Get active ontology
 		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
 		if err != nil {
@@ -93,7 +99,7 @@ func registerGetEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			return nil, fmt.Errorf("failed to get entity: %w", err)
 		}
 		if entity == nil {
-			return nil, fmt.Errorf("entity '%s' not found", name)
+			return NewErrorResult("ENTITY_NOT_FOUND", fmt.Sprintf("entity %q not found", name)), nil
 		}
 
 		// Get aliases for this entity
