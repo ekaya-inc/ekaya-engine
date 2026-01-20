@@ -148,45 +148,45 @@ export function isTokenExpired(jwt: string): boolean {
 }
 ```
 
-### Task 2: Update Backend to Return JWT in Response Body
+### Task 2: Update Backend to Return JWT in Response Body ✅
 
-**File: `pkg/handlers/auth.go`**
+**Status: COMPLETE** ✅
 
-Modify `CompleteOAuth` to return the JWT in the response body instead of (or in addition to) setting a cookie:
+**Files Modified:**
+- `pkg/handlers/auth.go` - Added token and project_id to response body
+- `pkg/handlers/auth_test.go` - Added comprehensive tests
+
+**Implementation Summary:**
+
+Modified `CompleteOAuth` handler to return JWT and project_id in the response body (in addition to setting cookie for backward compatibility):
 
 ```go
-// CompleteOAuthResponse - add Token field
+// CompleteOAuthResponse - added Token and ProjectID fields
 type CompleteOAuthResponse struct {
     Success     bool   `json:"success"`
     RedirectURL string `json:"redirect_url"`
-    Token       string `json:"token"`      // NEW: Return JWT for sessionStorage
-    ProjectID   string `json:"project_id"` // NEW: Return project ID for storage
+    Token       string `json:"token"`       // JWT for sessionStorage
+    ProjectID   string `json:"project_id"`  // Project ID extracted from JWT
 }
 ```
 
-In the handler, extract project_id from the JWT claims and include both in response:
+**Key Implementation Details:**
 
-```go
-// After token exchange succeeds...
-// Parse JWT to get project_id (for frontend storage)
-claims, err := h.authService.ParseTokenUnverified(token)
-if err != nil {
-    // Log but don't fail - token is still valid
-    h.logger.Warn("Failed to parse token for project_id", zap.Error(err))
-}
+1. **JWT Parsing:** Uses `jwt.NewParser(jwt.WithoutClaimsValidation()).ParseUnverified()` to extract project_id claim without full validation (since token is already validated by auth server)
 
-// Return token in response body for sessionStorage
-if err := WriteJSON(w, http.StatusOK, CompleteOAuthResponse{
-    Success:     true,
-    RedirectURL: originalURL,
-    Token:       token,
-    ProjectID:   claims.ProjectID, // May be empty if parse failed
-}); err != nil {
-    h.logger.Error("Failed to encode response", zap.Error(err))
-}
-```
+2. **Error Handling:** JWT parsing failures are logged as warnings but do not fail the request - the token is still valid and usable
 
-**Note**: Keep setting the cookie temporarily for backward compatibility during transition. Remove cookie setting in a follow-up once frontend is updated.
+3. **Backward Compatibility:** Cookie is still set alongside response body fields to support gradual migration
+
+4. **Test Coverage:**
+   - `TestAuthHandler_CompleteOAuth_ReturnsTokenInBody` - Verifies valid JWT returns token and project_id in response
+   - `TestAuthHandler_CompleteOAuth_HandlesInvalidJWTGracefully` - Verifies malformed JWTs don't cause request failures
+   - Updated `TestAuthHandler_CompleteOAuth_Success` - Verifies token field is present
+
+**Important Notes for Next Task:**
+- The response now includes both `token` and `project_id` fields
+- Frontend should check for both fields in response before attempting to extract project_id from JWT manually
+- Cookie is still being set (can be removed in later cleanup task)
 
 ### Task 3: Update OAuthCallbackPage to Store JWT in sessionStorage
 

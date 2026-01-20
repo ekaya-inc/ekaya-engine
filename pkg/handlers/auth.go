@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
@@ -26,6 +27,8 @@ type CompleteOAuthRequest struct {
 type CompleteOAuthResponse struct {
 	Success     bool   `json:"success"`
 	RedirectURL string `json:"redirect_url"`
+	Token       string `json:"token"`       // JWT for sessionStorage
+	ProjectID   string `json:"project_id"`  // Project ID extracted from JWT
 }
 
 // LogoutResponse represents the response for logout.
@@ -129,13 +132,29 @@ func (h *AuthHandler) CompleteOAuth(w http.ResponseWriter, r *http.Request) {
 		originalURL = "/"
 	}
 
-	h.logger.Info("OAuth completion successful",
-		zap.String("original_url", originalURL))
+	// Parse JWT to extract project_id (for frontend storage)
+	projectID := ""
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+	parsedToken, _, err := parser.ParseUnverified(token, &auth.Claims{})
+	if err != nil {
+		// Log warning but don't fail - token is still valid
+		h.logger.Warn("Failed to parse token for project_id extraction", zap.Error(err))
+	} else if claims, ok := parsedToken.Claims.(*auth.Claims); ok && claims.ProjectID != "" {
+		projectID = claims.ProjectID
+	} else {
+		h.logger.Warn("Failed to extract project_id from token claims")
+	}
 
-	// Return success with redirect URL
+	h.logger.Info("OAuth completion successful",
+		zap.String("original_url", originalURL),
+		zap.String("project_id", projectID))
+
+	// Return success with redirect URL, token, and project_id
 	if err := WriteJSON(w, http.StatusOK, CompleteOAuthResponse{
 		Success:     true,
 		RedirectURL: originalURL,
+		Token:       token,
+		ProjectID:   projectID,
 	}); err != nil {
 		h.logger.Error("Failed to encode response", zap.Error(err))
 	}
