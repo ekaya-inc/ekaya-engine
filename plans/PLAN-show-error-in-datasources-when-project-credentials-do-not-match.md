@@ -81,7 +81,7 @@ The GCM auth failure is the key indicator of a wrong encryption key.
 ## Implementation Steps
 
 1. [x] Add `ErrCredentialsKeyMismatch` to apperrors
-2. [ ] Modify `crypto.CredentialEncryptor.Decrypt()` to wrap GCM errors with identifiable type
+2. [x] Modify `crypto.CredentialEncryptor.Decrypt()` to wrap GCM errors with identifiable type
 3. [ ] Update `DatasourceService.List()` to catch key mismatch and return partial results with status
 4. [ ] Update `DatasourcesHandler.List()` response to include decryption status
 5. [ ] Update frontend `DatasourcePage` to detect and display the error
