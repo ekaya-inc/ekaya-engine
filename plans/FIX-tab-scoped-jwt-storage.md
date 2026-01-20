@@ -443,7 +443,33 @@ func (s *authService) ExtractToken(r *http.Request) (string, string) {
 }
 ```
 
-### Task 6: Remove Cookie Clearing from Frontend
+### Task 6: Remove Cookie Clearing from Frontend ✅
+
+**Status: COMPLETE** ✅
+
+**Findings:**
+The `ui/src/lib/api.ts` file was completely rewritten during Task 4 to use Bearer token authentication with sessionStorage. The cookie clearing line never existed in the new implementation:
+
+- No `document.cookie` manipulation anywhere in the file
+- No cookie-related code at all in `ui/src/lib/` directory
+- The file uses pure Bearer token authentication via Authorization header
+- All token management goes through `auth-token.ts` utilities (sessionStorage only)
+
+**Verification:**
+- Searched entire `ui/src/lib/` directory for `document.cookie` - no matches found
+- Reviewed complete `api.ts` implementation - no cookie references
+- The file is 84 lines of clean Bearer token implementation
+
+**Why This Works:**
+During Task 4's complete rewrite of `fetchWithAuth()`, all cookie handling was removed and replaced with sessionStorage-based token management. The cookie clearing line mentioned in the plan spec was never part of the new implementation.
+
+**Implementation Notes for Future Sessions:**
+- Frontend code is now 100% sessionStorage-based with zero cookie dependencies
+- All authentication flows use Bearer token via Authorization header
+- Tab-scoped isolation is fully implemented on the frontend
+- Backend still sets cookies for backward compatibility but frontend ignores them completely
+
+**Original Spec:**
 
 **File: `ui/src/lib/api.ts`**
 
