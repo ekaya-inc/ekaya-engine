@@ -767,7 +767,7 @@ func sanitizeArguments(args map[string]any) map[string]any {
             - **Note:** A bug fix for `main.go` (adding `SchemaRepo` and `ProjectService` to `ColumnToolDeps`) was committed during this task's attempted implementation. This fix should have been part of task 3.2.2.2 (update_column) but was missed.
             - **Next implementer:** Skip this task and proceed to 3.2.3.3 (relationship tools)
       3. [ ] 3.2.3.3: Convert relationship tools to error results (SPLIT INTO SUBTASKS BELOW)
-         1. [x] **COMPLETED** - 3.2.3.3.1: Convert update_relationship tool to error results
+         1. [x] **COMPLETED - REVIEWED AND APPROVED** - 3.2.3.3.1: Convert update_relationship tool to error results
             - **Implementation:** Modified `pkg/mcp/tools/relationship.go` to convert parameter validation and resource lookup errors to error results
             - **Files modified:**
               - `pkg/mcp/tools/relationship.go` (lines 4-8, 106-139, 155-156, 164-165):
@@ -804,7 +804,9 @@ func sanitizeArguments(args map[string]any) map[string]any {
               - Structured error details for enum validation (parameter, expected, actual fields)
               - Entity existence checks return actionable error results instead of Go errors
             - **Note on test coverage:** Tests cover parameter validation errors. Resource lookup errors (entity not found) are tested via unit tests with mocked request objects. Integration tests with real database would require more complex setup and are not included in this task.
-            - **Next implementer:** Task 3.2.3.3.2 (delete_relationship tool) - apply same pattern for parameter validation and resource lookups
+            - **Commit:** feat: convert update_relationship tool to use error results (commit 40cb29d)
+            - **Review completed:** Changes reviewed and approved. All tests passing. Error handling pattern correctly applied.
+            - **Next implementer:** Task 3.2.3.3.2 (delete_relationship tool) - apply same pattern for parameter validation and resource lookups. The `update_relationship` implementation provides a solid reference for the same validation pattern (whitespace trimming, non-empty checks, entity existence checks).
          2. [ ] 3.2.3.3.2: Convert delete_relationship tool to error results
             - **File:** `pkg/mcp/tools/relationship.go`
             - **Implementation:** Apply error handling pattern to the `delete_relationship` tool to convert actionable errors to error results while keeping system errors as Go errors.
