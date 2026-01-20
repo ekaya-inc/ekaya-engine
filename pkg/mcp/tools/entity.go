@@ -528,6 +528,15 @@ func registerDeleteEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			return nil, err
 		}
 
+		// Validate: name cannot be empty after trimming
+		name = trimString(name)
+		if name == "" {
+			return NewErrorResult(
+				"invalid_parameters",
+				"parameter 'name' cannot be empty",
+			), nil
+		}
+
 		// Get active ontology
 		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
 		if err != nil {
@@ -543,7 +552,97 @@ func registerDeleteEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			return nil, fmt.Errorf("failed to get entity: %w", err)
 		}
 		if entity == nil {
-			return nil, fmt.Errorf("entity '%s' not found", name)
+			return NewErrorResult(
+				"ENTITY_NOT_FOUND",
+				fmt.Sprintf("entity %q not found", name),
+			), nil
+		}
+
+		// Check for relationships (both as source and target)
+		// Get relationships where this entity is the source
+		sourceRels, err := deps.EntityRelationshipRepo.GetByOntology(tenantCtx, ontology.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check relationships: %w", err)
+		}
+		var relCount int
+		var relatedEntities []string
+		seenEntities := make(map[uuid.UUID]bool)
+		for _, rel := range sourceRels {
+			if rel.SourceEntityID == entity.ID || rel.TargetEntityID == entity.ID {
+				relCount++
+				// Track the other entity in the relationship
+				otherEntityID := rel.TargetEntityID
+				if rel.SourceEntityID != entity.ID {
+					otherEntityID = rel.SourceEntityID
+				}
+				if !seenEntities[otherEntityID] {
+					seenEntities[otherEntityID] = true
+					// Get the entity name for the error message
+					otherEntity, err := deps.OntologyEntityRepo.GetByID(tenantCtx, otherEntityID)
+					if err == nil && otherEntity != nil {
+						relatedEntities = append(relatedEntities, otherEntity.Name)
+					}
+				}
+			}
+		}
+
+		if relCount > 0 {
+			return NewErrorResultWithDetails(
+				"resource_conflict",
+				fmt.Sprintf("cannot delete entity %q - has %d relationship(s). Delete relationships first.", name, relCount),
+				map[string]any{
+					"relationship_count": relCount,
+					"related_entities":   relatedEntities,
+				},
+			), nil
+		}
+
+		// Check for occurrences in schema
+		// Note: Occurrences are stored in engine_ontology_entity_occurrences table
+		// We need to query it to check if this entity has any occurrences
+		scope, ok := database.GetTenantScope(tenantCtx)
+		if !ok || scope == nil {
+			return nil, fmt.Errorf("tenant scope not found in context")
+		}
+
+		var occurrenceCount int
+		occQuery := `
+			SELECT COUNT(*)
+			FROM engine_ontology_entity_occurrences
+			WHERE entity_id = $1 AND is_deleted = false`
+		if err := scope.Conn.QueryRow(ctx, occQuery, entity.ID).Scan(&occurrenceCount); err != nil {
+			return nil, fmt.Errorf("failed to check occurrences: %w", err)
+		}
+
+		if occurrenceCount > 0 {
+			// Get sample tables for error message
+			var tables []string
+			tablesQuery := `
+				SELECT DISTINCT table_name
+				FROM engine_ontology_entity_occurrences
+				WHERE entity_id = $1 AND is_deleted = false
+				LIMIT 5`
+			rows, err := scope.Conn.Query(ctx, tablesQuery, entity.ID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get occurrence tables: %w", err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var tableName string
+				if err := rows.Scan(&tableName); err != nil {
+					return nil, fmt.Errorf("failed to scan table name: %w", err)
+				}
+				tables = append(tables, tableName)
+			}
+
+			return NewErrorResultWithDetails(
+				"resource_conflict",
+				fmt.Sprintf("cannot delete entity %q - still referenced in %d schema occurrence(s)", name, occurrenceCount),
+				map[string]any{
+					"occurrence_count": occurrenceCount,
+					"tables":           tables,
+				},
+			), nil
 		}
 
 		// Soft delete the entity

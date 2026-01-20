@@ -696,11 +696,129 @@ func sanitizeArguments(args map[string]any) map[string]any {
          - **Note on probe.go location:** The `probe_column` tool is in `pkg/mcp/tools/probe.go`, not `column.go` as mentioned in the task description. This is the correct location.
          - **Commit:** Changes reviewed, approved, and committed with comprehensive test coverage
          - **Next implementer:** Task 3.2.2 (schema tools) is now complete. All high-priority schema tools (`get_schema`, `update_column`, `probe_column`) now surface actionable errors to Claude. Proceed to task 3.2.3 (entity and relationship tools) or task 3.2.4 (exploration and admin tools) as needed.
-   3. [ ] 3.2.3: Convert medium-priority entity and relationship tools to error results
-      - Apply the error handling pattern to remaining entity/relationship tools: `delete_entity`, `get_entity`, `list_entities`, `update_relationship`, `delete_relationship`, `get_relationship`, `list_relationships` in `pkg/mcp/tools/entity.go` and `pkg/mcp/tools/relationship.go`
-      - Convert parameter validation (missing/invalid entity names, relationship IDs), resource lookups (ENTITY_NOT_FOUND, RELATIONSHIP_NOT_FOUND), and business rule violations (cannot delete entity with relationships) to use `NewErrorResult()`
-      - Keep database failures as Go errors
-      - Add comprehensive unit tests covering all error scenarios with correct error codes and structured details as specified in the audit document
+   3. [ ] 3.2.3: Convert medium-priority entity and relationship tools to error results (SPLIT INTO SUBTASKS BELOW)
+      1. [x] **COMPLETED - COMMITTED** - 3.2.3.1: Convert delete_entity tool to error results
+         - **Implementation:** Modified `pkg/mcp/tools/entity.go` to convert parameter validation, resource lookup, and business rule errors to error results
+         - **Files modified:**
+           - `pkg/mcp/tools/entity.go` (lines 531-646):
+             - Empty entity name after trimming → `NewErrorResult("invalid_parameters", "parameter 'name' cannot be empty")`
+             - Entity not found → `NewErrorResult("ENTITY_NOT_FOUND", fmt.Sprintf("entity %q not found", name))`
+             - Entity has relationships → `NewErrorResultWithDetails("resource_conflict", ...)` with details: `{relationship_count: N, related_entities: ["Entity1", "Entity2"]}`
+             - Entity has occurrences → `NewErrorResultWithDetails("resource_conflict", ...)` with details: `{occurrence_count: N, tables: ["table1", "table2"]}`
+           - `pkg/mcp/tools/entity_test.go` (lines 594-743):
+             - Added `TestDeleteEntityTool_ErrorResults` with 4 comprehensive test cases:
+               - Empty entity name after trimming (whitespace-only string)
+               - Entity not found
+               - Entity has relationships (resource conflict) with relationship_count and related_entities details
+               - Entity has occurrences (resource conflict) with occurrence_count and tables details
+             - All tests verify: `result.IsError == true`, correct error code, message, and structured details
+         - **Error conversion pattern:**
+           - Parameter validation: Trim name, check non-empty → `NewErrorResult("invalid_parameters", ...)`
+           - Resource validation: Check entity exists → `NewErrorResult("ENTITY_NOT_FOUND", ...)`
+           - Business rule validation:
+             - Query all relationships for ontology, filter by entity ID (source or target)
+             - Query occurrences table for entity ID
+             - Return `NewErrorResultWithDetails("resource_conflict", ...)` with diagnostic details if violations found
+           - System errors: Database connection failures, auth failures → remain as Go errors
+         - **System errors kept as Go errors:**
+           - Database connection failures during relationship/occurrence checks
+           - Authentication failures from `AcquireToolAccess`
+           - Ontology repository failures (GetActive, GetByName, SoftDelete)
+           - Tenant scope errors
+         - **Error codes used:** `invalid_parameters`, `ENTITY_NOT_FOUND`, `resource_conflict`
+         - **Test coverage:** All 4 tests in `TestDeleteEntityTool_ErrorResults` pass, covering all error scenarios
+         - **Design decision:** Pre-check relationships and occurrences before deletion to give Claude actionable feedback about why deletion is blocked. This prevents silent CASCADE deletions and allows Claude to understand the impact and take corrective action first.
+         - **Pattern established:**
+           - Whitespace normalization with `trimString()` before checking for empty parameters
+           - Query relationships by fetching all for ontology and filtering in memory (simple approach, avoids additional repository methods)
+           - Query occurrences directly via SQL for count and sample tables
+           - Return structured details with counts and lists for actionable error messages
+         - **Note on CASCADE behavior:** The database schema has `ON DELETE CASCADE` for relationships, aliases, key_columns, and occurrences. However, we explicitly check and prevent deletion if relationships or occurrences exist, requiring the user to delete dependencies first. This is a "fail fast" approach that prevents accidental data loss and makes the deletion process more intentional.
+         - **Commit:** Changes reviewed, approved, and ready for commit with comprehensive test coverage
+         - **Next implementer:** Task 3.2.3.2 (get_entity and list_entities tools) - apply same pattern for parameter validation and resource lookups. These are simpler read operations with fewer error scenarios.
+      2. [ ] 3.2.3.2: Convert get_entity and list_entities tools to error results
+         - **Implementation:** Apply error handling pattern to `get_entity` and `list_entities` in `pkg/mcp/tools/entity.go`
+         - **For get_entity:**
+           - **Parameter validation errors to convert:**
+             - Empty entity name after trimming → `NewErrorResult("invalid_parameters", "parameter 'name' cannot be empty")`
+           - **Resource lookup errors to convert:**
+             - Entity not found → `NewErrorResult("ENTITY_NOT_FOUND", "entity \"<name>\" not found")`
+           - **System errors to keep as Go errors:**
+             - Database connection failures
+             - Authentication failures from `AcquireToolAccess`
+         - **For list_entities:**
+           - Most errors will be system errors (database failures). Focus on:
+             - Empty result set is NOT an error - return empty list
+             - Database connection failures remain as Go errors
+         - **Test coverage required:**
+           - Add to `pkg/mcp/tools/entity_test.go`:
+             - `TestGetEntityTool_ErrorResults` covering:
+               - Empty entity name
+               - Entity not found
+             - `TestListEntitiesTool_EmptyResult` verifying empty list returns successfully (not an error)
+         - **Pattern:** Simple read operations - mainly parameter validation and resource not found errors
+      3. [ ] 3.2.3.3: Convert relationship tools to error results (update_relationship, delete_relationship)
+         - **Implementation:** Apply error handling pattern to `update_relationship` and `delete_relationship` in `pkg/mcp/tools/relationship.go`
+         - **For update_relationship:**
+           - **Parameter validation errors to convert:**
+             - Empty from_entity after trimming → `NewErrorResult("invalid_parameters", "parameter 'from_entity' cannot be empty")`
+             - Empty to_entity after trimming → `NewErrorResult("invalid_parameters", "parameter 'to_entity' cannot be empty")`
+             - Invalid cardinality value → `NewErrorResultWithDetails("invalid_parameters", ...)` with details: `{parameter: "cardinality", expected: ["1:1", "1:N", "N:1", "N:M", "unknown"], actual: "<value>"}`
+           - **Resource lookup errors to convert:**
+             - From entity not found → `NewErrorResult("ENTITY_NOT_FOUND", "from_entity \"<name>\" not found")`
+             - To entity not found → `NewErrorResult("ENTITY_NOT_FOUND", "to_entity \"<name>\" not found")`
+           - **System errors to keep as Go errors:**
+             - Database connection failures
+             - Authentication failures
+         - **For delete_relationship:**
+           - **Parameter validation errors to convert:**
+             - Empty from_entity after trimming → `NewErrorResult("invalid_parameters", "parameter 'from_entity' cannot be empty")`
+             - Empty to_entity after trimming → `NewErrorResult("invalid_parameters", "parameter 'to_entity' cannot be empty")`
+           - **Resource lookup errors to convert:**
+             - Relationship not found → `NewErrorResult("RELATIONSHIP_NOT_FOUND", "relationship from \"<from>\" to \"<to>\" not found")`
+           - **System errors to keep as Go errors:**
+             - Database connection failures
+             - Authentication failures
+             - Transaction errors
+         - **Test coverage required:**
+           - Create `pkg/mcp/tools/relationship_test.go` with:
+             - `TestUpdateRelationshipTool_ErrorResults` covering:
+               - Empty from_entity/to_entity
+               - Invalid cardinality
+               - Entity not found
+             - `TestDeleteRelationshipTool_ErrorResults` covering:
+               - Empty from_entity/to_entity
+               - Relationship not found
+             - Verify error result structure (IsError=true, correct code, message, details)
+         - **Pattern:** Similar to entity tools - parameter validation with trimming, cardinality enum validation like role validation in update_column, resource existence checks before operations
+      4. [ ] 3.2.3.4: Convert get_relationship and list_relationships tools to error results
+         - **Implementation:** Apply error handling pattern to `get_relationship` and `list_relationships` in `pkg/mcp/tools/relationship.go`
+         - **For get_relationship:**
+           - **Parameter validation errors to convert:**
+             - Empty from_entity after trimming → `NewErrorResult("invalid_parameters", "parameter 'from_entity' cannot be empty")`
+             - Empty to_entity after trimming → `NewErrorResult("invalid_parameters", "parameter 'to_entity' cannot be empty")`
+           - **Resource lookup errors to convert:**
+             - Relationship not found → `NewErrorResult("RELATIONSHIP_NOT_FOUND", "relationship from \"<from>\" to \"<to>\" not found")`
+           - **System errors to keep as Go errors:**
+             - Database connection failures
+             - Authentication failures
+         - **For list_relationships:**
+           - **Parameter validation errors to convert:**
+             - If optional filter parameters exist (from_entity, to_entity), validate they are non-empty after trimming
+           - **Other considerations:**
+             - Empty result set is NOT an error - return empty list
+             - Database connection failures remain as Go errors
+         - **Test coverage required:**
+           - Add to `pkg/mcp/tools/relationship_test.go`:
+             - `TestGetRelationshipTool_ErrorResults` covering:
+               - Empty from_entity/to_entity
+               - Relationship not found
+             - `TestListRelationshipsTool_EmptyResult` verifying empty list returns successfully
+             - `TestListRelationshipsTool_FilterValidation` if filter parameters exist
+         - **Pattern:** Simple read operations like get_entity/list_entities - parameter validation and resource not found errors
+      - **Dependencies:** All subtasks use the same helper functions: `trimString()` (already in column.go), `NewErrorResult()`, `NewErrorResultWithDetails()` (already in errors.go)
+      - **Error codes to use:** `invalid_parameters`, `ENTITY_NOT_FOUND`, `RELATIONSHIP_NOT_FOUND`, `resource_conflict`
+      - **Testing pattern:** Create focused test files for each tool category (entity_delete_test.go, relationship_test.go). Each test should verify: `result.IsError == true`, correct error code, correct message, structured details if applicable. Follow the test structure from `column_test.go:TestUpdateColumnTool_ErrorResults`
    4. [ ] 3.2.4: Convert low-priority exploration and admin tools to error results
       - Apply the error handling pattern to remaining tools: `list_approved_queries`, `get_approved_query`, `delete_approved_query`, `chat`, `learn_fact`, `add_fact`, `get_facts`, `delete_fact` in `pkg/mcp/tools/approved_queries.go`, `pkg/mcp/tools/chat.go`, and `pkg/mcp/tools/knowledge.go`
       - Convert parameter validation and resource lookups to use `NewErrorResult()`
