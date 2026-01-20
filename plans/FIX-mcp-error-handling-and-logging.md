@@ -865,31 +865,7 @@ func sanitizeArguments(args map[string]any) map[string]any {
          - **Commit:** Changes reviewed, approved, and committed with comprehensive test coverage
          - **Next implementer:** Task 3.2.2 (schema tools) is now complete. All high-priority schema tools (`get_schema`, `update_column`, `probe_column`) now surface actionable errors to Claude. Proceed to task 3.2.3 (entity and relationship tools) or task 3.2.4 (exploration and admin tools) as needed.
    3. [ ] 3.2.3: Convert medium-priority entity and relationship tools to error results (REPLACED - SEE SUBTASKS BELOW)
-      1. [ ] 3.2.3.1: Convert delete_entity tool to error results
-
-         Apply error handling pattern to `delete_entity` tool in `pkg/mcp/tools/entity.go`. Convert actionable errors (parameter validation, resource not found, business rule violations) to error results using `NewErrorResult()` and `NewErrorResultWithDetails()`. Keep system errors (database failures, auth failures) as Go errors.
-
-         **Implementation details:**
-         - File: `pkg/mcp/tools/entity.go`, function: `deleteEntityTool()`
-         - Parameter validation:
-           - Empty entity name after trimming → `NewErrorResult("invalid_parameters", "parameter 'name' cannot be empty")`
-           - Use `trimString()` helper (already exists in column.go) for whitespace normalization
-         - Resource validation:
-           - Entity not found → `NewErrorResult("ENTITY_NOT_FOUND", fmt.Sprintf("entity %q not found", name))`
-         - Business rule validation:
-           - Entity has relationships (CASCADE would delete) → `NewErrorResultWithDetails("resource_conflict", "cannot delete entity with existing relationships", map[string]any{"relationship_count": count, "related_entities": []string{...}})`
-           - Entity has occurrences in tables → `NewErrorResultWithDetails("resource_conflict", "cannot delete entity that appears in schema", map[string]any{"occurrence_count": count, "tables": []string{...}})`
-         - System errors kept as Go errors:
-           - Database connection failures
-           - Authentication failures from `AcquireToolAccess`
-           - Ontology repository failures (GetActive, GetByName, SoftDelete)
-
-         **Test coverage:**
-         - Create `TestDeleteEntityTool_ErrorResults` in `pkg/mcp/tools/entity_test.go`
-         - Test cases: empty name, entity not found, has relationships, has occurrences
-         - Verify: `result.IsError == true`, correct error code, message, structured details
-
-         **Error codes:** `invalid_parameters`, `ENTITY_NOT_FOUND`, `resource_conflict`
+      1. [x] 3.2.3.1: Convert delete_entity tool to error results
 
       2. [x] **COMPLETED - REVIEWED AND COMMITTED** - 3.2.3.2: Convert get_entity and list_entities tools to error results
          - **Implementation:** Modified `pkg/mcp/tools/entity.go` to convert parameter validation and resource lookup errors to error results for `get_entity` tool
