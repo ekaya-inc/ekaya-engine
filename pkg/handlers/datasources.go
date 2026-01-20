@@ -15,14 +15,16 @@ import (
 
 // DatasourceResponse matches frontend Datasource interface.
 type DatasourceResponse struct {
-	DatasourceID string         `json:"datasource_id"`
-	ProjectID    string         `json:"project_id"`
-	Name         string         `json:"name"`
-	Type         string         `json:"type"`
-	Provider     string         `json:"provider,omitempty"`
-	Config       map[string]any `json:"config"`
-	CreatedAt    string         `json:"created_at"`
-	UpdatedAt    string         `json:"updated_at"`
+	DatasourceID     string         `json:"datasource_id"`
+	ProjectID        string         `json:"project_id"`
+	Name             string         `json:"name"`
+	Type             string         `json:"type"`
+	Provider         string         `json:"provider,omitempty"`
+	Config           map[string]any `json:"config"`
+	CreatedAt        string         `json:"created_at"`
+	UpdatedAt        string         `json:"updated_at"`
+	DecryptionFailed bool           `json:"decryption_failed,omitempty"`
+	ErrorMessage     string         `json:"error_message,omitempty"`
 }
 
 // ListDatasourcesResponse wraps array for frontend compatibility.
@@ -192,16 +194,18 @@ func (h *DatasourcesHandler) List(w http.ResponseWriter, r *http.Request) {
 	data := ListDatasourcesResponse{
 		Datasources: make([]DatasourceResponse, len(datasources)),
 	}
-	for i, ds := range datasources {
+	for i, dsWithStatus := range datasources {
 		data.Datasources[i] = DatasourceResponse{
-			DatasourceID: ds.ID.String(),
-			ProjectID:    ds.ProjectID.String(),
-			Name:         ds.Name,
-			Type:         ds.DatasourceType,
-			Provider:     ds.Provider,
-			Config:       ds.Config,
-			CreatedAt:    ds.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-			UpdatedAt:    ds.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			DatasourceID:     dsWithStatus.ID.String(),
+			ProjectID:        dsWithStatus.ProjectID.String(),
+			Name:             dsWithStatus.Name,
+			Type:             dsWithStatus.DatasourceType,
+			Provider:         dsWithStatus.Provider,
+			Config:           dsWithStatus.Config,
+			CreatedAt:        dsWithStatus.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			UpdatedAt:        dsWithStatus.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			DecryptionFailed: dsWithStatus.DecryptionFailed,
+			ErrorMessage:     dsWithStatus.ErrorMessage,
 		}
 	}
 
