@@ -534,21 +534,22 @@ func registerEscalateOntologyQuestionTool(s *server.MCPServer, deps *QuestionToo
 		}
 		defer cleanup()
 
-		// Extract question_id (required)
-		questionIDStr := getOptionalString(req, "question_id")
-		if questionIDStr == "" {
-			return nil, fmt.Errorf("question_id is required")
+		// Extract arguments with type assertion
+		args, ok := req.Params.Arguments.(map[string]any)
+		if !ok {
+			args = make(map[string]any)
 		}
 
-		questionID, err := uuid.Parse(questionIDStr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid question_id format: %w", err)
+		// Validate question_id parameter
+		questionID, errResult := validateQuestionID(args)
+		if errResult != nil {
+			return errResult, nil
 		}
 
-		// Extract reason (required)
-		reason := getOptionalString(req, "reason")
-		if reason == "" {
-			return nil, fmt.Errorf("reason is required")
+		// Validate reason parameter
+		reason, errResult := validateReasonParameter(args)
+		if errResult != nil {
+			return errResult, nil
 		}
 
 		// Get the question to verify it exists
@@ -561,7 +562,7 @@ func registerEscalateOntologyQuestionTool(s *server.MCPServer, deps *QuestionToo
 		}
 
 		if question == nil {
-			return nil, fmt.Errorf("question not found: %s", questionID)
+			return NewErrorResult("QUESTION_NOT_FOUND", fmt.Sprintf("ontology question %q not found", questionID.String())), nil
 		}
 
 		// Update question status to escalated with reason

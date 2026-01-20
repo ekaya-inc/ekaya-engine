@@ -1075,3 +1075,114 @@ func TestDismissOntologyQuestionTool_ErrorResults(t *testing.T) {
 		assert.Contains(t, errorResp.Message, questionIDStr)
 	})
 }
+
+// TestEscalateOntologyQuestionTool_ErrorResults verifies error handling for invalid parameters and resource lookups.
+func TestEscalateOntologyQuestionTool_ErrorResults(t *testing.T) {
+	t.Run("empty question_id", func(t *testing.T) {
+		args := map[string]any{"question_id": ""}
+		questionID, errResult := validateQuestionID(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Equal(t, uuid.Nil, questionID)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "parameter 'question_id' cannot be empty")
+	})
+
+	t.Run("whitespace-only question_id", func(t *testing.T) {
+		args := map[string]any{"question_id": "   "}
+		questionID, errResult := validateQuestionID(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Equal(t, uuid.Nil, questionID)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "parameter 'question_id' cannot be empty")
+	})
+
+	t.Run("invalid UUID format", func(t *testing.T) {
+		args := map[string]any{"question_id": "not-a-valid-uuid"}
+		questionID, errResult := validateQuestionID(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Equal(t, uuid.Nil, questionID)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "invalid question_id format")
+		assert.Contains(t, errorResp.Message, "not-a-valid-uuid")
+	})
+
+	t.Run("empty reason", func(t *testing.T) {
+		args := map[string]any{"reason": ""}
+		reason, errResult := validateReasonParameter(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Empty(t, reason)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "parameter 'reason' cannot be empty")
+	})
+
+	t.Run("whitespace-only reason", func(t *testing.T) {
+		args := map[string]any{"reason": "   "}
+		reason, errResult := validateReasonParameter(args)
+
+		require.NotNil(t, errResult, "expected error result")
+		require.True(t, errResult.IsError)
+		require.Empty(t, reason)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(errResult)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "invalid_parameters", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "parameter 'reason' cannot be empty")
+	})
+
+	t.Run("question not found", func(t *testing.T) {
+		questionIDStr := uuid.New().String()
+
+		result := NewErrorResult(
+			"QUESTION_NOT_FOUND",
+			fmt.Sprintf("ontology question %q not found", questionIDStr),
+		)
+
+		require.NotNil(t, result)
+		require.True(t, result.IsError)
+
+		var errorResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+		require.NoError(t, err)
+
+		assert.True(t, errorResp.Error)
+		assert.Equal(t, "QUESTION_NOT_FOUND", errorResp.Code)
+		assert.Contains(t, errorResp.Message, "ontology question")
+		assert.Contains(t, errorResp.Message, "not found")
+		assert.Contains(t, errorResp.Message, questionIDStr)
+	})
+}

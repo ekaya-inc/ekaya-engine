@@ -2859,9 +2859,11 @@ func sanitizeArguments(args map[string]any) map[string]any {
 
                **Pattern reference:** Follow identical pattern from task 3.3.2.2.2 (skip_ontology_question tool)
 
-            3. [ ] 3.3.2.2.3.3: Convert escalate_ontology_question tool to use validation helpers
+            3. [x] 3.3.2.2.3.3: Convert escalate_ontology_question tool to use validation helpers
 
                Apply error result pattern to `escalate_ontology_question` tool using the shared validation helpers from subtask 3.3.2.2.3.1.
+
+               **Implementation completed:** The `escalate_ontology_question` tool now uses `validateQuestionID` and `validateReasonParameter` helpers from subtask 3.3.2.2.3.1. All validation errors return error results with `invalid_parameters` code. Question not found returns `QUESTION_NOT_FOUND` error result. All test cases pass.
 
                **Context:** The `escalate_ontology_question` tool marks a question as "escalated" when it requires human domain expertise. It has the same validation requirements as `skip_ontology_question` and `dismiss_ontology_question`.
 
