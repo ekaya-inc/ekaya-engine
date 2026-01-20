@@ -40,7 +40,7 @@ When debugging MCP integrations, two issues make troubleshooting difficult:
 ### Phase 3: Rollout to All Tools
 
 1. [x] 3.1: Audit all MCP tools for error handling patterns
-2. [ ] 3.2: Convert actionable errors to error results
+2. [x] 3.2: Convert actionable errors to error results
    1. [x] 3.2.1: Convert high-priority query tools (`execute_approved_query`)
    2. [x] 3.2.2: Convert high-priority schema tools
       1. [x] 3.2.2.1: Convert get_schema tool
@@ -54,7 +54,7 @@ When debugging MCP integrations, two issues make troubleshooting difficult:
          2. [x] 3.2.3.3.2: Convert delete_relationship tool
          3. [N/A] 3.2.3.3.3: get_relationship (tool does not exist)
          4. [N/A] 3.2.3.3.4: list_relationships (tool does not exist)
-   4. [ ] 3.2.4: Convert low-priority exploration and admin tools
+   4. [x] 3.2.4: Convert low-priority exploration and admin tools
       1. [x] 3.2.4.1: Convert query management tools (`list_approved_queries`)
       2. [x] 3.2.4.2: Convert chat tool (N/A - tool does not exist as MCP tool)
       3. [x] 3.2.4.3: Convert knowledge management tools

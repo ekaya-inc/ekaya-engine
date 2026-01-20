@@ -214,12 +214,12 @@ func TestMCPRequestLogger(t *testing.T) {
 func TestSanitizeArguments(t *testing.T) {
 	t.Run("redacts sensitive keywords", func(t *testing.T) {
 		args := map[string]interface{}{
-			"password":       "secret",
-			"api_key":        "abc123",
-			"access_token":   "xyz789",
-			"client_secret":  "hidden",
-			"credential":     "cred123",
-			"normal_field":   "visible",
+			"password":      "secret",
+			"api_key":       "abc123",
+			"access_token":  "xyz789",
+			"client_secret": "hidden",
+			"credential":    "cred123",
+			"normal_field":  "visible",
 		}
 
 		result := sanitizeArguments(args)
@@ -282,9 +282,9 @@ func TestSanitizeArguments(t *testing.T) {
 
 	t.Run("case insensitive keyword matching", func(t *testing.T) {
 		args := map[string]interface{}{
-			"PASSWORD":     "secret",
-			"Api_Key":      "abc123",
-			"AccessToken":  "xyz789",
+			"PASSWORD":    "secret",
+			"Api_Key":     "abc123",
+			"AccessToken": "xyz789",
 		}
 
 		result := sanitizeArguments(args)

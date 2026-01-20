@@ -582,7 +582,7 @@ func TestUpdateColumnTool_ErrorResults(t *testing.T) {
 				details, ok := errResp.Details.(map[string]any)
 				require.True(t, ok, "details should be a map")
 				assert.Equal(t, "enum_values", details["parameter"])
-				assert.Equal(t, float64(1), details["invalid_element_index"]) // JSON unmarshals numbers as float64
+				assert.Equal(t, float64(1), details["invalid_element_index"])       // JSON unmarshals numbers as float64
 				assert.Contains(t, details["invalid_element_type"].(string), "map") // Type string contains "map"
 
 				break // Stop after first error

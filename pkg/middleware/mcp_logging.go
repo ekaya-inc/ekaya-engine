@@ -117,8 +117,8 @@ type jsonRPCRequest struct {
 
 // jsonRPCResponse represents the structure of a JSON-RPC response.
 type jsonRPCResponse struct {
-	Result interface{}    `json:"result"`
-	Error  *jsonRPCError  `json:"error"`
+	Result interface{}   `json:"result"`
+	Error  *jsonRPCError `json:"error"`
 }
 
 // jsonRPCError represents an error in a JSON-RPC response.

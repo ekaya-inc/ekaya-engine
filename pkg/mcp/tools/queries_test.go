@@ -1082,7 +1082,7 @@ func TestListApprovedQueriesTool_ErrorResults(t *testing.T) {
 			tagsParam:         []any{"valid-tag", 123, "another-tag"},
 			expectedErrorCode: "invalid_parameters",
 			expectedInDetails: map[string]any{
-				"parameter":            "tags",
+				"parameter":             "tags",
 				"invalid_element_index": float64(1), // JSON numbers are float64
 			},
 		},
@@ -1091,7 +1091,7 @@ func TestListApprovedQueriesTool_ErrorResults(t *testing.T) {
 			tagsParam:         []any{"tag1", true},
 			expectedErrorCode: "invalid_parameters",
 			expectedInDetails: map[string]any{
-				"parameter":            "tags",
+				"parameter":             "tags",
 				"invalid_element_index": float64(1),
 			},
 		},
@@ -1100,7 +1100,7 @@ func TestListApprovedQueriesTool_ErrorResults(t *testing.T) {
 			tagsParam:         []any{"tag1", map[string]any{"key": "value"}},
 			expectedErrorCode: "invalid_parameters",
 			expectedInDetails: map[string]any{
-				"parameter":            "tags",
+				"parameter":             "tags",
 				"invalid_element_index": float64(1),
 			},
 		},
@@ -1142,7 +1142,7 @@ func TestListApprovedQueriesTool_ErrorResults(t *testing.T) {
 								Code:    "invalid_parameters",
 								Message: "all tag elements must be strings",
 								Details: map[string]any{
-									"parameter":            "tags",
+									"parameter":             "tags",
 									"invalid_element_index": i,
 									"invalid_element_type":  fmt.Sprintf("%T", tag),
 								},

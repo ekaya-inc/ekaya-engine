@@ -178,7 +178,7 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 						return NewErrorResultWithDetails("invalid_parameters",
 							"all tag elements must be strings",
 							map[string]any{
-								"parameter":            "tags",
+								"parameter":             "tags",
 								"invalid_element_index": i,
 								"invalid_element_type":  fmt.Sprintf("%T", tag),
 							}), nil
