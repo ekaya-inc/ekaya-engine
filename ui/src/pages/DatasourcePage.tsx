@@ -36,21 +36,21 @@ const DatasourcePage = () => {
     setSelectedProvider(undefined);
   };
 
+  // Check if any datasource has decryption failure
+  const failedDatasource = datasources.find((ds) => ds.decryption_failed === true);
+
   const handleDisconnectDatasource = async (): Promise<void> => {
-    if (!pid || !selectedDatasource?.datasourceId) return;
+    if (!pid || !failedDatasource?.datasourceId) return;
 
     setIsDisconnecting(true);
     try {
-      await deleteDataSource(pid, selectedDatasource.datasourceId);
+      await deleteDataSource(pid, failedDatasource.datasourceId);
     } catch (error) {
       console.error('Failed to disconnect datasource:', error);
     } finally {
       setIsDisconnecting(false);
     }
   };
-
-  // Check if any datasource has decryption failure
-  const failedDatasource = datasources.find((ds) => ds.decryption_failed === true);
 
   if (showSetup) {
     return (
