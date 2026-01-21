@@ -122,7 +122,7 @@ if err != nil {
 }
 ```
 
-### 4. Add Enrichment Validation
+### 4. Add Enrichment Validation [x]
 
 After enrichment, validate all entities have descriptions:
 ```go

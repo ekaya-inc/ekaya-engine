@@ -21,6 +21,9 @@ type EntityDiscoveryService interface {
 
 	// EnrichEntitiesWithLLM uses an LLM to generate entity names and descriptions
 	EnrichEntitiesWithLLM(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID, tables []*models.SchemaTable, columns []*models.SchemaColumn) error
+
+	// ValidateEnrichment checks that all entities have non-empty descriptions
+	ValidateEnrichment(ctx context.Context, projectID, ontologyID uuid.UUID) error
 }
 
 type entityDiscoveryService struct {
@@ -431,4 +434,32 @@ func (s *entityDiscoveryService) parseEntityEnrichmentResponse(content string) (
 		return nil, fmt.Errorf("parse entity enrichment response: %w", err)
 	}
 	return response.Entities, nil
+}
+
+// ValidateEnrichment checks that all entities have non-empty descriptions after enrichment.
+// This catches any entities that failed to get enriched due to LLM response issues.
+func (s *entityDiscoveryService) ValidateEnrichment(ctx context.Context, projectID, ontologyID uuid.UUID) error {
+	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("get tenant context: %w", err)
+	}
+	defer cleanup()
+
+	entities, err := s.entityRepo.GetByOntology(tenantCtx, ontologyID)
+	if err != nil {
+		return fmt.Errorf("list entities: %w", err)
+	}
+
+	var emptyDescriptions []string
+	for _, e := range entities {
+		if e.Description == "" {
+			emptyDescriptions = append(emptyDescriptions, e.Name)
+		}
+	}
+
+	if len(emptyDescriptions) > 0 {
+		return fmt.Errorf("%d entities lack descriptions: %v", len(emptyDescriptions), emptyDescriptions)
+	}
+
+	return nil
 }
