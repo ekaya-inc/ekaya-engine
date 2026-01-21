@@ -309,6 +309,9 @@ func (m *mockSchemaRepoForFinalization) GetPrimaryKeyColumns(ctx context.Context
 func (m *mockSchemaRepoForFinalization) GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
+func (m *mockSchemaRepoForFinalization) SelectAllTablesAndColumns(ctx context.Context, datasourceID uuid.UUID) error {
+	return nil
+}
 
 type mockLLMClient struct {
 	responseContent string

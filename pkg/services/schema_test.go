@@ -363,6 +363,10 @@ func (m *mockSchemaRepository) GetColumnCountByProject(ctx context.Context, proj
 	return len(m.columns), nil
 }
 
+func (m *mockSchemaRepository) SelectAllTablesAndColumns(ctx context.Context, datasourceID uuid.UUID) error {
+	return nil
+}
+
 // mockDatasourceService is a mock for DatasourceService.
 type mockDatasourceService struct {
 	datasource *models.Datasource

@@ -355,3 +355,7 @@ func (m *mockSchemaService) GetRelationshipsResponse(ctx context.Context, projec
 		TotalCount:    0,
 	}, nil
 }
+
+func (m *mockSchemaService) SelectAllTables(ctx context.Context, datasourceID uuid.UUID) error {
+	return m.err
+}

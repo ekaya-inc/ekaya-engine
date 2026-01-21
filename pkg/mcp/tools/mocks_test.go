@@ -217,3 +217,70 @@ func (m *mockDatasourceService) Delete(ctx context.Context, id uuid.UUID) error 
 func (m *mockDatasourceService) TestConnection(ctx context.Context, dsType string, config map[string]any, datasourceID uuid.UUID) error {
 	return m.connectionError
 }
+
+// mockSchemaService implements services.SchemaService for testing.
+type mockSchemaService struct {
+	refreshResult         *models.RefreshResult
+	refreshError          error
+	selectAllTablesError  error
+	relationshipsResponse *models.RelationshipsResponse
+}
+
+func (m *mockSchemaService) RefreshDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RefreshResult, error) {
+	if m.refreshError != nil {
+		return nil, m.refreshError
+	}
+	return m.refreshResult, nil
+}
+
+func (m *mockSchemaService) GetDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.DatasourceSchema, error) {
+	return nil, nil
+}
+
+func (m *mockSchemaService) GetDatasourceTable(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.DatasourceTable, error) {
+	return nil, nil
+}
+
+func (m *mockSchemaService) AddManualRelationship(ctx context.Context, projectID, datasourceID uuid.UUID, req *models.AddRelationshipRequest) (*models.SchemaRelationship, error) {
+	return nil, nil
+}
+
+func (m *mockSchemaService) RemoveRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockSchemaService) GetRelationshipsForDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
+	return nil, nil
+}
+
+func (m *mockSchemaService) GetRelationshipsResponse(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RelationshipsResponse, error) {
+	return m.relationshipsResponse, nil
+}
+
+func (m *mockSchemaService) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
+	return nil
+}
+
+func (m *mockSchemaService) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
+	return nil
+}
+
+func (m *mockSchemaService) SaveSelections(ctx context.Context, projectID, datasourceID uuid.UUID, tableSelections map[uuid.UUID]bool, columnSelections map[uuid.UUID][]uuid.UUID) error {
+	return nil
+}
+
+func (m *mockSchemaService) GetSelectedDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.DatasourceSchema, error) {
+	return nil, nil
+}
+
+func (m *mockSchemaService) GetDatasourceSchemaForPrompt(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error) {
+	return "", nil
+}
+
+func (m *mockSchemaService) GetDatasourceSchemaWithEntities(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error) {
+	return "", nil
+}
+
+func (m *mockSchemaService) SelectAllTables(ctx context.Context, datasourceID uuid.UUID) error {
+	return m.selectAllTablesError
+}

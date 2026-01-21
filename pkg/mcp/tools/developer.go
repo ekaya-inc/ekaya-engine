@@ -149,6 +149,7 @@ func RegisterMCPTools(s *server.MCPServer, deps *MCPToolDeps) {
 	registerExecuteTool(s, deps)
 	registerValidateTool(s, deps)
 	registerExplainQueryTool(s, deps)
+	registerRefreshSchemaTool(s, deps)
 }
 
 // NewToolFilter creates a ToolFilterFunc that filters tools based on MCP configuration.
@@ -837,6 +838,126 @@ func registerExplainQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 		}
 
 		jsonResult, err := json.Marshal(result)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// getOptionalBoolWithDefaultDev extracts an optional boolean argument with a default value.
+func getOptionalBoolWithDefaultDev(req mcp.CallToolRequest, key string, defaultVal bool) bool {
+	if args, ok := req.Params.Arguments.(map[string]any); ok {
+		if val, ok := args[key].(bool); ok {
+			return val
+		}
+	}
+	return defaultVal
+}
+
+// registerRefreshSchemaTool adds the refresh_schema tool for syncing schema from datasource.
+func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
+	tool := mcp.NewTool(
+		"refresh_schema",
+		mcp.WithDescription(
+			"Refresh schema from datasource and auto-select new tables/columns. "+
+				"Use after execute() to make new tables visible to other tools. "+
+				"Returns summary: tables added/removed, columns added, relationships discovered.",
+		),
+		mcp.WithBoolean(
+			"auto_select",
+			mcp.Description("Automatically select all new tables/columns (default: true)"),
+		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "refresh_schema")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Get default datasource
+		dsID, err := deps.ProjectService.GetDefaultDatasourceID(tenantCtx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get default datasource: %w", err)
+		}
+		if dsID == uuid.Nil {
+			return nil, fmt.Errorf("no default datasource configured for project")
+		}
+
+		autoSelect := getOptionalBoolWithDefaultDev(req, "auto_select", true)
+
+		// Refresh schema
+		result, err := deps.SchemaService.RefreshDatasourceSchema(tenantCtx, projectID, dsID)
+		if err != nil {
+			deps.Logger.Error("Schema refresh failed",
+				zap.String("project_id", projectID.String()),
+				zap.String("datasource_id", dsID.String()),
+				zap.Error(err),
+			)
+			return nil, fmt.Errorf("schema refresh failed: %w", err)
+		}
+
+		// Auto-select new tables if requested
+		if autoSelect && len(result.NewTableNames) > 0 {
+			if err := deps.SchemaService.SelectAllTables(tenantCtx, dsID); err != nil {
+				deps.Logger.Warn("Failed to auto-select tables",
+					zap.String("project_id", projectID.String()),
+					zap.String("datasource_id", dsID.String()),
+					zap.Error(err),
+				)
+				// Don't fail the entire operation for selection failure
+			}
+		}
+
+		// Get relationships for response (uses enriched response with table/column names)
+		relsResp, _ := deps.SchemaService.GetRelationshipsResponse(tenantCtx, projectID, dsID)
+
+		relPairs := make([]map[string]string, 0)
+		if relsResp != nil {
+			for _, r := range relsResp.Relationships {
+				if r.IsApproved != nil && !*r.IsApproved {
+					continue // Skip removed relationships
+				}
+				relPairs = append(relPairs, map[string]string{
+					"from": r.SourceTableName + "." + r.SourceColumnName,
+					"to":   r.TargetTableName + "." + r.TargetColumnName,
+				})
+			}
+		}
+
+		deps.Logger.Info("Schema refresh completed via MCP",
+			zap.String("project_id", projectID.String()),
+			zap.String("datasource_id", dsID.String()),
+			zap.Int("tables_upserted", result.TablesUpserted),
+			zap.Int64("tables_deleted", result.TablesDeleted),
+			zap.Int("columns_upserted", result.ColumnsUpserted),
+			zap.Int("relationships_created", result.RelationshipsCreated),
+		)
+
+		response := struct {
+			TablesAdded        []string            `json:"tables_added"`
+			TablesRemoved      []string            `json:"tables_removed"`
+			ColumnsAdded       int                 `json:"columns_added"`
+			RelationshipsFound int                 `json:"relationships_found"`
+			Relationships      []map[string]string `json:"relationships,omitempty"`
+			AutoSelectApplied  bool                `json:"auto_select_applied"`
+		}{
+			TablesAdded:        result.NewTableNames,
+			TablesRemoved:      result.RemovedTableNames,
+			ColumnsAdded:       result.ColumnsUpserted,
+			RelationshipsFound: len(relPairs),
+			Relationships:      relPairs,
+			AutoSelectApplied:  autoSelect && len(result.NewTableNames) > 0,
+		}
+
+		jsonResult, err := json.Marshal(response)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal result: %w", err)
 		}

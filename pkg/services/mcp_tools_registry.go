@@ -40,6 +40,7 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "dismiss_ontology_question", Description: "Mark a question as not worth pursuing (e.g., 'Column appears unused, legacy')", ToolGroup: ToolGroupDeveloper},
 	{Name: "search_schema", Description: "Full-text search across tables, columns, and entities using pattern matching with relevance ranking", ToolGroup: ToolGroupDeveloper},
 	{Name: "explain_query", Description: "Analyze SQL query performance using EXPLAIN ANALYZE with execution plan and optimization hints", ToolGroup: ToolGroupDeveloper},
+	{Name: "refresh_schema", Description: "Refresh schema from datasource and auto-select new tables/columns", ToolGroup: ToolGroupDeveloper},
 
 	// Business user tools (approved_queries group)
 	// These read-only query tools enable business users to answer ad-hoc questions

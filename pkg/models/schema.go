@@ -203,12 +203,14 @@ const (
 
 // RefreshResult contains statistics from a schema refresh operation.
 type RefreshResult struct {
-	TablesUpserted       int   `json:"tables_upserted"`
-	TablesDeleted        int64 `json:"tables_deleted"`
-	ColumnsUpserted      int   `json:"columns_upserted"`
-	ColumnsDeleted       int64 `json:"columns_deleted"`
-	RelationshipsCreated int   `json:"relationships_created"`
-	RelationshipsDeleted int64 `json:"relationships_deleted"`
+	TablesUpserted       int      `json:"tables_upserted"`
+	TablesDeleted        int64    `json:"tables_deleted"`
+	ColumnsUpserted      int      `json:"columns_upserted"`
+	ColumnsDeleted       int64    `json:"columns_deleted"`
+	RelationshipsCreated int      `json:"relationships_created"`
+	RelationshipsDeleted int64    `json:"relationships_deleted"`
+	NewTableNames        []string `json:"new_table_names,omitempty"`
+	RemovedTableNames    []string `json:"removed_table_names,omitempty"`
 }
 
 // DatasourceSchema represents the complete schema for a customer's datasource.

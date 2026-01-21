@@ -1408,6 +1408,10 @@ func (m *mockTestSchemaRepo) SoftDeleteRemovedColumns(ctx context.Context, table
 	return 0, nil
 }
 
+func (m *mockTestSchemaRepo) SelectAllTablesAndColumns(ctx context.Context, datasourceID uuid.UUID) error {
+	return nil
+}
+
 // TestPKMatch_SmallIntegerValues tests that columns with all small integer values (1-10)
 // are rejected unless the target table is also small (lookup table scenario)
 func TestPKMatch_SmallIntegerValues(t *testing.T) {

@@ -60,6 +60,10 @@ type SchemaService interface {
 	// GetDatasourceSchemaWithEntities returns schema enriched with entity/role semantic information.
 	// This includes entity names and roles for columns that represent domain entities.
 	GetDatasourceSchemaWithEntities(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error)
+
+	// SelectAllTables marks all tables and columns for this datasource as selected.
+	// Used after schema refresh to auto-select newly discovered tables.
+	SelectAllTables(ctx context.Context, datasourceID uuid.UUID) error
 }
 
 type schemaService struct {
@@ -101,6 +105,16 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 		return nil, fmt.Errorf("user ID not found in context: %w", err)
 	}
 
+	// Get existing tables before refresh to track what's new/removed
+	existingTables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list existing tables: %w", err)
+	}
+	existingTableNames := make(map[string]bool)
+	for _, t := range existingTables {
+		existingTableNames[t.SchemaName+"."+t.TableName] = true
+	}
+
 	// Get datasource with decrypted config
 	ds, err := s.datasourceSvc.Get(ctx, projectID, datasourceID)
 	if err != nil {
@@ -114,7 +128,10 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 	}
 	defer discoverer.Close()
 
-	result := &models.RefreshResult{}
+	result := &models.RefreshResult{
+		NewTableNames:     make([]string, 0),
+		RemovedTableNames: make([]string, 0),
+	}
 
 	// Discover and sync tables
 	discoveredTables, err := discoverer.DiscoverTables(ctx)
@@ -122,14 +139,22 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 		return nil, fmt.Errorf("failed to discover tables: %w", err)
 	}
 
-	// Build active table keys for soft-delete cleanup
+	// Build active table keys for soft-delete cleanup and track discovered table names
 	activeTableKeys := make([]repositories.TableKey, len(discoveredTables))
+	discoveredTableNames := make(map[string]bool)
 
 	// Upsert each discovered table
 	for i, dt := range discoveredTables {
+		tableFQN := dt.SchemaName + "." + dt.TableName
 		activeTableKeys[i] = repositories.TableKey{
 			SchemaName: dt.SchemaName,
 			TableName:  dt.TableName,
+		}
+		discoveredTableNames[tableFQN] = true
+
+		// Check if this is a new table
+		if !existingTableNames[tableFQN] {
+			result.NewTableNames = append(result.NewTableNames, tableFQN)
 		}
 
 		table := &models.SchemaTable{
@@ -152,6 +177,13 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 		}
 		result.ColumnsUpserted += columnsUpserted
 		result.ColumnsDeleted += columnsDeleted
+	}
+
+	// Identify removed tables (existed before but not discovered now)
+	for tableFQN := range existingTableNames {
+		if !discoveredTableNames[tableFQN] {
+			result.RemovedTableNames = append(result.RemovedTableNames, tableFQN)
+		}
 	}
 
 	// Soft-delete tables no longer in datasource
@@ -1117,6 +1149,14 @@ func (s *schemaService) GetDatasourceSchemaWithEntities(ctx context.Context, pro
 	}
 
 	return sb.String(), nil
+}
+
+// SelectAllTables marks all tables and columns for this datasource as selected.
+func (s *schemaService) SelectAllTables(ctx context.Context, datasourceID uuid.UUID) error {
+	if err := s.schemaRepo.SelectAllTablesAndColumns(ctx, datasourceID); err != nil {
+		return fmt.Errorf("failed to select all tables: %w", err)
+	}
+	return nil
 }
 
 // Ensure schemaService implements SchemaService at compile time.

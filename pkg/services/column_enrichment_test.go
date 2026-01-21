@@ -339,6 +339,10 @@ func (r *testColEnrichmentSchemaRepo) UpdateColumnStats(ctx context.Context, col
 	return nil
 }
 
+func (r *testColEnrichmentSchemaRepo) SelectAllTablesAndColumns(ctx context.Context, datasourceID uuid.UUID) error {
+	return nil
+}
+
 // Mock datasource service for testing
 type testColEnrichmentDatasourceService struct{}
 
