@@ -249,3 +249,11 @@ Test with MCP:
 - It handles most English pluralization rules including irregulars
 - Alternative: `github.com/gobuffalo/flect` (from Buffalo framework)
 - The custom implementation is sufficient for 90%+ of cases but misses edge cases
+
+## Tasks
+
+- [x] Add inflection library dependency (`go get github.com/jinzhu/inflection`)
+- [ ] Update `toEntityName` in `pkg/services/schema_change_detection.go` to use inflection.Singular
+- [ ] Update table name mapping in `pkg/services/data_change_detection.go` to use inflection.Singular
+- [ ] Add unit tests for singularization edge cases
+- [ ] Manual verification with MCP refresh_schema
