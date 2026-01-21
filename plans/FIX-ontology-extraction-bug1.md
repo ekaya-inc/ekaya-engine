@@ -55,7 +55,7 @@ if selectedOnly {
 }
 ```
 
-#### 2. Update `IdentifyEntitiesFromDDL` to use filter
+#### 2. Update `IdentifyEntitiesFromDDL` to use filter [DONE]
 
 **File:** `pkg/services/entity_discovery_service.go`
 
