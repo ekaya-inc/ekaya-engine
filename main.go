@@ -154,7 +154,7 @@ func main() {
 	centralClient := central.NewClient(logger)
 
 	// Create services
-	projectService := services.NewProjectService(db, projectRepo, userRepo, centralClient, cfg.BaseURL, logger)
+	projectService := services.NewProjectService(db, projectRepo, userRepo, ontologyRepo, centralClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, ontologyRepo, credentialEncryptor, adapterFactory, projectService, logger)
 	schemaService := services.NewSchemaService(schemaRepo, ontologyEntityRepo, ontologyRepo, entityRelationshipRepo, datasourceService, adapterFactory, logger)

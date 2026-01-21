@@ -84,13 +84,10 @@ func registerGetEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			return NewErrorResult("invalid_parameters", "parameter 'name' cannot be empty"), nil
 		}
 
-		// Get active ontology
-		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
+		// Get or create active ontology (enables immediate use without extraction)
+		ontology, err := ensureOntologyExists(tenantCtx, deps.OntologyRepo, projectID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get active ontology: %w", err)
-		}
-		if ontology == nil {
-			return nil, fmt.Errorf("no active ontology found for project")
+			return NewErrorResult("ontology_error", err.Error()), nil
 		}
 
 		// Get entity by name
@@ -364,13 +361,10 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			}
 		}
 
-		// Get active ontology
-		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
+		// Get or create active ontology (enables immediate use without extraction)
+		ontology, err := ensureOntologyExists(tenantCtx, deps.OntologyRepo, projectID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get active ontology: %w", err)
-		}
-		if ontology == nil {
-			return nil, fmt.Errorf("no active ontology found for project")
+			return NewErrorResult("ontology_error", err.Error()), nil
 		}
 
 		// Check if entity exists
@@ -543,13 +537,10 @@ func registerDeleteEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			), nil
 		}
 
-		// Get active ontology
-		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
+		// Get or create active ontology (enables immediate use without extraction)
+		ontology, err := ensureOntologyExists(tenantCtx, deps.OntologyRepo, projectID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get active ontology: %w", err)
-		}
-		if ontology == nil {
-			return nil, fmt.Errorf("no active ontology found for project")
+			return NewErrorResult("ontology_error", err.Error()), nil
 		}
 
 		// Get entity by name

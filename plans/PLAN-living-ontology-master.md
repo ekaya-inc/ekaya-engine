@@ -28,7 +28,7 @@ Transform Ekaya Engine's ontology from a one-time extraction to a "living" syste
 | Plan | Name | Description | Depends On | Status |
 |------|------|-------------|------------|--------|
 | [PLAN-living-ontology-01](./PLAN-living-ontology-01-refresh-schema.md) | refresh_schema MCP Tool | Sync DDL from datasource via MCP | - | ✅ Done |
-| [PLAN-living-ontology-02](./PLAN-living-ontology-02-empty-ontology.md) | Empty Ontology on Project Creation | Enable immediate MCP tool use | - | |
+| [PLAN-living-ontology-02](./PLAN-living-ontology-02-empty-ontology.md) | Empty Ontology on Project Creation | Enable immediate MCP tool use | - | ✅ Done |
 | [PLAN-living-ontology-03](./PLAN-living-ontology-03-schema-change-detection.md) | Schema Change Detection | Detect DDL changes, queue for review | 01 | |
 | [PLAN-living-ontology-04](./PLAN-living-ontology-04-data-change-detection.md) | Data Change Detection | Detect data-level changes (enums, cardinality) | 03 | |
 | [PLAN-living-ontology-05](./PLAN-living-ontology-05-change-queue.md) | Ontology Change Queue & Precedence | Review/approve workflow, precedence model | 03, 04 | |
