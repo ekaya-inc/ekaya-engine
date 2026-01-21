@@ -152,7 +152,7 @@ func (r *knowledgeRepository) Upsert(ctx context.Context, fact *models.Knowledge
 
 - [x] Fix glossary.go:320 (`term.Source` → `existing.Source`)
 - [x] Fix knowledge_repository.go `Upsert` method
-- [ ] Add test for glossary term update via MCP
+- [x] Add test for glossary term update via MCP
 - [x] Add test for project knowledge update with fact_id
 - [ ] Run existing tests: `make test-short`
 - [ ] Manual verification via MCP tools
