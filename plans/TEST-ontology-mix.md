@@ -352,6 +352,94 @@ CREATE TABLE s10_user_preferences (
 - May generate ontology questions about JSONB structure
 - Should not try to infer relationships from JSONB content
 
+### Scenario 11: Provenance Precedence Preservation
+
+Test that ontology extraction respects the provenance hierarchy: **Manual > MCP > Inference**.
+Higher-precedence items should never be deleted or overwritten by lower-precedence operations.
+
+**Setup (via MCP tools before extraction):**
+
+```bash
+# 1. Create manual entity with custom description
+update_entity(name='Customer', description='A paying customer who has completed at least one purchase', aliases=['client', 'buyer'])
+
+# 2. Create manual relationship
+update_relationship(from_entity='Order', to_entity='Customer', label='placed_by', description='The customer who placed this order')
+
+# 3. Create glossary term
+update_glossary_term(term='Active Customer', definition='Customer with purchase in last 90 days', sql='SELECT * FROM customers WHERE last_order_date > NOW() - INTERVAL 90 DAY')
+
+# 4. Create project knowledge
+update_project_knowledge(fact='Orders under $10 are considered micro-transactions', category='business_rule')
+
+# 5. Create column metadata
+update_column(table='s1_orders', column='total_amount', description='Order total in USD, excludes tax', enum_values=['micro:<10', 'small:10-100', 'medium:100-500', 'large:>500'])
+```
+
+**Test Execution:**
+
+1. Run full ontology extraction via UI
+2. Wait for all DAG steps to complete
+3. Verify all manual items are preserved
+
+**Verification Queries:**
+
+```sql
+-- Verify manual entity preserved with original description
+SELECT name, description, created_by
+FROM engine_ontology_entities
+WHERE name = 'Customer' AND project_id = '<project-id>';
+-- Expected: description = 'A paying customer...', created_by = 'mcp'
+
+-- Verify manual aliases preserved
+SELECT a.alias
+FROM engine_ontology_entity_aliases a
+JOIN engine_ontology_entities e ON a.entity_id = e.id
+WHERE e.name = 'Customer';
+-- Expected: 'client', 'buyer'
+
+-- Verify manual relationship preserved
+SELECT r.label, r.description, r.created_by
+FROM engine_entity_relationships r
+JOIN engine_ontology_entities se ON r.source_entity_id = se.id
+JOIN engine_ontology_entities te ON r.target_entity_id = te.id
+WHERE se.name = 'Order' AND te.name = 'Customer';
+-- Expected: label = 'placed_by', description = 'The customer who placed...', created_by = 'mcp'
+
+-- Verify glossary term preserved
+SELECT term, definition, defining_sql
+FROM engine_glossary_terms
+WHERE term = 'Active Customer' AND project_id = '<project-id>';
+
+-- Verify project knowledge preserved
+SELECT fact, category
+FROM engine_project_knowledge
+WHERE project_id = '<project-id>' AND fact LIKE '%micro-transactions%';
+
+-- Verify column metadata preserved
+SELECT cm.description, cm.enum_values
+FROM engine_column_metadata cm
+JOIN engine_schema_columns c ON cm.column_id = c.id
+JOIN engine_schema_tables t ON c.schema_table_id = t.id
+WHERE t.table_name = 's1_orders' AND c.column_name = 'total_amount';
+```
+
+**Expected Ontology Results:**
+- Manual/MCP entities NOT deleted during Entity Discovery
+- Manual/MCP entity descriptions NOT overwritten by inference
+- Manual/MCP aliases preserved alongside any new inferred aliases
+- Manual/MCP relationships NOT deleted or modified
+- Manual/MCP glossary terms preserved
+- Manual/MCP project knowledge preserved
+- Manual/MCP column metadata preserved
+- New inference-created items coexist with manual items (no duplicates)
+
+**Edge Cases to Test:**
+
+1. **Same entity name**: If extraction discovers an entity with same name as manual entity, manual entity should be preserved (not duplicated or overwritten)
+2. **Conflicting descriptions**: Manual description takes precedence over inferred description
+3. **Re-extraction**: Running extraction multiple times should not accumulate duplicates or lose manual data
+
 ## Test Execution Steps
 
 ### Step 1: Create Test Tables
@@ -463,6 +551,7 @@ DROP TABLE IF EXISTS s10_user_preferences, s10_events CASCADE;
 
 ## Success Criteria
 
+### Schema Detection
 - [ ] All FK-based relationships detected with correct cardinality
 - [ ] UUID relationships inferred from naming conventions
 - [ ] Composite PKs handled correctly
@@ -473,3 +562,14 @@ DROP TABLE IF EXISTS s10_user_preferences, s10_events CASCADE;
 - [ ] Appropriate ontology questions generated for ambiguous cases
 - [ ] No false positive relationships
 - [ ] Entity names are semantically meaningful (not just table names)
+
+### Provenance Precedence (Manual > MCP > Inference)
+- [ ] Manual/MCP entities preserved during extraction (not deleted)
+- [ ] Manual/MCP entity descriptions not overwritten by inference
+- [ ] Manual/MCP aliases preserved
+- [ ] Manual/MCP relationships preserved (not deleted or modified)
+- [ ] Manual/MCP glossary terms preserved
+- [ ] Manual/MCP project knowledge preserved
+- [ ] Manual/MCP column metadata preserved
+- [ ] No duplicate entities created (same name, different provenance)
+- [ ] Re-extraction is idempotent for manual items
