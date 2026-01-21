@@ -408,3 +408,46 @@ func (m *mockSchemaRepository) GetNonPKColumnsByExactType(ctx context.Context, p
 func (m *mockSchemaRepository) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
+
+// mockColumnMetadataRepository implements repositories.ColumnMetadataRepository for testing.
+type mockColumnMetadataRepository struct {
+	metadata map[string]*models.ColumnMetadata // key is "table.column"
+}
+
+func newMockColumnMetadataRepository() *mockColumnMetadataRepository {
+	return &mockColumnMetadataRepository{
+		metadata: make(map[string]*models.ColumnMetadata),
+	}
+}
+
+func (m *mockColumnMetadataRepository) Upsert(ctx context.Context, meta *models.ColumnMetadata) error {
+	key := meta.TableName + "." + meta.ColumnName
+	m.metadata[key] = meta
+	return nil
+}
+
+func (m *mockColumnMetadataRepository) GetByTableColumn(ctx context.Context, projectID uuid.UUID, tableName, columnName string) (*models.ColumnMetadata, error) {
+	key := tableName + "." + columnName
+	if meta, ok := m.metadata[key]; ok {
+		return meta, nil
+	}
+	return nil, nil
+}
+
+func (m *mockColumnMetadataRepository) GetByTable(ctx context.Context, projectID uuid.UUID, tableName string) ([]*models.ColumnMetadata, error) {
+	return nil, nil
+}
+
+func (m *mockColumnMetadataRepository) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.ColumnMetadata, error) {
+	return nil, nil
+}
+
+func (m *mockColumnMetadataRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (m *mockColumnMetadataRepository) DeleteByTableColumn(ctx context.Context, projectID uuid.UUID, tableName, columnName string) error {
+	key := tableName + "." + columnName
+	delete(m.metadata, key)
+	return nil
+}

@@ -481,14 +481,15 @@ func main() {
 
 	// Register column probe tools (for deep-diving into column statistics and semantics)
 	probeToolDeps := &mcptools.ProbeToolDeps{
-		DB:               db,
-		MCPConfigService: mcpConfigService,
-		SchemaRepo:       schemaRepo,
-		OntologyRepo:     ontologyRepo,
-		EntityRepo:       ontologyEntityRepo,
-		RelationshipRepo: entityRelationshipRepo,
-		ProjectService:   projectService,
-		Logger:           logger,
+		DB:                 db,
+		MCPConfigService:   mcpConfigService,
+		SchemaRepo:         schemaRepo,
+		OntologyRepo:       ontologyRepo,
+		EntityRepo:         ontologyEntityRepo,
+		RelationshipRepo:   entityRelationshipRepo,
+		ColumnMetadataRepo: columnMetadataRepo,
+		ProjectService:     projectService,
+		Logger:             logger,
 	}
 	mcptools.RegisterProbeTools(mcpServer.MCP(), probeToolDeps)
 

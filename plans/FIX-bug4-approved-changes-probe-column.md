@@ -79,7 +79,12 @@ if ontology != nil {
 
 The `update_column` MCP tool writes to both locations (see pkg/mcp/tools/column.go:199-250), but `approve_change` only writes to `engine_column_metadata`.
 
-## Recommended Fix
+## Tasks
+
+- [x] Task 1: Update probe_column to read from both data sources (Option A)
+- [ ] Task 2: Add integration test for full approve_change → probe_column flow
+
+## Implementation Details
 
 ### Option A: Make probe_column read from both sources (Recommended)
 
