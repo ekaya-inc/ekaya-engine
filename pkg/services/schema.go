@@ -131,6 +131,9 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 	result := &models.RefreshResult{
 		NewTableNames:     make([]string, 0),
 		RemovedTableNames: make([]string, 0),
+		NewColumns:        make([]models.RefreshColumnChange, 0),
+		RemovedColumns:    make([]models.RefreshColumnChange, 0),
+		ModifiedColumns:   make([]models.RefreshColumnModification, 0),
 	}
 
 	// Discover and sync tables
@@ -171,12 +174,15 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 		result.TablesUpserted++
 
 		// Discover and sync columns for this table
-		columnsUpserted, columnsDeleted, err := s.syncColumnsForTable(ctx, discoverer, projectID, table)
+		colResult, err := s.syncColumnsForTable(ctx, discoverer, projectID, table)
 		if err != nil {
 			return nil, fmt.Errorf("failed to sync columns for table %s.%s: %w", dt.SchemaName, dt.TableName, err)
 		}
-		result.ColumnsUpserted += columnsUpserted
-		result.ColumnsDeleted += columnsDeleted
+		result.ColumnsUpserted += colResult.ColumnsUpserted
+		result.ColumnsDeleted += colResult.ColumnsDeleted
+		result.NewColumns = append(result.NewColumns, colResult.NewColumns...)
+		result.RemovedColumns = append(result.RemovedColumns, colResult.RemovedColumns...)
+		result.ModifiedColumns = append(result.ModifiedColumns, colResult.ModifiedColumns...)
 	}
 
 	// Identify removed tables (existed before but not discovered now)
@@ -223,23 +229,54 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 	return result, nil
 }
 
+// columnSyncResult holds detailed results from syncing columns for a table.
+type columnSyncResult struct {
+	ColumnsUpserted int
+	ColumnsDeleted  int64
+	NewColumns      []models.RefreshColumnChange
+	RemovedColumns  []models.RefreshColumnChange
+	ModifiedColumns []models.RefreshColumnModification
+}
+
 // syncColumnsForTable discovers and syncs columns for a single table.
+// Returns detailed change information for change detection.
 func (s *schemaService) syncColumnsForTable(
 	ctx context.Context,
 	discoverer datasource.SchemaDiscoverer,
 	projectID uuid.UUID,
 	table *models.SchemaTable,
-) (int, int64, error) {
+) (*columnSyncResult, error) {
+	result := &columnSyncResult{
+		NewColumns:      make([]models.RefreshColumnChange, 0),
+		RemovedColumns:  make([]models.RefreshColumnChange, 0),
+		ModifiedColumns: make([]models.RefreshColumnModification, 0),
+	}
+
+	tableFQN := table.SchemaName + "." + table.TableName
+
+	// Get existing columns before sync to detect changes
+	existingColumns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list existing columns: %w", err)
+	}
+
+	// Build map of existing columns by name for comparison
+	existingByName := make(map[string]*models.SchemaColumn, len(existingColumns))
+	for _, col := range existingColumns {
+		existingByName[col.ColumnName] = col
+	}
+
 	discoveredColumns, err := discoverer.DiscoverColumns(ctx, table.SchemaName, table.TableName)
 	if err != nil {
-		return 0, 0, fmt.Errorf("discover columns: %w", err)
+		return nil, fmt.Errorf("discover columns: %w", err)
 	}
 
 	activeColumnNames := make([]string, len(discoveredColumns))
-	columnsUpserted := 0
+	discoveredByName := make(map[string]bool)
 
 	for i, dc := range discoveredColumns {
 		activeColumnNames[i] = dc.ColumnName
+		discoveredByName[dc.ColumnName] = true
 
 		column := &models.SchemaColumn{
 			ProjectID:       projectID,
@@ -253,19 +290,49 @@ func (s *schemaService) syncColumnsForTable(
 			DefaultValue:    dc.DefaultValue,
 		}
 
-		if err := s.schemaRepo.UpsertColumn(ctx, column); err != nil {
-			return 0, 0, fmt.Errorf("upsert column %s: %w", dc.ColumnName, err)
+		// Check if this is a new column or type change
+		if existing, found := existingByName[dc.ColumnName]; !found {
+			// New column
+			result.NewColumns = append(result.NewColumns, models.RefreshColumnChange{
+				TableName:  tableFQN,
+				ColumnName: dc.ColumnName,
+				DataType:   dc.DataType,
+			})
+		} else if existing.DataType != dc.DataType {
+			// Type changed
+			result.ModifiedColumns = append(result.ModifiedColumns, models.RefreshColumnModification{
+				TableName:  tableFQN,
+				ColumnName: dc.ColumnName,
+				OldType:    existing.DataType,
+				NewType:    dc.DataType,
+			})
 		}
-		columnsUpserted++
+
+		if err := s.schemaRepo.UpsertColumn(ctx, column); err != nil {
+			return nil, fmt.Errorf("upsert column %s: %w", dc.ColumnName, err)
+		}
+		result.ColumnsUpserted++
+	}
+
+	// Identify removed columns (existed before but not discovered now)
+	for colName, col := range existingByName {
+		if !discoveredByName[colName] {
+			result.RemovedColumns = append(result.RemovedColumns, models.RefreshColumnChange{
+				TableName:  tableFQN,
+				ColumnName: colName,
+				DataType:   col.DataType,
+			})
+		}
 	}
 
 	// Soft-delete columns no longer in table
 	columnsDeleted, err := s.schemaRepo.SoftDeleteRemovedColumns(ctx, table.ID, activeColumnNames)
 	if err != nil {
-		return 0, 0, fmt.Errorf("soft-delete removed columns: %w", err)
+		return nil, fmt.Errorf("soft-delete removed columns: %w", err)
 	}
+	result.ColumnsDeleted = columnsDeleted
 
-	return columnsUpserted, columnsDeleted, nil
+	return result, nil
 }
 
 // syncForeignKeys discovers and syncs foreign key relationships.

@@ -16,19 +16,22 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
+	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // MCPToolDeps contains dependencies for MCP tools.
 // This includes developer tools, business user tools, and approved query tools.
 type MCPToolDeps struct {
-	DB                *database.DB
-	MCPConfigService  services.MCPConfigService
-	DatasourceService services.DatasourceService
-	SchemaService     services.SchemaService
-	ProjectService    services.ProjectService
-	AdapterFactory    datasource.DatasourceAdapterFactory
-	Logger            *zap.Logger
+	DB                           *database.DB
+	MCPConfigService             services.MCPConfigService
+	DatasourceService            services.DatasourceService
+	SchemaService                services.SchemaService
+	ProjectService               services.ProjectService
+	AdapterFactory               datasource.DatasourceAdapterFactory
+	SchemaChangeDetectionService services.SchemaChangeDetectionService
+	PendingChangeRepo            repositories.PendingChangeRepository
+	Logger                       *zap.Logger
 }
 
 // GetDB implements ToolAccessDeps.
@@ -150,6 +153,7 @@ func RegisterMCPTools(s *server.MCPServer, deps *MCPToolDeps) {
 	registerValidateTool(s, deps)
 	registerExplainQueryTool(s, deps)
 	registerRefreshSchemaTool(s, deps)
+	registerListPendingChangesTool(s, deps)
 }
 
 // NewToolFilter creates a ToolFilterFunc that filters tools based on MCP configuration.
@@ -932,6 +936,21 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 			}
 		}
 
+		// Detect changes and queue for review (if change detection service is configured)
+		var pendingChangesCreated int
+		if deps.SchemaChangeDetectionService != nil {
+			changes, err := deps.SchemaChangeDetectionService.DetectChanges(tenantCtx, projectID, result)
+			if err != nil {
+				// Log but don't fail - schema refresh succeeded
+				deps.Logger.Warn("Change detection failed",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err),
+				)
+			} else {
+				pendingChangesCreated = len(changes)
+			}
+		}
+
 		deps.Logger.Info("Schema refresh completed via MCP",
 			zap.String("project_id", projectID.String()),
 			zap.String("datasource_id", dsID.String()),
@@ -939,22 +958,131 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 			zap.Int64("tables_deleted", result.TablesDeleted),
 			zap.Int("columns_upserted", result.ColumnsUpserted),
 			zap.Int("relationships_created", result.RelationshipsCreated),
+			zap.Int("pending_changes_created", pendingChangesCreated),
 		)
 
 		response := struct {
-			TablesAdded        []string            `json:"tables_added"`
-			TablesRemoved      []string            `json:"tables_removed"`
-			ColumnsAdded       int                 `json:"columns_added"`
-			RelationshipsFound int                 `json:"relationships_found"`
-			Relationships      []map[string]string `json:"relationships,omitempty"`
-			AutoSelectApplied  bool                `json:"auto_select_applied"`
+			TablesAdded           []string            `json:"tables_added"`
+			TablesRemoved         []string            `json:"tables_removed"`
+			ColumnsAdded          int                 `json:"columns_added"`
+			RelationshipsFound    int                 `json:"relationships_found"`
+			Relationships         []map[string]string `json:"relationships,omitempty"`
+			AutoSelectApplied     bool                `json:"auto_select_applied"`
+			PendingChangesCreated int                 `json:"pending_changes_created"`
 		}{
-			TablesAdded:        result.NewTableNames,
-			TablesRemoved:      result.RemovedTableNames,
-			ColumnsAdded:       result.ColumnsUpserted,
-			RelationshipsFound: len(relPairs),
-			Relationships:      relPairs,
-			AutoSelectApplied:  autoSelect && len(result.NewTableNames) > 0,
+			TablesAdded:           result.NewTableNames,
+			TablesRemoved:         result.RemovedTableNames,
+			ColumnsAdded:          result.ColumnsUpserted,
+			RelationshipsFound:    len(relPairs),
+			Relationships:         relPairs,
+			AutoSelectApplied:     autoSelect && len(result.NewTableNames) > 0,
+			PendingChangesCreated: pendingChangesCreated,
+		}
+
+		jsonResult, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// registerListPendingChangesTool adds the list_pending_changes tool for viewing pending ontology changes.
+func registerListPendingChangesTool(s *server.MCPServer, deps *MCPToolDeps) {
+	tool := mcp.NewTool(
+		"list_pending_changes",
+		mcp.WithDescription(
+			"List pending ontology changes detected from schema or data analysis. "+
+				"Review these changes and approve/reject them to update the ontology.",
+		),
+		mcp.WithString(
+			"status",
+			mcp.Description("Filter by status: pending, approved, rejected, auto_applied (default: pending)"),
+		),
+		mcp.WithNumber(
+			"limit",
+			mcp.Description("Max changes to return (default: 50, max: 500)"),
+		),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "list_pending_changes")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Check if pending change repo is configured
+		if deps.PendingChangeRepo == nil {
+			return nil, fmt.Errorf("pending changes not available: repository not configured")
+		}
+
+		// Get parameters
+		status := getOptionalString(req, "status")
+		if status == "" {
+			status = "pending"
+		}
+		limit := 50
+		if limitVal, ok := getOptionalFloat(req, "limit"); ok {
+			limit = int(limitVal)
+		}
+		if limit > 500 {
+			limit = 500
+		}
+		if limit < 1 {
+			limit = 50
+		}
+
+		// List changes
+		changes, err := deps.PendingChangeRepo.List(tenantCtx, projectID, status, limit)
+		if err != nil {
+			deps.Logger.Error("Failed to list pending changes",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err),
+			)
+			return nil, fmt.Errorf("failed to list pending changes: %w", err)
+		}
+
+		// Get counts by status
+		counts, err := deps.PendingChangeRepo.CountByStatus(tenantCtx, projectID)
+		if err != nil {
+			deps.Logger.Warn("Failed to get pending change counts",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err),
+			)
+			// Continue without counts
+		}
+
+		response := struct {
+			Changes []any          `json:"changes"`
+			Count   int            `json:"count"`
+			Counts  map[string]int `json:"counts,omitempty"`
+		}{
+			Changes: make([]any, len(changes)),
+			Count:   len(changes),
+			Counts:  counts,
+		}
+
+		// Convert changes to response format
+		for i, c := range changes {
+			response.Changes[i] = map[string]any{
+				"id":                c.ID.String(),
+				"change_type":       c.ChangeType,
+				"change_source":     c.ChangeSource,
+				"table_name":        c.TableName,
+				"column_name":       c.ColumnName,
+				"old_value":         c.OldValue,
+				"new_value":         c.NewValue,
+				"suggested_action":  c.SuggestedAction,
+				"suggested_payload": c.SuggestedPayload,
+				"status":            c.Status,
+				"created_at":        c.CreatedAt,
+			}
 		}
 
 		jsonResult, err := json.Marshal(response)

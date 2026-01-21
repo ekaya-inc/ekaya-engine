@@ -133,6 +133,7 @@ func main() {
 	ontologyEntityRepo := repositories.NewOntologyEntityRepository()
 	entityRelationshipRepo := repositories.NewEntityRelationshipRepository()
 	ontologyDAGRepo := repositories.NewOntologyDAGRepository()
+	pendingChangeRepo := repositories.NewPendingChangeRepository()
 
 	// Create connection manager with config-driven settings
 	connManagerCfg := datasource.ConnectionManagerConfig{
@@ -158,6 +159,7 @@ func main() {
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, ontologyRepo, credentialEncryptor, adapterFactory, projectService, logger)
 	schemaService := services.NewSchemaService(schemaRepo, ontologyEntityRepo, ontologyRepo, entityRelationshipRepo, datasourceService, adapterFactory, logger)
+	schemaChangeDetectionService := services.NewSchemaChangeDetectionService(pendingChangeRepo, logger)
 	discoveryService := services.NewRelationshipDiscoveryService(schemaRepo, datasourceService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
@@ -253,13 +255,15 @@ func main() {
 
 	// Register MCP server (authenticated - project-scoped)
 	mcpToolDeps := &mcptools.MCPToolDeps{
-		DB:                db,
-		MCPConfigService:  mcpConfigService,
-		DatasourceService: datasourceService,
-		SchemaService:     schemaService,
-		ProjectService:    projectService,
-		AdapterFactory:    adapterFactory,
-		Logger:            logger,
+		DB:                           db,
+		MCPConfigService:             mcpConfigService,
+		DatasourceService:            datasourceService,
+		SchemaService:                schemaService,
+		ProjectService:               projectService,
+		AdapterFactory:               adapterFactory,
+		SchemaChangeDetectionService: schemaChangeDetectionService,
+		PendingChangeRepo:            pendingChangeRepo,
+		Logger:                       logger,
 	}
 	mcpServer := mcp.NewServer("ekaya-engine", cfg.Version, logger,
 		mcp.WithToolFilter(mcptools.NewToolFilter(mcpToolDeps)),
