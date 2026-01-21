@@ -14,7 +14,7 @@ func TestPrecedenceLevel(t *testing.T) {
 	}{
 		{
 			name:     "admin has highest precedence",
-			source:   models.ProvenanceAdmin,
+			source:   models.ProvenanceManual,
 			expected: 3,
 		},
 		{
@@ -61,21 +61,21 @@ func TestCanModify(t *testing.T) {
 	}{
 		{
 			name:             "admin can modify admin-created element",
-			elementCreatedBy: models.ProvenanceAdmin,
+			elementCreatedBy: models.ProvenanceManual,
 			elementUpdatedBy: nil,
-			modifierSource:   models.ProvenanceAdmin,
+			modifierSource:   models.ProvenanceManual,
 			expected:         true,
 		},
 		{
 			name:             "mcp cannot modify admin-created element",
-			elementCreatedBy: models.ProvenanceAdmin,
+			elementCreatedBy: models.ProvenanceManual,
 			elementUpdatedBy: nil,
 			modifierSource:   models.ProvenanceMCP,
 			expected:         false,
 		},
 		{
 			name:             "inference cannot modify admin-created element",
-			elementCreatedBy: models.ProvenanceAdmin,
+			elementCreatedBy: models.ProvenanceManual,
 			elementUpdatedBy: nil,
 			modifierSource:   models.ProvenanceInference,
 			expected:         false,
@@ -84,7 +84,7 @@ func TestCanModify(t *testing.T) {
 			name:             "admin can modify mcp-created element",
 			elementCreatedBy: models.ProvenanceMCP,
 			elementUpdatedBy: nil,
-			modifierSource:   models.ProvenanceAdmin,
+			modifierSource:   models.ProvenanceManual,
 			expected:         true,
 		},
 		{
@@ -105,7 +105,7 @@ func TestCanModify(t *testing.T) {
 			name:             "admin can modify inference-created element",
 			elementCreatedBy: models.ProvenanceInference,
 			elementUpdatedBy: nil,
-			modifierSource:   models.ProvenanceAdmin,
+			modifierSource:   models.ProvenanceManual,
 			expected:         true,
 		},
 		{
@@ -125,7 +125,7 @@ func TestCanModify(t *testing.T) {
 		{
 			name:             "mcp cannot modify element last updated by admin",
 			elementCreatedBy: models.ProvenanceInference,
-			elementUpdatedBy: strPtrForChangeReview(models.ProvenanceAdmin),
+			elementUpdatedBy: strPtrForChangeReview(models.ProvenanceManual),
 			modifierSource:   models.ProvenanceMCP,
 			expected:         false,
 		},
@@ -133,7 +133,7 @@ func TestCanModify(t *testing.T) {
 			name:             "admin can modify element last updated by mcp",
 			elementCreatedBy: models.ProvenanceInference,
 			elementUpdatedBy: strPtrForChangeReview(models.ProvenanceMCP),
-			modifierSource:   models.ProvenanceAdmin,
+			modifierSource:   models.ProvenanceManual,
 			expected:         true,
 		},
 		{

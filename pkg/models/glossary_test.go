@@ -64,7 +64,7 @@ func TestGlossarySourceConstants(t *testing.T) {
 	}{
 		{GlossarySourceInferred, "inferred"},
 		{GlossarySourceManual, "manual"},
-		{GlossarySourceClient, "client"},
+		{GlossarySourceMCP, "mcp"},
 	}
 
 	for _, tt := range tests {

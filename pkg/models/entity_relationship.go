@@ -40,7 +40,7 @@ type EntityRelationship struct {
 	Cardinality        string     `json:"cardinality"`           // "1:1", "1:N", "N:1", "N:M", "unknown"
 	Description        *string    `json:"description,omitempty"` // Optional description of the relationship
 	Association        *string    `json:"association,omitempty"` // Semantic association for this direction (e.g., "placed_by", "contains")
-	CreatedBy          string     `json:"created_by"`            // Provenance: 'admin', 'mcp', 'inference'
+	CreatedBy          string     `json:"created_by"`            // Provenance: 'manual', 'mcp', 'inference'
 	UpdatedBy          *string    `json:"updated_by,omitempty"`  // Who last updated (nil if never updated)
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          *time.Time `json:"updated_at,omitempty"`

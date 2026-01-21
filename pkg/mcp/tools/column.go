@@ -253,6 +253,26 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 
 		// Also track provenance in column_metadata table if available
 		if deps.ColumnMetadataRepo != nil {
+			// Check if existing metadata exists and verify precedence
+			existing, err := deps.ColumnMetadataRepo.GetByTableColumn(tenantCtx, projectID, table, column)
+			if err != nil {
+				return nil, fmt.Errorf("failed to check existing column metadata: %w", err)
+			}
+
+			// If metadata exists, check precedence before updating
+			if existing != nil {
+				if !canModify(existing.CreatedBy, existing.UpdatedBy, models.ProvenanceMCP) {
+					effectiveSource := existing.CreatedBy
+					if existing.UpdatedBy != nil && *existing.UpdatedBy != "" {
+						effectiveSource = *existing.UpdatedBy
+					}
+					return NewErrorResult("precedence_blocked",
+						fmt.Sprintf("Cannot modify column metadata: precedence blocked (existing: %s, modifier: %s). "+
+							"Admin changes cannot be overridden by MCP. Use the UI to modify or delete this metadata.",
+							effectiveSource, models.ProvenanceMCP)), nil
+				}
+			}
+
 			updatedBy := models.ProvenanceMCP
 			colMeta := &models.ColumnMetadata{
 				ProjectID:  projectID,
@@ -274,12 +294,7 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 				colMeta.EnumValues = enumValues
 			}
 			if err := deps.ColumnMetadataRepo.Upsert(tenantCtx, colMeta); err != nil {
-				// Log but don't fail - the JSONB update succeeded
-				deps.Logger.Warn("Failed to track column metadata provenance",
-					zap.String("table", table),
-					zap.String("column", column),
-					zap.Error(err),
-				)
+				return nil, fmt.Errorf("failed to update column metadata: %w", err)
 			}
 		}
 
@@ -477,4 +492,39 @@ type deleteColumnMetadataResponse struct {
 	Table   string `json:"table"`
 	Column  string `json:"column"`
 	Deleted bool   `json:"deleted"` // true if metadata was deleted, false if not found
+}
+
+// canModify checks if a source can modify column metadata based on precedence.
+// Precedence hierarchy: Admin (3) > MCP (2) > Inference (1)
+// Returns true if the modification is allowed, false if blocked by higher precedence.
+func canModify(elementCreatedBy string, elementUpdatedBy *string, modifierSource string) bool {
+	modifierLevel := precedenceLevel(modifierSource)
+
+	// Check against updated_by if present, otherwise check created_by
+	var existingSource string
+	if elementUpdatedBy != nil && *elementUpdatedBy != "" {
+		existingSource = *elementUpdatedBy
+	} else {
+		existingSource = elementCreatedBy
+	}
+
+	existingLevel := precedenceLevel(existingSource)
+
+	// Modifier can change if their level is >= existing level
+	return modifierLevel >= existingLevel
+}
+
+// precedenceLevel returns the numeric precedence level for a source.
+// Higher number = higher precedence.
+func precedenceLevel(source string) int {
+	switch source {
+	case models.ProvenanceManual:
+		return 3
+	case models.ProvenanceMCP:
+		return 2
+	case models.ProvenanceInference:
+		return 1
+	default:
+		return 0 // Unknown source has lowest precedence
+	}
 }

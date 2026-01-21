@@ -7,9 +7,9 @@ import (
 )
 
 // Provenance source constants for ontology elements.
-// Precedence: Admin (highest) > MCP (Claude) > Inference (Engine, lowest)
+// Precedence: Manual (highest) > MCP (Claude) > Inference (Engine, lowest)
 const (
-	ProvenanceAdmin     = "admin"     // Direct manual edit via UI - highest precedence
+	ProvenanceManual    = "manual"    // Direct manual edit via UI - highest precedence
 	ProvenanceMCP       = "mcp"       // Claude via MCP tools - wins over inference
 	ProvenanceInference = "inference" // Engine auto-detected or LLM-generated - lowest precedence
 )
@@ -29,7 +29,7 @@ type OntologyEntity struct {
 	PrimaryColumn  string    `json:"primary_column"` // Column where entity is primarily defined
 	IsDeleted      bool      `json:"is_deleted"`     // Soft delete flag
 	DeletionReason *string   `json:"deletion_reason,omitempty"`
-	CreatedBy      string    `json:"created_by"`           // Provenance: 'admin', 'mcp', 'inference'
+	CreatedBy      string    `json:"created_by"`           // Provenance: 'manual', 'mcp', 'inference'
 	UpdatedBy      *string   `json:"updated_by,omitempty"` // Who last updated (nil if never updated)
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`

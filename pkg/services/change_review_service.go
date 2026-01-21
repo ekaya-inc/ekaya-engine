@@ -12,7 +12,7 @@ import (
 )
 
 // ChangeReviewService handles review/approval workflow for pending ontology changes.
-// It implements the precedence model: Admin (UI) > MCP (Claude) > Inference (Engine)
+// It implements the precedence model: Manual (UI) > MCP (Claude) > Inference (Engine)
 type ChangeReviewService interface {
 	// ListPendingChanges returns pending changes awaiting review.
 	ListPendingChanges(ctx context.Context, projectID uuid.UUID, limit int) ([]*models.PendingChange, error)
@@ -41,69 +41,49 @@ type ApproveAllResult struct {
 }
 
 type changeReviewService struct {
-	pendingChangeRepo  repositories.PendingChangeRepository
-	entityRepo         repositories.OntologyEntityRepository
-	relationshipRepo   repositories.EntityRelationshipRepository
-	columnMetadataRepo repositories.ColumnMetadataRepository
-	ontologyRepo       repositories.OntologyRepository
-	incrementalDAG     IncrementalDAGService // Optional: triggers LLM enrichment after approval
-	logger             *zap.Logger
+	pendingChangeRepo   repositories.PendingChangeRepository
+	entityRepo          repositories.OntologyEntityRepository
+	relationshipRepo    repositories.EntityRelationshipRepository
+	columnMetadataRepo  repositories.ColumnMetadataRepository
+	ontologyRepo        repositories.OntologyRepository
+	precedenceChecker   PrecedenceChecker      // Precedence validation service
+	incrementalDAG      IncrementalDAGService  // Optional: triggers LLM enrichment after approval
+	logger              *zap.Logger
 }
 
 // ChangeReviewServiceDeps contains dependencies for ChangeReviewService.
 type ChangeReviewServiceDeps struct {
-	PendingChangeRepo  repositories.PendingChangeRepository
-	EntityRepo         repositories.OntologyEntityRepository
-	RelationshipRepo   repositories.EntityRelationshipRepository
-	ColumnMetadataRepo repositories.ColumnMetadataRepository
-	OntologyRepo       repositories.OntologyRepository
-	IncrementalDAG     IncrementalDAGService // Optional: set to enable LLM enrichment after approval
-	Logger             *zap.Logger
+	PendingChangeRepo   repositories.PendingChangeRepository
+	EntityRepo          repositories.OntologyEntityRepository
+	RelationshipRepo    repositories.EntityRelationshipRepository
+	ColumnMetadataRepo  repositories.ColumnMetadataRepository
+	OntologyRepo        repositories.OntologyRepository
+	PrecedenceChecker   PrecedenceChecker      // Optional: defaults to NewPrecedenceChecker() if nil
+	IncrementalDAG      IncrementalDAGService  // Optional: set to enable LLM enrichment after approval
+	Logger              *zap.Logger
 }
 
 // NewChangeReviewService creates a new ChangeReviewService.
 func NewChangeReviewService(deps *ChangeReviewServiceDeps) ChangeReviewService {
+	precedenceChecker := deps.PrecedenceChecker
+	if precedenceChecker == nil {
+		precedenceChecker = NewPrecedenceChecker()
+	}
 	return &changeReviewService{
-		pendingChangeRepo:  deps.PendingChangeRepo,
-		entityRepo:         deps.EntityRepo,
-		relationshipRepo:   deps.RelationshipRepo,
-		columnMetadataRepo: deps.ColumnMetadataRepo,
-		ontologyRepo:       deps.OntologyRepo,
-		incrementalDAG:     deps.IncrementalDAG,
-		logger:             deps.Logger,
+		pendingChangeRepo:   deps.PendingChangeRepo,
+		entityRepo:          deps.EntityRepo,
+		relationshipRepo:    deps.RelationshipRepo,
+		columnMetadataRepo:  deps.ColumnMetadataRepo,
+		ontologyRepo:        deps.OntologyRepo,
+		precedenceChecker:   precedenceChecker,
+		incrementalDAG:      deps.IncrementalDAG,
+		logger:              deps.Logger,
 	}
 }
 
-// precedenceLevel returns the numeric precedence level for a source.
-// Higher number = higher precedence.
-func precedenceLevel(source string) int {
-	switch source {
-	case models.ProvenanceAdmin:
-		return 3
-	case models.ProvenanceMCP:
-		return 2
-	case models.ProvenanceInference:
-		return 1
-	default:
-		return 0 // Unknown source has lowest precedence
-	}
-}
-
+// CanModify delegates to the PrecedenceChecker service.
 func (s *changeReviewService) CanModify(elementCreatedBy string, elementUpdatedBy *string, modifierSource string) bool {
-	modifierLevel := precedenceLevel(modifierSource)
-
-	// Check against updated_by if present, otherwise check created_by
-	var existingSource string
-	if elementUpdatedBy != nil && *elementUpdatedBy != "" {
-		existingSource = *elementUpdatedBy
-	} else {
-		existingSource = elementCreatedBy
-	}
-
-	existingLevel := precedenceLevel(existingSource)
-
-	// Modifier can change if their level is >= existing level
-	return modifierLevel >= existingLevel
+	return s.precedenceChecker.CanModify(elementCreatedBy, elementUpdatedBy, modifierSource)
 }
 
 func (s *changeReviewService) ListPendingChanges(ctx context.Context, projectID uuid.UUID, limit int) ([]*models.PendingChange, error) {
@@ -343,7 +323,7 @@ func (s *changeReviewService) applyUpdateColumnMetadata(ctx context.Context, cha
 		// Check precedence
 		if !s.CanModify(existing.CreatedBy, existing.UpdatedBy, reviewerSource) {
 			return fmt.Errorf("cannot modify column metadata: precedence blocked (existing: %s, reviewer: %s)",
-				getEffectiveSource(existing.CreatedBy, existing.UpdatedBy), reviewerSource)
+				s.precedenceChecker.GetEffectiveSource(existing.CreatedBy, existing.UpdatedBy), reviewerSource)
 		}
 	}
 
@@ -475,7 +455,7 @@ func (s *changeReviewService) applyUpdateRelationship(ctx context.Context, chang
 	// Check precedence
 	if !s.CanModify(existing.CreatedBy, existing.UpdatedBy, reviewerSource) {
 		return fmt.Errorf("cannot modify relationship: precedence blocked (existing: %s, reviewer: %s)",
-			getEffectiveSource(existing.CreatedBy, existing.UpdatedBy), reviewerSource)
+			s.precedenceChecker.GetEffectiveSource(existing.CreatedBy, existing.UpdatedBy), reviewerSource)
 	}
 
 	// Apply updates
@@ -494,10 +474,3 @@ func (s *changeReviewService) applyUpdateRelationship(ctx context.Context, chang
 	return s.relationshipRepo.Update(ctx, existing)
 }
 
-// getEffectiveSource returns the effective source for precedence checking.
-func getEffectiveSource(createdBy string, updatedBy *string) string {
-	if updatedBy != nil && *updatedBy != "" {
-		return *updatedBy
-	}
-	return createdBy
-}

@@ -263,7 +263,7 @@ func TestProcessEnumUpdate_SkipsDueToPrecedence(t *testing.T) {
 			TableName:  "orders",
 			ColumnName: "status",
 			EnumValues: []string{"pending"},
-			CreatedBy:  models.ProvenanceAdmin, // Admin created - inference can't modify
+			CreatedBy:  models.ProvenanceManual, // Manual created - inference can't modify
 		},
 	}
 

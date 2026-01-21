@@ -10,7 +10,7 @@ import (
 const (
 	GlossarySourceInferred = "inferred" // LLM discovered during ontology extraction
 	GlossarySourceManual   = "manual"   // Human added or edited via UI
-	GlossarySourceClient   = "client"   // MCP client added dynamically
+	GlossarySourceMCP      = "mcp"      // MCP client added dynamically
 )
 
 // BusinessGlossaryTerm represents a business term with its SQL definition.

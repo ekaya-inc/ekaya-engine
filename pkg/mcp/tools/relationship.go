@@ -172,6 +172,21 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 		var rel *models.EntityRelationship
 		isNew := existingRel == nil
 
+		// If relationship exists, check precedence before allowing update
+		if !isNew {
+			// Check precedence: can MCP modify this relationship?
+			if !canModifyRelationship(existingRel.CreatedBy, existingRel.UpdatedBy, models.ProvenanceMCP) {
+				effectiveSource := existingRel.CreatedBy
+				if existingRel.UpdatedBy != nil && *existingRel.UpdatedBy != "" {
+					effectiveSource = *existingRel.UpdatedBy
+				}
+				return NewErrorResult("precedence_blocked",
+					fmt.Sprintf("Cannot modify relationship: precedence blocked (existing: %s, modifier: %s). "+
+						"Manual changes cannot be overridden by MCP. Use the UI to modify or delete this relationship.",
+						effectiveSource, models.ProvenanceMCP)), nil
+			}
+		}
+
 		if isNew {
 			// Create new relationship with MCP provenance
 			// We need column details for the unique constraint, but for agent-created relationships,
@@ -367,4 +382,39 @@ type deleteRelationshipResponse struct {
 	FromEntity string `json:"from_entity"`
 	ToEntity   string `json:"to_entity"`
 	Deleted    bool   `json:"deleted"` // false if relationship didn't exist (idempotent)
+}
+
+// canModifyRelationship checks if a source can modify a relationship based on precedence.
+// Precedence hierarchy: Manual (3) > MCP (2) > Inference (1)
+// Returns true if the modification is allowed, false if blocked by higher precedence.
+func canModifyRelationship(elementCreatedBy string, elementUpdatedBy *string, modifierSource string) bool {
+	modifierLevel := precedenceLevelRelationship(modifierSource)
+
+	// Check against updated_by if present, otherwise check created_by
+	var existingSource string
+	if elementUpdatedBy != nil && *elementUpdatedBy != "" {
+		existingSource = *elementUpdatedBy
+	} else {
+		existingSource = elementCreatedBy
+	}
+
+	existingLevel := precedenceLevelRelationship(existingSource)
+
+	// Modifier can change if their level is >= existing level
+	return modifierLevel >= existingLevel
+}
+
+// precedenceLevelRelationship returns the numeric precedence level for a source.
+// Higher number = higher precedence.
+func precedenceLevelRelationship(source string) int {
+	switch source {
+	case models.ProvenanceManual:
+		return 3
+	case models.ProvenanceMCP:
+		return 2
+	case models.ProvenanceInference:
+		return 1
+	default:
+		return 0 // Unknown source has lowest precedence
+	}
 }
