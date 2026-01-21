@@ -32,6 +32,7 @@ type entityDiscoveryService struct {
 	ontologyRepo     repositories.OntologyRepository
 	conversationRepo repositories.ConversationRepository
 	llmFactory       llm.LLMClientFactory
+	workerPool       *llm.WorkerPool
 	getTenantCtx     TenantContextFunc
 	logger           *zap.Logger
 }
@@ -43,6 +44,7 @@ func NewEntityDiscoveryService(
 	ontologyRepo repositories.OntologyRepository,
 	conversationRepo repositories.ConversationRepository,
 	llmFactory llm.LLMClientFactory,
+	workerPool *llm.WorkerPool,
 	getTenantCtx TenantContextFunc,
 	logger *zap.Logger,
 ) EntityDiscoveryService {
@@ -52,6 +54,7 @@ func NewEntityDiscoveryService(
 		ontologyRepo:     ontologyRepo,
 		conversationRepo: conversationRepo,
 		llmFactory:       llmFactory,
+		workerPool:       workerPool,
 		getTenantCtx:     getTenantCtx,
 		logger:           logger.Named("entity-discovery"),
 	}
@@ -253,18 +256,121 @@ func (s *entityDiscoveryService) enrichEntitiesWithLLM(
 		}
 	}
 
-	// Build the prompt
+	// Use batched enrichment when there are many entities to avoid token limits
+	const entityBatchSize = 20
+	if len(entities) > entityBatchSize && s.workerPool != nil {
+		s.logger.Info("Using batched entity enrichment",
+			zap.Int("total_entities", len(entities)),
+			zap.Int("batch_size", entityBatchSize))
+		return s.enrichEntitiesInBatches(ctx, projectID, entities, tableColumns, entityBatchSize)
+	}
+
+	// Single batch enrichment for small entity sets or when worker pool unavailable
+	return s.enrichEntityBatch(tenantCtx, projectID, entities, tableColumns)
+}
+
+// enrichEntitiesInBatches splits entities into batches and processes them in parallel.
+// Fails fast if any batch fails.
+func (s *entityDiscoveryService) enrichEntitiesInBatches(
+	ctx context.Context,
+	projectID uuid.UUID,
+	entities []*models.OntologyEntity,
+	tableColumns map[string][]string,
+	batchSize int,
+) error {
+	// Build work items for each batch
+	var workItems []llm.WorkItem[int]
+
+	for i := 0; i < len(entities); i += batchSize {
+		end := i + batchSize
+		if end > len(entities) {
+			end = len(entities)
+		}
+		batch := entities[i:end]
+		batchID := fmt.Sprintf("batch-%d", i/batchSize)
+		batchStart := i
+		batchEnd := end
+
+		// Capture batch for closure
+		batchCopy := batch
+		workItems = append(workItems, llm.WorkItem[int]{
+			ID: batchID,
+			Execute: func(ctx context.Context) (int, error) {
+				// Acquire a fresh database connection for this batch to avoid
+				// concurrent access issues when multiple batches run in parallel.
+				var batchCtx context.Context
+				var cleanup func()
+				if s.getTenantCtx != nil {
+					var err error
+					batchCtx, cleanup, err = s.getTenantCtx(ctx, projectID)
+					if err != nil {
+						s.logger.Error("Failed to acquire tenant context for batch",
+							zap.String("batch_id", batchID),
+							zap.Error(err))
+						return 0, fmt.Errorf("acquire tenant context: %w", err)
+					}
+					defer cleanup()
+				} else {
+					batchCtx = ctx
+				}
+
+				s.logger.Debug("Enriching entity batch",
+					zap.String("batch_id", batchID),
+					zap.Int("batch_start", batchStart),
+					zap.Int("batch_end", batchEnd),
+					zap.Int("batch_size", len(batchCopy)))
+
+				if err := s.enrichEntityBatch(batchCtx, projectID, batchCopy, tableColumns); err != nil {
+					return 0, fmt.Errorf("batch %d-%d failed: %w", batchStart, batchEnd, err)
+				}
+				return len(batchCopy), nil
+			},
+		})
+	}
+
+	// Process all batches with worker pool
+	results := llm.Process(ctx, s.workerPool, workItems, func(completed, total int) {
+		s.logger.Debug("Entity enrichment progress",
+			zap.Int("batches_completed", completed),
+			zap.Int("total_batches", total))
+	})
+
+	// Check for failures - fail fast on any batch error
+	totalEnriched := 0
+	for _, r := range results {
+		if r.Err != nil {
+			return fmt.Errorf("entity enrichment batch failed: %w", r.Err)
+		}
+		totalEnriched += r.Result
+	}
+
+	s.logger.Info("Enriched entities with LLM-generated metadata (batched)",
+		zap.Int("total_entities", len(entities)),
+		zap.Int("batches", len(workItems)),
+		zap.Int("enriched", totalEnriched))
+
+	return nil
+}
+
+// enrichEntityBatch enriches a single batch of entities via LLM.
+func (s *entityDiscoveryService) enrichEntityBatch(
+	ctx context.Context,
+	projectID uuid.UUID,
+	entities []*models.OntologyEntity,
+	tableColumns map[string][]string,
+) error {
+	// Build the prompt for this batch
 	prompt := s.buildEntityEnrichmentPrompt(entities, tableColumns)
 	systemMsg := s.entityEnrichmentSystemMessage()
 
 	// Get LLM client - must use tenant context for config lookup
-	llmClient, err := s.llmFactory.CreateForProject(tenantCtx, projectID)
+	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
 	if err != nil {
 		return fmt.Errorf("create LLM client: %w", err)
 	}
 
 	// Call LLM
-	result, err := llmClient.GenerateResponse(tenantCtx, prompt, systemMsg, 0.3, false)
+	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.3, false)
 	if err != nil {
 		return fmt.Errorf("LLM call failed: %w", err)
 	}
@@ -279,7 +385,7 @@ func (s *entityDiscoveryService) enrichEntitiesWithLLM(
 		// Record parse failure in LLM conversation for troubleshooting
 		if s.conversationRepo != nil {
 			errorMessage := fmt.Sprintf("parse_failure: %s", err.Error())
-			if updateErr := s.conversationRepo.UpdateStatus(tenantCtx, result.ConversationID, models.LLMConversationStatusError, errorMessage); updateErr != nil {
+			if updateErr := s.conversationRepo.UpdateStatus(ctx, result.ConversationID, models.LLMConversationStatusError, errorMessage); updateErr != nil {
 				s.logger.Error("Failed to update conversation status",
 					zap.String("conversation_id", result.ConversationID.String()),
 					zap.Error(updateErr))
@@ -307,7 +413,7 @@ func (s *entityDiscoveryService) enrichEntitiesWithLLM(
 		entity.Name = enrichment.EntityName
 		entity.Description = enrichment.Description
 		entity.Domain = enrichment.Domain
-		if err := s.entityRepo.Update(tenantCtx, entity); err != nil {
+		if err := s.entityRepo.Update(ctx, entity); err != nil {
 			s.logger.Error("Failed to update entity with enrichment",
 				zap.String("entity_id", entity.ID.String()),
 				zap.Error(err))
@@ -322,7 +428,7 @@ func (s *entityDiscoveryService) enrichEntitiesWithLLM(
 				ColumnName: kc.Name,
 				Synonyms:   kc.Synonyms,
 			}
-			if err := s.entityRepo.CreateKeyColumn(tenantCtx, keyCol); err != nil {
+			if err := s.entityRepo.CreateKeyColumn(ctx, keyCol); err != nil {
 				s.logger.Error("Failed to create key column",
 					zap.String("entity_id", entity.ID.String()),
 					zap.String("column_name", kc.Name),
@@ -339,7 +445,7 @@ func (s *entityDiscoveryService) enrichEntitiesWithLLM(
 				Alias:    altName,
 				Source:   &discoverySource,
 			}
-			if err := s.entityRepo.CreateAlias(tenantCtx, alias); err != nil {
+			if err := s.entityRepo.CreateAlias(ctx, alias); err != nil {
 				s.logger.Error("Failed to create entity alias",
 					zap.String("entity_id", entity.ID.String()),
 					zap.String("alias", altName),

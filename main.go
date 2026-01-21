@@ -193,15 +193,16 @@ func main() {
 	ontologyFinalizationService := services.NewOntologyFinalizationService(
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, convRepo, llmFactory, getTenantCtx, logger)
 	entityService := services.NewEntityService(ontologyEntityRepo, entityRelationshipRepo, ontologyRepo, logger)
-	entityDiscoveryService := services.NewEntityDiscoveryService(
-		ontologyEntityRepo, schemaRepo, ontologyRepo, convRepo,
-		llmFactory, getTenantCtx, logger)
 	ontologyContextService := services.NewOntologyContextService(
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, projectService, logger)
 
 	// Create worker pool for parallel LLM calls
 	workerPoolConfig := llm.DefaultWorkerPoolConfig()
 	llmWorkerPool := llm.NewWorkerPool(workerPoolConfig, logger)
+
+	entityDiscoveryService := services.NewEntityDiscoveryService(
+		ontologyEntityRepo, schemaRepo, ontologyRepo, convRepo,
+		llmFactory, llmWorkerPool, getTenantCtx, logger)
 
 	// Create circuit breaker for LLM resilience
 	circuitBreakerConfig := llm.DefaultCircuitBreakerConfig()

@@ -143,7 +143,7 @@ func (s *entityDiscoveryService) validateEnrichment(ctx context.Context, ontolog
 }
 ```
 
-### 5. Consider Retry with Batching
+### 5. Consider Retry with Batching [x]
 
 If many entities cause token limits, implement batched enrichment:
 ```go
