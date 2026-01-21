@@ -243,4 +243,4 @@ This ensures:
 - [x] Real tables preferred over test/sample tables as primary
 - [x] Entity name uniqueness enforced at database level
 - [x] Test tables grouped under real table's entity as aliases
-- [ ] LLM enrichment includes context about existing names
+- [x] LLM enrichment includes context about existing names

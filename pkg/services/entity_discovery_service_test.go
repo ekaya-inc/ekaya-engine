@@ -1463,3 +1463,205 @@ func TestIdentifyEntitiesFromDDL_NoGrouping_UniqueTables(t *testing.T) {
 	assert.Len(t, entityRepo.createdEntities, 3, "Expected 3 entity creates")
 	assert.Len(t, entityRepo.createdAliases, 0, "Expected no aliases when tables are unique")
 }
+
+// ============================================================================
+// Tests for Existing Entity Names in Prompt
+// ============================================================================
+
+func TestEnrichEntitiesWithLLM_IncludesExistingNamesInPrompt(t *testing.T) {
+	// This test verifies that when some entities have already been enriched,
+	// their names are included in the prompt to prevent duplicate naming.
+
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	datasourceID := uuid.New()
+	conversationID := uuid.New()
+	tableID := uuid.New()
+
+	// Create one entity that has been enriched (has description and name differs from table)
+	// and one entity that hasn't been enriched yet
+	enrichedEntity := &models.OntologyEntity{
+		ID:            uuid.New(),
+		ProjectID:     projectID,
+		OntologyID:    ontologyID,
+		Name:          "Account", // LLM-generated name (different from table name)
+		Description:   "A user account in the system",
+		PrimarySchema: "public",
+		PrimaryTable:  "accounts",
+		PrimaryColumn: "id",
+	}
+
+	unenrichedEntity := &models.OntologyEntity{
+		ID:            uuid.New(),
+		ProjectID:     projectID,
+		OntologyID:    ontologyID,
+		Name:          "users", // Same as table name (not yet enriched)
+		Description:   "",
+		PrimarySchema: "public",
+		PrimaryTable:  "users",
+		PrimaryColumn: "id",
+	}
+
+	entityRepo := &mockEntityDiscoveryEntityRepo{
+		entities: []*models.OntologyEntity{enrichedEntity, unenrichedEntity},
+	}
+
+	var capturedPrompt string
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		capturedPrompt = prompt
+
+		// Return valid response for the unenriched entity
+		return &llm.GenerateResponseResult{
+			Content: `{
+				"entities": [
+					{
+						"table_name": "accounts",
+						"entity_name": "Account",
+						"description": "A user account",
+						"domain": "customer",
+						"key_columns": [],
+						"alternative_names": []
+					},
+					{
+						"table_name": "users",
+						"entity_name": "User",
+						"description": "A platform user",
+						"domain": "customer",
+						"key_columns": [],
+						"alternative_names": []
+					}
+				]
+			}`,
+			ConversationID: conversationID,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.CreateForProjectFunc = func(ctx context.Context, projectID uuid.UUID) (llm.LLMClient, error) {
+		return mockClient, nil
+	}
+
+	mockTenantCtx := func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {
+		return ctx, func() {}, nil
+	}
+
+	svc := NewEntityDiscoveryService(
+		entityRepo,
+		nil,
+		nil,
+		&mockEntityDiscoveryConversationRepo{},
+		mockFactory,
+		nil,
+		mockTenantCtx,
+		zap.NewNop(),
+	)
+
+	tables := []*models.SchemaTable{
+		{ID: uuid.New(), SchemaName: "public", TableName: "accounts"},
+		{ID: tableID, SchemaName: "public", TableName: "users"},
+	}
+	columns := []*models.SchemaColumn{
+		{SchemaTableID: tables[0].ID, ColumnName: "id"},
+		{SchemaTableID: tableID, ColumnName: "id"},
+	}
+
+	// Execute
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+
+	// Verify: no error
+	require.NoError(t, err)
+
+	// Verify: the prompt includes existing entity names section
+	assert.Contains(t, capturedPrompt, "EXISTING ENTITY NAMES (DO NOT REUSE)")
+	assert.Contains(t, capturedPrompt, "Account") // The enriched entity name should be listed
+
+	// Verify: the prompt includes instructions about naming
+	assert.Contains(t, capturedPrompt, "Check if a similar name already exists")
+	assert.Contains(t, capturedPrompt, "Choose a distinct name if the concept is different")
+	assert.Contains(t, capturedPrompt, "Merge tables representing the same concept")
+}
+
+func TestEnrichEntitiesWithLLM_NoExistingNames_NoExistingNamesSection(t *testing.T) {
+	// This test verifies that when no entities have been enriched yet,
+	// the "EXISTING ENTITY NAMES" section is not included in the prompt.
+
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	datasourceID := uuid.New()
+	conversationID := uuid.New()
+	tableID := uuid.New()
+
+	// Create only unenriched entities (name == table name, no description)
+	unenrichedEntity := &models.OntologyEntity{
+		ID:            uuid.New(),
+		ProjectID:     projectID,
+		OntologyID:    ontologyID,
+		Name:          "users", // Same as table name
+		Description:   "",
+		PrimarySchema: "public",
+		PrimaryTable:  "users",
+		PrimaryColumn: "id",
+	}
+
+	entityRepo := &mockEntityDiscoveryEntityRepo{
+		entities: []*models.OntologyEntity{unenrichedEntity},
+	}
+
+	var capturedPrompt string
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		capturedPrompt = prompt
+		return &llm.GenerateResponseResult{
+			Content: `{
+				"entities": [
+					{
+						"table_name": "users",
+						"entity_name": "User",
+						"description": "A platform user",
+						"domain": "customer",
+						"key_columns": [],
+						"alternative_names": []
+					}
+				]
+			}`,
+			ConversationID: conversationID,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.CreateForProjectFunc = func(ctx context.Context, projectID uuid.UUID) (llm.LLMClient, error) {
+		return mockClient, nil
+	}
+
+	mockTenantCtx := func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {
+		return ctx, func() {}, nil
+	}
+
+	svc := NewEntityDiscoveryService(
+		entityRepo,
+		nil,
+		nil,
+		&mockEntityDiscoveryConversationRepo{},
+		mockFactory,
+		nil,
+		mockTenantCtx,
+		zap.NewNop(),
+	)
+
+	tables := []*models.SchemaTable{
+		{ID: tableID, SchemaName: "public", TableName: "users"},
+	}
+	columns := []*models.SchemaColumn{
+		{SchemaTableID: tableID, ColumnName: "id"},
+	}
+
+	// Execute
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+
+	// Verify: no error
+	require.NoError(t, err)
+
+	// Verify: the prompt does NOT include existing entity names section
+	assert.NotContains(t, capturedPrompt, "EXISTING ENTITY NAMES (DO NOT REUSE)")
+}

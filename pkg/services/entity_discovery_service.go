@@ -416,8 +416,33 @@ func (s *entityDiscoveryService) enrichEntityBatch(
 	entities []*models.OntologyEntity,
 	tableColumns map[string][]string,
 ) error {
+	// Query for entity names that have already been enriched (have descriptions).
+	// This helps prevent duplicate names when processing in batches.
+	var existingNames []string
+	if len(entities) > 0 {
+		allEntities, err := s.entityRepo.GetByOntology(ctx, entities[0].OntologyID)
+		if err != nil {
+			s.logger.Warn("Failed to query existing entity names for prompt context",
+				zap.Error(err))
+			// Continue without existing names - not fatal
+		} else {
+			for _, e := range allEntities {
+				// Only include entities that have been enriched (have non-empty descriptions)
+				// and whose name differs from their primary table (indicating LLM-generated name)
+				if e.Description != "" && e.Name != e.PrimaryTable {
+					existingNames = append(existingNames, e.Name)
+				}
+			}
+			if len(existingNames) > 0 {
+				s.logger.Debug("Including existing entity names in prompt",
+					zap.Int("existing_count", len(existingNames)),
+					zap.Strings("names", existingNames))
+			}
+		}
+	}
+
 	// Build the prompt for this batch
-	prompt := s.buildEntityEnrichmentPrompt(entities, tableColumns)
+	prompt := s.buildEntityEnrichmentPrompt(entities, tableColumns, existingNames)
 	systemMsg := s.entityEnrichmentSystemMessage()
 
 	// Get LLM client - must use tenant context for config lookup
@@ -533,8 +558,21 @@ Consider the full schema context to understand the domain and make informed gues
 func (s *entityDiscoveryService) buildEntityEnrichmentPrompt(
 	entities []*models.OntologyEntity,
 	tableColumns map[string][]string,
+	existingNames []string,
 ) string {
 	var sb strings.Builder
+
+	// Include existing entity names to prevent duplicates
+	if len(existingNames) > 0 {
+		sb.WriteString("# IMPORTANT: Existing Entity Names\n\n")
+		sb.WriteString("**EXISTING ENTITY NAMES (DO NOT REUSE):** ")
+		sb.WriteString(strings.Join(existingNames, ", "))
+		sb.WriteString("\n\n")
+		sb.WriteString("When naming entities, you MUST:\n")
+		sb.WriteString("1. Check if a similar name already exists above\n")
+		sb.WriteString("2. Choose a distinct name if the concept is different\n")
+		sb.WriteString("3. Merge tables representing the same concept under one name\n\n")
+	}
 
 	sb.WriteString("# Schema Context\n\n")
 	sb.WriteString("Below are all the tables in this database with their columns. Use this context to understand what domain/industry this database serves.\n\n")
