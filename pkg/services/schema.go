@@ -19,7 +19,8 @@ import (
 type SchemaService interface {
 	// RefreshDatasourceSchema syncs tables, columns, and FK relationships from the datasource.
 	// Creates SchemaDiscoverer internally, caller does not manage adapter lifecycle.
-	RefreshDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RefreshResult, error)
+	// If autoSelect is true, newly created tables and columns will have IsSelected set to true.
+	RefreshDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID, autoSelect bool) (*models.RefreshResult, error)
 
 	// GetDatasourceSchema returns the complete schema for a datasource.
 	GetDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.DatasourceSchema, error)
@@ -98,7 +99,8 @@ func NewSchemaService(
 }
 
 // RefreshDatasourceSchema syncs the schema from the datasource into our repository.
-func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RefreshResult, error) {
+// If autoSelect is true, newly created tables and columns will have IsSelected set to true.
+func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID, autoSelect bool) (*models.RefreshResult, error) {
 	// Extract userID from context (JWT claims)
 	userID, err := auth.RequireUserIDFromContext(ctx)
 	if err != nil {
@@ -156,7 +158,8 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 		discoveredTableNames[tableFQN] = true
 
 		// Check if this is a new table
-		if !existingTableNames[tableFQN] {
+		isNewTable := !existingTableNames[tableFQN]
+		if isNewTable {
 			result.NewTableNames = append(result.NewTableNames, tableFQN)
 		}
 
@@ -166,6 +169,7 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 			SchemaName:   dt.SchemaName,
 			TableName:    dt.TableName,
 			RowCount:     &dt.RowCount,
+			IsSelected:   isNewTable && autoSelect, // Auto-select new tables if requested
 		}
 
 		if err := s.schemaRepo.UpsertTable(ctx, table); err != nil {
@@ -174,7 +178,9 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 		result.TablesUpserted++
 
 		// Discover and sync columns for this table
-		colResult, err := s.syncColumnsForTable(ctx, discoverer, projectID, table)
+		// Auto-select columns only if the table is new and autoSelect is true
+		autoSelectColumns := isNewTable && autoSelect
+		colResult, err := s.syncColumnsForTable(ctx, discoverer, projectID, table, autoSelectColumns)
 		if err != nil {
 			return nil, fmt.Errorf("failed to sync columns for table %s.%s: %w", dt.SchemaName, dt.TableName, err)
 		}
@@ -240,11 +246,13 @@ type columnSyncResult struct {
 
 // syncColumnsForTable discovers and syncs columns for a single table.
 // Returns detailed change information for change detection.
+// If autoSelect is true, newly created columns will have IsSelected set to true.
 func (s *schemaService) syncColumnsForTable(
 	ctx context.Context,
 	discoverer datasource.SchemaDiscoverer,
 	projectID uuid.UUID,
 	table *models.SchemaTable,
+	autoSelect bool,
 ) (*columnSyncResult, error) {
 	result := &columnSyncResult{
 		NewColumns:      make([]models.RefreshColumnChange, 0),
@@ -278,6 +286,10 @@ func (s *schemaService) syncColumnsForTable(
 		activeColumnNames[i] = dc.ColumnName
 		discoveredByName[dc.ColumnName] = true
 
+		// Check if this is a new column or type change
+		existing, found := existingByName[dc.ColumnName]
+		isNewColumn := !found
+
 		column := &models.SchemaColumn{
 			ProjectID:       projectID,
 			SchemaTableID:   table.ID,
@@ -288,10 +300,10 @@ func (s *schemaService) syncColumnsForTable(
 			IsUnique:        dc.IsUnique,
 			OrdinalPosition: dc.OrdinalPosition,
 			DefaultValue:    dc.DefaultValue,
+			IsSelected:      isNewColumn && autoSelect, // Auto-select new columns if requested
 		}
 
-		// Check if this is a new column or type change
-		if existing, found := existingByName[dc.ColumnName]; !found {
+		if isNewColumn {
 			// New column
 			result.NewColumns = append(result.NewColumns, models.RefreshColumnChange{
 				TableName:  tableFQN,

@@ -904,8 +904,8 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 
 		autoSelect := getOptionalBoolWithDefaultDev(req, "auto_select", true)
 
-		// Refresh schema
-		result, err := deps.SchemaService.RefreshDatasourceSchema(tenantCtx, projectID, dsID)
+		// Refresh schema - autoSelect causes new tables/columns to be marked as selected at creation time
+		result, err := deps.SchemaService.RefreshDatasourceSchema(tenantCtx, projectID, dsID, autoSelect)
 		if err != nil {
 			deps.Logger.Error("Schema refresh failed",
 				zap.String("project_id", projectID.String()),
@@ -915,20 +915,8 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 			return nil, fmt.Errorf("schema refresh failed: %w", err)
 		}
 
-		// Auto-select new tables if requested
-		var autoSelectSucceeded bool
-		if autoSelect && len(result.NewTableNames) > 0 {
-			if err := deps.SchemaService.SelectAllTables(tenantCtx, dsID); err != nil {
-				deps.Logger.Warn("Failed to auto-select tables",
-					zap.String("project_id", projectID.String()),
-					zap.String("datasource_id", dsID.String()),
-					zap.Error(err),
-				)
-				// Don't fail the entire operation for selection failure
-			} else {
-				autoSelectSucceeded = true
-			}
-		}
+		// Auto-select was applied if new tables were discovered and autoSelect was true
+		autoSelectApplied := autoSelect && len(result.NewTableNames) > 0
 
 		// Get relationships for response (uses enriched response with table/column names)
 		relsResp, _ := deps.SchemaService.GetRelationshipsResponse(tenantCtx, projectID, dsID)
@@ -985,7 +973,7 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 			ColumnsAdded:          result.ColumnsUpserted,
 			RelationshipsFound:    len(relPairs),
 			Relationships:         relPairs,
-			AutoSelectApplied:     autoSelectSucceeded,
+			AutoSelectApplied:     autoSelectApplied,
 			PendingChangesCreated: pendingChangesCreated,
 		}
 

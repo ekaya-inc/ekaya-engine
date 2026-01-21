@@ -552,7 +552,7 @@ func TestSchemaService_RefreshDatasourceSchema_Success(t *testing.T) {
 	service := newTestSchemaService(repo, dsSvc, factory)
 
 	ctx := testContextWithAuth(projectID.String(), "test-user-id")
-	result, err := service.RefreshDatasourceSchema(ctx, projectID, datasourceID)
+	result, err := service.RefreshDatasourceSchema(ctx, projectID, datasourceID, false)
 	if err != nil {
 		t.Fatalf("RefreshDatasourceSchema failed: %v", err)
 	}
@@ -599,7 +599,7 @@ func TestSchemaService_RefreshDatasourceSchema_NoTables(t *testing.T) {
 	service := newTestSchemaService(repo, dsSvc, factory)
 
 	ctx := testContextWithAuth(projectID.String(), "test-user-id")
-	result, err := service.RefreshDatasourceSchema(ctx, projectID, datasourceID)
+	result, err := service.RefreshDatasourceSchema(ctx, projectID, datasourceID, false)
 	if err != nil {
 		t.Fatalf("RefreshDatasourceSchema failed: %v", err)
 	}
@@ -627,7 +627,7 @@ func TestSchemaService_RefreshDatasourceSchema_DatasourceError(t *testing.T) {
 
 	service := newTestSchemaService(repo, dsSvc, factory)
 
-	_, err := service.RefreshDatasourceSchema(context.Background(), projectID, datasourceID)
+	_, err := service.RefreshDatasourceSchema(context.Background(), projectID, datasourceID, false)
 	if err == nil {
 		t.Fatal("expected error from datasource service")
 	}
@@ -645,7 +645,7 @@ func TestSchemaService_RefreshDatasourceSchema_AdapterError(t *testing.T) {
 
 	service := newTestSchemaService(repo, dsSvc, factory)
 
-	_, err := service.RefreshDatasourceSchema(context.Background(), projectID, datasourceID)
+	_, err := service.RefreshDatasourceSchema(context.Background(), projectID, datasourceID, false)
 	if err == nil {
 		t.Fatal("expected error from adapter factory")
 	}
@@ -664,7 +664,7 @@ func TestSchemaService_RefreshDatasourceSchema_DiscoverTablesError(t *testing.T)
 
 	service := newTestSchemaService(repo, dsSvc, factory)
 
-	_, err := service.RefreshDatasourceSchema(context.Background(), projectID, datasourceID)
+	_, err := service.RefreshDatasourceSchema(context.Background(), projectID, datasourceID, false)
 	if err == nil {
 		t.Fatal("expected error from discover tables")
 	}
@@ -692,7 +692,7 @@ func TestSchemaService_RefreshDatasourceSchema_NoFKSupport(t *testing.T) {
 	service := newTestSchemaService(repo, dsSvc, factory)
 
 	ctx := testContextWithAuth(projectID.String(), "test-user-id")
-	result, err := service.RefreshDatasourceSchema(ctx, projectID, datasourceID)
+	result, err := service.RefreshDatasourceSchema(ctx, projectID, datasourceID, false)
 	if err != nil {
 		t.Fatalf("RefreshDatasourceSchema failed: %v", err)
 	}
@@ -2104,7 +2104,7 @@ func TestSchemaService_RefreshDatasourceSchema_NoAuthContext(t *testing.T) {
 	service := newTestSchemaService(repo, dsSvc, factory)
 
 	// Context without auth claims
-	_, err := service.RefreshDatasourceSchema(context.Background(), projectID, datasourceID)
+	_, err := service.RefreshDatasourceSchema(context.Background(), projectID, datasourceID, false)
 
 	if err == nil {
 		t.Fatal("expected error when context has no auth claims, got nil")

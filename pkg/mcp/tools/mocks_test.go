@@ -234,7 +234,7 @@ type mockSchemaService struct {
 	relationshipsResponse *models.RelationshipsResponse
 }
 
-func (m *mockSchemaService) RefreshDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RefreshResult, error) {
+func (m *mockSchemaService) RefreshDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID, autoSelect bool) (*models.RefreshResult, error) {
 	if m.refreshError != nil {
 		return nil, m.refreshError
 	}

@@ -134,7 +134,7 @@ if autoSelect && len(result.NewTableNames) > 0 {
 AutoSelectApplied: autoSelectSucceeded,
 ```
 
-### Fix 2: Set IsSelected during table creation
+### Fix 2: Set IsSelected during table creation [x]
 
 If `auto_select: true`, set the flag during table creation rather than as a separate update:
 
