@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -98,6 +99,29 @@ func NewSchemaService(
 	}
 }
 
+// tableExclusionPatterns contains compiled regex patterns for tables that should
+// not be auto-selected during schema discovery (test/sample/temporary tables).
+var tableExclusionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`^s\d+_`),   // s1_, s2_, etc. (sample tables)
+	regexp.MustCompile(`^test_`),   // test_* (test tables)
+	regexp.MustCompile(`^tmp_`),    // tmp_* (temporary tables)
+	regexp.MustCompile(`^temp_`),   // temp_* (temporary tables)
+	regexp.MustCompile(`_test$`),   // *_test (test tables)
+	regexp.MustCompile(`_backup$`), // *_backup (backup tables)
+}
+
+// shouldAutoSelect determines if a table should be auto-selected during schema discovery.
+// Returns true by default, but returns false for tables matching test/sample patterns.
+func shouldAutoSelect(tableName string) bool {
+	lowerName := strings.ToLower(tableName)
+	for _, pattern := range tableExclusionPatterns {
+		if pattern.MatchString(lowerName) {
+			return false
+		}
+	}
+	return true
+}
+
 // RefreshDatasourceSchema syncs the schema from the datasource into our repository.
 // If autoSelect is true, newly created tables and columns will have IsSelected set to true.
 func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID, autoSelect bool) (*models.RefreshResult, error) {
@@ -163,13 +187,17 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 			result.NewTableNames = append(result.NewTableNames, tableFQN)
 		}
 
+		// Determine if this table should be auto-selected
+		// Only auto-select new tables when autoSelect is true AND table doesn't match exclusion patterns
+		tableAutoSelect := isNewTable && autoSelect && shouldAutoSelect(dt.TableName)
+
 		table := &models.SchemaTable{
 			ProjectID:    projectID,
 			DatasourceID: datasourceID,
 			SchemaName:   dt.SchemaName,
 			TableName:    dt.TableName,
 			RowCount:     &dt.RowCount,
-			IsSelected:   isNewTable && autoSelect, // Auto-select new tables if requested
+			IsSelected:   tableAutoSelect,
 		}
 
 		if err := s.schemaRepo.UpsertTable(ctx, table); err != nil {
@@ -178,8 +206,8 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 		result.TablesUpserted++
 
 		// Discover and sync columns for this table
-		// Auto-select columns only if the table is new and autoSelect is true
-		autoSelectColumns := isNewTable && autoSelect
+		// Auto-select columns only if the table is auto-selected
+		autoSelectColumns := tableAutoSelect
 		colResult, err := s.syncColumnsForTable(ctx, discoverer, projectID, table, autoSelectColumns)
 		if err != nil {
 			return nil, fmt.Errorf("failed to sync columns for table %s.%s: %w", dt.SchemaName, dt.TableName, err)

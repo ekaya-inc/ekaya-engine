@@ -2113,3 +2113,233 @@ func TestSchemaService_RefreshDatasourceSchema_NoAuthContext(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+// ============================================================================
+// Tests for shouldAutoSelect (Table Exclusion Patterns)
+// ============================================================================
+
+func TestShouldAutoSelect_NormalTables(t *testing.T) {
+	// Normal business tables should be auto-selected
+	normalTables := []string{
+		"users",
+		"orders",
+		"billing_transactions",
+		"user_profiles",
+		"my_table",
+		"s_table",     // just starts with s, no digit
+		"test",        // just "test", not test_ prefix
+		"testing",     // doesn't match test_ pattern
+		"backup",      // just "backup", not _backup suffix
+		"temp",        // just "temp", not temp_ prefix
+		"temporary",   // doesn't match temp_ pattern
+		"tests_data",  // tests_ not test_
+		"sample_data", // sample_ not s\d+_
+	}
+
+	for _, tableName := range normalTables {
+		if !shouldAutoSelect(tableName) {
+			t.Errorf("expected table %q to be auto-selected, but it was not", tableName)
+		}
+	}
+}
+
+func TestShouldAutoSelect_SamplePrefixes(t *testing.T) {
+	// Tables with s1_, s2_, etc. prefixes should NOT be auto-selected
+	sampleTables := []string{
+		"s1_customers",
+		"s2_orders",
+		"s10_products",
+		"s123_test_data",
+		"S1_CUSTOMERS", // uppercase should also be excluded
+		"S10_Products", // mixed case
+	}
+
+	for _, tableName := range sampleTables {
+		if shouldAutoSelect(tableName) {
+			t.Errorf("expected table %q to NOT be auto-selected (sample prefix), but it was", tableName)
+		}
+	}
+}
+
+func TestShouldAutoSelect_TestPatterns(t *testing.T) {
+	// Tables with test patterns should NOT be auto-selected
+	testTables := []string{
+		"test_users",
+		"test_orders",
+		"TEST_DATA", // uppercase
+		"Test_Table",
+		"users_test",
+		"orders_test",
+		"USERS_TEST", // uppercase suffix
+	}
+
+	for _, tableName := range testTables {
+		if shouldAutoSelect(tableName) {
+			t.Errorf("expected table %q to NOT be auto-selected (test pattern), but it was", tableName)
+		}
+	}
+}
+
+func TestShouldAutoSelect_TempPatterns(t *testing.T) {
+	// Tables with temp patterns should NOT be auto-selected
+	tempTables := []string{
+		"tmp_users",
+		"tmp_staging",
+		"TMP_DATA", // uppercase
+		"temp_orders",
+		"temp_backup",
+		"TEMP_STAGING", // uppercase
+	}
+
+	for _, tableName := range tempTables {
+		if shouldAutoSelect(tableName) {
+			t.Errorf("expected table %q to NOT be auto-selected (temp pattern), but it was", tableName)
+		}
+	}
+}
+
+func TestShouldAutoSelect_BackupSuffix(t *testing.T) {
+	// Tables with _backup suffix should NOT be auto-selected
+	backupTables := []string{
+		"users_backup",
+		"orders_backup",
+		"data_backup",
+		"USERS_BACKUP", // uppercase
+	}
+
+	for _, tableName := range backupTables {
+		if shouldAutoSelect(tableName) {
+			t.Errorf("expected table %q to NOT be auto-selected (backup suffix), but it was", tableName)
+		}
+	}
+}
+
+func TestShouldAutoSelect_EdgeCases(t *testing.T) {
+	testCases := []struct {
+		name     string
+		expected bool
+	}{
+		{"s_users", true},            // "s" followed by non-digit
+		{"s0_data", false},           // s0_ matches pattern
+		{"test_", false},             // test_ with nothing after
+		{"_test", false},             // ends with _test, so excluded
+		{"my_test_table", true},      // _test_ in middle, not at end
+		{"production_backup", false}, // _backup at end
+		{"backup_data", true},        // backup_ at start, not _backup at end
+		{"TMP_", false},              // tmp_ with nothing after (case insensitive)
+	}
+
+	for _, tc := range testCases {
+		result := shouldAutoSelect(tc.name)
+		if result != tc.expected {
+			t.Errorf("shouldAutoSelect(%q) = %v, expected %v", tc.name, result, tc.expected)
+		}
+	}
+}
+
+func TestSchemaService_RefreshDatasourceSchema_AutoSelectWithExclusion(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	repo := &mockSchemaRepository{}
+	dsSvc := &mockDatasourceService{
+		datasource: &models.Datasource{
+			ID:             datasourceID,
+			ProjectID:      projectID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{"host": "localhost"},
+		},
+	}
+	discoverer := &mockSchemaDiscoverer{
+		tables: []datasource.TableMetadata{
+			{SchemaName: "public", TableName: "users", RowCount: 100},                // normal - should be selected
+			{SchemaName: "public", TableName: "s1_sample", RowCount: 10},             // sample - should NOT be selected
+			{SchemaName: "public", TableName: "test_data", RowCount: 5},              // test - should NOT be selected
+			{SchemaName: "public", TableName: "orders_backup", RowCount: 50},         // backup - should NOT be selected
+			{SchemaName: "public", TableName: "billing_transactions", RowCount: 200}, // normal - should be selected
+		},
+		columns: map[string][]datasource.ColumnMetadata{
+			"public.users":                {{ColumnName: "id", DataType: "uuid", IsPrimaryKey: true, OrdinalPosition: 1}},
+			"public.s1_sample":            {{ColumnName: "id", DataType: "uuid", IsPrimaryKey: true, OrdinalPosition: 1}},
+			"public.test_data":            {{ColumnName: "id", DataType: "uuid", IsPrimaryKey: true, OrdinalPosition: 1}},
+			"public.orders_backup":        {{ColumnName: "id", DataType: "uuid", IsPrimaryKey: true, OrdinalPosition: 1}},
+			"public.billing_transactions": {{ColumnName: "id", DataType: "uuid", IsPrimaryKey: true, OrdinalPosition: 1}},
+		},
+		supportsFKs: false,
+	}
+	factory := &mockSchemaAdapterFactory{discoverer: discoverer}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	ctx := testContextWithAuth(projectID.String(), "test-user-id")
+	result, err := service.RefreshDatasourceSchema(ctx, projectID, datasourceID, true) // autoSelect = true
+	if err != nil {
+		t.Fatalf("RefreshDatasourceSchema failed: %v", err)
+	}
+
+	if result.TablesUpserted != 5 {
+		t.Errorf("expected 5 tables upserted, got %d", result.TablesUpserted)
+	}
+
+	// Check that the right tables are selected/not selected
+	expectedSelections := map[string]bool{
+		"users":                true,  // normal table
+		"s1_sample":            false, // sample prefix
+		"test_data":            false, // test prefix
+		"orders_backup":        false, // backup suffix
+		"billing_transactions": true,  // normal table
+	}
+
+	for _, table := range repo.upsertedTables {
+		expected, ok := expectedSelections[table.TableName]
+		if !ok {
+			t.Errorf("unexpected table %q in upserted tables", table.TableName)
+			continue
+		}
+		if table.IsSelected != expected {
+			t.Errorf("table %q: expected IsSelected=%v, got %v", table.TableName, expected, table.IsSelected)
+		}
+	}
+}
+
+func TestSchemaService_RefreshDatasourceSchema_AutoSelectFalse(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	repo := &mockSchemaRepository{}
+	dsSvc := &mockDatasourceService{
+		datasource: &models.Datasource{
+			ID:             datasourceID,
+			ProjectID:      projectID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{"host": "localhost"},
+		},
+	}
+	discoverer := &mockSchemaDiscoverer{
+		tables: []datasource.TableMetadata{
+			{SchemaName: "public", TableName: "users", RowCount: 100},
+			{SchemaName: "public", TableName: "s1_sample", RowCount: 10},
+		},
+		columns: map[string][]datasource.ColumnMetadata{
+			"public.users":     {{ColumnName: "id", DataType: "uuid", IsPrimaryKey: true, OrdinalPosition: 1}},
+			"public.s1_sample": {{ColumnName: "id", DataType: "uuid", IsPrimaryKey: true, OrdinalPosition: 1}},
+		},
+		supportsFKs: false,
+	}
+	factory := &mockSchemaAdapterFactory{discoverer: discoverer}
+
+	service := newTestSchemaService(repo, dsSvc, factory)
+
+	ctx := testContextWithAuth(projectID.String(), "test-user-id")
+	_, err := service.RefreshDatasourceSchema(ctx, projectID, datasourceID, false) // autoSelect = false
+	if err != nil {
+		t.Fatalf("RefreshDatasourceSchema failed: %v", err)
+	}
+
+	// When autoSelect is false, no tables should be selected regardless of name
+	for _, table := range repo.upsertedTables {
+		if table.IsSelected {
+			t.Errorf("table %q should not be selected when autoSelect=false", table.TableName)
+		}
+	}
+}
