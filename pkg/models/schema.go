@@ -212,8 +212,8 @@ type RefreshResult struct {
 	NewTableNames        []string `json:"new_table_names,omitempty"`
 	RemovedTableNames    []string `json:"removed_table_names,omitempty"`
 	// Detailed column changes for change detection (PLAN-03)
-	NewColumns      []RefreshColumnChange      `json:"new_columns,omitempty"`
-	RemovedColumns  []RefreshColumnChange      `json:"removed_columns,omitempty"`
+	NewColumns      []RefreshColumnChange       `json:"new_columns,omitempty"`
+	RemovedColumns  []RefreshColumnChange       `json:"removed_columns,omitempty"`
 	ModifiedColumns []RefreshColumnModification `json:"modified_columns,omitempty"`
 }
 

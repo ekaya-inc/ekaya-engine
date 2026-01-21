@@ -29,8 +29,8 @@ type OntologyEntity struct {
 	PrimaryColumn  string    `json:"primary_column"` // Column where entity is primarily defined
 	IsDeleted      bool      `json:"is_deleted"`     // Soft delete flag
 	DeletionReason *string   `json:"deletion_reason,omitempty"`
-	CreatedBy      string    `json:"created_by"`              // Provenance: 'admin', 'mcp', 'inference'
-	UpdatedBy      *string   `json:"updated_by,omitempty"`    // Who last updated (nil if never updated)
+	CreatedBy      string    `json:"created_by"`           // Provenance: 'admin', 'mcp', 'inference'
+	UpdatedBy      *string   `json:"updated_by,omitempty"` // Who last updated (nil if never updated)
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }

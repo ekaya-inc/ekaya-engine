@@ -8,15 +8,15 @@ import (
 
 // Change type constants for schema changes.
 const (
-	ChangeTypeNewTable      = "new_table"
-	ChangeTypeDroppedTable  = "dropped_table"
-	ChangeTypeNewColumn     = "new_column"
-	ChangeTypeDroppedColumn = "dropped_column"
+	ChangeTypeNewTable       = "new_table"
+	ChangeTypeDroppedTable   = "dropped_table"
+	ChangeTypeNewColumn      = "new_column"
+	ChangeTypeDroppedColumn  = "dropped_column"
 	ChangeTypeModifiedColumn = "modified_column"
 	// Data-level changes (for PLAN-04)
-	ChangeTypeNewEnumValue     = "new_enum_value"
+	ChangeTypeNewEnumValue      = "new_enum_value"
 	ChangeTypeCardinalityChange = "cardinality_change"
-	ChangeTypeNewFKPattern     = "new_fk_pattern"
+	ChangeTypeNewFKPattern      = "new_fk_pattern"
 )
 
 // Change source constants.

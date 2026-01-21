@@ -422,16 +422,16 @@ func (s *changeReviewService) applyCreateRelationship(ctx context.Context, chang
 	}
 
 	rel := &models.EntityRelationship{
-		OntologyID:       ontology.ID,
-		SourceEntityID:   sourceUUID,
-		TargetEntityID:   targetUUID,
+		OntologyID:        ontology.ID,
+		SourceEntityID:    sourceUUID,
+		TargetEntityID:    targetUUID,
 		SourceColumnTable: change.TableName,
 		SourceColumnName:  change.ColumnName,
-		DetectionMethod:  "pending_change",
-		Confidence:       0.8,
-		Status:           "confirmed",
-		Cardinality:      "unknown",
-		CreatedBy:        reviewerSource,
+		DetectionMethod:   "pending_change",
+		Confidence:        0.8,
+		Status:            "confirmed",
+		Cardinality:       "unknown",
+		CreatedBy:         reviewerSource,
 	}
 
 	if desc, ok := payload["description"].(string); ok {

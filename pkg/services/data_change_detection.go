@@ -273,12 +273,12 @@ func (s *dataChangeDetectionService) detectEnumChanges(
 
 		if len(newValues) > 0 {
 			return &models.PendingChange{
-				ChangeType:   models.ChangeTypeNewEnumValue,
-				ChangeSource: models.ChangeSourceDataScan,
-				TableName:    table.TableName,
-				ColumnName:   col.ColumnName,
-				OldValue:     map[string]any{"enum_values": existingEnumValues},
-				NewValue:     map[string]any{"new_values": newValues, "all_values": values},
+				ChangeType:      models.ChangeTypeNewEnumValue,
+				ChangeSource:    models.ChangeSourceDataScan,
+				TableName:       table.TableName,
+				ColumnName:      col.ColumnName,
+				OldValue:        map[string]any{"enum_values": existingEnumValues},
+				NewValue:        map[string]any{"new_values": newValues, "all_values": values},
 				SuggestedAction: models.SuggestedActionUpdateColumnMetadata,
 				SuggestedPayload: map[string]any{
 					"table":       table.TableName,
@@ -295,11 +295,11 @@ func (s *dataChangeDetectionService) detectEnumChanges(
 	// Only flag columns with reasonable number of distinct values (e.g., 2-50)
 	if len(values) >= 2 && len(values) <= 50 {
 		return &models.PendingChange{
-			ChangeType:   models.ChangeTypeNewEnumValue,
-			ChangeSource: models.ChangeSourceDataScan,
-			TableName:    table.TableName,
-			ColumnName:   col.ColumnName,
-			NewValue:     map[string]any{"distinct_count": len(values), "sample_values": values},
+			ChangeType:      models.ChangeTypeNewEnumValue,
+			ChangeSource:    models.ChangeSourceDataScan,
+			TableName:       table.TableName,
+			ColumnName:      col.ColumnName,
+			NewValue:        map[string]any{"distinct_count": len(values), "sample_values": values},
 			SuggestedAction: models.SuggestedActionUpdateColumnMetadata,
 			SuggestedPayload: map[string]any{
 				"table":       table.TableName,
