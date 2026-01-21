@@ -868,3 +868,201 @@ func TestShouldCreateCandidate_BugScenarios(t *testing.T) {
 		})
 	}
 }
+
+// ============================================================================
+// validateFKDirection Tests
+// ============================================================================
+
+func TestValidateFKDirection_ValidDirection(t *testing.T) {
+	// Valid FK: source (FK column) has fewer distinct values than target (PK column)
+	// Example: orders.user_id (50 distinct) → users.id (100 distinct)
+	tests := []struct {
+		name           string
+		sourceDistinct int64
+		targetDistinct int64
+		sourceRows     int64
+		targetRows     int64
+		wantRejection  string
+	}{
+		{
+			name:           "typical FK pattern - source has fewer distinct values",
+			sourceDistinct: 50,
+			targetDistinct: 100,
+			sourceRows:     1000,
+			targetRows:     100,
+			wantRejection:  "", // Valid
+		},
+		{
+			name:           "1:1 relationship - equal distinct values",
+			sourceDistinct: 100,
+			targetDistinct: 100,
+			sourceRows:     100,
+			targetRows:     100,
+			wantRejection:  "", // Valid
+		},
+		{
+			name:           "source slightly higher within tolerance (10%)",
+			sourceDistinct: 105,
+			targetDistinct: 100,
+			sourceRows:     1000,
+			targetRows:     100,
+			wantRejection:  "", // Valid - within 10% tolerance
+		},
+		{
+			name:           "zero distinct values in source",
+			sourceDistinct: 0,
+			targetDistinct: 100,
+			sourceRows:     0,
+			targetRows:     100,
+			wantRejection:  "", // Valid - edge case, don't reject
+		},
+		{
+			name:           "zero distinct values in target",
+			sourceDistinct: 100,
+			targetDistinct: 0,
+			sourceRows:     1000,
+			targetRows:     0,
+			wantRejection:  "", // Valid - edge case, don't reject
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			overlap := &datasource.ValueOverlapResult{
+				SourceDistinct: tt.sourceDistinct,
+				TargetDistinct: tt.targetDistinct,
+				MatchRate:      0.95,
+			}
+			sourceTable := &models.SchemaTable{
+				TableName: "source_table",
+				RowCount:  &tt.sourceRows,
+			}
+			targetTable := &models.SchemaTable{
+				TableName: "target_table",
+				RowCount:  &tt.targetRows,
+			}
+
+			rejection := validateFKDirection(overlap, sourceTable, targetTable)
+			if rejection != tt.wantRejection {
+				t.Errorf("validateFKDirection() = %q, want %q", rejection, tt.wantRejection)
+			}
+		})
+	}
+}
+
+func TestValidateFKDirection_WrongDirection(t *testing.T) {
+	// Invalid FK: source (FK column) has MORE distinct values than target (PK column)
+	// This suggests the relationship direction is reversed
+	// Example: accounts.account_id (100 distinct) → account_password_resets.account_id (50 distinct)
+	// Should be: account_password_resets.account_id → accounts.account_id
+	tests := []struct {
+		name           string
+		sourceDistinct int64
+		targetDistinct int64
+		sourceRows     int64
+		targetRows     int64
+		wantRejection  string
+	}{
+		{
+			name:           "reversed FK - source has significantly more distinct values",
+			sourceDistinct: 200,
+			targetDistinct: 100,
+			sourceRows:     100,
+			targetRows:     200,
+			wantRejection:  models.RejectionWrongDirection,
+		},
+		{
+			name:           "BUG-4c scenario: accounts.account_id → account_password_resets.account_id",
+			sourceDistinct: 100, // accounts table has 100 accounts
+			targetDistinct: 50,  // only 50 accounts have password resets
+			sourceRows:     100,
+			targetRows:     60, // 60 password reset records
+			wantRejection:  models.RejectionWrongDirection,
+		},
+		{
+			name:           "source just over 10% tolerance",
+			sourceDistinct: 112, // More than 10% above target
+			targetDistinct: 100,
+			sourceRows:     500,
+			targetRows:     100,
+			wantRejection:  models.RejectionWrongDirection,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			overlap := &datasource.ValueOverlapResult{
+				SourceDistinct: tt.sourceDistinct,
+				TargetDistinct: tt.targetDistinct,
+				MatchRate:      0.95,
+			}
+			sourceTable := &models.SchemaTable{
+				TableName: "source_table",
+				RowCount:  &tt.sourceRows,
+			}
+			targetTable := &models.SchemaTable{
+				TableName: "target_table",
+				RowCount:  &tt.targetRows,
+			}
+
+			rejection := validateFKDirection(overlap, sourceTable, targetTable)
+			if rejection != tt.wantRejection {
+				t.Errorf("validateFKDirection() = %q, want %q", rejection, tt.wantRejection)
+			}
+		})
+	}
+}
+
+func TestValidateFKDirection_NilRowCounts(t *testing.T) {
+	// Test edge case where row counts are nil
+	overlap := &datasource.ValueOverlapResult{
+		SourceDistinct: 50,
+		TargetDistinct: 100,
+		MatchRate:      0.95,
+	}
+	sourceTable := &models.SchemaTable{
+		TableName: "source_table",
+		RowCount:  nil,
+	}
+	targetTable := &models.SchemaTable{
+		TableName: "target_table",
+		RowCount:  nil,
+	}
+
+	rejection := validateFKDirection(overlap, sourceTable, targetTable)
+	if rejection != "" {
+		t.Errorf("validateFKDirection() with nil row counts should not reject, got %q", rejection)
+	}
+}
+
+func TestValidateFKDirection_BugScenarios(t *testing.T) {
+	// Test the specific bug scenario from FIX-ontology-extraction-bug4.md
+	// BUG-4c: accounts.account_id → account_password_resets.account_id (reversed direction)
+	t.Run("BUG-4c: reversed relationship direction", func(t *testing.T) {
+		// accounts table is the PK table (100 accounts)
+		// account_password_resets is the FK table (60 records for 50 accounts)
+		// Wrong direction: accounts.account_id → account_password_resets.account_id
+
+		accountsRowCount := int64(100)
+		resetRowCount := int64(60)
+
+		overlap := &datasource.ValueOverlapResult{
+			SourceDistinct: 100, // All 100 account IDs in accounts table
+			TargetDistinct: 50,  // Only 50 unique account_ids in password_resets
+			MatchRate:      0.50, // Only 50% of accounts have password resets
+		}
+		sourceTable := &models.SchemaTable{
+			TableName: "accounts",
+			RowCount:  &accountsRowCount,
+		}
+		targetTable := &models.SchemaTable{
+			TableName: "account_password_resets",
+			RowCount:  &resetRowCount,
+		}
+
+		rejection := validateFKDirection(overlap, sourceTable, targetTable)
+		if rejection != models.RejectionWrongDirection {
+			t.Errorf("BUG-4c scenario should reject with wrong_direction, got %q", rejection)
+		}
+	})
+}

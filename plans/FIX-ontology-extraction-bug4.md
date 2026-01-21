@@ -246,6 +246,6 @@ if candidate.Source != DiscoveryTypeConstraint {
 - [x] Orphan threshold decreased to 10% or less
 - [x] Attribute columns (email, password, etc.) excluded from FK candidates
 - [x] *_id columns only match to their expected tables
-- [ ] FK direction validated via cardinality analysis
+- [x] FK direction validated via cardinality analysis
 - [ ] Zero-orphan requirement for inferred (non-constraint) relationships
 - [ ] Existing legitimate relationships (actual DB FKs) still discovered

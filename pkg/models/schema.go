@@ -179,11 +179,13 @@ const (
 
 // Rejection reasons for relationship candidates
 const (
-	RejectionLowMatchRate   = "low_match_rate"
-	RejectionHighOrphanRate = "high_orphan_rate"
-	RejectionJoinFailed     = "join_failed"
-	RejectionTypeMismatch   = "type_mismatch"
-	RejectionAlreadyExists  = "already_exists"
+	RejectionLowMatchRate    = "low_match_rate"
+	RejectionHighOrphanRate  = "high_orphan_rate"
+	RejectionJoinFailed      = "join_failed"
+	RejectionTypeMismatch    = "type_mismatch"
+	RejectionAlreadyExists   = "already_exists"
+	RejectionWrongDirection  = "wrong_direction"   // Source has more distinct values than target (reversed FK)
+	RejectionOrphanIntegrity = "orphan_integrity"  // More than 5% orphan values (FK integrity violation)
 )
 
 // Joinability classification reasons

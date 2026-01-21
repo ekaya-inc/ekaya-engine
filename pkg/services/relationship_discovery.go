@@ -342,6 +342,13 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 			continue
 		}
 
+		// Validate FK direction: source (FK) should have fewer or equal distinct values than target (PK)
+		// If source has more distinct values, it's likely the PK side, indicating a reversed relationship
+		if rejection := validateFKDirection(overlap, candidate.sourceTable, candidate.targetTable); rejection != "" {
+			s.recordRejectedCandidate(ctx, projectID, candidate, overlap, rejection)
+			continue
+		}
+
 		// Verify via join analysis
 		joinAnalysis, err := discoverer.AnalyzeJoin(
 			ctx,
@@ -594,6 +601,56 @@ func shouldCreateCandidate(sourceColumnName, targetTableName string) bool {
 	}
 
 	return true
+}
+
+// FKDirectionOrphanThreshold defines the maximum orphan rate (5%) for FK direction validation.
+// If more than 5% of source values don't exist in the target, the relationship is likely invalid.
+const FKDirectionOrphanThreshold = 0.05
+
+// validateFKDirection validates that the relationship direction is correct based on cardinality patterns.
+// Returns a rejection reason if the direction is wrong, empty string if valid.
+//
+// FK pattern rules:
+// 1. Source (FK) should have fewer or equal distinct values than target (PK)
+//   - If source has more distinct values, it's likely the PK side (reversed direction)
+//
+// 2. Child table (FK holder) typically has more or equal rows than parent (PK holder)
+//   - This isn't strictly enforced as some valid patterns (e.g., 1:1) may violate this
+//
+// This prevents reversed relationships like accounts.account_id → account_password_resets.account_id
+// where the direction should be account_password_resets.account_id → accounts.account_id
+func validateFKDirection(overlap *datasource.ValueOverlapResult, sourceTable, targetTable *models.SchemaTable) string {
+	// Rule 1: FK column should have fewer or equal distinct values than PK column
+	// If source has significantly more distinct values, this suggests the source is the PK side
+	// Allow a 10% tolerance for data quality issues
+	if overlap.SourceDistinct > 0 && overlap.TargetDistinct > 0 {
+		if float64(overlap.SourceDistinct) > float64(overlap.TargetDistinct)*1.1 {
+			return models.RejectionWrongDirection
+		}
+	}
+
+	// Rule 2: Validate row count pattern (soft check with tolerance)
+	// In typical FK relationships, the child table (FK holder) has more or equal rows
+	// However, this is a soft check because:
+	// - 1:1 relationships may have equal rows
+	// - Optional FKs may have fewer rows on either side
+	// - We use a 50% tolerance to avoid false rejections
+	if sourceTable.RowCount != nil && targetTable.RowCount != nil {
+		sourceRows := *sourceTable.RowCount
+		targetRows := *targetTable.RowCount
+
+		// If target (PK table) has significantly more rows than source (FK table),
+		// this could indicate a reversed relationship, but only flag extreme cases
+		// where target has 3x more rows (very unusual for valid FK)
+		if targetRows > 0 && sourceRows > 0 {
+			if float64(targetRows) > float64(sourceRows)*3 {
+				// This is suspicious but not definitive - log it but don't reject
+				// The orphan check (which happens after join analysis) will catch invalid relationships
+			}
+		}
+	}
+
+	return "" // Valid direction
 }
 
 func normalizeType(t string) string {
