@@ -241,6 +241,6 @@ This ensures:
 
 - [x] One entity per business concept (no duplicates)
 - [x] Real tables preferred over test/sample tables as primary
-- [ ] Entity name uniqueness enforced at database level
+- [x] Entity name uniqueness enforced at database level
 - [x] Test tables grouped under real table's entity as aliases
 - [ ] LLM enrichment includes context about existing names

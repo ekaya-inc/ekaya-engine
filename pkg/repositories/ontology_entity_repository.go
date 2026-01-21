@@ -77,21 +77,40 @@ func (r *ontologyEntityRepository) Create(ctx context.Context, entity *models.On
 		entity.CreatedBy = models.ProvenanceInference
 	}
 
+	// Use ON CONFLICT to handle duplicate entity names within the same ontology.
+	// On conflict, merge descriptions by preferring the new description if it's non-empty,
+	// otherwise keep the existing one.
 	query := `
 		INSERT INTO engine_ontology_entities (
 			id, project_id, ontology_id, name, description, domain,
 			primary_schema, primary_table, primary_column,
 			created_by, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		ON CONFLICT (ontology_id, name) DO UPDATE SET
+			description = COALESCE(NULLIF(EXCLUDED.description, ''), engine_ontology_entities.description),
+			domain = COALESCE(EXCLUDED.domain, engine_ontology_entities.domain),
+			primary_schema = EXCLUDED.primary_schema,
+			primary_table = EXCLUDED.primary_table,
+			primary_column = EXCLUDED.primary_column,
+			updated_at = EXCLUDED.updated_at
+		RETURNING id, created_at`
 
-	_, err := scope.Conn.Exec(ctx, query,
+	row := scope.Conn.QueryRow(ctx, query,
 		entity.ID, entity.ProjectID, entity.OntologyID, entity.Name, entity.Description, entity.Domain,
 		entity.PrimarySchema, entity.PrimaryTable, entity.PrimaryColumn,
 		entity.CreatedBy, entity.CreatedAt, entity.UpdatedAt,
 	)
-	if err != nil {
-		return fmt.Errorf("failed to create ontology entity: %w", err)
+
+	// Retrieve the actual ID and created_at (may be different if row already existed)
+	var actualID uuid.UUID
+	var actualCreatedAt time.Time
+	if err := row.Scan(&actualID, &actualCreatedAt); err != nil {
+		return fmt.Errorf("failed to create/update ontology entity: %w", err)
 	}
+
+	// Update the entity struct with actual values from the database
+	entity.ID = actualID
+	entity.CreatedAt = actualCreatedAt
 
 	return nil
 }

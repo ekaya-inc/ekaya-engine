@@ -177,29 +177,160 @@ func TestOntologyEntityRepository_Create_Success(t *testing.T) {
 	}
 }
 
-func TestOntologyEntityRepository_Create_DuplicateName(t *testing.T) {
+func TestOntologyEntityRepository_Create_UpsertOnDuplicateName(t *testing.T) {
 	tc := setupOntologyEntityTest(t)
 	tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
 
-	tc.createTestEntity(ctx, "account")
+	original := tc.createTestEntity(ctx, "account")
+	originalID := original.ID
 
-	// Try to create another with same name
-	entity := &models.OntologyEntity{
+	// Create another entity with the same name - should upsert (update existing)
+	updated := &models.OntologyEntity{
 		ProjectID:     tc.projectID,
 		OntologyID:    tc.ontologyID,
 		Name:          "account",
-		Description:   "Duplicate account",
-		PrimarySchema: "public",
-		PrimaryTable:  "accounts",
-		PrimaryColumn: "id",
+		Description:   "Updated account description",
+		PrimarySchema: "new_schema",
+		PrimaryTable:  "new_accounts",
+		PrimaryColumn: "new_id",
 	}
 
-	err := tc.repo.Create(ctx, entity)
-	if err == nil {
-		t.Error("expected error for duplicate entity name")
+	err := tc.repo.Create(ctx, updated)
+	if err != nil {
+		t.Fatalf("Create (upsert) failed: %v", err)
+	}
+
+	// Verify the entity struct was updated with the actual ID from database
+	if updated.ID != originalID {
+		t.Errorf("expected ID to be original %v, got %v", originalID, updated.ID)
+	}
+
+	// Verify only one entity exists
+	entities, err := tc.repo.GetByOntology(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("GetByOntology failed: %v", err)
+	}
+	if len(entities) != 1 {
+		t.Errorf("expected 1 entity after upsert, got %d", len(entities))
+	}
+
+	// Verify the entity was updated
+	retrieved, err := tc.repo.GetByName(ctx, tc.ontologyID, "account")
+	if err != nil {
+		t.Fatalf("GetByName failed: %v", err)
+	}
+	if retrieved.Description != "Updated account description" {
+		t.Errorf("expected description 'Updated account description', got %q", retrieved.Description)
+	}
+	if retrieved.PrimarySchema != "new_schema" {
+		t.Errorf("expected primary_schema 'new_schema', got %q", retrieved.PrimarySchema)
+	}
+	if retrieved.PrimaryTable != "new_accounts" {
+		t.Errorf("expected primary_table 'new_accounts', got %q", retrieved.PrimaryTable)
+	}
+}
+
+func TestOntologyEntityRepository_Create_UpsertPreservesExistingDescription(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create entity with description
+	original := &models.OntologyEntity{
+		ProjectID:     tc.projectID,
+		OntologyID:    tc.ontologyID,
+		Name:          "user",
+		Description:   "A platform user",
+		PrimarySchema: "public",
+		PrimaryTable:  "users",
+		PrimaryColumn: "id",
+	}
+	err := tc.repo.Create(ctx, original)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Upsert with empty description - should preserve existing
+	updated := &models.OntologyEntity{
+		ProjectID:     tc.projectID,
+		OntologyID:    tc.ontologyID,
+		Name:          "user",
+		Description:   "", // Empty description
+		PrimarySchema: "app",
+		PrimaryTable:  "app_users",
+		PrimaryColumn: "user_id",
+	}
+	err = tc.repo.Create(ctx, updated)
+	if err != nil {
+		t.Fatalf("Create (upsert) failed: %v", err)
+	}
+
+	// Verify original description was preserved
+	retrieved, err := tc.repo.GetByName(ctx, tc.ontologyID, "user")
+	if err != nil {
+		t.Fatalf("GetByName failed: %v", err)
+	}
+	if retrieved.Description != "A platform user" {
+		t.Errorf("expected description 'A platform user' to be preserved, got %q", retrieved.Description)
+	}
+	// But other fields should be updated
+	if retrieved.PrimarySchema != "app" {
+		t.Errorf("expected primary_schema 'app', got %q", retrieved.PrimarySchema)
+	}
+	if retrieved.PrimaryTable != "app_users" {
+		t.Errorf("expected primary_table 'app_users', got %q", retrieved.PrimaryTable)
+	}
+}
+
+func TestOntologyEntityRepository_Create_UpsertOverwritesWithNewDescription(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create entity with description
+	original := &models.OntologyEntity{
+		ProjectID:     tc.projectID,
+		OntologyID:    tc.ontologyID,
+		Name:          "order",
+		Description:   "Original order description",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+		PrimaryColumn: "id",
+	}
+	err := tc.repo.Create(ctx, original)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Upsert with new description - should overwrite
+	updated := &models.OntologyEntity{
+		ProjectID:     tc.projectID,
+		OntologyID:    tc.ontologyID,
+		Name:          "order",
+		Description:   "Better order description",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+		PrimaryColumn: "id",
+	}
+	err = tc.repo.Create(ctx, updated)
+	if err != nil {
+		t.Fatalf("Create (upsert) failed: %v", err)
+	}
+
+	// Verify new description replaced old one
+	retrieved, err := tc.repo.GetByName(ctx, tc.ontologyID, "order")
+	if err != nil {
+		t.Fatalf("GetByName failed: %v", err)
+	}
+	if retrieved.Description != "Better order description" {
+		t.Errorf("expected description 'Better order description', got %q", retrieved.Description)
 	}
 }
 
