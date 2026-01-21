@@ -41,26 +41,26 @@ type ApproveAllResult struct {
 }
 
 type changeReviewService struct {
-	pendingChangeRepo   repositories.PendingChangeRepository
-	entityRepo          repositories.OntologyEntityRepository
-	relationshipRepo    repositories.EntityRelationshipRepository
-	columnMetadataRepo  repositories.ColumnMetadataRepository
-	ontologyRepo        repositories.OntologyRepository
-	precedenceChecker   PrecedenceChecker      // Precedence validation service
-	incrementalDAG      IncrementalDAGService  // Optional: triggers LLM enrichment after approval
-	logger              *zap.Logger
+	pendingChangeRepo  repositories.PendingChangeRepository
+	entityRepo         repositories.OntologyEntityRepository
+	relationshipRepo   repositories.EntityRelationshipRepository
+	columnMetadataRepo repositories.ColumnMetadataRepository
+	ontologyRepo       repositories.OntologyRepository
+	precedenceChecker  PrecedenceChecker     // Precedence validation service
+	incrementalDAG     IncrementalDAGService // Optional: triggers LLM enrichment after approval
+	logger             *zap.Logger
 }
 
 // ChangeReviewServiceDeps contains dependencies for ChangeReviewService.
 type ChangeReviewServiceDeps struct {
-	PendingChangeRepo   repositories.PendingChangeRepository
-	EntityRepo          repositories.OntologyEntityRepository
-	RelationshipRepo    repositories.EntityRelationshipRepository
-	ColumnMetadataRepo  repositories.ColumnMetadataRepository
-	OntologyRepo        repositories.OntologyRepository
-	PrecedenceChecker   PrecedenceChecker      // Optional: defaults to NewPrecedenceChecker() if nil
-	IncrementalDAG      IncrementalDAGService  // Optional: set to enable LLM enrichment after approval
-	Logger              *zap.Logger
+	PendingChangeRepo  repositories.PendingChangeRepository
+	EntityRepo         repositories.OntologyEntityRepository
+	RelationshipRepo   repositories.EntityRelationshipRepository
+	ColumnMetadataRepo repositories.ColumnMetadataRepository
+	OntologyRepo       repositories.OntologyRepository
+	PrecedenceChecker  PrecedenceChecker     // Optional: defaults to NewPrecedenceChecker() if nil
+	IncrementalDAG     IncrementalDAGService // Optional: set to enable LLM enrichment after approval
+	Logger             *zap.Logger
 }
 
 // NewChangeReviewService creates a new ChangeReviewService.
@@ -70,14 +70,14 @@ func NewChangeReviewService(deps *ChangeReviewServiceDeps) ChangeReviewService {
 		precedenceChecker = NewPrecedenceChecker()
 	}
 	return &changeReviewService{
-		pendingChangeRepo:   deps.PendingChangeRepo,
-		entityRepo:          deps.EntityRepo,
-		relationshipRepo:    deps.RelationshipRepo,
-		columnMetadataRepo:  deps.ColumnMetadataRepo,
-		ontologyRepo:        deps.OntologyRepo,
-		precedenceChecker:   precedenceChecker,
-		incrementalDAG:      deps.IncrementalDAG,
-		logger:              deps.Logger,
+		pendingChangeRepo:  deps.PendingChangeRepo,
+		entityRepo:         deps.EntityRepo,
+		relationshipRepo:   deps.RelationshipRepo,
+		columnMetadataRepo: deps.ColumnMetadataRepo,
+		ontologyRepo:       deps.OntologyRepo,
+		precedenceChecker:  precedenceChecker,
+		incrementalDAG:     deps.IncrementalDAG,
+		logger:             deps.Logger,
 	}
 }
 
@@ -473,4 +473,3 @@ func (s *changeReviewService) applyUpdateRelationship(ctx context.Context, chang
 
 	return s.relationshipRepo.Update(ctx, existing)
 }
-

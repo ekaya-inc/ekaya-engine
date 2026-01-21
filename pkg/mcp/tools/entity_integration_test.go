@@ -62,8 +62,8 @@ func setupEntityToolIntegrationTest(t *testing.T) *entityToolTestContext {
 	mockMCPConfig := &mockMCPConfigService{
 		config: &models.ToolGroupConfig{
 			Enabled:                true,
-			AddQueryTools:          true,  // Enables query tools
-			AddOntologyMaintenance: true,  // Enables update_entity, delete_entity, etc.
+			AddQueryTools:          true, // Enables query tools
+			AddOntologyMaintenance: true, // Enables update_entity, delete_entity, etc.
 		},
 	}
 

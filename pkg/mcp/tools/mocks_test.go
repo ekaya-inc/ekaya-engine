@@ -295,8 +295,8 @@ func (m *mockSchemaService) SelectAllTables(ctx context.Context, projectID, data
 
 // mockSchemaRepository implements repositories.SchemaRepository for testing.
 type mockSchemaRepository struct {
-	tables       []*models.SchemaTable
-	columns      []*models.SchemaColumn
+	tables        []*models.SchemaTable
+	columns       []*models.SchemaColumn
 	relationships []*models.SchemaRelationship
 }
 

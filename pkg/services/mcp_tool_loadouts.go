@@ -168,14 +168,14 @@ var Loadouts = map[string][]string{
 //   - Developer Tools + Add Query Tools + Add Ontology Maintenance: +Developer Core +Query +Ontology Maintenance +Ontology Questions
 //   - Custom Tools selected: All tools available (individual selection)
 var UILoadoutMapping = map[string][]string{
-	"business":                              {LoadoutDefault, LoadoutQuery},
-	"business_with_ontology":                {LoadoutDefault, LoadoutQuery, LoadoutOntologyMaintenance},
-	"agent":                                 {LoadoutDefault, LoadoutLimitedQuery},
-	"developer":                             {LoadoutDefault, LoadoutDeveloperCore},
-	"developer_with_query":                  {LoadoutDefault, LoadoutDeveloperCore, LoadoutQuery},
-	"developer_with_ontology_maintenance":   {LoadoutDefault, LoadoutDeveloperCore, LoadoutOntologyMaintenance, LoadoutOntologyQuestions},
-	"developer_with_query_and_maintenance":  {LoadoutDefault, LoadoutDeveloperCore, LoadoutQuery, LoadoutOntologyMaintenance, LoadoutOntologyQuestions},
-	"custom":                                {}, // Custom mode uses individual tool selection
+	"business":                             {LoadoutDefault, LoadoutQuery},
+	"business_with_ontology":               {LoadoutDefault, LoadoutQuery, LoadoutOntologyMaintenance},
+	"agent":                                {LoadoutDefault, LoadoutLimitedQuery},
+	"developer":                            {LoadoutDefault, LoadoutDeveloperCore},
+	"developer_with_query":                 {LoadoutDefault, LoadoutDeveloperCore, LoadoutQuery},
+	"developer_with_ontology_maintenance":  {LoadoutDefault, LoadoutDeveloperCore, LoadoutOntologyMaintenance, LoadoutOntologyQuestions},
+	"developer_with_query_and_maintenance": {LoadoutDefault, LoadoutDeveloperCore, LoadoutQuery, LoadoutOntologyMaintenance, LoadoutOntologyQuestions},
+	"custom":                               {}, // Custom mode uses individual tool selection
 }
 
 // allToolsIndex is a lookup map for tool order, built at init time.
