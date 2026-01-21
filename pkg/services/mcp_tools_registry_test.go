@@ -57,7 +57,7 @@ func TestGetEnabledTools_DeveloperWithQueryTools(t *testing.T) {
 
 	toolNames := extractToolNames(tools)
 
-	// Developer Core + Query + Ontology Maintenance
+	// Developer Core + Query (but NOT Ontology Maintenance)
 	assert.Contains(t, toolNames, "health")
 	assert.Contains(t, toolNames, "echo")
 	assert.Contains(t, toolNames, "execute")
@@ -65,25 +65,34 @@ func TestGetEnabledTools_DeveloperWithQueryTools(t *testing.T) {
 	assert.Contains(t, toolNames, "get_ontology")
 	assert.Contains(t, toolNames, "sample")
 	assert.Contains(t, toolNames, "list_approved_queries")
-	assert.Contains(t, toolNames, "update_entity")
-	assert.Contains(t, toolNames, "update_column")
+
+	// Ontology Maintenance tools should NOT be included with AddQueryTools alone
+	assert.NotContains(t, toolNames, "update_entity")
+	assert.NotContains(t, toolNames, "update_column")
+	assert.NotContains(t, toolNames, "refresh_schema")
 }
 
-func TestGetEnabledTools_DeveloperWithOntologyQuestions(t *testing.T) {
+func TestGetEnabledTools_DeveloperWithOntologyMaintenance(t *testing.T) {
 	state := map[string]*models.ToolGroupConfig{
-		ToolGroupDeveloper: {Enabled: true, AddOntologyQuestions: true},
+		ToolGroupDeveloper: {Enabled: true, AddOntologyMaintenance: true},
 	}
 	tools := GetEnabledTools(state)
 
 	toolNames := extractToolNames(tools)
 
-	// Developer Core + Ontology Questions
+	// Developer Core + Ontology Maintenance + Ontology Questions
 	assert.Contains(t, toolNames, "health")
 	assert.Contains(t, toolNames, "echo")
 	assert.Contains(t, toolNames, "execute")
+	// Ontology Questions tools
 	assert.Contains(t, toolNames, "list_ontology_questions")
 	assert.Contains(t, toolNames, "resolve_ontology_question")
 	assert.Contains(t, toolNames, "skip_ontology_question")
+	// Ontology Maintenance tools
+	assert.Contains(t, toolNames, "update_entity")
+	assert.Contains(t, toolNames, "update_column")
+	assert.Contains(t, toolNames, "refresh_schema")
+	assert.Contains(t, toolNames, "list_pending_changes")
 
 	// Query tools should NOT be included
 	assert.NotContains(t, toolNames, "get_schema")

@@ -883,12 +883,12 @@ func TestMCPConfigService_Update_EnabledToolsReflectNewState(t *testing.T) {
 		toolNames[i] = tool.Name
 	}
 
-	// Developer Core + Query + Ontology Maintenance tools
+	// Developer Core + Query loadout (NO ontology maintenance - that requires AddOntologyMaintenance)
 	assert.Contains(t, toolNames, "echo", "should include echo after enabling developer")
 	assert.Contains(t, toolNames, "execute", "should include execute after enabling developer")
 	assert.Contains(t, toolNames, "get_schema", "should include get_schema with AddQueryTools")
 	assert.Contains(t, toolNames, "sample", "should include sample with AddQueryTools")
-	assert.Contains(t, toolNames, "update_entity", "should include update_entity with AddQueryTools")
+	assert.NotContains(t, toolNames, "update_entity", "should NOT include update_entity with AddQueryTools (requires AddOntologyMaintenance)")
 }
 
 func TestMCPConfigService_Update_AllowOntologyMaintenance(t *testing.T) {
