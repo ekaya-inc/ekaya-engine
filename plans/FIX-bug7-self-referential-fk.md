@@ -87,7 +87,7 @@ The PK-match discovery skip (lines 592-595, 608-611) should **remain** because:
 - A column matching the same table's PK is likely just a copy or different ID
 - The FK Discovery handles legitimate self-references via actual constraints
 
-### Step 3: Handle Role Labels for Self-References ✅
+### Step 3: Handle Role Labels for Self-References ✅ VERIFIED
 
 Self-referential relationships need role labels to distinguish directions:
 
