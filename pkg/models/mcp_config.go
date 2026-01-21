@@ -15,10 +15,10 @@ type ToolGroupConfig struct {
 	AllowOntologyMaintenance bool `json:"allowOntologyMaintenance,omitempty"`
 
 	// Developer Tools options
-	// AddQueryTools: When enabled, adds Query loadout + Ontology Maintenance tools
+	// AddQueryTools: When enabled, adds Query loadout (schema exploration and querying)
 	AddQueryTools bool `json:"addQueryTools,omitempty"`
-	// AddOntologyQuestions: When enabled, adds Ontology Questions tools for answering pending questions
-	AddOntologyQuestions bool `json:"addOntologyQuestions,omitempty"`
+	// AddOntologyMaintenance: When enabled, adds Ontology Maintenance + Ontology Questions tools
+	AddOntologyMaintenance bool `json:"addOntologyMaintenance,omitempty"`
 
 	// Custom Tools options
 	// CustomTools: List of individually selected tool names (only used when custom group is enabled)

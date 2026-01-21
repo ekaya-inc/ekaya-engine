@@ -71,6 +71,14 @@ var AllToolsOrdered = []ToolSpec{
 	{Name: "delete_glossary_term", Description: "Delete a business glossary term that's no longer relevant"},
 	{Name: "delete_project_knowledge", Description: "Remove incorrect or outdated domain facts"},
 	{Name: "delete_relationship", Description: "Remove a relationship that doesn't exist or was incorrectly identified"},
+
+	// Schema Management (Living Ontology)
+	{Name: "refresh_schema", Description: "Refresh schema from datasource and detect changes (new tables, columns, etc.)"},
+	{Name: "scan_data_changes", Description: "Scan for data-level changes (new enum values, FK patterns) in selected tables"},
+	{Name: "list_pending_changes", Description: "List pending ontology changes awaiting review"},
+	{Name: "approve_change", Description: "Approve a pending ontology change and apply it"},
+	{Name: "reject_change", Description: "Reject a pending ontology change without applying it"},
+	{Name: "approve_all_changes", Description: "Approve all pending ontology changes that can be applied"},
 }
 
 // Loadouts defines which tools belong to each loadout.
@@ -127,6 +135,13 @@ var Loadouts = map[string][]string{
 		"delete_glossary_term",
 		"delete_project_knowledge",
 		"delete_relationship",
+		// Schema management (living ontology) tools
+		"refresh_schema",
+		"scan_data_changes",
+		"list_pending_changes",
+		"approve_change",
+		"reject_change",
+		"approve_all_changes",
 	},
 
 	// Ontology Questions -- special mode for MCP Client to enumerate and answer pending questions
@@ -148,19 +163,19 @@ var Loadouts = map[string][]string{
 //   - Business Tools + Allow Usage to Improve Ontology: +Query +Ontology Maintenance
 //   - Agent Tools selected: +Limited Query
 //   - Developer Tools selected: +Developer Core
-//   - Developer Tools + Add Query Tools: +Developer Core +Query +Ontology Maintenance
-//   - Developer Tools + Add Ontology Questions: +Developer Core +Ontology Questions
-//   - Developer Tools + Add Query Tools + Add Ontology Questions: +Developer Core +Query +Ontology Maintenance +Ontology Questions
+//   - Developer Tools + Add Query Tools: +Developer Core +Query
+//   - Developer Tools + Add Ontology Maintenance: +Developer Core +Ontology Maintenance +Ontology Questions
+//   - Developer Tools + Add Query Tools + Add Ontology Maintenance: +Developer Core +Query +Ontology Maintenance +Ontology Questions
 //   - Custom Tools selected: All tools available (individual selection)
 var UILoadoutMapping = map[string][]string{
-	"business":                           {LoadoutDefault, LoadoutQuery},
-	"business_with_ontology":             {LoadoutDefault, LoadoutQuery, LoadoutOntologyMaintenance},
-	"agent":                              {LoadoutDefault, LoadoutLimitedQuery},
-	"developer":                          {LoadoutDefault, LoadoutDeveloperCore},
-	"developer_with_query":               {LoadoutDefault, LoadoutDeveloperCore, LoadoutQuery, LoadoutOntologyMaintenance},
-	"developer_with_ontology_questions":  {LoadoutDefault, LoadoutDeveloperCore, LoadoutOntologyQuestions},
-	"developer_with_query_and_questions": {LoadoutDefault, LoadoutDeveloperCore, LoadoutQuery, LoadoutOntologyMaintenance, LoadoutOntologyQuestions},
-	"custom":                             {}, // Custom mode uses individual tool selection
+	"business":                              {LoadoutDefault, LoadoutQuery},
+	"business_with_ontology":                {LoadoutDefault, LoadoutQuery, LoadoutOntologyMaintenance},
+	"agent":                                 {LoadoutDefault, LoadoutLimitedQuery},
+	"developer":                             {LoadoutDefault, LoadoutDeveloperCore},
+	"developer_with_query":                  {LoadoutDefault, LoadoutDeveloperCore, LoadoutQuery},
+	"developer_with_ontology_maintenance":   {LoadoutDefault, LoadoutDeveloperCore, LoadoutOntologyMaintenance, LoadoutOntologyQuestions},
+	"developer_with_query_and_maintenance":  {LoadoutDefault, LoadoutDeveloperCore, LoadoutQuery, LoadoutOntologyMaintenance, LoadoutOntologyQuestions},
+	"custom":                                {}, // Custom mode uses individual tool selection
 }
 
 // allToolsIndex is a lookup map for tool order, built at init time.
@@ -266,10 +281,10 @@ func ComputeEnabledToolsFromConfig(state map[string]*models.ToolGroupConfig, isA
 	if devConfig != nil && devConfig.Enabled {
 		loadouts = append(loadouts, LoadoutDeveloperCore)
 		if devConfig.AddQueryTools {
-			loadouts = append(loadouts, LoadoutQuery, LoadoutOntologyMaintenance)
+			loadouts = append(loadouts, LoadoutQuery)
 		}
-		if devConfig.AddOntologyQuestions {
-			loadouts = append(loadouts, LoadoutOntologyQuestions)
+		if devConfig.AddOntologyMaintenance {
+			loadouts = append(loadouts, LoadoutOntologyMaintenance, LoadoutOntologyQuestions)
 		}
 	}
 
