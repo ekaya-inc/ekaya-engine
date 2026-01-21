@@ -127,15 +127,16 @@ Investigate why `ensureOntologyExists` might return a different ontology ID than
 3. [x] **pkg/mcp/tools/entity_test.go** (if exists) or create tests
    - Add test case for finding extraction-created entities
 
-## Testing Verification
+## Testing Verification ✅
 
-After implementing:
+Manually verified on 2026-01-21:
 
-1. Run ontology extraction via UI
-2. Wait for Entity Discovery to complete
-3. Verify `get_context(depth='entities')` shows entities
-4. Verify `get_entity(name='EntityName')` finds those same entities
-5. Verify `update_entity` and `delete_entity` also work with extraction-created entities
+1. [x] Run ontology extraction via UI
+2. [x] Wait for Entity Discovery to complete
+3. [x] Verify `get_context(depth='entities')` shows entities (50+ entities returned)
+4. [x] Verify `get_entity(name='Account')` finds extraction-created entities
+5. [x] Verify `update_entity` works with extraction-created entities (`created: false`)
+6. [x] Verify `delete_entity` works (tested with temporary `ManualTestEntity`)
 
 ## Related Issues
 
