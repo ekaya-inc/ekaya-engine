@@ -376,6 +376,21 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 		var entityID uuid.UUID
 		isNew := existingEntity == nil
 
+		// If entity exists, check precedence before allowing update
+		if !isNew {
+			// Check precedence: can MCP modify this entity?
+			if !canModifyEntity(existingEntity.CreatedBy, existingEntity.UpdatedBy, models.ProvenanceMCP) {
+				effectiveSource := existingEntity.CreatedBy
+				if existingEntity.UpdatedBy != nil && *existingEntity.UpdatedBy != "" {
+					effectiveSource = *existingEntity.UpdatedBy
+				}
+				return NewErrorResult("precedence_blocked",
+					fmt.Sprintf("Cannot modify entity: precedence blocked (existing: %s, modifier: %s). "+
+						"Manual changes cannot be overridden by MCP. Use the UI to modify or delete this entity.",
+						effectiveSource, models.ProvenanceMCP)), nil
+			}
+		}
+
 		if isNew {
 			// Create new entity with MCP provenance
 			newEntity := &models.OntologyEntity{
@@ -597,42 +612,17 @@ func registerDeleteEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			), nil
 		}
 
-		// Check for occurrences in schema
-		// Note: Occurrences are stored in engine_ontology_entity_occurrences table
-		// We need to query it to check if this entity has any occurrences
-		scope, ok := database.GetTenantScope(tenantCtx)
-		if !ok || scope == nil {
-			return nil, fmt.Errorf("tenant scope not found in context")
-		}
-
-		var occurrenceCount int
-		occQuery := `
-			SELECT COUNT(*)
-			FROM engine_ontology_entity_occurrences
-			WHERE entity_id = $1 AND is_deleted = false`
-		if err := scope.Conn.QueryRow(ctx, occQuery, entity.ID).Scan(&occurrenceCount); err != nil {
+		// Check for occurrences in schema using repository
+		occurrenceCount, err := deps.OntologyEntityRepo.CountOccurrencesByEntity(tenantCtx, entity.ID)
+		if err != nil {
 			return nil, fmt.Errorf("failed to check occurrences: %w", err)
 		}
 
 		if occurrenceCount > 0 {
 			// Get sample tables for error message
-			var tables []string
-			tablesQuery := `
-				SELECT DISTINCT table_name
-				FROM engine_ontology_entity_occurrences
-				WHERE entity_id = $1 AND is_deleted = false
-				LIMIT 5`
-			rows, err := scope.Conn.Query(ctx, tablesQuery, entity.ID)
+			tables, err := deps.OntologyEntityRepo.GetOccurrenceTablesByEntity(tenantCtx, entity.ID, 5)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get occurrence tables: %w", err)
-			}
-			defer rows.Close()
-			for rows.Next() {
-				var tableName string
-				if err := rows.Scan(&tableName); err != nil {
-					return nil, fmt.Errorf("failed to scan table name: %w", err)
-				}
-				tables = append(tables, tableName)
 			}
 
 			return NewErrorResultWithDetails(
@@ -705,4 +695,39 @@ type updateEntityResponse struct {
 type deleteEntityResponse struct {
 	Name    string `json:"name"`
 	Deleted bool   `json:"deleted"`
+}
+
+// canModifyEntity checks if a source can modify an entity based on precedence.
+// Precedence hierarchy: Manual (3) > MCP (2) > Inference (1)
+// Returns true if the modification is allowed, false if blocked by higher precedence.
+func canModifyEntity(elementCreatedBy string, elementUpdatedBy *string, modifierSource string) bool {
+	modifierLevel := precedenceLevelEntity(modifierSource)
+
+	// Check against updated_by if present, otherwise check created_by
+	var existingSource string
+	if elementUpdatedBy != nil && *elementUpdatedBy != "" {
+		existingSource = *elementUpdatedBy
+	} else {
+		existingSource = elementCreatedBy
+	}
+
+	existingLevel := precedenceLevelEntity(existingSource)
+
+	// Modifier can change if their level is >= existing level
+	return modifierLevel >= existingLevel
+}
+
+// precedenceLevelEntity returns the numeric precedence level for a source.
+// Higher number = higher precedence.
+func precedenceLevelEntity(source string) int {
+	switch source {
+	case models.ProvenanceManual:
+		return 3
+	case models.ProvenanceMCP:
+		return 2
+	case models.ProvenanceInference:
+		return 1
+	default:
+		return 0 // Unknown source has lowest precedence
+	}
 }

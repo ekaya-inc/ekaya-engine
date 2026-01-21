@@ -37,6 +37,10 @@ type OntologyEntityRepository interface {
 	CreateKeyColumn(ctx context.Context, keyColumn *models.OntologyEntityKeyColumn) error
 	GetKeyColumnsByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityKeyColumn, error)
 	GetAllKeyColumnsByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityKeyColumn, error)
+
+	// Occurrence operations
+	CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error)
+	GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error)
 }
 
 type ontologyEntityRepository struct{}
@@ -581,4 +585,64 @@ func scanOntologyEntityKeyColumn(row pgx.Row) (*models.OntologyEntityKeyColumn, 
 	}
 
 	return &kc, nil
+}
+
+// ============================================================================
+// Occurrence Operations
+// ============================================================================
+
+// CountOccurrencesByEntity returns the count of non-deleted occurrences for an entity.
+func (r *ontologyEntityRepository) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return 0, fmt.Errorf("tenant scope not found in context")
+	}
+
+	query := `
+		SELECT COUNT(*)
+		FROM engine_ontology_entity_occurrences
+		WHERE entity_id = $1 AND is_deleted = false`
+
+	var count int
+	err := scope.Conn.QueryRow(ctx, query, entityID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count occurrences: %w", err)
+	}
+
+	return count, nil
+}
+
+// GetOccurrenceTablesByEntity returns distinct table names where an entity has occurrences.
+func (r *ontologyEntityRepository) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("tenant scope not found in context")
+	}
+
+	query := `
+		SELECT DISTINCT table_name
+		FROM engine_ontology_entity_occurrences
+		WHERE entity_id = $1 AND is_deleted = false
+		LIMIT $2`
+
+	rows, err := scope.Conn.Query(ctx, query, entityID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get occurrence tables: %w", err)
+	}
+	defer rows.Close()
+
+	var tables []string
+	for rows.Next() {
+		var tableName string
+		if err := rows.Scan(&tableName); err != nil {
+			return nil, fmt.Errorf("failed to scan table name: %w", err)
+		}
+		tables = append(tables, tableName)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	return tables, nil
 }

@@ -137,6 +137,14 @@ func (m *mockEntityRepoForFinalization) GetAllKeyColumnsByProject(ctx context.Co
 	return nil, nil
 }
 
+func (m *mockEntityRepoForFinalization) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockEntityRepoForFinalization) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	return nil, nil
+}
+
 type mockRelationshipRepoForFinalization struct {
 	relationships   []*models.EntityRelationship
 	getByProjectErr error

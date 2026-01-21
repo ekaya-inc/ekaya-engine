@@ -168,6 +168,14 @@ func (r *testRelEnrichmentEntityRepo) Restore(ctx context.Context, entityID uuid
 	return nil
 }
 
+func (r *testRelEnrichmentEntityRepo) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (r *testRelEnrichmentEntityRepo) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	return nil, nil
+}
+
 // Tests for task 2 changes: validation, retry logic, error handling
 
 func TestRelationshipEnrichmentService_ValidationFiltersInvalid(t *testing.T) {

@@ -147,6 +147,14 @@ func (m *mockOntologyEntityRepository) GetAllKeyColumnsByProject(ctx context.Con
 	return make(map[uuid.UUID][]*models.OntologyEntityKeyColumn), nil
 }
 
+func (m *mockOntologyEntityRepository) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockOntologyEntityRepository) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	return nil, nil
+}
+
 // mockEntityRelationshipRepository is a mock for EntityRelationshipRepository.
 type mockEntityRelationshipRepository struct {
 	relationships         []*models.EntityRelationship

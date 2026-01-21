@@ -115,6 +115,36 @@ func (tc *ontologyEntityTestContext) createTestEntity(ctx context.Context, name 
 	return entity
 }
 
+func (tc *ontologyEntityTestContext) createTestOccurrence(ctx context.Context, entityID uuid.UUID, tableName, columnName string) {
+	tc.t.Helper()
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		tc.t.Fatal("failed to get tenant scope from context")
+	}
+	_, err := scope.Conn.Exec(ctx, `
+		INSERT INTO engine_ontology_entity_occurrences (id, entity_id, schema_name, table_name, column_name, role, is_deleted)
+		VALUES (gen_random_uuid(), $1, 'public', $2, $3, 'identifier', false)
+	`, entityID, tableName, columnName)
+	if err != nil {
+		tc.t.Fatalf("failed to create test occurrence: %v", err)
+	}
+}
+
+func (tc *ontologyEntityTestContext) createTestOccurrenceDeleted(ctx context.Context, entityID uuid.UUID, tableName, columnName string) {
+	tc.t.Helper()
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		tc.t.Fatal("failed to get tenant scope from context")
+	}
+	_, err := scope.Conn.Exec(ctx, `
+		INSERT INTO engine_ontology_entity_occurrences (id, entity_id, schema_name, table_name, column_name, role, is_deleted)
+		VALUES (gen_random_uuid(), $1, 'public', $2, $3, 'identifier', true)
+	`, entityID, tableName, columnName)
+	if err != nil {
+		tc.t.Fatalf("failed to create test occurrence (deleted): %v", err)
+	}
+}
+
 // ============================================================================
 // Entity Create Tests
 // ============================================================================
@@ -838,5 +868,167 @@ func TestOntologyEntityRepository_DeleteAlias_CascadeOnEntityDelete(t *testing.T
 	}
 	if len(aliases) != 0 {
 		t.Errorf("expected 0 aliases after entity delete, got %d", len(aliases))
+	}
+}
+
+// ============================================================================
+// CountOccurrencesByEntity Tests
+// ============================================================================
+
+func TestOntologyEntityRepository_CountOccurrencesByEntity_NoOccurrences(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	// Entity with no occurrences should return 0
+	count, err := tc.repo.CountOccurrencesByEntity(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("CountOccurrencesByEntity failed: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 occurrences, got %d", count)
+	}
+}
+
+func TestOntologyEntityRepository_CountOccurrencesByEntity_WithOccurrences(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	// Create some occurrences for this entity
+	tc.createTestOccurrence(ctx, entity.ID, "users", "id")
+	tc.createTestOccurrence(ctx, entity.ID, "accounts", "owner_id")
+	tc.createTestOccurrence(ctx, entity.ID, "orders", "customer_id")
+
+	count, err := tc.repo.CountOccurrencesByEntity(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("CountOccurrencesByEntity failed: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("expected 3 occurrences, got %d", count)
+	}
+}
+
+func TestOntologyEntityRepository_CountOccurrencesByEntity_ExcludesDeleted(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	// Create occurrences - one active, one deleted
+	tc.createTestOccurrence(ctx, entity.ID, "users", "id")
+	tc.createTestOccurrenceDeleted(ctx, entity.ID, "accounts", "owner_id")
+
+	count, err := tc.repo.CountOccurrencesByEntity(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("CountOccurrencesByEntity failed: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 occurrence (excluding deleted), got %d", count)
+	}
+}
+
+// ============================================================================
+// GetOccurrenceTablesByEntity Tests
+// ============================================================================
+
+func TestOntologyEntityRepository_GetOccurrenceTablesByEntity_NoOccurrences(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	tables, err := tc.repo.GetOccurrenceTablesByEntity(ctx, entity.ID, 10)
+	if err != nil {
+		t.Fatalf("GetOccurrenceTablesByEntity failed: %v", err)
+	}
+	if len(tables) != 0 {
+		t.Errorf("expected 0 tables, got %d", len(tables))
+	}
+}
+
+func TestOntologyEntityRepository_GetOccurrenceTablesByEntity_WithOccurrences(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	// Create occurrences in different tables
+	tc.createTestOccurrence(ctx, entity.ID, "users", "id")
+	tc.createTestOccurrence(ctx, entity.ID, "accounts", "owner_id")
+	tc.createTestOccurrence(ctx, entity.ID, "orders", "customer_id")
+
+	tables, err := tc.repo.GetOccurrenceTablesByEntity(ctx, entity.ID, 10)
+	if err != nil {
+		t.Fatalf("GetOccurrenceTablesByEntity failed: %v", err)
+	}
+	if len(tables) != 3 {
+		t.Errorf("expected 3 tables, got %d", len(tables))
+	}
+}
+
+func TestOntologyEntityRepository_GetOccurrenceTablesByEntity_RespectsLimit(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	// Create occurrences in different tables
+	tc.createTestOccurrence(ctx, entity.ID, "users", "id")
+	tc.createTestOccurrence(ctx, entity.ID, "accounts", "owner_id")
+	tc.createTestOccurrence(ctx, entity.ID, "orders", "customer_id")
+	tc.createTestOccurrence(ctx, entity.ID, "invoices", "customer_id")
+
+	tables, err := tc.repo.GetOccurrenceTablesByEntity(ctx, entity.ID, 2)
+	if err != nil {
+		t.Fatalf("GetOccurrenceTablesByEntity failed: %v", err)
+	}
+	if len(tables) != 2 {
+		t.Errorf("expected 2 tables (limited), got %d", len(tables))
+	}
+}
+
+func TestOntologyEntityRepository_GetOccurrenceTablesByEntity_ExcludesDeleted(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	// Create occurrences - one active, one deleted
+	tc.createTestOccurrence(ctx, entity.ID, "users", "id")
+	tc.createTestOccurrenceDeleted(ctx, entity.ID, "accounts", "owner_id")
+
+	tables, err := tc.repo.GetOccurrenceTablesByEntity(ctx, entity.ID, 10)
+	if err != nil {
+		t.Fatalf("GetOccurrenceTablesByEntity failed: %v", err)
+	}
+	if len(tables) != 1 {
+		t.Errorf("expected 1 table (excluding deleted), got %d", len(tables))
+	}
+	if tables[0] != "users" {
+		t.Errorf("expected table 'users', got %q", tables[0])
 	}
 }

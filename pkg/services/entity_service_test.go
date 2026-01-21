@@ -105,6 +105,14 @@ func (m *mockEntityRepo) GetAllKeyColumnsByProject(ctx context.Context, projectI
 	return nil, nil
 }
 
+func (m *mockEntityRepo) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockEntityRepo) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	return nil, nil
+}
+
 type mockRelationshipRepo struct {
 	relationships       map[uuid.UUID][]*models.EntityRelationship // keyed by target entity ID
 	getByTargetEntityFn func(ctx context.Context, entityID uuid.UUID) ([]*models.EntityRelationship, error)

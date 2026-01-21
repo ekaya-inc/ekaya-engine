@@ -142,6 +142,14 @@ func (r *testColEnrichmentEntityRepo) Restore(ctx context.Context, entityID uuid
 	return nil
 }
 
+func (r *testColEnrichmentEntityRepo) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (r *testColEnrichmentEntityRepo) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	return nil, nil
+}
+
 type testColEnrichmentRelRepo struct{}
 
 func (r *testColEnrichmentRelRepo) GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error) {

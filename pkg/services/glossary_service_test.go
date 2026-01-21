@@ -250,6 +250,14 @@ func (m *mockEntityRepoForGlossary) GetAllKeyColumnsByProject(ctx context.Contex
 	return nil, nil
 }
 
+func (m *mockEntityRepoForGlossary) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockEntityRepoForGlossary) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	return nil, nil
+}
+
 type mockLLMClientForGlossary struct {
 	responseContent string
 	generateErr     error
