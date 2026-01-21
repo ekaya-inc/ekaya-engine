@@ -317,11 +317,11 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 		} else {
 			// Update existing term
 			// Check precedence: can MCP modify this term?
-			if !canModifyGlossaryTerm(term.Source, models.GlossarySourceMCP) {
+			if !canModifyGlossaryTerm(existing.Source, models.GlossarySourceMCP) {
 				return NewErrorResult("precedence_blocked",
 					fmt.Sprintf("Cannot modify glossary term: precedence blocked (existing: %s, modifier: %s). "+
 						"Manual terms cannot be overridden by MCP. Use the UI to modify or delete this term.",
-						term.Source, models.GlossarySourceMCP)), nil
+						existing.Source, models.GlossarySourceMCP)), nil
 			}
 
 			term = existing
