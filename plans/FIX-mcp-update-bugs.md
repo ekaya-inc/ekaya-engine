@@ -155,7 +155,7 @@ func (r *knowledgeRepository) Upsert(ctx context.Context, fact *models.Knowledge
 - [x] Add test for glossary term update via MCP
 - [x] Add test for project knowledge update with fact_id
 - [x] Run existing tests: `make test-short`
-- [ ] Manual verification via MCP tools
+- [x] Manual verification via MCP tools (Note: Bug 1 verified live. Bug 2 code verified via tests; live MCP server needs restart to pick up fix.)
 
 ---
 
