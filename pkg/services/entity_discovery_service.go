@@ -291,52 +291,64 @@ func (s *entityDiscoveryService) enrichEntitiesWithLLM(
 		enrichmentByTable[e.TableName] = e
 	}
 
+	// Track entities not found in LLM response
+	var unenrichedTables []string
+
 	for _, entity := range entities {
-		if enrichment, ok := enrichmentByTable[entity.PrimaryTable]; ok {
-			entity.Name = enrichment.EntityName
-			entity.Description = enrichment.Description
-			entity.Domain = enrichment.Domain
-			if err := s.entityRepo.Update(tenantCtx, entity); err != nil {
-				s.logger.Error("Failed to update entity with enrichment",
+		enrichment, found := enrichmentByTable[entity.PrimaryTable]
+		if !found {
+			unenrichedTables = append(unenrichedTables, entity.PrimaryTable)
+			continue
+		}
+
+		entity.Name = enrichment.EntityName
+		entity.Description = enrichment.Description
+		entity.Domain = enrichment.Domain
+		if err := s.entityRepo.Update(tenantCtx, entity); err != nil {
+			s.logger.Error("Failed to update entity with enrichment",
+				zap.String("entity_id", entity.ID.String()),
+				zap.Error(err))
+			// Continue with other entities
+			continue
+		}
+
+		// Create key columns with synonyms
+		for _, kc := range enrichment.KeyColumns {
+			keyCol := &models.OntologyEntityKeyColumn{
+				EntityID:   entity.ID,
+				ColumnName: kc.Name,
+				Synonyms:   kc.Synonyms,
+			}
+			if err := s.entityRepo.CreateKeyColumn(tenantCtx, keyCol); err != nil {
+				s.logger.Error("Failed to create key column",
 					zap.String("entity_id", entity.ID.String()),
+					zap.String("column_name", kc.Name),
 					zap.Error(err))
-				// Continue with other entities
-				continue
-			}
-
-			// Create key columns with synonyms
-			for _, kc := range enrichment.KeyColumns {
-				keyCol := &models.OntologyEntityKeyColumn{
-					EntityID:   entity.ID,
-					ColumnName: kc.Name,
-					Synonyms:   kc.Synonyms,
-				}
-				if err := s.entityRepo.CreateKeyColumn(tenantCtx, keyCol); err != nil {
-					s.logger.Error("Failed to create key column",
-						zap.String("entity_id", entity.ID.String()),
-						zap.String("column_name", kc.Name),
-						zap.Error(err))
-					// Continue with other key columns
-				}
-			}
-
-			// Create aliases (alternative names)
-			discoverySource := "discovery"
-			for _, altName := range enrichment.AlternativeNames {
-				alias := &models.OntologyEntityAlias{
-					EntityID: entity.ID,
-					Alias:    altName,
-					Source:   &discoverySource,
-				}
-				if err := s.entityRepo.CreateAlias(tenantCtx, alias); err != nil {
-					s.logger.Error("Failed to create entity alias",
-						zap.String("entity_id", entity.ID.String()),
-						zap.String("alias", altName),
-						zap.Error(err))
-					// Continue with other aliases
-				}
+				// Continue with other key columns
 			}
 		}
+
+		// Create aliases (alternative names)
+		discoverySource := "discovery"
+		for _, altName := range enrichment.AlternativeNames {
+			alias := &models.OntologyEntityAlias{
+				EntityID: entity.ID,
+				Alias:    altName,
+				Source:   &discoverySource,
+			}
+			if err := s.entityRepo.CreateAlias(tenantCtx, alias); err != nil {
+				s.logger.Error("Failed to create entity alias",
+					zap.String("entity_id", entity.ID.String()),
+					zap.String("alias", altName),
+					zap.Error(err))
+				// Continue with other aliases
+			}
+		}
+	}
+
+	// Fail if any entities were not in the LLM response (truncated/incomplete response)
+	if len(unenrichedTables) > 0 {
+		return fmt.Errorf("entity enrichment incomplete: %d entities not in LLM response: %v", len(unenrichedTables), unenrichedTables)
 	}
 
 	s.logger.Info("Enriched entities with LLM-generated metadata",
