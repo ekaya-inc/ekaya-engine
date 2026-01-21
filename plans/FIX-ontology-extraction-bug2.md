@@ -181,7 +181,7 @@ ORDER BY created_at DESC;
 
 - [ ] All entities have non-empty descriptions after enrichment
 - [ ] Entity names are human-readable (not raw table names)
-- [ ] Parse failures are surfaced as errors, not swallowed
+- [x] Parse failures are surfaced as errors, not swallowed
 - [ ] Partial enrichment (incomplete LLM response) fails the workflow
 - [ ] Failed enrichment is visible in DAG status
 - [ ] LLM conversation records show clear status for troubleshooting

@@ -269,20 +269,20 @@ func (s *entityDiscoveryService) enrichEntitiesWithLLM(
 	// Parse response
 	enrichments, err := s.parseEntityEnrichmentResponse(result.Content)
 	if err != nil {
-		s.logger.Warn("Failed to parse entity enrichment response, keeping original names",
+		s.logger.Error("Failed to parse entity enrichment response",
 			zap.String("conversation_id", result.ConversationID.String()),
 			zap.Error(err))
 
-		// Update conversation status for parse failure
+		// Record parse failure in LLM conversation for troubleshooting
 		if s.conversationRepo != nil {
 			errorMessage := fmt.Sprintf("parse_failure: %s", err.Error())
 			if updateErr := s.conversationRepo.UpdateStatus(tenantCtx, result.ConversationID, models.LLMConversationStatusError, errorMessage); updateErr != nil {
-				s.logger.Warn("Failed to update conversation status",
+				s.logger.Error("Failed to update conversation status",
 					zap.String("conversation_id", result.ConversationID.String()),
 					zap.Error(updateErr))
 			}
 		}
-		return nil // Don't fail the workflow for enrichment parsing errors
+		return fmt.Errorf("entity enrichment parse failure: %w", err)
 	}
 
 	// Update entities with enriched names, descriptions, and new fields
