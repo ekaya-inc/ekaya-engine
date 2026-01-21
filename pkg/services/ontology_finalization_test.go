@@ -93,6 +93,10 @@ func (m *mockEntityRepoForFinalization) GetByName(ctx context.Context, ontologyI
 	return nil, nil
 }
 
+func (m *mockEntityRepoForFinalization) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 func (m *mockEntityRepoForFinalization) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }
@@ -325,7 +329,7 @@ func (m *mockSchemaRepoForFinalization) GetPrimaryKeyColumns(ctx context.Context
 func (m *mockSchemaRepoForFinalization) GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
-func (m *mockSchemaRepoForFinalization) SelectAllTablesAndColumns(ctx context.Context, datasourceID uuid.UUID) error {
+func (m *mockSchemaRepoForFinalization) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
 

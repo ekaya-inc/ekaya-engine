@@ -88,6 +88,10 @@ func (m *mockOntologyEntityRepository) GetByName(ctx context.Context, ontologyID
 	return nil, nil
 }
 
+func (m *mockOntologyEntityRepository) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 func (m *mockOntologyEntityRepository) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }

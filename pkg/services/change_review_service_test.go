@@ -7,6 +7,7 @@ import (
 )
 
 func TestPrecedenceLevel(t *testing.T) {
+	checker := NewPrecedenceChecker()
 	tests := []struct {
 		name     string
 		source   string
@@ -41,16 +42,16 @@ func TestPrecedenceLevel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := precedenceLevel(tt.source)
+			got := checker.GetPrecedenceLevel(tt.source)
 			if got != tt.expected {
-				t.Errorf("precedenceLevel(%q) = %d, want %d", tt.source, got, tt.expected)
+				t.Errorf("GetPrecedenceLevel(%q) = %d, want %d", tt.source, got, tt.expected)
 			}
 		})
 	}
 }
 
 func TestCanModify(t *testing.T) {
-	service := &changeReviewService{}
+	service := &changeReviewService{precedenceChecker: NewPrecedenceChecker()}
 
 	tests := []struct {
 		name             string
@@ -157,6 +158,7 @@ func TestCanModify(t *testing.T) {
 }
 
 func TestGetEffectiveSource(t *testing.T) {
+	checker := NewPrecedenceChecker()
 	tests := []struct {
 		name      string
 		createdBy string
@@ -185,9 +187,9 @@ func TestGetEffectiveSource(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := getEffectiveSource(tt.createdBy, tt.updatedBy)
+			got := checker.GetEffectiveSource(tt.createdBy, tt.updatedBy)
 			if got != tt.expected {
-				t.Errorf("getEffectiveSource(%q, %v) = %q, want %q",
+				t.Errorf("GetEffectiveSource(%q, %v) = %q, want %q",
 					tt.createdBy, tt.updatedBy, got, tt.expected)
 			}
 		})

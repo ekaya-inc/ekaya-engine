@@ -95,6 +95,9 @@ func (m *mockEntityRepo) GetByProject(ctx context.Context, projectID uuid.UUID) 
 func (m *mockEntityRepo) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {
 	return nil, nil
 }
+func (m *mockEntityRepo) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	return nil, nil
+}
 func (m *mockEntityRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }

@@ -206,6 +206,10 @@ func (m *mockEntityRepoForGlossary) GetByName(ctx context.Context, ontologyID uu
 	return nil, nil
 }
 
+func (m *mockEntityRepoForGlossary) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 func (m *mockEntityRepoForGlossary) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }

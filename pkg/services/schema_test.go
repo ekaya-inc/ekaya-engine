@@ -363,7 +363,7 @@ func (m *mockSchemaRepository) GetColumnCountByProject(ctx context.Context, proj
 	return len(m.columns), nil
 }
 
-func (m *mockSchemaRepository) SelectAllTablesAndColumns(ctx context.Context, datasourceID uuid.UUID) error {
+func (m *mockSchemaRepository) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
 

@@ -1146,6 +1146,10 @@ func (m *mockTestEntityRepo) GetByName(ctx context.Context, ontologyID uuid.UUID
 	return nil, nil
 }
 
+func (m *mockTestEntityRepo) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 func (m *mockTestEntityRepo) SoftDelete(ctx context.Context, entityID uuid.UUID, reason string) error {
 	return nil
 }
@@ -1416,7 +1420,7 @@ func (m *mockTestSchemaRepo) SoftDeleteRemovedColumns(ctx context.Context, table
 	return 0, nil
 }
 
-func (m *mockTestSchemaRepo) SelectAllTablesAndColumns(ctx context.Context, datasourceID uuid.UUID) error {
+func (m *mockTestSchemaRepo) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
 

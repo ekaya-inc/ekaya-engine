@@ -134,6 +134,15 @@ func (r *testColEnrichmentEntityRepo) GetByName(ctx context.Context, ontologyID 
 	return nil, nil
 }
 
+func (r *testColEnrichmentEntityRepo) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	for _, e := range r.entities {
+		if e.ProjectID == projectID && e.Name == name {
+			return e, nil
+		}
+	}
+	return nil, nil
+}
+
 func (r *testColEnrichmentEntityRepo) SoftDelete(ctx context.Context, entityID uuid.UUID, reason string) error {
 	return nil
 }
@@ -355,7 +364,7 @@ func (r *testColEnrichmentSchemaRepo) UpdateColumnStats(ctx context.Context, col
 	return nil
 }
 
-func (r *testColEnrichmentSchemaRepo) SelectAllTablesAndColumns(ctx context.Context, datasourceID uuid.UUID) error {
+func (r *testColEnrichmentSchemaRepo) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
 

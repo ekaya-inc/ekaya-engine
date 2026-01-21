@@ -160,6 +160,10 @@ func (r *testRelEnrichmentEntityRepo) GetByName(ctx context.Context, ontologyID 
 	return nil, nil
 }
 
+func (r *testRelEnrichmentEntityRepo) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 func (r *testRelEnrichmentEntityRepo) SoftDelete(ctx context.Context, entityID uuid.UUID, reason string) error {
 	return nil
 }
