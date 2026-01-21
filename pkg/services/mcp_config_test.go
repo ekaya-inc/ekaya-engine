@@ -152,6 +152,14 @@ func (m *mockProjectServiceForMCP) UpdateAuthServerURL(ctx context.Context, proj
 	return nil
 }
 
+func (m *mockProjectServiceForMCP) GetAutoApproveSettings(ctx context.Context, projectID uuid.UUID) (*AutoApproveSettings, error) {
+	return nil, nil
+}
+
+func (m *mockProjectServiceForMCP) SetAutoApproveSettings(ctx context.Context, projectID uuid.UUID, settings *AutoApproveSettings) error {
+	return nil
+}
+
 // Tests
 
 func TestMCPConfigService_Get_ReturnsStoredConfigState(t *testing.T) {

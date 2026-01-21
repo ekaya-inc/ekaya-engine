@@ -589,6 +589,14 @@ func (m *mockProjectServiceForDatasource) UpdateAuthServerURL(ctx context.Contex
 	return errors.New("not implemented")
 }
 
+func (m *mockProjectServiceForDatasource) GetAutoApproveSettings(ctx context.Context, projectID uuid.UUID) (*AutoApproveSettings, error) {
+	return nil, nil
+}
+
+func (m *mockProjectServiceForDatasource) SetAutoApproveSettings(ctx context.Context, projectID uuid.UUID, settings *AutoApproveSettings) error {
+	return nil
+}
+
 // TestDatasourceService_Delete_ClearsDefaultDatasourceID verifies that when the default
 // datasource is deleted, the default_datasource_id is cleared so that a new datasource
 // can become the default.

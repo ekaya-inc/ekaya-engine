@@ -183,6 +183,14 @@ func (m *mockProjectService) UpdateAuthServerURL(ctx context.Context, projectID 
 	return nil
 }
 
+func (m *mockProjectService) GetAutoApproveSettings(ctx context.Context, projectID uuid.UUID) (*services.AutoApproveSettings, error) {
+	return nil, nil
+}
+
+func (m *mockProjectService) SetAutoApproveSettings(ctx context.Context, projectID uuid.UUID, settings *services.AutoApproveSettings) error {
+	return nil
+}
+
 // mockDatasourceService implements services.DatasourceService for testing.
 type mockDatasourceService struct {
 	datasource      *models.Datasource

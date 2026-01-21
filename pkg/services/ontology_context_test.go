@@ -277,6 +277,14 @@ func (m *mockProjectServiceForOntology) UpdateAuthServerURL(ctx context.Context,
 	return nil
 }
 
+func (m *mockProjectServiceForOntology) GetAutoApproveSettings(ctx context.Context, projectID uuid.UUID) (*AutoApproveSettings, error) {
+	return nil, nil
+}
+
+func (m *mockProjectServiceForOntology) SetAutoApproveSettings(ctx context.Context, projectID uuid.UUID, settings *AutoApproveSettings) error {
+	return nil
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

@@ -29,6 +29,12 @@ type ProvisionResult struct {
 	Created         bool   // true if project was created, false if already existed
 }
 
+// AutoApproveSettings contains the auto-approve configuration for a project.
+type AutoApproveSettings struct {
+	SchemaChanges    bool `json:"schema_changes"`    // Auto-approve schema changes (new tables, columns, etc.)
+	InferenceChanges bool `json:"inference_changes"` // Auto-approve inference changes (LLM-generated)
+}
+
 // ProjectService defines the interface for project operations.
 type ProjectService interface {
 	Provision(ctx context.Context, projectID uuid.UUID, name string, params map[string]interface{}) (*ProvisionResult, error)
@@ -41,6 +47,10 @@ type ProjectService interface {
 	SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string)
 	GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error)
 	UpdateAuthServerURL(ctx context.Context, projectID uuid.UUID, authServerURL string) error
+
+	// Auto-approve settings for living ontology changes
+	GetAutoApproveSettings(ctx context.Context, projectID uuid.UUID) (*AutoApproveSettings, error)
+	SetAutoApproveSettings(ctx context.Context, projectID uuid.UUID, settings *AutoApproveSettings) error
 }
 
 // projectService implements ProjectService.
@@ -312,6 +322,58 @@ func (s *projectService) UpdateAuthServerURL(ctx context.Context, projectID uuid
 	s.logger.Info("Updated auth server URL for project",
 		zap.String("project_id", projectID.String()),
 		zap.String("auth_server_url", authServerURL))
+
+	return nil
+}
+
+// GetAutoApproveSettings retrieves the auto-approve settings from project parameters.
+// Returns default settings (all false) if not configured.
+func (s *projectService) GetAutoApproveSettings(ctx context.Context, projectID uuid.UUID) (*AutoApproveSettings, error) {
+	project, err := s.projectRepo.Get(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get project: %w", err)
+	}
+
+	settings := &AutoApproveSettings{}
+
+	if project.Parameters != nil {
+		if autoApprove, ok := project.Parameters["auto_approve"].(map[string]interface{}); ok {
+			if v, ok := autoApprove["schema_changes"].(bool); ok {
+				settings.SchemaChanges = v
+			}
+			if v, ok := autoApprove["inference_changes"].(bool); ok {
+				settings.InferenceChanges = v
+			}
+		}
+	}
+
+	return settings, nil
+}
+
+// SetAutoApproveSettings updates the auto-approve settings in project parameters.
+func (s *projectService) SetAutoApproveSettings(ctx context.Context, projectID uuid.UUID, settings *AutoApproveSettings) error {
+	project, err := s.projectRepo.Get(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("failed to get project: %w", err)
+	}
+
+	if project.Parameters == nil {
+		project.Parameters = make(map[string]interface{})
+	}
+
+	project.Parameters["auto_approve"] = map[string]interface{}{
+		"schema_changes":    settings.SchemaChanges,
+		"inference_changes": settings.InferenceChanges,
+	}
+
+	if err := s.projectRepo.Update(ctx, project); err != nil {
+		return fmt.Errorf("failed to update project: %w", err)
+	}
+
+	s.logger.Info("Updated auto-approve settings for project",
+		zap.String("project_id", projectID.String()),
+		zap.Bool("schema_changes", settings.SchemaChanges),
+		zap.Bool("inference_changes", settings.InferenceChanges))
 
 	return nil
 }

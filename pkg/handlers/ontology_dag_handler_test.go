@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // mockOntologyDAGService is a mock implementation for testing
@@ -64,6 +65,14 @@ func (m *mockProjectServiceForDAG) GetDefaultDatasourceID(ctx context.Context, p
 
 func (m *mockProjectServiceForDAG) SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string) {
 	// No-op for tests
+}
+
+func (m *mockProjectServiceForDAG) GetAutoApproveSettings(ctx context.Context, projectID uuid.UUID) (*services.AutoApproveSettings, error) {
+	return nil, nil
+}
+
+func (m *mockProjectServiceForDAG) SetAutoApproveSettings(ctx context.Context, projectID uuid.UUID, settings *services.AutoApproveSettings) error {
+	return nil
 }
 
 func TestOntologyDAGHandler_StartExtraction_Success(t *testing.T) {

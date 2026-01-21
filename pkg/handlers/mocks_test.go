@@ -100,6 +100,14 @@ func (m *mockProjectService) UpdateAuthServerURL(ctx context.Context, projectID 
 	return m.err
 }
 
+func (m *mockProjectService) GetAutoApproveSettings(ctx context.Context, projectID uuid.UUID) (*services.AutoApproveSettings, error) {
+	return nil, nil
+}
+
+func (m *mockProjectService) SetAutoApproveSettings(ctx context.Context, projectID uuid.UUID, settings *services.AutoApproveSettings) error {
+	return nil
+}
+
 // mockAuthService is a mock AuthService for integration testing.
 type mockAuthService struct {
 	claims *auth.Claims
