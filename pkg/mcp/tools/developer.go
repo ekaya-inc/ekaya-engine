@@ -916,6 +916,7 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 		}
 
 		// Auto-select new tables if requested
+		var autoSelectSucceeded bool
 		if autoSelect && len(result.NewTableNames) > 0 {
 			if err := deps.SchemaService.SelectAllTables(tenantCtx, dsID); err != nil {
 				deps.Logger.Warn("Failed to auto-select tables",
@@ -924,6 +925,8 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 					zap.Error(err),
 				)
 				// Don't fail the entire operation for selection failure
+			} else {
+				autoSelectSucceeded = true
 			}
 		}
 
@@ -982,7 +985,7 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 			ColumnsAdded:          result.ColumnsUpserted,
 			RelationshipsFound:    len(relPairs),
 			Relationships:         relPairs,
-			AutoSelectApplied:     autoSelect && len(result.NewTableNames) > 0,
+			AutoSelectApplied:     autoSelectSucceeded,
 			PendingChangesCreated: pendingChangesCreated,
 		}
 

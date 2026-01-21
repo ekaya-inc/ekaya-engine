@@ -3,10 +3,9 @@ package tools
 import (
 	"testing"
 
+	mcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	mcp "github.com/mark3labs/mcp-go/mcp"
 )
 
 // TestGetOptionalBoolWithDefaultDev tests the helper function for extracting boolean parameters.
