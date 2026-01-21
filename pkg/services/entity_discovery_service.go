@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -540,6 +541,77 @@ func (s *entityDiscoveryService) parseEntityEnrichmentResponse(content string) (
 		return nil, fmt.Errorf("parse entity enrichment response: %w", err)
 	}
 	return response.Entities, nil
+}
+
+// testPrefixPatterns defines regex patterns for common test/sample table prefixes.
+// These prefixes indicate tables that are likely test data, staging, or sample tables
+// rather than production tables.
+var testPrefixPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`^s\d+_`),    // s1_, s2_, s10_, etc. (sample tables)
+	regexp.MustCompile(`^test_`),    // test_users, test_orders
+	regexp.MustCompile(`^tmp_`),     // tmp_users, tmp_data
+	regexp.MustCompile(`^temp_`),    // temp_users, temp_data
+	regexp.MustCompile(`^staging_`), // staging_users, staging_orders
+	regexp.MustCompile(`^dev_`),     // dev_users, dev_data
+	regexp.MustCompile(`^sample_`),  // sample_users, sample_data
+	regexp.MustCompile(`^demo_`),    // demo_users, demo_data
+	regexp.MustCompile(`^backup_`),  // backup_users, backup_data
+	regexp.MustCompile(`^old_`),     // old_users, old_data
+	regexp.MustCompile(`^_`),        // _temp_table, _backup
+	regexp.MustCompile(`^copy_of_`), // copy_of_users
+	regexp.MustCompile(`^archive_`), // archive_users
+}
+
+// extractCoreConcept removes common test/sample prefixes from a table name
+// to extract the core business concept. For example:
+//   - "s1_users" → "users"
+//   - "test_orders" → "orders"
+//   - "staging_products" → "products"
+//   - "users" → "users" (unchanged)
+func extractCoreConcept(tableName string) string {
+	name := tableName
+	for _, pattern := range testPrefixPatterns {
+		name = pattern.ReplaceAllString(name, "")
+	}
+	return strings.ToLower(name)
+}
+
+// hasTestPrefix returns true if the table name has a test/sample/staging prefix.
+func hasTestPrefix(tableName string) bool {
+	for _, pattern := range testPrefixPatterns {
+		if pattern.MatchString(tableName) {
+			return true
+		}
+	}
+	return false
+}
+
+// groupSimilarTables groups tables by their core concept.
+// Tables with test prefixes like "s1_users", "s2_users", "test_users" will all
+// be grouped under the core concept "users" along with the real "users" table.
+// This allows the system to identify that they represent the same business entity.
+func groupSimilarTables(tables []*models.SchemaTable) map[string][]*models.SchemaTable {
+	groups := make(map[string][]*models.SchemaTable)
+
+	for _, t := range tables {
+		concept := extractCoreConcept(t.TableName)
+		groups[concept] = append(groups[concept], t)
+	}
+	return groups
+}
+
+// selectPrimaryTable selects the best table to represent an entity from a group.
+// It prefers tables without test prefixes (the "real" table).
+// If all tables have test prefixes, it returns the first one.
+func selectPrimaryTable(tables []*models.SchemaTable) *models.SchemaTable {
+	// Prefer tables without test prefixes
+	for _, t := range tables {
+		if !hasTestPrefix(t.TableName) {
+			return t
+		}
+	}
+	// Fallback to first table if all have test prefixes
+	return tables[0]
 }
 
 // ValidateEnrichment checks that all entities have non-empty descriptions after enrichment.

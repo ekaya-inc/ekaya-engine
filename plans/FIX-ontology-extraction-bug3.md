@@ -239,8 +239,8 @@ This ensures:
 
 ## Acceptance Criteria
 
-- [ ] One entity per business concept (no duplicates)
-- [ ] Real tables preferred over test/sample tables as primary
+- [x] One entity per business concept (no duplicates)
+- [x] Real tables preferred over test/sample tables as primary
 - [ ] Entity name uniqueness enforced at database level
 - [ ] Test tables grouped under real table's entity as aliases
 - [ ] LLM enrichment includes context about existing names
