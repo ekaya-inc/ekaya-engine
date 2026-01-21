@@ -159,5 +159,5 @@ func (s *entityDiscoveryService) IdentifyEntitiesFromDDL(...) {
 
 - [x] Tables with `is_selected = false` are not extracted as entities
 - [x] New tables default to `is_selected = true` unless matching exclusion patterns
-- [ ] Existing legitimate entities (Billing Engagement, User, Channel, etc.) still extracted
-- [ ] Test tables (s1_*, s2_*, etc.) not extracted
+- [x] Existing legitimate entities (Billing Engagement, User, Channel, etc.) still extracted
+- [x] Test tables (s1_*, s2_*, etc.) not extracted
