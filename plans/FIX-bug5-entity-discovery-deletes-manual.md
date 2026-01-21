@@ -2,6 +2,12 @@
 
 **Priority:** High
 **Component:** Ontology Extraction / Entity Management
+**Status:** Implemented
+
+## Implementation Tasks
+
+- [x] Add `DeleteInferenceEntitiesByOntology` to repository interface and implementation
+- [x] Update `StartExtraction` to use provenance-aware deletion
 
 ## Problem Statement
 
