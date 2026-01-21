@@ -16,10 +16,9 @@ import (
 
 // Discovery configuration constants
 const (
-	DefaultMatchThreshold      = 0.95 // 95% match (allow 5% for data issues)
-	DefaultOrphanRateThreshold = 0.10 // Max 10% orphans
-	DefaultSampleLimit         = 1000 // Max values to sample for overlap check
-	MaxColumnsPerStatsQuery    = 25   // Batch size for column stats
+	DefaultMatchThreshold   = 0.95 // 95% match (allow 5% for data issues)
+	DefaultSampleLimit      = 1000 // Max values to sample for overlap check
+	MaxColumnsPerStatsQuery = 25   // Batch size for column stats
 
 	// CardinalityUniqueThreshold allows 10% tolerance for uniqueness detection
 	// to account for minor data inconsistencies or sampling variance.
@@ -364,15 +363,11 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 			continue
 		}
 
-		// Check orphan rate
-		var orphanRate float64
-		total := joinAnalysis.SourceMatched + joinAnalysis.OrphanCount
-		if total > 0 {
-			orphanRate = float64(joinAnalysis.OrphanCount) / float64(total)
-		}
-
-		if orphanRate > DefaultOrphanRateThreshold {
-			s.recordRejectedCandidate(ctx, projectID, candidate, overlap, models.RejectionHighOrphanRate)
+		// Zero-orphan requirement for inferred relationships
+		// Real FK relationships should have 0% orphans - all source values must exist in target.
+		// This prevents false positives from coincidental value overlap.
+		if joinAnalysis.OrphanCount > 0 {
+			s.recordRejectedCandidate(ctx, projectID, candidate, overlap, models.RejectionOrphanIntegrity)
 			continue
 		}
 

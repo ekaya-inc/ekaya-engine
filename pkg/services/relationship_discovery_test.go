@@ -332,7 +332,7 @@ func TestRelationshipDiscoveryService_DiscoverRelationships_Success(t *testing.T
 			SourceMatched: 100,
 			TargetMatched: 50,
 			JoinCount:     100,
-			OrphanCount:   5,
+			OrphanCount:   0, // Zero orphans required for inferred relationships
 		},
 	}
 	factory := &rdMockAdapterFactory{discoverer: discoverer}
@@ -426,6 +426,86 @@ func TestRelationshipDiscoveryService_DiscoverRelationships_LowMatchRate(t *test
 		t.Error("expected rejection reason to be set")
 	} else if *recorded.RejectionReason != models.RejectionLowMatchRate {
 		t.Errorf("expected rejection reason '%s', got '%s'", models.RejectionLowMatchRate, *recorded.RejectionReason)
+	}
+	if recorded.IsValidated {
+		t.Error("expected IsValidated to be false for rejected candidate")
+	}
+}
+
+func TestRelationshipDiscoveryService_DiscoverRelationships_ZeroOrphanRequirement(t *testing.T) {
+	// Test that inferred relationships require zero orphans
+	// Any orphan values should cause rejection with orphan_integrity reason
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	usersIDColID := uuid.New()
+	ordersUserIDColID := uuid.New()
+
+	rowCount := int64(100)
+	repo := &rdMockSchemaRepository{
+		mockSchemaRepository: mockSchemaRepository{
+			tables: []*models.SchemaTable{
+				{ID: usersTableID, TableName: "users", SchemaName: "public", RowCount: &rowCount, DatasourceID: datasourceID},
+				{ID: ordersTableID, TableName: "orders", SchemaName: "public", RowCount: &rowCount, DatasourceID: datasourceID},
+			},
+			relationships: []*models.SchemaRelationship{},
+		},
+		columnsByTable: map[uuid.UUID][]*models.SchemaColumn{
+			usersTableID: {
+				{ID: usersIDColID, ColumnName: "id", DataType: "uuid", IsPrimaryKey: true, SchemaTableID: usersTableID},
+			},
+			ordersTableID: {
+				{ID: ordersUserIDColID, ColumnName: "user_id", DataType: "uuid", IsPrimaryKey: false, SchemaTableID: ordersTableID},
+			},
+		},
+	}
+	dsSvc := &mockDatasourceService{
+		datasource: &models.Datasource{
+			ID:             datasourceID,
+			ProjectID:      projectID,
+			DatasourceType: "postgres",
+			Config:         map[string]any{"host": "localhost"},
+		},
+	}
+	discoverer := &rdMockSchemaDiscoverer{
+		valueOverlap: &datasource.ValueOverlapResult{
+			MatchRate:      0.98, // High match rate - would pass threshold
+			SourceDistinct: 50,
+			TargetDistinct: 100,
+			MatchedCount:   49,
+		},
+		joinAnalysis: &datasource.JoinAnalysis{
+			SourceMatched: 100,
+			TargetMatched: 50,
+			JoinCount:     100,
+			OrphanCount:   2, // Only 2 orphans - but should still be rejected
+		},
+	}
+	factory := &rdMockAdapterFactory{discoverer: discoverer}
+
+	service := newTestRelationshipDiscoveryService(repo, dsSvc, factory)
+
+	ctx := testContextWithAuthRD(projectID.String(), "test-user-id")
+	result, err := service.DiscoverRelationships(ctx, projectID, datasourceID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No relationships should be created due to orphan values
+	if result.RelationshipsCreated != 0 {
+		t.Errorf("expected 0 relationships created due to orphan values, got %d", result.RelationshipsCreated)
+	}
+
+	// Verify rejected candidate was recorded with orphan_integrity rejection reason
+	if len(repo.upsertedRelationships) != 1 {
+		t.Fatalf("expected 1 rejected relationship recorded, got %d", len(repo.upsertedRelationships))
+	}
+	recorded := repo.upsertedRelationships[0]
+	if recorded.RejectionReason == nil {
+		t.Error("expected rejection reason to be set")
+	} else if *recorded.RejectionReason != models.RejectionOrphanIntegrity {
+		t.Errorf("expected rejection reason '%s', got '%s'", models.RejectionOrphanIntegrity, *recorded.RejectionReason)
 	}
 	if recorded.IsValidated {
 		t.Error("expected IsValidated to be false for rejected candidate")
