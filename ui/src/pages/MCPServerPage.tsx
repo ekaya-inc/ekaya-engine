@@ -25,8 +25,8 @@ const getSubOptionEnabled = (state: ToolGroupState | undefined, subOptionName: s
       return state.allowOntologyMaintenance ?? false;
     case 'addQueryTools':
       return state.addQueryTools ?? false;
-    case 'addOntologyQuestions':
-      return state.addOntologyQuestions ?? false;
+    case 'addOntologyMaintenance':
+      return state.addOntologyMaintenance ?? false;
     // Legacy sub-options
     case 'enableExecute':
       return state.enableExecute ?? false;
@@ -57,7 +57,7 @@ const MCPServerPage = () => {
   const developerState = config?.toolGroups[TOOL_GROUP_IDS.DEVELOPER];
   const isDeveloperEnabled = developerState?.enabled ?? false;
   const addQueryTools = developerState?.addQueryTools ?? false;
-  const addOntologyQuestions = developerState?.addOntologyQuestions ?? false;
+  const addOntologyMaintenance = developerState?.addOntologyMaintenance ?? false;
 
   const isAgentToolsEnabled = config?.toolGroups[TOOL_GROUP_IDS.AGENT_TOOLS]?.enabled ?? false;
 
@@ -161,7 +161,7 @@ const MCPServerPage = () => {
           [TOOL_GROUP_IDS.DEVELOPER]: {
             enabled: isDeveloperEnabled,
             ...(subOptionName === 'addQueryTools' ? { addQueryTools: enabled } : { addQueryTools }),
-            ...(subOptionName === 'addOntologyQuestions' ? { addOntologyQuestions: enabled } : { addOntologyQuestions }),
+            ...(subOptionName === 'addOntologyMaintenance' ? { addOntologyMaintenance: enabled } : { addOntologyMaintenance }),
           },
         },
       });

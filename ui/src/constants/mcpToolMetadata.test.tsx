@@ -34,10 +34,10 @@ describe('mcpToolMetadata', () => {
       // Warning is at top level (execute is now always included when developer is enabled)
       expect(metadata.warning).toBeDefined();
       expect(metadata.warning).toContain('destructive operations');
-      // Sub-options for adding query tools and ontology questions
+      // Sub-options for adding query tools and ontology maintenance
       expect(metadata.subOptions).toBeDefined();
       expect(metadata.subOptions?.addQueryTools).toBeDefined();
-      expect(metadata.subOptions?.addOntologyQuestions).toBeDefined();
+      expect(metadata.subOptions?.addOntologyMaintenance).toBeDefined();
     });
 
     it('has metadata for business user tools', () => {
