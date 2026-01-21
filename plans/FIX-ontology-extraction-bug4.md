@@ -249,4 +249,4 @@ if candidate.Source != DiscoveryTypeConstraint {
 - [x] FK direction validated via cardinality analysis
 - [x] Only PK columns considered as relationship targets (not all unique columns)
 - [x] Zero-orphan requirement for inferred (non-constraint) relationships
-- [ ] Existing legitimate relationships (actual DB FKs) still discovered
+- [x] Existing legitimate relationships (actual DB FKs) still discovered

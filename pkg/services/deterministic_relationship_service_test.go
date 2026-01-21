@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -2570,5 +2571,494 @@ func TestPKMatch_LowCardinalityRatio(t *testing.T) {
 
 	if len(mocks.relationshipRepo.created) != 0 {
 		t.Errorf("expected no relationships in repo, got %d", len(mocks.relationshipRepo.created))
+	}
+}
+
+// TestFKDiscovery_LegitimateFK_EmailNotDiscovered verifies that:
+// 1. Actual DB FK constraints are discovered (account_authentications.account_id → accounts.account_id)
+// 2. email→email is NOT discovered (FK discovery only follows FK constraints, not column name patterns)
+// 3. Reversed direction is NOT discovered (FK relationships preserve the constraint direction)
+//
+// This is the end-to-end validation test for BUG-4 fixes.
+func TestFKDiscovery_LegitimateFK_EmailNotDiscovered(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	accountEntityID := uuid.New()
+	authEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, accountEntityID)
+
+	// FK discovery requires entities for BOTH tables (source and target)
+	mocks.entityRepo.entities = []*models.OntologyEntity{
+		{
+			ID:            accountEntityID,
+			OntologyID:    ontologyID,
+			Name:          "account",
+			PrimarySchema: "public",
+			PrimaryTable:  "accounts",
+		},
+		{
+			ID:            authEntityID,
+			OntologyID:    ontologyID,
+			Name:          "account_authentication",
+			PrimarySchema: "public",
+			PrimaryTable:  "account_authentications",
+		},
+	}
+
+	accountsTableID := uuid.New()
+	accountAuthTableID := uuid.New()
+	accountIDColumnID := uuid.New()
+	accountEmailColumnID := uuid.New()
+	authAccountIDColumnID := uuid.New()
+	authEmailColumnID := uuid.New()
+
+	rowCount := int64(1000)
+	authRowCount := int64(500)
+	distinctCount := int64(1000)
+	authDistinctCount := int64(500)
+	isJoinableTrue := true
+
+	// Setup tables: accounts and account_authentications
+	// accounts has: account_id (PK), email
+	// account_authentications has: account_id (FK → accounts.account_id), email
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         accountsTableID,
+			SchemaName: "public",
+			TableName:  "accounts",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            accountIDColumnID,
+					SchemaTableID: accountsTableID,
+					ColumnName:    "account_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+				{
+					ID:            accountEmailColumnID,
+					SchemaTableID: accountsTableID,
+					ColumnName:    "email",
+					DataType:      "varchar",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+			},
+		},
+		{
+			ID:         accountAuthTableID,
+			SchemaName: "public",
+			TableName:  "account_authentications",
+			RowCount:   &authRowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            authAccountIDColumnID,
+					SchemaTableID: accountAuthTableID,
+					ColumnName:    "account_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false, // FK, not PK
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &authDistinctCount,
+				},
+				{
+					ID:            authEmailColumnID,
+					SchemaTableID: accountAuthTableID,
+					ColumnName:    "email",
+					DataType:      "varchar",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &authDistinctCount,
+				},
+			},
+		},
+	}
+
+	// Add actual FK schema relationship: account_authentications.account_id → accounts.account_id
+	// This simulates what the schema discovery would find from a FOREIGN KEY constraint
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
+		{
+			ID:               uuid.New(),
+			ProjectID:        projectID,
+			SourceTableID:    accountAuthTableID,    // FK holder
+			SourceColumnID:   authAccountIDColumnID, // FK column
+			TargetTableID:    accountsTableID,       // PK holder
+			TargetColumnID:   accountIDColumnID,     // PK column
+			RelationshipType: models.RelationshipTypeFK,
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	// Run FK discovery
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: 1 FK relationship discovered (the legitimate one)
+	if result.FKRelationships != 1 {
+		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
+	}
+
+	// Bidirectional: 2 relationships created (forward + reverse)
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	}
+
+	// Verify: forward relationship is account_authentications.account_id → accounts.account_id
+	forwardRel := mocks.relationshipRepo.created[0]
+	if forwardRel.SourceColumnName != "account_id" {
+		t.Errorf("expected forward source column 'account_id', got %q", forwardRel.SourceColumnName)
+	}
+	if forwardRel.TargetColumnName != "account_id" {
+		t.Errorf("expected forward target column 'account_id', got %q", forwardRel.TargetColumnName)
+	}
+	if forwardRel.SourceColumnTable != "account_authentications" {
+		t.Errorf("expected forward source table 'account_authentications', got %q", forwardRel.SourceColumnTable)
+	}
+	if forwardRel.TargetColumnTable != "accounts" {
+		t.Errorf("expected forward target table 'accounts', got %q", forwardRel.TargetColumnTable)
+	}
+	if forwardRel.DetectionMethod != models.DetectionMethodForeignKey {
+		t.Errorf("expected DetectionMethod=%q, got %q", models.DetectionMethodForeignKey, forwardRel.DetectionMethod)
+	}
+
+	// Verify: NO email→email relationships were created
+	// FK discovery only follows actual FK constraints from DDL, so email columns
+	// without FK constraints won't be discovered - this validates BUG-4a
+	for _, rel := range mocks.relationshipRepo.created {
+		if rel.SourceColumnName == "email" && rel.TargetColumnName == "email" {
+			t.Errorf("email→email relationship should NOT be discovered (BUG-4a): %s.%s → %s.%s",
+				rel.SourceColumnTable, rel.SourceColumnName,
+				rel.TargetColumnTable, rel.TargetColumnName)
+		}
+	}
+
+	// Verify: The reverse relationship is the correct direction for bidirectional navigation
+	// (not a spurious "reversed FK direction" relationship)
+	reverseRel := mocks.relationshipRepo.created[1]
+	if reverseRel.SourceColumnTable != "accounts" || reverseRel.TargetColumnTable != "account_authentications" {
+		t.Errorf("expected reverse to be accounts → account_authentications, got %s → %s",
+			reverseRel.SourceColumnTable, reverseRel.TargetColumnTable)
+	}
+}
+
+// TestPKMatch_EmailColumnsExcluded verifies that email columns are excluded from
+// PK match discovery even if they have high cardinality and could technically join.
+// This tests the attribute column exclusion logic for inferred relationships.
+func TestPKMatch_EmailColumnsExcluded(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	accountEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, accountEntityID)
+
+	// Replace default user entity with account entity
+	mocks.entityRepo.entities = []*models.OntologyEntity{
+		{
+			ID:            accountEntityID,
+			OntologyID:    ontologyID,
+			Name:          "account",
+			PrimarySchema: "public",
+			PrimaryTable:  "accounts",
+		},
+	}
+
+	accountsTableID := uuid.New()
+	accountAuthTableID := uuid.New()
+
+	rowCount := int64(1000)
+	authRowCount := int64(500)
+	distinctCount := int64(1000)
+	authDistinctCount := int64(500)
+	isJoinableTrue := true
+
+	// Setup tables with email columns that have overlapping values
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         accountsTableID,
+			SchemaName: "public",
+			TableName:  "accounts",
+			RowCount:   &rowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: accountsTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+				{
+					ID:            uuid.New(),
+					SchemaTableID: accountsTableID,
+					ColumnName:    "email",
+					DataType:      "varchar",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+			},
+		},
+		{
+			ID:         accountAuthTableID,
+			SchemaName: "public",
+			TableName:  "account_authentications",
+			RowCount:   &authRowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: accountAuthTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &authDistinctCount,
+				},
+				{
+					ID:            uuid.New(),
+					SchemaTableID: accountAuthTableID,
+					ColumnName:    "email",
+					DataType:      "varchar",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &authDistinctCount,
+				},
+			},
+		},
+	}
+
+	// Mock join analysis to return perfect overlap for email columns
+	// This simulates the case where emails DO match (same users in both tables)
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		// Return 0 orphans - perfect match
+		return &datasource.JoinAnalysis{
+			OrphanCount: 0,
+		}, nil
+	}
+
+	// No FK relationships (we're testing PK match discovery)
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	// Run PK match discovery
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: NO relationships discovered (email columns should be excluded)
+	if result.InferredRelationships != 0 {
+		t.Errorf("expected 0 inferred relationships (email columns should be excluded), got %d", result.InferredRelationships)
+	}
+
+	// Verify: NO email→email relationships in repo
+	for _, rel := range mocks.relationshipRepo.created {
+		if rel.SourceColumnName == "email" || rel.TargetColumnName == "email" {
+			t.Errorf("email column relationship should NOT be discovered: %s.%s → %s.%s",
+				rel.SourceColumnTable, rel.SourceColumnName,
+				rel.TargetColumnTable, rel.TargetColumnName)
+		}
+	}
+}
+
+// TestPKMatch_ReversedDirectionRejected verifies that when PK match discovery
+// considers a relationship, the zero-orphan requirement rejects the wrong direction.
+//
+// Scenario: accounts (100 rows) and account_password_resets (60 rows, 50 distinct account_ids)
+// - accounts.account_id → account_password_resets.account_id has 50 orphans (accounts without resets)
+// - account_password_resets.account_id → accounts.account_id has 0 orphans (all resets have valid accounts)
+//
+// The zero-orphan requirement ensures only the correct FK direction is discovered.
+// Note: PK match creates bidirectional relationships for navigation, so the "reverse" in the
+// created relationships is NOT the same as "wrong direction" - it's the navigation reverse.
+func TestPKMatch_ReversedDirectionRejected(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	accountEntityID := uuid.New()
+	passwordResetEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, accountEntityID)
+
+	// Add password_reset entity
+	mocks.entityRepo.entities = []*models.OntologyEntity{
+		{
+			ID:            accountEntityID,
+			OntologyID:    ontologyID,
+			Name:          "account",
+			PrimarySchema: "public",
+			PrimaryTable:  "accounts",
+		},
+		{
+			ID:            passwordResetEntityID,
+			OntologyID:    ontologyID,
+			Name:          "password_reset",
+			PrimarySchema: "public",
+			PrimaryTable:  "account_password_resets",
+		},
+	}
+
+	accountsTableID := uuid.New()
+	passwordResetTableID := uuid.New()
+
+	// accounts has 100 distinct accounts
+	// password_resets only has 50 distinct accounts (only 50 accounts have reset passwords)
+	accountRowCount := int64(100)
+	resetRowCount := int64(60) // 60 reset records for 50 distinct accounts
+	accountDistinct := int64(100)
+	resetDistinct := int64(50) // Only 50 accounts have password resets
+	isJoinableTrue := true
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         accountsTableID,
+			SchemaName: "public",
+			TableName:  "accounts",
+			RowCount:   &accountRowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: accountsTableID,
+					ColumnName:    "account_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &accountDistinct,
+				},
+			},
+		},
+		{
+			ID:         passwordResetTableID,
+			SchemaName: "public",
+			TableName:  "account_password_resets",
+			RowCount:   &resetRowCount,
+			Columns: []models.SchemaColumn{
+				{
+					ID:            uuid.New(),
+					SchemaTableID: passwordResetTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &resetRowCount,
+				},
+				{
+					ID:            uuid.New(),
+					SchemaTableID: passwordResetTableID,
+					ColumnName:    "account_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &resetDistinct,
+				},
+			},
+		},
+	}
+
+	// Track which join analyses were performed to verify both directions were tested
+	joinAnalysisCalls := make(map[string]int)
+
+	// Mock join analysis
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		key := fmt.Sprintf("%s.%s.%s→%s.%s.%s", sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn)
+		joinAnalysisCalls[key]++
+
+		// accounts.account_id → password_resets (wrong direction) has 50 orphans
+		if sourceTable == "accounts" && sourceColumn == "account_id" &&
+			targetTable == "account_password_resets" && targetColumn == "account_id" {
+			return &datasource.JoinAnalysis{
+				OrphanCount: 50, // 50 accounts have no password reset - would cause orphans
+			}, nil
+		}
+
+		// password_resets.account_id → accounts.account_id (correct direction) has 0 orphans
+		if sourceTable == "account_password_resets" && sourceColumn == "account_id" &&
+			targetTable == "accounts" && targetColumn == "account_id" {
+			return &datasource.JoinAnalysis{
+				OrphanCount: 0, // All password resets have valid account references
+			}, nil
+		}
+
+		// Default: high orphan count (no match)
+		return &datasource.JoinAnalysis{OrphanCount: 100}, nil
+	}
+
+	// No FK relationships (testing inference only)
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	// Run PK match discovery
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: 1 inferred relationship (correct direction only)
+	if result.InferredRelationships != 1 {
+		t.Errorf("expected 1 inferred relationship (correct direction), got %d", result.InferredRelationships)
+	}
+
+	// Verify: 2 relationships in repo (forward + reverse for navigation)
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Errorf("expected 2 relationships (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	}
+
+	// Verify: The forward relationship should be the correct FK direction
+	// (account_password_resets.account_id → accounts.account_id)
+	if len(mocks.relationshipRepo.created) >= 1 {
+		forwardRel := mocks.relationshipRepo.created[0]
+		if forwardRel.SourceColumnTable != "account_password_resets" || forwardRel.TargetColumnTable != "accounts" {
+			t.Errorf("expected forward direction account_password_resets→accounts, got %s→%s",
+				forwardRel.SourceColumnTable, forwardRel.TargetColumnTable)
+		}
+		if forwardRel.DetectionMethod != models.DetectionMethodPKMatch {
+			t.Errorf("expected DetectionMethod=%q, got %q", models.DetectionMethodPKMatch, forwardRel.DetectionMethod)
+		}
+	}
+
+	// Verify: The reverse relationship is for navigation only (not an independently discovered wrong-direction relationship)
+	if len(mocks.relationshipRepo.created) >= 2 {
+		reverseRel := mocks.relationshipRepo.created[1]
+		if reverseRel.SourceColumnTable != "accounts" || reverseRel.TargetColumnTable != "account_password_resets" {
+			t.Errorf("expected reverse direction accounts→account_password_resets (for navigation), got %s→%s",
+				reverseRel.SourceColumnTable, reverseRel.TargetColumnTable)
+		}
 	}
 }
