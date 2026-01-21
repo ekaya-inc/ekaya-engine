@@ -161,6 +161,6 @@ func (r *knowledgeRepository) Upsert(ctx context.Context, fact *models.Knowledge
 
 ## Additional Cleanup (Optional)
 
-Update `plans/BUGS-ontology-testing.md`:
-- Mark Bug 1 (singularization) as **CLOSED** - stale data issue
-- Update Bug 2 and Bug 3 to reference this FIX file
+- [x] Update `plans/BUGS-ontology-testing.md`:
+  - Mark Bug 1 (singularization) as **CLOSED** - stale data issue
+  - Update Bug 2 and Bug 3 to reference this FIX file
