@@ -600,28 +600,9 @@ func registerDeleteEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			), nil
 		}
 
-		// Check for occurrences in schema using repository
-		occurrenceCount, err := deps.OntologyEntityRepo.CountOccurrencesByEntity(tenantCtx, entity.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check occurrences: %w", err)
-		}
-
-		if occurrenceCount > 0 {
-			// Get sample tables for error message
-			tables, err := deps.OntologyEntityRepo.GetOccurrenceTablesByEntity(tenantCtx, entity.ID, 5)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get occurrence tables: %w", err)
-			}
-
-			return NewErrorResultWithDetails(
-				"resource_conflict",
-				fmt.Sprintf("cannot delete entity %q - still referenced in %d schema occurrence(s)", name, occurrenceCount),
-				map[string]any{
-					"occurrence_count": occurrenceCount,
-					"tables":           tables,
-				},
-			), nil
-		}
+		// Note: Occurrence checking was removed after migration 030 dropped the
+		// engine_ontology_entity_occurrences table. Entity deletion no longer
+		// requires checking for schema occurrences.
 
 		// Soft delete the entity
 		reason := "Deleted via MCP agent"
