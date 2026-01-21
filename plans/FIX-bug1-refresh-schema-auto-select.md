@@ -155,7 +155,7 @@ table := &models.SchemaTable{
 
 This eliminates the race condition between insert and update.
 
-### Fix 3: Add explicit project_id filter to update query
+### Fix 3: Add explicit project_id filter to update query [x]
 
 ```go
 // pkg/repositories/schema_repository.go:1685-1689

@@ -289,6 +289,6 @@ func (m *mockSchemaService) GetDatasourceSchemaWithEntities(ctx context.Context,
 	return "", nil
 }
 
-func (m *mockSchemaService) SelectAllTables(ctx context.Context, datasourceID uuid.UUID) error {
+func (m *mockSchemaService) SelectAllTables(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return m.selectAllTablesError
 }

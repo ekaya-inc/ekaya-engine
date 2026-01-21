@@ -64,7 +64,7 @@ type SchemaService interface {
 
 	// SelectAllTables marks all tables and columns for this datasource as selected.
 	// Used after schema refresh to auto-select newly discovered tables.
-	SelectAllTables(ctx context.Context, datasourceID uuid.UUID) error
+	SelectAllTables(ctx context.Context, projectID, datasourceID uuid.UUID) error
 }
 
 type schemaService struct {
@@ -1231,8 +1231,8 @@ func (s *schemaService) GetDatasourceSchemaWithEntities(ctx context.Context, pro
 }
 
 // SelectAllTables marks all tables and columns for this datasource as selected.
-func (s *schemaService) SelectAllTables(ctx context.Context, datasourceID uuid.UUID) error {
-	if err := s.schemaRepo.SelectAllTablesAndColumns(ctx, datasourceID); err != nil {
+func (s *schemaService) SelectAllTables(ctx context.Context, projectID, datasourceID uuid.UUID) error {
+	if err := s.schemaRepo.SelectAllTablesAndColumns(ctx, projectID, datasourceID); err != nil {
 		return fmt.Errorf("failed to select all tables: %w", err)
 	}
 	return nil
