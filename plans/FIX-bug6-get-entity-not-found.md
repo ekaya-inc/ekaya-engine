@@ -120,11 +120,11 @@ Investigate why `ensureOntologyExists` might return a different ontology ID than
    - Add interface method `GetByProjectAndName(ctx, projectID, name) (*OntologyEntity, error)`
    - Implement the method with JOIN to engine_ontologies
 
-2. [ ] **pkg/mcp/tools/entity.go**
+2. [x] **pkg/mcp/tools/entity.go**
    - Modify `registerGetEntityTool` handler to use `GetByProjectAndName` instead of `ensureOntologyExists` + `GetByName`
    - Note: `update_entity` and `delete_entity` may also need this fix
 
-3. [ ] **pkg/mcp/tools/entity_test.go** (if exists) or create tests
+3. [x] **pkg/mcp/tools/entity_test.go** (if exists) or create tests
    - Add test case for finding extraction-created entities
 
 ## Testing Verification

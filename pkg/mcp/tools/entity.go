@@ -84,14 +84,8 @@ func registerGetEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			return NewErrorResult("invalid_parameters", "parameter 'name' cannot be empty"), nil
 		}
 
-		// Get or create active ontology (enables immediate use without extraction)
-		ontology, err := ensureOntologyExists(tenantCtx, deps.OntologyRepo, projectID)
-		if err != nil {
-			return NewErrorResult("ontology_error", err.Error()), nil
-		}
-
-		// Get entity by name
-		entity, err := deps.OntologyEntityRepo.GetByName(tenantCtx, ontology.ID, name)
+		// Get entity by name using project-scoped lookup (joins to active ontology)
+		entity, err := deps.OntologyEntityRepo.GetByProjectAndName(tenantCtx, projectID, name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get entity: %w", err)
 		}
@@ -112,7 +106,7 @@ func registerGetEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 		}
 
 		// Get relationships where this entity is the source
-		sourceRels, err := deps.EntityRelationshipRepo.GetByOntology(tenantCtx, ontology.ID)
+		sourceRels, err := deps.EntityRelationshipRepo.GetByOntology(tenantCtx, entity.OntologyID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get entity relationships: %w", err)
 		}
@@ -124,7 +118,7 @@ func registerGetEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 		}
 
 		// Get all entities for mapping IDs to names
-		allEntities, err := deps.OntologyEntityRepo.GetByOntology(tenantCtx, ontology.ID)
+		allEntities, err := deps.OntologyEntityRepo.GetByOntology(tenantCtx, entity.OntologyID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get all entities: %w", err)
 		}
@@ -361,14 +355,8 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			}
 		}
 
-		// Get or create active ontology (enables immediate use without extraction)
-		ontology, err := ensureOntologyExists(tenantCtx, deps.OntologyRepo, projectID)
-		if err != nil {
-			return NewErrorResult("ontology_error", err.Error()), nil
-		}
-
-		// Check if entity exists
-		existingEntity, err := deps.OntologyEntityRepo.GetByName(tenantCtx, ontology.ID, name)
+		// Check if entity exists using project-scoped lookup (joins to active ontology)
+		existingEntity, err := deps.OntologyEntityRepo.GetByProjectAndName(tenantCtx, projectID, name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check for existing entity: %w", err)
 		}
@@ -392,6 +380,12 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 		}
 
 		if isNew {
+			// Get or create active ontology for new entity creation
+			ontology, err := ensureOntologyExists(tenantCtx, deps.OntologyRepo, projectID)
+			if err != nil {
+				return NewErrorResult("ontology_error", err.Error()), nil
+			}
+
 			// Create new entity with MCP provenance
 			newEntity := &models.OntologyEntity{
 				ProjectID:   projectID,
@@ -555,14 +549,8 @@ func registerDeleteEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			), nil
 		}
 
-		// Get or create active ontology (enables immediate use without extraction)
-		ontology, err := ensureOntologyExists(tenantCtx, deps.OntologyRepo, projectID)
-		if err != nil {
-			return NewErrorResult("ontology_error", err.Error()), nil
-		}
-
-		// Get entity by name
-		entity, err := deps.OntologyEntityRepo.GetByName(tenantCtx, ontology.ID, name)
+		// Get entity by name using project-scoped lookup (joins to active ontology)
+		entity, err := deps.OntologyEntityRepo.GetByProjectAndName(tenantCtx, projectID, name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get entity: %w", err)
 		}
@@ -575,7 +563,7 @@ func registerDeleteEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 
 		// Check for relationships (both as source and target)
 		// Get relationships where this entity is the source
-		sourceRels, err := deps.EntityRelationshipRepo.GetByOntology(tenantCtx, ontology.ID)
+		sourceRels, err := deps.EntityRelationshipRepo.GetByOntology(tenantCtx, entity.OntologyID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check relationships: %w", err)
 		}
