@@ -1278,6 +1278,10 @@ func (m *mockTestEntityRepo) DeleteByOntology(ctx context.Context, ontologyID uu
 	return nil
 }
 
+func (m *mockTestEntityRepo) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
 func (m *mockTestRelationshipRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }

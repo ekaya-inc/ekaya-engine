@@ -99,6 +99,12 @@ func (tc *ontologyEntityTestContext) createTestContext() (context.Context, func(
 // createTestEntity creates a schema entity for testing.
 func (tc *ontologyEntityTestContext) createTestEntity(ctx context.Context, name string) *models.OntologyEntity {
 	tc.t.Helper()
+	return tc.createTestEntityWithProvenance(ctx, name, models.ProvenanceInference)
+}
+
+// createTestEntityWithProvenance creates a schema entity with the specified provenance.
+func (tc *ontologyEntityTestContext) createTestEntityWithProvenance(ctx context.Context, name string, createdBy string) *models.OntologyEntity {
+	tc.t.Helper()
 	entity := &models.OntologyEntity{
 		ProjectID:     tc.projectID,
 		OntologyID:    tc.ontologyID,
@@ -107,6 +113,7 @@ func (tc *ontologyEntityTestContext) createTestEntity(ctx context.Context, name 
 		PrimarySchema: "public",
 		PrimaryTable:  name + "s",
 		PrimaryColumn: "id",
+		CreatedBy:     createdBy,
 	}
 	err := tc.repo.Create(ctx, entity)
 	if err != nil {
@@ -449,6 +456,159 @@ func TestOntologyEntityRepository_DeleteByOntology_Success(t *testing.T) {
 	}
 	if len(entities) != 0 {
 		t.Errorf("expected 0 entities after delete, got %d", len(entities))
+	}
+}
+
+// ============================================================================
+// Entity DeleteInferenceEntitiesByOntology Tests
+// ============================================================================
+
+func TestOntologyEntityRepository_DeleteInferenceEntitiesByOntology_PreservesManualAndMCP(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create entities with different provenance
+	tc.createTestEntityWithProvenance(ctx, "inference_entity1", models.ProvenanceInference)
+	tc.createTestEntityWithProvenance(ctx, "inference_entity2", models.ProvenanceInference)
+	tc.createTestEntityWithProvenance(ctx, "manual_entity", models.ProvenanceManual)
+	tc.createTestEntityWithProvenance(ctx, "mcp_entity", models.ProvenanceMCP)
+
+	// Delete only inference entities
+	err := tc.repo.DeleteInferenceEntitiesByOntology(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("DeleteInferenceEntitiesByOntology failed: %v", err)
+	}
+
+	// Verify only manual and MCP entities remain
+	entities, err := tc.repo.GetByOntology(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("GetByOntology failed: %v", err)
+	}
+	if len(entities) != 2 {
+		t.Errorf("expected 2 entities (manual + mcp), got %d", len(entities))
+	}
+
+	// Verify the correct entities remain
+	entityNames := make(map[string]bool)
+	for _, e := range entities {
+		entityNames[e.Name] = true
+	}
+	if !entityNames["manual_entity"] {
+		t.Error("expected manual_entity to be preserved")
+	}
+	if !entityNames["mcp_entity"] {
+		t.Error("expected mcp_entity to be preserved")
+	}
+	if entityNames["inference_entity1"] || entityNames["inference_entity2"] {
+		t.Error("expected inference entities to be deleted")
+	}
+}
+
+func TestOntologyEntityRepository_DeleteInferenceEntitiesByOntology_NoEntities(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// No entities exist - should not error
+	err := tc.repo.DeleteInferenceEntitiesByOntology(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("DeleteInferenceEntitiesByOntology failed: %v", err)
+	}
+}
+
+func TestOntologyEntityRepository_DeleteInferenceEntitiesByOntology_OnlyManualEntities(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create only manual entities
+	tc.createTestEntityWithProvenance(ctx, "manual_entity1", models.ProvenanceManual)
+	tc.createTestEntityWithProvenance(ctx, "manual_entity2", models.ProvenanceManual)
+
+	// Delete inference entities (none exist)
+	err := tc.repo.DeleteInferenceEntitiesByOntology(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("DeleteInferenceEntitiesByOntology failed: %v", err)
+	}
+
+	// All manual entities should remain
+	entities, err := tc.repo.GetByOntology(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("GetByOntology failed: %v", err)
+	}
+	if len(entities) != 2 {
+		t.Errorf("expected 2 entities, got %d", len(entities))
+	}
+}
+
+func TestOntologyEntityRepository_DeleteInferenceEntitiesByOntology_CascadesAliases(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create inference entity with alias
+	inferenceEntity := tc.createTestEntityWithProvenance(ctx, "inference_entity", models.ProvenanceInference)
+	err := tc.repo.CreateAlias(ctx, &models.OntologyEntityAlias{
+		EntityID: inferenceEntity.ID,
+		Alias:    "inference_alias",
+	})
+	if err != nil {
+		t.Fatalf("CreateAlias failed: %v", err)
+	}
+
+	// Create manual entity with alias
+	manualEntity := tc.createTestEntityWithProvenance(ctx, "manual_entity", models.ProvenanceManual)
+	err = tc.repo.CreateAlias(ctx, &models.OntologyEntityAlias{
+		EntityID: manualEntity.ID,
+		Alias:    "manual_alias",
+	})
+	if err != nil {
+		t.Fatalf("CreateAlias failed: %v", err)
+	}
+
+	// Delete inference entities
+	err = tc.repo.DeleteInferenceEntitiesByOntology(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("DeleteInferenceEntitiesByOntology failed: %v", err)
+	}
+
+	// Verify inference entity alias is deleted (cascaded)
+	inferenceAliases, err := tc.repo.GetAliasesByEntity(ctx, inferenceEntity.ID)
+	if err != nil {
+		t.Fatalf("GetAliasesByEntity failed: %v", err)
+	}
+	if len(inferenceAliases) != 0 {
+		t.Errorf("expected 0 aliases for deleted inference entity, got %d", len(inferenceAliases))
+	}
+
+	// Verify manual entity alias is preserved
+	manualAliases, err := tc.repo.GetAliasesByEntity(ctx, manualEntity.ID)
+	if err != nil {
+		t.Fatalf("GetAliasesByEntity failed: %v", err)
+	}
+	if len(manualAliases) != 1 {
+		t.Errorf("expected 1 alias for manual entity, got %d", len(manualAliases))
+	}
+}
+
+func TestOntologyEntityRepository_DeleteInferenceEntitiesByOntology_NoTenantScope(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx := context.Background() // No tenant scope
+
+	err := tc.repo.DeleteInferenceEntitiesByOntology(ctx, tc.ontologyID)
+	if err == nil {
+		t.Error("expected error for DeleteInferenceEntitiesByOntology without tenant scope")
 	}
 }
 

@@ -96,6 +96,10 @@ func (m *mockOntologyEntityRepository) DeleteByOntology(ctx context.Context, ont
 	return nil
 }
 
+func (m *mockOntologyEntityRepository) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
 func (m *mockOntologyEntityRepository) Update(ctx context.Context, entity *models.OntologyEntity) error {
 	return nil
 }

@@ -22,6 +22,7 @@ type OntologyEntityRepository interface {
 	GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error)
 	GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error)
 	DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error
+	DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error
 	Update(ctx context.Context, entity *models.OntologyEntity) error
 
 	// Soft delete operations
@@ -236,6 +237,24 @@ func (r *ontologyEntityRepository) DeleteByOntology(ctx context.Context, ontolog
 	_, err := scope.Conn.Exec(ctx, query, ontologyID)
 	if err != nil {
 		return fmt.Errorf("failed to delete ontology entities: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteInferenceEntitiesByOntology deletes only inference-created entities.
+// Preserves entities created by manual or MCP sources.
+func (r *ontologyEntityRepository) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `DELETE FROM engine_ontology_entities WHERE ontology_id = $1 AND created_by = 'inference'`
+
+	_, err := scope.Conn.Exec(ctx, query, ontologyID)
+	if err != nil {
+		return fmt.Errorf("failed to delete inference entities: %w", err)
 	}
 
 	return nil

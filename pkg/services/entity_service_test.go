@@ -101,6 +101,9 @@ func (m *mockEntityRepo) GetByProjectAndName(ctx context.Context, projectID uuid
 func (m *mockEntityRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }
+func (m *mockEntityRepo) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
 func (m *mockEntityRepo) GetAllAliasesByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityAlias, error) {
 	return nil, nil
 }

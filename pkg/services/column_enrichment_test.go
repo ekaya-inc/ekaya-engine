@@ -114,6 +114,10 @@ func (r *testColEnrichmentEntityRepo) DeleteByOntology(ctx context.Context, onto
 	return nil
 }
 
+func (r *testColEnrichmentEntityRepo) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
 func (r *testColEnrichmentEntityRepo) DeleteAlias(ctx context.Context, aliasID uuid.UUID) error {
 	return nil
 }
