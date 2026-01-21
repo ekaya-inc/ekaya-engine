@@ -46,6 +46,7 @@ type changeReviewService struct {
 	relationshipRepo   repositories.EntityRelationshipRepository
 	columnMetadataRepo repositories.ColumnMetadataRepository
 	ontologyRepo       repositories.OntologyRepository
+	incrementalDAG     IncrementalDAGService // Optional: triggers LLM enrichment after approval
 	logger             *zap.Logger
 }
 
@@ -56,6 +57,7 @@ type ChangeReviewServiceDeps struct {
 	RelationshipRepo   repositories.EntityRelationshipRepository
 	ColumnMetadataRepo repositories.ColumnMetadataRepository
 	OntologyRepo       repositories.OntologyRepository
+	IncrementalDAG     IncrementalDAGService // Optional: set to enable LLM enrichment after approval
 	Logger             *zap.Logger
 }
 
@@ -67,6 +69,7 @@ func NewChangeReviewService(deps *ChangeReviewServiceDeps) ChangeReviewService {
 		relationshipRepo:   deps.RelationshipRepo,
 		columnMetadataRepo: deps.ColumnMetadataRepo,
 		ontologyRepo:       deps.OntologyRepo,
+		incrementalDAG:     deps.IncrementalDAG,
 		logger:             deps.Logger,
 	}
 }
@@ -135,6 +138,11 @@ func (s *changeReviewService) ApproveChange(ctx context.Context, changeID uuid.U
 	change.Status = models.ChangeStatusApproved
 	change.ReviewedBy = &reviewerSource
 
+	// Trigger incremental LLM enrichment asynchronously if configured
+	if s.incrementalDAG != nil {
+		s.incrementalDAG.ProcessChangeAsync(ctx, change)
+	}
+
 	return change, nil
 }
 
@@ -175,6 +183,8 @@ func (s *changeReviewService) ApproveAllChanges(ctx context.Context, projectID u
 		return nil, fmt.Errorf("failed to list pending changes: %w", err)
 	}
 
+	var approvedChanges []*models.PendingChange
+
 	for _, change := range changes {
 		// Try to apply the change
 		if err := s.applyChange(ctx, change, reviewerSource); err != nil {
@@ -191,7 +201,20 @@ func (s *changeReviewService) ApproveAllChanges(ctx context.Context, projectID u
 			continue
 		}
 
+		change.Status = models.ChangeStatusApproved
+		approvedChanges = append(approvedChanges, change)
 		result.Approved++
+	}
+
+	// Trigger batch incremental LLM enrichment asynchronously if configured
+	if s.incrementalDAG != nil && len(approvedChanges) > 0 {
+		go func() {
+			if err := s.incrementalDAG.ProcessChanges(ctx, approvedChanges); err != nil {
+				s.logger.Error("Failed to process approved changes for incremental enrichment",
+					zap.Error(err),
+					zap.Int("change_count", len(approvedChanges)))
+			}
+		}()
 	}
 
 	return result, nil

@@ -32,7 +32,7 @@ Transform Ekaya Engine's ontology from a one-time extraction to a "living" syste
 | [PLAN-living-ontology-03](./PLAN-living-ontology-03-schema-change-detection.md) | Schema Change Detection | Detect DDL changes, queue for review | 01 | ✅ Done |
 | [PLAN-living-ontology-04](./PLAN-living-ontology-04-data-change-detection.md) | Data Change Detection | Detect data-level changes (enums, cardinality) | 03 | ✅ Done |
 | [PLAN-living-ontology-05](./PLAN-living-ontology-05-change-queue.md) | Ontology Change Queue & Precedence | Review/approve workflow, precedence model | 03, 04 | ✅ Done |
-| [PLAN-living-ontology-06](./PLAN-living-ontology-06-incremental-dag.md) | Incremental DAG Execution | Targeted LLM enrichment for changes | 05 | |
+| [PLAN-living-ontology-06](./PLAN-living-ontology-06-incremental-dag.md) | Incremental DAG Execution | Targeted LLM enrichment for changes | 05 | ✅ Done |
 
 ## Dependency Graph
 
