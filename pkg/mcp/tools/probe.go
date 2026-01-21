@@ -485,7 +485,9 @@ func probeRelationships(ctx context.Context, deps *ProbeToolDeps, projectID uuid
 	}
 
 	// Get all entities to build entity ID -> name map
-	entities, err := deps.EntityRepo.GetByOntology(ctx, ontology.ID)
+	// Use GetByProject (not GetByOntology) to match the pattern used by get_ontology,
+	// ensuring entities created via MCP tools are found regardless of which ontology ID they have
+	entities, err := deps.EntityRepo.GetByProject(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get entities: %w", err)
 	}
