@@ -41,6 +41,9 @@ const (
 	SuggestedActionCreateColumnMetadata = "create_column_metadata"
 	SuggestedActionUpdateColumnMetadata = "update_column_metadata"
 	SuggestedActionReviewColumn         = "review_column"
+	// Data-level change actions (for PLAN-04)
+	SuggestedActionUpdateRelationship = "update_relationship"
+	SuggestedActionCreateRelationship = "create_relationship"
 )
 
 // PendingChange represents a detected schema or data change awaiting review.

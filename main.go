@@ -160,6 +160,7 @@ func main() {
 	datasourceService := services.NewDatasourceService(datasourceRepo, ontologyRepo, credentialEncryptor, adapterFactory, projectService, logger)
 	schemaService := services.NewSchemaService(schemaRepo, ontologyEntityRepo, ontologyRepo, entityRelationshipRepo, datasourceService, adapterFactory, logger)
 	schemaChangeDetectionService := services.NewSchemaChangeDetectionService(pendingChangeRepo, logger)
+	dataChangeDetectionService := services.NewDataChangeDetectionService(schemaRepo, ontologyRepo, pendingChangeRepo, datasourceService, adapterFactory, logger)
 	discoveryService := services.NewRelationshipDiscoveryService(schemaRepo, datasourceService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
@@ -262,6 +263,7 @@ func main() {
 		ProjectService:               projectService,
 		AdapterFactory:               adapterFactory,
 		SchemaChangeDetectionService: schemaChangeDetectionService,
+		DataChangeDetectionService:   dataChangeDetectionService,
 		PendingChangeRepo:            pendingChangeRepo,
 		Logger:                       logger,
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
@@ -30,6 +31,7 @@ type MCPToolDeps struct {
 	ProjectService               services.ProjectService
 	AdapterFactory               datasource.DatasourceAdapterFactory
 	SchemaChangeDetectionService services.SchemaChangeDetectionService
+	DataChangeDetectionService   services.DataChangeDetectionService
 	PendingChangeRepo            repositories.PendingChangeRepository
 	Logger                       *zap.Logger
 }
@@ -153,6 +155,7 @@ func RegisterMCPTools(s *server.MCPServer, deps *MCPToolDeps) {
 	registerValidateTool(s, deps)
 	registerExplainQueryTool(s, deps)
 	registerRefreshSchemaTool(s, deps)
+	registerScanDataChangesTool(s, deps)
 	registerListPendingChangesTool(s, deps)
 }
 
@@ -1082,6 +1085,111 @@ func registerListPendingChangesTool(s *server.MCPServer, deps *MCPToolDeps) {
 				"suggested_payload": c.SuggestedPayload,
 				"status":            c.Status,
 				"created_at":        c.CreatedAt,
+			}
+		}
+
+		jsonResult, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// registerScanDataChangesTool adds the scan_data_changes tool for detecting data-level changes.
+func registerScanDataChangesTool(s *server.MCPServer, deps *MCPToolDeps) {
+	tool := mcp.NewTool(
+		"scan_data_changes",
+		mcp.WithDescription(
+			"Scan data for changes like new enum values and potential FK patterns. "+
+				"Creates pending changes for review. Use after data updates to keep ontology current.",
+		),
+		mcp.WithString(
+			"tables",
+			mcp.Description("Comma-separated list of table names to scan (default: all selected tables)"),
+		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "scan_data_changes")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Check if data change detection service is configured
+		if deps.DataChangeDetectionService == nil {
+			return nil, fmt.Errorf("data change detection not available: service not configured")
+		}
+
+		// Get default datasource
+		dsID, err := deps.ProjectService.GetDefaultDatasourceID(tenantCtx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get default datasource: %w", err)
+		}
+		if dsID == uuid.Nil {
+			return nil, fmt.Errorf("no default datasource configured for project")
+		}
+
+		// Get optional tables parameter
+		tablesStr := getOptionalString(req, "tables")
+
+		var changes []*models.PendingChange
+		if tablesStr != "" {
+			// Parse comma-separated table names
+			tableNames := strings.Split(tablesStr, ",")
+			for i, t := range tableNames {
+				tableNames[i] = strings.TrimSpace(t)
+			}
+			changes, err = deps.DataChangeDetectionService.ScanTables(tenantCtx, projectID, dsID, tableNames)
+		} else {
+			changes, err = deps.DataChangeDetectionService.ScanForChanges(tenantCtx, projectID, dsID)
+		}
+
+		if err != nil {
+			deps.Logger.Error("Data change scan failed",
+				zap.String("project_id", projectID.String()),
+				zap.String("datasource_id", dsID.String()),
+				zap.Error(err),
+			)
+			return nil, fmt.Errorf("data change scan failed: %w", err)
+		}
+
+		deps.Logger.Info("Data change scan completed via MCP",
+			zap.String("project_id", projectID.String()),
+			zap.String("datasource_id", dsID.String()),
+			zap.Int("changes_found", len(changes)),
+		)
+
+		// Build response summary
+		changesByType := make(map[string]int)
+		for _, c := range changes {
+			changesByType[c.ChangeType]++
+		}
+
+		response := struct {
+			TotalChanges  int            `json:"total_changes"`
+			ChangesByType map[string]int `json:"changes_by_type"`
+			Changes       []any          `json:"changes"`
+		}{
+			TotalChanges:  len(changes),
+			ChangesByType: changesByType,
+			Changes:       make([]any, len(changes)),
+		}
+
+		for i, c := range changes {
+			response.Changes[i] = map[string]any{
+				"id":               c.ID.String(),
+				"change_type":      c.ChangeType,
+				"table_name":       c.TableName,
+				"column_name":      c.ColumnName,
+				"new_value":        c.NewValue,
+				"suggested_action": c.SuggestedAction,
 			}
 		}
 
