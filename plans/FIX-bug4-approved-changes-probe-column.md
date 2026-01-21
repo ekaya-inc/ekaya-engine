@@ -82,7 +82,7 @@ The `update_column` MCP tool writes to both locations (see pkg/mcp/tools/column.
 ## Tasks
 
 - [x] Task 1: Update probe_column to read from both data sources (Option A)
-- [ ] Task 2: Add integration test for full approve_change → probe_column flow
+- [x] Task 2: Add integration test for full approve_change → probe_column flow
 
 ## Implementation Details
 
