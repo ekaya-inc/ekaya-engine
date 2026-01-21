@@ -8,6 +8,7 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
@@ -289,5 +290,121 @@ func (m *mockSchemaService) GetDatasourceSchemaWithEntities(ctx context.Context,
 }
 
 func (m *mockSchemaService) SelectAllTables(ctx context.Context, projectID, datasourceID uuid.UUID) error {
+	return nil
+}
+
+// mockSchemaRepository implements repositories.SchemaRepository for testing.
+type mockSchemaRepository struct {
+	tables       []*models.SchemaTable
+	columns      []*models.SchemaColumn
+	relationships []*models.SchemaRelationship
+}
+
+func (m *mockSchemaRepository) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+	return m.tables, nil
+}
+func (m *mockSchemaRepository) GetTableByID(ctx context.Context, projectID, tableID uuid.UUID) (*models.SchemaTable, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepository) GetTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, schemaName, tableName string) (*models.SchemaTable, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepository) FindTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepository) UpsertTable(ctx context.Context, table *models.SchemaTable) error {
+	return nil
+}
+func (m *mockSchemaRepository) SoftDeleteRemovedTables(ctx context.Context, projectID, datasourceID uuid.UUID, activeTableKeys []repositories.TableKey) (int64, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepository) UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error {
+	return nil
+}
+func (m *mockSchemaRepository) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
+	return nil
+}
+func (m *mockSchemaRepository) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepository) ListColumnsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return m.columns, nil
+}
+func (m *mockSchemaRepository) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepository) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepository) GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepository) GetColumnByName(ctx context.Context, tableID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepository) UpsertColumn(ctx context.Context, column *models.SchemaColumn) error {
+	return nil
+}
+func (m *mockSchemaRepository) SoftDeleteRemovedColumns(ctx context.Context, tableID uuid.UUID, activeColumnNames []string) (int64, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepository) UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error {
+	return nil
+}
+func (m *mockSchemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error {
+	return nil
+}
+func (m *mockSchemaRepository) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
+	return nil
+}
+func (m *mockSchemaRepository) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
+	return m.relationships, nil
+}
+func (m *mockSchemaRepository) GetRelationshipByID(ctx context.Context, projectID, relationshipID uuid.UUID) (*models.SchemaRelationship, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepository) GetRelationshipByColumns(ctx context.Context, sourceColumnID, targetColumnID uuid.UUID) (*models.SchemaRelationship, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepository) UpsertRelationship(ctx context.Context, rel *models.SchemaRelationship) error {
+	return nil
+}
+func (m *mockSchemaRepository) SoftDeleteOrphanedRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (int64, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepository) DeleteRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error {
+	return nil
+}
+func (m *mockSchemaRepository) UpdateRelationshipApproval(ctx context.Context, projectID, relationshipID uuid.UUID, isApproved bool) error {
+	return nil
+}
+func (m *mockSchemaRepository) SoftDeleteRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error {
+	return nil
+}
+func (m *mockSchemaRepository) GetRelationshipDetails(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.RelationshipDetail, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepository) GetEmptyTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepository) GetOrphanTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepository) UpsertRelationshipWithMetrics(ctx context.Context, rel *models.SchemaRelationship, metrics *models.DiscoveryMetrics) error {
+	return nil
+}
+func (m *mockSchemaRepository) GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepository) UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount, distinctCount *int64, isJoinable *bool, joinabilityReason *string) error {
+	return nil
+}
+func (m *mockSchemaRepository) GetPrimaryKeyColumns(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepository) GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepository) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
