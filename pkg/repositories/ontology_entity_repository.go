@@ -20,6 +20,7 @@ type OntologyEntityRepository interface {
 	GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error)
 	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error)
 	GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error)
+	GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error)
 	DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error
 	Update(ctx context.Context, entity *models.OntologyEntity) error
 
@@ -184,6 +185,35 @@ func (r *ontologyEntityRepository) GetByName(ctx context.Context, ontologyID uui
 		WHERE ontology_id = $1 AND name = $2 AND NOT is_deleted`
 
 	row := scope.Conn.QueryRow(ctx, query, ontologyID, name)
+	entity, err := scanOntologyEntity(row)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil // Entity not found
+		}
+		return nil, err
+	}
+
+	return entity, nil
+}
+
+// GetByProjectAndName finds an entity by name within the active ontology for a project.
+// This uses a JOIN to engine_ontologies (like GetByProject) rather than requiring an exact ontology_id.
+func (r *ontologyEntityRepository) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT e.id, e.project_id, e.ontology_id, e.name, e.description, e.domain,
+		       e.primary_schema, e.primary_table, e.primary_column,
+		       e.is_deleted, e.deletion_reason,
+		       e.created_by, e.updated_by, e.created_at, e.updated_at
+		FROM engine_ontology_entities e
+		JOIN engine_ontologies o ON e.ontology_id = o.id
+		WHERE e.project_id = $1 AND e.name = $2 AND o.is_active = true AND NOT e.is_deleted`
+
+	row := scope.Conn.QueryRow(ctx, query, projectID, name)
 	entity, err := scanOntologyEntity(row)
 	if err != nil {
 		if err == pgx.ErrNoRows {

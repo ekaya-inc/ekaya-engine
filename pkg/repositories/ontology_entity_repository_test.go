@@ -314,6 +314,117 @@ func TestOntologyEntityRepository_GetByName_NotFound(t *testing.T) {
 }
 
 // ============================================================================
+// Entity GetByProjectAndName Tests
+// ============================================================================
+
+func TestOntologyEntityRepository_GetByProjectAndName_Success(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	tc.createTestEntity(ctx, "user")
+	tc.createTestEntity(ctx, "account")
+
+	entity, err := tc.repo.GetByProjectAndName(ctx, tc.projectID, "account")
+	if err != nil {
+		t.Fatalf("GetByProjectAndName failed: %v", err)
+	}
+	if entity == nil {
+		t.Fatal("expected entity to be found")
+	}
+	if entity.Name != "account" {
+		t.Errorf("expected name 'account', got %q", entity.Name)
+	}
+}
+
+func TestOntologyEntityRepository_GetByProjectAndName_NotFound(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	tc.createTestEntity(ctx, "user")
+
+	entity, err := tc.repo.GetByProjectAndName(ctx, tc.projectID, "nonexistent")
+	if err != nil {
+		t.Fatalf("GetByProjectAndName failed: %v", err)
+	}
+	if entity != nil {
+		t.Error("expected nil for non-existent entity")
+	}
+}
+
+func TestOntologyEntityRepository_GetByProjectAndName_FilteredFromDeletedEntity(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	// Soft delete
+	err := tc.repo.SoftDelete(ctx, entity.ID, "test")
+	if err != nil {
+		t.Fatalf("SoftDelete failed: %v", err)
+	}
+
+	// GetByProjectAndName should not find deleted entity
+	retrieved, err := tc.repo.GetByProjectAndName(ctx, tc.projectID, "user")
+	if err != nil {
+		t.Fatalf("GetByProjectAndName failed: %v", err)
+	}
+	if retrieved != nil {
+		t.Error("expected nil for soft-deleted entity via GetByProjectAndName")
+	}
+}
+
+func TestOntologyEntityRepository_GetByProjectAndName_OnlyFindsActiveOntology(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create entity in the active ontology
+	tc.createTestEntity(ctx, "user")
+
+	// Deactivate the ontology
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		t.Fatal("failed to get tenant scope")
+	}
+	_, err := scope.Conn.Exec(ctx, `UPDATE engine_ontologies SET is_active = false WHERE id = $1`, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("failed to deactivate ontology: %v", err)
+	}
+
+	// GetByProjectAndName should not find entity in inactive ontology
+	entity, err := tc.repo.GetByProjectAndName(ctx, tc.projectID, "user")
+	if err != nil {
+		t.Fatalf("GetByProjectAndName failed: %v", err)
+	}
+	if entity != nil {
+		t.Error("expected nil for entity in inactive ontology")
+	}
+}
+
+func TestOntologyEntityRepository_GetByProjectAndName_NoTenantScope(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx := context.Background() // No tenant scope
+
+	_, err := tc.repo.GetByProjectAndName(ctx, tc.projectID, "user")
+	if err == nil {
+		t.Error("expected error for GetByProjectAndName without tenant scope")
+	}
+}
+
+// ============================================================================
 // Entity DeleteByOntology Tests
 // ============================================================================
 
