@@ -43,6 +43,9 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "refresh_schema", Description: "Refresh schema from datasource and auto-select new tables/columns", ToolGroup: ToolGroupDeveloper},
 	{Name: "scan_data_changes", Description: "Scan data for changes like new enum values and potential FK patterns", ToolGroup: ToolGroupDeveloper},
 	{Name: "list_pending_changes", Description: "List pending ontology changes detected from schema or data analysis", ToolGroup: ToolGroupDeveloper},
+	{Name: "approve_change", Description: "Approve a pending ontology change and apply it with precedence rules", ToolGroup: ToolGroupDeveloper},
+	{Name: "reject_change", Description: "Reject a pending ontology change without applying it", ToolGroup: ToolGroupDeveloper},
+	{Name: "approve_all_changes", Description: "Approve all pending changes that can be applied (respects precedence)", ToolGroup: ToolGroupDeveloper},
 
 	// Business user tools (approved_queries group)
 	// These read-only query tools enable business users to answer ad-hoc questions

@@ -220,6 +220,14 @@ func (m *mockEntityRelationshipRepository) Delete(ctx context.Context, id uuid.U
 	return nil
 }
 
+func (m *mockEntityRelationshipRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (m *mockEntityRelationshipRepository) Update(ctx context.Context, rel *models.EntityRelationship) error {
+	return nil
+}
+
 // mockProjectServiceForOntology is a mock for ProjectService in ontology context tests.
 type mockProjectServiceForOntology struct {
 	datasourceID uuid.UUID

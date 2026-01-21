@@ -197,6 +197,14 @@ func (m *mockRelationshipRepoForFinalization) Delete(ctx context.Context, id uui
 	return nil
 }
 
+func (m *mockRelationshipRepoForFinalization) GetByID(ctx context.Context, id uuid.UUID) (*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (m *mockRelationshipRepoForFinalization) Update(ctx context.Context, rel *models.EntityRelationship) error {
+	return nil
+}
+
 type mockSchemaRepoForFinalization struct {
 	columnsByTable  map[string][]*models.SchemaColumn
 	getColumnsByErr error

@@ -173,7 +173,7 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 		isNew := existingRel == nil
 
 		if isNew {
-			// Create new relationship
+			// Create new relationship with MCP provenance
 			// We need column details for the unique constraint, but for agent-created relationships,
 			// we'll use placeholder values since the actual column details aren't known
 			rel = &models.EntityRelationship{
@@ -190,6 +190,7 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 				Confidence:         1.0,
 				Status:             models.RelationshipStatusConfirmed,
 				Cardinality:        "unknown",
+				CreatedBy:          models.ProvenanceMCP,
 			}
 			if cardinality != "" {
 				rel.Cardinality = cardinality
@@ -201,8 +202,10 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 				rel.Association = &label
 			}
 		} else {
-			// Update existing relationship
+			// Update existing relationship with MCP provenance
 			rel = existingRel
+			updatedBy := models.ProvenanceMCP
+			rel.UpdatedBy = &updatedBy
 			if description != "" {
 				rel.Description = &description
 			}

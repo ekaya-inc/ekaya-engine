@@ -157,6 +157,12 @@ func (m *mockRelationshipRepo) Upsert(ctx context.Context, rel *models.EntityRel
 func (m *mockRelationshipRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
+func (m *mockRelationshipRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.EntityRelationship, error) {
+	return nil, nil
+}
+func (m *mockRelationshipRepo) Update(ctx context.Context, rel *models.EntityRelationship) error {
+	return nil
+}
 
 type mockOntologyRepo struct {
 	ontologies  map[uuid.UUID]*models.TieredOntology

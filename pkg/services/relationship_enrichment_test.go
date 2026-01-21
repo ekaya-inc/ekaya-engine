@@ -84,6 +84,14 @@ func (r *testRelEnrichmentRelRepo) Delete(ctx context.Context, id uuid.UUID) err
 	return nil
 }
 
+func (r *testRelEnrichmentRelRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (r *testRelEnrichmentRelRepo) Update(ctx context.Context, rel *models.EntityRelationship) error {
+	return nil
+}
+
 type testRelEnrichmentEntityRepo struct {
 	entities []*models.OntologyEntity
 }

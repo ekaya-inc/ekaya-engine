@@ -377,12 +377,13 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 		isNew := existingEntity == nil
 
 		if isNew {
-			// Create new entity
+			// Create new entity with MCP provenance
 			newEntity := &models.OntologyEntity{
 				ProjectID:   projectID,
 				OntologyID:  ontology.ID,
 				Name:        name,
 				Description: description,
+				CreatedBy:   models.ProvenanceMCP,
 				// Note: PrimaryTable, PrimaryColumn, Domain, PrimarySchema are typically set during discovery
 				// For agent updates, we leave them empty or preserve existing values
 			}
@@ -391,10 +392,12 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			}
 			entityID = newEntity.ID
 		} else {
-			// Update existing entity
+			// Update existing entity with MCP provenance
 			entityID = existingEntity.ID
 			if description != "" {
 				existingEntity.Description = description
+				updatedBy := models.ProvenanceMCP
+				existingEntity.UpdatedBy = &updatedBy
 				if err := deps.OntologyEntityRepo.Update(tenantCtx, existingEntity); err != nil {
 					return nil, fmt.Errorf("failed to update entity: %w", err)
 				}

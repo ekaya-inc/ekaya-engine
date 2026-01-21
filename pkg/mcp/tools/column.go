@@ -18,12 +18,13 @@ import (
 
 // ColumnToolDeps contains dependencies for column metadata tools.
 type ColumnToolDeps struct {
-	DB               *database.DB
-	MCPConfigService services.MCPConfigService
-	OntologyRepo     repositories.OntologyRepository
-	SchemaRepo       repositories.SchemaRepository
-	ProjectService   services.ProjectService
-	Logger           *zap.Logger
+	DB                 *database.DB
+	MCPConfigService   services.MCPConfigService
+	OntologyRepo       repositories.OntologyRepository
+	SchemaRepo         repositories.SchemaRepository
+	ColumnMetadataRepo repositories.ColumnMetadataRepository
+	ProjectService     services.ProjectService
+	Logger             *zap.Logger
 }
 
 // GetDB implements ToolAccessDeps.
@@ -248,6 +249,38 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 		// Save updated column details back to ontology
 		if err := deps.OntologyRepo.UpdateColumnDetails(tenantCtx, projectID, table, existingColumns); err != nil {
 			return nil, fmt.Errorf("failed to update column details: %w", err)
+		}
+
+		// Also track provenance in column_metadata table if available
+		if deps.ColumnMetadataRepo != nil {
+			updatedBy := models.ProvenanceMCP
+			colMeta := &models.ColumnMetadata{
+				ProjectID:  projectID,
+				TableName:  table,
+				ColumnName: column,
+				CreatedBy:  models.ProvenanceMCP,
+				UpdatedBy:  &updatedBy,
+			}
+			if description != "" {
+				colMeta.Description = &description
+			}
+			if entity != "" {
+				colMeta.Entity = &entity
+			}
+			if role != "" {
+				colMeta.Role = &role
+			}
+			if enumValues != nil {
+				colMeta.EnumValues = enumValues
+			}
+			if err := deps.ColumnMetadataRepo.Upsert(tenantCtx, colMeta); err != nil {
+				// Log but don't fail - the JSONB update succeeded
+				deps.Logger.Warn("Failed to track column metadata provenance",
+					zap.String("table", table),
+					zap.String("column", column),
+					zap.Error(err),
+				)
+			}
 		}
 
 		// Build response

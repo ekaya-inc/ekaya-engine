@@ -66,17 +66,22 @@ func (r *ontologyEntityRepository) Create(ctx context.Context, entity *models.On
 		entity.ID = uuid.New()
 	}
 
+	// Default created_by to 'inference' if not set
+	if entity.CreatedBy == "" {
+		entity.CreatedBy = models.ProvenanceInference
+	}
+
 	query := `
 		INSERT INTO engine_ontology_entities (
 			id, project_id, ontology_id, name, description, domain,
 			primary_schema, primary_table, primary_column,
-			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+			created_by, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		entity.ID, entity.ProjectID, entity.OntologyID, entity.Name, entity.Description, entity.Domain,
 		entity.PrimarySchema, entity.PrimaryTable, entity.PrimaryColumn,
-		entity.CreatedAt, entity.UpdatedAt,
+		entity.CreatedBy, entity.CreatedAt, entity.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create ontology entity: %w", err)
@@ -95,7 +100,7 @@ func (r *ontologyEntityRepository) GetByOntology(ctx context.Context, ontologyID
 		SELECT id, project_id, ontology_id, name, description, domain,
 		       primary_schema, primary_table, primary_column,
 		       is_deleted, deletion_reason,
-		       created_at, updated_at
+		       created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_entities
 		WHERE ontology_id = $1 AND NOT is_deleted
 		ORDER BY name`
@@ -132,7 +137,7 @@ func (r *ontologyEntityRepository) GetByProject(ctx context.Context, projectID u
 		SELECT e.id, e.project_id, e.ontology_id, e.name, e.description, e.domain,
 		       e.primary_schema, e.primary_table, e.primary_column,
 		       e.is_deleted, e.deletion_reason,
-		       e.created_at, e.updated_at
+		       e.created_by, e.updated_by, e.created_at, e.updated_at
 		FROM engine_ontology_entities e
 		JOIN engine_ontologies o ON e.ontology_id = o.id
 		WHERE e.project_id = $1 AND o.is_active = true AND NOT e.is_deleted
@@ -170,7 +175,7 @@ func (r *ontologyEntityRepository) GetByName(ctx context.Context, ontologyID uui
 		SELECT id, project_id, ontology_id, name, description, domain,
 		       primary_schema, primary_table, primary_column,
 		       is_deleted, deletion_reason,
-		       created_at, updated_at
+		       created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_entities
 		WHERE ontology_id = $1 AND name = $2 AND NOT is_deleted`
 
@@ -216,7 +221,7 @@ func (r *ontologyEntityRepository) GetByID(ctx context.Context, entityID uuid.UU
 		SELECT id, project_id, ontology_id, name, description, domain,
 		       primary_schema, primary_table, primary_column,
 		       is_deleted, deletion_reason,
-		       created_at, updated_at
+		       created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_entities
 		WHERE id = $1`
 
@@ -244,13 +249,13 @@ func (r *ontologyEntityRepository) Update(ctx context.Context, entity *models.On
 		UPDATE engine_ontology_entities
 		SET name = $2, description = $3, domain = $4,
 		    primary_schema = $5, primary_table = $6, primary_column = $7,
-		    updated_at = $8
+		    updated_by = $8, updated_at = $9
 		WHERE id = $1`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		entity.ID, entity.Name, entity.Description, entity.Domain,
 		entity.PrimarySchema, entity.PrimaryTable, entity.PrimaryColumn,
-		entity.UpdatedAt,
+		entity.UpdatedBy, entity.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update entity: %w", err)
@@ -429,7 +434,7 @@ func scanOntologyEntity(row pgx.Row) (*models.OntologyEntity, error) {
 		&e.ID, &e.ProjectID, &e.OntologyID, &e.Name, &e.Description, &domain,
 		&e.PrimarySchema, &e.PrimaryTable, &e.PrimaryColumn,
 		&e.IsDeleted, &e.DeletionReason,
-		&e.CreatedAt, &e.UpdatedAt,
+		&e.CreatedBy, &e.UpdatedBy, &e.CreatedAt, &e.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {

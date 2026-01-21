@@ -193,6 +193,14 @@ func (r *testColEnrichmentRelRepo) DeleteByOntology(ctx context.Context, ontolog
 	return nil
 }
 
+func (r *testColEnrichmentRelRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (r *testColEnrichmentRelRepo) Update(ctx context.Context, rel *models.EntityRelationship) error {
+	return nil
+}
+
 type testColEnrichmentSchemaRepo struct {
 	columnsByTable map[string][]*models.SchemaColumn
 }
