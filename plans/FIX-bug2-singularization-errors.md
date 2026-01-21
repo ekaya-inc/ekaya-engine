@@ -253,7 +253,7 @@ Test with MCP:
 ## Tasks
 
 - [x] Add inflection library dependency (`go get github.com/jinzhu/inflection`)
-- [ ] Update `toEntityName` in `pkg/services/schema_change_detection.go` to use inflection.Singular
+- [x] Update `toEntityName` in `pkg/services/schema_change_detection.go` to use inflection.Singular
 - [ ] Update table name mapping in `pkg/services/data_change_detection.go` to use inflection.Singular
 - [ ] Add unit tests for singularization edge cases
 - [ ] Manual verification with MCP refresh_schema

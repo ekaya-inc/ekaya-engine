@@ -270,11 +270,32 @@ func TestToEntityName(t *testing.T) {
 		tableName    string
 		expectedName string
 	}{
+		// Regular plurals (simple -s removal)
 		{"public.users", "User"},
 		{"public.orders", "Order"},
 		{"products", "Product"},
 		{"user_accounts", "User_account"},
+
+		// -ies → -y (consonant + y plurals)
+		{"categories", "Category"},
+		{"activities", "Activity"},
+		{"companies", "Company"},
+		{"s4_categories", "S4_category"},
+		{"s5_activities", "S5_activity"},
+
+		// -es plurals (s, x, z, ch, sh endings)
+		{"boxes", "Box"},
+		{"addresses", "Address"},
+
+		// -ves → -f/-fe
+		{"knives", "Knife"},
+
+		// Irregular plurals
+		{"people", "Person"},
+
+		// Edge cases
 		{"", ""},
+		{"data", "Datum"}, // inflection library handles this
 	}
 
 	for _, tc := range tests {

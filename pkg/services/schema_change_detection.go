@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jinzhu/inflection"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
@@ -146,7 +147,7 @@ func (s *schemaChangeDetectionService) DetectChanges(
 }
 
 // toEntityName converts a table name to an entity name.
-// Examples: "public.users" -> "User", "orders" -> "Order"
+// Examples: "public.users" -> "User", "orders" -> "Order", "categories" -> "Category"
 func toEntityName(tableName string) string {
 	// Strip schema prefix if present
 	name := tableName
@@ -154,9 +155,10 @@ func toEntityName(tableName string) string {
 		name = tableName[idx+1:]
 	}
 
-	// Convert to singular PascalCase
-	// Simple heuristic: remove trailing 's' and capitalize first letter
-	name = strings.TrimSuffix(name, "s")
+	// Singularize using proper English rules
+	name = inflection.Singular(name)
+
+	// Capitalize first letter
 	if len(name) > 0 {
 		name = strings.ToUpper(name[:1]) + name[1:]
 	}
