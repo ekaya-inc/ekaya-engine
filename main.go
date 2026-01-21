@@ -134,6 +134,7 @@ func main() {
 	entityRelationshipRepo := repositories.NewEntityRelationshipRepository()
 	ontologyDAGRepo := repositories.NewOntologyDAGRepository()
 	pendingChangeRepo := repositories.NewPendingChangeRepository()
+	columnMetadataRepo := repositories.NewColumnMetadataRepository()
 
 	// Create connection manager with config-driven settings
 	connManagerCfg := datasource.ConnectionManagerConfig{
@@ -231,6 +232,36 @@ func main() {
 	ontologyDAGService.SetGlossaryDiscoveryMethods(services.NewGlossaryDiscoveryAdapter(glossaryService))
 	ontologyDAGService.SetGlossaryEnrichmentMethods(services.NewGlossaryEnrichmentAdapter(glossaryService))
 
+	// Incremental DAG service for targeted LLM enrichment after changes
+	// Created first without ChangeReviewService due to circular dependency
+	incrementalDAGService := services.NewIncrementalDAGService(&services.IncrementalDAGServiceDeps{
+		OntologyRepo:       ontologyRepo,
+		EntityRepo:         ontologyEntityRepo,
+		RelationshipRepo:   entityRelationshipRepo,
+		ColumnMetadataRepo: columnMetadataRepo,
+		SchemaRepo:         schemaRepo,
+		ConversationRepo:   convRepo,
+		AIConfigSvc:        aiConfigService,
+		LLMFactory:         llmFactory,
+		ChangeReviewSvc:    nil, // Will be set after ChangeReviewService is created
+		GetTenantCtx:       getTenantCtx,
+		Logger:             logger,
+	})
+
+	// Change review service for approving/rejecting pending ontology changes
+	changeReviewService := services.NewChangeReviewService(&services.ChangeReviewServiceDeps{
+		PendingChangeRepo:  pendingChangeRepo,
+		EntityRepo:         ontologyEntityRepo,
+		RelationshipRepo:   entityRelationshipRepo,
+		ColumnMetadataRepo: columnMetadataRepo,
+		OntologyRepo:       ontologyRepo,
+		IncrementalDAG:     incrementalDAGService,
+		Logger:             logger,
+	})
+
+	// Wire up the circular dependency: IncrementalDAGService needs ChangeReviewService for precedence checks
+	incrementalDAGService.SetChangeReviewService(changeReviewService)
+
 	mux := http.NewServeMux()
 
 	// Register health handler
@@ -264,6 +295,7 @@ func main() {
 		AdapterFactory:               adapterFactory,
 		SchemaChangeDetectionService: schemaChangeDetectionService,
 		DataChangeDetectionService:   dataChangeDetectionService,
+		ChangeReviewService:          changeReviewService,
 		PendingChangeRepo:            pendingChangeRepo,
 		Logger:                       logger,
 	}

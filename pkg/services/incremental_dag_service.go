@@ -27,6 +27,12 @@ type IncrementalDAGService interface {
 	// ProcessChangeAsync processes a change asynchronously in a background goroutine.
 	// Errors are logged but not returned.
 	ProcessChangeAsync(ctx context.Context, change *models.PendingChange)
+
+	// SetChangeReviewService injects the ChangeReviewService for precedence checking.
+	// This breaks the circular dependency: IncrementalDAGService needs ChangeReviewService
+	// for precedence checking, while ChangeReviewService needs IncrementalDAGService for
+	// triggering enrichment after approval.
+	SetChangeReviewService(svc ChangeReviewService)
 }
 
 type incrementalDAGService struct {
@@ -76,6 +82,11 @@ func NewIncrementalDAGService(deps *IncrementalDAGServiceDeps) IncrementalDAGSer
 }
 
 var _ IncrementalDAGService = (*incrementalDAGService)(nil)
+
+// SetChangeReviewService injects the ChangeReviewService for precedence checking.
+func (s *incrementalDAGService) SetChangeReviewService(svc ChangeReviewService) {
+	s.changeReviewSvc = svc
+}
 
 // ProcessChangeAsync processes a change asynchronously.
 func (s *incrementalDAGService) ProcessChangeAsync(ctx context.Context, change *models.PendingChange) {
