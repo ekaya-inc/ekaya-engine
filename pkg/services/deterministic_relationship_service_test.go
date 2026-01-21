@@ -2348,6 +2348,123 @@ func TestFKDiscovery_ForeignKeyRelationshipType(t *testing.T) {
 	}
 }
 
+// TestFKDiscovery_SelfReferentialRelationship tests that self-referential FK constraints
+// (e.g., employee.manager_id → employee.id) are discovered as entity relationships.
+// These represent hierarchies/trees and are intentional design patterns.
+func TestFKDiscovery_SelfReferentialRelationship(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	employeeEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, employeeEntityID)
+
+	// Replace default user entity with employee entity that owns the employees table
+	mocks.entityRepo.entities = []*models.OntologyEntity{
+		{
+			ID:            employeeEntityID,
+			OntologyID:    ontologyID,
+			Name:          "employee",
+			PrimarySchema: "public",
+			PrimaryTable:  "employees",
+		},
+	}
+
+	employeesTableID := uuid.New()
+	idColumnID := uuid.New()
+	managerIDColumnID := uuid.New()
+
+	// Setup employees table with self-referential FK
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         employeesTableID,
+			SchemaName: "public",
+			TableName:  "employees",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            idColumnID,
+					SchemaTableID: employeesTableID,
+					ColumnName:    "id",
+					DataType:      "integer",
+					IsPrimaryKey:  true,
+				},
+				{
+					ID:            managerIDColumnID,
+					SchemaTableID: employeesTableID,
+					ColumnName:    "manager_id",
+					DataType:      "integer",
+					IsPrimaryKey:  false,
+				},
+			},
+		},
+	}
+
+	// Add self-referential FK schema relationship (manager_id → id in same table)
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
+		{
+			ID:               uuid.New(),
+			ProjectID:        projectID,
+			SourceTableID:    employeesTableID,
+			SourceColumnID:   managerIDColumnID,
+			TargetTableID:    employeesTableID, // Same table
+			TargetColumnID:   idColumnID,       // References own PK
+			RelationshipType: models.RelationshipTypeFK,
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: 1 FK relationship discovered (creates 2 rows: forward + reverse)
+	if result.FKRelationships != 1 {
+		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
+	}
+
+	// Bidirectional: 2 relationships created (forward + reverse)
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	}
+
+	// Verify: both source and target are the same entity (self-reference)
+	forwardRel := mocks.relationshipRepo.created[0]
+	if forwardRel.SourceEntityID != employeeEntityID {
+		t.Errorf("expected forward source entity to be employee, got %v", forwardRel.SourceEntityID)
+	}
+	if forwardRel.TargetEntityID != employeeEntityID {
+		t.Errorf("expected forward target entity to be employee, got %v", forwardRel.TargetEntityID)
+	}
+
+	// Verify columns
+	if forwardRel.SourceColumnName != "manager_id" {
+		t.Errorf("expected forward source column 'manager_id', got %q", forwardRel.SourceColumnName)
+	}
+	if forwardRel.TargetColumnName != "id" {
+		t.Errorf("expected forward target column 'id', got %q", forwardRel.TargetColumnName)
+	}
+
+	// Verify reverse relationship
+	reverseRel := mocks.relationshipRepo.created[1]
+	if reverseRel.SourceEntityID != employeeEntityID || reverseRel.TargetEntityID != employeeEntityID {
+		t.Errorf("expected reverse to be self-referential, got source=%v target=%v", reverseRel.SourceEntityID, reverseRel.TargetEntityID)
+	}
+	if reverseRel.SourceColumnName != "id" || reverseRel.TargetColumnName != "manager_id" {
+		t.Errorf("expected reverse columns id→manager_id, got %s→%s", reverseRel.SourceColumnName, reverseRel.TargetColumnName)
+	}
+}
+
 // TestPKMatch_LowCardinalityRatio tests that columns with very low cardinality
 // relative to row count are rejected (status/type columns)
 func TestPKMatch_LowCardinalityRatio(t *testing.T) {

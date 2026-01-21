@@ -192,10 +192,9 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 			continue // No entity owns this table
 		}
 
-		// Don't create self-referencing relationships
-		if sourceEntity.ID == targetEntity.ID {
-			continue
-		}
+		// Self-referential relationships are allowed here - they represent hierarchies/trees
+		// (e.g., employee.manager_id → employee.id, category.parent_id → category.id).
+		// These come from explicit FK constraints in the schema and are intentional.
 
 		// Determine detection method based on schema relationship type
 		detectionMethod := models.DetectionMethodForeignKey
