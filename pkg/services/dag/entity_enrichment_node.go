@@ -54,9 +54,7 @@ func (n *EntityEnrichmentNode) Execute(ctx context.Context, dag *models.Ontology
 
 	// Call the underlying service method
 	if err := n.entityEnrichment.EnrichEntitiesWithLLM(ctx, dag.ProjectID, *dag.OntologyID, dag.DatasourceID); err != nil {
-		// Log but don't fail - entities will have table names as fallback
-		n.Logger().Warn("Failed to enrich entities with LLM - using table names as fallback",
-			zap.Error(err))
+		return fmt.Errorf("entity enrichment failed: %w", err)
 	}
 
 	// Report completion

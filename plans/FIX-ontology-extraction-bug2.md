@@ -183,5 +183,5 @@ ORDER BY created_at DESC;
 - [ ] Entity names are human-readable (not raw table names)
 - [x] Parse failures are surfaced as errors, not swallowed
 - [x] Partial enrichment (incomplete LLM response) fails the workflow
-- [ ] Failed enrichment is visible in DAG status
+- [x] Failed enrichment is visible in DAG status (entity_enrichment_node.go now returns errors)
 - [ ] LLM conversation records show clear status for troubleshooting
