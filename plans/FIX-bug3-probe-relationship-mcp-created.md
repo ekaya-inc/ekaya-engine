@@ -2,6 +2,7 @@
 
 **Priority:** Medium
 **Component:** MCP Server / probe_relationship
+**Status:** ✅ FIXED
 
 ## Problem Statement
 
@@ -87,7 +88,7 @@ If `entityRelationships` contains relationships from ontology A but `entityIDToN
 
 ### Change entity lookup to use GetByProject (like get_ontology does)
 
-**pkg/mcp/tools/probe.go** (around line 488):
+**pkg/mcp/tools/probe.go** (around line 533):
 
 ```go
 // Before:
@@ -99,11 +100,11 @@ entities, err := deps.EntityRepo.GetByProject(ctx, projectID)
 
 This ensures `probe_relationship` uses the same entity lookup pattern as `get_ontology`, making them consistent.
 
-## Files to Modify
+## Files Modified
 
-1. **pkg/mcp/tools/probe.go:488**
-   - Change `GetByOntology(ctx, ontology.ID)` to `GetByProject(ctx, projectID)`
-   - This is a one-line fix
+1. [x] **pkg/mcp/tools/probe.go:533**
+   - Changed `GetByOntology(ctx, ontology.ID)` to `GetByProject(ctx, projectID)`
+   - Added comment explaining the pattern consistency with get_ontology
 
 ## Testing Verification
 

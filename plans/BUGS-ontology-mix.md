@@ -2,29 +2,36 @@
 
 Discovered during ad-hoc testing of ontology extraction scenarios from TEST-ontology-mix.md.
 
+## Summary
+
+| Bug | Description | Severity | Status |
+|-----|-------------|----------|--------|
+| 1 | `refresh_schema` auto_select doesn't update UI | Medium | ✅ FIXED |
+| 2 | Entity name singularization incorrect | Low | ✅ FIXED |
+| 3 | `probe_relationship` empty for MCP-created | Medium | ✅ FIXED |
+| 4 | Approved column metadata not in `probe_column` | Medium | ✅ FIXED |
+| 5 | Entity Discovery deletes manual entities | High | ✅ FIXED |
+| 6 | `get_entity` not found for extraction entities | High | ✅ FIXED |
+| 7 | Self-referential FK not discovered | High | ✅ FIXED |
+| 8 | Junction table FK not discovered | Medium | ✅ FIXED |
+
+**Progress: 8/8 fixed**
+
 ## Bug 1: MCP `refresh_schema` auto_select Does Not Update UI State
 
 **Severity:** Medium
 **Component:** MCP Server / Schema Selection
+**Status:** ✅ FIXED (see FIX-bug1-refresh-schema-auto-select.md)
 
 **Description:**
 When calling `refresh_schema` with `auto_select: true`, the MCP server reports that tables were auto-selected, but the UI Schema Selection page shows them as unchecked.
 
-**Steps to Reproduce:**
-1. Create new tables in the datasource database
-2. Call MCP `refresh_schema` with `auto_select: true`
-3. Response shows `"auto_select_applied": true` and lists tables in `tables_added`
-4. Navigate to UI Schema Selection page
-5. Newly added tables show as unchecked
+**Root Cause:** Multiple issues - response didn't reflect actual success, new tables created with IsSelected=false before SelectAllTables ran.
 
-**Expected Behavior:**
-Tables should be checked/selected in UI after `auto_select: true`
-
-**Actual Behavior:**
-Tables appear unchecked in UI despite MCP reporting auto_select was applied
-
-**Workaround:**
-Manually select tables in the UI
+**Fix Applied:**
+- [x] Response now reflects actual success of SelectAllTables
+- [x] IsSelected set during table creation when auto_select=true
+- [x] Added explicit project_id filter to update query
 
 ---
 
@@ -32,6 +39,7 @@ Manually select tables in the UI
 
 **Severity:** Low
 **Component:** Schema Refresh / Entity Naming
+**Status:** ✅ FIXED (see FIX-bug2-singularization-errors.md)
 
 **Description:**
 When `refresh_schema` suggests entity names from table names, the singularization logic produces incorrect results for some table names ending in "ies" or "es".
@@ -40,14 +48,9 @@ When `refresh_schema` suggests entity names from table names, the singularizatio
 - `s4_categories` → suggested "S4_categorie" (should be "S4_category" or "Category")
 - `s5_activities` → suggested "S5_activitie" (should be "S5_activity" or "Activity")
 
-**Expected Behavior:**
-Entity names should be correctly singularized (categories → category, activities → activity)
+**Root Cause:** `toEntityName()` uses `strings.TrimSuffix(name, "s")` which only removes trailing "s".
 
-**Actual Behavior:**
-Simple suffix stripping produces grammatically incorrect names
-
-**Suggestion:**
-Use a proper inflection library (e.g., Go's `inflect` package) for singularization
+**Recommended Fix:** Use `github.com/jinzhu/inflection` library for proper English singularization.
 
 ---
 
@@ -55,21 +58,16 @@ Use a proper inflection library (e.g., Go's `inflect` package) for singularizati
 
 **Severity:** Medium
 **Component:** MCP Server / probe_relationship
+**Status:** ✅ FIXED (see FIX-bug3-probe-relationship-mcp-created.md)
 
 **Description:**
 Relationships created via `update_relationship` MCP tool don't appear in `probe_relationship` results.
 
-**Steps to Reproduce:**
-1. Create relationship via `update_relationship(from_entity='S1Order', to_entity='S1Customer', ...)`
-2. Verify relationship exists via `get_ontology` (it shows up)
-3. Call `probe_relationship(from_entity='S1Order', to_entity='S1Customer')`
-4. Returns empty `{"relationships":[]}`
+**Root Cause:** Entity lookup inconsistency - `probe_relationship` used `GetByOntology(ontology.ID)` requiring exact ontology ID match, while `get_ontology` uses `GetByProject` with JOIN to ANY active ontology.
 
-**Expected Behavior:**
-`probe_relationship` should return the manually created relationship
-
-**Possible Cause:**
-`probe_relationship` may only query FK-based relationships with computed metrics, not manually created ontology relationships
+**Fix Applied:**
+- [x] Changed entity lookup in probe.go:533 from `GetByOntology(ctx, ontology.ID)` to `GetByProject(ctx, projectID)`
+- Added comment explaining pattern consistency with get_ontology
 
 ---
 
@@ -77,22 +75,16 @@ Relationships created via `update_relationship` MCP tool don't appear in `probe_
 
 **Severity:** Medium
 **Component:** MCP Server / Column Metadata
+**Status:** ✅ FIXED (commit 59d7425, see FIX-bug4-approved-changes-probe-column.md)
 
 **Description:**
 After approving a pending change to add enum values to a column, `probe_column` does not return the enum information.
 
-**Steps to Reproduce:**
-1. Call `scan_data_changes` which detects enum values in s7_tickets.ticket_type
-2. Approve the change via `approve_change`
-3. Response shows "Change approved and applied successfully"
-4. Call `probe_column(table='s7_tickets', column='ticket_type')`
-5. Returns minimal info without enum_labels
+**Root Cause:** Two separate storage locations - `approve_change` wrote to `engine_column_metadata` table, but `probe_column` only read from `ontology.column_details` JSONB.
 
-**Expected Behavior:**
-`probe_column` should return the approved enum values
-
-**Actual Behavior:**
-Returns `{"table":"s7_tickets","column":"ticket_type"}` with no enum info
+**Fix Applied:**
+- [x] Updated probe_column to read from both data sources
+- [x] Added integration test for full approve_change → probe_column flow
 
 ---
 
@@ -100,25 +92,17 @@ Returns `{"table":"s7_tickets","column":"ticket_type"}` with no enum info
 
 **Severity:** High
 **Component:** Ontology Extraction / Entity Management
+**Status:** ✅ FIXED (see FIX-bug5-entity-discovery-deletes-manual.md)
 
 **Description:**
-When ontology extraction starts, the Entity Discovery step appears to delete or overwrite manually created entities.
+When ontology extraction starts, the Entity Discovery step unconditionally deletes all existing entities, including those created manually via MCP tools.
 
-**Steps to Reproduce:**
-1. Create entity via `update_entity(name='S1Customer', description='...')`
-2. Verify entity exists via `get_entity(name='S1Customer')` - works
-3. Start ontology extraction via UI
-4. After Entity Discovery completes, call `get_entity(name='S1Customer')`
-5. Returns "entity not found"
+**Root Cause:** `StartExtraction` called `DeleteByOntology` which was a hard delete of ALL entities regardless of `created_by` provenance.
 
-**Expected Behavior:**
-Manually created entities should be preserved or merged with extracted entities
-
-**Actual Behavior:**
-Manually created entities are deleted during extraction
-
-**Impact:**
-Users lose their manual ontology work when running extraction
+**Fix Applied:**
+- [x] Added `DeleteInferenceEntitiesByOntology` to repository (only deletes `created_by = 'inference'`)
+- [x] Updated `StartExtraction` to use provenance-aware deletion
+- Manual/MCP entities are now preserved during extraction
 
 ---
 
@@ -126,25 +110,17 @@ Users lose their manual ontology work when running extraction
 
 **Severity:** High
 **Component:** MCP Server / Entity Queries
+**Status:** ✅ FIXED (see FIX-bug6-get-entity-not-found.md)
 
 **Description:**
 Entities shown in `get_context` with depth=entities are not found by `get_entity`.
 
-**Steps to Reproduce:**
-1. Start ontology extraction
-2. After Entity Discovery completes, call `get_context(depth='entities')`
-3. Response shows entities like `"s1_customers": {"primary_table": "s1_customers", ...}`
-4. Call `get_entity(name='s1_customers')`
-5. Returns "entity not found"
+**Root Cause:** `get_entity` used `GetByName(ontology.ID, name)` requiring exact ontology ID match, while `get_context` used `GetByProject` with JOIN to ANY active ontology.
 
-**Expected Behavior:**
-`get_entity` should find entities that appear in `get_context`
-
-**Actual Behavior:**
-`get_entity` returns "not found" for extraction-created entities
-
-**Possible Cause:**
-`get_context` and `get_entity` may query different data sources or tables
+**Fix Applied:**
+- [x] Added `GetByProjectAndName(ctx, projectID, name)` repository method
+- [x] Updated `get_entity`, `update_entity`, `delete_entity` to use new method
+- [x] Manually verified on 2026-01-21 with 50+ extraction-created entities
 
 ---
 
@@ -152,46 +128,38 @@ Entities shown in `get_context` with depth=entities are not found by `get_entity
 
 **Severity:** High
 **Component:** FK Discovery
+**Status:** ✅ FIXED (see FIX-bug7-self-referential-fk.md)
 
 **Description:**
 Tables with self-referential foreign keys (e.g., employee.manager_id → employee.id) are not detected by FK Discovery.
 
-**Evidence:**
-- s4_employees has FK: `manager_id INTEGER REFERENCES s4_employees(id)`
-- s4_categories has FK: `parent_category_id INTEGER REFERENCES s4_categories(id)`
-- `probe_relationship` returns no Employee→Employee or Category→Category relationships
+**Root Cause:** FK Discovery code explicitly skipped self-referential relationships with `if sourceEntity.ID == targetEntity.ID { continue }`.
 
-**Expected Behavior:**
-Self-referential FKs should be detected and added to relationships with appropriate role labels (e.g., "manager", "parent")
-
-**Actual Behavior:**
-Self-referential relationships are completely missing from probe_relationship results
-
-**Impact:**
-Hierarchical data models (org charts, category trees) won't have proper relationship modeling
+**Fix Applied:**
+- [x] Removed self-reference skip in FK Discovery (lines 195-198)
+- [x] PK-match skip kept (intentional - avoids false positives)
+- [x] Role labels handled by Column Enrichment via LLM (verified)
 
 ---
 
 ## Bug 8: Junction Table FK Relationships Not Discovered
 
 **Severity:** Medium
-**Component:** FK Discovery
+**Component:** FK Discovery / Schema Discovery
+**Status:** ✅ FIXED (see FIX-bug8-junction-table-fk.md)
 
 **Description:**
 Junction tables with composite primary keys have their FK relationships ignored.
 
-**Evidence:**
-- s3_enrollments has FKs: `student_id → s3_students`, `course_code → s3_courses`
-- `probe_relationship` returns no Student→Enrollment or Course→Enrollment relationships
+**Root Cause:** Schema discovery at `pkg/adapters/datasource/postgres/schema.go` explicitly excluded composite PKs with `array_length(ix.indkey, 1) = 1`. This caused:
+1. Composite PK columns marked as `IsPrimaryKey = false`
+2. Entity Discovery finds no PK candidates → No entity created for junction table
+3. FK Discovery skips relationships when source entity doesn't exist
 
-**Expected Behavior:**
-FK relationships from junction tables should be discovered normally
-
-**Actual Behavior:**
-Junction table FK relationships are missing
-
-**Note:**
-This may be related to Bug where junction tables don't create entities - if no entity exists, no relationship can be created.
+**Fix Applied:**
+- [x] Removed `array_length(ix.indkey, 1) = 1` filter from PK detection query
+- [x] Removed same filter from unique constraint detection query
+- All columns in composite PKs/unique constraints now properly detected
 
 ---
 

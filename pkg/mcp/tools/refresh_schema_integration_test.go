@@ -159,11 +159,11 @@ func TestRefreshSchema_AutoSelectApplied_ReflectsNewTables_Integration(t *testin
 			mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 			tc.mcpServer = mcpServer
 
-			// Set up mocks
+			// Set up mocks - refresh_schema requires ontology maintenance to be enabled
 			mockMCPConfig := &mockMCPConfigService{
 				config: &models.ToolGroupConfig{
-					Enabled:       true,
-					AddQueryTools: true,
+					Enabled:                true,
+					AddOntologyMaintenance: true,
 				},
 			}
 

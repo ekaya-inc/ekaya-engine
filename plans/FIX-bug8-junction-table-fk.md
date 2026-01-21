@@ -1,7 +1,8 @@
 # FIX: Bug 8 - Junction Table FK Relationships Not Discovered
 
 **Priority:** Medium
-**Component:** FK Discovery
+**Component:** FK Discovery / Schema Discovery
+**Status:** ✅ FIXED
 
 ## Problem Statement
 
@@ -11,111 +12,97 @@ Junction tables with composite primary keys have their FK relationships ignored.
 - `s3_enrollments` has FKs: `student_id → s3_students`, `course_code → s3_courses`
 - `probe_relationship` returns no Enrollment→Student or Enrollment→Course relationships
 
-## Root Cause Analysis
+## Root Cause Analysis ✅ COMPLETE
 
-### Entity Discovery Does Create Entities for Junction Tables
+### The Bug Chain
 
-Looking at `pkg/services/entity_discovery_service.go:107-154`, Entity Discovery:
-1. Finds ALL primary key columns (line 118: `if col.IsPrimaryKey`)
-2. Groups candidates by table (line 148-154: `bestByTable`)
-3. Creates ONE entity per table using the first/best PK column
+The issue is a **data discovery problem** in schema introspection, not business logic.
 
-For junction tables with composite PKs (e.g., `student_id + course_code`):
-- Both columns are marked as `IsPrimaryKey = true`
-- ONE entity is created (e.g., "Enrollment") with one column as `PrimaryColumn`
-- **Entity IS created** - this is not the bug
+### Primary Root Cause: Composite PK Columns Excluded
 
-### The Real Issue: Schema Relationships May Not Exist
-
-For FK Discovery to work (pkg/services/deterministic_relationship_service.go:145-228), it needs:
-1. Schema relationships in `engine_schema_relationships` table
-2. Both source and target entities to exist via `entityByPrimaryTable` lookup
-
-The bug might be in one of these areas:
-
-**Possibility 1: Schema Relationships Not Created for Junction Table FKs**
-
-Check if `scan_data_changes` or schema introspection is populating `engine_schema_relationships` for junction table FKs. If the FK constraints exist but aren't in the schema_relationships table, FK Discovery won't find them.
-
-**Possibility 2: Entity Lookup Fails**
-
-FK Discovery does (lines 181-193):
-```go
-sourceKey := fmt.Sprintf("%s.%s", sourceTable.SchemaName, sourceTable.TableName)
-sourceEntity := entityByPrimaryTable[sourceKey]
-if sourceEntity == nil {
-    continue // No entity owns this table
-}
-```
-
-If the junction table's entity isn't in `entityByPrimaryTable`, the FK is skipped.
-
-**Possibility 3: Composite PK Entity Created with Wrong Column**
-
-Entity Discovery picks one column from the composite PK as `PrimaryColumn`. FK Discovery might use this column for lookups, and if it's not the FK column, matching fails.
-
-## Investigation Required
-
-### Step 1: Verify Entities Exist
+**File:** `pkg/adapters/datasource/postgres/schema.go:143`
 
 ```sql
--- Check if junction table entity exists
-SELECT name, primary_table, primary_column FROM engine_ontology_entities
-WHERE primary_table = 's3_enrollments';
+-- In DiscoverColumns query (lines 135-144)
+LEFT JOIN (
+    SELECT a.attname as column_name, true as is_pk
+    FROM pg_index ix
+    ...
+    WHERE ix.indisprimary = true
+      AND n.nspname = $1
+      AND t.relname = $2
+      AND array_length(ix.indkey, 1) = 1  -- *** BUG: Single-column PKs only ***
+) pk ON c.column_name = pk.column_name
 ```
 
-### Step 2: Verify Schema Relationships Exist
+This filter `array_length(ix.indkey, 1) = 1` **explicitly excludes composite PKs**.
 
-```sql
--- Check if FK relationships are in schema_relationships
-SELECT source_column_id, target_column_id, relationship_type
-FROM engine_schema_relationships
-WHERE relationship_type = 'foreign_key';
-```
+### The Cascade Effect
 
-### Step 3: Check entityByPrimaryTable Map Contents
+1. **Schema Discovery** marks `s3_enrollments.student_id` and `s3_enrollments.course_code` as `IsPrimaryKey = false` (because they're part of a composite PK)
 
-Add logging to see what entities are in the map:
-```go
-for key, entity := range entityByPrimaryTable {
-    s.logger.Debug("Entity in lookup map",
-        zap.String("key", key),
-        zap.String("entity", entity.Name))
-}
-```
+2. **Entity Discovery** (`entity_discovery_service.go:118`) looks for columns where `col.IsPrimaryKey == true`:
+   ```go
+   if col.IsPrimaryKey {
+       candidates = append(candidates, entityCandidate{...})
+   }
+   ```
+   Neither junction table column qualifies → No entity candidate created
+
+3. **Fallback to Unique Constraint** (`entity_discovery_service.go:131-143`) only triggers if columns have individual unique constraints (rare for junction tables)
+
+4. **FK Discovery** (`deterministic_relationship_service.go:181-186`) looks up source entity:
+   ```go
+   sourceEntity := entityByPrimaryTable[sourceKey]
+   if sourceEntity == nil {
+       continue // No entity owns this table - SKIPPED!
+   }
+   ```
+   No entity for `s3_enrollments` → FKs from junction table are skipped
+
+### What Should Happen vs. What Actually Happens
+
+| Step | Expected | Actual |
+|------|----------|--------|
+| Schema discovery | `s3_enrollments.student_id` marked as PrimaryKey | Marked as NOT PrimaryKey |
+| Entity discovery | Creates "Enrollment" entity | No entity created (no PK candidates) |
+| FK discovery | Discovers Enrollment → Student | Skips (no Enrollment entity) |
+| `probe_relationship` | Returns relationships | Returns `[]` (empty) |
 
 ## Recommended Fix
 
-### If Schema Relationships Missing (Most Likely)
+### Remove the Single-Column PK Filter
 
-Fix the schema introspection to detect and store junction table FK constraints:
+**File:** `pkg/adapters/datasource/postgres/schema.go:143`
 
-1. Check `pkg/services/schema_introspection.go` or similar for FK detection
-2. Verify it handles composite FK columns
-3. Ensure FKs from junction tables are stored in `engine_schema_relationships`
+```sql
+-- Before:
+AND array_length(ix.indkey, 1) = 1  -- Single-column PKs only
 
-### If Entity Not in Lookup Map
+-- After: Remove this line entirely
+-- All columns in composite PKs should be marked as IsPrimaryKey = true
+```
 
-Check that Entity Discovery correctly creates entities for all tables:
+The query already uses `a.attnum = ANY(ix.indkey)` which correctly joins all columns in the index. The `array_length` filter is unnecessarily restrictive.
 
-1. Verify `entityByPrimaryTable` is populated from ALL entities (line 132-136)
-2. Ensure junction table entities aren't filtered out
+### Also Consider: Unique Constraint Filter (Line 157)
 
-## Many-to-Many Representation
+Same issue exists for unique constraints:
+```sql
+AND array_length(ix.indkey, 1) = 1  -- Single-column unique indexes only
+```
 
-For a proper data model, junction tables like `s3_enrollments`:
-- Should have an entity (e.g., "Enrollment")
-- Should have relationships:
-  - Enrollment → Student (N:1)
-  - Enrollment → Course (N:1)
-- The M:N relationship (Student ↔ Course) is implicit via the junction
+This may also need removal to support composite unique constraints.
 
-## Files to Investigate
+## Files Modified
 
-1. **pkg/services/schema_introspection.go** (or similar) - FK detection from database
-2. **pkg/services/schema_change_detection.go** - Schema relationship creation
-3. **pkg/services/deterministic_relationship_service.go:132-136** - Entity lookup map
-4. **pkg/services/entity_discovery_service.go:148-154** - Entity creation for composite PKs
+1. [x] **pkg/adapters/datasource/postgres/schema.go:143**
+   - Removed `AND array_length(ix.indkey, 1) = 1` from PK detection
+   - All columns in composite PKs now marked as `IsPrimaryKey = true`
+
+2. [x] **pkg/adapters/datasource/postgres/schema.go:157**
+   - Removed `AND array_length(ix.indkey, 1) = 1` from unique constraint detection
+   - All columns in composite unique constraints now detected
 
 ## Testing Verification
 
@@ -131,38 +118,42 @@ After implementing:
        enrolled_at TIMESTAMP,
        PRIMARY KEY (student_id, course_id)
    );
-   INSERT INTO test_students VALUES (1, 'Alice'), (2, 'Bob');
-   INSERT INTO test_courses VALUES (1, 'Math'), (2, 'Science');
-   INSERT INTO test_enrollments VALUES (1, 1, NOW()), (1, 2, NOW()), (2, 1, NOW());
    ```
 
 2. Run schema refresh: `refresh_schema`
 
-3. Run ontology extraction
+3. Verify both columns are marked as PK:
+   ```sql
+   SELECT table_name, column_name, is_primary_key
+   FROM engine_schema_columns
+   WHERE table_name = 'test_enrollments';
+   ```
+   Expected: Both `student_id` and `course_id` have `is_primary_key = true`
 
-4. Verify entities exist:
-   - Student entity
-   - Course entity
-   - Enrollment entity (junction)
+4. Run ontology extraction
 
-5. Call `probe_relationship(from_entity='Enrollment')`:
+5. Verify entity exists:
+   ```sql
+   SELECT name, primary_table FROM engine_ontology_entities
+   WHERE primary_table = 'test_enrollments';
+   ```
+
+6. Verify relationships via `probe_relationship(from_entity='Enrollment')`:
    - Should show: Enrollment → Student
    - Should show: Enrollment → Course
 
-6. Verify via direct query:
-   ```sql
-   SELECT e1.name as from_entity, e2.name as to_entity,
-          r.source_column_table, r.source_column_name,
-          r.target_column_table, r.target_column_name
-   FROM engine_entity_relationships r
-   JOIN engine_ontology_entities e1 ON r.source_entity_id = e1.id
-   JOIN engine_ontology_entities e2 ON r.target_entity_id = e2.id
-   WHERE e1.primary_table = 'test_enrollments' OR e2.primary_table = 'test_enrollments';
-   ```
-
-## Edge Cases
+## Edge Cases to Consider
 
 - Tables with composite PKs that are NOT junction tables (audit tables, etc.)
 - Junction tables with additional non-PK columns (e.g., `grade`, `enrolled_at`)
 - Junction tables with their own surrogate key (`id` + composite unique constraint)
 - Self-referential junction tables (rare but possible)
+
+## Why the Filter Was Added (Historical Context)
+
+The `array_length = 1` filter was likely added to:
+1. Avoid complexity in entity discovery (picking one "best" column)
+2. Simplify cardinality calculations
+3. Handle edge cases where multiple columns share PK status
+
+However, excluding composite PKs entirely breaks junction table support, which is a common and important pattern.

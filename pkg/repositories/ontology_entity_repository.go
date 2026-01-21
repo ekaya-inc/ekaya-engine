@@ -639,59 +639,19 @@ func scanOntologyEntityKeyColumn(row pgx.Row) (*models.OntologyEntityKeyColumn, 
 // ============================================================================
 // Occurrence Operations
 // ============================================================================
+// NOTE: The engine_ontology_entity_occurrences table was dropped in migration 030.
+// These methods are kept for interface compatibility but return empty results.
 
 // CountOccurrencesByEntity returns the count of non-deleted occurrences for an entity.
+// NOTE: Returns 0 - the occurrences table was dropped in migration 030.
 func (r *ontologyEntityRepository) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		return 0, fmt.Errorf("tenant scope not found in context")
-	}
-
-	query := `
-		SELECT COUNT(*)
-		FROM engine_ontology_entity_occurrences
-		WHERE entity_id = $1 AND is_deleted = false`
-
-	var count int
-	err := scope.Conn.QueryRow(ctx, query, entityID).Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf("failed to count occurrences: %w", err)
-	}
-
-	return count, nil
+	// Table dropped in migration 030 - return 0 for interface compatibility
+	return 0, nil
 }
 
 // GetOccurrenceTablesByEntity returns distinct table names where an entity has occurrences.
+// NOTE: Returns empty slice - the occurrences table was dropped in migration 030.
 func (r *ontologyEntityRepository) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
-	scope, ok := database.GetTenantScope(ctx)
-	if !ok {
-		return nil, fmt.Errorf("tenant scope not found in context")
-	}
-
-	query := `
-		SELECT DISTINCT table_name
-		FROM engine_ontology_entity_occurrences
-		WHERE entity_id = $1 AND is_deleted = false
-		LIMIT $2`
-
-	rows, err := scope.Conn.Query(ctx, query, entityID, limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get occurrence tables: %w", err)
-	}
-	defer rows.Close()
-
-	var tables []string
-	for rows.Next() {
-		var tableName string
-		if err := rows.Scan(&tableName); err != nil {
-			return nil, fmt.Errorf("failed to scan table name: %w", err)
-		}
-		tables = append(tables, tableName)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rows: %w", err)
-	}
-
-	return tables, nil
+	// Table dropped in migration 030 - return empty for interface compatibility
+	return []string{}, nil
 }
