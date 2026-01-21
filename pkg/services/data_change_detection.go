@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jinzhu/inflection"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
@@ -327,9 +328,10 @@ func (s *dataChangeDetectionService) detectPotentialFKs(
 	tableByName := make(map[string]*models.SchemaTable)
 	for _, t := range allTables {
 		tableByName[t.TableName] = t
-		// Also map without 's' suffix for pluralized tables
-		if strings.HasSuffix(t.TableName, "s") {
-			tableByName[strings.TrimSuffix(t.TableName, "s")] = t
+		// Also map singular form for FK lookups (e.g., "categories" -> "category")
+		singular := inflection.Singular(t.TableName)
+		if singular != t.TableName {
+			tableByName[singular] = t
 		}
 	}
 
