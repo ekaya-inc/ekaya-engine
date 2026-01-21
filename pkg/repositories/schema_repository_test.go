@@ -376,7 +376,7 @@ func TestSchemaRepository_ListTablesByDatasource(t *testing.T) {
 	tc.createTestTable(ctx, "public", "orders")
 	tc.createTestTable(ctx, "analytics", "events")
 
-	tables, err := tc.repo.ListTablesByDatasource(ctx, tc.projectID, tc.dsID)
+	tables, err := tc.repo.ListTablesByDatasource(ctx, tc.projectID, tc.dsID, false)
 	if err != nil {
 		t.Fatalf("ListTablesByDatasource failed: %v", err)
 	}
@@ -391,6 +391,52 @@ func TestSchemaRepository_ListTablesByDatasource(t *testing.T) {
 		actual := table.SchemaName + "." + table.TableName
 		if actual != expectedOrder[i] {
 			t.Errorf("expected table[%d] to be %q, got %q", i, expectedOrder[i], actual)
+		}
+	}
+}
+
+func TestSchemaRepository_ListTablesByDatasource_SelectedOnly(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create tables - some selected, some not
+	usersTable := tc.createTestTable(ctx, "public", "users")
+	ordersTable := tc.createTestTable(ctx, "public", "orders")
+	testTable := tc.createTestTable(ctx, "public", "s1_test_data")
+
+	// Mark users and orders as selected, leave test table unselected
+	if err := tc.repo.UpdateTableSelection(ctx, tc.projectID, usersTable.ID, true); err != nil {
+		t.Fatalf("Failed to select users table: %v", err)
+	}
+	if err := tc.repo.UpdateTableSelection(ctx, tc.projectID, ordersTable.ID, true); err != nil {
+		t.Fatalf("Failed to select orders table: %v", err)
+	}
+
+	// With selectedOnly=false, should return all 3 tables
+	allTables, err := tc.repo.ListTablesByDatasource(ctx, tc.projectID, tc.dsID, false)
+	if err != nil {
+		t.Fatalf("ListTablesByDatasource(selectedOnly=false) failed: %v", err)
+	}
+	if len(allTables) != 3 {
+		t.Errorf("expected 3 tables with selectedOnly=false, got %d", len(allTables))
+	}
+
+	// With selectedOnly=true, should return only 2 selected tables
+	selectedTables, err := tc.repo.ListTablesByDatasource(ctx, tc.projectID, tc.dsID, true)
+	if err != nil {
+		t.Fatalf("ListTablesByDatasource(selectedOnly=true) failed: %v", err)
+	}
+	if len(selectedTables) != 2 {
+		t.Errorf("expected 2 tables with selectedOnly=true, got %d", len(selectedTables))
+	}
+
+	// Verify only selected tables are returned
+	for _, table := range selectedTables {
+		if table.TableName == testTable.TableName {
+			t.Errorf("expected test table %q to be filtered out", testTable.TableName)
 		}
 	}
 }
@@ -447,7 +493,7 @@ func TestSchemaRepository_SoftDeleteRemovedTables(t *testing.T) {
 	}
 
 	// Verify only keep_me is still visible
-	tables, err := tc.repo.ListTablesByDatasource(ctx, tc.projectID, tc.dsID)
+	tables, err := tc.repo.ListTablesByDatasource(ctx, tc.projectID, tc.dsID, false)
 	if err != nil {
 		t.Fatalf("ListTablesByDatasource failed: %v", err)
 	}
@@ -1209,7 +1255,7 @@ func TestSchemaRepository_NoTenantScope(t *testing.T) {
 	// Use context WITHOUT tenant scope
 	ctx := context.Background()
 
-	_, err := tc.repo.ListTablesByDatasource(ctx, tc.projectID, tc.dsID)
+	_, err := tc.repo.ListTablesByDatasource(ctx, tc.projectID, tc.dsID, false)
 	if err == nil {
 		t.Error("expected error when no tenant scope")
 	}
@@ -1306,7 +1352,7 @@ func TestSchemaRepository_PerformanceBaseline(t *testing.T) {
 	}
 
 	// List all tables
-	tables, err := tc.repo.ListTablesByDatasource(ctx, tc.projectID, tc.dsID)
+	tables, err := tc.repo.ListTablesByDatasource(ctx, tc.projectID, tc.dsID, false)
 	if err != nil {
 		t.Fatalf("ListTablesByDatasource failed: %v", err)
 	}

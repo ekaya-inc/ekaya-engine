@@ -108,7 +108,7 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 	}
 
 	// Get existing tables before refresh to track what's new/removed
-	existingTables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
+	existingTables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list existing tables: %w", err)
 	}
@@ -429,7 +429,7 @@ func (s *schemaService) syncForeignKeys(
 // GetDatasourceSchema returns the complete schema for a datasource.
 func (s *schemaService) GetDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.DatasourceSchema, error) {
 	// Get all tables
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}

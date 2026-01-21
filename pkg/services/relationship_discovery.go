@@ -136,7 +136,7 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 	}
 
 	// Phase 1: Get all tables and columns
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}

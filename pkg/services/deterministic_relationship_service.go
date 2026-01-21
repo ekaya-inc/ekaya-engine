@@ -143,7 +143,7 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 	}
 
 	// Load tables and columns to resolve IDs to names
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
 	if err != nil {
 		return nil, fmt.Errorf("list tables: %w", err)
 	}
@@ -445,7 +445,7 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	}
 
 	// Load tables and columns
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
 	if err != nil {
 		return nil, fmt.Errorf("list tables: %w", err)
 	}

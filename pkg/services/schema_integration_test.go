@@ -363,7 +363,7 @@ func TestSchemaService_SaveSelections_Integration(t *testing.T) {
 	}
 
 	// Verify table selections
-	tables, err := tc.repo.ListTablesByDatasource(ctx, tc.projectID, tc.dsID)
+	tables, err := tc.repo.ListTablesByDatasource(ctx, tc.projectID, tc.dsID, false)
 	if err != nil {
 		t.Fatalf("ListTablesByDatasource failed: %v", err)
 	}

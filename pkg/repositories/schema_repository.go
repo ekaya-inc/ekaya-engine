@@ -23,7 +23,9 @@ type TableKey struct {
 // SchemaRepository provides data access for schema discovery tables.
 type SchemaRepository interface {
 	// Tables
-	ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error)
+	// ListTablesByDatasource returns tables for a datasource.
+	// If selectedOnly is true, only tables with is_selected=true are returned.
+	ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error)
 	GetTableByID(ctx context.Context, projectID, tableID uuid.UUID) (*models.SchemaTable, error)
 	GetTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, schemaName, tableName string) (*models.SchemaTable, error)
 	// FindTableByName finds a table by name within a datasource (schema-agnostic).
@@ -85,7 +87,7 @@ var _ SchemaRepository = (*schemaRepository)(nil)
 // Table Methods
 // ============================================================================
 
-func (r *schemaRepository) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+func (r *schemaRepository) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
@@ -96,8 +98,11 @@ func (r *schemaRepository) ListTablesByDatasource(ctx context.Context, projectID
 		       is_selected, row_count, business_name, description, metadata,
 		       created_at, updated_at
 		FROM engine_schema_tables
-		WHERE project_id = $1 AND datasource_id = $2 AND deleted_at IS NULL
-		ORDER BY schema_name, table_name`
+		WHERE project_id = $1 AND datasource_id = $2 AND deleted_at IS NULL`
+	if selectedOnly {
+		query += " AND is_selected = true"
+	}
+	query += " ORDER BY schema_name, table_name"
 
 	rows, err := scope.Conn.Query(ctx, query, projectID, datasourceID)
 	if err != nil {

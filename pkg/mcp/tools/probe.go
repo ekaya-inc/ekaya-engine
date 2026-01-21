@@ -796,7 +796,7 @@ type columnKey struct {
 // to schema relationships (which use column IDs).
 func buildColumnKeyToIDMap(ctx context.Context, deps *ProbeToolDeps, projectID, datasourceID uuid.UUID) (map[columnKey]uuid.UUID, error) {
 	// Get all tables for this datasource to build table_id -> table_name map
-	tables, err := deps.SchemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
+	tables, err := deps.SchemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}

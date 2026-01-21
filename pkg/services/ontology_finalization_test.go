@@ -234,7 +234,7 @@ func (m *mockSchemaRepoForFinalization) GetColumnsByTables(ctx context.Context, 
 }
 
 // Stub implementations for SchemaRepository interface
-func (m *mockSchemaRepoForFinalization) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaTable, error) {
+func (m *mockSchemaRepoForFinalization) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
 	return nil, nil
 }
 func (m *mockSchemaRepoForFinalization) GetTableByID(ctx context.Context, projectID, tableID uuid.UUID) (*models.SchemaTable, error) {

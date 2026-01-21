@@ -85,7 +85,7 @@ func (s *dataChangeDetectionService) ScanForChanges(
 	projectID, datasourceID uuid.UUID,
 ) ([]*models.PendingChange, error) {
 	// Get all tables for the datasource
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}
@@ -131,7 +131,7 @@ func (s *dataChangeDetectionService) ScanTables(
 	}
 
 	// Get tables for schema info
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}

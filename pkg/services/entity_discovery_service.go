@@ -86,8 +86,8 @@ func (s *entityDiscoveryService) identifyEntitiesFromDDL(
 	}
 	defer cleanup()
 
-	// Get all tables for this datasource
-	tables, err := s.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID)
+	// Get selected tables for this datasource (respects is_selected flag to exclude test/sample tables)
+	tables, err := s.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID, true)
 	if err != nil {
 		return 0, nil, nil, fmt.Errorf("list tables: %w", err)
 	}
