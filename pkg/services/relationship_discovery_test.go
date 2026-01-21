@@ -396,7 +396,7 @@ func TestRelationshipDiscoveryService_DiscoverRelationships_LowMatchRate(t *test
 	}
 	discoverer := &rdMockSchemaDiscoverer{
 		valueOverlap: &datasource.ValueOverlapResult{
-			MatchRate:      0.30, // Below threshold of 0.70
+			MatchRate:      0.30, // Below threshold
 			SourceDistinct: 50,
 			TargetDistinct: 100,
 			MatchedCount:   15,

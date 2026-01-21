@@ -16,8 +16,8 @@ import (
 
 // Discovery configuration constants
 const (
-	DefaultMatchThreshold      = 0.70 // 70% value overlap required
-	DefaultOrphanRateThreshold = 0.50 // 50% max orphan rate
+	DefaultMatchThreshold      = 0.95 // 95% match (allow 5% for data issues)
+	DefaultOrphanRateThreshold = 0.10 // Max 10% orphans
 	DefaultSampleLimit         = 1000 // Max values to sample for overlap check
 	MaxColumnsPerStatsQuery    = 25   // Batch size for column stats
 

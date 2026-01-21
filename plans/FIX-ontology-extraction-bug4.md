@@ -242,8 +242,8 @@ if candidate.Source != DiscoveryTypeConstraint {
 
 ## Acceptance Criteria
 
-- [ ] Match threshold increased to 95%+
-- [ ] Orphan threshold decreased to 10% or less
+- [x] Match threshold increased to 95%+
+- [x] Orphan threshold decreased to 10% or less
 - [ ] Attribute columns (email, password, etc.) excluded from FK candidates
 - [ ] *_id columns only match to their expected tables
 - [ ] FK direction validated via cardinality analysis
