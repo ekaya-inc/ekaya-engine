@@ -282,6 +282,13 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 					continue
 				}
 
+				// Skip if semantic validation fails:
+				// - *_id columns should reference their expected table
+				// - Attribute columns (email, password, etc.) are never FK sources
+				if !shouldCreateCandidate(source.column.ColumnName, tableByID[targetPK.SchemaTableID].TableName) {
+					continue
+				}
+
 				candidates = append(candidates, &relationshipCandidate{
 					sourceColumn: source.column,
 					sourceTable:  source.table,
@@ -529,6 +536,64 @@ func (s *relationshipDiscoveryService) areTypesCompatible(sourceType, targetType
 	// joinable types are uuid and text. These require exact type match.
 	// Same normalized type = compatible
 	return source == target
+}
+
+// attributeColumnPatterns contains column names that represent data attributes,
+// not foreign key references. These should never be FK sources.
+var attributeColumnPatterns = []string{
+	"email",
+	"password",
+	"name",
+	"description",
+	"status",
+	"type",
+}
+
+// shouldCreateCandidate validates whether a source column should be considered
+// as a foreign key candidate pointing to the target column. This applies semantic
+// validation beyond type compatibility to reduce false positive relationships.
+//
+// Rules:
+// 1. *_id columns should reference their expected table (user_id → users)
+// 2. Attribute columns (email, password, etc.) are never FK sources
+func shouldCreateCandidate(sourceColumnName, targetTableName string) bool {
+	sourceLower := strings.ToLower(sourceColumnName)
+
+	// Rule 2: Attribute columns are not FK sources
+	// Check if source column name contains any attribute pattern
+	for _, attr := range attributeColumnPatterns {
+		if strings.Contains(sourceLower, attr) {
+			return false // emails, passwords, statuses aren't FKs
+		}
+	}
+
+	// Rule 1: *_id columns should match their expected table
+	if strings.HasSuffix(sourceLower, "_id") {
+		// Extract the entity name from column (e.g., "user_id" → "user")
+		entityName := strings.TrimSuffix(sourceLower, "_id")
+
+		// Target table should be the entity name or its plural form
+		targetLower := strings.ToLower(targetTableName)
+
+		// Handle common plural patterns:
+		// user_id → users, user
+		// category_id → categories, category
+		// status_id → statuses, status
+		expectedPlural := entityName + "s"
+		expectedPluralIES := ""
+		if strings.HasSuffix(entityName, "y") {
+			// category → categories (drop y, add ies)
+			expectedPluralIES = entityName[:len(entityName)-1] + "ies"
+		}
+
+		if targetLower != entityName &&
+			targetLower != expectedPlural &&
+			(expectedPluralIES == "" || targetLower != expectedPluralIES) {
+			return false // user_id shouldn't point to channels table
+		}
+	}
+
+	return true
 }
 
 func normalizeType(t string) string {
