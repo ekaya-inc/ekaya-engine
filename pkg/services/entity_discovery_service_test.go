@@ -1109,3 +1109,357 @@ func TestEnrichEntitiesWithLLM_SmallEntitySet_NoBatching(t *testing.T) {
 	// Verify: LLM was called exactly once (no batching for ≤20 entities)
 	assert.Equal(t, 1, llmCallCount, "Expected 1 LLM call for 20 entities (no batching)")
 }
+
+// ============================================================================
+// IdentifyEntitiesFromDDL Table Grouping Tests
+// ============================================================================
+
+// trackingEntityRepo is a mock that tracks entity creates and alias creates
+type trackingEntityRepo struct {
+	mockEntityDiscoveryEntityRepo
+	createdEntities []*models.OntologyEntity
+	createdAliases  []*models.OntologyEntityAlias
+}
+
+func (m *trackingEntityRepo) Create(ctx context.Context, entity *models.OntologyEntity) error {
+	if entity.ID == uuid.Nil {
+		entity.ID = uuid.New()
+	}
+	m.createdEntities = append(m.createdEntities, entity)
+	return nil
+}
+
+func (m *trackingEntityRepo) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {
+	if alias.ID == uuid.Nil {
+		alias.ID = uuid.New()
+	}
+	m.createdAliases = append(m.createdAliases, alias)
+	return nil
+}
+
+// mockSchemaRepoForGrouping is a mock schema repository for table grouping tests
+type mockSchemaRepoForGrouping struct {
+	tables  []*models.SchemaTable
+	columns []*models.SchemaColumn
+}
+
+func (m *mockSchemaRepoForGrouping) ListTablesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) ([]*models.SchemaTable, error) {
+	return m.tables, nil
+}
+
+func (m *mockSchemaRepoForGrouping) ListColumnsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return m.columns, nil
+}
+
+// Stub implementations for interface
+func (m *mockSchemaRepoForGrouping) GetTableByID(ctx context.Context, projectID, tableID uuid.UUID) (*models.SchemaTable, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForGrouping) GetTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, schemaName, tableName string) (*models.SchemaTable, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForGrouping) FindTableByName(ctx context.Context, projectID, datasourceID uuid.UUID, tableName string) (*models.SchemaTable, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForGrouping) UpsertTable(ctx context.Context, table *models.SchemaTable) error {
+	return nil
+}
+func (m *mockSchemaRepoForGrouping) SoftDeleteRemovedTables(ctx context.Context, projectID, datasourceID uuid.UUID, activeTableKeys []repositories.TableKey) (int64, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepoForGrouping) UpdateTableSelection(ctx context.Context, projectID, tableID uuid.UUID, isSelected bool) error {
+	return nil
+}
+func (m *mockSchemaRepoForGrouping) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
+	return nil
+}
+func (m *mockSchemaRepoForGrouping) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForGrouping) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForGrouping) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepoForGrouping) GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForGrouping) GetColumnByName(ctx context.Context, tableID uuid.UUID, columnName string) (*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForGrouping) UpsertColumn(ctx context.Context, column *models.SchemaColumn) error {
+	return nil
+}
+func (m *mockSchemaRepoForGrouping) SoftDeleteRemovedColumns(ctx context.Context, tableID uuid.UUID, activeColumnNames []string) (int64, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepoForGrouping) UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error {
+	return nil
+}
+func (m *mockSchemaRepoForGrouping) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error {
+	return nil
+}
+func (m *mockSchemaRepoForGrouping) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
+	return nil
+}
+func (m *mockSchemaRepoForGrouping) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForGrouping) GetRelationshipByID(ctx context.Context, projectID, relationshipID uuid.UUID) (*models.SchemaRelationship, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForGrouping) GetRelationshipByColumns(ctx context.Context, sourceColumnID, targetColumnID uuid.UUID) (*models.SchemaRelationship, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForGrouping) UpsertRelationship(ctx context.Context, rel *models.SchemaRelationship) error {
+	return nil
+}
+func (m *mockSchemaRepoForGrouping) UpdateRelationshipApproval(ctx context.Context, projectID, relationshipID uuid.UUID, isApproved bool) error {
+	return nil
+}
+func (m *mockSchemaRepoForGrouping) SoftDeleteRelationship(ctx context.Context, projectID, relationshipID uuid.UUID) error {
+	return nil
+}
+func (m *mockSchemaRepoForGrouping) SoftDeleteOrphanedRelationships(ctx context.Context, projectID, datasourceID uuid.UUID) (int64, error) {
+	return 0, nil
+}
+func (m *mockSchemaRepoForGrouping) GetRelationshipDetails(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.RelationshipDetail, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForGrouping) GetEmptyTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForGrouping) GetOrphanTables(ctx context.Context, projectID, datasourceID uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForGrouping) UpsertRelationshipWithMetrics(ctx context.Context, rel *models.SchemaRelationship, metrics *models.DiscoveryMetrics) error {
+	return nil
+}
+func (m *mockSchemaRepoForGrouping) GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForGrouping) UpdateColumnJoinability(ctx context.Context, columnID uuid.UUID, rowCount, nonNullCount, distinctCount *int64, isJoinable *bool, joinabilityReason *string) error {
+	return nil
+}
+func (m *mockSchemaRepoForGrouping) GetPrimaryKeyColumns(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForGrouping) GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepoForGrouping) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
+	return nil
+}
+
+var _ repositories.SchemaRepository = (*mockSchemaRepoForGrouping)(nil)
+
+func TestIdentifyEntitiesFromDDL_GroupsSimilarTables(t *testing.T) {
+	// Test that tables with similar names (e.g., "users", "s1_users", "test_users")
+	// result in ONE entity, not multiple.
+
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	datasourceID := uuid.New()
+
+	// Create tables with PKs: "users", "s1_users", "s2_users", "test_users"
+	usersTableID := uuid.New()
+	s1UsersTableID := uuid.New()
+	s2UsersTableID := uuid.New()
+	testUsersTableID := uuid.New()
+	ordersTableID := uuid.New()
+
+	tables := []*models.SchemaTable{
+		{ID: usersTableID, SchemaName: "public", TableName: "users"},
+		{ID: s1UsersTableID, SchemaName: "public", TableName: "s1_users"},
+		{ID: s2UsersTableID, SchemaName: "public", TableName: "s2_users"},
+		{ID: testUsersTableID, SchemaName: "public", TableName: "test_users"},
+		{ID: ordersTableID, SchemaName: "public", TableName: "orders"},
+	}
+
+	columns := []*models.SchemaColumn{
+		{SchemaTableID: usersTableID, ColumnName: "id", IsPrimaryKey: true},
+		{SchemaTableID: s1UsersTableID, ColumnName: "id", IsPrimaryKey: true},
+		{SchemaTableID: s2UsersTableID, ColumnName: "id", IsPrimaryKey: true},
+		{SchemaTableID: testUsersTableID, ColumnName: "id", IsPrimaryKey: true},
+		{SchemaTableID: ordersTableID, ColumnName: "id", IsPrimaryKey: true},
+	}
+
+	entityRepo := &trackingEntityRepo{}
+	schemaRepo := &mockSchemaRepoForGrouping{
+		tables:  tables,
+		columns: columns,
+	}
+
+	mockTenantCtx := func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {
+		return ctx, func() {}, nil
+	}
+
+	svc := NewEntityDiscoveryService(
+		entityRepo,
+		schemaRepo,
+		nil,
+		nil,
+		llm.NewMockClientFactory(),
+		nil,
+		mockTenantCtx,
+		zap.NewNop(),
+	)
+
+	// Execute
+	entityCount, _, _, err := svc.IdentifyEntitiesFromDDL(context.Background(), projectID, ontologyID, datasourceID)
+
+	// Verify: no error
+	require.NoError(t, err)
+
+	// Verify: should create only 2 entities ("users" and "orders"), not 5
+	assert.Equal(t, 2, entityCount, "Expected 2 entities (users grouped, orders separate)")
+	assert.Len(t, entityRepo.createdEntities, 2, "Expected 2 entity creates")
+
+	// Verify: one entity should be for "users" concept, one for "orders"
+	var usersEntity, ordersEntity *models.OntologyEntity
+	for _, e := range entityRepo.createdEntities {
+		if e.PrimaryTable == "users" {
+			usersEntity = e
+		} else if e.PrimaryTable == "orders" {
+			ordersEntity = e
+		}
+	}
+
+	require.NotNil(t, usersEntity, "Expected users entity to be created")
+	require.NotNil(t, ordersEntity, "Expected orders entity to be created")
+
+	// Verify: "users" entity should use the non-prefixed table as primary
+	assert.Equal(t, "users", usersEntity.PrimaryTable)
+
+	// Verify: aliases created for grouped tables (s1_users, s2_users, test_users)
+	assert.Len(t, entityRepo.createdAliases, 3, "Expected 3 aliases for grouped user tables")
+
+	// Verify aliases are for the users entity
+	aliasNames := make([]string, len(entityRepo.createdAliases))
+	for i, alias := range entityRepo.createdAliases {
+		aliasNames[i] = alias.Alias
+		assert.Equal(t, usersEntity.ID, alias.EntityID, "Alias should belong to users entity")
+	}
+	assert.ElementsMatch(t, []string{"s1_users", "s2_users", "test_users"}, aliasNames)
+}
+
+func TestIdentifyEntitiesFromDDL_AllTestTables_UsesFirstAsPrimary(t *testing.T) {
+	// When all tables in a group have test prefixes, use the first one as primary
+
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	datasourceID := uuid.New()
+
+	// Only test tables, no "real" users table
+	s1UsersTableID := uuid.New()
+	s2UsersTableID := uuid.New()
+	s5UsersTableID := uuid.New()
+
+	tables := []*models.SchemaTable{
+		{ID: s1UsersTableID, SchemaName: "public", TableName: "s1_users"},
+		{ID: s2UsersTableID, SchemaName: "public", TableName: "s2_users"},
+		{ID: s5UsersTableID, SchemaName: "public", TableName: "s5_users"},
+	}
+
+	columns := []*models.SchemaColumn{
+		{SchemaTableID: s1UsersTableID, ColumnName: "id", IsPrimaryKey: true},
+		{SchemaTableID: s2UsersTableID, ColumnName: "id", IsPrimaryKey: true},
+		{SchemaTableID: s5UsersTableID, ColumnName: "id", IsPrimaryKey: true},
+	}
+
+	entityRepo := &trackingEntityRepo{}
+	schemaRepo := &mockSchemaRepoForGrouping{
+		tables:  tables,
+		columns: columns,
+	}
+
+	mockTenantCtx := func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {
+		return ctx, func() {}, nil
+	}
+
+	svc := NewEntityDiscoveryService(
+		entityRepo,
+		schemaRepo,
+		nil,
+		nil,
+		llm.NewMockClientFactory(),
+		nil,
+		mockTenantCtx,
+		zap.NewNop(),
+	)
+
+	// Execute
+	entityCount, _, _, err := svc.IdentifyEntitiesFromDDL(context.Background(), projectID, ontologyID, datasourceID)
+
+	// Verify: no error
+	require.NoError(t, err)
+
+	// Verify: should create only 1 entity
+	assert.Equal(t, 1, entityCount, "Expected 1 entity for all test tables")
+	assert.Len(t, entityRepo.createdEntities, 1, "Expected 1 entity create")
+
+	// Verify: the first table (s1_users) should be used as primary
+	assert.Equal(t, "s1_users", entityRepo.createdEntities[0].PrimaryTable)
+
+	// Verify: other tables are aliases
+	assert.Len(t, entityRepo.createdAliases, 2, "Expected 2 aliases")
+	aliasNames := []string{entityRepo.createdAliases[0].Alias, entityRepo.createdAliases[1].Alias}
+	assert.ElementsMatch(t, []string{"s2_users", "s5_users"}, aliasNames)
+}
+
+func TestIdentifyEntitiesFromDDL_NoGrouping_UniqueTables(t *testing.T) {
+	// When tables have no naming overlap, each should create its own entity
+
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	datasourceID := uuid.New()
+
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	productsTableID := uuid.New()
+
+	tables := []*models.SchemaTable{
+		{ID: usersTableID, SchemaName: "public", TableName: "users"},
+		{ID: ordersTableID, SchemaName: "public", TableName: "orders"},
+		{ID: productsTableID, SchemaName: "public", TableName: "products"},
+	}
+
+	columns := []*models.SchemaColumn{
+		{SchemaTableID: usersTableID, ColumnName: "id", IsPrimaryKey: true},
+		{SchemaTableID: ordersTableID, ColumnName: "id", IsPrimaryKey: true},
+		{SchemaTableID: productsTableID, ColumnName: "id", IsPrimaryKey: true},
+	}
+
+	entityRepo := &trackingEntityRepo{}
+	schemaRepo := &mockSchemaRepoForGrouping{
+		tables:  tables,
+		columns: columns,
+	}
+
+	mockTenantCtx := func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {
+		return ctx, func() {}, nil
+	}
+
+	svc := NewEntityDiscoveryService(
+		entityRepo,
+		schemaRepo,
+		nil,
+		nil,
+		llm.NewMockClientFactory(),
+		nil,
+		mockTenantCtx,
+		zap.NewNop(),
+	)
+
+	// Execute
+	entityCount, _, _, err := svc.IdentifyEntitiesFromDDL(context.Background(), projectID, ontologyID, datasourceID)
+
+	// Verify: no error
+	require.NoError(t, err)
+
+	// Verify: 3 entities, no aliases
+	assert.Equal(t, 3, entityCount, "Expected 3 entities")
+	assert.Len(t, entityRepo.createdEntities, 3, "Expected 3 entity creates")
+	assert.Len(t, entityRepo.createdAliases, 0, "Expected no aliases when tables are unique")
+}

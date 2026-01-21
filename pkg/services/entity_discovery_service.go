@@ -160,33 +160,89 @@ func (s *entityDiscoveryService) identifyEntitiesFromDDL(
 		}
 	}
 
-	// Create entity records (one per table, using the best candidate)
-	// Use table name as temporary name - LLM will enrich with proper names later
+	// Group similar tables by core concept to prevent duplicate entities
+	// e.g., "users", "s1_users", "test_users" all map to concept "users"
+	tableGroups := groupSimilarTables(tables)
+
+	// Create ONE entity per concept group, using the primary (non-test) table
 	entityCount := 0
-	for _, c := range bestByTable {
+	for concept, groupTables := range tableGroups {
+		// Select the primary table (prefer non-test tables)
+		primaryTable := selectPrimaryTable(groupTables)
+		tableKey := fmt.Sprintf("%s.%s", primaryTable.SchemaName, primaryTable.TableName)
+
+		// Get the best candidate for the primary table
+		c, ok := bestByTable[tableKey]
+		if !ok {
+			// No PK/unique constraint found for primary table, try alternate tables in group
+			for _, altTable := range groupTables {
+				if altTable.TableName == primaryTable.TableName {
+					continue
+				}
+				altKey := fmt.Sprintf("%s.%s", altTable.SchemaName, altTable.TableName)
+				if altC, found := bestByTable[altKey]; found {
+					// Use the alternate table's column info for the entity
+					c = altC
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				s.logger.Debug("No entity candidate found for concept group",
+					zap.String("concept", concept),
+					zap.Int("tables_in_group", len(groupTables)))
+				continue
+			}
+		}
+
 		entity := &models.OntologyEntity{
 			ProjectID:     projectID,
 			OntologyID:    ontologyID,
-			Name:          c.tableName, // Temporary - will be enriched by LLM
-			Description:   "",          // Will be filled by LLM
-			PrimarySchema: c.schemaName,
-			PrimaryTable:  c.tableName,
+			Name:          primaryTable.TableName, // Temporary - will be enriched by LLM
+			Description:   "",                     // Will be filled by LLM
+			PrimarySchema: primaryTable.SchemaName,
+			PrimaryTable:  primaryTable.TableName,
 			PrimaryColumn: c.columnName,
 		}
 
 		if err := s.entityRepo.Create(tenantCtx, entity); err != nil {
 			s.logger.Error("Failed to create entity",
-				zap.String("table_name", c.tableName),
+				zap.String("table_name", primaryTable.TableName),
 				zap.Error(err))
-			return 0, nil, nil, fmt.Errorf("create entity for table %s: %w", c.tableName, err)
+			return 0, nil, nil, fmt.Errorf("create entity for table %s: %w", primaryTable.TableName, err)
 		}
 
 		s.logger.Info("Entity created (pending LLM enrichment)",
 			zap.String("entity_id", entity.ID.String()),
-			zap.String("table_name", c.tableName),
-			zap.String("primary_location", fmt.Sprintf("%s.%s.%s", c.schemaName, c.tableName, c.columnName)),
+			zap.String("table_name", primaryTable.TableName),
+			zap.String("primary_location", fmt.Sprintf("%s.%s.%s", primaryTable.SchemaName, primaryTable.TableName, c.columnName)),
 			zap.Float64("confidence", c.confidence),
-			zap.String("reason", c.reason))
+			zap.String("reason", c.reason),
+			zap.Int("grouped_tables", len(groupTables)))
+
+		// Store alternate tables as aliases for query matching
+		aliasSource := "table_grouping"
+		for _, altTable := range groupTables {
+			if altTable.TableName == primaryTable.TableName {
+				continue
+			}
+			alias := &models.OntologyEntityAlias{
+				EntityID: entity.ID,
+				Alias:    altTable.TableName,
+				Source:   &aliasSource,
+			}
+			if err := s.entityRepo.CreateAlias(tenantCtx, alias); err != nil {
+				s.logger.Error("Failed to create alias for grouped table",
+					zap.String("entity_id", entity.ID.String()),
+					zap.String("alias", altTable.TableName),
+					zap.Error(err))
+				// Continue - alias creation failure is not fatal
+			} else {
+				s.logger.Debug("Created alias for grouped table",
+					zap.String("entity_id", entity.ID.String()),
+					zap.String("alias", altTable.TableName))
+			}
+		}
 
 		entityCount++
 	}
