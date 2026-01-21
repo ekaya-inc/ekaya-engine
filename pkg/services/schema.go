@@ -19,7 +19,8 @@ import (
 type SchemaService interface {
 	// RefreshDatasourceSchema syncs tables, columns, and FK relationships from the datasource.
 	// Creates SchemaDiscoverer internally, caller does not manage adapter lifecycle.
-	RefreshDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RefreshResult, error)
+	// If autoSelect is true, newly created tables and columns will have IsSelected set to true.
+	RefreshDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID, autoSelect bool) (*models.RefreshResult, error)
 
 	// GetDatasourceSchema returns the complete schema for a datasource.
 	GetDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.DatasourceSchema, error)
@@ -60,6 +61,10 @@ type SchemaService interface {
 	// GetDatasourceSchemaWithEntities returns schema enriched with entity/role semantic information.
 	// This includes entity names and roles for columns that represent domain entities.
 	GetDatasourceSchemaWithEntities(ctx context.Context, projectID, datasourceID uuid.UUID, selectedOnly bool) (string, error)
+
+	// SelectAllTables marks all tables and columns for this datasource as selected.
+	// Used after schema refresh to auto-select newly discovered tables.
+	SelectAllTables(ctx context.Context, projectID, datasourceID uuid.UUID) error
 }
 
 type schemaService struct {
@@ -94,11 +99,22 @@ func NewSchemaService(
 }
 
 // RefreshDatasourceSchema syncs the schema from the datasource into our repository.
-func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RefreshResult, error) {
+// If autoSelect is true, newly created tables and columns will have IsSelected set to true.
+func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID, autoSelect bool) (*models.RefreshResult, error) {
 	// Extract userID from context (JWT claims)
 	userID, err := auth.RequireUserIDFromContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("user ID not found in context: %w", err)
+	}
+
+	// Get existing tables before refresh to track what's new/removed
+	existingTables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list existing tables: %w", err)
+	}
+	existingTableNames := make(map[string]bool)
+	for _, t := range existingTables {
+		existingTableNames[t.SchemaName+"."+t.TableName] = true
 	}
 
 	// Get datasource with decrypted config
@@ -114,7 +130,13 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 	}
 	defer discoverer.Close()
 
-	result := &models.RefreshResult{}
+	result := &models.RefreshResult{
+		NewTableNames:     make([]string, 0),
+		RemovedTableNames: make([]string, 0),
+		NewColumns:        make([]models.RefreshColumnChange, 0),
+		RemovedColumns:    make([]models.RefreshColumnChange, 0),
+		ModifiedColumns:   make([]models.RefreshColumnModification, 0),
+	}
 
 	// Discover and sync tables
 	discoveredTables, err := discoverer.DiscoverTables(ctx)
@@ -122,14 +144,23 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 		return nil, fmt.Errorf("failed to discover tables: %w", err)
 	}
 
-	// Build active table keys for soft-delete cleanup
+	// Build active table keys for soft-delete cleanup and track discovered table names
 	activeTableKeys := make([]repositories.TableKey, len(discoveredTables))
+	discoveredTableNames := make(map[string]bool)
 
 	// Upsert each discovered table
 	for i, dt := range discoveredTables {
+		tableFQN := dt.SchemaName + "." + dt.TableName
 		activeTableKeys[i] = repositories.TableKey{
 			SchemaName: dt.SchemaName,
 			TableName:  dt.TableName,
+		}
+		discoveredTableNames[tableFQN] = true
+
+		// Check if this is a new table
+		isNewTable := !existingTableNames[tableFQN]
+		if isNewTable {
+			result.NewTableNames = append(result.NewTableNames, tableFQN)
 		}
 
 		table := &models.SchemaTable{
@@ -138,6 +169,7 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 			SchemaName:   dt.SchemaName,
 			TableName:    dt.TableName,
 			RowCount:     &dt.RowCount,
+			IsSelected:   isNewTable && autoSelect, // Auto-select new tables if requested
 		}
 
 		if err := s.schemaRepo.UpsertTable(ctx, table); err != nil {
@@ -146,12 +178,24 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 		result.TablesUpserted++
 
 		// Discover and sync columns for this table
-		columnsUpserted, columnsDeleted, err := s.syncColumnsForTable(ctx, discoverer, projectID, table)
+		// Auto-select columns only if the table is new and autoSelect is true
+		autoSelectColumns := isNewTable && autoSelect
+		colResult, err := s.syncColumnsForTable(ctx, discoverer, projectID, table, autoSelectColumns)
 		if err != nil {
 			return nil, fmt.Errorf("failed to sync columns for table %s.%s: %w", dt.SchemaName, dt.TableName, err)
 		}
-		result.ColumnsUpserted += columnsUpserted
-		result.ColumnsDeleted += columnsDeleted
+		result.ColumnsUpserted += colResult.ColumnsUpserted
+		result.ColumnsDeleted += colResult.ColumnsDeleted
+		result.NewColumns = append(result.NewColumns, colResult.NewColumns...)
+		result.RemovedColumns = append(result.RemovedColumns, colResult.RemovedColumns...)
+		result.ModifiedColumns = append(result.ModifiedColumns, colResult.ModifiedColumns...)
+	}
+
+	// Identify removed tables (existed before but not discovered now)
+	for tableFQN := range existingTableNames {
+		if !discoveredTableNames[tableFQN] {
+			result.RemovedTableNames = append(result.RemovedTableNames, tableFQN)
+		}
 	}
 
 	// Soft-delete tables no longer in datasource
@@ -191,23 +235,60 @@ func (s *schemaService) RefreshDatasourceSchema(ctx context.Context, projectID, 
 	return result, nil
 }
 
+// columnSyncResult holds detailed results from syncing columns for a table.
+type columnSyncResult struct {
+	ColumnsUpserted int
+	ColumnsDeleted  int64
+	NewColumns      []models.RefreshColumnChange
+	RemovedColumns  []models.RefreshColumnChange
+	ModifiedColumns []models.RefreshColumnModification
+}
+
 // syncColumnsForTable discovers and syncs columns for a single table.
+// Returns detailed change information for change detection.
+// If autoSelect is true, newly created columns will have IsSelected set to true.
 func (s *schemaService) syncColumnsForTable(
 	ctx context.Context,
 	discoverer datasource.SchemaDiscoverer,
 	projectID uuid.UUID,
 	table *models.SchemaTable,
-) (int, int64, error) {
+	autoSelect bool,
+) (*columnSyncResult, error) {
+	result := &columnSyncResult{
+		NewColumns:      make([]models.RefreshColumnChange, 0),
+		RemovedColumns:  make([]models.RefreshColumnChange, 0),
+		ModifiedColumns: make([]models.RefreshColumnModification, 0),
+	}
+
+	tableFQN := table.SchemaName + "." + table.TableName
+
+	// Get existing columns before sync to detect changes
+	existingColumns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list existing columns: %w", err)
+	}
+
+	// Build map of existing columns by name for comparison
+	existingByName := make(map[string]*models.SchemaColumn, len(existingColumns))
+	for _, col := range existingColumns {
+		existingByName[col.ColumnName] = col
+	}
+
 	discoveredColumns, err := discoverer.DiscoverColumns(ctx, table.SchemaName, table.TableName)
 	if err != nil {
-		return 0, 0, fmt.Errorf("discover columns: %w", err)
+		return nil, fmt.Errorf("discover columns: %w", err)
 	}
 
 	activeColumnNames := make([]string, len(discoveredColumns))
-	columnsUpserted := 0
+	discoveredByName := make(map[string]bool)
 
 	for i, dc := range discoveredColumns {
 		activeColumnNames[i] = dc.ColumnName
+		discoveredByName[dc.ColumnName] = true
+
+		// Check if this is a new column or type change
+		existing, found := existingByName[dc.ColumnName]
+		isNewColumn := !found
 
 		column := &models.SchemaColumn{
 			ProjectID:       projectID,
@@ -219,21 +300,51 @@ func (s *schemaService) syncColumnsForTable(
 			IsUnique:        dc.IsUnique,
 			OrdinalPosition: dc.OrdinalPosition,
 			DefaultValue:    dc.DefaultValue,
+			IsSelected:      isNewColumn && autoSelect, // Auto-select new columns if requested
+		}
+
+		if isNewColumn {
+			// New column
+			result.NewColumns = append(result.NewColumns, models.RefreshColumnChange{
+				TableName:  tableFQN,
+				ColumnName: dc.ColumnName,
+				DataType:   dc.DataType,
+			})
+		} else if existing.DataType != dc.DataType {
+			// Type changed
+			result.ModifiedColumns = append(result.ModifiedColumns, models.RefreshColumnModification{
+				TableName:  tableFQN,
+				ColumnName: dc.ColumnName,
+				OldType:    existing.DataType,
+				NewType:    dc.DataType,
+			})
 		}
 
 		if err := s.schemaRepo.UpsertColumn(ctx, column); err != nil {
-			return 0, 0, fmt.Errorf("upsert column %s: %w", dc.ColumnName, err)
+			return nil, fmt.Errorf("upsert column %s: %w", dc.ColumnName, err)
 		}
-		columnsUpserted++
+		result.ColumnsUpserted++
+	}
+
+	// Identify removed columns (existed before but not discovered now)
+	for colName, col := range existingByName {
+		if !discoveredByName[colName] {
+			result.RemovedColumns = append(result.RemovedColumns, models.RefreshColumnChange{
+				TableName:  tableFQN,
+				ColumnName: colName,
+				DataType:   col.DataType,
+			})
+		}
 	}
 
 	// Soft-delete columns no longer in table
 	columnsDeleted, err := s.schemaRepo.SoftDeleteRemovedColumns(ctx, table.ID, activeColumnNames)
 	if err != nil {
-		return 0, 0, fmt.Errorf("soft-delete removed columns: %w", err)
+		return nil, fmt.Errorf("soft-delete removed columns: %w", err)
 	}
+	result.ColumnsDeleted = columnsDeleted
 
-	return columnsUpserted, columnsDeleted, nil
+	return result, nil
 }
 
 // syncForeignKeys discovers and syncs foreign key relationships.
@@ -1117,6 +1228,14 @@ func (s *schemaService) GetDatasourceSchemaWithEntities(ctx context.Context, pro
 	}
 
 	return sb.String(), nil
+}
+
+// SelectAllTables marks all tables and columns for this datasource as selected.
+func (s *schemaService) SelectAllTables(ctx context.Context, projectID, datasourceID uuid.UUID) error {
+	if err := s.schemaRepo.SelectAllTablesAndColumns(ctx, projectID, datasourceID); err != nil {
+		return fmt.Errorf("failed to select all tables: %w", err)
+	}
+	return nil
 }
 
 // Ensure schemaService implements SchemaService at compile time.

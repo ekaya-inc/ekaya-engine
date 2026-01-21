@@ -245,6 +245,94 @@ func TestKnowledgeRepository_Upsert_SameTypesDifferentKeys(t *testing.T) {
 	}
 }
 
+func TestKnowledgeRepository_Upsert_UpdateByID(t *testing.T) {
+	tc := setupKnowledgeTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create initial fact
+	original := tc.createTestFact(ctx, models.FactTypeTerminology, "original_key", "Original value")
+	originalID := original.ID
+	originalCreatedAt := original.CreatedAt
+
+	// Update by ID with a NEW key (this was the bug - it would fail with duplicate key error)
+	updated := &models.KnowledgeFact{
+		ID:        originalID, // Explicitly set ID for update-by-ID
+		ProjectID: tc.projectID,
+		FactType:  models.FactTypeTerminology,
+		Key:       "updated_key", // Different key
+		Value:     "Updated value",
+		Context:   "New context",
+	}
+
+	err := tc.repo.Upsert(ctx, updated)
+	if err != nil {
+		t.Fatalf("Upsert with ID failed: %v", err)
+	}
+
+	// ID should be unchanged
+	if updated.ID != originalID {
+		t.Errorf("expected same ID %v, got %v", originalID, updated.ID)
+	}
+
+	// CreatedAt should be preserved
+	if !updated.CreatedAt.Equal(originalCreatedAt) {
+		t.Errorf("expected CreatedAt to be preserved, was %v now %v", originalCreatedAt, updated.CreatedAt)
+	}
+
+	// Verify old key no longer exists
+	oldFact, err := tc.repo.GetByKey(ctx, tc.projectID, models.FactTypeTerminology, "original_key")
+	if err != nil {
+		t.Fatalf("GetByKey failed: %v", err)
+	}
+	if oldFact != nil {
+		t.Error("expected old key to not exist after update")
+	}
+
+	// Verify new key exists with correct values
+	newFact, err := tc.repo.GetByKey(ctx, tc.projectID, models.FactTypeTerminology, "updated_key")
+	if err != nil {
+		t.Fatalf("GetByKey failed: %v", err)
+	}
+	if newFact == nil {
+		t.Fatal("expected new key to exist")
+	}
+	if newFact.Value != "Updated value" {
+		t.Errorf("expected value 'Updated value', got %q", newFact.Value)
+	}
+	if newFact.Context != "New context" {
+		t.Errorf("expected context 'New context', got %q", newFact.Context)
+	}
+}
+
+func TestKnowledgeRepository_Upsert_UpdateByID_NotFound(t *testing.T) {
+	tc := setupKnowledgeTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Try to update a non-existent ID
+	nonExistentID := uuid.New()
+	fact := &models.KnowledgeFact{
+		ID:        nonExistentID,
+		ProjectID: tc.projectID,
+		FactType:  models.FactTypeTerminology,
+		Key:       "some_key",
+		Value:     "Some value",
+	}
+
+	err := tc.repo.Upsert(ctx, fact)
+	if err == nil {
+		t.Error("expected error for non-existent ID")
+	}
+	if err != nil && err.Error() != "fact with id "+nonExistentID.String()+" not found" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
 // ============================================================================
 // GetByProject Tests
 // ============================================================================

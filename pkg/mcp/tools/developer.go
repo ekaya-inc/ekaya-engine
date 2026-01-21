@@ -16,19 +16,25 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // MCPToolDeps contains dependencies for MCP tools.
 // This includes developer tools, business user tools, and approved query tools.
 type MCPToolDeps struct {
-	DB                *database.DB
-	MCPConfigService  services.MCPConfigService
-	DatasourceService services.DatasourceService
-	SchemaService     services.SchemaService
-	ProjectService    services.ProjectService
-	AdapterFactory    datasource.DatasourceAdapterFactory
-	Logger            *zap.Logger
+	DB                           *database.DB
+	MCPConfigService             services.MCPConfigService
+	DatasourceService            services.DatasourceService
+	SchemaService                services.SchemaService
+	ProjectService               services.ProjectService
+	AdapterFactory               datasource.DatasourceAdapterFactory
+	SchemaChangeDetectionService services.SchemaChangeDetectionService
+	DataChangeDetectionService   services.DataChangeDetectionService
+	ChangeReviewService          services.ChangeReviewService
+	PendingChangeRepo            repositories.PendingChangeRepository
+	Logger                       *zap.Logger
 }
 
 // GetDB implements ToolAccessDeps.
@@ -149,6 +155,12 @@ func RegisterMCPTools(s *server.MCPServer, deps *MCPToolDeps) {
 	registerExecuteTool(s, deps)
 	registerValidateTool(s, deps)
 	registerExplainQueryTool(s, deps)
+	registerRefreshSchemaTool(s, deps)
+	registerScanDataChangesTool(s, deps)
+	registerListPendingChangesTool(s, deps)
+	registerApproveChangeTool(s, deps)
+	registerRejectChangeTool(s, deps)
+	registerApproveAllChangesTool(s, deps)
 }
 
 // NewToolFilter creates a ToolFilterFunc that filters tools based on MCP configuration.
@@ -837,6 +849,574 @@ func registerExplainQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 		}
 
 		jsonResult, err := json.Marshal(result)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// getOptionalBoolWithDefaultDev extracts an optional boolean argument with a default value.
+func getOptionalBoolWithDefaultDev(req mcp.CallToolRequest, key string, defaultVal bool) bool {
+	if args, ok := req.Params.Arguments.(map[string]any); ok {
+		if val, ok := args[key].(bool); ok {
+			return val
+		}
+	}
+	return defaultVal
+}
+
+// registerRefreshSchemaTool adds the refresh_schema tool for syncing schema from datasource.
+func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
+	tool := mcp.NewTool(
+		"refresh_schema",
+		mcp.WithDescription(
+			"Refresh schema from datasource and auto-select new tables/columns. "+
+				"Use after execute() to make new tables visible to other tools. "+
+				"Returns summary: tables added/removed, columns added, relationships discovered.",
+		),
+		mcp.WithBoolean(
+			"auto_select",
+			mcp.Description("Automatically select all new tables/columns (default: true)"),
+		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "refresh_schema")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Get default datasource
+		dsID, err := deps.ProjectService.GetDefaultDatasourceID(tenantCtx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get default datasource: %w", err)
+		}
+		if dsID == uuid.Nil {
+			return nil, fmt.Errorf("no default datasource configured for project")
+		}
+
+		autoSelect := getOptionalBoolWithDefaultDev(req, "auto_select", true)
+
+		// Refresh schema - autoSelect causes new tables/columns to be marked as selected at creation time
+		result, err := deps.SchemaService.RefreshDatasourceSchema(tenantCtx, projectID, dsID, autoSelect)
+		if err != nil {
+			deps.Logger.Error("Schema refresh failed",
+				zap.String("project_id", projectID.String()),
+				zap.String("datasource_id", dsID.String()),
+				zap.Error(err),
+			)
+			return nil, fmt.Errorf("schema refresh failed: %w", err)
+		}
+
+		// Auto-select was applied if new tables were discovered and autoSelect was true
+		autoSelectApplied := autoSelect && len(result.NewTableNames) > 0
+
+		// Get relationships for response (uses enriched response with table/column names)
+		relsResp, _ := deps.SchemaService.GetRelationshipsResponse(tenantCtx, projectID, dsID)
+
+		relPairs := make([]map[string]string, 0)
+		if relsResp != nil {
+			for _, r := range relsResp.Relationships {
+				if r.IsApproved != nil && !*r.IsApproved {
+					continue // Skip removed relationships
+				}
+				relPairs = append(relPairs, map[string]string{
+					"from": r.SourceTableName + "." + r.SourceColumnName,
+					"to":   r.TargetTableName + "." + r.TargetColumnName,
+				})
+			}
+		}
+
+		// Detect changes and queue for review (if change detection service is configured)
+		var pendingChangesCreated int
+		if deps.SchemaChangeDetectionService != nil {
+			changes, err := deps.SchemaChangeDetectionService.DetectChanges(tenantCtx, projectID, result)
+			if err != nil {
+				// Log but don't fail - schema refresh succeeded
+				deps.Logger.Warn("Change detection failed",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err),
+				)
+			} else {
+				pendingChangesCreated = len(changes)
+			}
+		}
+
+		deps.Logger.Info("Schema refresh completed via MCP",
+			zap.String("project_id", projectID.String()),
+			zap.String("datasource_id", dsID.String()),
+			zap.Int("tables_upserted", result.TablesUpserted),
+			zap.Int64("tables_deleted", result.TablesDeleted),
+			zap.Int("columns_upserted", result.ColumnsUpserted),
+			zap.Int("relationships_created", result.RelationshipsCreated),
+			zap.Int("pending_changes_created", pendingChangesCreated),
+		)
+
+		response := struct {
+			TablesAdded           []string            `json:"tables_added"`
+			TablesRemoved         []string            `json:"tables_removed"`
+			ColumnsAdded          int                 `json:"columns_added"`
+			RelationshipsFound    int                 `json:"relationships_found"`
+			Relationships         []map[string]string `json:"relationships,omitempty"`
+			AutoSelectApplied     bool                `json:"auto_select_applied"`
+			PendingChangesCreated int                 `json:"pending_changes_created"`
+		}{
+			TablesAdded:           result.NewTableNames,
+			TablesRemoved:         result.RemovedTableNames,
+			ColumnsAdded:          result.ColumnsUpserted,
+			RelationshipsFound:    len(relPairs),
+			Relationships:         relPairs,
+			AutoSelectApplied:     autoSelectApplied,
+			PendingChangesCreated: pendingChangesCreated,
+		}
+
+		jsonResult, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// registerListPendingChangesTool adds the list_pending_changes tool for viewing pending ontology changes.
+func registerListPendingChangesTool(s *server.MCPServer, deps *MCPToolDeps) {
+	tool := mcp.NewTool(
+		"list_pending_changes",
+		mcp.WithDescription(
+			"List pending ontology changes detected from schema or data analysis. "+
+				"Review these changes and approve/reject them to update the ontology.",
+		),
+		mcp.WithString(
+			"status",
+			mcp.Description("Filter by status: pending, approved, rejected, auto_applied (default: pending)"),
+		),
+		mcp.WithNumber(
+			"limit",
+			mcp.Description("Max changes to return (default: 50, max: 500)"),
+		),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "list_pending_changes")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Check if pending change repo is configured
+		if deps.PendingChangeRepo == nil {
+			return nil, fmt.Errorf("pending changes not available: repository not configured")
+		}
+
+		// Get parameters
+		status := getOptionalString(req, "status")
+		if status == "" {
+			status = "pending"
+		}
+		limit := 50
+		if limitVal, ok := getOptionalFloat(req, "limit"); ok {
+			limit = int(limitVal)
+		}
+		if limit > 500 {
+			limit = 500
+		}
+		if limit < 1 {
+			limit = 50
+		}
+
+		// List changes
+		changes, err := deps.PendingChangeRepo.List(tenantCtx, projectID, status, limit)
+		if err != nil {
+			deps.Logger.Error("Failed to list pending changes",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err),
+			)
+			return nil, fmt.Errorf("failed to list pending changes: %w", err)
+		}
+
+		// Get counts by status
+		counts, err := deps.PendingChangeRepo.CountByStatus(tenantCtx, projectID)
+		if err != nil {
+			deps.Logger.Warn("Failed to get pending change counts",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err),
+			)
+			// Continue without counts
+		}
+
+		response := struct {
+			Changes []any          `json:"changes"`
+			Count   int            `json:"count"`
+			Counts  map[string]int `json:"counts,omitempty"`
+		}{
+			Changes: make([]any, len(changes)),
+			Count:   len(changes),
+			Counts:  counts,
+		}
+
+		// Convert changes to response format
+		for i, c := range changes {
+			response.Changes[i] = map[string]any{
+				"id":                c.ID.String(),
+				"change_type":       c.ChangeType,
+				"change_source":     c.ChangeSource,
+				"table_name":        c.TableName,
+				"column_name":       c.ColumnName,
+				"old_value":         c.OldValue,
+				"new_value":         c.NewValue,
+				"suggested_action":  c.SuggestedAction,
+				"suggested_payload": c.SuggestedPayload,
+				"status":            c.Status,
+				"created_at":        c.CreatedAt,
+			}
+		}
+
+		jsonResult, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// registerApproveChangeTool adds the approve_change tool for approving pending ontology changes.
+func registerApproveChangeTool(s *server.MCPServer, deps *MCPToolDeps) {
+	tool := mcp.NewTool(
+		"approve_change",
+		mcp.WithDescription(
+			"Approve a pending ontology change and apply it. "+
+				"The change will be applied to the ontology with 'mcp' provenance. "+
+				"Precedence rules apply: Admin > MCP > Inference changes.",
+		),
+		mcp.WithString(
+			"change_id",
+			mcp.Required(),
+			mcp.Description("UUID of the pending change to approve"),
+		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "approve_change")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Check if pending change repo is configured
+		if deps.PendingChangeRepo == nil {
+			return nil, fmt.Errorf("pending changes not available: repository not configured")
+		}
+		if deps.ChangeReviewService == nil {
+			return nil, fmt.Errorf("change review service not available")
+		}
+
+		// Get change ID
+		changeIDStr, err := req.RequireString("change_id")
+		if err != nil {
+			return NewErrorResult("invalid_parameters", "change_id is required"), nil
+		}
+
+		changeID, err := uuid.Parse(changeIDStr)
+		if err != nil {
+			return NewErrorResult("invalid_parameters", fmt.Sprintf("invalid change_id: %v", err)), nil
+		}
+
+		// Verify change belongs to this project
+		change, err := deps.PendingChangeRepo.GetByID(tenantCtx, changeID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get pending change: %w", err)
+		}
+		if change == nil {
+			return NewErrorResult("not_found", "pending change not found"), nil
+		}
+		if change.ProjectID != projectID {
+			return NewErrorResult("not_found", "pending change not found"), nil
+		}
+
+		// Approve the change
+		approvedChange, err := deps.ChangeReviewService.ApproveChange(tenantCtx, changeID, models.ProvenanceMCP)
+		if err != nil {
+			deps.Logger.Error("Failed to approve change",
+				zap.String("change_id", changeIDStr),
+				zap.Error(err),
+			)
+			return NewErrorResult("approval_failed", err.Error()), nil
+		}
+
+		response := map[string]any{
+			"id":               approvedChange.ID.String(),
+			"status":           approvedChange.Status,
+			"change_type":      approvedChange.ChangeType,
+			"table_name":       approvedChange.TableName,
+			"column_name":      approvedChange.ColumnName,
+			"suggested_action": approvedChange.SuggestedAction,
+			"message":          "Change approved and applied successfully",
+		}
+
+		jsonResult, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// registerRejectChangeTool adds the reject_change tool for rejecting pending ontology changes.
+func registerRejectChangeTool(s *server.MCPServer, deps *MCPToolDeps) {
+	tool := mcp.NewTool(
+		"reject_change",
+		mcp.WithDescription(
+			"Reject a pending ontology change without applying it. "+
+				"Use this when a suggested change is not appropriate.",
+		),
+		mcp.WithString(
+			"change_id",
+			mcp.Required(),
+			mcp.Description("UUID of the pending change to reject"),
+		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "reject_change")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Check if pending change repo is configured
+		if deps.PendingChangeRepo == nil {
+			return nil, fmt.Errorf("pending changes not available: repository not configured")
+		}
+		if deps.ChangeReviewService == nil {
+			return nil, fmt.Errorf("change review service not available")
+		}
+
+		// Get change ID
+		changeIDStr, err := req.RequireString("change_id")
+		if err != nil {
+			return NewErrorResult("invalid_parameters", "change_id is required"), nil
+		}
+
+		changeID, err := uuid.Parse(changeIDStr)
+		if err != nil {
+			return NewErrorResult("invalid_parameters", fmt.Sprintf("invalid change_id: %v", err)), nil
+		}
+
+		// Verify change belongs to this project
+		change, err := deps.PendingChangeRepo.GetByID(tenantCtx, changeID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get pending change: %w", err)
+		}
+		if change == nil {
+			return NewErrorResult("not_found", "pending change not found"), nil
+		}
+		if change.ProjectID != projectID {
+			return NewErrorResult("not_found", "pending change not found"), nil
+		}
+
+		// Reject the change
+		rejectedChange, err := deps.ChangeReviewService.RejectChange(tenantCtx, changeID, models.ProvenanceMCP)
+		if err != nil {
+			deps.Logger.Error("Failed to reject change",
+				zap.String("change_id", changeIDStr),
+				zap.Error(err),
+			)
+			return NewErrorResult("rejection_failed", err.Error()), nil
+		}
+
+		response := map[string]any{
+			"id":          rejectedChange.ID.String(),
+			"status":      rejectedChange.Status,
+			"change_type": rejectedChange.ChangeType,
+			"table_name":  rejectedChange.TableName,
+			"column_name": rejectedChange.ColumnName,
+			"message":     "Change rejected successfully",
+		}
+
+		jsonResult, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// registerApproveAllChangesTool adds the approve_all_changes tool for bulk approving pending changes.
+func registerApproveAllChangesTool(s *server.MCPServer, deps *MCPToolDeps) {
+	tool := mcp.NewTool(
+		"approve_all_changes",
+		mcp.WithDescription(
+			"Approve all pending ontology changes that can be applied. "+
+				"Changes blocked by precedence rules will be skipped. "+
+				"Returns summary of approved and skipped changes.",
+		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "approve_all_changes")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Check if services are configured
+		if deps.PendingChangeRepo == nil {
+			return nil, fmt.Errorf("pending changes not available: repository not configured")
+		}
+		if deps.ChangeReviewService == nil {
+			return nil, fmt.Errorf("change review service not available")
+		}
+
+		// Approve all changes
+		result, err := deps.ChangeReviewService.ApproveAllChanges(tenantCtx, projectID, models.ProvenanceMCP)
+		if err != nil {
+			deps.Logger.Error("Failed to approve all changes",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err),
+			)
+			return nil, fmt.Errorf("failed to approve all changes: %w", err)
+		}
+
+		response := map[string]any{
+			"approved":       result.Approved,
+			"skipped":        result.Skipped,
+			"skipped_reason": result.SkippedReason,
+			"message":        fmt.Sprintf("Approved %d changes, skipped %d", result.Approved, result.Skipped),
+		}
+
+		jsonResult, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// registerScanDataChangesTool adds the scan_data_changes tool for detecting data-level changes.
+func registerScanDataChangesTool(s *server.MCPServer, deps *MCPToolDeps) {
+	tool := mcp.NewTool(
+		"scan_data_changes",
+		mcp.WithDescription(
+			"Scan data for changes like new enum values and potential FK patterns. "+
+				"Creates pending changes for review. Use after data updates to keep ontology current.",
+		),
+		mcp.WithString(
+			"tables",
+			mcp.Description("Comma-separated list of table names to scan (default: all selected tables)"),
+		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "scan_data_changes")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Check if data change detection service is configured
+		if deps.DataChangeDetectionService == nil {
+			return nil, fmt.Errorf("data change detection not available: service not configured")
+		}
+
+		// Get default datasource
+		dsID, err := deps.ProjectService.GetDefaultDatasourceID(tenantCtx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get default datasource: %w", err)
+		}
+		if dsID == uuid.Nil {
+			return nil, fmt.Errorf("no default datasource configured for project")
+		}
+
+		// Get optional tables parameter
+		tablesStr := getOptionalString(req, "tables")
+
+		var changes []*models.PendingChange
+		if tablesStr != "" {
+			// Parse comma-separated table names
+			tableNames := strings.Split(tablesStr, ",")
+			for i, t := range tableNames {
+				tableNames[i] = strings.TrimSpace(t)
+			}
+			changes, err = deps.DataChangeDetectionService.ScanTables(tenantCtx, projectID, dsID, tableNames)
+		} else {
+			changes, err = deps.DataChangeDetectionService.ScanForChanges(tenantCtx, projectID, dsID)
+		}
+
+		if err != nil {
+			deps.Logger.Error("Data change scan failed",
+				zap.String("project_id", projectID.String()),
+				zap.String("datasource_id", dsID.String()),
+				zap.Error(err),
+			)
+			return nil, fmt.Errorf("data change scan failed: %w", err)
+		}
+
+		deps.Logger.Info("Data change scan completed via MCP",
+			zap.String("project_id", projectID.String()),
+			zap.String("datasource_id", dsID.String()),
+			zap.Int("changes_found", len(changes)),
+		)
+
+		// Build response summary
+		changesByType := make(map[string]int)
+		for _, c := range changes {
+			changesByType[c.ChangeType]++
+		}
+
+		response := struct {
+			TotalChanges  int            `json:"total_changes"`
+			ChangesByType map[string]int `json:"changes_by_type"`
+			Changes       []any          `json:"changes"`
+		}{
+			TotalChanges:  len(changes),
+			ChangesByType: changesByType,
+			Changes:       make([]any, len(changes)),
+		}
+
+		for i, c := range changes {
+			response.Changes[i] = map[string]any{
+				"id":               c.ID.String(),
+				"change_type":      c.ChangeType,
+				"table_name":       c.TableName,
+				"column_name":      c.ColumnName,
+				"new_value":        c.NewValue,
+				"suggested_action": c.SuggestedAction,
+			}
+		}
+
+		jsonResult, err := json.Marshal(response)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal result: %w", err)
 		}

@@ -35,12 +35,12 @@ export const TOOL_GROUP_METADATA: Record<string, ToolGroupMetadata> = {
       addQueryTools: {
         name: 'Add Query Tools',
         description:
-          'Include schema exploration, sampling, and ontology maintenance tools. Enables the MCP Client to explore and improve the data model.',
+          'Include schema exploration, sampling, and query tools. Enables the MCP Client to explore the database and run queries.',
       },
-      addOntologyQuestions: {
-        name: 'Add Ontology Questions',
+      addOntologyMaintenance: {
+        name: 'Add Ontology Maintenance',
         description:
-          'Include tools to review and answer questions generated during ontology extraction. Use this to refine the business ontology.',
+          'Include tools to manage the ontology: create/update entities, relationships, refresh schema, and review pending changes.',
         tip: (
           <div>
             <span className="font-semibold">Pro Tip:</span> Have AI answer questions about your Ontology{' '}
@@ -127,6 +127,14 @@ export const ALL_TOOLS_ORDERED = [
   { name: 'delete_glossary_term', description: 'Delete a business glossary term' },
   { name: 'delete_project_knowledge', description: 'Remove incorrect or outdated domain facts' },
   { name: 'delete_relationship', description: 'Remove a relationship that was incorrectly identified' },
+
+  // Schema Management (Living Ontology)
+  { name: 'refresh_schema', description: 'Refresh schema from datasource and detect changes' },
+  { name: 'scan_data_changes', description: 'Scan for data-level changes (new enum values, FK patterns)' },
+  { name: 'list_pending_changes', description: 'List pending ontology changes awaiting review' },
+  { name: 'approve_change', description: 'Approve a pending ontology change and apply it' },
+  { name: 'reject_change', description: 'Reject a pending ontology change without applying it' },
+  { name: 'approve_all_changes', description: 'Approve all pending ontology changes' },
 ] as const;
 
 // Tool order lookup for sorting

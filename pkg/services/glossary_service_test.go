@@ -206,7 +206,15 @@ func (m *mockEntityRepoForGlossary) GetByName(ctx context.Context, ontologyID uu
 	return nil, nil
 }
 
+func (m *mockEntityRepoForGlossary) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 func (m *mockEntityRepoForGlossary) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepoForGlossary) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }
 
@@ -247,6 +255,14 @@ func (m *mockEntityRepoForGlossary) GetKeyColumnsByEntity(ctx context.Context, e
 }
 
 func (m *mockEntityRepoForGlossary) GetAllKeyColumnsByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityKeyColumn, error) {
+	return nil, nil
+}
+
+func (m *mockEntityRepoForGlossary) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockEntityRepoForGlossary) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
 	return nil, nil
 }
 

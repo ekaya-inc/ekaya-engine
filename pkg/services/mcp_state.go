@@ -148,7 +148,7 @@ func (v *mcpStateValidator) applyUpdate(groupName string, current, update *model
 	// New sub-options
 	current.AllowOntologyMaintenance = update.AllowOntologyMaintenance
 	current.AddQueryTools = update.AddQueryTools
-	current.AddOntologyQuestions = update.AddOntologyQuestions
+	current.AddOntologyMaintenance = update.AddOntologyMaintenance
 	current.CustomTools = update.CustomTools
 
 	// Legacy sub-options (backward compatibility)
@@ -177,7 +177,7 @@ func (v *mcpStateValidator) normalizeState(state map[string]*models.ToolGroupCon
 			// New sub-options
 			config.AllowOntologyMaintenance = false
 			config.AddQueryTools = false
-			config.AddOntologyQuestions = false
+			config.AddOntologyMaintenance = false
 			config.CustomTools = nil
 
 			// Legacy sub-options
@@ -211,7 +211,7 @@ func (v *mcpStateValidator) deepCopy(state map[string]*models.ToolGroupConfig) m
 				// New sub-options
 				AllowOntologyMaintenance: v.AllowOntologyMaintenance,
 				AddQueryTools:            v.AddQueryTools,
-				AddOntologyQuestions:     v.AddOntologyQuestions,
+				AddOntologyMaintenance:   v.AddOntologyMaintenance,
 				CustomTools:              customToolsCopy,
 
 				// Legacy sub-options

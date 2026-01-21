@@ -88,7 +88,15 @@ func (m *mockOntologyEntityRepository) GetByName(ctx context.Context, ontologyID
 	return nil, nil
 }
 
+func (m *mockOntologyEntityRepository) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 func (m *mockOntologyEntityRepository) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockOntologyEntityRepository) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }
 
@@ -145,6 +153,14 @@ func (m *mockOntologyEntityRepository) GetAllKeyColumnsByProject(ctx context.Con
 		return m.keyColumns, nil
 	}
 	return make(map[uuid.UUID][]*models.OntologyEntityKeyColumn), nil
+}
+
+func (m *mockOntologyEntityRepository) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockOntologyEntityRepository) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	return nil, nil
 }
 
 // mockEntityRelationshipRepository is a mock for EntityRelationshipRepository.
@@ -220,6 +236,14 @@ func (m *mockEntityRelationshipRepository) Delete(ctx context.Context, id uuid.U
 	return nil
 }
 
+func (m *mockEntityRelationshipRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (m *mockEntityRelationshipRepository) Update(ctx context.Context, rel *models.EntityRelationship) error {
+	return nil
+}
+
 // mockProjectServiceForOntology is a mock for ProjectService in ontology context tests.
 type mockProjectServiceForOntology struct {
 	datasourceID uuid.UUID
@@ -266,6 +290,14 @@ func (m *mockProjectServiceForOntology) GetAuthServerURL(ctx context.Context, pr
 }
 
 func (m *mockProjectServiceForOntology) UpdateAuthServerURL(ctx context.Context, projectID uuid.UUID, authServerURL string) error {
+	return nil
+}
+
+func (m *mockProjectServiceForOntology) GetAutoApproveSettings(ctx context.Context, projectID uuid.UUID) (*AutoApproveSettings, error) {
+	return nil, nil
+}
+
+func (m *mockProjectServiceForOntology) SetAutoApproveSettings(ctx context.Context, projectID uuid.UUID, settings *AutoApproveSettings) error {
 	return nil
 }
 

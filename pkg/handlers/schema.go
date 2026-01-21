@@ -295,7 +295,8 @@ func (h *SchemaHandler) RefreshSchema(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.schemaService.RefreshDatasourceSchema(r.Context(), projectID, datasourceID)
+	// UI-initiated refresh does not auto-select new tables (users can manually select what they need)
+	result, err := h.schemaService.RefreshDatasourceSchema(r.Context(), projectID, datasourceID, false)
 	if err != nil {
 		h.logger.Error("Failed to refresh schema",
 			zap.String("project_id", projectID.String()),

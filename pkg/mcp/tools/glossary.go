@@ -299,7 +299,7 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 				Definition:  definition,
 				DefiningSQL: sql,
 				Aliases:     aliases,
-				Source:      models.GlossarySourceClient, // Mark as client-created
+				Source:      models.GlossarySourceMCP, // Mark as MCP-created
 			}
 
 			if err := deps.GlossaryService.CreateTerm(tenantCtx, projectID, term); err != nil {
@@ -316,6 +316,14 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 				zap.String("term", termName))
 		} else {
 			// Update existing term
+			// Check precedence: can MCP modify this term?
+			if !canModifyGlossaryTerm(existing.Source, models.GlossarySourceMCP) {
+				return NewErrorResult("precedence_blocked",
+					fmt.Sprintf("Cannot modify glossary term: precedence blocked (existing: %s, modifier: %s). "+
+						"Manual terms cannot be overridden by MCP. Use the UI to modify or delete this term.",
+						existing.Source, models.GlossarySourceMCP)), nil
+			}
+
 			term = existing
 
 			// Update fields if provided (nil means keep existing)
@@ -329,9 +337,9 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 				term.Aliases = aliases
 			}
 
-			// Update source to client if it was previously inferred
+			// Update source to MCP if it was previously inferred
 			if term.Source == models.GlossarySourceInferred {
-				term.Source = models.GlossarySourceClient
+				term.Source = models.GlossarySourceMCP
 			}
 
 			if err := deps.GlossaryService.UpdateTerm(tenantCtx, term); err != nil {
@@ -372,6 +380,32 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 
 		return mcp.NewToolResultText(string(jsonResult)), nil
 	})
+}
+
+// canModifyGlossaryTerm checks if a source can modify a glossary term based on precedence.
+// Precedence hierarchy: Manual (3) > MCP (2) > Inferred (1)
+// Returns true if the modification is allowed, false if blocked by higher precedence.
+func canModifyGlossaryTerm(termSource string, modifierSource string) bool {
+	modifierLevel := precedenceLevelGlossary(modifierSource)
+	existingLevel := precedenceLevelGlossary(termSource)
+
+	// Modifier can change if their level is >= existing level
+	return modifierLevel >= existingLevel
+}
+
+// precedenceLevelGlossary returns the numeric precedence level for a glossary source.
+// Higher number = higher precedence.
+func precedenceLevelGlossary(source string) int {
+	switch source {
+	case models.GlossarySourceManual:
+		return 3
+	case models.GlossarySourceMCP:
+		return 2
+	case models.GlossarySourceInferred:
+		return 1
+	default:
+		return 0 // Unknown source has lowest precedence
+	}
 }
 
 // registerDeleteGlossaryTermTool adds the delete_glossary_term tool for removing business terms.

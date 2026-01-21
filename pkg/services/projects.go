@@ -16,6 +16,9 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
 
+// ErrOntologyNotFound is returned when no active ontology exists for a project.
+var ErrOntologyNotFound = errors.New("no active ontology found for project")
+
 // ProvisionResult contains the result of provisioning a project.
 type ProvisionResult struct {
 	ProjectID       uuid.UUID
@@ -24,6 +27,12 @@ type ProvisionResult struct {
 	ProjectsPageURL string // URL to ekaya-central projects list
 	ProjectPageURL  string // URL to this project in ekaya-central
 	Created         bool   // true if project was created, false if already existed
+}
+
+// AutoApproveSettings contains the auto-approve configuration for a project.
+type AutoApproveSettings struct {
+	SchemaChanges    bool `json:"schema_changes"`    // Auto-approve schema changes (new tables, columns, etc.)
+	InferenceChanges bool `json:"inference_changes"` // Auto-approve inference changes (LLM-generated)
 }
 
 // ProjectService defines the interface for project operations.
@@ -38,6 +47,10 @@ type ProjectService interface {
 	SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string)
 	GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error)
 	UpdateAuthServerURL(ctx context.Context, projectID uuid.UUID, authServerURL string) error
+
+	// Auto-approve settings for living ontology changes
+	GetAutoApproveSettings(ctx context.Context, projectID uuid.UUID) (*AutoApproveSettings, error)
+	SetAutoApproveSettings(ctx context.Context, projectID uuid.UUID, settings *AutoApproveSettings) error
 }
 
 // projectService implements ProjectService.
@@ -45,6 +58,7 @@ type projectService struct {
 	db            *database.DB
 	projectRepo   repositories.ProjectRepository
 	userRepo      repositories.UserRepository
+	ontologyRepo  repositories.OntologyRepository
 	centralClient *central.Client
 	baseURL       string
 	logger        *zap.Logger
@@ -55,6 +69,7 @@ func NewProjectService(
 	db *database.DB,
 	projectRepo repositories.ProjectRepository,
 	userRepo repositories.UserRepository,
+	ontologyRepo repositories.OntologyRepository,
 	centralClient *central.Client,
 	baseURL string,
 	logger *zap.Logger,
@@ -63,6 +78,7 @@ func NewProjectService(
 		db:            db,
 		projectRepo:   projectRepo,
 		userRepo:      userRepo,
+		ontologyRepo:  ontologyRepo,
 		centralClient: centralClient,
 		baseURL:       baseURL,
 		logger:        logger,
@@ -130,6 +146,10 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 		return nil, fmt.Errorf("failed to create project: %w", err)
 	}
 
+	// Create empty ontology for immediate MCP tool use.
+	// This is done within the existing scope since we don't have tenant context yet.
+	s.createEmptyOntology(ctx, projectID)
+
 	// Extract URLs from parameters
 	var papiURL, projectsPageURL, projectPageURL string
 	if params != nil {
@@ -152,6 +172,27 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 		ProjectPageURL:  projectPageURL,
 		Created:         true,
 	}, nil
+}
+
+// createEmptyOntology creates an empty ontology record for the given project.
+// This enables immediate use of MCP ontology tools without requiring extraction.
+// Errors are logged but not propagated since this is best-effort.
+func (s *projectService) createEmptyOntology(ctx context.Context, projectID uuid.UUID) {
+	emptyOntology := &models.TieredOntology{
+		ProjectID:       projectID,
+		Version:         1,
+		IsActive:        true,
+		EntitySummaries: make(map[string]*models.EntitySummary),
+		ColumnDetails:   make(map[string][]models.ColumnDetail),
+		Metadata:        make(map[string]any),
+	}
+
+	if err := s.ontologyRepo.Create(ctx, emptyOntology); err != nil {
+		s.logger.Error("failed to create initial ontology",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err),
+		)
+	}
 }
 
 // GetByID returns a project by its ID.
@@ -281,6 +322,58 @@ func (s *projectService) UpdateAuthServerURL(ctx context.Context, projectID uuid
 	s.logger.Info("Updated auth server URL for project",
 		zap.String("project_id", projectID.String()),
 		zap.String("auth_server_url", authServerURL))
+
+	return nil
+}
+
+// GetAutoApproveSettings retrieves the auto-approve settings from project parameters.
+// Returns default settings (all false) if not configured.
+func (s *projectService) GetAutoApproveSettings(ctx context.Context, projectID uuid.UUID) (*AutoApproveSettings, error) {
+	project, err := s.projectRepo.Get(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get project: %w", err)
+	}
+
+	settings := &AutoApproveSettings{}
+
+	if project.Parameters != nil {
+		if autoApprove, ok := project.Parameters["auto_approve"].(map[string]interface{}); ok {
+			if v, ok := autoApprove["schema_changes"].(bool); ok {
+				settings.SchemaChanges = v
+			}
+			if v, ok := autoApprove["inference_changes"].(bool); ok {
+				settings.InferenceChanges = v
+			}
+		}
+	}
+
+	return settings, nil
+}
+
+// SetAutoApproveSettings updates the auto-approve settings in project parameters.
+func (s *projectService) SetAutoApproveSettings(ctx context.Context, projectID uuid.UUID, settings *AutoApproveSettings) error {
+	project, err := s.projectRepo.Get(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("failed to get project: %w", err)
+	}
+
+	if project.Parameters == nil {
+		project.Parameters = make(map[string]interface{})
+	}
+
+	project.Parameters["auto_approve"] = map[string]interface{}{
+		"schema_changes":    settings.SchemaChanges,
+		"inference_changes": settings.InferenceChanges,
+	}
+
+	if err := s.projectRepo.Update(ctx, project); err != nil {
+		return fmt.Errorf("failed to update project: %w", err)
+	}
+
+	s.logger.Info("Updated auto-approve settings for project",
+		zap.String("project_id", projectID.String()),
+		zap.Bool("schema_changes", settings.SchemaChanges),
+		zap.Bool("inference_changes", settings.InferenceChanges))
 
 	return nil
 }

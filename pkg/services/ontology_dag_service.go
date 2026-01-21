@@ -171,9 +171,10 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 		return nil, fmt.Errorf("get or create ontology: %w", err)
 	}
 
-	// Delete existing entities for fresh discovery
-	if err := s.entityRepo.DeleteByOntology(ctx, ontology.ID); err != nil {
-		return nil, fmt.Errorf("delete existing entities: %w", err)
+	// Delete only inference-created entities for fresh discovery
+	// Manual and MCP entities are preserved
+	if err := s.entityRepo.DeleteInferenceEntitiesByOntology(ctx, ontology.ID); err != nil {
+		return nil, fmt.Errorf("delete inference entities: %w", err)
 	}
 
 	// Create new DAG

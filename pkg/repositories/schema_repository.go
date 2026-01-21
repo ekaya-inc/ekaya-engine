@@ -66,6 +66,10 @@ type SchemaRepository interface {
 	GetPrimaryKeyColumns(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error)
 	// GetNonPKColumnsByExactType returns non-primary-key columns with exact data type match for review candidate discovery.
 	GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error)
+
+	// SelectAllTablesAndColumns marks all tables and columns for a datasource as selected.
+	// Used after schema refresh to auto-select newly discovered tables.
+	SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error
 }
 
 type schemaRepository struct{}
@@ -1668,4 +1672,37 @@ func scanSchemaColumnWithDiscovery(rows pgx.Rows) (*models.SchemaColumn, error) 
 		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
 	return &c, nil
+}
+
+// SelectAllTablesAndColumns marks all tables and their columns as selected for a datasource.
+func (r *schemaRepository) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	// Update all tables to selected (explicit project_id filter in addition to RLS)
+	_, err := scope.Conn.Exec(ctx, `
+		UPDATE engine_schema_tables
+		SET is_selected = true, updated_at = NOW()
+		WHERE project_id = $1 AND datasource_id = $2 AND deleted_at IS NULL
+	`, projectID, datasourceID)
+	if err != nil {
+		return fmt.Errorf("failed to select all tables: %w", err)
+	}
+
+	// Update all columns to selected for the tables in this datasource
+	_, err = scope.Conn.Exec(ctx, `
+		UPDATE engine_schema_columns
+		SET is_selected = true, updated_at = NOW()
+		WHERE table_id IN (
+			SELECT id FROM engine_schema_tables
+			WHERE project_id = $1 AND datasource_id = $2 AND deleted_at IS NULL
+		) AND deleted_at IS NULL
+	`, projectID, datasourceID)
+	if err != nil {
+		return fmt.Errorf("failed to select all columns: %w", err)
+	}
+
+	return nil
 }

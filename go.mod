@@ -11,6 +11,7 @@ require (
 	github.com/gorilla/sessions v1.4.0
 	github.com/ilyakaznacheev/cleanenv v1.5.0
 	github.com/jackc/pgx/v5 v5.7.6
+	github.com/jinzhu/inflection v1.0.0
 	github.com/liushuangls/go-anthropic/v2 v2.17.0
 	github.com/mark3labs/mcp-go v0.43.2
 	github.com/microsoft/go-mssqldb v1.9.5

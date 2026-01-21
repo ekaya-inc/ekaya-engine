@@ -93,7 +93,15 @@ func (m *mockEntityRepoForFinalization) GetByName(ctx context.Context, ontologyI
 	return nil, nil
 }
 
+func (m *mockEntityRepoForFinalization) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 func (m *mockEntityRepoForFinalization) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepoForFinalization) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }
 
@@ -134,6 +142,14 @@ func (m *mockEntityRepoForFinalization) GetKeyColumnsByEntity(ctx context.Contex
 }
 
 func (m *mockEntityRepoForFinalization) GetAllKeyColumnsByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityKeyColumn, error) {
+	return nil, nil
+}
+
+func (m *mockEntityRepoForFinalization) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockEntityRepoForFinalization) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
 	return nil, nil
 }
 
@@ -194,6 +210,14 @@ func (m *mockRelationshipRepoForFinalization) Upsert(ctx context.Context, rel *m
 }
 
 func (m *mockRelationshipRepoForFinalization) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (m *mockRelationshipRepoForFinalization) GetByID(ctx context.Context, id uuid.UUID) (*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (m *mockRelationshipRepoForFinalization) Update(ctx context.Context, rel *models.EntityRelationship) error {
 	return nil
 }
 
@@ -308,6 +332,9 @@ func (m *mockSchemaRepoForFinalization) GetPrimaryKeyColumns(ctx context.Context
 }
 func (m *mockSchemaRepoForFinalization) GetNonPKColumnsByExactType(ctx context.Context, projectID, datasourceID uuid.UUID, dataType string) ([]*models.SchemaColumn, error) {
 	return nil, nil
+}
+func (m *mockSchemaRepoForFinalization) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
+	return nil
 }
 
 type mockLLMClient struct {

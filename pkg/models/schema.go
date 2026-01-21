@@ -203,12 +203,33 @@ const (
 
 // RefreshResult contains statistics from a schema refresh operation.
 type RefreshResult struct {
-	TablesUpserted       int   `json:"tables_upserted"`
-	TablesDeleted        int64 `json:"tables_deleted"`
-	ColumnsUpserted      int   `json:"columns_upserted"`
-	ColumnsDeleted       int64 `json:"columns_deleted"`
-	RelationshipsCreated int   `json:"relationships_created"`
-	RelationshipsDeleted int64 `json:"relationships_deleted"`
+	TablesUpserted       int      `json:"tables_upserted"`
+	TablesDeleted        int64    `json:"tables_deleted"`
+	ColumnsUpserted      int      `json:"columns_upserted"`
+	ColumnsDeleted       int64    `json:"columns_deleted"`
+	RelationshipsCreated int      `json:"relationships_created"`
+	RelationshipsDeleted int64    `json:"relationships_deleted"`
+	NewTableNames        []string `json:"new_table_names,omitempty"`
+	RemovedTableNames    []string `json:"removed_table_names,omitempty"`
+	// Detailed column changes for change detection (PLAN-03)
+	NewColumns      []RefreshColumnChange       `json:"new_columns,omitempty"`
+	RemovedColumns  []RefreshColumnChange       `json:"removed_columns,omitempty"`
+	ModifiedColumns []RefreshColumnModification `json:"modified_columns,omitempty"`
+}
+
+// RefreshColumnChange represents a column that was added or removed during refresh.
+type RefreshColumnChange struct {
+	TableName  string `json:"table_name"`
+	ColumnName string `json:"column_name"`
+	DataType   string `json:"data_type"`
+}
+
+// RefreshColumnModification represents a column whose type changed during refresh.
+type RefreshColumnModification struct {
+	TableName  string `json:"table_name"`
+	ColumnName string `json:"column_name"`
+	OldType    string `json:"old_type"`
+	NewType    string `json:"new_type"`
 }
 
 // DatasourceSchema represents the complete schema for a customer's datasource.

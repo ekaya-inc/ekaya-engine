@@ -138,13 +138,10 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 			}
 		}
 
-		// Get active ontology
-		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
+		// Get or create active ontology (enables immediate use without extraction)
+		ontology, err := ensureOntologyExists(tenantCtx, deps.OntologyRepo, projectID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get active ontology: %w", err)
-		}
-		if ontology == nil {
-			return nil, fmt.Errorf("no active ontology found for project")
+			return NewErrorResult("ontology_error", err.Error()), nil
 		}
 
 		// Get from entity
@@ -175,8 +172,23 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 		var rel *models.EntityRelationship
 		isNew := existingRel == nil
 
+		// If relationship exists, check precedence before allowing update
+		if !isNew {
+			// Check precedence: can MCP modify this relationship?
+			if !canModifyRelationship(existingRel.CreatedBy, existingRel.UpdatedBy, models.ProvenanceMCP) {
+				effectiveSource := existingRel.CreatedBy
+				if existingRel.UpdatedBy != nil && *existingRel.UpdatedBy != "" {
+					effectiveSource = *existingRel.UpdatedBy
+				}
+				return NewErrorResult("precedence_blocked",
+					fmt.Sprintf("Cannot modify relationship: precedence blocked (existing: %s, modifier: %s). "+
+						"Manual changes cannot be overridden by MCP. Use the UI to modify or delete this relationship.",
+						effectiveSource, models.ProvenanceMCP)), nil
+			}
+		}
+
 		if isNew {
-			// Create new relationship
+			// Create new relationship with MCP provenance
 			// We need column details for the unique constraint, but for agent-created relationships,
 			// we'll use placeholder values since the actual column details aren't known
 			rel = &models.EntityRelationship{
@@ -193,6 +205,7 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 				Confidence:         1.0,
 				Status:             models.RelationshipStatusConfirmed,
 				Cardinality:        "unknown",
+				CreatedBy:          models.ProvenanceMCP,
 			}
 			if cardinality != "" {
 				rel.Cardinality = cardinality
@@ -204,8 +217,10 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 				rel.Association = &label
 			}
 		} else {
-			// Update existing relationship
+			// Update existing relationship with MCP provenance
 			rel = existingRel
+			updatedBy := models.ProvenanceMCP
+			rel.UpdatedBy = &updatedBy
 			if description != "" {
 				rel.Description = &description
 			}
@@ -298,13 +313,10 @@ func registerDeleteRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 			return NewErrorResult("invalid_parameters", "parameter 'to_entity' cannot be empty"), nil
 		}
 
-		// Get active ontology
-		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
+		// Get or create active ontology (enables immediate use without extraction)
+		ontology, err := ensureOntologyExists(tenantCtx, deps.OntologyRepo, projectID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get active ontology: %w", err)
-		}
-		if ontology == nil {
-			return nil, fmt.Errorf("no active ontology found for project")
+			return NewErrorResult("ontology_error", err.Error()), nil
 		}
 
 		// Get from entity
@@ -370,4 +382,39 @@ type deleteRelationshipResponse struct {
 	FromEntity string `json:"from_entity"`
 	ToEntity   string `json:"to_entity"`
 	Deleted    bool   `json:"deleted"` // false if relationship didn't exist (idempotent)
+}
+
+// canModifyRelationship checks if a source can modify a relationship based on precedence.
+// Precedence hierarchy: Manual (3) > MCP (2) > Inference (1)
+// Returns true if the modification is allowed, false if blocked by higher precedence.
+func canModifyRelationship(elementCreatedBy string, elementUpdatedBy *string, modifierSource string) bool {
+	modifierLevel := precedenceLevelRelationship(modifierSource)
+
+	// Check against updated_by if present, otherwise check created_by
+	var existingSource string
+	if elementUpdatedBy != nil && *elementUpdatedBy != "" {
+		existingSource = *elementUpdatedBy
+	} else {
+		existingSource = elementCreatedBy
+	}
+
+	existingLevel := precedenceLevelRelationship(existingSource)
+
+	// Modifier can change if their level is >= existing level
+	return modifierLevel >= existingLevel
+}
+
+// precedenceLevelRelationship returns the numeric precedence level for a source.
+// Higher number = higher precedence.
+func precedenceLevelRelationship(source string) int {
+	switch source {
+	case models.ProvenanceManual:
+		return 3
+	case models.ProvenanceMCP:
+		return 2
+	case models.ProvenanceInference:
+		return 1
+	default:
+		return 0 // Unknown source has lowest precedence
+	}
 }

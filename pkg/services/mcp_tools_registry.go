@@ -40,6 +40,12 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "dismiss_ontology_question", Description: "Mark a question as not worth pursuing (e.g., 'Column appears unused, legacy')", ToolGroup: ToolGroupDeveloper},
 	{Name: "search_schema", Description: "Full-text search across tables, columns, and entities using pattern matching with relevance ranking", ToolGroup: ToolGroupDeveloper},
 	{Name: "explain_query", Description: "Analyze SQL query performance using EXPLAIN ANALYZE with execution plan and optimization hints", ToolGroup: ToolGroupDeveloper},
+	{Name: "refresh_schema", Description: "Refresh schema from datasource and auto-select new tables/columns", ToolGroup: ToolGroupDeveloper},
+	{Name: "scan_data_changes", Description: "Scan data for changes like new enum values and potential FK patterns", ToolGroup: ToolGroupDeveloper},
+	{Name: "list_pending_changes", Description: "List pending ontology changes detected from schema or data analysis", ToolGroup: ToolGroupDeveloper},
+	{Name: "approve_change", Description: "Approve a pending ontology change and apply it with precedence rules", ToolGroup: ToolGroupDeveloper},
+	{Name: "reject_change", Description: "Reject a pending ontology change without applying it", ToolGroup: ToolGroupDeveloper},
+	{Name: "approve_all_changes", Description: "Approve all pending changes that can be applied (respects precedence)", ToolGroup: ToolGroupDeveloper},
 
 	// Business user tools (approved_queries group)
 	// These read-only query tools enable business users to answer ad-hoc questions

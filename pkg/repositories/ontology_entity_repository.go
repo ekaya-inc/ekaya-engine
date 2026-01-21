@@ -20,7 +20,9 @@ type OntologyEntityRepository interface {
 	GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error)
 	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error)
 	GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error)
+	GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error)
 	DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error
+	DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error
 	Update(ctx context.Context, entity *models.OntologyEntity) error
 
 	// Soft delete operations
@@ -37,6 +39,10 @@ type OntologyEntityRepository interface {
 	CreateKeyColumn(ctx context.Context, keyColumn *models.OntologyEntityKeyColumn) error
 	GetKeyColumnsByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityKeyColumn, error)
 	GetAllKeyColumnsByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityKeyColumn, error)
+
+	// Occurrence operations
+	CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error)
+	GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error)
 }
 
 type ontologyEntityRepository struct{}
@@ -66,17 +72,22 @@ func (r *ontologyEntityRepository) Create(ctx context.Context, entity *models.On
 		entity.ID = uuid.New()
 	}
 
+	// Default created_by to 'inference' if not set
+	if entity.CreatedBy == "" {
+		entity.CreatedBy = models.ProvenanceInference
+	}
+
 	query := `
 		INSERT INTO engine_ontology_entities (
 			id, project_id, ontology_id, name, description, domain,
 			primary_schema, primary_table, primary_column,
-			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+			created_by, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		entity.ID, entity.ProjectID, entity.OntologyID, entity.Name, entity.Description, entity.Domain,
 		entity.PrimarySchema, entity.PrimaryTable, entity.PrimaryColumn,
-		entity.CreatedAt, entity.UpdatedAt,
+		entity.CreatedBy, entity.CreatedAt, entity.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create ontology entity: %w", err)
@@ -95,7 +106,7 @@ func (r *ontologyEntityRepository) GetByOntology(ctx context.Context, ontologyID
 		SELECT id, project_id, ontology_id, name, description, domain,
 		       primary_schema, primary_table, primary_column,
 		       is_deleted, deletion_reason,
-		       created_at, updated_at
+		       created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_entities
 		WHERE ontology_id = $1 AND NOT is_deleted
 		ORDER BY name`
@@ -132,7 +143,7 @@ func (r *ontologyEntityRepository) GetByProject(ctx context.Context, projectID u
 		SELECT e.id, e.project_id, e.ontology_id, e.name, e.description, e.domain,
 		       e.primary_schema, e.primary_table, e.primary_column,
 		       e.is_deleted, e.deletion_reason,
-		       e.created_at, e.updated_at
+		       e.created_by, e.updated_by, e.created_at, e.updated_at
 		FROM engine_ontology_entities e
 		JOIN engine_ontologies o ON e.ontology_id = o.id
 		WHERE e.project_id = $1 AND o.is_active = true AND NOT e.is_deleted
@@ -170,11 +181,40 @@ func (r *ontologyEntityRepository) GetByName(ctx context.Context, ontologyID uui
 		SELECT id, project_id, ontology_id, name, description, domain,
 		       primary_schema, primary_table, primary_column,
 		       is_deleted, deletion_reason,
-		       created_at, updated_at
+		       created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_entities
 		WHERE ontology_id = $1 AND name = $2 AND NOT is_deleted`
 
 	row := scope.Conn.QueryRow(ctx, query, ontologyID, name)
+	entity, err := scanOntologyEntity(row)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil // Entity not found
+		}
+		return nil, err
+	}
+
+	return entity, nil
+}
+
+// GetByProjectAndName finds an entity by name within the active ontology for a project.
+// This uses a JOIN to engine_ontologies (like GetByProject) rather than requiring an exact ontology_id.
+func (r *ontologyEntityRepository) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT e.id, e.project_id, e.ontology_id, e.name, e.description, e.domain,
+		       e.primary_schema, e.primary_table, e.primary_column,
+		       e.is_deleted, e.deletion_reason,
+		       e.created_by, e.updated_by, e.created_at, e.updated_at
+		FROM engine_ontology_entities e
+		JOIN engine_ontologies o ON e.ontology_id = o.id
+		WHERE e.project_id = $1 AND e.name = $2 AND o.is_active = true AND NOT e.is_deleted`
+
+	row := scope.Conn.QueryRow(ctx, query, projectID, name)
 	entity, err := scanOntologyEntity(row)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -202,6 +242,24 @@ func (r *ontologyEntityRepository) DeleteByOntology(ctx context.Context, ontolog
 	return nil
 }
 
+// DeleteInferenceEntitiesByOntology deletes only inference-created entities.
+// Preserves entities created by manual or MCP sources.
+func (r *ontologyEntityRepository) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `DELETE FROM engine_ontology_entities WHERE ontology_id = $1 AND created_by = 'inference'`
+
+	_, err := scope.Conn.Exec(ctx, query, ontologyID)
+	if err != nil {
+		return fmt.Errorf("failed to delete inference entities: %w", err)
+	}
+
+	return nil
+}
+
 // ============================================================================
 // Entity CRUD Operations
 // ============================================================================
@@ -216,7 +274,7 @@ func (r *ontologyEntityRepository) GetByID(ctx context.Context, entityID uuid.UU
 		SELECT id, project_id, ontology_id, name, description, domain,
 		       primary_schema, primary_table, primary_column,
 		       is_deleted, deletion_reason,
-		       created_at, updated_at
+		       created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_entities
 		WHERE id = $1`
 
@@ -244,13 +302,13 @@ func (r *ontologyEntityRepository) Update(ctx context.Context, entity *models.On
 		UPDATE engine_ontology_entities
 		SET name = $2, description = $3, domain = $4,
 		    primary_schema = $5, primary_table = $6, primary_column = $7,
-		    updated_at = $8
+		    updated_by = $8, updated_at = $9
 		WHERE id = $1`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		entity.ID, entity.Name, entity.Description, entity.Domain,
 		entity.PrimarySchema, entity.PrimaryTable, entity.PrimaryColumn,
-		entity.UpdatedAt,
+		entity.UpdatedBy, entity.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update entity: %w", err)
@@ -429,7 +487,7 @@ func scanOntologyEntity(row pgx.Row) (*models.OntologyEntity, error) {
 		&e.ID, &e.ProjectID, &e.OntologyID, &e.Name, &e.Description, &domain,
 		&e.PrimarySchema, &e.PrimaryTable, &e.PrimaryColumn,
 		&e.IsDeleted, &e.DeletionReason,
-		&e.CreatedAt, &e.UpdatedAt,
+		&e.CreatedBy, &e.UpdatedBy, &e.CreatedAt, &e.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -576,4 +634,24 @@ func scanOntologyEntityKeyColumn(row pgx.Row) (*models.OntologyEntityKeyColumn, 
 	}
 
 	return &kc, nil
+}
+
+// ============================================================================
+// Occurrence Operations
+// ============================================================================
+// NOTE: The engine_ontology_entity_occurrences table was dropped in migration 030.
+// These methods are kept for interface compatibility but return empty results.
+
+// CountOccurrencesByEntity returns the count of non-deleted occurrences for an entity.
+// NOTE: Returns 0 - the occurrences table was dropped in migration 030.
+func (r *ontologyEntityRepository) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
+	// Table dropped in migration 030 - return 0 for interface compatibility
+	return 0, nil
+}
+
+// GetOccurrenceTablesByEntity returns distinct table names where an entity has occurrences.
+// NOTE: Returns empty slice - the occurrences table was dropped in migration 030.
+func (r *ontologyEntityRepository) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	// Table dropped in migration 030 - return empty for interface compatibility
+	return []string{}, nil
 }

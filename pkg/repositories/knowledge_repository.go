@@ -40,10 +40,30 @@ func (r *knowledgeRepository) Upsert(ctx context.Context, fact *models.Knowledge
 
 	now := time.Now()
 	fact.UpdatedAt = now
-	if fact.ID == uuid.Nil {
-		fact.ID = uuid.New()
-		fact.CreatedAt = now
+
+	// If ID is provided, update by ID (explicit update mode)
+	if fact.ID != uuid.Nil {
+		query := `
+			UPDATE engine_project_knowledge
+			SET fact_type = $2, key = $3, value = $4, context = $5, updated_at = $6
+			WHERE id = $1
+			RETURNING created_at`
+
+		err := scope.Conn.QueryRow(ctx, query,
+			fact.ID, fact.FactType, fact.Key, fact.Value, fact.Context, fact.UpdatedAt,
+		).Scan(&fact.CreatedAt)
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				return fmt.Errorf("fact with id %s not found", fact.ID)
+			}
+			return fmt.Errorf("failed to update knowledge fact: %w", err)
+		}
+		return nil
 	}
+
+	// No ID provided - upsert by (project_id, fact_type, key)
+	fact.ID = uuid.New()
+	fact.CreatedAt = now
 
 	query := `
 		INSERT INTO engine_project_knowledge (

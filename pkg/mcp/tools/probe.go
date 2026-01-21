@@ -20,14 +20,15 @@ import (
 
 // ProbeToolDeps contains dependencies for probe tools.
 type ProbeToolDeps struct {
-	DB               *database.DB
-	MCPConfigService services.MCPConfigService
-	SchemaRepo       repositories.SchemaRepository
-	OntologyRepo     repositories.OntologyRepository
-	EntityRepo       repositories.OntologyEntityRepository
-	RelationshipRepo repositories.EntityRelationshipRepository
-	ProjectService   services.ProjectService
-	Logger           *zap.Logger
+	DB                 *database.DB
+	MCPConfigService   services.MCPConfigService
+	SchemaRepo         repositories.SchemaRepository
+	OntologyRepo       repositories.OntologyRepository
+	EntityRepo         repositories.OntologyEntityRepository
+	RelationshipRepo   repositories.EntityRelationshipRepository
+	ColumnMetadataRepo repositories.ColumnMetadataRepository
+	ProjectService     services.ProjectService
+	Logger             *zap.Logger
 }
 
 // GetDB implements ToolAccessDeps.
@@ -354,6 +355,48 @@ func probeColumn(ctx context.Context, deps *ProbeToolDeps, projectID uuid.UUID, 
 		}
 	}
 
+	// Fallback: check engine_column_metadata for approved changes not yet in ontology
+	// This handles the case where approve_change writes to column_metadata but not ontology
+	if deps.ColumnMetadataRepo != nil {
+		columnMeta, err := deps.ColumnMetadataRepo.GetByTableColumn(ctx, projectID, tableName, columnName)
+		if err != nil {
+			deps.Logger.Warn("Failed to get column metadata fallback",
+				zap.String("project_id", projectID.String()),
+				zap.String("table", tableName),
+				zap.String("column", columnName),
+				zap.Error(err))
+		} else if columnMeta != nil {
+			// Initialize semantic section if not already present
+			if response.Semantic == nil {
+				response.Semantic = &probeColumnSemantic{}
+			}
+
+			// Merge enum values if present in column_metadata but not in ontology response
+			if len(columnMeta.EnumValues) > 0 && len(response.Semantic.EnumLabels) == 0 {
+				enumLabels := make(map[string]string)
+				for _, ev := range columnMeta.EnumValues {
+					enumLabels[ev] = ev // Value as its own label (no enrichment from approve_change)
+				}
+				response.Semantic.EnumLabels = enumLabels
+			}
+
+			// Merge description if present in column_metadata but missing from ontology
+			if columnMeta.Description != nil && *columnMeta.Description != "" && response.Semantic.Description == "" {
+				response.Semantic.Description = *columnMeta.Description
+			}
+
+			// Merge entity if present in column_metadata but missing from ontology
+			if columnMeta.Entity != nil && *columnMeta.Entity != "" && response.Semantic.Entity == "" {
+				response.Semantic.Entity = *columnMeta.Entity
+			}
+
+			// Merge role if present in column_metadata but missing from ontology
+			if columnMeta.Role != nil && *columnMeta.Role != "" && response.Semantic.Role == "" {
+				response.Semantic.Role = *columnMeta.Role
+			}
+		}
+	}
+
 	// Add sample values from persisted data (low-cardinality columns ≤50 distinct values)
 	if len(column.SampleValues) > 0 {
 		response.SampleValues = column.SampleValues
@@ -485,7 +528,9 @@ func probeRelationships(ctx context.Context, deps *ProbeToolDeps, projectID uuid
 	}
 
 	// Get all entities to build entity ID -> name map
-	entities, err := deps.EntityRepo.GetByOntology(ctx, ontology.ID)
+	// Use GetByProject (not GetByOntology) to match the pattern used by get_ontology,
+	// ensuring entities created via MCP tools are found regardless of which ontology ID they have
+	entities, err := deps.EntityRepo.GetByProject(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get entities: %w", err)
 	}

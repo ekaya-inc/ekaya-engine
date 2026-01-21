@@ -95,13 +95,27 @@ func (m *mockEntityRepo) GetByProject(ctx context.Context, projectID uuid.UUID) 
 func (m *mockEntityRepo) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {
 	return nil, nil
 }
+func (m *mockEntityRepo) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	return nil, nil
+}
 func (m *mockEntityRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+func (m *mockEntityRepo) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }
 func (m *mockEntityRepo) GetAllAliasesByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityAlias, error) {
 	return nil, nil
 }
 func (m *mockEntityRepo) GetAllKeyColumnsByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityKeyColumn, error) {
+	return nil, nil
+}
+
+func (m *mockEntityRepo) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockEntityRepo) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
 	return nil, nil
 }
 
@@ -155,6 +169,12 @@ func (m *mockRelationshipRepo) Upsert(ctx context.Context, rel *models.EntityRel
 	return nil
 }
 func (m *mockRelationshipRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+func (m *mockRelationshipRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.EntityRelationship, error) {
+	return nil, nil
+}
+func (m *mockRelationshipRepo) Update(ctx context.Context, rel *models.EntityRelationship) error {
 	return nil
 }
 

@@ -84,17 +84,8 @@ func registerGetEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			return NewErrorResult("invalid_parameters", "parameter 'name' cannot be empty"), nil
 		}
 
-		// Get active ontology
-		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get active ontology: %w", err)
-		}
-		if ontology == nil {
-			return nil, fmt.Errorf("no active ontology found for project")
-		}
-
-		// Get entity by name
-		entity, err := deps.OntologyEntityRepo.GetByName(tenantCtx, ontology.ID, name)
+		// Get entity by name using project-scoped lookup (joins to active ontology)
+		entity, err := deps.OntologyEntityRepo.GetByProjectAndName(tenantCtx, projectID, name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get entity: %w", err)
 		}
@@ -115,7 +106,7 @@ func registerGetEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 		}
 
 		// Get relationships where this entity is the source
-		sourceRels, err := deps.EntityRelationshipRepo.GetByOntology(tenantCtx, ontology.ID)
+		sourceRels, err := deps.EntityRelationshipRepo.GetByOntology(tenantCtx, entity.OntologyID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get entity relationships: %w", err)
 		}
@@ -127,7 +118,7 @@ func registerGetEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 		}
 
 		// Get all entities for mapping IDs to names
-		allEntities, err := deps.OntologyEntityRepo.GetByOntology(tenantCtx, ontology.ID)
+		allEntities, err := deps.OntologyEntityRepo.GetByOntology(tenantCtx, entity.OntologyID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get all entities: %w", err)
 		}
@@ -364,17 +355,8 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			}
 		}
 
-		// Get active ontology
-		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get active ontology: %w", err)
-		}
-		if ontology == nil {
-			return nil, fmt.Errorf("no active ontology found for project")
-		}
-
-		// Check if entity exists
-		existingEntity, err := deps.OntologyEntityRepo.GetByName(tenantCtx, ontology.ID, name)
+		// Check if entity exists using project-scoped lookup (joins to active ontology)
+		existingEntity, err := deps.OntologyEntityRepo.GetByProjectAndName(tenantCtx, projectID, name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check for existing entity: %w", err)
 		}
@@ -382,13 +364,35 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 		var entityID uuid.UUID
 		isNew := existingEntity == nil
 
+		// If entity exists, check precedence before allowing update
+		if !isNew {
+			// Check precedence: can MCP modify this entity?
+			if !canModifyEntity(existingEntity.CreatedBy, existingEntity.UpdatedBy, models.ProvenanceMCP) {
+				effectiveSource := existingEntity.CreatedBy
+				if existingEntity.UpdatedBy != nil && *existingEntity.UpdatedBy != "" {
+					effectiveSource = *existingEntity.UpdatedBy
+				}
+				return NewErrorResult("precedence_blocked",
+					fmt.Sprintf("Cannot modify entity: precedence blocked (existing: %s, modifier: %s). "+
+						"Manual changes cannot be overridden by MCP. Use the UI to modify or delete this entity.",
+						effectiveSource, models.ProvenanceMCP)), nil
+			}
+		}
+
 		if isNew {
-			// Create new entity
+			// Get or create active ontology for new entity creation
+			ontology, err := ensureOntologyExists(tenantCtx, deps.OntologyRepo, projectID)
+			if err != nil {
+				return NewErrorResult("ontology_error", err.Error()), nil
+			}
+
+			// Create new entity with MCP provenance
 			newEntity := &models.OntologyEntity{
 				ProjectID:   projectID,
 				OntologyID:  ontology.ID,
 				Name:        name,
 				Description: description,
+				CreatedBy:   models.ProvenanceMCP,
 				// Note: PrimaryTable, PrimaryColumn, Domain, PrimarySchema are typically set during discovery
 				// For agent updates, we leave them empty or preserve existing values
 			}
@@ -397,10 +401,12 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			}
 			entityID = newEntity.ID
 		} else {
-			// Update existing entity
+			// Update existing entity with MCP provenance
 			entityID = existingEntity.ID
 			if description != "" {
 				existingEntity.Description = description
+				updatedBy := models.ProvenanceMCP
+				existingEntity.UpdatedBy = &updatedBy
 				if err := deps.OntologyEntityRepo.Update(tenantCtx, existingEntity); err != nil {
 					return nil, fmt.Errorf("failed to update entity: %w", err)
 				}
@@ -543,17 +549,8 @@ func registerDeleteEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			), nil
 		}
 
-		// Get active ontology
-		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get active ontology: %w", err)
-		}
-		if ontology == nil {
-			return nil, fmt.Errorf("no active ontology found for project")
-		}
-
-		// Get entity by name
-		entity, err := deps.OntologyEntityRepo.GetByName(tenantCtx, ontology.ID, name)
+		// Get entity by name using project-scoped lookup (joins to active ontology)
+		entity, err := deps.OntologyEntityRepo.GetByProjectAndName(tenantCtx, projectID, name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get entity: %w", err)
 		}
@@ -566,7 +563,7 @@ func registerDeleteEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 
 		// Check for relationships (both as source and target)
 		// Get relationships where this entity is the source
-		sourceRels, err := deps.EntityRelationshipRepo.GetByOntology(tenantCtx, ontology.ID)
+		sourceRels, err := deps.EntityRelationshipRepo.GetByOntology(tenantCtx, entity.OntologyID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check relationships: %w", err)
 		}
@@ -603,53 +600,9 @@ func registerDeleteEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			), nil
 		}
 
-		// Check for occurrences in schema
-		// Note: Occurrences are stored in engine_ontology_entity_occurrences table
-		// We need to query it to check if this entity has any occurrences
-		scope, ok := database.GetTenantScope(tenantCtx)
-		if !ok || scope == nil {
-			return nil, fmt.Errorf("tenant scope not found in context")
-		}
-
-		var occurrenceCount int
-		occQuery := `
-			SELECT COUNT(*)
-			FROM engine_ontology_entity_occurrences
-			WHERE entity_id = $1 AND is_deleted = false`
-		if err := scope.Conn.QueryRow(ctx, occQuery, entity.ID).Scan(&occurrenceCount); err != nil {
-			return nil, fmt.Errorf("failed to check occurrences: %w", err)
-		}
-
-		if occurrenceCount > 0 {
-			// Get sample tables for error message
-			var tables []string
-			tablesQuery := `
-				SELECT DISTINCT table_name
-				FROM engine_ontology_entity_occurrences
-				WHERE entity_id = $1 AND is_deleted = false
-				LIMIT 5`
-			rows, err := scope.Conn.Query(ctx, tablesQuery, entity.ID)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get occurrence tables: %w", err)
-			}
-			defer rows.Close()
-			for rows.Next() {
-				var tableName string
-				if err := rows.Scan(&tableName); err != nil {
-					return nil, fmt.Errorf("failed to scan table name: %w", err)
-				}
-				tables = append(tables, tableName)
-			}
-
-			return NewErrorResultWithDetails(
-				"resource_conflict",
-				fmt.Sprintf("cannot delete entity %q - still referenced in %d schema occurrence(s)", name, occurrenceCount),
-				map[string]any{
-					"occurrence_count": occurrenceCount,
-					"tables":           tables,
-				},
-			), nil
-		}
+		// Note: Occurrence checking was removed after migration 030 dropped the
+		// engine_ontology_entity_occurrences table. Entity deletion no longer
+		// requires checking for schema occurrences.
 
 		// Soft delete the entity
 		reason := "Deleted via MCP agent"
@@ -711,4 +664,39 @@ type updateEntityResponse struct {
 type deleteEntityResponse struct {
 	Name    string `json:"name"`
 	Deleted bool   `json:"deleted"`
+}
+
+// canModifyEntity checks if a source can modify an entity based on precedence.
+// Precedence hierarchy: Manual (3) > MCP (2) > Inference (1)
+// Returns true if the modification is allowed, false if blocked by higher precedence.
+func canModifyEntity(elementCreatedBy string, elementUpdatedBy *string, modifierSource string) bool {
+	modifierLevel := precedenceLevelEntity(modifierSource)
+
+	// Check against updated_by if present, otherwise check created_by
+	var existingSource string
+	if elementUpdatedBy != nil && *elementUpdatedBy != "" {
+		existingSource = *elementUpdatedBy
+	} else {
+		existingSource = elementCreatedBy
+	}
+
+	existingLevel := precedenceLevelEntity(existingSource)
+
+	// Modifier can change if their level is >= existing level
+	return modifierLevel >= existingLevel
+}
+
+// precedenceLevelEntity returns the numeric precedence level for a source.
+// Higher number = higher precedence.
+func precedenceLevelEntity(source string) int {
+	switch source {
+	case models.ProvenanceManual:
+		return 3
+	case models.ProvenanceMCP:
+		return 2
+	case models.ProvenanceInference:
+		return 1
+	default:
+		return 0 // Unknown source has lowest precedence
+	}
 }

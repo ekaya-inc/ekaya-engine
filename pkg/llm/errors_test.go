@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/sashabaranov/go-openai"
 )
 
 // TestError_Error_WithStatusCode tests Error.Error() includes status code
@@ -368,5 +370,87 @@ func TestClassifyError_RateLimitedType(t *testing.T) {
 				t.Errorf("expected type %s, got %s", tt.expected, result.Type)
 			}
 		})
+	}
+}
+
+// TestClassifyError_RequestError_NilErr tests that openai.RequestError with nil Err
+// doesn't produce "%!s(<nil>)" in the error message (library bug workaround)
+func TestClassifyError_RequestError_NilErr(t *testing.T) {
+	// This reproduces the bug in go-openai where RequestError.Error() uses %s on nil
+	reqErr := &openai.RequestError{
+		HTTPStatus:     "400 Bad Request",
+		HTTPStatusCode: 400,
+		Err:            nil, // nil error causes "%!s(<nil>)" in library's Error()
+		Body:           []byte(`{"object":"error","message":"CUDA error: CUBLAS_STATUS_INTERNAL_ERROR"}`),
+	}
+
+	result := ClassifyError(reqErr)
+
+	// Should NOT contain the formatting artifact
+	errStr := result.Error()
+	if strings.Contains(errStr, "%!s(<nil>)") {
+		t.Errorf("error message contains formatting artifact '%%!s(<nil>)': %s", errStr)
+	}
+
+	// Should contain the actual error body
+	if !strings.Contains(errStr, "CUDA error") {
+		t.Errorf("expected error message to contain 'CUDA error', got: %s", errStr)
+	}
+
+	// CUDA errors should be retryable
+	if !result.Retryable {
+		t.Error("CUDA errors should be retryable")
+	}
+
+	// Should have correct status code
+	if result.StatusCode != 400 {
+		t.Errorf("expected status code 400, got %d", result.StatusCode)
+	}
+}
+
+// TestClassifyError_RequestError_WithUnderlyingErr tests RequestError with a real underlying error
+func TestClassifyError_RequestError_WithUnderlyingErr(t *testing.T) {
+	underlyingErr := errors.New("network timeout")
+	reqErr := &openai.RequestError{
+		HTTPStatus:     "503 Service Unavailable",
+		HTTPStatusCode: 503,
+		Err:            underlyingErr,
+		Body:           []byte(`{"error":"service temporarily unavailable"}`),
+	}
+
+	result := ClassifyError(reqErr)
+
+	// Should have the underlying error as cause
+	if result.Cause != underlyingErr {
+		t.Error("expected underlying error to be preserved as Cause")
+	}
+
+	// 5xx errors should be retryable
+	if !result.Retryable {
+		t.Error("5xx errors should be retryable")
+	}
+
+	if result.StatusCode != 503 {
+		t.Errorf("expected status code 503, got %d", result.StatusCode)
+	}
+}
+
+// TestClassifyError_RequestError_RateLimit tests RequestError for rate limiting
+func TestClassifyError_RequestError_RateLimit(t *testing.T) {
+	reqErr := &openai.RequestError{
+		HTTPStatus:     "429 Too Many Requests",
+		HTTPStatusCode: 429,
+		Err:            nil,
+		Body:           []byte(`{"error":"rate limit exceeded"}`),
+	}
+
+	result := ClassifyError(reqErr)
+
+	if result.Type != ErrorTypeRateLimited {
+		t.Errorf("expected type %s, got %s", ErrorTypeRateLimited, result.Type)
+	}
+
+	if !result.Retryable {
+		t.Error("rate limit errors should be retryable")
 	}
 }

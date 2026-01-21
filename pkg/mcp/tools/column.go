@@ -18,12 +18,13 @@ import (
 
 // ColumnToolDeps contains dependencies for column metadata tools.
 type ColumnToolDeps struct {
-	DB               *database.DB
-	MCPConfigService services.MCPConfigService
-	OntologyRepo     repositories.OntologyRepository
-	SchemaRepo       repositories.SchemaRepository
-	ProjectService   services.ProjectService
-	Logger           *zap.Logger
+	DB                 *database.DB
+	MCPConfigService   services.MCPConfigService
+	OntologyRepo       repositories.OntologyRepository
+	SchemaRepo         repositories.SchemaRepository
+	ColumnMetadataRepo repositories.ColumnMetadataRepository
+	ProjectService     services.ProjectService
+	Logger             *zap.Logger
 }
 
 // GetDB implements ToolAccessDeps.
@@ -188,13 +189,10 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 				fmt.Sprintf("column %q not found in table %q", column, table)), nil
 		}
 
-		// Get active ontology
-		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
+		// Get or create active ontology (enables immediate use without extraction)
+		ontology, err := ensureOntologyExists(tenantCtx, deps.OntologyRepo, projectID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get active ontology: %w", err)
-		}
-		if ontology == nil {
-			return nil, fmt.Errorf("no active ontology found for project")
+			return NewErrorResult("ontology_error", err.Error()), nil
 		}
 
 		// Get existing column details for this table
@@ -251,6 +249,53 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 		// Save updated column details back to ontology
 		if err := deps.OntologyRepo.UpdateColumnDetails(tenantCtx, projectID, table, existingColumns); err != nil {
 			return nil, fmt.Errorf("failed to update column details: %w", err)
+		}
+
+		// Also track provenance in column_metadata table if available
+		if deps.ColumnMetadataRepo != nil {
+			// Check if existing metadata exists and verify precedence
+			existing, err := deps.ColumnMetadataRepo.GetByTableColumn(tenantCtx, projectID, table, column)
+			if err != nil {
+				return nil, fmt.Errorf("failed to check existing column metadata: %w", err)
+			}
+
+			// If metadata exists, check precedence before updating
+			if existing != nil {
+				if !canModify(existing.CreatedBy, existing.UpdatedBy, models.ProvenanceMCP) {
+					effectiveSource := existing.CreatedBy
+					if existing.UpdatedBy != nil && *existing.UpdatedBy != "" {
+						effectiveSource = *existing.UpdatedBy
+					}
+					return NewErrorResult("precedence_blocked",
+						fmt.Sprintf("Cannot modify column metadata: precedence blocked (existing: %s, modifier: %s). "+
+							"Admin changes cannot be overridden by MCP. Use the UI to modify or delete this metadata.",
+							effectiveSource, models.ProvenanceMCP)), nil
+				}
+			}
+
+			updatedBy := models.ProvenanceMCP
+			colMeta := &models.ColumnMetadata{
+				ProjectID:  projectID,
+				TableName:  table,
+				ColumnName: column,
+				CreatedBy:  models.ProvenanceMCP,
+				UpdatedBy:  &updatedBy,
+			}
+			if description != "" {
+				colMeta.Description = &description
+			}
+			if entity != "" {
+				colMeta.Entity = &entity
+			}
+			if role != "" {
+				colMeta.Role = &role
+			}
+			if enumValues != nil {
+				colMeta.EnumValues = enumValues
+			}
+			if err := deps.ColumnMetadataRepo.Upsert(tenantCtx, colMeta); err != nil {
+				return nil, fmt.Errorf("failed to update column metadata: %w", err)
+			}
 		}
 
 		// Build response
@@ -317,13 +362,10 @@ func registerDeleteColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps)
 			return nil, err
 		}
 
-		// Get active ontology
-		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
+		// Get or create active ontology (enables immediate use without extraction)
+		ontology, err := ensureOntologyExists(tenantCtx, deps.OntologyRepo, projectID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get active ontology: %w", err)
-		}
-		if ontology == nil {
-			return nil, fmt.Errorf("no active ontology found for project")
+			return NewErrorResult("ontology_error", err.Error()), nil
 		}
 
 		// Get existing column details for this table
@@ -450,4 +492,39 @@ type deleteColumnMetadataResponse struct {
 	Table   string `json:"table"`
 	Column  string `json:"column"`
 	Deleted bool   `json:"deleted"` // true if metadata was deleted, false if not found
+}
+
+// canModify checks if a source can modify column metadata based on precedence.
+// Precedence hierarchy: Admin (3) > MCP (2) > Inference (1)
+// Returns true if the modification is allowed, false if blocked by higher precedence.
+func canModify(elementCreatedBy string, elementUpdatedBy *string, modifierSource string) bool {
+	modifierLevel := precedenceLevel(modifierSource)
+
+	// Check against updated_by if present, otherwise check created_by
+	var existingSource string
+	if elementUpdatedBy != nil && *elementUpdatedBy != "" {
+		existingSource = *elementUpdatedBy
+	} else {
+		existingSource = elementCreatedBy
+	}
+
+	existingLevel := precedenceLevel(existingSource)
+
+	// Modifier can change if their level is >= existing level
+	return modifierLevel >= existingLevel
+}
+
+// precedenceLevel returns the numeric precedence level for a source.
+// Higher number = higher precedence.
+func precedenceLevel(source string) int {
+	switch source {
+	case models.ProvenanceManual:
+		return 3
+	case models.ProvenanceMCP:
+		return 2
+	case models.ProvenanceInference:
+		return 1
+	default:
+		return 0 // Unknown source has lowest precedence
+	}
 }

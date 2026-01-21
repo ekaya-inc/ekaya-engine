@@ -18,7 +18,7 @@ export interface ToolGroupState {
 
   // Developer Tools sub-options
   addQueryTools?: boolean;
-  addOntologyQuestions?: boolean;
+  addOntologyMaintenance?: boolean;
 
   // Custom Tools - individually selected tool names
   customTools?: string[];
@@ -54,7 +54,7 @@ export interface ToolGroupConfigUpdate {
 
   // Developer Tools sub-options
   addQueryTools?: boolean;
-  addOntologyQuestions?: boolean;
+  addOntologyMaintenance?: boolean;
 
   // Custom Tools - individually selected tool names
   customTools?: string[];

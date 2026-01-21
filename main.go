@@ -133,6 +133,8 @@ func main() {
 	ontologyEntityRepo := repositories.NewOntologyEntityRepository()
 	entityRelationshipRepo := repositories.NewEntityRelationshipRepository()
 	ontologyDAGRepo := repositories.NewOntologyDAGRepository()
+	pendingChangeRepo := repositories.NewPendingChangeRepository()
+	columnMetadataRepo := repositories.NewColumnMetadataRepository()
 
 	// Create connection manager with config-driven settings
 	connManagerCfg := datasource.ConnectionManagerConfig{
@@ -154,10 +156,12 @@ func main() {
 	centralClient := central.NewClient(logger)
 
 	// Create services
-	projectService := services.NewProjectService(db, projectRepo, userRepo, centralClient, cfg.BaseURL, logger)
+	projectService := services.NewProjectService(db, projectRepo, userRepo, ontologyRepo, centralClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, ontologyRepo, credentialEncryptor, adapterFactory, projectService, logger)
 	schemaService := services.NewSchemaService(schemaRepo, ontologyEntityRepo, ontologyRepo, entityRelationshipRepo, datasourceService, adapterFactory, logger)
+	schemaChangeDetectionService := services.NewSchemaChangeDetectionService(pendingChangeRepo, logger)
+	dataChangeDetectionService := services.NewDataChangeDetectionService(schemaRepo, ontologyRepo, pendingChangeRepo, datasourceService, adapterFactory, logger)
 	discoveryService := services.NewRelationshipDiscoveryService(schemaRepo, datasourceService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
@@ -228,6 +232,36 @@ func main() {
 	ontologyDAGService.SetGlossaryDiscoveryMethods(services.NewGlossaryDiscoveryAdapter(glossaryService))
 	ontologyDAGService.SetGlossaryEnrichmentMethods(services.NewGlossaryEnrichmentAdapter(glossaryService))
 
+	// Incremental DAG service for targeted LLM enrichment after changes
+	// Created first without ChangeReviewService due to circular dependency
+	incrementalDAGService := services.NewIncrementalDAGService(&services.IncrementalDAGServiceDeps{
+		OntologyRepo:       ontologyRepo,
+		EntityRepo:         ontologyEntityRepo,
+		RelationshipRepo:   entityRelationshipRepo,
+		ColumnMetadataRepo: columnMetadataRepo,
+		SchemaRepo:         schemaRepo,
+		ConversationRepo:   convRepo,
+		AIConfigSvc:        aiConfigService,
+		LLMFactory:         llmFactory,
+		ChangeReviewSvc:    nil, // Will be set after ChangeReviewService is created
+		GetTenantCtx:       getTenantCtx,
+		Logger:             logger,
+	})
+
+	// Change review service for approving/rejecting pending ontology changes
+	changeReviewService := services.NewChangeReviewService(&services.ChangeReviewServiceDeps{
+		PendingChangeRepo:  pendingChangeRepo,
+		EntityRepo:         ontologyEntityRepo,
+		RelationshipRepo:   entityRelationshipRepo,
+		ColumnMetadataRepo: columnMetadataRepo,
+		OntologyRepo:       ontologyRepo,
+		IncrementalDAG:     incrementalDAGService,
+		Logger:             logger,
+	})
+
+	// Wire up the circular dependency: IncrementalDAGService needs ChangeReviewService for precedence checks
+	incrementalDAGService.SetChangeReviewService(changeReviewService)
+
 	mux := http.NewServeMux()
 
 	// Register health handler
@@ -253,13 +287,17 @@ func main() {
 
 	// Register MCP server (authenticated - project-scoped)
 	mcpToolDeps := &mcptools.MCPToolDeps{
-		DB:                db,
-		MCPConfigService:  mcpConfigService,
-		DatasourceService: datasourceService,
-		SchemaService:     schemaService,
-		ProjectService:    projectService,
-		AdapterFactory:    adapterFactory,
-		Logger:            logger,
+		DB:                           db,
+		MCPConfigService:             mcpConfigService,
+		DatasourceService:            datasourceService,
+		SchemaService:                schemaService,
+		ProjectService:               projectService,
+		AdapterFactory:               adapterFactory,
+		SchemaChangeDetectionService: schemaChangeDetectionService,
+		DataChangeDetectionService:   dataChangeDetectionService,
+		ChangeReviewService:          changeReviewService,
+		PendingChangeRepo:            pendingChangeRepo,
+		Logger:                       logger,
 	}
 	mcpServer := mcp.NewServer("ekaya-engine", cfg.Version, logger,
 		mcp.WithToolFilter(mcptools.NewToolFilter(mcpToolDeps)),
@@ -431,25 +469,27 @@ func main() {
 
 	// Register column metadata tools (for updating column semantic information)
 	columnToolDeps := &mcptools.ColumnToolDeps{
-		DB:               db,
-		MCPConfigService: mcpConfigService,
-		OntologyRepo:     ontologyRepo,
-		SchemaRepo:       schemaRepo,
-		ProjectService:   projectService,
-		Logger:           logger,
+		DB:                 db,
+		MCPConfigService:   mcpConfigService,
+		OntologyRepo:       ontologyRepo,
+		SchemaRepo:         schemaRepo,
+		ColumnMetadataRepo: columnMetadataRepo,
+		ProjectService:     projectService,
+		Logger:             logger,
 	}
 	mcptools.RegisterColumnTools(mcpServer.MCP(), columnToolDeps)
 
 	// Register column probe tools (for deep-diving into column statistics and semantics)
 	probeToolDeps := &mcptools.ProbeToolDeps{
-		DB:               db,
-		MCPConfigService: mcpConfigService,
-		SchemaRepo:       schemaRepo,
-		OntologyRepo:     ontologyRepo,
-		EntityRepo:       ontologyEntityRepo,
-		RelationshipRepo: entityRelationshipRepo,
-		ProjectService:   projectService,
-		Logger:           logger,
+		DB:                 db,
+		MCPConfigService:   mcpConfigService,
+		SchemaRepo:         schemaRepo,
+		OntologyRepo:       ontologyRepo,
+		EntityRepo:         ontologyEntityRepo,
+		RelationshipRepo:   entityRelationshipRepo,
+		ColumnMetadataRepo: columnMetadataRepo,
+		ProjectService:     projectService,
+		Logger:             logger,
 	}
 	mcptools.RegisterProbeTools(mcpServer.MCP(), probeToolDeps)
 

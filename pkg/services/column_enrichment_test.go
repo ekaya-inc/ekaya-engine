@@ -114,6 +114,10 @@ func (r *testColEnrichmentEntityRepo) DeleteByOntology(ctx context.Context, onto
 	return nil
 }
 
+func (r *testColEnrichmentEntityRepo) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
 func (r *testColEnrichmentEntityRepo) DeleteAlias(ctx context.Context, aliasID uuid.UUID) error {
 	return nil
 }
@@ -134,12 +138,29 @@ func (r *testColEnrichmentEntityRepo) GetByName(ctx context.Context, ontologyID 
 	return nil, nil
 }
 
+func (r *testColEnrichmentEntityRepo) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	for _, e := range r.entities {
+		if e.ProjectID == projectID && e.Name == name {
+			return e, nil
+		}
+	}
+	return nil, nil
+}
+
 func (r *testColEnrichmentEntityRepo) SoftDelete(ctx context.Context, entityID uuid.UUID, reason string) error {
 	return nil
 }
 
 func (r *testColEnrichmentEntityRepo) Restore(ctx context.Context, entityID uuid.UUID) error {
 	return nil
+}
+
+func (r *testColEnrichmentEntityRepo) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (r *testColEnrichmentEntityRepo) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	return nil, nil
 }
 
 type testColEnrichmentRelRepo struct{}
@@ -190,6 +211,14 @@ func (r *testColEnrichmentRelRepo) Delete(ctx context.Context, id uuid.UUID) err
 }
 
 func (r *testColEnrichmentRelRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (r *testColEnrichmentRelRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (r *testColEnrichmentRelRepo) Update(ctx context.Context, rel *models.EntityRelationship) error {
 	return nil
 }
 
@@ -336,6 +365,10 @@ func (r *testColEnrichmentSchemaRepo) GetRelationshipDetails(ctx context.Context
 }
 
 func (r *testColEnrichmentSchemaRepo) UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error {
+	return nil
+}
+
+func (r *testColEnrichmentSchemaRepo) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
 
@@ -1534,4 +1567,179 @@ func joinStrings(strs []string, sep string) string {
 		result += sep + strs[i]
 	}
 	return result
+}
+
+// TestColumnEnrichmentService_EnrichTable_SelfReferentialFK tests that self-referential
+// foreign keys (e.g., employees.manager_id -> employees.id) are properly handled
+// with appropriate fk_association values like "manager" or "reports_to".
+func TestColumnEnrichmentService_EnrichTable_SelfReferentialFK(t *testing.T) {
+	projectID := uuid.New()
+	entityID := uuid.New()
+
+	entity := &models.OntologyEntity{
+		ID:           entityID,
+		Name:         "Employee",
+		Description:  "An employee in the organization",
+		PrimaryTable: "employees",
+	}
+
+	columns := []*models.SchemaColumn{
+		{ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
+		{ColumnName: "name", DataType: "varchar"},
+		{ColumnName: "manager_id", DataType: "bigint"}, // Self-referential FK
+	}
+
+	// LLM response with proper self-referential FK association
+	llmResponse := `{
+		"columns": [
+			{
+				"name": "id",
+				"description": "Unique identifier for the employee",
+				"semantic_type": "identifier",
+				"role": "identifier",
+				"fk_association": null
+			},
+			{
+				"name": "name",
+				"description": "Full name of the employee",
+				"semantic_type": "text",
+				"role": "attribute",
+				"fk_association": null
+			},
+			{
+				"name": "manager_id",
+				"description": "Reference to the employee's manager in the organizational hierarchy",
+				"semantic_type": "identifier",
+				"role": "dimension",
+				"fk_association": "manager"
+			}
+		]
+	}`
+
+	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
+	entityRepo := &testColEnrichmentEntityRepo{entities: []*models.OntologyEntity{entity}}
+
+	// Create a relationship repo that returns self-referential FK
+	relRepo := &testSelfRefRelRepo{
+		relationships: []*models.EntityRelationship{
+			{
+				ID:                uuid.New(),
+				SourceEntityID:    entityID,
+				TargetEntityID:    entityID, // Same entity - self-referential
+				SourceColumnTable: "employees",
+				SourceColumnName:  "manager_id",
+				TargetColumnTable: "employees",
+				TargetColumnName:  "id",
+			},
+		},
+	}
+
+	schemaRepo := &testColEnrichmentSchemaRepo{
+		columnsByTable: map[string][]*models.SchemaColumn{
+			"employees": columns,
+		},
+	}
+
+	llmFactory := &testColEnrichmentLLMFactory{
+		client: &testColEnrichmentLLMClient{response: llmResponse},
+	}
+
+	service := &columnEnrichmentService{
+		ontologyRepo:     ontologyRepo,
+		entityRepo:       entityRepo,
+		relationshipRepo: relRepo,
+		schemaRepo:       schemaRepo,
+		dsSvc:            &testColEnrichmentDatasourceService{},
+		llmFactory:       llmFactory,
+		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:           zap.NewNop(),
+	}
+
+	// Execute
+	err := service.EnrichTable(context.Background(), projectID, "employees")
+
+	// Verify
+	require.NoError(t, err)
+	details := ontologyRepo.columnDetails["employees"]
+	require.Equal(t, 3, len(details))
+
+	// Find the manager_id column and verify self-referential FK association
+	managerCol := findColumnDetail(details, "manager_id")
+	require.NotNil(t, managerCol, "Should find manager_id column")
+	assert.Equal(t, "manager_id", managerCol.Name)
+	assert.Equal(t, "manager", managerCol.FKAssociation, "Self-referential FK should have 'manager' association")
+	assert.True(t, managerCol.IsForeignKey, "manager_id should be marked as FK")
+	assert.Equal(t, "employees", managerCol.ForeignTable, "FK should point to same table (employees)")
+}
+
+// testSelfRefRelRepo is a mock relationship repo that returns self-referential relationships
+type testSelfRefRelRepo struct {
+	relationships []*models.EntityRelationship
+}
+
+func (r *testSelfRefRelRepo) GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error) {
+	// Filter relationships to those involving the requested tables
+	var result []*models.EntityRelationship
+	for _, rel := range r.relationships {
+		for _, tableName := range tableNames {
+			if rel.SourceColumnTable == tableName {
+				result = append(result, rel)
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
+func (r *testSelfRefRelRepo) Create(ctx context.Context, rel *models.EntityRelationship) error {
+	return nil
+}
+
+func (r *testSelfRefRelRepo) GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return r.relationships, nil
+}
+
+func (r *testSelfRefRelRepo) GetByOntologyGroupedByTarget(ctx context.Context, ontologyID uuid.UUID) (map[uuid.UUID][]*models.EntityRelationship, error) {
+	return make(map[uuid.UUID][]*models.EntityRelationship), nil
+}
+
+func (r *testSelfRefRelRepo) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return r.relationships, nil
+}
+
+func (r *testSelfRefRelRepo) UpdateDescription(ctx context.Context, id uuid.UUID, description string) error {
+	return nil
+}
+
+func (r *testSelfRefRelRepo) UpdateDescriptionAndAssociation(ctx context.Context, id uuid.UUID, description string, association string) error {
+	return nil
+}
+
+func (r *testSelfRefRelRepo) GetByTargetEntity(ctx context.Context, entityID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (r *testSelfRefRelRepo) GetByEntityPair(ctx context.Context, ontologyID uuid.UUID, fromEntityID uuid.UUID, toEntityID uuid.UUID) (*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (r *testSelfRefRelRepo) Upsert(ctx context.Context, rel *models.EntityRelationship) error {
+	return nil
+}
+
+func (r *testSelfRefRelRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (r *testSelfRefRelRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (r *testSelfRefRelRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (r *testSelfRefRelRepo) Update(ctx context.Context, rel *models.EntityRelationship) error {
+	return nil
 }

@@ -22,7 +22,7 @@ func TestProjectService_UpdateAuthServerURL_Success(t *testing.T) {
 	ensureTestProject(t, engineDB, projectID, "Update Auth URL Test")
 
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, "", zap.NewNop())
 
 	authURL := "http://localhost:5002"
 	err := service.UpdateAuthServerURL(context.Background(), projectID, authURL)
@@ -63,7 +63,7 @@ func TestProjectService_UpdateAuthServerURL_InitializesParametersIfNil(t *testin
 	}
 
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, "", zap.NewNop())
 
 	authURL := "https://auth.example.com"
 	err = service.UpdateAuthServerURL(context.Background(), projectID, authURL)
@@ -104,7 +104,7 @@ func TestProjectService_UpdateAuthServerURL_PreservesExistingParameters(t *testi
 	}
 
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, "", zap.NewNop())
 
 	authURL := "http://localhost:5002"
 	err = service.UpdateAuthServerURL(context.Background(), projectID, authURL)
@@ -150,7 +150,7 @@ func TestProjectService_UpdateAuthServerURL_PreservesExistingParameters(t *testi
 func TestProjectService_UpdateAuthServerURL_ProjectNotFound(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, "", zap.NewNop())
 
 	// Use a non-existent project ID
 	nonExistentID := uuid.New()
@@ -184,7 +184,7 @@ func TestProjectService_GetAuthServerURL_Success(t *testing.T) {
 	}
 
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, "", zap.NewNop())
 
 	authURL, err := service.GetAuthServerURL(context.Background(), projectID)
 	if err != nil {
@@ -204,7 +204,7 @@ func TestProjectService_GetAuthServerURL_NotSet(t *testing.T) {
 	ensureTestProject(t, engineDB, projectID, "Get Auth URL Not Set Test")
 
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, "", zap.NewNop())
 
 	authURL, err := service.GetAuthServerURL(context.Background(), projectID)
 	if err != nil {
@@ -219,7 +219,7 @@ func TestProjectService_GetAuthServerURL_NotSet(t *testing.T) {
 func TestProjectService_GetAuthServerURL_ProjectNotFound(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, "", zap.NewNop())
 
 	// Use a non-existent project ID
 	nonExistentID := uuid.New()
@@ -238,7 +238,7 @@ func TestProjectService_UpdateAndGetAuthServerURL_RoundTrip(t *testing.T) {
 	ensureTestProject(t, engineDB, projectID, "Round Trip Test")
 
 	projectRepo := repositories.NewProjectRepository()
-	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, "", zap.NewNop())
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, "", zap.NewNop())
 
 	// Update auth_server_url
 	authURL := "http://localhost:5002"
@@ -270,6 +270,88 @@ func TestProjectService_UpdateAndGetAuthServerURL_RoundTrip(t *testing.T) {
 
 	if retrievedAuthURL != newAuthURL {
 		t.Errorf("expected auth URL %q after update, got %q", newAuthURL, retrievedAuthURL)
+	}
+}
+
+func TestProjectService_Provision_CreatesEmptyOntology(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+
+	// Use a unique project ID for this test
+	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000207")
+	ctx := context.Background()
+
+	// Clean up any existing data for this project ID before the test
+	scope, err := engineDB.DB.WithoutTenant(ctx)
+	if err != nil {
+		t.Fatalf("Failed to create scope: %v", err)
+	}
+	// Use tenant context for the ontology delete (RLS)
+	tenantScope, err := engineDB.DB.WithTenant(ctx, projectID)
+	if err == nil {
+		_, _ = tenantScope.Conn.Exec(ctx, `DELETE FROM engine_ontologies WHERE project_id = $1`, projectID)
+		tenantScope.Close()
+	}
+	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_projects WHERE id = $1`, projectID)
+	scope.Close()
+
+	// Create repositories
+	projectRepo := repositories.NewProjectRepository()
+	userRepo := repositories.NewUserRepository()
+	ontologyRepo := repositories.NewOntologyRepository()
+
+	service := NewProjectService(engineDB.DB, projectRepo, userRepo, ontologyRepo, nil, "", zap.NewNop())
+
+	// Provision new project
+	result, err := service.Provision(ctx, projectID, "Empty Ontology Test", nil)
+	if err != nil {
+		t.Fatalf("Provision failed: %v", err)
+	}
+
+	if !result.Created {
+		t.Error("expected project to be created (new), got already exists")
+	}
+
+	// Verify ontology was created
+	tenantScope, err = engineDB.DB.WithTenant(ctx, projectID)
+	if err != nil {
+		t.Fatalf("Failed to create tenant scope: %v", err)
+	}
+	defer tenantScope.Close()
+
+	var ontologyExists bool
+	err = tenantScope.Conn.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM engine_ontologies
+			WHERE project_id = $1 AND is_active = true
+		)
+	`, projectID).Scan(&ontologyExists)
+	if err != nil {
+		t.Fatalf("Failed to check for ontology: %v", err)
+	}
+
+	if !ontologyExists {
+		t.Error("expected an active ontology to be created with the project")
+	}
+
+	// Verify ontology is empty (version 1, no entities)
+	var version int
+	var entitySummariesJSON string
+	err = tenantScope.Conn.QueryRow(ctx, `
+		SELECT version, COALESCE(entity_summaries::text, '{}')
+		FROM engine_ontologies
+		WHERE project_id = $1 AND is_active = true
+	`, projectID).Scan(&version, &entitySummariesJSON)
+	if err != nil {
+		t.Fatalf("Failed to query ontology details: %v", err)
+	}
+
+	if version != 1 {
+		t.Errorf("expected ontology version 1, got %d", version)
+	}
+
+	// Empty ontology should have empty entity summaries
+	if entitySummariesJSON != "{}" && entitySummariesJSON != "null" && entitySummariesJSON != "" {
+		t.Errorf("expected empty entity summaries, got %q", entitySummariesJSON)
 	}
 }
 

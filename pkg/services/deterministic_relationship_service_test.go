@@ -1126,6 +1126,14 @@ func (m *mockTestEntityRepo) GetAllKeyColumnsByProject(ctx context.Context, proj
 	return nil, nil
 }
 
+func (m *mockTestEntityRepo) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockTestEntityRepo) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	return nil, nil
+}
+
 func (m *mockTestEntityRepo) GetAllAliasesByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityAlias, error) {
 	return nil, nil
 }
@@ -1135,6 +1143,10 @@ func (m *mockTestEntityRepo) GetByProject(ctx context.Context, projectID uuid.UU
 }
 
 func (m *mockTestEntityRepo) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	return nil, nil
+}
+
+func (m *mockTestEntityRepo) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
 	return nil, nil
 }
 
@@ -1263,6 +1275,10 @@ func (m *mockTestEntityRepo) DeleteAlias(ctx context.Context, id uuid.UUID) erro
 }
 
 func (m *mockTestEntityRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockTestEntityRepo) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }
 
@@ -1406,6 +1422,10 @@ func (m *mockTestSchemaRepo) SoftDeleteRemovedTables(ctx context.Context, projec
 
 func (m *mockTestSchemaRepo) SoftDeleteRemovedColumns(ctx context.Context, tableID uuid.UUID, activeColumnNames []string) (int64, error) {
 	return 0, nil
+}
+
+func (m *mockTestSchemaRepo) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
+	return nil
 }
 
 // TestPKMatch_SmallIntegerValues tests that columns with all small integer values (1-10)
@@ -2329,6 +2349,123 @@ func TestFKDiscovery_ForeignKeyRelationshipType(t *testing.T) {
 	reverseRel := mocks.relationshipRepo.created[1]
 	if reverseRel.DetectionMethod != models.DetectionMethodForeignKey {
 		t.Errorf("expected reverse DetectionMethod=%q, got %q", models.DetectionMethodForeignKey, reverseRel.DetectionMethod)
+	}
+}
+
+// TestFKDiscovery_SelfReferentialRelationship tests that self-referential FK constraints
+// (e.g., employee.manager_id → employee.id) are discovered as entity relationships.
+// These represent hierarchies/trees and are intentional design patterns.
+func TestFKDiscovery_SelfReferentialRelationship(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	employeeEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, employeeEntityID)
+
+	// Replace default user entity with employee entity that owns the employees table
+	mocks.entityRepo.entities = []*models.OntologyEntity{
+		{
+			ID:            employeeEntityID,
+			OntologyID:    ontologyID,
+			Name:          "employee",
+			PrimarySchema: "public",
+			PrimaryTable:  "employees",
+		},
+	}
+
+	employeesTableID := uuid.New()
+	idColumnID := uuid.New()
+	managerIDColumnID := uuid.New()
+
+	// Setup employees table with self-referential FK
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         employeesTableID,
+			SchemaName: "public",
+			TableName:  "employees",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            idColumnID,
+					SchemaTableID: employeesTableID,
+					ColumnName:    "id",
+					DataType:      "integer",
+					IsPrimaryKey:  true,
+				},
+				{
+					ID:            managerIDColumnID,
+					SchemaTableID: employeesTableID,
+					ColumnName:    "manager_id",
+					DataType:      "integer",
+					IsPrimaryKey:  false,
+				},
+			},
+		},
+	}
+
+	// Add self-referential FK schema relationship (manager_id → id in same table)
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
+		{
+			ID:               uuid.New(),
+			ProjectID:        projectID,
+			SourceTableID:    employeesTableID,
+			SourceColumnID:   managerIDColumnID,
+			TargetTableID:    employeesTableID, // Same table
+			TargetColumnID:   idColumnID,       // References own PK
+			RelationshipType: models.RelationshipTypeFK,
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: 1 FK relationship discovered (creates 2 rows: forward + reverse)
+	if result.FKRelationships != 1 {
+		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
+	}
+
+	// Bidirectional: 2 relationships created (forward + reverse)
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	}
+
+	// Verify: both source and target are the same entity (self-reference)
+	forwardRel := mocks.relationshipRepo.created[0]
+	if forwardRel.SourceEntityID != employeeEntityID {
+		t.Errorf("expected forward source entity to be employee, got %v", forwardRel.SourceEntityID)
+	}
+	if forwardRel.TargetEntityID != employeeEntityID {
+		t.Errorf("expected forward target entity to be employee, got %v", forwardRel.TargetEntityID)
+	}
+
+	// Verify columns
+	if forwardRel.SourceColumnName != "manager_id" {
+		t.Errorf("expected forward source column 'manager_id', got %q", forwardRel.SourceColumnName)
+	}
+	if forwardRel.TargetColumnName != "id" {
+		t.Errorf("expected forward target column 'id', got %q", forwardRel.TargetColumnName)
+	}
+
+	// Verify reverse relationship
+	reverseRel := mocks.relationshipRepo.created[1]
+	if reverseRel.SourceEntityID != employeeEntityID || reverseRel.TargetEntityID != employeeEntityID {
+		t.Errorf("expected reverse to be self-referential, got source=%v target=%v", reverseRel.SourceEntityID, reverseRel.TargetEntityID)
+	}
+	if reverseRel.SourceColumnName != "id" || reverseRel.TargetColumnName != "manager_id" {
+		t.Errorf("expected reverse columns id→manager_id, got %s→%s", reverseRel.SourceColumnName, reverseRel.TargetColumnName)
 	}
 }
 

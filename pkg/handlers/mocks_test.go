@@ -100,6 +100,14 @@ func (m *mockProjectService) UpdateAuthServerURL(ctx context.Context, projectID 
 	return m.err
 }
 
+func (m *mockProjectService) GetAutoApproveSettings(ctx context.Context, projectID uuid.UUID) (*services.AutoApproveSettings, error) {
+	return nil, nil
+}
+
+func (m *mockProjectService) SetAutoApproveSettings(ctx context.Context, projectID uuid.UUID, settings *services.AutoApproveSettings) error {
+	return nil
+}
+
 // mockAuthService is a mock AuthService for integration testing.
 type mockAuthService struct {
 	claims *auth.Claims
@@ -222,7 +230,7 @@ type mockSchemaService struct {
 	err           error
 }
 
-func (m *mockSchemaService) RefreshDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.RefreshResult, error) {
+func (m *mockSchemaService) RefreshDatasourceSchema(ctx context.Context, projectID, datasourceID uuid.UUID, autoSelect bool) (*models.RefreshResult, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -354,4 +362,8 @@ func (m *mockSchemaService) GetRelationshipsResponse(ctx context.Context, projec
 		Relationships: []*models.RelationshipDetail{},
 		TotalCount:    0,
 	}, nil
+}
+
+func (m *mockSchemaService) SelectAllTables(ctx context.Context, projectID, datasourceID uuid.UUID) error {
+	return m.err
 }
