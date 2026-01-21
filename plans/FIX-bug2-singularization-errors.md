@@ -256,4 +256,4 @@ Test with MCP:
 - [x] Update `toEntityName` in `pkg/services/schema_change_detection.go` to use inflection.Singular
 - [x] Update table name mapping in `pkg/services/data_change_detection.go` to use inflection.Singular
 - [x] Add unit tests for singularization edge cases
-- [ ] Manual verification with MCP refresh_schema
+- [x] Manual verification with MCP refresh_schema
