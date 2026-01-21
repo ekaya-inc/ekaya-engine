@@ -230,7 +230,6 @@ func (m *mockDatasourceService) TestConnection(ctx context.Context, dsType strin
 type mockSchemaService struct {
 	refreshResult         *models.RefreshResult
 	refreshError          error
-	selectAllTablesError  error
 	relationshipsResponse *models.RelationshipsResponse
 }
 
@@ -290,5 +289,5 @@ func (m *mockSchemaService) GetDatasourceSchemaWithEntities(ctx context.Context,
 }
 
 func (m *mockSchemaService) SelectAllTables(ctx context.Context, projectID, datasourceID uuid.UUID) error {
-	return m.selectAllTablesError
+	return nil
 }

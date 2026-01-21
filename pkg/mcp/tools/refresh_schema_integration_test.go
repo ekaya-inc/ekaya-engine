@@ -128,34 +128,27 @@ func (tc *refreshSchemaTestContext) callTool(ctx context.Context, toolName strin
 	return response.Result, nil
 }
 
-// TestRefreshSchema_AutoSelectApplied_ReflectsActualSuccess verifies that
-// auto_select_applied in the response reflects whether SelectAllTables actually succeeded.
-func TestRefreshSchema_AutoSelectApplied_ReflectsActualSuccess_Integration(t *testing.T) {
+// TestRefreshSchema_AutoSelectApplied_ReflectsNewTables verifies that
+// auto_select_applied in the response reflects whether new tables were discovered.
+// Selection is now set at creation time (not via SelectAllTables), so auto_select_applied
+// is true when autoSelect=true AND new tables exist.
+func TestRefreshSchema_AutoSelectApplied_ReflectsNewTables_Integration(t *testing.T) {
 	tc := setupRefreshSchemaIntegrationTest(t)
 	datasourceID := uuid.MustParse("00000000-0000-0000-0000-000000000068")
 
 	tests := []struct {
 		name                      string
 		newTableNames             []string
-		selectAllTablesError      error
 		expectedAutoSelectApplied bool
 	}{
 		{
-			name:                      "auto_select_applied true when SelectAllTables succeeds",
+			name:                      "auto_select_applied true when new tables discovered",
 			newTableNames:             []string{"public.new_table"},
-			selectAllTablesError:      nil,
 			expectedAutoSelectApplied: true,
-		},
-		{
-			name:                      "auto_select_applied false when SelectAllTables fails",
-			newTableNames:             []string{"public.new_table"},
-			selectAllTablesError:      assert.AnError,
-			expectedAutoSelectApplied: false,
 		},
 		{
 			name:                      "auto_select_applied false when no new tables",
 			newTableNames:             []string{},
-			selectAllTablesError:      nil,
 			expectedAutoSelectApplied: false,
 		},
 	}
@@ -182,7 +175,6 @@ func TestRefreshSchema_AutoSelectApplied_ReflectsActualSuccess_Integration(t *te
 					ColumnsUpserted:      5,
 					RelationshipsCreated: 0,
 				},
-				selectAllTablesError: tt.selectAllTablesError,
 			}
 
 			mockProject := &mockProjectService{
@@ -220,9 +212,9 @@ func TestRefreshSchema_AutoSelectApplied_ReflectsActualSuccess_Integration(t *te
 			err = json.Unmarshal([]byte(textContent.Text), &refreshResponse)
 			require.NoError(t, err)
 
-			// Verify auto_select_applied reflects actual success of SelectAllTables
+			// Verify auto_select_applied reflects whether new tables were discovered
 			assert.Equal(t, tt.expectedAutoSelectApplied, refreshResponse.AutoSelectApplied,
-				"auto_select_applied should reflect actual success of SelectAllTables, not just whether the condition was met")
+				"auto_select_applied should be true when autoSelect=true AND new tables exist")
 		})
 	}
 }
