@@ -131,6 +131,10 @@ func (m *mockKnowledgeService) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+func (m *mockKnowledgeService) SeedKnowledgeFromFile(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
 // setupChatIntegrationTest creates a test context with mock services.
 func setupChatIntegrationTest(t *testing.T) *chatIntegrationTestContext {
 	t.Helper()
@@ -171,9 +175,10 @@ func setupChatIntegrationTestWithRealServices(t *testing.T) *chatIntegrationTest
 	chatRepo := repositories.NewOntologyChatRepository()
 	ontologyRepo := repositories.NewOntologyRepository()
 	knowledgeRepo := repositories.NewKnowledgeRepository()
+	projectRepo := repositories.NewProjectRepository()
 
 	// Create real services
-	knowledgeSvc := services.NewKnowledgeService(knowledgeRepo, zap.NewNop())
+	knowledgeSvc := services.NewKnowledgeService(knowledgeRepo, projectRepo, zap.NewNop())
 
 	// Use a unique project ID for chat tests
 	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000045")

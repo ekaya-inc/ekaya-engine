@@ -48,6 +48,7 @@ type ontologyDAGService struct {
 	knowledgeRepo    repositories.KnowledgeRepository
 
 	// Adapted service methods for dag package
+	knowledgeSeedingMethods       dag.KnowledgeSeedingMethods
 	entityDiscoveryMethods        dag.EntityDiscoveryMethods
 	entityEnrichmentMethods       dag.EntityEnrichmentMethods
 	fkDiscoveryMethods            dag.FKDiscoveryMethods
@@ -99,6 +100,12 @@ func NewOntologyDAGService(
 }
 
 var _ OntologyDAGService = (*ontologyDAGService)(nil)
+
+// SetKnowledgeSeedingMethods sets the knowledge seeding methods interface.
+// This is called after service construction to avoid circular dependencies.
+func (s *ontologyDAGService) SetKnowledgeSeedingMethods(methods dag.KnowledgeSeedingMethods) {
+	s.knowledgeSeedingMethods = methods
+}
 
 // SetEntityDiscoveryMethods sets the entity discovery methods interface.
 // This is called after service construction to avoid circular dependencies.
@@ -207,7 +214,7 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 	}
 
 	// Transition to running
-	currentNode := string(models.DAGNodeEntityDiscovery)
+	currentNode := string(models.DAGNodeKnowledgeSeeding)
 	dagRecord.Status = models.DAGStatusRunning
 	dagRecord.CurrentNode = &currentNode
 	dagRecord.StartedAt = &now
@@ -625,6 +632,14 @@ func (s *ontologyDAGService) executeNode(ctx context.Context, dagRecord *models.
 // getNodeExecutor returns the appropriate executor for a node.
 func (s *ontologyDAGService) getNodeExecutor(nodeName models.DAGNodeName, nodeID uuid.UUID) (dag.NodeExecutor, error) {
 	switch nodeName {
+	case models.DAGNodeKnowledgeSeeding:
+		if s.knowledgeSeedingMethods == nil {
+			return nil, fmt.Errorf("knowledge seeding methods not set")
+		}
+		node := dag.NewKnowledgeSeedingNode(s.dagRepo, s.knowledgeSeedingMethods, s.logger)
+		node.SetCurrentNodeID(nodeID)
+		return node, nil
+
 	case models.DAGNodeEntityDiscovery:
 		if s.entityDiscoveryMethods == nil {
 			return nil, fmt.Errorf("entity discovery methods not set")
