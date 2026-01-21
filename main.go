@@ -469,12 +469,13 @@ func main() {
 
 	// Register column metadata tools (for updating column semantic information)
 	columnToolDeps := &mcptools.ColumnToolDeps{
-		DB:               db,
-		MCPConfigService: mcpConfigService,
-		OntologyRepo:     ontologyRepo,
-		SchemaRepo:       schemaRepo,
-		ProjectService:   projectService,
-		Logger:           logger,
+		DB:                 db,
+		MCPConfigService:   mcpConfigService,
+		OntologyRepo:       ontologyRepo,
+		SchemaRepo:         schemaRepo,
+		ColumnMetadataRepo: columnMetadataRepo,
+		ProjectService:     projectService,
+		Logger:             logger,
 	}
 	mcptools.RegisterColumnTools(mcpServer.MCP(), columnToolDeps)
 
