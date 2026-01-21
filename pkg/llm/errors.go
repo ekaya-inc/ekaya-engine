@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/sashabaranov/go-openai"
 )
 
 // Error represents a structured LLM error with classification.
@@ -102,6 +104,64 @@ func extractStatusCode(errStr string) int {
 	return 0
 }
 
+// classifyRequestError handles openai.RequestError specifically, avoiding its
+// broken Error() method which produces "%!s(<nil>)" when Err is nil.
+func classifyRequestError(reqErr *openai.RequestError) *Error {
+	statusCode := reqErr.HTTPStatusCode
+
+	// Build a clean error message from the response body
+	// The body contains the actual error details from the API
+	message := string(reqErr.Body)
+	if message == "" {
+		message = reqErr.HTTPStatus
+	}
+
+	// Classify based on status code and body content
+	lower := strings.ToLower(message)
+
+	// CUDA/GPU errors (transient server-side issues, retryable)
+	if strings.Contains(lower, "cuda error") || strings.Contains(lower, "gpu error") {
+		return &Error{
+			Type:       ErrorTypeEndpoint,
+			Message:    message,
+			Retryable:  true,
+			Cause:      reqErr.Err, // Use underlying error, not reqErr itself
+			StatusCode: statusCode,
+		}
+	}
+
+	// Rate limiting
+	if statusCode == 429 || strings.Contains(lower, "rate limit") {
+		return &Error{
+			Type:       ErrorTypeRateLimited,
+			Message:    message,
+			Retryable:  true,
+			Cause:      reqErr.Err,
+			StatusCode: statusCode,
+		}
+	}
+
+	// 5xx server errors
+	if statusCode >= 500 {
+		return &Error{
+			Type:       ErrorTypeEndpoint,
+			Message:    message,
+			Retryable:  true,
+			Cause:      reqErr.Err,
+			StatusCode: statusCode,
+		}
+	}
+
+	// 4xx client errors (generally not retryable)
+	return &Error{
+		Type:       ErrorTypeEndpoint,
+		Message:    message,
+		Retryable:  false,
+		Cause:      reqErr.Err,
+		StatusCode: statusCode,
+	}
+}
+
 // ClassifyError categorizes an error and returns a structured Error.
 // This consolidates error classification logic for consistent handling.
 func ClassifyError(err error) *Error {
@@ -113,6 +173,14 @@ func ClassifyError(err error) *Error {
 	var llmErr *Error
 	if errors.As(err, &llmErr) {
 		return llmErr
+	}
+
+	// Handle openai.RequestError specially - its Error() method has a bug where
+	// it uses %s on a nil error, producing "%!s(<nil>)" in the output.
+	// We extract the useful information and construct a clean error message.
+	var reqErr *openai.RequestError
+	if errors.As(err, &reqErr) {
+		return classifyRequestError(reqErr)
 	}
 
 	errStr := err.Error()
