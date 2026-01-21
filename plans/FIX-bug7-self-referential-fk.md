@@ -80,14 +80,14 @@ if sourceEntity.ID == targetEntity.ID {
 
 Simply remove lines 195-198 to allow FK-based self-references.
 
-### Step 2: Keep PK-match Skip (Recommended)
+### Step 2: Keep PK-match Skip (Recommended) ✅
 
 The PK-match discovery skip (lines 592-595, 608-611) should **remain** because:
 - Same-table PK matches are almost always false positives without explicit FK constraints
 - A column matching the same table's PK is likely just a copy or different ID
 - The FK Discovery handles legitimate self-references via actual constraints
 
-### Step 3: Handle Role Labels for Self-References
+### Step 3: Handle Role Labels for Self-References ✅
 
 Self-referential relationships need role labels to distinguish directions:
 

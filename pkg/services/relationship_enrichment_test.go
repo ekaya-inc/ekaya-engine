@@ -377,3 +377,141 @@ func TestRelationshipEnrichmentService_InvalidJSONResponse(t *testing.T) {
 	assert.Equal(t, 0, result.RelationshipsEnriched)
 	assert.Equal(t, 1, result.RelationshipsFailed, "Should mark as failed when JSON parse fails")
 }
+
+// TestRelationshipEnrichmentService_SelfReferentialRelationship tests that self-referential
+// relationships (e.g., Employee -> Employee for manager_id) are properly enriched with
+// appropriate association labels like "reports_to" or "manages".
+func TestRelationshipEnrichmentService_SelfReferentialRelationship(t *testing.T) {
+	projectID := uuid.New()
+	employeeEntityID := uuid.New()
+	relID := uuid.New()
+
+	// Setup: Employee entity that has a self-referential relationship
+	entities := []*models.OntologyEntity{
+		{
+			ID:          employeeEntityID,
+			Name:        "Employee",
+			Description: "An employee in the organization hierarchy",
+		},
+	}
+
+	// Self-referential relationship: employees.manager_id -> employees.id
+	relationships := []*models.EntityRelationship{
+		{
+			ID:                relID,
+			SourceEntityID:    employeeEntityID,
+			TargetEntityID:    employeeEntityID, // Same entity - self-referential
+			SourceColumnTable: "employees",
+			SourceColumnName:  "manager_id",
+			TargetColumnTable: "employees",
+			TargetColumnName:  "id",
+			DetectionMethod:   "fk_constraint",
+			Confidence:        1.0,
+		},
+	}
+
+	relRepo := &testRelEnrichmentRelRepo{relationships: relationships}
+	entityRepo := &testRelEnrichmentEntityRepo{entities: entities}
+	mockFactory := llm.NewMockClientFactory()
+
+	// LLM responds with appropriate self-referential association
+	mockFactory.MockClient.GenerateResponseFunc = func(ctx context.Context, prompt, systemMsg string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		return &llm.GenerateResponseResult{
+			Content: `{"relationships": [{"id": 1, "description": "Represents the reporting structure within the organization. Each employee has a manager who is also an employee, forming a hierarchical tree.", "association": "reports_to"}]}`,
+		}, nil
+	}
+
+	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
+	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+
+	// Execute
+	result, err := service.EnrichProject(context.Background(), projectID, nil)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.Equal(t, 1, result.RelationshipsEnriched)
+	assert.Equal(t, 0, result.RelationshipsFailed)
+
+	// Verify the self-referential relationship was enriched with proper association
+	assert.Contains(t, relRepo.updatedDescs[relID], "reporting structure",
+		"Description should mention hierarchical/reporting structure")
+	assert.Equal(t, "reports_to", relRepo.updatedAssociations[relID],
+		"Self-referential FK should have 'reports_to' association")
+}
+
+// TestRelationshipEnrichmentService_MultipleSelfReferentialFK tests handling of tables
+// with multiple self-referential FKs (e.g., employee.manager_id and employee.mentor_id).
+func TestRelationshipEnrichmentService_MultipleSelfReferentialFK(t *testing.T) {
+	projectID := uuid.New()
+	employeeEntityID := uuid.New()
+	managerRelID := uuid.New()
+	mentorRelID := uuid.New()
+
+	// Setup: Employee entity with multiple self-references
+	entities := []*models.OntologyEntity{
+		{
+			ID:          employeeEntityID,
+			Name:        "Employee",
+			Description: "An employee with management and mentorship relationships",
+		},
+	}
+
+	// Two self-referential relationships: manager_id and mentor_id
+	relationships := []*models.EntityRelationship{
+		{
+			ID:                managerRelID,
+			SourceEntityID:    employeeEntityID,
+			TargetEntityID:    employeeEntityID, // Self-referential
+			SourceColumnTable: "employees",
+			SourceColumnName:  "manager_id",
+			TargetColumnTable: "employees",
+			TargetColumnName:  "id",
+			DetectionMethod:   "fk_constraint",
+			Confidence:        1.0,
+		},
+		{
+			ID:                mentorRelID,
+			SourceEntityID:    employeeEntityID,
+			TargetEntityID:    employeeEntityID, // Self-referential
+			SourceColumnTable: "employees",
+			SourceColumnName:  "mentor_id",
+			TargetColumnTable: "employees",
+			TargetColumnName:  "id",
+			DetectionMethod:   "fk_constraint",
+			Confidence:        1.0,
+		},
+	}
+
+	relRepo := &testRelEnrichmentRelRepo{relationships: relationships}
+	entityRepo := &testRelEnrichmentEntityRepo{entities: entities}
+	mockFactory := llm.NewMockClientFactory()
+
+	// LLM responds with different associations for each self-referential FK
+	mockFactory.MockClient.GenerateResponseFunc = func(ctx context.Context, prompt, systemMsg string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		return &llm.GenerateResponseResult{
+			Content: `{"relationships": [
+				{"id": 1, "description": "Represents management hierarchy where an employee reports to a manager.", "association": "reports_to"},
+				{"id": 2, "description": "Represents mentorship relationship where an employee is guided by a mentor.", "association": "mentored_by"}
+			]}`,
+		}, nil
+	}
+
+	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
+	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+
+	// Execute
+	result, err := service.EnrichProject(context.Background(), projectID, nil)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.Equal(t, 2, result.RelationshipsEnriched)
+	assert.Equal(t, 0, result.RelationshipsFailed)
+
+	// Verify both relationships have distinct associations
+	assert.Equal(t, "reports_to", relRepo.updatedAssociations[managerRelID],
+		"Manager FK should have 'reports_to' association")
+	assert.Equal(t, "mentored_by", relRepo.updatedAssociations[mentorRelID],
+		"Mentor FK should have 'mentored_by' association")
+}
