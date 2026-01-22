@@ -2898,6 +2898,283 @@ func TestPKMatch_EmailColumnsExcluded(t *testing.T) {
 // The zero-orphan requirement ensures only the correct FK direction is discovered.
 // Note: PK match creates bidirectional relationships for navigation, so the "reverse" in the
 // created relationships is NOT the same as "wrong direction" - it's the navigation reverse.
+// TestPKMatch_LowCardinalityRatio_IDColumn tests that _id columns bypass the cardinality
+// ratio check, allowing FK discovery even with low cardinality relative to row count.
+// This fixes BUG-9 where visitor_id (500 unique visitors in 100,000 rows = 0.5%) was
+// incorrectly filtered out by the 5% cardinality ratio threshold.
+func TestPKMatch_LowCardinalityRatio_IDColumn(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	billingEngagementEntityID := uuid.New()
+
+	userDistinct := int64(500)       // 500 unique users
+	billingRowCount := int64(100000) // 100k billing engagements
+	billingDistinct := int64(100000) // all unique
+	visitorDistinct := int64(500)    // only 500 unique visitors = 0.5% ratio (below old 5% threshold)
+	userRowCount := int64(500)       // same as distinct for users
+	isJoinableTrue := true
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Add billing_engagement entity
+	mocks.entityRepo.entities = []*models.OntologyEntity{
+		{
+			ID:            userEntityID,
+			OntologyID:    ontologyID,
+			Name:          "user",
+			PrimarySchema: "public",
+			PrimaryTable:  "users",
+		},
+		{
+			ID:            billingEngagementEntityID,
+			OntologyID:    ontologyID,
+			Name:          "billing_engagement",
+			PrimarySchema: "public",
+			PrimaryTable:  "billing_engagements",
+		},
+	}
+
+	// Mock discoverer returns 0 orphans (all visitor_ids have matching user)
+	joinAnalysisCalled := false
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		// Track that join analysis was called for visitor_id
+		if sourceColumn == "visitor_id" {
+			joinAnalysisCalled = true
+		}
+		return &datasource.JoinAnalysis{
+			OrphanCount: 0, // All references valid
+		}, nil
+	}
+
+	usersTableID := uuid.New()
+	billingTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &userRowCount,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: usersTableID,
+					ColumnName:    "user_id",
+					DataType:      "text", // text UUID
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &userDistinct,
+				},
+			},
+		},
+		{
+			ID:         billingTableID,
+			SchemaName: "public",
+			TableName:  "billing_engagements",
+			RowCount:   &billingRowCount, // 100k rows
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: billingTableID,
+					ColumnName:    "engagement_id",
+					DataType:      "text",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &billingDistinct,
+				},
+				{
+					SchemaTableID: billingTableID,
+					ColumnName:    "visitor_id", // FK to users.user_id
+					DataType:      "text",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &visitorDistinct, // 500/100k = 0.5% (below old 5% threshold)
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: visitor_id should have passed the cardinality filter because it ends in _id
+	if !joinAnalysisCalled {
+		t.Error("expected join analysis to be called for visitor_id column (should bypass cardinality ratio check for _id columns)")
+	}
+
+	// Verify: relationship created (visitor_id → user_id)
+	if result.InferredRelationships < 1 {
+		t.Errorf("expected at least 1 inferred relationship (visitor_id → user_id), got %d", result.InferredRelationships)
+	}
+
+	// Verify: at least one relationship exists for billing_engagements.visitor_id → users.user_id
+	var foundVisitorRelationship bool
+	for _, rel := range mocks.relationshipRepo.created {
+		if rel.SourceColumnTable == "billing_engagements" && rel.SourceColumnName == "visitor_id" &&
+			rel.TargetColumnTable == "users" && rel.TargetColumnName == "user_id" {
+			foundVisitorRelationship = true
+			break
+		}
+	}
+	if !foundVisitorRelationship {
+		t.Error("expected relationship billing_engagements.visitor_id → users.user_id to be discovered")
+	}
+}
+
+// TestIsLikelyFKColumn tests the isLikelyFKColumn helper function
+func TestIsLikelyFKColumn(t *testing.T) {
+	tests := []struct {
+		columnName string
+		expected   bool
+	}{
+		// Should return true
+		{"user_id", true},
+		{"visitor_id", true},
+		{"host_id", true},
+		{"account_uuid", true},
+		{"session_key", true},
+		{"USER_ID", true}, // case insensitive
+		{"Visitor_Id", true},
+
+		// Should return false
+		{"status", false},
+		{"id", false}, // just "id" doesn't match suffix patterns
+		{"rating", false},
+		{"visitor", false}, // no _id suffix
+		{"created_at", false},
+		{"is_active", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.columnName, func(t *testing.T) {
+			result := isLikelyFKColumn(tt.columnName)
+			if result != tt.expected {
+				t.Errorf("isLikelyFKColumn(%q) = %v, expected %v", tt.columnName, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestPKMatch_NonIDColumn_StillFilteredByCardinality verifies that non-_id columns
+// still get filtered by the cardinality ratio check.
+func TestPKMatch_NonIDColumn_StillFilteredByCardinality(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	accountEntityID := uuid.New()
+	userEntityID := uuid.New()
+
+	distinctCount := int64(100)
+	lowDistinctCount := int64(30) // 30 distinct values
+	rowCount := int64(10000)      // 10,000 rows -> ratio = 0.003 (0.3%) < 5%
+	isJoinableTrue := true
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, accountEntityID)
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            userEntityID,
+		OntologyID:    ontologyID,
+		Name:          "user",
+		PrimarySchema: "public",
+		PrimaryTable:  "users",
+	})
+
+	// Mock discoverer should NOT be called for "buyer" column (filtered by cardinality ratio)
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		if sourceColumn == "buyer" {
+			t.Errorf("AnalyzeJoin should not be called for 'buyer' column (non-_id column should be filtered by cardinality ratio)")
+		}
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+	}
+
+	accountsTableID := uuid.New()
+	usersTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         accountsTableID,
+			SchemaName: "public",
+			TableName:  "accounts",
+			RowCount:   &distinctCount,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: accountsTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &distinctCount,
+				},
+			},
+		},
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &rowCount, // 10,000 rows
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "bigint",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &rowCount,
+				},
+				{
+					SchemaTableID: usersTableID,
+					ColumnName:    "buyer", // Non-_id column with low cardinality ratio
+					DataType:      "bigint",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &lowDistinctCount, // 30/10000 = 0.3% < 5%
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: NO relationships for the "buyer" column due to low cardinality ratio
+	// (non-_id columns still get filtered by the 5% threshold)
+	for _, rel := range mocks.relationshipRepo.created {
+		if rel.SourceColumnName == "buyer" || rel.TargetColumnName == "buyer" {
+			t.Errorf("unexpected relationship involving 'buyer' column: %s.%s → %s.%s",
+				rel.SourceColumnTable, rel.SourceColumnName,
+				rel.TargetColumnTable, rel.TargetColumnName)
+		}
+	}
+
+	// The result may include other relationships (like id columns), but buyer should not appear
+	_ = result
+}
+
 func TestPKMatch_ReversedDirectionRejected(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()

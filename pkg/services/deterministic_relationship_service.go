@@ -556,7 +556,10 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			continue
 		}
 		// Check cardinality ratio if row count available
-		if table.RowCount != nil && *table.RowCount > 0 {
+		// Skip this check for likely FK columns (ending in _id, _uuid, _key) since they
+		// are often valid FK columns even with low cardinality (e.g., 500 unique visitors
+		// in 100,000 rows = 0.5%). Let the actual join validation decide.
+		if table.RowCount != nil && *table.RowCount > 0 && !isLikelyFKColumn(col.ColumnName) {
 			ratio := float64(*col.DistinctCount) / float64(*table.RowCount)
 			if ratio < 0.05 {
 				continue
@@ -731,6 +734,22 @@ func isPKMatchExcludedType(col *models.SchemaColumn) bool {
 
 	// JSON types
 	if strings.Contains(lower, "json") {
+		return true
+	}
+
+	return false
+}
+
+// isLikelyFKColumn returns true for column names that strongly suggest a foreign key relationship.
+// These columns skip the cardinality ratio check because they are likely FK columns even with low
+// cardinality (e.g., 500 unique visitors in 100,000 rows = 0.5%).
+func isLikelyFKColumn(columnName string) bool {
+	lower := strings.ToLower(columnName)
+
+	// Explicit FK patterns
+	if strings.HasSuffix(lower, "_id") ||
+		strings.HasSuffix(lower, "_uuid") ||
+		strings.HasSuffix(lower, "_key") {
 		return true
 	}
 

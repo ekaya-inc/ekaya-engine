@@ -251,8 +251,8 @@ Run relationship discovery and verify:
 
 ## Acceptance Criteria
 
-- [ ] Text UUID columns treated as FK candidates
-- [ ] Cardinality filter relaxed for _id columns
+- [x] Text UUID columns treated as FK candidates
+- [x] Cardinality filter relaxed for _id columns
 - [ ] Type compatibility includes text ↔ uuid
 - [ ] Role-prefixed columns (visitor_id, host_id) mapped to target entity
 - [ ] Billing Engagement entity has 4+ relationships after extraction
