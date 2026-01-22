@@ -55,9 +55,9 @@ func CalculateFees(amount int) (platformFee, tikrShare, hostEarnings int) {
 	// Verify we extracted facts
 	assert.GreaterOrEqual(t, len(facts), 3, "Should extract at least 3 facts")
 
-	// Check that we found the expected facts
+	// Check that we found the expected facts for the complete fee structure
 	// Note: DurationPerTik contains "billing" in its comment, so it's categorized as business_rule
-	var foundTikDuration, foundPlatformFee, foundCalculateFees bool
+	var foundTikDuration, foundPlatformFee, foundTikrShare, foundCalculateFees bool
 	for _, fact := range facts {
 		// DurationPerTik has "billing" in comment, so it's business_rule
 		if strings.Contains(fact.Fact, "DurationPerTik") || strings.Contains(fact.Fact, "6 seconds") {
@@ -66,14 +66,20 @@ func CalculateFees(amount int) (platformFee, tikrShare, hostEarnings int) {
 		if fact.FactType == "business_rule" && (strings.Contains(fact.Fact, "PlatformFeeRate") || strings.Contains(fact.Fact, "4.5%")) {
 			foundPlatformFee = true
 		}
+		// Fee structure: Tikr share (30%)
+		if fact.FactType == "business_rule" && (strings.Contains(fact.Fact, "TikrShareRate") || strings.Contains(fact.Fact, "30%")) {
+			foundTikrShare = true
+		}
+		// CalculateFees documents the complete fee breakdown including host earnings calculation
 		if fact.FactType == "business_rule" && strings.Contains(fact.Fact, "CalculateFees") {
 			foundCalculateFees = true
 		}
 	}
 
 	assert.True(t, foundTikDuration, "Should find tik duration fact")
-	assert.True(t, foundPlatformFee, "Should find platform fee business rule")
-	assert.True(t, foundCalculateFees, "Should find CalculateFees business rule")
+	assert.True(t, foundPlatformFee, "Should find platform fee business rule (4.5%)")
+	assert.True(t, foundTikrShare, "Should find Tikr share business rule (30%)")
+	assert.True(t, foundCalculateFees, "Should find CalculateFees business rule documenting fee structure")
 }
 
 func TestKnowledgeDiscovery_ScanCodeComments_TypeScriptFiles(t *testing.T) {
@@ -582,6 +588,76 @@ func TestKnowledgeDiscovery_ScanDocumentation_EmptyContextFilled(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, facts, 1)
 	assert.Contains(t, facts[0].Context, "README.md", "Empty context should be filled with source path")
+}
+
+// TestKnowledgeDiscovery_ScanCodeComments_FeeStructure verifies that the complete Tikr fee structure
+// is captured from code comments: platform fees (4.5%), Tikr share (30%), and the resulting
+// host earnings (~66.35% of total transaction).
+func TestKnowledgeDiscovery_ScanCodeComments_FeeStructure(t *testing.T) {
+	logger := zap.NewNop()
+	kd := NewKnowledgeDiscovery(logger, nil)
+
+	tmpDir := t.TempDir()
+
+	// Create a Go file with billing calculations that documents the fee structure
+	goContent := `package billing
+
+// PlatformFeeRate is the platform's fee percentage (4.5%)
+// This fee covers payment processing costs.
+const PlatformFeeRate = 0.045
+
+// TikrShareRate is the percentage taken by Tikr (30% of amount after platform fees)
+// Host receives the remainder (~66.35% of total).
+const TikrShareRate = 0.30
+
+// HostEarningsRate is approximately 66.35% of total transaction
+// Calculation: (1 - 0.045) * (1 - 0.30) = 0.9550 * 0.70 = 0.6685 ≈ 66.85%
+// Note: Actual calculation may vary slightly due to rounding.
+const HostEarningsRate = 0.6685
+
+// CalculateEarnings computes the fee breakdown for a billing transaction.
+// Fee structure: Platform fees (4.5%), Tikr share (30%), Host earnings (~66.35%)
+func CalculateEarnings(totalAmount int) (platformFees, tikrShare, hostEarnings int) {
+	platformFees = totalAmount * 45 / 1000      // 4.5%
+	afterFees := totalAmount - platformFees
+	tikrShare = afterFees * 30 / 100            // 30% of remainder
+	hostEarnings = afterFees - tikrShare        // ~66.35% of total
+	return
+}
+`
+	goPath := filepath.Join(tmpDir, "billing_helpers.go")
+	err := os.WriteFile(goPath, []byte(goContent), 0600)
+	require.NoError(t, err)
+
+	// Run the scanner
+	facts, err := kd.ScanCodeComments(context.Background(), tmpDir)
+	require.NoError(t, err)
+
+	// Verify we extracted the complete fee structure
+	var foundPlatformFee, foundTikrShare, foundHostEarnings, foundCalculateEarnings bool
+	for _, fact := range facts {
+		// Platform fee rate (4.5%)
+		if fact.FactType == "business_rule" && (strings.Contains(fact.Fact, "PlatformFeeRate") || strings.Contains(fact.Fact, "4.5%")) {
+			foundPlatformFee = true
+		}
+		// Tikr share rate (30%)
+		if fact.FactType == "business_rule" && (strings.Contains(fact.Fact, "TikrShareRate") || strings.Contains(fact.Fact, "30%")) {
+			foundTikrShare = true
+		}
+		// Host earnings rate (~66.35%)
+		if fact.FactType == "business_rule" && (strings.Contains(fact.Fact, "HostEarningsRate") || strings.Contains(fact.Fact, "66")) {
+			foundHostEarnings = true
+		}
+		// CalculateEarnings function documenting fee structure
+		if fact.FactType == "business_rule" && strings.Contains(fact.Fact, "CalculateEarnings") {
+			foundCalculateEarnings = true
+		}
+	}
+
+	assert.True(t, foundPlatformFee, "Should find platform fee rate (4.5%)")
+	assert.True(t, foundTikrShare, "Should find Tikr share rate (30%)")
+	assert.True(t, foundHostEarnings, "Should find host earnings rate (~66.35%)")
+	assert.True(t, foundCalculateEarnings, "Should find CalculateEarnings function documenting fee structure")
 }
 
 // Helper functions for mock LLM clients
