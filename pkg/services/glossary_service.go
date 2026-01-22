@@ -23,6 +23,8 @@ var ErrTestTermRejected = errors.New("term name appears to be test data")
 // testTermPatterns contains regex patterns to detect test-like term names.
 // Terms matching these patterns are rejected to prevent test data from
 // being persisted in the glossary.
+//
+// IMPORTANT: Keep in sync with testTermPatterns in scripts/cleanup-test-data/main.go
 var testTermPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)^test`),    // Starts with "test"
 	regexp.MustCompile(`(?i)test$`),    // Ends with "test"
@@ -109,9 +111,13 @@ type glossaryService struct {
 	llmFactory     llm.LLMClientFactory
 	getTenant      TenantContextFunc
 	logger         *zap.Logger
+	env            string
 }
 
 // NewGlossaryService creates a new GlossaryService.
+// The env parameter specifies the runtime environment (e.g., "local", "dev", "production").
+// In production, test-like terms are rejected entirely.
+// In non-production environments, test-like terms are allowed but logged as warnings.
 func NewGlossaryService(
 	glossaryRepo repositories.GlossaryRepository,
 	ontologyRepo repositories.OntologyRepository,
@@ -122,6 +128,7 @@ func NewGlossaryService(
 	llmFactory llm.LLMClientFactory,
 	getTenant TenantContextFunc,
 	logger *zap.Logger,
+	env string,
 ) GlossaryService {
 	return &glossaryService{
 		glossaryRepo:   glossaryRepo,
@@ -133,6 +140,7 @@ func NewGlossaryService(
 		llmFactory:     llmFactory,
 		getTenant:      getTenant,
 		logger:         logger.Named("glossary-service"),
+		env:            env,
 	}
 }
 
@@ -150,9 +158,14 @@ func (s *glossaryService) CreateTerm(ctx context.Context, projectID uuid.UUID, t
 		return fmt.Errorf("defining_sql is required")
 	}
 
-	// Reject test-like term names to prevent test data in production
+	// Handle test-like term names based on environment
 	if IsTestTerm(term.Term) {
-		return fmt.Errorf("%w: %s", ErrTestTermRejected, term.Term)
+		if s.env == "production" {
+			return fmt.Errorf("test data not allowed in production: %s", term.Term)
+		}
+		s.logger.Warn("Creating test-like glossary term",
+			zap.String("term", term.Term),
+			zap.String("env", s.env))
 	}
 
 	// Set project ID and default source if not provided
@@ -209,9 +222,14 @@ func (s *glossaryService) UpdateTerm(ctx context.Context, term *models.BusinessG
 		return fmt.Errorf("defining_sql is required")
 	}
 
-	// Reject test-like term names to prevent test data in production
+	// Handle test-like term names based on environment
 	if IsTestTerm(term.Term) {
-		return fmt.Errorf("%w: %s", ErrTestTermRejected, term.Term)
+		if s.env == "production" {
+			return fmt.Errorf("test data not allowed in production: %s", term.Term)
+		}
+		s.logger.Warn("Updating to test-like glossary term",
+			zap.String("term", term.Term),
+			zap.String("env", s.env))
 	}
 
 	// Get existing term to check if SQL changed

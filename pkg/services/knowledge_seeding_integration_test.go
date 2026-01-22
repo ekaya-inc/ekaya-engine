@@ -511,6 +511,7 @@ func TestKnowledgeSeeding_Integration_DomainKnowledgeIncludedInGlossaryPrompt(t 
 		mockFactory,
 		nil, // getTenantCtx
 		zap.NewNop(),
+		"test",
 	)
 
 	// Call SuggestTerms which should include knowledge in the prompt
@@ -561,6 +562,7 @@ func TestKnowledgeSeeding_Integration_GlossaryDiscovery_DomainSpecificTerms(t *t
 		mockFactory,
 		nil, // getTenantCtx
 		zap.NewNop(),
+		"test",
 	)
 
 	// Discover glossary terms using the ontologyID

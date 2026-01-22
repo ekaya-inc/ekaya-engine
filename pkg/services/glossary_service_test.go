@@ -440,7 +440,7 @@ func TestGlossaryService_CreateTerm(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	term := &models.BusinessGlossaryTerm{
 		Term:        "Revenue",
@@ -470,7 +470,7 @@ func TestGlossaryService_CreateTerm_MissingName(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	term := &models.BusinessGlossaryTerm{
 		Definition: "Some definition",
@@ -493,7 +493,7 @@ func TestGlossaryService_CreateTerm_MissingDefinition(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	term := &models.BusinessGlossaryTerm{
 		Term: "Revenue",
@@ -516,7 +516,7 @@ func TestGlossaryService_UpdateTerm(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	// Create initial term
 	term := &models.BusinessGlossaryTerm{
@@ -549,7 +549,7 @@ func TestGlossaryService_UpdateTerm_NotFound(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	term := &models.BusinessGlossaryTerm{
 		ID:         uuid.New(),
@@ -573,7 +573,7 @@ func TestGlossaryService_DeleteTerm(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	// Create term
 	term := &models.BusinessGlossaryTerm{
@@ -606,7 +606,7 @@ func TestGlossaryService_GetTerms(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	// Create terms
 	term1 := &models.BusinessGlossaryTerm{Term: "Revenue", Definition: "Revenue def", DefiningSQL: "SELECT SUM(amount) FROM transactions"}
@@ -683,7 +683,7 @@ func TestGlossaryService_SuggestTerms(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	suggestions, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -714,7 +714,7 @@ func TestGlossaryService_SuggestTerms_NoOntology(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	_, err := svc.SuggestTerms(ctx, projectID)
 	require.Error(t, err)
@@ -740,7 +740,7 @@ func TestGlossaryService_SuggestTerms_NoEntities(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	suggestions, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -777,7 +777,7 @@ func TestGlossaryService_SuggestTerms_LLMError(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	_, err := svc.SuggestTerms(ctx, projectID)
 	require.Error(t, err)
@@ -830,7 +830,7 @@ func TestGlossaryService_SuggestTerms_WithConventions(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	suggestions, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -875,7 +875,7 @@ func TestGlossaryService_SuggestTerms_WithColumnDetails(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	suggestions, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -926,7 +926,7 @@ func TestGlossaryService_SuggestTerms_InvalidSQL(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
 	require.NoError(t, err)
@@ -1020,7 +1020,7 @@ func TestGlossaryService_DiscoverGlossaryTerms(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
 	require.NoError(t, err)
@@ -1075,7 +1075,7 @@ func TestGlossaryService_DiscoverGlossaryTerms_SkipsDuplicates(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	// Create existing term with same name
 	existingTerm := &models.BusinessGlossaryTerm{
@@ -1118,7 +1118,7 @@ func TestGlossaryService_DiscoverGlossaryTerms_NoEntities(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
 	require.NoError(t, err)
@@ -1166,7 +1166,7 @@ func TestGlossaryService_EnrichGlossaryTerms(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
 
 	// Create unenriched term (no DefiningSQL initially)
 	term := &models.BusinessGlossaryTerm{
@@ -1229,7 +1229,7 @@ func TestGlossaryService_EnrichGlossaryTerms_OnlyEnrichesUnenrichedTerms(t *test
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	// Create already-enriched term
 	enrichedTerm := &models.BusinessGlossaryTerm{
@@ -1281,7 +1281,7 @@ func TestGlossaryService_EnrichGlossaryTerms_NoUnenrichedTerms(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	// No terms exist
 	err := svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
@@ -1487,7 +1487,7 @@ func TestGlossaryService_SuggestTerms_WithDomainKnowledge_IncludesFactsInPrompt(
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, knowledgeRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, knowledgeRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	suggestions, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -1557,7 +1557,7 @@ func TestGlossaryService_SuggestTerms_WithoutDomainKnowledge_PromptDoesNotHaveKn
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, knowledgeRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, knowledgeRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	_, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -1649,7 +1649,7 @@ func TestGlossaryService_DiscoverGlossaryTerms_WithDomainKnowledge_GeneratesDoma
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, knowledgeRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, knowledgeRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
 	require.NoError(t, err)
@@ -1711,7 +1711,7 @@ func TestGlossaryService_SystemMessage_GuidesAgainstGenericMetrics(t *testing.T)
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	_, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -1775,7 +1775,7 @@ func TestGlossaryService_Prompt_IncludesNegativeExamplesSection(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	_, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -2342,7 +2342,7 @@ func TestGlossaryService_Prompt_IncludesDomainAnalysisSection(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	_, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -2657,7 +2657,7 @@ func TestFilterInapplicableTerms_IntegrationWithSuggestTerms(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "test")
 
 	suggestions, err := svc.SuggestTerms(ctx, projectID)
 	require.NoError(t, err)
@@ -2755,13 +2755,13 @@ func TestIsTestTerm(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isTestTerm(tt.termName)
-			assert.Equal(t, tt.want, got, "isTestTerm(%q) = %v, want %v", tt.termName, got, tt.want)
+			got := IsTestTerm(tt.termName)
+			assert.Equal(t, tt.want, got, "IsTestTerm(%q) = %v, want %v", tt.termName, got, tt.want)
 		})
 	}
 }
 
-func TestGlossaryService_CreateTerm_RejectsTestTerm(t *testing.T) {
+func TestGlossaryService_CreateTerm_RejectsTestTermInProduction(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
 
@@ -2773,7 +2773,8 @@ func TestGlossaryService_CreateTerm_RejectsTestTerm(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	// Production environment should reject test terms
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "production")
 
 	testCases := []struct {
 		name     string
@@ -2797,13 +2798,13 @@ func TestGlossaryService_CreateTerm_RejectsTestTerm(t *testing.T) {
 
 			err := svc.CreateTerm(ctx, projectID, term)
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "appears to be test data")
+			assert.Contains(t, err.Error(), "test data not allowed in production")
 			assert.Contains(t, err.Error(), tc.termName)
 		})
 	}
 }
 
-func TestGlossaryService_UpdateTerm_RejectsTestTerm(t *testing.T) {
+func TestGlossaryService_CreateTerm_AllowsTestTermInNonProduction(t *testing.T) {
 	projectID := uuid.New()
 	ctx := withTestAuth(context.Background(), projectID)
 
@@ -2815,7 +2816,37 @@ func TestGlossaryService_UpdateTerm_RejectsTestTerm(t *testing.T) {
 
 	datasourceSvc := &mockDatasourceServiceForGlossary{}
 	adapterFactory := &mockAdapterFactoryForGlossary{}
-	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+	// Non-production environments should allow test terms with a warning
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "local")
+
+	term := &models.BusinessGlossaryTerm{
+		Term:        "TestRevenue",
+		Definition:  "Some definition",
+		DefiningSQL: "SELECT 1",
+	}
+
+	// Should succeed in non-production (with warning logged)
+	err := svc.CreateTerm(ctx, projectID, term)
+	require.NoError(t, err)
+
+	// Verify term was created
+	assert.NotEqual(t, uuid.Nil, term.ID)
+}
+
+func TestGlossaryService_UpdateTerm_RejectsTestTermInProduction(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{}
+	entityRepo := &mockEntityRepoForGlossary{}
+	llmFactory := &mockLLMFactoryForGlossary{}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	// Production environment should reject test terms
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "production")
 
 	// Create a valid term first (we'll add it directly to the mock repo)
 	existingTerm := &models.BusinessGlossaryTerm{
@@ -2851,8 +2882,50 @@ func TestGlossaryService_UpdateTerm_RejectsTestTerm(t *testing.T) {
 
 			err := svc.UpdateTerm(ctx, term)
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "appears to be test data")
+			assert.Contains(t, err.Error(), "test data not allowed in production")
 			assert.Contains(t, err.Error(), tc.termName)
 		})
 	}
+}
+
+func TestGlossaryService_UpdateTerm_AllowsTestTermInNonProduction(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{}
+	entityRepo := &mockEntityRepoForGlossary{}
+	llmFactory := &mockLLMFactoryForGlossary{}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	// Non-production environments should allow test terms with a warning
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger, "local")
+
+	// Create a valid term first (we'll add it directly to the mock repo)
+	existingTerm := &models.BusinessGlossaryTerm{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Term:        "Revenue",
+		Definition:  "Total revenue",
+		DefiningSQL: "SELECT SUM(amount) FROM transactions",
+	}
+	glossaryRepo.terms[existingTerm.ID] = existingTerm
+
+	// Update with a test-like name - should succeed in non-production
+	term := &models.BusinessGlossaryTerm{
+		ID:          existingTerm.ID,
+		ProjectID:   projectID,
+		Term:        "TestRevenue",
+		Definition:  "Updated definition",
+		DefiningSQL: "SELECT SUM(amount) FROM transactions",
+	}
+
+	err := svc.UpdateTerm(ctx, term)
+	require.NoError(t, err)
+
+	// Verify term was updated
+	updated, _ := glossaryRepo.GetByID(ctx, existingTerm.ID)
+	assert.Equal(t, "TestRevenue", updated.Term)
 }
