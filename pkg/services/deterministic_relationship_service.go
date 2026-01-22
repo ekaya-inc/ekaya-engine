@@ -521,8 +521,7 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	}
 
 	// Build list of filtered FK candidate columns (columns that could reference entity columns)
-	// Group by type for efficient matching
-	candidatesByType := make(map[string][]*pkMatchCandidate)
+	var allCandidates []*pkMatchCandidate
 	for _, col := range columns {
 		table, ok := tableByID[col.SchemaTableID]
 		if !ok {
@@ -573,31 +572,25 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			}
 		}
 
-		cwt := &pkMatchCandidate{
+		allCandidates = append(allCandidates, &pkMatchCandidate{
 			column: col,
 			schema: table.SchemaName,
 			table:  table.TableName,
-		}
-		candidatesByType[col.DataType] = append(candidatesByType[col.DataType], cwt)
-	}
-
-	// Calculate total candidates for progress logging
-	totalCandidates := 0
-	for _, candidates := range candidatesByType {
-		totalCandidates += len(candidates)
+		})
 	}
 	s.logger.Info("PK-match discovery setup complete",
 		zap.Int("entity_ref_columns", len(entityRefColumns)),
-		zap.Int("total_candidates", totalCandidates))
+		zap.Int("total_candidates", len(allCandidates)))
 
-	// For each entity reference column, find candidates with matching type and test joins
+	// For each entity reference column, find candidates with compatible types and test joins
 	var inferredCount int
 	processedRefs := 0
 	for _, ref := range entityRefColumns {
-		refType := ref.column.DataType
-		candidates := candidatesByType[refType]
-
-		for _, candidate := range candidates {
+		for _, candidate := range allCandidates {
+			// Skip if types are incompatible (handles text ↔ uuid, int variants, etc.)
+			if !areTypesCompatibleForFK(candidate.column.DataType, ref.column.DataType) {
+				continue
+			}
 			// Skip if same table (self-reference)
 			if candidate.schema == ref.schema && candidate.table == ref.table {
 				continue
@@ -757,6 +750,58 @@ func isLikelyFKColumn(columnName string) bool {
 	if strings.HasSuffix(lower, "_id") ||
 		strings.HasSuffix(lower, "_uuid") ||
 		strings.HasSuffix(lower, "_key") {
+		return true
+	}
+
+	return false
+}
+
+// areTypesCompatibleForFK checks if source and target column types are compatible for FK relationships.
+// Supports exact match, UUID compatibility (text ↔ uuid ↔ varchar ↔ character varying),
+// and integer compatibility (int ↔ integer ↔ bigint ↔ smallint ↔ serial).
+func areTypesCompatibleForFK(sourceType, targetType string) bool {
+	source := strings.ToLower(sourceType)
+	target := strings.ToLower(targetType)
+
+	// Strip length/precision info (e.g., varchar(255) → varchar)
+	if idx := strings.Index(source, "("); idx > 0 {
+		source = source[:idx]
+	}
+	if idx := strings.Index(target, "("); idx > 0 {
+		target = target[:idx]
+	}
+	source = strings.TrimSpace(source)
+	target = strings.TrimSpace(target)
+
+	// Exact match
+	if source == target {
+		return true
+	}
+
+	// UUID compatibility: text, uuid, varchar, character varying can all store UUIDs
+	uuidTypes := map[string]bool{
+		"uuid":              true,
+		"text":              true,
+		"varchar":           true,
+		"character varying": true,
+	}
+	if uuidTypes[source] && uuidTypes[target] {
+		return true
+	}
+
+	// Integer compatibility: int, integer, bigint, smallint, serial variants
+	intTypes := map[string]bool{
+		"int":       true,
+		"int2":      true,
+		"int4":      true,
+		"int8":      true,
+		"integer":   true,
+		"bigint":    true,
+		"smallint":  true,
+		"serial":    true,
+		"bigserial": true,
+	}
+	if intTypes[source] && intTypes[target] {
 		return true
 	}
 

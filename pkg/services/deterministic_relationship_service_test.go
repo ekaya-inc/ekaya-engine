@@ -970,7 +970,7 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 						ColumnName:    "user_id", // _id column - should be included even with nil IsJoinable
 						DataType:      "uuid",
 						IsPrimaryKey:  false,
-						IsJoinable:    nil,          // nil joinability - but should be included for _id columns
+						IsJoinable:    nil,           // nil joinability - but should be included for _id columns
 						DistinctCount: &highDistinct, // Sufficient distinct count
 					},
 				},
@@ -3442,6 +3442,115 @@ func TestPKMatch_ReversedDirectionRejected(t *testing.T) {
 		if reverseRel.SourceColumnTable != "accounts" || reverseRel.TargetColumnTable != "account_password_resets" {
 			t.Errorf("expected reverse direction accounts→account_password_resets (for navigation), got %s→%s",
 				reverseRel.SourceColumnTable, reverseRel.TargetColumnTable)
+		}
+	}
+}
+
+// ============================================================================
+// areTypesCompatibleForFK Tests
+// ============================================================================
+
+func TestAreTypesCompatibleForFK_ExactMatch(t *testing.T) {
+	tests := []struct {
+		source, target string
+		want           bool
+	}{
+		{"uuid", "uuid", true},
+		{"text", "text", true},
+		{"integer", "integer", true},
+		{"bigint", "bigint", true},
+	}
+
+	for _, tt := range tests {
+		got := areTypesCompatibleForFK(tt.source, tt.target)
+		if got != tt.want {
+			t.Errorf("areTypesCompatibleForFK(%q, %q) = %v, want %v", tt.source, tt.target, got, tt.want)
+		}
+	}
+}
+
+func TestAreTypesCompatibleForFK_UUIDCompatibility(t *testing.T) {
+	// UUID types should be compatible with each other (text ↔ uuid ↔ varchar ↔ character varying)
+	uuidTypes := []string{"uuid", "text", "varchar", "character varying"}
+
+	for _, source := range uuidTypes {
+		for _, target := range uuidTypes {
+			got := areTypesCompatibleForFK(source, target)
+			if !got {
+				t.Errorf("areTypesCompatibleForFK(%q, %q) = false, want true (UUID compatibility)", source, target)
+			}
+		}
+	}
+}
+
+func TestAreTypesCompatibleForFK_IntegerCompatibility(t *testing.T) {
+	// Integer types should be compatible with each other
+	intTypes := []string{"int", "int2", "int4", "int8", "integer", "bigint", "smallint", "serial", "bigserial"}
+
+	for _, source := range intTypes {
+		for _, target := range intTypes {
+			got := areTypesCompatibleForFK(source, target)
+			if !got {
+				t.Errorf("areTypesCompatibleForFK(%q, %q) = false, want true (integer compatibility)", source, target)
+			}
+		}
+	}
+}
+
+func TestAreTypesCompatibleForFK_IncompatibleTypes(t *testing.T) {
+	tests := []struct {
+		source, target string
+	}{
+		{"integer", "uuid"},
+		{"integer", "text"},
+		{"bigint", "varchar"},
+		{"uuid", "integer"},
+		{"text", "bigint"},
+	}
+
+	for _, tt := range tests {
+		got := areTypesCompatibleForFK(tt.source, tt.target)
+		if got {
+			t.Errorf("areTypesCompatibleForFK(%q, %q) = true, want false (incompatible types)", tt.source, tt.target)
+		}
+	}
+}
+
+func TestAreTypesCompatibleForFK_NormalizesLengthSpecifiers(t *testing.T) {
+	tests := []struct {
+		source, target string
+		want           bool
+	}{
+		{"varchar(255)", "varchar(100)", true},   // Same type, different lengths
+		{"varchar(36)", "uuid", true},            // varchar(36) is UUID compatible
+		{"character varying(255)", "text", true}, // character varying is UUID compatible
+		{"int(11)", "integer", true},             // MySQL-style int with display width
+		{"INT(11)", "INTEGER", true},             // Case insensitive
+	}
+
+	for _, tt := range tests {
+		got := areTypesCompatibleForFK(tt.source, tt.target)
+		if got != tt.want {
+			t.Errorf("areTypesCompatibleForFK(%q, %q) = %v, want %v", tt.source, tt.target, got, tt.want)
+		}
+	}
+}
+
+func TestAreTypesCompatibleForFK_CaseInsensitive(t *testing.T) {
+	tests := []struct {
+		source, target string
+		want           bool
+	}{
+		{"UUID", "uuid", true},
+		{"Text", "TEXT", true},
+		{"INTEGER", "integer", true},
+		{"VARCHAR", "text", true},
+	}
+
+	for _, tt := range tests {
+		got := areTypesCompatibleForFK(tt.source, tt.target)
+		if got != tt.want {
+			t.Errorf("areTypesCompatibleForFK(%q, %q) = %v, want %v", tt.source, tt.target, got, tt.want)
 		}
 	}
 }
