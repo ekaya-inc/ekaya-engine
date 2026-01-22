@@ -1287,3 +1287,447 @@ func TestGlossaryService_EnrichGlossaryTerms_NoUnenrichedTerms(t *testing.T) {
 	err := svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
 	require.NoError(t, err)
 }
+
+// ============================================================================
+// Tests - Domain-Specific Glossary Generation with Knowledge Seeding
+// ============================================================================
+
+// mockKnowledgeRepoForGlossary implements a mock knowledge repository for glossary tests.
+type mockKnowledgeRepoForGlossary struct {
+	facts []*models.KnowledgeFact
+	err   error
+}
+
+func (m *mockKnowledgeRepoForGlossary) Upsert(ctx context.Context, fact *models.KnowledgeFact) error {
+	if m.err != nil {
+		return m.err
+	}
+	if fact.ID == uuid.Nil {
+		fact.ID = uuid.New()
+	}
+	m.facts = append(m.facts, fact)
+	return nil
+}
+
+func (m *mockKnowledgeRepoForGlossary) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.KnowledgeFact, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.facts, nil
+}
+
+func (m *mockKnowledgeRepoForGlossary) GetByType(ctx context.Context, projectID uuid.UUID, factType string) ([]*models.KnowledgeFact, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	filtered := make([]*models.KnowledgeFact, 0)
+	for _, f := range m.facts {
+		if f.FactType == factType {
+			filtered = append(filtered, f)
+		}
+	}
+	return filtered, nil
+}
+
+func (m *mockKnowledgeRepoForGlossary) GetByKey(ctx context.Context, projectID uuid.UUID, factType, key string) (*models.KnowledgeFact, error) {
+	for _, f := range m.facts {
+		if f.FactType == factType && f.Key == key {
+			return f, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockKnowledgeRepoForGlossary) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (m *mockKnowledgeRepoForGlossary) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
+	m.facts = make([]*models.KnowledgeFact, 0)
+	return nil
+}
+
+// mockLLMClientCapturingPrompt captures the prompt for verification.
+type mockLLMClientCapturingPrompt struct {
+	capturedPrompt        string
+	capturedSystemMessage string
+	responseContent       string
+	generateErr           error
+}
+
+func (m *mockLLMClientCapturingPrompt) GenerateResponse(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+	m.capturedPrompt = prompt
+	m.capturedSystemMessage = systemMessage
+	if m.generateErr != nil {
+		return nil, m.generateErr
+	}
+	return &llm.GenerateResponseResult{
+		Content:          m.responseContent,
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		TotalTokens:      150,
+	}, nil
+}
+
+func (m *mockLLMClientCapturingPrompt) CreateEmbedding(ctx context.Context, input string, model string) ([]float32, error) {
+	return nil, nil
+}
+
+func (m *mockLLMClientCapturingPrompt) CreateEmbeddings(ctx context.Context, inputs []string, model string) ([][]float32, error) {
+	return nil, nil
+}
+
+func (m *mockLLMClientCapturingPrompt) GetModel() string {
+	return "test-model"
+}
+
+func (m *mockLLMClientCapturingPrompt) GetEndpoint() string {
+	return "https://test.endpoint"
+}
+
+func TestGlossaryService_SuggestTerms_WithDomainKnowledge_IncludesFactsInPrompt(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Engagement",
+			Description:  "User engagement sessions",
+			Domain:       "billing",
+			PrimaryTable: "billing_engagements",
+		},
+	}
+
+	// Tikr-specific domain knowledge
+	knowledgeFacts := []*models.KnowledgeFact{
+		{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			FactType:  "terminology",
+			Key:       "A tik represents 6 seconds of engagement time",
+			Value:     "A tik represents 6 seconds of engagement time",
+			Context:   "Billing unit - from billing_helpers.go:413",
+		},
+		{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			FactType:  "terminology",
+			Key:       "Host is a content creator who receives payments",
+			Value:     "Host is a content creator who receives payments",
+			Context:   "User role",
+		},
+		{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			FactType:  "terminology",
+			Key:       "Visitor is a viewer who pays for engagements",
+			Value:     "Visitor is a viewer who pays for engagements",
+			Context:   "User role",
+		},
+		{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			FactType:  "business_rule",
+			Key:       "Platform fees are 4.5% of total amount",
+			Value:     "Platform fees are 4.5% of total amount",
+			Context:   "billing_helpers.go:373",
+		},
+		{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			FactType:  "business_rule",
+			Key:       "Tikr share is 30% of amount after platform fees",
+			Value:     "Tikr share is 30% of amount after platform fees",
+			Context:   "billing_helpers.go:375",
+		},
+	}
+
+	// LLM response with domain-specific terms (NOT generic SaaS metrics)
+	llmResponse := `{"terms": [
+		{
+			"term": "Tik Count",
+			"definition": "Number of 6-second engagement units consumed during a session",
+			"aliases": ["Engagement Tiks", "Tik Units"]
+		},
+		{
+			"term": "Host Earnings",
+			"definition": "Amount earned by content creators after platform fees and Tikr share deductions",
+			"aliases": ["Creator Earnings", "Host Revenue"]
+		},
+		{
+			"term": "Visitor Spend",
+			"definition": "Total amount paid by viewers for engagements",
+			"aliases": ["Viewer Payments", "Engagement Cost"]
+		}
+	]}`
+
+	// Capture the prompt to verify it includes domain knowledge
+	llmClient := &mockLLMClientCapturingPrompt{responseContent: llmResponse}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	knowledgeRepo := &mockKnowledgeRepoForGlossary{facts: knowledgeFacts}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+			DomainSummary: &models.DomainSummary{
+				Description: "Video engagement platform where viewers pay creators per 6-second tik",
+			},
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, knowledgeRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+
+	suggestions, err := svc.SuggestTerms(ctx, projectID)
+	require.NoError(t, err)
+
+	// Verify domain knowledge facts were included in the prompt
+	assert.Contains(t, llmClient.capturedPrompt, "Domain Knowledge", "Prompt should include domain knowledge section")
+	assert.Contains(t, llmClient.capturedPrompt, "tik represents 6 seconds", "Prompt should include tik terminology")
+	assert.Contains(t, llmClient.capturedPrompt, "Host is a content creator", "Prompt should include host role")
+	assert.Contains(t, llmClient.capturedPrompt, "Visitor is a viewer", "Prompt should include visitor role")
+	assert.Contains(t, llmClient.capturedPrompt, "Platform fees are 4.5%", "Prompt should include fee structure")
+	assert.Contains(t, llmClient.capturedPrompt, "Tikr share is 30%", "Prompt should include Tikr share rule")
+
+	// Verify the system message instructs NOT to suggest generic SaaS metrics
+	assert.Contains(t, llmClient.capturedSystemMessage, "DO NOT suggest generic SaaS metrics", "System message should warn against generic metrics")
+	assert.Contains(t, llmClient.capturedSystemMessage, "ACTUAL business model", "System message should emphasize actual business model")
+
+	// Verify domain-specific terms were returned
+	require.Len(t, suggestions, 3)
+	assert.Equal(t, "Tik Count", suggestions[0].Term)
+	assert.Equal(t, "Host Earnings", suggestions[1].Term)
+	assert.Equal(t, "Visitor Spend", suggestions[2].Term)
+}
+
+func TestGlossaryService_SuggestTerms_WithoutDomainKnowledge_PromptDoesNotHaveKnowledgeSection(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Transaction",
+			Description:  "Financial transactions",
+			Domain:       "billing",
+			PrimaryTable: "transactions",
+		},
+	}
+
+	// Generic response when no domain knowledge is provided
+	llmResponse := `{"terms": [
+		{
+			"term": "Revenue",
+			"definition": "Total transaction value",
+			"aliases": ["Total Revenue"]
+		}
+	]}`
+
+	// Capture the prompt to verify it does NOT include domain knowledge section
+	llmClient := &mockLLMClientCapturingPrompt{responseContent: llmResponse}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	// Empty knowledge repo
+	knowledgeRepo := &mockKnowledgeRepoForGlossary{facts: []*models.KnowledgeFact{}}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, knowledgeRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+
+	_, err := svc.SuggestTerms(ctx, projectID)
+	require.NoError(t, err)
+
+	// Verify the prompt does NOT include domain knowledge section when empty
+	assert.NotContains(t, llmClient.capturedPrompt, "Domain Knowledge", "Prompt should not include domain knowledge section when no facts exist")
+}
+
+func TestGlossaryService_DiscoverGlossaryTerms_WithDomainKnowledge_GeneratesDomainSpecificTerms(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Engagement",
+			Description:  "User engagement sessions",
+			Domain:       "billing",
+			PrimaryTable: "billing_engagements",
+		},
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "User",
+			Description:  "Platform users (hosts and visitors)",
+			Domain:       "customer",
+			PrimaryTable: "users",
+		},
+	}
+
+	// Tikr-specific domain knowledge
+	knowledgeFacts := []*models.KnowledgeFact{
+		{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			FactType:  "terminology",
+			Key:       "A tik represents 6 seconds of engagement time",
+			Value:     "A tik represents 6 seconds of engagement time",
+			Context:   "Billing unit",
+		},
+		{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			FactType:  "terminology",
+			Key:       "Host is a content creator",
+			Value:     "Host is a content creator",
+			Context:   "User role",
+		},
+	}
+
+	// Domain-specific terms that should be generated (NOT generic SaaS metrics)
+	llmResponse := `{"terms": [
+		{
+			"term": "Engagement Revenue",
+			"definition": "Total revenue from viewer-to-host engagement sessions measured in tiks"
+		},
+		{
+			"term": "Host Earnings",
+			"definition": "Amount paid to content creators after platform and Tikr share deductions"
+		},
+		{
+			"term": "Tik Duration",
+			"definition": "Total engagement time measured in 6-second tik units"
+		}
+	]}`
+
+	llmClient := &mockLLMClientCapturingPrompt{responseContent: llmResponse}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	knowledgeRepo := &mockKnowledgeRepoForGlossary{facts: knowledgeFacts}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+			DomainSummary: &models.DomainSummary{
+				Description: "Video engagement platform",
+			},
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, knowledgeRepo, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+
+	count, err := svc.DiscoverGlossaryTerms(ctx, projectID, ontologyID)
+	require.NoError(t, err)
+	assert.Equal(t, 3, count)
+
+	// Verify the discovered terms are domain-specific
+	terms, err := svc.GetTerms(ctx, projectID)
+	require.NoError(t, err)
+	require.Len(t, terms, 3)
+
+	// Verify terms use domain-specific terminology
+	termNames := make([]string, len(terms))
+	for i, term := range terms {
+		termNames[i] = term.Term
+	}
+	assert.Contains(t, termNames, "Engagement Revenue", "Should generate Engagement Revenue, not generic Revenue")
+	assert.Contains(t, termNames, "Host Earnings", "Should generate Host Earnings, not generic User Revenue")
+	assert.Contains(t, termNames, "Tik Duration", "Should generate Tik Duration, not generic Session Duration")
+
+	// Verify none of the generic SaaS metrics appear
+	for _, term := range terms {
+		assert.NotEqual(t, "Churn Rate", term.Term, "Should NOT generate generic Churn Rate")
+		assert.NotEqual(t, "Active Subscribers", term.Term, "Should NOT generate generic Active Subscribers")
+		assert.NotEqual(t, "Average Order Value", term.Term, "Should NOT generate generic AOV")
+		assert.NotEqual(t, "Monthly Active Users", term.Term, "Should NOT generate generic MAU")
+	}
+}
+
+func TestGlossaryService_SystemMessage_GuidesAgainstGenericMetrics(t *testing.T) {
+	// This test verifies the system message content directly
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Transaction",
+			PrimaryTable: "transactions",
+		},
+	}
+
+	llmResponse := `{"terms": []}`
+	llmClient := &mockLLMClientCapturingPrompt{responseContent: llmResponse}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+
+	_, err := svc.SuggestTerms(ctx, projectID)
+	require.NoError(t, err)
+
+	// Verify the system message explicitly guides against generic metrics
+	sysMsg := llmClient.capturedSystemMessage
+
+	// Check key phrases that prevent generic SaaS metrics
+	assert.Contains(t, sysMsg, "DO NOT suggest generic SaaS metrics", "Must warn against generic metrics")
+	assert.Contains(t, sysMsg, "unless they are clearly supported", "Must require schema/knowledge support")
+	assert.Contains(t, sysMsg, "ACTUAL business model", "Must emphasize actual business model")
+
+	// Verify it mentions domain knowledge usage
+	assert.Contains(t, sysMsg, "domain knowledge", "Must mention using domain knowledge")
+	assert.Contains(t, sysMsg, "Industry-specific terminology", "Must guide toward industry-specific terms")
+
+	// Verify it mentions roles
+	assert.Contains(t, sysMsg, "User roles and their meanings", "Must mention understanding user roles")
+}
