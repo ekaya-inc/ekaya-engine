@@ -610,6 +610,17 @@ func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntolog
 	sb.WriteString("- What time-based columns exist (duration, start_time, end_time)\n")
 	sb.WriteString("- What user roles are distinguished (host, visitor, creator, viewer)\n\n")
 
+	// Add domain-specific hints based on detected patterns
+	domainHints := getDomainHints(entities, ontology)
+	if len(domainHints) > 0 {
+		sb.WriteString("## Domain Analysis\n\n")
+		sb.WriteString("Based on the schema structure, the following observations apply to this business:\n\n")
+		for _, hint := range domainHints {
+			sb.WriteString(fmt.Sprintf("- %s\n", hint))
+		}
+		sb.WriteString("\n")
+	}
+
 	sb.WriteString("## Response Format\n\n")
 	sb.WriteString("Respond with a JSON object containing suggested business terms (NO SQL - just term, definition, aliases):\n")
 	sb.WriteString("```json\n")
@@ -1088,4 +1099,109 @@ func capitalizeWords(s string) string {
 		}
 	}
 	return strings.Join(words, " ")
+}
+
+// getDomainHints analyzes entities and column details to detect domain patterns
+// and returns hints to guide the LLM toward domain-specific term suggestions.
+func getDomainHints(entities []*models.OntologyEntity, ontology *models.TieredOntology) []string {
+	var hints []string
+
+	// Detect patterns from entity names
+	hasEngagement := containsEntityByName(entities, "engagement", "session", "meeting", "call", "booking")
+	hasSubscription := containsEntityByName(entities, "subscription", "plan", "membership", "tier")
+	hasBilling := containsEntityByName(entities, "billing", "transaction", "payment", "invoice", "charge")
+	hasInventory := containsEntityByName(entities, "inventory", "product", "stock", "warehouse", "sku")
+	hasEcommerce := containsEntityByName(entities, "order", "cart", "checkout", "purchase")
+
+	// Check for distinct user roles in column details
+	hasUserRoles := hasRoleDistinctingColumns(ontology)
+
+	// Generate domain-specific hints
+	if hasEngagement && !hasSubscription {
+		hints = append(hints, "This appears to be an engagement/session-based business, not subscription-based. Focus on per-engagement metrics rather than recurring revenue metrics.")
+	}
+
+	if hasBilling && !hasSubscription {
+		hints = append(hints, "Focus on transaction-based metrics (revenue per engagement, fees, payouts, transaction volume) rather than subscription metrics (MRR, ARR, churn).")
+	}
+
+	if hasUserRoles {
+		hints = append(hints, "There are distinct user roles (e.g., host/visitor, creator/viewer, buyer/seller). Consider role-specific metrics for each participant type.")
+	}
+
+	if !hasInventory && !hasEcommerce {
+		hints = append(hints, "This is not an e-commerce or inventory-based business. Do not suggest inventory metrics (stock levels, turnover) or order-based metrics (AOV, cart abandonment).")
+	}
+
+	if hasSubscription {
+		hints = append(hints, "This appears to be a subscription-based business. Consider recurring revenue metrics (MRR, ARR, churn, subscriber lifetime value).")
+	}
+
+	return hints
+}
+
+// containsEntityByName checks if any entity name contains one of the specified keywords.
+// The comparison is case-insensitive and matches substrings.
+func containsEntityByName(entities []*models.OntologyEntity, keywords ...string) bool {
+	for _, entity := range entities {
+		if entity.IsDeleted {
+			continue
+		}
+		nameLower := strings.ToLower(entity.Name)
+		tableLower := strings.ToLower(entity.PrimaryTable)
+		for _, keyword := range keywords {
+			keywordLower := strings.ToLower(keyword)
+			if strings.Contains(nameLower, keywordLower) || strings.Contains(tableLower, keywordLower) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasRoleDistinctingColumns checks if the ontology contains columns that indicate
+// distinct user roles (e.g., host_id, visitor_id, creator_id, buyer_id).
+// These columns suggest the platform has different participant types with potentially
+// different metrics for each role.
+func hasRoleDistinctingColumns(ontology *models.TieredOntology) bool {
+	if ontology == nil || ontology.ColumnDetails == nil {
+		return false
+	}
+
+	// Role-indicating column patterns (beyond simple user_id)
+	rolePatterns := []string{
+		"host_id", "visitor_id", "creator_id", "viewer_id",
+		"buyer_id", "seller_id", "sender_id", "receiver_id",
+		"payer_id", "payee_id", "owner_id", "member_id",
+		"author_id", "performer_id", "attendee_id", "participant_id",
+	}
+
+	roleCount := 0
+	for _, columns := range ontology.ColumnDetails {
+		for _, col := range columns {
+			colLower := strings.ToLower(col.Name)
+			for _, pattern := range rolePatterns {
+				if colLower == pattern {
+					roleCount++
+					if roleCount >= 2 {
+						// Need at least 2 distinct role columns to indicate role-based business
+						return true
+					}
+				}
+			}
+			// Also check FKAssociation for role semantics
+			if col.FKAssociation != "" {
+				assocLower := strings.ToLower(col.FKAssociation)
+				if strings.Contains(assocLower, "host") || strings.Contains(assocLower, "visitor") ||
+					strings.Contains(assocLower, "buyer") || strings.Contains(assocLower, "seller") ||
+					strings.Contains(assocLower, "payer") || strings.Contains(assocLower, "payee") {
+					roleCount++
+					if roleCount >= 2 {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }

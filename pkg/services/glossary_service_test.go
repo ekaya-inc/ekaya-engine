@@ -1800,3 +1800,562 @@ func TestGlossaryService_Prompt_IncludesNegativeExamplesSection(t *testing.T) {
 	assert.Contains(t, prompt, "What time-based columns exist", "Prompt must mention time-based columns")
 	assert.Contains(t, prompt, "What user roles are distinguished", "Prompt must mention user roles")
 }
+
+// ============================================================================
+// Tests - getDomainHints Function (BUG-7 Fix Task 4)
+// ============================================================================
+
+func TestGetDomainHints_EngagementBasedNotSubscription(t *testing.T) {
+	// Test: Engagement/session entities without subscription entities
+	// Expected: Hint about engagement-based business, not subscription
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "engagement",
+			PrimaryTable: "billing_engagements",
+		},
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "user",
+			PrimaryTable: "users",
+		},
+	}
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+	}
+
+	hints := getDomainHints(entities, ontology)
+
+	// Should detect engagement-based business
+	found := false
+	for _, hint := range hints {
+		if assert.ObjectsAreEqual("This appears to be an engagement/session-based business, not subscription-based. Focus on per-engagement metrics rather than recurring revenue metrics.", hint) {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "Should include hint about engagement-based business")
+
+	// Should NOT include subscription hint
+	for _, hint := range hints {
+		assert.NotContains(t, hint, "subscription-based business", "Should NOT include subscription hint when no subscription entities")
+	}
+}
+
+func TestGetDomainHints_SubscriptionBased(t *testing.T) {
+	// Test: Has subscription entities
+	// Expected: Hint about subscription-based business
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "subscription",
+			PrimaryTable: "subscriptions",
+		},
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "user",
+			PrimaryTable: "users",
+		},
+	}
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+	}
+
+	hints := getDomainHints(entities, ontology)
+
+	// Should detect subscription-based business
+	found := false
+	for _, hint := range hints {
+		if assert.ObjectsAreEqual("This appears to be a subscription-based business. Consider recurring revenue metrics (MRR, ARR, churn, subscriber lifetime value).", hint) {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "Should include hint about subscription-based business")
+}
+
+func TestGetDomainHints_BillingEntities(t *testing.T) {
+	// Test: Has billing/transaction entities without subscription
+	// Expected: Hint about transaction-based metrics
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "transaction",
+			PrimaryTable: "billing_transactions",
+		},
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "payment",
+			PrimaryTable: "payments",
+		},
+	}
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+	}
+
+	hints := getDomainHints(entities, ontology)
+
+	// Should include transaction-based metrics hint
+	found := false
+	for _, hint := range hints {
+		if assert.ObjectsAreEqual("Focus on transaction-based metrics (revenue per engagement, fees, payouts, transaction volume) rather than subscription metrics (MRR, ARR, churn).", hint) {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "Should include hint about transaction-based metrics")
+}
+
+func TestGetDomainHints_DistinctUserRoles(t *testing.T) {
+	// Test: Has columns indicating distinct user roles (host_id, visitor_id)
+	// Expected: Hint about role-specific metrics
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "engagement",
+			PrimaryTable: "billing_engagements",
+		},
+	}
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"billing_engagements": {
+				{Name: "id", Role: "identifier"},
+				{Name: "host_id", Role: "dimension", FKAssociation: "host"},
+				{Name: "visitor_id", Role: "dimension", FKAssociation: "visitor"},
+				{Name: "amount", Role: "measure"},
+			},
+		},
+	}
+
+	hints := getDomainHints(entities, ontology)
+
+	// Should include user roles hint
+	found := false
+	for _, hint := range hints {
+		if assert.ObjectsAreEqual("There are distinct user roles (e.g., host/visitor, creator/viewer, buyer/seller). Consider role-specific metrics for each participant type.", hint) {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "Should include hint about distinct user roles")
+}
+
+func TestGetDomainHints_NoInventoryNoEcommerce(t *testing.T) {
+	// Test: No inventory or e-commerce entities
+	// Expected: Hint to not suggest inventory/order metrics
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "user",
+			PrimaryTable: "users",
+		},
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "engagement",
+			PrimaryTable: "engagements",
+		},
+	}
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+	}
+
+	hints := getDomainHints(entities, ontology)
+
+	// Should include hint about not suggesting inventory/ecommerce metrics
+	found := false
+	for _, hint := range hints {
+		if assert.ObjectsAreEqual("This is not an e-commerce or inventory-based business. Do not suggest inventory metrics (stock levels, turnover) or order-based metrics (AOV, cart abandonment).", hint) {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "Should include hint about not suggesting inventory/ecommerce metrics")
+}
+
+func TestGetDomainHints_HasInventory(t *testing.T) {
+	// Test: Has inventory entities
+	// Expected: Should NOT include the "not e-commerce" hint
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "product",
+			PrimaryTable: "products",
+		},
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "inventory",
+			PrimaryTable: "inventory",
+		},
+	}
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+	}
+
+	hints := getDomainHints(entities, ontology)
+
+	// Should NOT include the "not e-commerce" hint
+	for _, hint := range hints {
+		assert.NotContains(t, hint, "not an e-commerce", "Should NOT include 'not e-commerce' hint when inventory exists")
+	}
+}
+
+func TestGetDomainHints_HasEcommerce(t *testing.T) {
+	// Test: Has e-commerce entities (order, cart)
+	// Expected: Should NOT include the "not e-commerce" hint
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "order",
+			PrimaryTable: "orders",
+		},
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "cart",
+			PrimaryTable: "shopping_carts",
+		},
+	}
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+	}
+
+	hints := getDomainHints(entities, ontology)
+
+	// Should NOT include the "not e-commerce" hint
+	for _, hint := range hints {
+		assert.NotContains(t, hint, "not an e-commerce", "Should NOT include 'not e-commerce' hint when order/cart entities exist")
+	}
+}
+
+func TestGetDomainHints_SkipsDeletedEntities(t *testing.T) {
+	// Test: Deleted entities should be ignored
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "subscription",
+			PrimaryTable: "subscriptions",
+			IsDeleted:    true, // Deleted - should be ignored
+		},
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "user",
+			PrimaryTable: "users",
+		},
+	}
+
+	ontology := &models.TieredOntology{
+		ID:        ontologyID,
+		ProjectID: projectID,
+		IsActive:  true,
+	}
+
+	hints := getDomainHints(entities, ontology)
+
+	// Should NOT include subscription hint since the subscription entity is deleted
+	for _, hint := range hints {
+		assert.NotContains(t, hint, "subscription-based business", "Should NOT include subscription hint for deleted entities")
+	}
+}
+
+func TestGetDomainHints_NilOntology(t *testing.T) {
+	// Test: Nil ontology should not panic
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "engagement",
+			PrimaryTable: "engagements",
+		},
+	}
+
+	// Should not panic with nil ontology
+	hints := getDomainHints(entities, nil)
+	assert.NotNil(t, hints, "Should return non-nil hints even with nil ontology")
+}
+
+func TestGetDomainHints_EmptyEntities(t *testing.T) {
+	// Test: Empty entities should return no hints related to entity detection
+	ontology := &models.TieredOntology{
+		ID:       uuid.New(),
+		IsActive: true,
+	}
+
+	hints := getDomainHints([]*models.OntologyEntity{}, ontology)
+
+	// Should include the "not e-commerce" hint since no inventory/ecommerce detected
+	found := false
+	for _, hint := range hints {
+		if assert.ObjectsAreEqual("This is not an e-commerce or inventory-based business. Do not suggest inventory metrics (stock levels, turnover) or order-based metrics (AOV, cart abandonment).", hint) {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "Should include 'not e-commerce' hint when entities are empty")
+}
+
+func TestContainsEntityByName_CaseInsensitive(t *testing.T) {
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "ENGAGEMENT",
+			PrimaryTable: "engagements",
+		},
+	}
+
+	// Should match case-insensitively
+	assert.True(t, containsEntityByName(entities, "engagement"), "Should match 'engagement' case-insensitively")
+	assert.True(t, containsEntityByName(entities, "ENGAGEMENT"), "Should match 'ENGAGEMENT' case-insensitively")
+	assert.True(t, containsEntityByName(entities, "Engagement"), "Should match 'Engagement' case-insensitively")
+	assert.False(t, containsEntityByName(entities, "subscription"), "Should not match 'subscription'")
+}
+
+func TestContainsEntityByName_MatchesTableName(t *testing.T) {
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "billing_entry",
+			PrimaryTable: "billing_transactions",
+		},
+	}
+
+	// Should match table name as well
+	assert.True(t, containsEntityByName(entities, "transaction"), "Should match 'transaction' in table name")
+	assert.True(t, containsEntityByName(entities, "billing"), "Should match 'billing' in table name")
+}
+
+func TestContainsEntityByName_SkipsDeleted(t *testing.T) {
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "subscription",
+			PrimaryTable: "subscriptions",
+			IsDeleted:    true,
+		},
+	}
+
+	// Should NOT match deleted entities
+	assert.False(t, containsEntityByName(entities, "subscription"), "Should NOT match deleted entities")
+}
+
+func TestHasRoleDistinctingColumns_DetectsRoles(t *testing.T) {
+	ontology := &models.TieredOntology{
+		ID:       uuid.New(),
+		IsActive: true,
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"engagements": {
+				{Name: "id", Role: "identifier"},
+				{Name: "host_id", Role: "dimension"},
+				{Name: "visitor_id", Role: "dimension"},
+				{Name: "amount", Role: "measure"},
+			},
+		},
+	}
+
+	assert.True(t, hasRoleDistinctingColumns(ontology), "Should detect host_id and visitor_id as role columns")
+}
+
+func TestHasRoleDistinctingColumns_DetectsFromFKAssociation(t *testing.T) {
+	ontology := &models.TieredOntology{
+		ID:       uuid.New(),
+		IsActive: true,
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"transactions": {
+				{Name: "id", Role: "identifier"},
+				{Name: "user_a_id", Role: "dimension", FKAssociation: "buyer"},
+				{Name: "user_b_id", Role: "dimension", FKAssociation: "seller"},
+				{Name: "amount", Role: "measure"},
+			},
+		},
+	}
+
+	assert.True(t, hasRoleDistinctingColumns(ontology), "Should detect buyer/seller from FK associations")
+}
+
+func TestHasRoleDistinctingColumns_NeedsAtLeastTwo(t *testing.T) {
+	ontology := &models.TieredOntology{
+		ID:       uuid.New(),
+		IsActive: true,
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"engagements": {
+				{Name: "id", Role: "identifier"},
+				{Name: "host_id", Role: "dimension"}, // Only one role column
+				{Name: "amount", Role: "measure"},
+			},
+		},
+	}
+
+	assert.False(t, hasRoleDistinctingColumns(ontology), "Should require at least 2 role columns")
+}
+
+func TestHasRoleDistinctingColumns_NilOntology(t *testing.T) {
+	assert.False(t, hasRoleDistinctingColumns(nil), "Should return false for nil ontology")
+}
+
+func TestHasRoleDistinctingColumns_NilColumnDetails(t *testing.T) {
+	ontology := &models.TieredOntology{
+		ID:            uuid.New(),
+		IsActive:      true,
+		ColumnDetails: nil,
+	}
+
+	assert.False(t, hasRoleDistinctingColumns(ontology), "Should return false when ColumnDetails is nil")
+}
+
+func TestGlossaryService_Prompt_IncludesDomainAnalysisSection(t *testing.T) {
+	// Test that the prompt includes the Domain Analysis section with hints
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	// Engagement-based business with distinct user roles
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "engagement",
+			PrimaryTable: "billing_engagements",
+		},
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "transaction",
+			PrimaryTable: "billing_transactions",
+		},
+	}
+
+	llmResponse := `{"terms": []}`
+	llmClient := &mockLLMClientCapturingPrompt{responseContent: llmResponse}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+			ColumnDetails: map[string][]models.ColumnDetail{
+				"billing_engagements": {
+					{Name: "host_id", Role: "dimension"},
+					{Name: "visitor_id", Role: "dimension"},
+				},
+			},
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+
+	_, err := svc.SuggestTerms(ctx, projectID)
+	require.NoError(t, err)
+
+	prompt := llmClient.capturedPrompt
+
+	// Verify Domain Analysis section is included
+	assert.Contains(t, prompt, "Domain Analysis", "Prompt should include Domain Analysis section")
+	assert.Contains(t, prompt, "Based on the schema structure", "Prompt should include schema analysis context")
+
+	// Verify specific hints are included
+	assert.Contains(t, prompt, "engagement/session-based business", "Should include engagement-based hint")
+	assert.Contains(t, prompt, "transaction-based metrics", "Should include transaction-based hint")
+	assert.Contains(t, prompt, "distinct user roles", "Should include user roles hint")
+	assert.Contains(t, prompt, "not an e-commerce", "Should include not-ecommerce hint")
+}
