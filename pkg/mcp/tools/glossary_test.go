@@ -1031,4 +1031,3 @@ func TestUpdateGlossaryTermTool_ErrorResults(t *testing.T) {
 		}
 	})
 }
-

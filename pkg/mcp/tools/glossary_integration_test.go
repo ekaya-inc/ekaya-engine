@@ -254,16 +254,16 @@ func TestUpdateGlossaryTermTool_Integration_RejectsTestTermOnCreate(t *testing.T
 
 	// Test terms that should be rejected (patterns from services.IsTestTerm)
 	testTerms := []string{
-		"TestRevenue",     // Starts with "test"
-		"RevenueTest",     // Ends with "test"
-		"UITestMetric",    // UI test prefix
-		"DebugCounter",    // Debug prefix
-		"TodoMetric",      // Todo prefix
-		"FixmeValue",      // Fixme prefix
-		"DummyRevenue",    // Dummy prefix
-		"SampleMetric",    // Sample prefix
-		"ExampleRevenue",  // Example prefix
-		"Revenue2026",     // Ends with 4 digits (year pattern)
+		"TestRevenue",    // Starts with "test"
+		"RevenueTest",    // Ends with "test"
+		"UITestMetric",   // UI test prefix
+		"DebugCounter",   // Debug prefix
+		"TodoMetric",     // Todo prefix
+		"FixmeValue",     // Fixme prefix
+		"DummyRevenue",   // Dummy prefix
+		"SampleMetric",   // Sample prefix
+		"ExampleRevenue", // Example prefix
+		"Revenue2026",    // Ends with 4 digits (year pattern)
 	}
 
 	for _, testTerm := range testTerms {
