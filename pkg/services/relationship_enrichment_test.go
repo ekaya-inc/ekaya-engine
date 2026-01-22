@@ -220,7 +220,7 @@ func TestRelationshipEnrichmentService_ValidationFiltersInvalid(t *testing.T) {
 	mockFactory := llm.NewMockClientFactory()
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -274,7 +274,7 @@ func TestRelationshipEnrichmentService_RetryOnTransientError(t *testing.T) {
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -322,7 +322,7 @@ func TestRelationshipEnrichmentService_NonRetryableError(t *testing.T) {
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -371,7 +371,7 @@ func TestRelationshipEnrichmentService_InvalidJSONResponse(t *testing.T) {
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -427,7 +427,7 @@ func TestRelationshipEnrichmentService_SelfReferentialRelationship(t *testing.T)
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -503,7 +503,7 @@ func TestRelationshipEnrichmentService_MultipleSelfReferentialFK(t *testing.T) {
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -518,4 +518,162 @@ func TestRelationshipEnrichmentService_MultipleSelfReferentialFK(t *testing.T) {
 		"Manager FK should have 'reports_to' association")
 	assert.Equal(t, "mentored_by", relRepo.updatedAssociations[mentorRelID],
 		"Mentor FK should have 'mentored_by' association")
+}
+
+// TestRelationshipEnrichmentService_HostVisitorRolesWithKnowledge tests that host and visitor
+// roles are enriched with their business meaning from seeded project knowledge.
+// This verifies BUG-5 fix: Host/Visitor roles captured with business meaning.
+func TestRelationshipEnrichmentService_HostVisitorRolesWithKnowledge(t *testing.T) {
+	projectID := uuid.New()
+	userEntityID := uuid.New()
+	engagementEntityID := uuid.New()
+	hostRelID := uuid.New()
+	visitorRelID := uuid.New()
+
+	// Setup: User entity appearing with different roles in engagements
+	entities := []*models.OntologyEntity{
+		{
+			ID:          userEntityID,
+			Name:        "User",
+			Description: "A platform user",
+		},
+		{
+			ID:          engagementEntityID,
+			Name:        "Engagement",
+			Description: "A billing engagement session",
+		},
+	}
+
+	// Two relationships: host_id and visitor_id both reference User
+	relationships := []*models.EntityRelationship{
+		{
+			ID:                hostRelID,
+			SourceEntityID:    engagementEntityID,
+			TargetEntityID:    userEntityID,
+			SourceColumnTable: "billing_engagements",
+			SourceColumnName:  "host_id",
+			TargetColumnTable: "users",
+			TargetColumnName:  "id",
+			DetectionMethod:   "foreign_key",
+			Confidence:        1.0,
+		},
+		{
+			ID:                visitorRelID,
+			SourceEntityID:    engagementEntityID,
+			TargetEntityID:    userEntityID,
+			SourceColumnTable: "billing_engagements",
+			SourceColumnName:  "visitor_id",
+			TargetColumnTable: "users",
+			TargetColumnName:  "id",
+			DetectionMethod:   "foreign_key",
+			Confidence:        1.0,
+		},
+	}
+
+	// Mock knowledge repository that returns seeded domain knowledge
+	knowledgeRepo := &mockKnowledgeRepoForRelEnrichment{
+		facts: []*models.KnowledgeFact{
+			{
+				ID:        uuid.New(),
+				ProjectID: projectID,
+				FactType:  "terminology",
+				Key:       "Host is a content creator who receives payments",
+				Value:     "Host is a content creator who receives payments",
+				Context:   "User role",
+			},
+			{
+				ID:        uuid.New(),
+				ProjectID: projectID,
+				FactType:  "terminology",
+				Key:       "Visitor is a viewer who pays for engagements",
+				Value:     "Visitor is a viewer who pays for engagements",
+				Context:   "User role",
+			},
+		},
+	}
+
+	relRepo := &testRelEnrichmentRelRepo{relationships: relationships}
+	entityRepo := &testRelEnrichmentEntityRepo{entities: entities}
+	mockFactory := llm.NewMockClientFactory()
+
+	var capturedPrompt string
+	// LLM responds with role-aware descriptions
+	mockFactory.MockClient.GenerateResponseFunc = func(ctx context.Context, prompt, systemMsg string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		capturedPrompt = prompt
+		return &llm.GenerateResponseResult{
+			Content: `{"relationships": [
+				{"id": 1, "description": "Links the engagement to the host (content creator) who receives payments for the session. Each host can have many engagements.", "association": "as_host"},
+				{"id": 2, "description": "Links the engagement to the visitor (viewer) who pays for the engagement session. Each visitor can participate in many engagements.", "association": "as_visitor"}
+			]}`,
+		}, nil
+	}
+
+	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
+	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, knowledgeRepo, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+
+	// Execute
+	result, err := service.EnrichProject(context.Background(), projectID, nil)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.Equal(t, 2, result.RelationshipsEnriched)
+	assert.Equal(t, 0, result.RelationshipsFailed)
+
+	// Verify domain knowledge was included in the prompt
+	assert.Contains(t, capturedPrompt, "Domain Knowledge", "Prompt should include domain knowledge section")
+	assert.Contains(t, capturedPrompt, "Host is a content creator who receives payments", "Prompt should include host role definition")
+	assert.Contains(t, capturedPrompt, "Visitor is a viewer who pays for engagements", "Prompt should include visitor role definition")
+
+	// Verify role-aware associations
+	assert.Equal(t, "as_host", relRepo.updatedAssociations[hostRelID],
+		"Host FK should have 'as_host' association")
+	assert.Equal(t, "as_visitor", relRepo.updatedAssociations[visitorRelID],
+		"Visitor FK should have 'as_visitor' association")
+
+	// Verify descriptions include business meaning
+	assert.Contains(t, relRepo.updatedDescs[hostRelID], "content creator",
+		"Host description should mention content creator role")
+	assert.Contains(t, relRepo.updatedDescs[visitorRelID], "viewer",
+		"Visitor description should mention viewer role")
+}
+
+// mockKnowledgeRepoForRelEnrichment is a test mock for KnowledgeRepository.
+type mockKnowledgeRepoForRelEnrichment struct {
+	facts []*models.KnowledgeFact
+}
+
+func (m *mockKnowledgeRepoForRelEnrichment) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.KnowledgeFact, error) {
+	return m.facts, nil
+}
+
+func (m *mockKnowledgeRepoForRelEnrichment) GetByType(ctx context.Context, projectID uuid.UUID, factType string) ([]*models.KnowledgeFact, error) {
+	var result []*models.KnowledgeFact
+	for _, f := range m.facts {
+		if f.FactType == factType {
+			result = append(result, f)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockKnowledgeRepoForRelEnrichment) GetByKey(ctx context.Context, projectID uuid.UUID, factType, key string) (*models.KnowledgeFact, error) {
+	for _, f := range m.facts {
+		if f.FactType == factType && f.Key == key {
+			return f, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockKnowledgeRepoForRelEnrichment) Upsert(ctx context.Context, fact *models.KnowledgeFact) error {
+	return nil
+}
+
+func (m *mockKnowledgeRepoForRelEnrichment) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (m *mockKnowledgeRepoForRelEnrichment) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
 }

@@ -41,6 +41,7 @@ type batchResult struct {
 type relationshipEnrichmentService struct {
 	relationshipRepo repositories.EntityRelationshipRepository
 	entityRepo       repositories.OntologyEntityRepository
+	knowledgeRepo    repositories.KnowledgeRepository
 	conversationRepo repositories.ConversationRepository
 	llmFactory       llm.LLMClientFactory
 	workerPool       *llm.WorkerPool
@@ -53,6 +54,7 @@ type relationshipEnrichmentService struct {
 func NewRelationshipEnrichmentService(
 	relationshipRepo repositories.EntityRelationshipRepository,
 	entityRepo repositories.OntologyEntityRepository,
+	knowledgeRepo repositories.KnowledgeRepository,
 	conversationRepo repositories.ConversationRepository,
 	llmFactory llm.LLMClientFactory,
 	workerPool *llm.WorkerPool,
@@ -63,6 +65,7 @@ func NewRelationshipEnrichmentService(
 	return &relationshipEnrichmentService{
 		relationshipRepo: relationshipRepo,
 		entityRepo:       entityRepo,
+		knowledgeRepo:    knowledgeRepo,
 		conversationRepo: conversationRepo,
 		llmFactory:       llmFactory,
 		workerPool:       workerPool,
@@ -102,6 +105,18 @@ func (s *relationshipEnrichmentService) EnrichProject(ctx context.Context, proje
 		entityByID[e.ID] = e
 	}
 
+	// Fetch project knowledge for role/association context
+	var knowledgeFacts []*models.KnowledgeFact
+	if s.knowledgeRepo != nil {
+		knowledgeFacts, err = s.knowledgeRepo.GetByProject(ctx, projectID)
+		if err != nil {
+			s.logger.Error("Failed to fetch project knowledge, continuing without it",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			// Continue without knowledge - don't fail the entire operation
+		}
+	}
+
 	// Validate relationships before enrichment
 	validRelationships := s.validateRelationships(relationships, entityByID)
 	if len(validRelationships) < len(relationships) {
@@ -134,7 +149,7 @@ func (s *relationshipEnrichmentService) EnrichProject(ctx context.Context, proje
 		workItems = append(workItems, llm.WorkItem[*batchResult]{
 			ID: batchID,
 			Execute: func(ctx context.Context) (*batchResult, error) {
-				return s.enrichBatchInternal(ctx, projectID, batchCopy, entityByID)
+				return s.enrichBatchInternal(ctx, projectID, batchCopy, entityByID, knowledgeFacts)
 			},
 		})
 	}
@@ -191,6 +206,7 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 	projectID uuid.UUID,
 	relationships []*models.EntityRelationship,
 	entityByID map[uuid.UUID]*models.OntologyEntity,
+	knowledgeFacts []*models.KnowledgeFact,
 ) (*batchResult, error) {
 	result := &batchResult{
 		BatchSize: len(relationships),
@@ -245,7 +261,7 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 	}
 
 	systemMsg := s.relationshipEnrichmentSystemMessage()
-	prompt := s.buildRelationshipEnrichmentPrompt(relationships, entityByID)
+	prompt := s.buildRelationshipEnrichmentPrompt(relationships, entityByID, knowledgeFacts)
 
 	// Retry LLM call with exponential backoff
 	retryConfig := &retry.Config{
@@ -341,7 +357,7 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 			if s.conversationRepo != nil {
 				errorMessage := fmt.Sprintf("hallucination: invalid ID %d (expected 1-%d)", e.ID, maxExpectedID)
 				if updateErr := s.conversationRepo.UpdateStatus(batchCtx, llmResult.ConversationID, models.LLMConversationStatusError, errorMessage); updateErr != nil {
-					s.logger.Warn("Failed to update conversation status for hallucination",
+					s.logger.Error("Failed to update conversation status for hallucination",
 						zap.String("conversation_id", llmResult.ConversationID.String()),
 						zap.Error(updateErr))
 				}
@@ -403,11 +419,43 @@ Focus on the business meaning, not technical details. Describe what the relation
 func (s *relationshipEnrichmentService) buildRelationshipEnrichmentPrompt(
 	relationships []*models.EntityRelationship,
 	entityByID map[uuid.UUID]*models.OntologyEntity,
+	knowledgeFacts []*models.KnowledgeFact,
 ) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Relationship Description Generation\n\n")
 	sb.WriteString("Generate business-meaningful descriptions for each relationship below.\n\n")
+
+	// Include domain knowledge section if available - this provides context for roles like host/visitor
+	if len(knowledgeFacts) > 0 {
+		sb.WriteString("## Domain Knowledge\n\n")
+		sb.WriteString("Use the following domain-specific facts to inform your relationship descriptions, especially for role semantics:\n\n")
+
+		// Group facts by type for better organization
+		factsByType := make(map[string][]*models.KnowledgeFact)
+		for _, fact := range knowledgeFacts {
+			factsByType[fact.FactType] = append(factsByType[fact.FactType], fact)
+		}
+
+		// Order of presentation
+		typeOrder := []string{"terminology", "business_rule", "enumeration", "convention"}
+		for _, factType := range typeOrder {
+			facts, exists := factsByType[factType]
+			if !exists || len(facts) == 0 {
+				continue
+			}
+
+			sb.WriteString(fmt.Sprintf("**%s:**\n", capitalizeWords(factType)))
+			for _, fact := range facts {
+				sb.WriteString(fmt.Sprintf("- %s", fact.Value))
+				if fact.Context != "" {
+					sb.WriteString(fmt.Sprintf(" (%s)", fact.Context))
+				}
+				sb.WriteString("\n")
+			}
+			sb.WriteString("\n")
+		}
+	}
 
 	// Entity context
 	sb.WriteString("## Entities\n")
@@ -456,8 +504,13 @@ func (s *relationshipEnrichmentService) buildRelationshipEnrichmentPrompt(
 	sb.WriteString("   - Use entity names (not table names) when referring to what's connected\n")
 	sb.WriteString("   - Describe the nature of the relationship (e.g., 'belongs to', 'created by', 'references')\n")
 	sb.WriteString("   - Include cardinality hints if clear (e.g., 'each order can have many items')\n")
+	sb.WriteString("   - **IMPORTANT**: If column names indicate roles (like host_id, visitor_id, buyer_id, seller_id), ")
+	sb.WriteString("use the Domain Knowledge above to describe what those roles mean in business terms.\n")
+	sb.WriteString("     For example, if domain knowledge says 'Host is a content creator who receives payments', ")
+	sb.WriteString("include that meaning in the description.\n")
 	sb.WriteString("2. **association**: A short verb/label (1-2 words) that describes this direction of the relationship\n")
 	sb.WriteString("   - Examples: \"placed_by\", \"owns\", \"contains\", \"managed_by\", \"belongs_to\", \"created_by\"\n")
+	sb.WriteString("   - For role-based columns (host_id, visitor_id), use the role as the association (e.g., \"as_host\", \"as_visitor\")\n")
 	sb.WriteString("   - Use lowercase with underscores for multi-word associations\n")
 	sb.WriteString("   - Should read naturally: \"Order [association] User\" (e.g., \"Order placed_by User\")\n")
 
@@ -559,7 +612,7 @@ func (s *relationshipEnrichmentService) logRelationshipFailure(
 			errorMessage = fmt.Sprintf("%s: %s", reason, err.Error())
 		}
 		if updateErr := s.conversationRepo.UpdateStatus(ctx, conversationID, models.LLMConversationStatusError, errorMessage); updateErr != nil {
-			s.logger.Warn("Failed to update conversation status",
+			s.logger.Error("Failed to update conversation status",
 				zap.String("conversation_id", conversationID.String()),
 				zap.Error(updateErr))
 		}
