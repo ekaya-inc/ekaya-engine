@@ -572,7 +572,7 @@ func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntolog
 	}
 
 	// Include column details if available
-	if ontology.ColumnDetails != nil && len(ontology.ColumnDetails) > 0 {
+	if len(ontology.ColumnDetails) > 0 {
 		sb.WriteString("## Key Columns\n\n")
 		for tableName, columns := range ontology.ColumnDetails {
 			// Only show columns with roles (measures, dimensions) or FK associations
@@ -644,7 +644,7 @@ func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntolog
 }
 `)
 	sb.WriteString("```\n\n")
-	sb.WriteString("Suggest 10-20 key business metrics based on the schema. Be comprehensive!\n")
+	sb.WriteString("Suggest 5-15 domain-specific business terms based on the schema. Focus on quality over quantity.\n")
 
 	return sb.String()
 }
@@ -1040,7 +1040,7 @@ func (s *glossaryService) buildEnrichTermPrompt(
 	}
 
 	// Include column details if available
-	if ontology.ColumnDetails != nil && len(ontology.ColumnDetails) > 0 {
+	if len(ontology.ColumnDetails) > 0 {
 		sb.WriteString("## Key Columns\n\n")
 		for tableName, columns := range ontology.ColumnDetails {
 			relevantCols := make([]models.ColumnDetail, 0)
