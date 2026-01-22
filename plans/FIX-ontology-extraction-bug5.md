@@ -261,6 +261,7 @@ Then use industry templates as starting context for glossary discovery.
 ## Acceptance Criteria
 
 - [x] Knowledge seeding mechanism exists
+- [x] Knowledge seed file format defined
 - [ ] Seeded knowledge included in glossary discovery prompt
 - [ ] Domain-specific terms generated instead of generic SaaS metrics
 - [ ] Host/Visitor roles captured with business meaning
