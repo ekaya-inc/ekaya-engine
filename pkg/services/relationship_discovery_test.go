@@ -1127,8 +1127,8 @@ func TestValidateFKDirection_BugScenarios(t *testing.T) {
 		resetRowCount := int64(60)
 
 		overlap := &datasource.ValueOverlapResult{
-			SourceDistinct: 100, // All 100 account IDs in accounts table
-			TargetDistinct: 50,  // Only 50 unique account_ids in password_resets
+			SourceDistinct: 100,  // All 100 account IDs in accounts table
+			TargetDistinct: 50,   // Only 50 unique account_ids in password_resets
 			MatchRate:      0.50, // Only 50% of accounts have password resets
 		}
 		sourceTable := &models.SchemaTable{
