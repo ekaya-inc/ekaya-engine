@@ -209,7 +209,7 @@ func main() {
 	llmCircuitBreaker := llm.NewCircuitBreaker(circuitBreakerConfig)
 
 	columnEnrichmentService := services.NewColumnEnrichmentService(
-		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, convRepo,
+		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, convRepo, projectRepo,
 		datasourceService, adapterFactory, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
 	relationshipEnrichmentService := services.NewRelationshipEnrichmentService(
 		entityRelationshipRepo, ontologyEntityRepo, knowledgeRepo, convRepo, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)

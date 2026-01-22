@@ -1888,3 +1888,451 @@ func TestColumnEnrichmentService_buildColumnEnrichmentPrompt_EnumInstructions(t 
 	assert.Contains(t, prompt, `"value":`)
 	assert.Contains(t, prompt, `"label":`)
 }
+
+// TestColumnEnrichmentService_mergeEnumDefinitions tests that project-level enum
+// definitions are correctly merged with sampled values.
+func TestColumnEnrichmentService_mergeEnumDefinitions(t *testing.T) {
+	service := &columnEnrichmentService{
+		logger: zap.NewNop(),
+	}
+
+	tests := []struct {
+		name           string
+		tableName      string
+		columnName     string
+		sampledValues  []string
+		enumDefs       []models.EnumDefinition
+		expectedEnums  []models.EnumValue
+		expectOverride bool // If true, all values should have descriptions
+	}{
+		{
+			name:          "matching_exact_table_definition",
+			tableName:     "billing_transactions",
+			columnName:    "transaction_state",
+			sampledValues: []string{"1", "2", "3"},
+			enumDefs: []models.EnumDefinition{
+				{
+					Table:  "billing_transactions",
+					Column: "transaction_state",
+					Values: map[string]string{
+						"1": "STARTED - Transaction started",
+						"2": "ENDED - Transaction ended",
+						"3": "WAITING - Awaiting chargeback period",
+					},
+				},
+			},
+			expectedEnums: []models.EnumValue{
+				{Value: "1", Label: "STARTED", Description: "Transaction started"},
+				{Value: "2", Label: "ENDED", Description: "Transaction ended"},
+				{Value: "3", Label: "WAITING", Description: "Awaiting chargeback period"},
+			},
+			expectOverride: true,
+		},
+		{
+			name:          "matching_wildcard_table_definition",
+			tableName:     "offers",
+			columnName:    "offer_type",
+			sampledValues: []string{"1", "2"},
+			enumDefs: []models.EnumDefinition{
+				{
+					Table:  "*",
+					Column: "offer_type",
+					Values: map[string]string{
+						"1": "FREE - Free Engagement",
+						"2": "PAID - Preauthorized per-minute",
+					},
+				},
+			},
+			expectedEnums: []models.EnumValue{
+				{Value: "1", Label: "FREE", Description: "Free Engagement"},
+				{Value: "2", Label: "PAID", Description: "Preauthorized per-minute"},
+			},
+			expectOverride: true,
+		},
+		{
+			name:          "no_matching_definition_falls_back",
+			tableName:     "users",
+			columnName:    "status",
+			sampledValues: []string{"active", "inactive"},
+			enumDefs: []models.EnumDefinition{
+				{
+					Table:  "billing_transactions",
+					Column: "transaction_state",
+					Values: map[string]string{"1": "Started"},
+				},
+			},
+			expectedEnums: []models.EnumValue{
+				{Value: "active"},
+				{Value: "inactive"},
+			},
+			expectOverride: false,
+		},
+		{
+			name:          "partial_match_still_applies_definition",
+			tableName:     "billing_transactions",
+			columnName:    "transaction_state",
+			sampledValues: []string{"1", "2", "99"}, // 99 not in definition
+			enumDefs: []models.EnumDefinition{
+				{
+					Table:  "billing_transactions",
+					Column: "transaction_state",
+					Values: map[string]string{
+						"1": "STARTED - Transaction started",
+						"2": "ENDED - Transaction ended",
+					},
+				},
+			},
+			expectedEnums: []models.EnumValue{
+				{Value: "1", Label: "STARTED", Description: "Transaction started"},
+				{Value: "2", Label: "ENDED", Description: "Transaction ended"},
+				{Value: "99"}, // No description for unknown value
+			},
+			expectOverride: true,
+		},
+		{
+			name:          "exact_table_takes_precedence_over_wildcard",
+			tableName:     "billing_transactions",
+			columnName:    "offer_type",
+			sampledValues: []string{"1"},
+			enumDefs: []models.EnumDefinition{
+				{
+					Table:  "billing_transactions",
+					Column: "offer_type",
+					Values: map[string]string{
+						"1": "EXACT - From exact table match",
+					},
+				},
+				{
+					Table:  "*",
+					Column: "offer_type",
+					Values: map[string]string{
+						"1": "WILDCARD - From wildcard",
+					},
+				},
+			},
+			expectedEnums: []models.EnumValue{
+				{Value: "1", Label: "EXACT", Description: "From exact table match"},
+			},
+			expectOverride: true,
+		},
+		{
+			name:          "description_without_label_separator",
+			tableName:     "orders",
+			columnName:    "status",
+			sampledValues: []string{"1"},
+			enumDefs: []models.EnumDefinition{
+				{
+					Table:  "orders",
+					Column: "status",
+					Values: map[string]string{
+						"1": "Just a plain description without separator",
+					},
+				},
+			},
+			expectedEnums: []models.EnumValue{
+				{Value: "1", Description: "Just a plain description without separator"},
+			},
+			expectOverride: true,
+		},
+		{
+			name:          "empty_sampled_values",
+			tableName:     "billing_transactions",
+			columnName:    "transaction_state",
+			sampledValues: []string{},
+			enumDefs: []models.EnumDefinition{
+				{
+					Table:  "billing_transactions",
+					Column: "transaction_state",
+					Values: map[string]string{"1": "STARTED - Transaction started"},
+				},
+			},
+			expectedEnums:  nil,
+			expectOverride: false,
+		},
+		{
+			name:          "empty_enum_definitions",
+			tableName:     "billing_transactions",
+			columnName:    "transaction_state",
+			sampledValues: []string{"1", "2"},
+			enumDefs:      []models.EnumDefinition{},
+			expectedEnums: []models.EnumValue{
+				{Value: "1"},
+				{Value: "2"},
+			},
+			expectOverride: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := service.mergeEnumDefinitions(tt.tableName, tt.columnName, tt.sampledValues, tt.enumDefs)
+
+			if tt.expectedEnums == nil {
+				assert.Nil(t, result)
+				return
+			}
+
+			require.Equal(t, len(tt.expectedEnums), len(result), "enum value count mismatch")
+
+			for i, expected := range tt.expectedEnums {
+				assert.Equal(t, expected.Value, result[i].Value, "value mismatch at index %d", i)
+				assert.Equal(t, expected.Label, result[i].Label, "label mismatch at index %d", i)
+				assert.Equal(t, expected.Description, result[i].Description, "description mismatch at index %d", i)
+			}
+		})
+	}
+}
+
+// TestColumnEnrichmentService_splitEnumDescription tests the helper function
+// that parses "LABEL - Description" format.
+func TestColumnEnrichmentService_splitEnumDescription(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected []string
+	}{
+		{"STARTED - Transaction started", []string{"STARTED", "Transaction started"}},
+		{"FREE - Free Engagement", []string{"FREE", "Free Engagement"}},
+		{"Just a description", nil},
+		{" - Empty label", nil},
+		{"Empty description - ", nil},
+		{"", nil},
+		{"MULTI - Part - Description", []string{"MULTI", "Part - Description"}},
+		{"A-B - Hyphenated label", []string{"A-B", "Hyphenated label"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := splitEnumDescription(tt.input)
+			if tt.expected == nil {
+				assert.Nil(t, result)
+			} else {
+				require.NotNil(t, result)
+				assert.Equal(t, tt.expected[0], result[0], "label mismatch")
+				assert.Equal(t, tt.expected[1], result[1], "description mismatch")
+			}
+		})
+	}
+}
+
+// TestColumnEnrichmentService_toEnumValues tests the helper function
+// that converts string slices to EnumValue slices.
+func TestColumnEnrichmentService_toEnumValues(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  []string
+		expect []models.EnumValue
+	}{
+		{
+			name:   "normal_values",
+			input:  []string{"active", "inactive", "pending"},
+			expect: []models.EnumValue{{Value: "active"}, {Value: "inactive"}, {Value: "pending"}},
+		},
+		{
+			name:   "empty_slice",
+			input:  []string{},
+			expect: nil,
+		},
+		{
+			name:   "nil_slice",
+			input:  nil,
+			expect: nil,
+		},
+		{
+			name:   "single_value",
+			input:  []string{"1"},
+			expect: []models.EnumValue{{Value: "1"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := toEnumValues(tt.input)
+			if tt.expect == nil {
+				assert.Nil(t, result)
+			} else {
+				require.Equal(t, len(tt.expect), len(result))
+				for i := range tt.expect {
+					assert.Equal(t, tt.expect[i].Value, result[i].Value)
+				}
+			}
+		})
+	}
+}
+
+// testEnumDefProjectRepo is a mock project repository for testing enum definition loading
+type testEnumDefProjectRepo struct {
+	project *models.Project
+}
+
+func (r *testEnumDefProjectRepo) Create(ctx context.Context, project *models.Project) error {
+	return nil
+}
+
+func (r *testEnumDefProjectRepo) Get(ctx context.Context, id uuid.UUID) (*models.Project, error) {
+	return r.project, nil
+}
+
+func (r *testEnumDefProjectRepo) Update(ctx context.Context, project *models.Project) error {
+	return nil
+}
+
+func (r *testEnumDefProjectRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+// TestColumnEnrichmentService_loadEnumDefinitions tests loading enum definitions
+// from project configuration.
+func TestColumnEnrichmentService_loadEnumDefinitions(t *testing.T) {
+	projectID := uuid.New()
+
+	t.Run("no_project_repo", func(t *testing.T) {
+		service := &columnEnrichmentService{
+			projectRepo: nil,
+			logger:      zap.NewNop(),
+		}
+
+		result := service.loadEnumDefinitions(context.Background(), projectID)
+		assert.Nil(t, result)
+	})
+
+	t.Run("project_without_parameters", func(t *testing.T) {
+		projectRepo := &testEnumDefProjectRepo{
+			project: &models.Project{
+				ID:         projectID,
+				Name:       "Test Project",
+				Parameters: nil,
+			},
+		}
+
+		service := &columnEnrichmentService{
+			projectRepo: projectRepo,
+			logger:      zap.NewNop(),
+		}
+
+		result := service.loadEnumDefinitions(context.Background(), projectID)
+		assert.Nil(t, result)
+	})
+
+	t.Run("project_without_enums_path", func(t *testing.T) {
+		projectRepo := &testEnumDefProjectRepo{
+			project: &models.Project{
+				ID:   projectID,
+				Name: "Test Project",
+				Parameters: map[string]interface{}{
+					"some_other_param": "value",
+				},
+			},
+		}
+
+		service := &columnEnrichmentService{
+			projectRepo: projectRepo,
+			logger:      zap.NewNop(),
+		}
+
+		result := service.loadEnumDefinitions(context.Background(), projectID)
+		assert.Nil(t, result)
+	})
+
+	t.Run("invalid_file_path", func(t *testing.T) {
+		projectRepo := &testEnumDefProjectRepo{
+			project: &models.Project{
+				ID:   projectID,
+				Name: "Test Project",
+				Parameters: map[string]interface{}{
+					"enums_path": "/nonexistent/path/enums.yaml",
+				},
+			},
+		}
+
+		service := &columnEnrichmentService{
+			projectRepo: projectRepo,
+			logger:      zap.NewNop(),
+		}
+
+		result := service.loadEnumDefinitions(context.Background(), projectID)
+		assert.Nil(t, result)
+	})
+}
+
+// TestColumnEnrichmentService_convertToColumnDetails_WithEnumDefinitions tests that
+// enum definitions are properly merged during column detail conversion.
+func TestColumnEnrichmentService_convertToColumnDetails_WithEnumDefinitions(t *testing.T) {
+	service := &columnEnrichmentService{
+		logger: zap.NewNop(),
+	}
+
+	columns := []*models.SchemaColumn{
+		{ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
+		{ColumnName: "transaction_state", DataType: "integer"},
+		{ColumnName: "status", DataType: "varchar"},
+	}
+
+	// LLM enrichments - transaction_state has inferred but incorrect enum values
+	enrichments := []columnEnrichment{
+		{
+			Name:         "id",
+			Description:  "Unique identifier",
+			SemanticType: "identifier",
+			Role:         "identifier",
+		},
+		{
+			Name:         "transaction_state",
+			Description:  "State of the transaction",
+			SemanticType: "status",
+			Role:         "dimension",
+			EnumValues: []models.EnumValue{
+				{Value: "1", Label: "State 1"}, // Wrong label - LLM guessed
+				{Value: "2", Label: "State 2"},
+			},
+		},
+		{
+			Name:         "status",
+			Description:  "User status",
+			SemanticType: "status",
+			Role:         "dimension",
+			EnumValues: []models.EnumValue{
+				{Value: "active", Label: "Active"},
+			},
+		},
+	}
+
+	enumSamples := map[string][]string{
+		"transaction_state": {"1", "2"},
+		"status":            {"active"},
+	}
+
+	// Project enum definitions with correct values
+	enumDefs := []models.EnumDefinition{
+		{
+			Table:  "billing_transactions",
+			Column: "transaction_state",
+			Values: map[string]string{
+				"1": "STARTED - Transaction started",
+				"2": "ENDED - Transaction ended",
+			},
+		},
+	}
+
+	fkInfo := map[string]string{}
+
+	details := service.convertToColumnDetails("billing_transactions", enrichments, columns, fkInfo, enumSamples, enumDefs)
+
+	require.Equal(t, 3, len(details))
+
+	// Check transaction_state - should have enum definitions merged (overriding LLM inference)
+	stateCol := findColumnDetail(details, "transaction_state")
+	require.NotNil(t, stateCol)
+	require.Equal(t, 2, len(stateCol.EnumValues))
+	assert.Equal(t, "1", stateCol.EnumValues[0].Value)
+	assert.Equal(t, "STARTED", stateCol.EnumValues[0].Label)
+	assert.Equal(t, "Transaction started", stateCol.EnumValues[0].Description)
+	assert.Equal(t, "2", stateCol.EnumValues[1].Value)
+	assert.Equal(t, "ENDED", stateCol.EnumValues[1].Label)
+
+	// Check status - should keep LLM values (no enum definition for this column)
+	statusCol := findColumnDetail(details, "status")
+	require.NotNil(t, statusCol)
+	require.Equal(t, 1, len(statusCol.EnumValues))
+	assert.Equal(t, "active", statusCol.EnumValues[0].Value)
+	assert.Equal(t, "Active", statusCol.EnumValues[0].Label)
+}

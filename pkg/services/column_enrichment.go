@@ -43,6 +43,7 @@ type columnEnrichmentService struct {
 	relationshipRepo repositories.EntityRelationshipRepository
 	schemaRepo       repositories.SchemaRepository
 	conversationRepo repositories.ConversationRepository
+	projectRepo      repositories.ProjectRepository
 	dsSvc            DatasourceService
 	adapterFactory   datasource.DatasourceAdapterFactory
 	llmFactory       llm.LLMClientFactory
@@ -59,6 +60,7 @@ func NewColumnEnrichmentService(
 	relationshipRepo repositories.EntityRelationshipRepository,
 	schemaRepo repositories.SchemaRepository,
 	conversationRepo repositories.ConversationRepository,
+	projectRepo repositories.ProjectRepository,
 	dsSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
@@ -73,6 +75,7 @@ func NewColumnEnrichmentService(
 		relationshipRepo: relationshipRepo,
 		schemaRepo:       schemaRepo,
 		conversationRepo: conversationRepo,
+		projectRepo:      projectRepo,
 		dsSvc:            dsSvc,
 		adapterFactory:   adapterFactory,
 		llmFactory:       llmFactory,
@@ -205,14 +208,17 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 		enumSamples = make(map[string][]string)
 	}
 
+	// Load project-level enum definitions
+	enumDefs := s.loadEnumDefinitions(ctx, projectID)
+
 	// Build and send LLM prompt
 	enrichments, err := s.enrichColumnsWithLLM(ctx, projectID, entity, columns, fkInfo, enumSamples)
 	if err != nil {
 		return fmt.Errorf("LLM enrichment failed: %w", err)
 	}
 
-	// Convert enrichments to ColumnDetail and save
-	columnDetails := s.convertToColumnDetails(enrichments, columns, fkInfo)
+	// Convert enrichments to ColumnDetail and save, merging enum definitions
+	columnDetails := s.convertToColumnDetails(tableName, enrichments, columns, fkInfo, enumSamples, enumDefs)
 	if err := s.ontologyRepo.UpdateColumnDetails(ctx, projectID, tableName, columnDetails); err != nil {
 		return fmt.Errorf("save column details: %w", err)
 	}
@@ -767,10 +773,15 @@ func (s *columnEnrichmentService) writeFKContext(sb *strings.Builder, fkInfo map
 }
 
 // convertToColumnDetails converts LLM enrichments to ColumnDetail structs.
+// It merges project-level enum definitions when available, using them to provide
+// accurate descriptions for enum values that the LLM cannot infer.
 func (s *columnEnrichmentService) convertToColumnDetails(
+	tableName string,
 	enrichments []columnEnrichment,
 	columns []*models.SchemaColumn,
 	fkInfo map[string]string,
+	enumSamples map[string][]string,
+	enumDefs []models.EnumDefinition,
 ) []models.ColumnDetail {
 	// Build a map for quick lookup
 	enrichmentByName := make(map[string]columnEnrichment)
@@ -804,6 +815,24 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 			}
 		}
 
+		// Merge project-level enum definitions if available
+		// This overrides LLM-inferred enum values with explicit definitions
+		if sampledValues, hasSamples := enumSamples[col.ColumnName]; hasSamples && len(enumDefs) > 0 {
+			if mergedEnums := s.mergeEnumDefinitions(tableName, col.ColumnName, sampledValues, enumDefs); len(mergedEnums) > 0 {
+				// Only override if we have meaningful descriptions from definitions
+				hasDescriptions := false
+				for _, ev := range mergedEnums {
+					if ev.Description != "" || ev.Label != "" {
+						hasDescriptions = true
+						break
+					}
+				}
+				if hasDescriptions {
+					detail.EnumValues = mergedEnums
+				}
+			}
+		}
+
 		details = append(details, detail)
 	}
 
@@ -826,4 +855,118 @@ func (s *columnEnrichmentService) logTableFailure(
 	}
 
 	s.logger.Error("Table enrichment failed", fields...)
+}
+
+// loadEnumDefinitions loads enum definitions from the project's configured enums_path.
+// Returns an empty slice if no path is configured or loading fails.
+func (s *columnEnrichmentService) loadEnumDefinitions(ctx context.Context, projectID uuid.UUID) []models.EnumDefinition {
+	if s.projectRepo == nil {
+		return nil
+	}
+
+	project, err := s.projectRepo.Get(ctx, projectID)
+	if err != nil {
+		s.logger.Debug("Failed to get project for enum definitions",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return nil
+	}
+
+	if project.Parameters == nil {
+		return nil
+	}
+
+	enumsPath, ok := project.Parameters["enums_path"].(string)
+	if !ok || enumsPath == "" {
+		return nil
+	}
+
+	s.logger.Info("Loading enum definitions from file",
+		zap.String("project_id", projectID.String()),
+		zap.String("enums_path", enumsPath))
+
+	defs, err := models.ParseEnumFile(enumsPath)
+	if err != nil {
+		s.logger.Warn("Failed to parse enum definitions file",
+			zap.String("enums_path", enumsPath),
+			zap.Error(err))
+		return nil
+	}
+
+	s.logger.Info("Loaded enum definitions",
+		zap.String("project_id", projectID.String()),
+		zap.Int("definition_count", len(defs)))
+
+	return defs
+}
+
+// mergeEnumDefinitions merges project-level enum definitions with sampled values.
+// If a matching definition exists for the column, it creates EnumValue objects
+// with value and description from the definition. Otherwise, it falls back to
+// sampled values without descriptions.
+func (s *columnEnrichmentService) mergeEnumDefinitions(
+	tableName string,
+	columnName string,
+	sampledValues []string,
+	enumDefs []models.EnumDefinition,
+) []models.EnumValue {
+	// Find matching definition
+	for _, def := range enumDefs {
+		if (def.Table == "*" || def.Table == tableName) && def.Column == columnName {
+			// Found a matching definition - create EnumValues with descriptions
+			var result []models.EnumValue
+			for _, v := range sampledValues {
+				ev := models.EnumValue{
+					Value: v,
+				}
+				if desc, ok := def.Values[v]; ok {
+					ev.Description = desc
+					// If description has format "LABEL - Description", extract label
+					if parts := splitEnumDescription(desc); parts != nil {
+						ev.Label = parts[0]
+						ev.Description = parts[1]
+					}
+				}
+				result = append(result, ev)
+			}
+
+			s.logger.Debug("Applied enum definitions",
+				zap.String("table", tableName),
+				zap.String("column", columnName),
+				zap.Int("value_count", len(result)))
+
+			return result
+		}
+	}
+
+	// No matching definition - fall back to sampled values without descriptions
+	return toEnumValues(sampledValues)
+}
+
+// splitEnumDescription splits a description in format "LABEL - Description" into parts.
+// Returns nil if the description doesn't match this format.
+func splitEnumDescription(desc string) []string {
+	// Look for " - " separator
+	idx := strings.Index(desc, " - ")
+	if idx == -1 {
+		return nil
+	}
+	label := strings.TrimSpace(desc[:idx])
+	description := strings.TrimSpace(desc[idx+3:])
+	if label == "" || description == "" {
+		return nil
+	}
+	return []string{label, description}
+}
+
+// toEnumValues converts a slice of strings to EnumValue objects without descriptions.
+func toEnumValues(values []string) []models.EnumValue {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]models.EnumValue, len(values))
+	for i, v := range values {
+		result[i] = models.EnumValue{Value: v}
+	}
+	return result
 }
