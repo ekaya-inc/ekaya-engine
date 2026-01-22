@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -14,6 +15,32 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
+
+// testTermPatterns contains regex patterns to detect test-like term names.
+// Terms matching these patterns are rejected to prevent test data from
+// being persisted in the glossary.
+var testTermPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)^test`),    // Starts with "test"
+	regexp.MustCompile(`(?i)test$`),    // Ends with "test"
+	regexp.MustCompile(`(?i)^uitest`),  // UI test prefix
+	regexp.MustCompile(`(?i)^debug`),   // Debug prefix
+	regexp.MustCompile(`(?i)^todo`),    // Todo prefix
+	regexp.MustCompile(`(?i)^fixme`),   // Fixme prefix
+	regexp.MustCompile(`(?i)^dummy`),   // Dummy prefix
+	regexp.MustCompile(`(?i)^sample`),  // Sample prefix
+	regexp.MustCompile(`(?i)^example`), // Example prefix
+	regexp.MustCompile(`\d{4}$`),       // Ends with 4 digits (e.g., Term2026)
+}
+
+// isTestTerm checks if a term name matches any test-like pattern.
+func isTestTerm(termName string) bool {
+	for _, pattern := range testTermPatterns {
+		if pattern.MatchString(termName) {
+			return true
+		}
+	}
+	return false
+}
 
 // GlossaryService provides operations for managing business glossary terms.
 type GlossaryService interface {
@@ -117,6 +144,11 @@ func (s *glossaryService) CreateTerm(ctx context.Context, projectID uuid.UUID, t
 		return fmt.Errorf("defining_sql is required")
 	}
 
+	// Reject test-like term names to prevent test data in production
+	if isTestTerm(term.Term) {
+		return fmt.Errorf("term name '%s' appears to be test data", term.Term)
+	}
+
 	// Set project ID and default source if not provided
 	term.ProjectID = projectID
 	if term.Source == "" {
@@ -169,6 +201,11 @@ func (s *glossaryService) UpdateTerm(ctx context.Context, term *models.BusinessG
 	}
 	if term.DefiningSQL == "" {
 		return fmt.Errorf("defining_sql is required")
+	}
+
+	// Reject test-like term names to prevent test data in production
+	if isTestTerm(term.Term) {
+		return fmt.Errorf("term name '%s' appears to be test data", term.Term)
 	}
 
 	// Get existing term to check if SQL changed

@@ -2683,3 +2683,176 @@ func TestFilterInapplicableTerms_IntegrationWithSuggestTerms(t *testing.T) {
 	assert.NotContains(t, termNames, "Average Order Value", "Should filter e-commerce term")
 	assert.NotContains(t, termNames, "GMV", "Should filter e-commerce term")
 }
+
+// ============================================================================
+// Test Term Pattern Validation Tests
+// ============================================================================
+
+func TestIsTestTerm(t *testing.T) {
+	tests := []struct {
+		name     string
+		termName string
+		want     bool
+	}{
+		// Should match - starts with "test"
+		{"starts with test lowercase", "testTerm", true},
+		{"starts with test uppercase", "TestMetric", true},
+		{"starts with TEST all caps", "TESTREVENUE", true},
+
+		// Should match - ends with "test"
+		{"ends with test lowercase", "mytest", true},
+		{"ends with test mixed case", "MyTest", true},
+
+		// Should match - starts with "uitest"
+		{"uitest prefix", "UITestTerm2026", true},
+		{"uitest lowercase", "uitestmetric", true},
+
+		// Should match - starts with "debug"
+		{"debug prefix", "DebugRevenue", true},
+		{"debug lowercase", "debugmetric", true},
+
+		// Should match - starts with "todo"
+		{"todo prefix", "TodoFixLater", true},
+		{"todo lowercase", "todoitem", true},
+
+		// Should match - starts with "fixme"
+		{"fixme prefix", "FixMeRevenue", true},
+		{"fixme lowercase", "fixmethis", true},
+
+		// Should match - starts with "dummy"
+		{"dummy prefix", "DummyMetric", true},
+		{"dummy lowercase", "dummydata", true},
+
+		// Should match - starts with "sample"
+		{"sample prefix", "SampleRevenue", true},
+		{"sample lowercase", "sampleterm", true},
+
+		// Should match - starts with "example"
+		{"example prefix", "ExampleMetric", true},
+		{"example lowercase", "exampleterm", true},
+
+		// Should match - ends with 4 digits
+		{"ends with year 2026", "Term2026", true},
+		{"ends with year 2025", "Metric2025", true},
+		{"ends with 4 digits", "Revenue1234", true},
+
+		// Should NOT match - legitimate business terms
+		{"valid term Revenue", "Revenue", false},
+		{"valid term Active Users", "Active Users", false},
+		{"valid term Customer Lifetime Value", "Customer Lifetime Value", false},
+		{"valid term MRR", "MRR", false},
+		{"valid term Transaction Count", "Transaction Count", false},
+		{"valid term Engagement Duration", "Engagement Duration", false},
+
+		// Should NOT match - contains "test" but not at start/end
+		{"test in middle", "ContestWinner", false},
+		{"attest in middle", "AttestationRate", false},
+
+		// Should NOT match - 3 or fewer trailing digits
+		{"three trailing digits", "Revenue123", false},
+		{"two trailing digits", "Metric99", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTestTerm(tt.termName)
+			assert.Equal(t, tt.want, got, "isTestTerm(%q) = %v, want %v", tt.termName, got, tt.want)
+		})
+	}
+}
+
+func TestGlossaryService_CreateTerm_RejectsTestTerm(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{}
+	entityRepo := &mockEntityRepoForGlossary{}
+	llmFactory := &mockLLMFactoryForGlossary{}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+
+	testCases := []struct {
+		name     string
+		termName string
+	}{
+		{"starts with test", "TestRevenue"},
+		{"ends with test", "MyTest"},
+		{"uitest prefix", "UITestTerm2026"},
+		{"ends with year", "Metric2026"},
+		{"debug prefix", "DebugData"},
+		{"sample prefix", "SampleMetric"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			term := &models.BusinessGlossaryTerm{
+				Term:        tc.termName,
+				Definition:  "Some definition",
+				DefiningSQL: "SELECT 1",
+			}
+
+			err := svc.CreateTerm(ctx, projectID, term)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "appears to be test data")
+			assert.Contains(t, err.Error(), tc.termName)
+		})
+	}
+}
+
+func TestGlossaryService_UpdateTerm_RejectsTestTerm(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{}
+	entityRepo := &mockEntityRepoForGlossary{}
+	llmFactory := &mockLLMFactoryForGlossary{}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+
+	// Create a valid term first (we'll add it directly to the mock repo)
+	existingTerm := &models.BusinessGlossaryTerm{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Term:        "Revenue",
+		Definition:  "Total revenue",
+		DefiningSQL: "SELECT SUM(amount) FROM transactions",
+	}
+	glossaryRepo.terms[existingTerm.ID] = existingTerm
+
+	// Try to update with a test-like name
+	testCases := []struct {
+		name     string
+		termName string
+	}{
+		{"starts with test", "TestRevenue"},
+		{"ends with test", "RevenueTest"},
+		{"uitest prefix", "UITestMetric"},
+		{"ends with year", "Revenue2026"},
+		{"debug prefix", "DebugRevenue"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			term := &models.BusinessGlossaryTerm{
+				ID:          existingTerm.ID,
+				ProjectID:   projectID,
+				Term:        tc.termName,
+				Definition:  "Updated definition",
+				DefiningSQL: "SELECT SUM(amount) FROM transactions",
+			}
+
+			err := svc.UpdateTerm(ctx, term)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "appears to be test data")
+			assert.Contains(t, err.Error(), tc.termName)
+		})
+	}
+}
