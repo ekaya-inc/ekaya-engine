@@ -1743,3 +1743,148 @@ func (r *testSelfRefRelRepo) GetByID(ctx context.Context, id uuid.UUID) (*models
 func (r *testSelfRefRelRepo) Update(ctx context.Context, rel *models.EntityRelationship) error {
 	return nil
 }
+
+// TestColumnEnrichmentService_EnrichTable_IntegerEnumInference tests that integer enum
+// columns like transaction_state get meaningful labels inferred from column context.
+func TestColumnEnrichmentService_EnrichTable_IntegerEnumInference(t *testing.T) {
+	projectID := uuid.New()
+
+	entity := &models.OntologyEntity{
+		ID:           uuid.New(),
+		Name:         "BillingTransaction",
+		Description:  "A billing transaction recording payment activity",
+		PrimaryTable: "billing_transactions",
+	}
+
+	columns := []*models.SchemaColumn{
+		{ColumnName: "id", DataType: "bigint", IsPrimaryKey: true},
+		{ColumnName: "transaction_state", DataType: "integer"},
+	}
+
+	// LLM response with inferred labels for integer enum values
+	// The LLM should infer state progression from the column name context
+	llmResponse := `{
+		"columns": [
+			{
+				"name": "id",
+				"description": "Unique identifier for the billing transaction",
+				"semantic_type": "identifier",
+				"role": "identifier",
+				"fk_association": null
+			},
+			{
+				"name": "transaction_state",
+				"description": "Current state of the billing transaction in its lifecycle",
+				"semantic_type": "status",
+				"role": "dimension",
+				"enum_values": [
+					{"value": "1", "label": "Started", "description": "Transaction has been initiated"},
+					{"value": "2", "label": "Ended", "description": "Transaction has completed"},
+					{"value": "3", "label": "Waiting", "description": "Transaction is waiting for processing"}
+				],
+				"fk_association": null
+			}
+		]
+	}`
+
+	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
+	entityRepo := &testColEnrichmentEntityRepo{entities: []*models.OntologyEntity{entity}}
+	relRepo := &testColEnrichmentRelRepo{}
+	schemaRepo := &testColEnrichmentSchemaRepo{
+		columnsByTable: map[string][]*models.SchemaColumn{
+			"billing_transactions": columns,
+		},
+	}
+
+	// Track what prompt was sent to the LLM
+	var capturedPrompt string
+	llmClient := &testColEnrichmentLLMClient{
+		generateFunc: func(ctx context.Context, prompt, systemMsg string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+			capturedPrompt = prompt
+			return &llm.GenerateResponseResult{Content: llmResponse}, nil
+		},
+	}
+	llmFactory := &testColEnrichmentLLMFactory{client: llmClient}
+
+	service := &columnEnrichmentService{
+		ontologyRepo:     ontologyRepo,
+		entityRepo:       entityRepo,
+		relationshipRepo: relRepo,
+		schemaRepo:       schemaRepo,
+		dsSvc:            &testColEnrichmentDatasourceService{},
+		llmFactory:       llmFactory,
+		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:           zap.NewNop(),
+	}
+
+	// Execute
+	err := service.EnrichTable(context.Background(), projectID, "billing_transactions")
+
+	// Verify
+	require.NoError(t, err)
+
+	// Verify the prompt includes enhanced enum instructions
+	assert.Contains(t, capturedPrompt, "Return as objects")
+	assert.Contains(t, capturedPrompt, "Infer labels from column context")
+	assert.Contains(t, capturedPrompt, "For integer enums")
+	assert.Contains(t, capturedPrompt, "For string enums")
+
+	// Verify column details were saved with proper enum values
+	details := ontologyRepo.columnDetails["billing_transactions"]
+	require.Equal(t, 2, len(details))
+
+	// Find transaction_state column and verify enum values with inferred labels
+	stateCol := findColumnDetail(details, "transaction_state")
+	require.NotNil(t, stateCol, "Should find transaction_state column")
+	assert.Equal(t, "status", stateCol.SemanticType)
+	require.Equal(t, 3, len(stateCol.EnumValues), "Should have 3 enum values")
+
+	// Verify enum values have both value and inferred label
+	assert.Equal(t, "1", stateCol.EnumValues[0].Value)
+	assert.Equal(t, "Started", stateCol.EnumValues[0].Label)
+	assert.Equal(t, "Transaction has been initiated", stateCol.EnumValues[0].Description)
+
+	assert.Equal(t, "2", stateCol.EnumValues[1].Value)
+	assert.Equal(t, "Ended", stateCol.EnumValues[1].Label)
+
+	assert.Equal(t, "3", stateCol.EnumValues[2].Value)
+	assert.Equal(t, "Waiting", stateCol.EnumValues[2].Label)
+}
+
+// TestColumnEnrichmentService_buildColumnEnrichmentPrompt_EnumInstructions verifies
+// that the prompt includes proper instructions for inferring enum labels.
+func TestColumnEnrichmentService_buildColumnEnrichmentPrompt_EnumInstructions(t *testing.T) {
+	service := &columnEnrichmentService{
+		circuitBreaker: llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:         zap.NewNop(),
+	}
+
+	entity := &models.OntologyEntity{
+		ID:           uuid.New(),
+		Name:         "TestEntity",
+		PrimaryTable: "test_table",
+	}
+
+	columns := []*models.SchemaColumn{
+		{ColumnName: "status", DataType: "integer"},
+	}
+
+	enumSamples := map[string][]string{
+		"status": {"1", "2", "3"},
+	}
+
+	prompt := service.buildColumnEnrichmentPrompt(entity, columns, nil, enumSamples)
+
+	// Verify enhanced enum instructions are present
+	assert.Contains(t, prompt, "enum_values")
+	assert.Contains(t, prompt, "Return as objects")
+	assert.Contains(t, prompt, "Infer labels from column context")
+	assert.Contains(t, prompt, "For integer enums")
+	assert.Contains(t, prompt, "For string enums")
+	assert.Contains(t, prompt, "Include description if you can infer the business meaning")
+
+	// Verify response format example shows object structure
+	assert.Contains(t, prompt, `"value":`)
+	assert.Contains(t, prompt, `"label":`)
+}

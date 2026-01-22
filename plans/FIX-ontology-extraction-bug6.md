@@ -241,8 +241,8 @@ If enum values aren't appearing:
 
 ## Acceptance Criteria
 
-- [ ] Columns matching patterns (state, type, etc.) have sample values extracted
-- [ ] LLM prompt guides towards descriptive enum labels
+- [x] Columns matching patterns (state, type, etc.) have sample values extracted
+- [x] LLM prompt guides towards descriptive enum labels
 - [ ] Project-level enum definitions can be provided via config
 - [ ] Enum definitions merged with sampled values during enrichment
 - [ ] `probe_column` returns enum values with descriptions
