@@ -1740,3 +1740,63 @@ func TestGlossaryService_SystemMessage_GuidesAgainstGenericMetrics(t *testing.T)
 	// Verify it mentions roles
 	assert.Contains(t, sysMsg, "User roles and their meanings", "Must mention understanding user roles")
 }
+
+func TestGlossaryService_Prompt_IncludesNegativeExamplesSection(t *testing.T) {
+	// This test verifies that the user prompt includes the "What NOT to Suggest" section
+	// with specific negative examples to prevent generic SaaS metrics (BUG-7 fix)
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Engagement",
+			PrimaryTable: "engagements",
+		},
+	}
+
+	llmResponse := `{"terms": []}`
+	llmClient := &mockLLMClientCapturingPrompt{responseContent: llmResponse}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+
+	_, err := svc.SuggestTerms(ctx, projectID)
+	require.NoError(t, err)
+
+	// Verify the prompt includes the "What NOT to Suggest" section
+	prompt := llmClient.capturedPrompt
+	assert.Contains(t, prompt, "What NOT to Suggest", "Prompt must include 'What NOT to Suggest' section")
+
+	// Verify specific negative examples are listed
+	assert.Contains(t, prompt, "Active Subscribers", "Prompt must explicitly list 'Active Subscribers' as a term to avoid")
+	assert.Contains(t, prompt, "only for subscription businesses", "Prompt must explain why 'Active Subscribers' should be avoided")
+	assert.Contains(t, prompt, "Churn Rate", "Prompt must explicitly list 'Churn Rate' as a term to avoid")
+	assert.Contains(t, prompt, "Customer Lifetime Value", "Prompt must explicitly list 'Customer Lifetime Value' as a term to avoid")
+	assert.Contains(t, prompt, "Average Order Value", "Prompt must explicitly list 'Average Order Value' as a term to avoid")
+	assert.Contains(t, prompt, "Inventory Turnover", "Prompt must explicitly list 'Inventory Turnover' as a term to avoid")
+	assert.Contains(t, prompt, "MRR/ARR", "Prompt must explicitly list 'MRR/ARR' as a term to avoid")
+
+	// Verify guidance for what TO suggest instead
+	assert.Contains(t, prompt, "Instead, look for domain-specific metrics", "Prompt must guide toward domain-specific alternatives")
+	assert.Contains(t, prompt, "What entities actually exist", "Prompt must mention looking at actual entities")
+	assert.Contains(t, prompt, "What columns track value", "Prompt must mention value-tracking columns")
+	assert.Contains(t, prompt, "What time-based columns exist", "Prompt must mention time-based columns")
+	assert.Contains(t, prompt, "What user roles are distinguished", "Prompt must mention user roles")
+}

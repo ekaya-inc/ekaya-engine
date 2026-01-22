@@ -595,6 +595,21 @@ func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntolog
 		}
 	}
 
+	// Add negative examples section to prevent generic SaaS terms
+	sb.WriteString("## What NOT to Suggest\n\n")
+	sb.WriteString("Do NOT suggest these generic terms unless the schema clearly supports them:\n")
+	sb.WriteString("- \"Active Subscribers\" - only for subscription businesses with recurring billing\n")
+	sb.WriteString("- \"Churn Rate\" - only for subscription businesses with membership/plan concepts\n")
+	sb.WriteString("- \"Customer Lifetime Value\" - requires purchase history and repeat transactions\n")
+	sb.WriteString("- \"Average Order Value\" - requires order/cart system with line items\n")
+	sb.WriteString("- \"Inventory Turnover\" - requires inventory management tables\n")
+	sb.WriteString("- \"MRR/ARR\" - only for subscription businesses with recurring revenue\n\n")
+	sb.WriteString("Instead, look for domain-specific metrics based on:\n")
+	sb.WriteString("- What entities actually exist (Engagement, Transaction, Session, etc.)\n")
+	sb.WriteString("- What columns track value (amount, fee, revenue, earned_amount)\n")
+	sb.WriteString("- What time-based columns exist (duration, start_time, end_time)\n")
+	sb.WriteString("- What user roles are distinguished (host, visitor, creator, viewer)\n\n")
+
 	sb.WriteString("## Response Format\n\n")
 	sb.WriteString("Respond with a JSON object containing suggested business terms (NO SQL - just term, definition, aliases):\n")
 	sb.WriteString("```json\n")
