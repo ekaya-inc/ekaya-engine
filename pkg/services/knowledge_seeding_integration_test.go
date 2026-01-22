@@ -28,19 +28,19 @@ var (
 
 // knowledgeSeedingTestContext holds all dependencies for knowledge seeding integration tests.
 type knowledgeSeedingTestContext struct {
-	t               *testing.T
-	engineDB        *testhelpers.EngineDB
-	knowledgeSvc    KnowledgeService
-	glossarySvc     GlossaryService
-	knowledgeRepo   repositories.KnowledgeRepository
-	glossaryRepo    repositories.GlossaryRepository
-	ontologyRepo    repositories.OntologyRepository
-	entityRepo      repositories.OntologyEntityRepository
-	projectRepo     repositories.ProjectRepository
-	projectID       uuid.UUID
-	dsID            uuid.UUID
-	tempDir         string
-	seedFilePath    string
+	t             *testing.T
+	engineDB      *testhelpers.EngineDB
+	knowledgeSvc  KnowledgeService
+	glossarySvc   GlossaryService
+	knowledgeRepo repositories.KnowledgeRepository
+	glossaryRepo  repositories.GlossaryRepository
+	ontologyRepo  repositories.OntologyRepository
+	entityRepo    repositories.OntologyEntityRepository
+	projectRepo   repositories.ProjectRepository
+	projectID     uuid.UUID
+	dsID          uuid.UUID
+	tempDir       string
+	seedFilePath  string
 }
 
 // setupKnowledgeSeedingTest creates a test context with real database.
@@ -65,18 +65,18 @@ func setupKnowledgeSeedingTest(t *testing.T) *knowledgeSeedingTestContext {
 	knowledgeSvc := NewKnowledgeService(knowledgeRepo, projectRepo, logger)
 
 	tc := &knowledgeSeedingTestContext{
-		t:              t,
-		engineDB:       engineDB,
-		knowledgeSvc:   knowledgeSvc,
-		knowledgeRepo:  knowledgeRepo,
-		glossaryRepo:   glossaryRepo,
-		ontologyRepo:   ontologyRepo,
-		entityRepo:     entityRepo,
-		projectRepo:    projectRepo,
-		projectID:      knowledgeSeedingTestProjectID,
-		dsID:           knowledgeSeedingTestDSID,
-		tempDir:        tempDir,
-		seedFilePath:   seedFilePath,
+		t:             t,
+		engineDB:      engineDB,
+		knowledgeSvc:  knowledgeSvc,
+		knowledgeRepo: knowledgeRepo,
+		glossaryRepo:  glossaryRepo,
+		ontologyRepo:  ontologyRepo,
+		entityRepo:    entityRepo,
+		projectRepo:   projectRepo,
+		projectID:     knowledgeSeedingTestProjectID,
+		dsID:          knowledgeSeedingTestDSID,
+		tempDir:       tempDir,
+		seedFilePath:  seedFilePath,
 	}
 
 	// Ensure project exists with seed path
