@@ -687,3 +687,148 @@ func TestProbeColumn_Integration_PartialMerge(t *testing.T) {
 	assert.Equal(t, "DRAFT", probeResponse.Semantic.EnumLabels["DRAFT"])
 	assert.Equal(t, "OVERDUE", probeResponse.Semantic.EnumLabels["OVERDUE"])
 }
+
+// TestProbeColumn_Integration_EnumWithDescriptions verifies that probe_column
+// returns enum values with their descriptions for integer enum columns.
+// This is the key test for BUG-6: Missing Enum Value Extraction.
+func TestProbeColumn_Integration_EnumWithDescriptions(t *testing.T) {
+	tc := setupProbeColumnIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Step 1: Create schema table and column (billing_transactions.transaction_state)
+	tableID := tc.createSchemaTable(ctx, "billing_transactions")
+	tc.createSchemaColumn(ctx, tableID, "transaction_state", "integer", 8, 10000)
+
+	// Step 2: Create an active ontology WITH column details that have enum values with descriptions
+	// This simulates what happens after column enrichment with project-level enum definitions
+	tc.createActiveOntology(ctx)
+	columnDetails := []models.ColumnDetail{
+		{
+			Name:        "transaction_state",
+			Description: "State of the billing transaction",
+			Role:        "dimension",
+			EnumValues: []models.EnumValue{
+				{Value: "0", Label: "UNSPECIFIED", Description: "Not set"},
+				{Value: "1", Label: "STARTED", Description: "Transaction started"},
+				{Value: "2", Label: "ENDED", Description: "Transaction ended"},
+				{Value: "3", Label: "WAITING", Description: "Awaiting chargeback period"},
+				{Value: "4", Label: "AVAILABLE", Description: "Available for payout"},
+				{Value: "5", Label: "PROCESSING", Description: "Processing payout"},
+				{Value: "6", Label: "PAYING", Description: "Paying out"},
+				{Value: "7", Label: "PAID", Description: "Paid out"},
+				{Value: "8", Label: "ERROR", Description: "Error occurred"},
+			},
+		},
+	}
+	err := tc.ontologyRepo.UpdateColumnDetails(ctx, tc.projectID, "billing_transactions", columnDetails)
+	require.NoError(t, err)
+	err = tc.ontologyRepo.UpdateEntitySummary(ctx, tc.projectID, "billing_transactions", &models.EntitySummary{
+		TableName:    "billing_transactions",
+		BusinessName: "Billing Transaction",
+		Description:  "Financial transactions for billing",
+	})
+	require.NoError(t, err)
+
+	// Step 3: Probe the column
+	result, err := tc.callTool(ctx, "probe_column", map[string]any{
+		"table":  "billing_transactions",
+		"column": "transaction_state",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.IsError)
+
+	var probeResponse probeColumnResponse
+	err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &probeResponse)
+	require.NoError(t, err)
+
+	// Key assertions: enum_labels should have meaningful labels (not just "1", "2", "3")
+	assert.NotNil(t, probeResponse.Semantic, "should have semantic section")
+	assert.Equal(t, "Billing Transaction", probeResponse.Semantic.Entity)
+	assert.Equal(t, "dimension", probeResponse.Semantic.Role)
+	assert.Equal(t, "State of the billing transaction", probeResponse.Semantic.Description)
+
+	// The critical assertion: enum_labels should have descriptive labels
+	assert.NotNil(t, probeResponse.Semantic.EnumLabels, "should have enum_labels")
+	assert.Len(t, probeResponse.Semantic.EnumLabels, 9, "should have all 9 transaction states")
+
+	// Label takes precedence over description
+	assert.Equal(t, "UNSPECIFIED", probeResponse.Semantic.EnumLabels["0"], "value 0 should have label")
+	assert.Equal(t, "STARTED", probeResponse.Semantic.EnumLabels["1"], "value 1 should have label")
+	assert.Equal(t, "ENDED", probeResponse.Semantic.EnumLabels["2"], "value 2 should have label")
+	assert.Equal(t, "WAITING", probeResponse.Semantic.EnumLabels["3"], "value 3 should have label")
+	assert.Equal(t, "AVAILABLE", probeResponse.Semantic.EnumLabels["4"], "value 4 should have label")
+	assert.Equal(t, "PROCESSING", probeResponse.Semantic.EnumLabels["5"], "value 5 should have label")
+	assert.Equal(t, "PAYING", probeResponse.Semantic.EnumLabels["6"], "value 6 should have label")
+	assert.Equal(t, "PAID", probeResponse.Semantic.EnumLabels["7"], "value 7 should have label")
+	assert.Equal(t, "ERROR", probeResponse.Semantic.EnumLabels["8"], "value 8 should have label")
+}
+
+// TestProbeColumn_Integration_EnumDescriptionFallback verifies that when enum values
+// have no Label but have Description, the description is used as the label.
+func TestProbeColumn_Integration_EnumDescriptionFallback(t *testing.T) {
+	tc := setupProbeColumnIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Step 1: Create schema table and column
+	tableID := tc.createSchemaTable(ctx, "activity_logs")
+	tc.createSchemaColumn(ctx, tableID, "activity_type", "integer", 5, 5000)
+
+	// Step 2: Create an active ontology with enum values that have Description but no Label
+	// This simulates enum values where only descriptions were provided
+	tc.createActiveOntology(ctx)
+	columnDetails := []models.ColumnDetail{
+		{
+			Name:        "activity_type",
+			Description: "Type of activity logged",
+			Role:        "dimension",
+			EnumValues: []models.EnumValue{
+				{Value: "1", Description: "User logged in"},
+				{Value: "2", Description: "User logged out"},
+				{Value: "3", Description: "Password changed"},
+				{Value: "4", Description: "Profile updated"},
+				{Value: "5", Description: "Settings modified"},
+			},
+		},
+	}
+	err := tc.ontologyRepo.UpdateColumnDetails(ctx, tc.projectID, "activity_logs", columnDetails)
+	require.NoError(t, err)
+	err = tc.ontologyRepo.UpdateEntitySummary(ctx, tc.projectID, "activity_logs", &models.EntitySummary{
+		TableName:    "activity_logs",
+		BusinessName: "Activity Log",
+	})
+	require.NoError(t, err)
+
+	// Step 3: Probe the column
+	result, err := tc.callTool(ctx, "probe_column", map[string]any{
+		"table":  "activity_logs",
+		"column": "activity_type",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.IsError)
+
+	var probeResponse probeColumnResponse
+	err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &probeResponse)
+	require.NoError(t, err)
+
+	// When no Label exists, Description should be used
+	assert.NotNil(t, probeResponse.Semantic)
+	assert.NotNil(t, probeResponse.Semantic.EnumLabels)
+	assert.Len(t, probeResponse.Semantic.EnumLabels, 5)
+
+	// Description is used as the label when Label is empty
+	assert.Equal(t, "User logged in", probeResponse.Semantic.EnumLabels["1"])
+	assert.Equal(t, "User logged out", probeResponse.Semantic.EnumLabels["2"])
+	assert.Equal(t, "Password changed", probeResponse.Semantic.EnumLabels["3"])
+	assert.Equal(t, "Profile updated", probeResponse.Semantic.EnumLabels["4"])
+	assert.Equal(t, "Settings modified", probeResponse.Semantic.EnumLabels["5"])
+}

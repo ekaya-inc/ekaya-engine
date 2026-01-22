@@ -245,5 +245,5 @@ If enum values aren't appearing:
 - [x] LLM prompt guides towards descriptive enum labels
 - [x] Project-level enum definitions can be provided via config (includes file format support)
 - [x] Enum definitions merged with sampled values during enrichment
-- [ ] `probe_column` returns enum values with descriptions
-- [ ] Integer enums have meaningful labels (not just "1", "2", "3")
+- [x] `probe_column` returns enum values with descriptions
+- [x] Integer enums have meaningful labels (not just "1", "2", "3")
