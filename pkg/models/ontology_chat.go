@@ -206,14 +206,15 @@ func IsValidFactType(t string) bool {
 
 // KnowledgeFact represents a learned business fact about the project.
 type KnowledgeFact struct {
-	ID        uuid.UUID `json:"id"`
-	ProjectID uuid.UUID `json:"project_id"`
-	FactType  string    `json:"fact_type"`
-	Key       string    `json:"key"`
-	Value     string    `json:"value"`
-	Context   string    `json:"context,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         uuid.UUID  `json:"id"`
+	ProjectID  uuid.UUID  `json:"project_id"`
+	OntologyID *uuid.UUID `json:"ontology_id,omitempty"` // Links to ontology for CASCADE delete
+	FactType   string     `json:"fact_type"`
+	Key        string     `json:"key"`
+	Value      string     `json:"value"`
+	Context    string     `json:"context,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 // ============================================================================

@@ -18,6 +18,7 @@ import (
 // It provides access to schema metadata, data sampling, and ontology updates.
 type OntologyToolExecutor struct {
 	projectID          uuid.UUID
+	ontologyID         uuid.UUID
 	datasourceID       uuid.UUID
 	ontologyRepo       repositories.OntologyRepository
 	knowledgeRepo      repositories.KnowledgeRepository
@@ -31,6 +32,7 @@ type OntologyToolExecutor struct {
 // OntologyToolExecutorConfig holds dependencies for creating an OntologyToolExecutor.
 type OntologyToolExecutorConfig struct {
 	ProjectID          uuid.UUID
+	OntologyID         uuid.UUID
 	DatasourceID       uuid.UUID
 	OntologyRepo       repositories.OntologyRepository
 	KnowledgeRepo      repositories.KnowledgeRepository
@@ -45,6 +47,7 @@ type OntologyToolExecutorConfig struct {
 func NewOntologyToolExecutor(cfg *OntologyToolExecutorConfig) *OntologyToolExecutor {
 	return &OntologyToolExecutor{
 		projectID:          cfg.ProjectID,
+		ontologyID:         cfg.OntologyID,
 		datasourceID:       cfg.DatasourceID,
 		ontologyRepo:       cfg.OntologyRepo,
 		knowledgeRepo:      cfg.KnowledgeRepo,
@@ -287,11 +290,12 @@ func (e *OntologyToolExecutor) storeKnowledge(ctx context.Context, arguments str
 	}
 
 	fact := &models.KnowledgeFact{
-		ProjectID: e.projectID,
-		FactType:  args.FactType,
-		Key:       args.Key,
-		Value:     args.Value,
-		Context:   args.Context,
+		ProjectID:  e.projectID,
+		OntologyID: &e.ontologyID,
+		FactType:   args.FactType,
+		Key:        args.Key,
+		Value:      args.Value,
+		Context:    args.Context,
 	}
 
 	if err := e.knowledgeRepo.Upsert(ctx, fact); err != nil {

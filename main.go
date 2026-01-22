@@ -171,7 +171,7 @@ func main() {
 	llmFactory := llm.NewClientFactory(aiConfigService, logger)
 
 	// Ontology services
-	knowledgeService := services.NewKnowledgeService(knowledgeRepo, projectRepo, logger)
+	knowledgeService := services.NewKnowledgeService(knowledgeRepo, projectRepo, ontologyRepo, logger)
 	ontologyBuilderService := services.NewOntologyBuilderService(llmFactory, logger)
 	ontologyQuestionService := services.NewOntologyQuestionService(
 		ontologyQuestionRepo, ontologyRepo, knowledgeRepo,
@@ -429,6 +429,7 @@ func main() {
 		DB:                  db,
 		MCPConfigService:    mcpConfigService,
 		KnowledgeRepository: knowledgeRepo,
+		OntologyRepository:  ontologyRepo,
 		Logger:              logger,
 	}
 	mcptools.RegisterKnowledgeTools(mcpServer.MCP(), knowledgeToolDeps)

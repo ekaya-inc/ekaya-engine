@@ -37,33 +37,45 @@ type KnowledgeService interface {
 }
 
 type knowledgeService struct {
-	repo        repositories.KnowledgeRepository
-	projectRepo repositories.ProjectRepository
-	logger      *zap.Logger
+	repo         repositories.KnowledgeRepository
+	projectRepo  repositories.ProjectRepository
+	ontologyRepo repositories.OntologyRepository
+	logger       *zap.Logger
 }
 
 // NewKnowledgeService creates a new knowledge service.
 func NewKnowledgeService(
 	repo repositories.KnowledgeRepository,
 	projectRepo repositories.ProjectRepository,
+	ontologyRepo repositories.OntologyRepository,
 	logger *zap.Logger,
 ) KnowledgeService {
 	return &knowledgeService{
-		repo:        repo,
-		projectRepo: projectRepo,
-		logger:      logger.Named("knowledge"),
+		repo:         repo,
+		projectRepo:  projectRepo,
+		ontologyRepo: ontologyRepo,
+		logger:       logger.Named("knowledge"),
 	}
 }
 
 var _ KnowledgeService = (*knowledgeService)(nil)
 
 func (s *knowledgeService) Store(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
+	// Look up active ontology to associate knowledge with it
+	var ontologyID *uuid.UUID
+	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	if err == nil && ontology != nil {
+		ontologyID = &ontology.ID
+	}
+	// If no active ontology found, ontologyID remains nil (allowed by schema)
+
 	fact := &models.KnowledgeFact{
-		ProjectID: projectID,
-		FactType:  factType,
-		Key:       key,
-		Value:     value,
-		Context:   contextInfo,
+		ProjectID:  projectID,
+		OntologyID: ontologyID,
+		FactType:   factType,
+		Key:        key,
+		Value:      value,
+		Context:    contextInfo,
 	}
 
 	if err := s.repo.Upsert(ctx, fact); err != nil {
@@ -144,15 +156,24 @@ func (s *knowledgeService) SeedKnowledgeFromFile(ctx context.Context, projectID 
 		return 0, fmt.Errorf("load knowledge seed file: %w", err)
 	}
 
+	// Look up active ontology to associate knowledge with it
+	var ontologyID *uuid.UUID
+	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	if err == nil && ontology != nil {
+		ontologyID = &ontology.ID
+	}
+	// If no active ontology found, ontologyID remains nil (allowed by schema)
+
 	// Upsert all facts
 	count := 0
 	for _, fact := range seedFile.AllFacts() {
 		knowledgeFact := &models.KnowledgeFact{
-			ProjectID: projectID,
-			FactType:  fact.FactType,
-			Key:       fact.Fact,
-			Value:     fact.Fact,
-			Context:   fact.Context,
+			ProjectID:  projectID,
+			OntologyID: ontologyID,
+			FactType:   fact.FactType,
+			Key:        fact.Fact,
+			Value:      fact.Fact,
+			Context:    fact.Context,
 		}
 
 		if err := s.repo.Upsert(ctx, knowledgeFact); err != nil {

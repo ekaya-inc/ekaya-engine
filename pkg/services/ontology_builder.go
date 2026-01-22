@@ -93,7 +93,7 @@ func (s *ontologyBuilderService) ProcessAnswer(ctx context.Context, projectID uu
 	// Extract thinking from response before parsing JSON
 	thinking := llm.ExtractThinking(llmResult.Content)
 
-	result, err := s.parseAnswerProcessingResponse(llmResult.Content, projectID)
+	result, err := s.parseAnswerProcessingResponse(llmResult.Content, projectID, question.OntologyID)
 	if err != nil {
 		// If parsing fails, return a basic result with thinking preserved
 		s.logger.Warn("Failed to parse answer processing response", zap.Error(err))
@@ -189,7 +189,7 @@ func (s *ontologyBuilderService) buildAnswerProcessingPrompt(question *models.On
 	return prompt.String()
 }
 
-func (s *ontologyBuilderService) parseAnswerProcessingResponse(response string, projectID uuid.UUID) (*AnswerProcessingResult, error) {
+func (s *ontologyBuilderService) parseAnswerProcessingResponse(response string, projectID, ontologyID uuid.UUID) (*AnswerProcessingResult, error) {
 	type llmResult struct {
 		FollowUp      *string `json:"follow_up"`
 		EntityUpdates []struct {
@@ -249,11 +249,12 @@ func (s *ontologyBuilderService) parseAnswerProcessingResponse(response string, 
 
 	for _, kf := range llmResp.KnowledgeFacts {
 		result.KnowledgeFacts = append(result.KnowledgeFacts, &models.KnowledgeFact{
-			ProjectID: projectID,
-			FactType:  kf.FactType,
-			Key:       kf.Key,
-			Value:     kf.Value,
-			Context:   kf.Context,
+			ProjectID:  projectID,
+			OntologyID: &ontologyID,
+			FactType:   kf.FactType,
+			Key:        kf.Key,
+			Value:      kf.Value,
+			Context:    kf.Context,
 		})
 	}
 

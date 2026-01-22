@@ -23,6 +23,7 @@ type KnowledgeToolDeps struct {
 	DB                  *database.DB
 	MCPConfigService    services.MCPConfigService
 	KnowledgeRepository repositories.KnowledgeRepository
+	OntologyRepository  repositories.OntologyRepository
 	Logger              *zap.Logger
 }
 
@@ -127,13 +128,22 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 			), nil
 		}
 
+		// Look up active ontology to associate knowledge with it
+		var ontologyID *uuid.UUID
+		ontology, err := deps.OntologyRepository.GetActive(tenantCtx, projectID)
+		if err == nil && ontology != nil {
+			ontologyID = &ontology.ID
+		}
+		// If no active ontology found, ontologyID remains nil (allowed by schema)
+
 		// Build KnowledgeFact
 		knowledgeFact := &models.KnowledgeFact{
-			ProjectID: projectID,
-			FactType:  category,
-			Key:       fact, // Using fact as the key for upsert semantics
-			Value:     fact,
-			Context:   context,
+			ProjectID:  projectID,
+			OntologyID: ontologyID,
+			FactType:   category,
+			Key:        fact, // Using fact as the key for upsert semantics
+			Value:      fact,
+			Context:    context,
 		}
 
 		// If fact_id provided, parse it and set ID for explicit update
