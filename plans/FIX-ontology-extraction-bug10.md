@@ -193,4 +193,4 @@ WHERE NOT EXISTS (
 - [x] Existing stale data cleaned up (skipped - manual operation; migrations backfill to active ontology, cleanup SQL in plan above for orphaned rows)
 - [x] Ontology delete removes all associated data
 - [x] Datasource change doesn't retain old domain facts
-- [ ] MCP tools continue to work correctly
+- [x] MCP tools continue to work correctly

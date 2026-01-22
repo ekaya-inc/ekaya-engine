@@ -128,13 +128,15 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 			), nil
 		}
 
-		// Look up active ontology to associate knowledge with it
+		// Look up active ontology to associate knowledge with it (optional dependency)
 		var ontologyID *uuid.UUID
-		ontology, err := deps.OntologyRepository.GetActive(tenantCtx, projectID)
-		if err == nil && ontology != nil {
-			ontologyID = &ontology.ID
+		if deps.OntologyRepository != nil {
+			ontology, err := deps.OntologyRepository.GetActive(tenantCtx, projectID)
+			if err == nil && ontology != nil {
+				ontologyID = &ontology.ID
+			}
 		}
-		// If no active ontology found, ontologyID remains nil (allowed by schema)
+		// If no active ontology found or OntologyRepository not provided, ontologyID remains nil (allowed by schema)
 
 		// Build KnowledgeFact
 		knowledgeFact := &models.KnowledgeFact{
