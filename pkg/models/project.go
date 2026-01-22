@@ -29,6 +29,31 @@ const (
 	IndustryCreatorEcon = "creator_economy"
 )
 
+// EnumDefinition defines the known values and their meanings for an enum column.
+// This allows projects to provide explicit enum definitions that get merged
+// during column enrichment, providing accurate descriptions for integer/string
+// enum values that the LLM cannot infer from data alone.
+type EnumDefinition struct {
+	// Table is the table name containing the enum column.
+	// Use "*" to apply to any table with this column name.
+	Table string `json:"table"`
+
+	// Column is the column name containing enum values.
+	Column string `json:"column"`
+
+	// Values maps raw enum values (as strings) to their descriptions.
+	// Example: {"1": "STARTED - Transaction started", "2": "ENDED - Transaction ended"}
+	Values map[string]string `json:"values"`
+}
+
+// ProjectConfig contains project-level configuration that can be customized
+// per-project. This includes enum definitions and other semantic annotations.
+type ProjectConfig struct {
+	// EnumDefinitions provides explicit enum value → description mappings
+	// for columns where the LLM cannot infer meanings from data alone.
+	EnumDefinitions []EnumDefinition `json:"enum_definitions,omitempty"`
+}
+
 // JSONBMap is a map type that handles PostgreSQL JSONB serialization.
 type JSONBMap map[string]interface{}
 
