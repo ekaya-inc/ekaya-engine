@@ -701,3 +701,121 @@ func TestOntologyRepository_NoTenantScope(t *testing.T) {
 		t.Error("expected error for GetNextVersion without tenant scope")
 	}
 }
+
+// ============================================================================
+// DeleteByProject Tests
+// ============================================================================
+
+func TestOntologyRepository_DeleteByProject_CleansUpRelatedData(t *testing.T) {
+	tc := setupOntologyTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create an ontology
+	ontology := tc.createTestOntology(ctx, 1, true)
+
+	// Create knowledge facts linked to this project and ontology
+	knowledgeRepo := NewKnowledgeRepository()
+	fact := &models.KnowledgeFact{
+		ProjectID:  tc.projectID,
+		OntologyID: &ontology.ID,
+		FactType:   "terminology",
+		Key:        "test_term",
+		Value:      "A test term definition",
+	}
+	err := knowledgeRepo.Upsert(ctx, fact)
+	if err != nil {
+		t.Fatalf("failed to create knowledge fact: %v", err)
+	}
+
+	// Create glossary terms linked to this project and ontology
+	glossaryRepo := NewGlossaryRepository()
+	term := &models.BusinessGlossaryTerm{
+		ProjectID:   tc.projectID,
+		OntologyID:  &ontology.ID,
+		Term:        "Active Users",
+		Definition:  "Users who logged in recently",
+		DefiningSQL: "SELECT * FROM users WHERE last_login > NOW() - INTERVAL '30 days'",
+		Source:      models.GlossarySourceInferred,
+	}
+	err = glossaryRepo.Create(ctx, term)
+	if err != nil {
+		t.Fatalf("failed to create glossary term: %v", err)
+	}
+
+	// Verify data exists before delete
+	facts, err := knowledgeRepo.GetByProject(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("failed to get knowledge facts: %v", err)
+	}
+	if len(facts) == 0 {
+		t.Fatal("expected knowledge facts to exist before delete")
+	}
+
+	terms, err := glossaryRepo.GetByProject(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("failed to get glossary terms: %v", err)
+	}
+	if len(terms) == 0 {
+		t.Fatal("expected glossary terms to exist before delete")
+	}
+
+	// Delete by project
+	err = tc.repo.DeleteByProject(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("DeleteByProject failed: %v", err)
+	}
+
+	// Verify ontology is deleted
+	retrieved, err := tc.repo.GetActive(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("GetActive failed: %v", err)
+	}
+	if retrieved != nil {
+		t.Error("expected ontology to be deleted")
+	}
+
+	// Verify knowledge facts are deleted
+	facts, err = knowledgeRepo.GetByProject(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("failed to get knowledge facts after delete: %v", err)
+	}
+	if len(facts) != 0 {
+		t.Errorf("expected 0 knowledge facts after delete, got %d", len(facts))
+	}
+
+	// Verify glossary terms are deleted
+	terms, err = glossaryRepo.GetByProject(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("failed to get glossary terms after delete: %v", err)
+	}
+	if len(terms) != 0 {
+		t.Errorf("expected 0 glossary terms after delete, got %d", len(terms))
+	}
+}
+
+func TestOntologyRepository_DeleteByProject_EmptyProject(t *testing.T) {
+	tc := setupOntologyTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Delete should succeed even if no data exists
+	err := tc.repo.DeleteByProject(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("DeleteByProject failed on empty project: %v", err)
+	}
+}
+
+func TestOntologyRepository_DeleteByProject_NoTenantScope(t *testing.T) {
+	tc := setupOntologyTest(t)
+	ctx := context.Background() // No tenant scope
+
+	err := tc.repo.DeleteByProject(ctx, tc.projectID)
+	if err == nil {
+		t.Error("expected error for DeleteByProject without tenant scope")
+	}
+}

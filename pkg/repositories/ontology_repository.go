@@ -283,11 +283,33 @@ func (r *ontologyRepository) DeleteByProject(ctx context.Context, projectID uuid
 		return fmt.Errorf("no tenant scope in context")
 	}
 
-	query := `DELETE FROM engine_ontologies WHERE project_id = $1`
+	// Use transaction to ensure atomicity of all cleanup operations
+	tx, err := scope.Conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback on defer is best-effort
 
-	_, err := scope.Conn.Exec(ctx, query, projectID)
+	// 1. Clean up project_knowledge (fallback - also has CASCADE via ontology_id FK)
+	_, err = tx.Exec(ctx, `DELETE FROM engine_project_knowledge WHERE project_id = $1`, projectID)
+	if err != nil {
+		return fmt.Errorf("failed to delete project knowledge: %w", err)
+	}
+
+	// 2. Clean up business_glossary (fallback - also has CASCADE via ontology_id FK)
+	_, err = tx.Exec(ctx, `DELETE FROM engine_business_glossary WHERE project_id = $1`, projectID)
+	if err != nil {
+		return fmt.Errorf("failed to delete business glossary: %w", err)
+	}
+
+	// 3. Delete ontologies (cascades to other ontology tables like entities, relationships, etc.)
+	_, err = tx.Exec(ctx, `DELETE FROM engine_ontologies WHERE project_id = $1`, projectID)
 	if err != nil {
 		return fmt.Errorf("failed to delete ontologies: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return nil
