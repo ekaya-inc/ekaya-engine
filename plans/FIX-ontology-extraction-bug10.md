@@ -182,6 +182,10 @@ WHERE NOT EXISTS (
 );
 ```
 
+## Implementation Notes
+
+**Task 3 (Update knowledge repository to set ontology_id):** Completed as part of Task 1. The `knowledge_repository.go` already includes `ontology_id` in all queries and the `KnowledgeFact` struct. No separate implementation was needed.
+
 ## Acceptance Criteria
 
 - [x] `engine_project_knowledge` linked to `ontology_id` with CASCADE
