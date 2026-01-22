@@ -185,7 +185,7 @@ WHERE NOT EXISTS (
 ## Acceptance Criteria
 
 - [x] `engine_project_knowledge` linked to `ontology_id` with CASCADE
-- [ ] `engine_business_glossary` linked to `ontology_id` with CASCADE
+- [x] `engine_business_glossary` linked to `ontology_id` with CASCADE
 - [ ] Existing stale data cleaned up
 - [ ] Ontology delete removes all associated data
 - [ ] Datasource change doesn't retain old domain facts

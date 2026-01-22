@@ -18,6 +18,7 @@ const (
 type BusinessGlossaryTerm struct {
 	ID            uuid.UUID      `json:"id"`
 	ProjectID     uuid.UUID      `json:"project_id"`
+	OntologyID    *uuid.UUID     `json:"ontology_id,omitempty"` // Links to ontology for CASCADE delete
 	Term          string         `json:"term"`
 	Definition    string         `json:"definition"`
 	DefiningSQL   string         `json:"defining_sql"`

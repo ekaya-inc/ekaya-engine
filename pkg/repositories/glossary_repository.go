@@ -51,14 +51,15 @@ func (r *glossaryRepository) Create(ctx context.Context, term *models.BusinessGl
 
 	query := `
 		INSERT INTO engine_business_glossary (
-			project_id, term, definition, defining_sql, base_table,
+			project_id, ontology_id, term, definition, defining_sql, base_table,
 			output_columns, source, created_by, updated_by,
 			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, created_at, updated_at`
 
 	err := scope.Conn.QueryRow(ctx, query,
 		term.ProjectID,
+		term.OntologyID,
 		term.Term,
 		term.Definition,
 		term.DefiningSQL,
@@ -190,7 +191,7 @@ func (r *glossaryRepository) GetByProject(ctx context.Context, projectID uuid.UU
 	}
 
 	query := `
-		SELECT g.id, g.project_id, g.term, g.definition, g.defining_sql, g.base_table,
+		SELECT g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
 		       g.output_columns, g.source, g.created_by, g.updated_by,
 		       g.created_at, g.updated_at,
 		       COALESCE(
@@ -200,7 +201,7 @@ func (r *glossaryRepository) GetByProject(ctx context.Context, projectID uuid.UU
 		FROM engine_business_glossary g
 		LEFT JOIN engine_glossary_aliases a ON g.id = a.glossary_id
 		WHERE g.project_id = $1
-		GROUP BY g.id, g.project_id, g.term, g.definition, g.defining_sql, g.base_table,
+		GROUP BY g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
 		         g.output_columns, g.source, g.created_by, g.updated_by,
 		         g.created_at, g.updated_at
 		ORDER BY g.term`
@@ -234,7 +235,7 @@ func (r *glossaryRepository) GetByTerm(ctx context.Context, projectID uuid.UUID,
 	}
 
 	query := `
-		SELECT g.id, g.project_id, g.term, g.definition, g.defining_sql, g.base_table,
+		SELECT g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
 		       g.output_columns, g.source, g.created_by, g.updated_by,
 		       g.created_at, g.updated_at,
 		       COALESCE(
@@ -244,7 +245,7 @@ func (r *glossaryRepository) GetByTerm(ctx context.Context, projectID uuid.UUID,
 		FROM engine_business_glossary g
 		LEFT JOIN engine_glossary_aliases a ON g.id = a.glossary_id
 		WHERE g.project_id = $1 AND g.term = $2
-		GROUP BY g.id, g.project_id, g.term, g.definition, g.defining_sql, g.base_table,
+		GROUP BY g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
 		         g.output_columns, g.source, g.created_by, g.updated_by,
 		         g.created_at, g.updated_at`
 
@@ -267,7 +268,7 @@ func (r *glossaryRepository) GetByAlias(ctx context.Context, projectID uuid.UUID
 	}
 
 	query := `
-		SELECT g.id, g.project_id, g.term, g.definition, g.defining_sql, g.base_table,
+		SELECT g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
 		       g.output_columns, g.source, g.created_by, g.updated_by,
 		       g.created_at, g.updated_at,
 		       COALESCE(
@@ -278,7 +279,7 @@ func (r *glossaryRepository) GetByAlias(ctx context.Context, projectID uuid.UUID
 		INNER JOIN engine_glossary_aliases a ON g.id = a.glossary_id
 		LEFT JOIN engine_glossary_aliases a2 ON g.id = a2.glossary_id
 		WHERE g.project_id = $1 AND a.alias = $2
-		GROUP BY g.id, g.project_id, g.term, g.definition, g.defining_sql, g.base_table,
+		GROUP BY g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
 		         g.output_columns, g.source, g.created_by, g.updated_by,
 		         g.created_at, g.updated_at`
 
@@ -301,7 +302,7 @@ func (r *glossaryRepository) GetByID(ctx context.Context, termID uuid.UUID) (*mo
 	}
 
 	query := `
-		SELECT g.id, g.project_id, g.term, g.definition, g.defining_sql, g.base_table,
+		SELECT g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
 		       g.output_columns, g.source, g.created_by, g.updated_by,
 		       g.created_at, g.updated_at,
 		       COALESCE(
@@ -311,7 +312,7 @@ func (r *glossaryRepository) GetByID(ctx context.Context, termID uuid.UUID) (*mo
 		FROM engine_business_glossary g
 		LEFT JOIN engine_glossary_aliases a ON g.id = a.glossary_id
 		WHERE g.id = $1
-		GROUP BY g.id, g.project_id, g.term, g.definition, g.defining_sql, g.base_table,
+		GROUP BY g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
 		         g.output_columns, g.source, g.created_by, g.updated_by,
 		         g.created_at, g.updated_at`
 
@@ -381,6 +382,7 @@ func scanGlossaryTerm(row pgx.Row) (*models.BusinessGlossaryTerm, error) {
 	err := row.Scan(
 		&t.ID,
 		&t.ProjectID,
+		&t.OntologyID,
 		&t.Term,
 		&t.Definition,
 		&t.DefiningSQL,

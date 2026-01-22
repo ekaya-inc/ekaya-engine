@@ -842,6 +842,9 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 		// Source is already set to "inferred" in parseSuggestTermsResponse
 		// DefiningSQL is empty - will be populated in enrichment phase
 
+		// Set ontology_id to link term to ontology lifecycle (CASCADE delete)
+		term.OntologyID = &ontologyID
+
 		// Create the term
 		if err := s.glossaryRepo.Create(ctx, term); err != nil {
 			s.logger.Error("Failed to create discovered term",
