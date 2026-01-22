@@ -171,7 +171,7 @@ func main() {
 	llmFactory := llm.NewClientFactory(aiConfigService, logger)
 
 	// Ontology services
-	knowledgeService := services.NewKnowledgeService(knowledgeRepo, logger)
+	knowledgeService := services.NewKnowledgeService(knowledgeRepo, projectRepo, logger)
 	ontologyBuilderService := services.NewOntologyBuilderService(llmFactory, logger)
 	ontologyQuestionService := services.NewOntologyQuestionService(
 		ontologyQuestionRepo, ontologyRepo, knowledgeRepo,
@@ -214,7 +214,7 @@ func main() {
 	relationshipEnrichmentService := services.NewRelationshipEnrichmentService(
 		entityRelationshipRepo, ontologyEntityRepo, convRepo, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
 	glossaryRepo := repositories.NewGlossaryRepository()
-	glossaryService := services.NewGlossaryService(glossaryRepo, ontologyRepo, ontologyEntityRepo, datasourceService, adapterFactory, llmFactory, getTenantCtx, logger)
+	glossaryService := services.NewGlossaryService(glossaryRepo, ontologyRepo, ontologyEntityRepo, knowledgeRepo, datasourceService, adapterFactory, llmFactory, getTenantCtx, logger)
 
 	// Ontology DAG service for orchestrated workflow execution
 	ontologyDAGService := services.NewOntologyDAGService(
@@ -223,6 +223,7 @@ func main() {
 		getTenantCtx, logger)
 
 	// Wire DAG adapters using setter pattern (avoids import cycles)
+	ontologyDAGService.SetKnowledgeSeedingMethods(services.NewKnowledgeSeedingAdapter(knowledgeService))
 	ontologyDAGService.SetEntityDiscoveryMethods(services.NewEntityDiscoveryAdapter(entityDiscoveryService))
 	ontologyDAGService.SetEntityEnrichmentMethods(services.NewEntityEnrichmentAdapter(entityDiscoveryService, schemaRepo, getTenantCtx))
 	ontologyDAGService.SetFKDiscoveryMethods(services.NewFKDiscoveryAdapter(deterministicRelationshipService))

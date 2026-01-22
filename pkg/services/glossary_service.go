@@ -70,6 +70,7 @@ type glossaryService struct {
 	glossaryRepo   repositories.GlossaryRepository
 	ontologyRepo   repositories.OntologyRepository
 	entityRepo     repositories.OntologyEntityRepository
+	knowledgeRepo  repositories.KnowledgeRepository
 	datasourceSvc  DatasourceService
 	adapterFactory datasource.DatasourceAdapterFactory
 	llmFactory     llm.LLMClientFactory
@@ -82,6 +83,7 @@ func NewGlossaryService(
 	glossaryRepo repositories.GlossaryRepository,
 	ontologyRepo repositories.OntologyRepository,
 	entityRepo repositories.OntologyEntityRepository,
+	knowledgeRepo repositories.KnowledgeRepository,
 	datasourceSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
@@ -92,6 +94,7 @@ func NewGlossaryService(
 		glossaryRepo:   glossaryRepo,
 		ontologyRepo:   ontologyRepo,
 		entityRepo:     entityRepo,
+		knowledgeRepo:  knowledgeRepo,
 		datasourceSvc:  datasourceSvc,
 		adapterFactory: adapterFactory,
 		llmFactory:     llmFactory,
@@ -408,8 +411,20 @@ func (s *glossaryService) SuggestTerms(ctx context.Context, projectID uuid.UUID)
 		return []*models.BusinessGlossaryTerm{}, nil
 	}
 
+	// Fetch project knowledge for domain context
+	var knowledgeFacts []*models.KnowledgeFact
+	if s.knowledgeRepo != nil {
+		knowledgeFacts, err = s.knowledgeRepo.GetByProject(ctx, projectID)
+		if err != nil {
+			s.logger.Warn("Failed to fetch project knowledge, continuing without it",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			// Continue without knowledge - don't fail the entire operation
+		}
+	}
+
 	// Build context for LLM
-	prompt := s.buildSuggestTermsPrompt(ontology, entities)
+	prompt := s.buildSuggestTermsPrompt(ontology, entities, knowledgeFacts)
 	systemMessage := s.suggestTermsSystemMessage()
 
 	// Create LLM client
@@ -445,27 +460,63 @@ func (s *glossaryService) SuggestTerms(ctx context.Context, projectID uuid.UUID)
 func (s *glossaryService) suggestTermsSystemMessage() string {
 	return `You are a business analyst expert. Your task is to analyze a database schema and identify business metrics and terms that would help executives understand the data.
 
-Focus on discovering as many useful business terms as possible across these categories:
-1. Key Performance Indicators (KPIs) - metrics that measure business success
-2. Financial metrics - revenue, costs, margins, GMV, AOV, etc.
-3. User/customer metrics - active users, retention, churn, lifetime value, etc.
-4. Transaction metrics - volume, value, conversion rates, etc.
-5. Engagement metrics - sessions, page views, time on platform, etc.
-6. Growth metrics - new users, growth rates, acquisition costs, etc.
+IMPORTANT: DO NOT suggest generic SaaS metrics unless they are clearly supported by the schema and domain knowledge. Focus on terms that reflect the ACTUAL business model shown in the schema and domain knowledge provided.
+
+When domain knowledge is provided, use it to understand:
+- Industry-specific terminology (e.g., "tik" as a billing unit vs generic "session")
+- User roles and their meanings (e.g., "host" vs "visitor" vs generic "user")
+- Business rules and calculations (e.g., fee structures, revenue splits)
+- Platform-specific concepts that differ from generic SaaS patterns
+
+Focus on discovering business terms that are:
+1. Directly supported by the schema columns and tables
+2. Aligned with the domain knowledge provided
+3. Specific to this platform's business model
 
 For each term, provide ONLY:
-- term: A clear business name
-- definition: A detailed explanation of what it measures and how it's typically calculated
+- term: A clear business name using domain-specific terminology when applicable
+- definition: A detailed explanation of what it measures, using the domain's concepts
 - aliases: Alternative names that business users might use for this metric
 
 DO NOT include SQL in this response. SQL definitions will be generated separately.
-Be comprehensive - suggest 10-20 terms if the schema supports it.`
+Suggest 5-15 terms that are specific and meaningful for this domain.`
 }
 
-func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntology, entities []*models.OntologyEntity) string {
+func (s *glossaryService) buildSuggestTermsPrompt(ontology *models.TieredOntology, entities []*models.OntologyEntity, knowledgeFacts []*models.KnowledgeFact) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Database Schema Analysis for Business Metrics\n\n")
+
+	// Include domain knowledge section if available
+	if len(knowledgeFacts) > 0 {
+		sb.WriteString("## Domain Knowledge\n\n")
+		sb.WriteString("The following domain-specific facts have been captured for this project. Use these to inform your term suggestions:\n\n")
+
+		// Group facts by type for better organization
+		factsByType := make(map[string][]*models.KnowledgeFact)
+		for _, fact := range knowledgeFacts {
+			factsByType[fact.FactType] = append(factsByType[fact.FactType], fact)
+		}
+
+		// Order of presentation
+		typeOrder := []string{"terminology", "business_rule", "enumeration", "convention"}
+		for _, factType := range typeOrder {
+			facts, exists := factsByType[factType]
+			if !exists || len(facts) == 0 {
+				continue
+			}
+
+			sb.WriteString(fmt.Sprintf("**%s:**\n", capitalizeWords(factType)))
+			for _, fact := range facts {
+				sb.WriteString(fmt.Sprintf("- %s", fact.Value))
+				if fact.Context != "" {
+					sb.WriteString(fmt.Sprintf(" (%s)", fact.Context))
+				}
+				sb.WriteString("\n")
+			}
+			sb.WriteString("\n")
+		}
+	}
 
 	// Include domain summary if available
 	if ontology.DomainSummary != nil && ontology.DomainSummary.Description != "" {
@@ -625,8 +676,20 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 		return 0, nil
 	}
 
+	// Fetch project knowledge for domain context
+	var knowledgeFacts []*models.KnowledgeFact
+	if s.knowledgeRepo != nil {
+		knowledgeFacts, err = s.knowledgeRepo.GetByProject(ctx, projectID)
+		if err != nil {
+			s.logger.Warn("Failed to fetch project knowledge, continuing without it",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			// Continue without knowledge - don't fail the entire operation
+		}
+	}
+
 	// Build context for LLM
-	prompt := s.buildSuggestTermsPrompt(ontology, entities)
+	prompt := s.buildSuggestTermsPrompt(ontology, entities, knowledgeFacts)
 	systemMessage := s.suggestTermsSystemMessage()
 
 	// Create LLM client
@@ -992,4 +1055,16 @@ func (s *glossaryService) parseEnrichTermResponse(content string) (*termEnrichme
 	}
 
 	return &enrichment, nil
+}
+
+// capitalizeWords capitalizes the first letter of each word in a string,
+// treating underscores as word separators.
+func capitalizeWords(s string) string {
+	words := strings.Split(strings.ReplaceAll(s, "_", " "), " ")
+	for i, word := range words {
+		if len(word) > 0 {
+			words[i] = strings.ToUpper(word[:1]) + word[1:]
+		}
+	}
+	return strings.Join(words, " ")
 }
