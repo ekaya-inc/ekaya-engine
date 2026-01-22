@@ -5,9 +5,12 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 // Project represents a project in the system.
@@ -78,4 +81,62 @@ func (j *JSONBMap) Scan(value interface{}) error {
 	}
 
 	return json.Unmarshal(bytes, j)
+}
+
+// EnumFile represents the structure of an enum definitions file (.ekaya/enums.yaml).
+// This allows projects to define enum values and their meanings in a YAML file format.
+type EnumFile struct {
+	// Enums is the list of enum definitions in the file.
+	Enums []EnumDefinition `yaml:"enums" json:"enums"`
+}
+
+// ParseEnumFile loads and parses an enum definitions file (YAML or JSON).
+// The expected file structure is:
+//
+//	enums:
+//	  - table: billing_transactions
+//	    column: transaction_state
+//	    values:
+//	      "0": "UNSPECIFIED - Not set"
+//	      "1": "STARTED - Transaction started"
+//	  - table: "*"
+//	    column: offer_type
+//	    values:
+//	      "1": "FREE - Free Engagement"
+//
+// Table can be "*" to apply to any table with the specified column name.
+func ParseEnumFile(path string) ([]EnumDefinition, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read enum file: %w", err)
+	}
+
+	return ParseEnumFileContent(data, filepath.Ext(path))
+}
+
+// ParseEnumFileContent parses enum definitions from raw content.
+// The ext parameter should be the file extension (e.g., ".yaml", ".json") to determine format.
+// If ext is empty or unknown, YAML is tried first, then JSON.
+func ParseEnumFileContent(data []byte, ext string) ([]EnumDefinition, error) {
+	var enumFile EnumFile
+
+	switch ext {
+	case ".yaml", ".yml":
+		if err := yaml.Unmarshal(data, &enumFile); err != nil {
+			return nil, fmt.Errorf("parse YAML: %w", err)
+		}
+	case ".json":
+		if err := json.Unmarshal(data, &enumFile); err != nil {
+			return nil, fmt.Errorf("parse JSON: %w", err)
+		}
+	default:
+		// Try YAML first (more permissive), then JSON
+		if err := yaml.Unmarshal(data, &enumFile); err != nil {
+			if jsonErr := json.Unmarshal(data, &enumFile); jsonErr != nil {
+				return nil, fmt.Errorf("parse enum file (tried YAML and JSON): YAML: %v, JSON: %v", err, jsonErr)
+			}
+		}
+	}
+
+	return enumFile.Enums, nil
 }
