@@ -249,6 +249,12 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 			return NewErrorResult("invalid_parameters", "parameter 'term' cannot be empty"), nil
 		}
 
+		// Reject test-like term names to prevent test data in glossary
+		if services.IsTestTerm(termName) {
+			return NewErrorResult("invalid_parameters",
+				"term name appears to be test data - use a real business term"), nil
+		}
+
 		// Get optional parameters
 		definition := getOptionalString(req, "definition")
 		sql := getOptionalString(req, "sql")

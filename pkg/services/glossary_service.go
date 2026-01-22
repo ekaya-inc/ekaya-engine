@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -15,6 +16,9 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
+
+// ErrTestTermRejected is returned when a term name matches test-like patterns.
+var ErrTestTermRejected = errors.New("term name appears to be test data")
 
 // testTermPatterns contains regex patterns to detect test-like term names.
 // Terms matching these patterns are rejected to prevent test data from
@@ -32,8 +36,10 @@ var testTermPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`\d{4}$`),       // Ends with 4 digits (e.g., Term2026)
 }
 
-// isTestTerm checks if a term name matches any test-like pattern.
-func isTestTerm(termName string) bool {
+// IsTestTerm checks if a term name matches any test-like pattern.
+// This is exported for use by MCP tools that need to validate terms
+// before calling service methods.
+func IsTestTerm(termName string) bool {
 	for _, pattern := range testTermPatterns {
 		if pattern.MatchString(termName) {
 			return true
@@ -145,8 +151,8 @@ func (s *glossaryService) CreateTerm(ctx context.Context, projectID uuid.UUID, t
 	}
 
 	// Reject test-like term names to prevent test data in production
-	if isTestTerm(term.Term) {
-		return fmt.Errorf("term name '%s' appears to be test data", term.Term)
+	if IsTestTerm(term.Term) {
+		return fmt.Errorf("%w: %s", ErrTestTermRejected, term.Term)
 	}
 
 	// Set project ID and default source if not provided
@@ -204,8 +210,8 @@ func (s *glossaryService) UpdateTerm(ctx context.Context, term *models.BusinessG
 	}
 
 	// Reject test-like term names to prevent test data in production
-	if isTestTerm(term.Term) {
-		return fmt.Errorf("term name '%s' appears to be test data", term.Term)
+	if IsTestTerm(term.Term) {
+		return fmt.Errorf("%w: %s", ErrTestTermRejected, term.Term)
 	}
 
 	// Get existing term to check if SQL changed

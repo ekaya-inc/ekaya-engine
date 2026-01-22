@@ -145,7 +145,7 @@ func (s *glossaryService) CreateOrUpdateTerm(ctx context.Context, term GlossaryT
 ## Acceptance Criteria
 
 - [x] Term validation rejects obvious test patterns
-- [ ] MCP tool returns error for test-like terms
+- [x] MCP tool returns error for test-like terms
 - [ ] Existing test term cleaned up
 - [ ] Warning logged in non-production environments for test-like terms
 - [ ] Production environment blocks test data entirely

@@ -974,4 +974,61 @@ func TestUpdateGlossaryTermTool_ErrorResults(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("test-like term name rejected", func(t *testing.T) {
+		// These test terms should be rejected by the IsTestTerm validation
+		testTerms := []string{
+			"TestTerm",       // Starts with "test"
+			"UITestTerm2026", // UI test prefix with year
+			"mytest",         // Ends with "test"
+			"DebugMetric",    // Debug prefix
+			"DummyValue",     // Dummy prefix
+			"SampleData",     // Sample prefix
+			"ExampleRevenue", // Example prefix
+			"Revenue2026",    // Ends with year (4 digits)
+		}
+
+		for _, termName := range testTerms {
+			// Verify the term is detected as test data
+			require.True(t, services.IsTestTerm(termName),
+				"IsTestTerm(%q) should return true", termName)
+
+			// Verify the error response structure matches what the handler would return
+			result := NewErrorResult(
+				"invalid_parameters",
+				"term name appears to be test data - use a real business term",
+			)
+
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			var errorResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errorResp)
+			require.NoError(t, err)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Contains(t, errorResp.Message, "term name appears to be test data")
+		}
+	})
+
+	t.Run("valid business term names accepted", func(t *testing.T) {
+		// These should NOT be rejected as test terms
+		validTerms := []string{
+			"Revenue",
+			"Active Users",
+			"Monthly Recurring Revenue",
+			"Customer Lifetime Value",
+			"Gross Merchandise Value",
+			"Average Order Value",
+			"Net Promoter Score",
+			"Churn Rate",
+		}
+
+		for _, termName := range validTerms {
+			assert.False(t, services.IsTestTerm(termName),
+				"IsTestTerm(%q) should return false for valid business term", termName)
+		}
+	})
 }
+
