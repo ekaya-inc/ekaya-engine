@@ -2359,3 +2359,327 @@ func TestGlossaryService_Prompt_IncludesDomainAnalysisSection(t *testing.T) {
 	assert.Contains(t, prompt, "distinct user roles", "Should include user roles hint")
 	assert.Contains(t, prompt, "not an e-commerce", "Should include not-ecommerce hint")
 }
+
+// ============================================================================
+// Tests - filterInapplicableTerms (BUG-7 Fix Task 5)
+// ============================================================================
+
+func TestFilterInapplicableTerms_FiltersSubscriptionTerms(t *testing.T) {
+	// Engagement-based business without subscriptions
+	entities := []*models.OntologyEntity{
+		{Name: "engagement", PrimaryTable: "engagements"},
+		{Name: "transaction", PrimaryTable: "transactions"},
+		{Name: "user", PrimaryTable: "users"},
+	}
+
+	terms := []*models.BusinessGlossaryTerm{
+		{Term: "Revenue", Definition: "Total revenue"},
+		{Term: "Active Subscribers", Definition: "Users with active subscriptions"},
+		{Term: "Churn Rate", Definition: "Subscription cancellation rate"},
+		{Term: "MRR", Definition: "Monthly recurring revenue"},
+		{Term: "Engagement Count", Definition: "Total engagements"},
+	}
+
+	filtered := filterInapplicableTerms(terms, entities)
+
+	// Should keep domain-appropriate terms
+	termNames := make([]string, len(filtered))
+	for i, t := range filtered {
+		termNames[i] = t.Term
+	}
+
+	assert.Contains(t, termNames, "Revenue", "Should keep generic revenue term")
+	assert.Contains(t, termNames, "Engagement Count", "Should keep engagement-specific term")
+	assert.NotContains(t, termNames, "Active Subscribers", "Should filter subscription term")
+	assert.NotContains(t, termNames, "Churn Rate", "Should filter subscription term")
+	assert.NotContains(t, termNames, "MRR", "Should filter subscription term")
+}
+
+func TestFilterInapplicableTerms_KeepsSubscriptionTermsWhenEntitiesExist(t *testing.T) {
+	// SaaS business with subscriptions
+	entities := []*models.OntologyEntity{
+		{Name: "subscription", PrimaryTable: "subscriptions"},
+		{Name: "plan", PrimaryTable: "subscription_plans"},
+		{Name: "user", PrimaryTable: "users"},
+	}
+
+	terms := []*models.BusinessGlossaryTerm{
+		{Term: "Active Subscribers", Definition: "Users with active subscriptions"},
+		{Term: "Churn Rate", Definition: "Subscription cancellation rate"},
+		{Term: "MRR", Definition: "Monthly recurring revenue"},
+	}
+
+	filtered := filterInapplicableTerms(terms, entities)
+
+	assert.Len(t, filtered, 3, "Should keep all subscription terms when entities exist")
+}
+
+func TestFilterInapplicableTerms_FiltersInventoryTerms(t *testing.T) {
+	// Service business without inventory
+	entities := []*models.OntologyEntity{
+		{Name: "booking", PrimaryTable: "bookings"},
+		{Name: "service", PrimaryTable: "services"},
+	}
+
+	terms := []*models.BusinessGlossaryTerm{
+		{Term: "Bookings", Definition: "Total bookings"},
+		{Term: "Inventory Turnover", Definition: "Rate of inventory sold"},
+		{Term: "Stock Level", Definition: "Current inventory count"},
+	}
+
+	filtered := filterInapplicableTerms(terms, entities)
+
+	termNames := make([]string, len(filtered))
+	for i, t := range filtered {
+		termNames[i] = t.Term
+	}
+
+	assert.Contains(t, termNames, "Bookings", "Should keep service-specific term")
+	assert.NotContains(t, termNames, "Inventory Turnover", "Should filter inventory term")
+	assert.NotContains(t, termNames, "Stock Level", "Should filter inventory term")
+}
+
+func TestFilterInapplicableTerms_KeepsInventoryTermsWhenEntitiesExist(t *testing.T) {
+	// Retail business with inventory
+	entities := []*models.OntologyEntity{
+		{Name: "product", PrimaryTable: "products"},
+		{Name: "inventory", PrimaryTable: "inventory"},
+		{Name: "warehouse", PrimaryTable: "warehouses"},
+	}
+
+	terms := []*models.BusinessGlossaryTerm{
+		{Term: "Inventory Turnover", Definition: "Rate of inventory sold"},
+		{Term: "Stock Level", Definition: "Current inventory count"},
+	}
+
+	filtered := filterInapplicableTerms(terms, entities)
+
+	assert.Len(t, filtered, 2, "Should keep all inventory terms when entities exist")
+}
+
+func TestFilterInapplicableTerms_FiltersEcommerceTerms(t *testing.T) {
+	// Engagement-based platform without orders
+	entities := []*models.OntologyEntity{
+		{Name: "engagement", PrimaryTable: "engagements"},
+		{Name: "payment", PrimaryTable: "payments"},
+	}
+
+	terms := []*models.BusinessGlossaryTerm{
+		{Term: "Revenue", Definition: "Total revenue"},
+		{Term: "Average Order Value", Definition: "Average value per order"},
+		{Term: "GMV", Definition: "Gross merchandise value"},
+		{Term: "Cart Abandonment", Definition: "Rate of abandoned carts"},
+	}
+
+	filtered := filterInapplicableTerms(terms, entities)
+
+	termNames := make([]string, len(filtered))
+	for i, t := range filtered {
+		termNames[i] = t.Term
+	}
+
+	assert.Contains(t, termNames, "Revenue", "Should keep generic term")
+	assert.NotContains(t, termNames, "Average Order Value", "Should filter e-commerce term")
+	assert.NotContains(t, termNames, "GMV", "Should filter e-commerce term")
+	assert.NotContains(t, termNames, "Cart Abandonment", "Should filter e-commerce term")
+}
+
+func TestFilterInapplicableTerms_KeepsEcommerceTermsWhenEntitiesExist(t *testing.T) {
+	// E-commerce business
+	entities := []*models.OntologyEntity{
+		{Name: "order", PrimaryTable: "orders"},
+		{Name: "cart", PrimaryTable: "carts"},
+		{Name: "product", PrimaryTable: "products"},
+	}
+
+	terms := []*models.BusinessGlossaryTerm{
+		{Term: "Average Order Value", Definition: "Average value per order"},
+		{Term: "GMV", Definition: "Gross merchandise value"},
+	}
+
+	filtered := filterInapplicableTerms(terms, entities)
+
+	assert.Len(t, filtered, 2, "Should keep all e-commerce terms when entities exist")
+}
+
+func TestFilterInapplicableTerms_SkipsDeletedEntities(t *testing.T) {
+	// Entities that would normally allow subscription terms, but are marked deleted
+	entities := []*models.OntologyEntity{
+		{Name: "subscription", PrimaryTable: "subscriptions", IsDeleted: true},
+		{Name: "user", PrimaryTable: "users"},
+	}
+
+	terms := []*models.BusinessGlossaryTerm{
+		{Term: "Active Subscribers", Definition: "Users with active subscriptions"},
+		{Term: "Active Users", Definition: "Users with recent activity"},
+	}
+
+	filtered := filterInapplicableTerms(terms, entities)
+
+	termNames := make([]string, len(filtered))
+	for i, t := range filtered {
+		termNames[i] = t.Term
+	}
+
+	assert.Contains(t, termNames, "Active Users", "Should keep generic term")
+	assert.NotContains(t, termNames, "Active Subscribers", "Should filter when subscription entity is deleted")
+}
+
+func TestFilterInapplicableTerms_EmptyTerms(t *testing.T) {
+	entities := []*models.OntologyEntity{
+		{Name: "user", PrimaryTable: "users"},
+	}
+
+	filtered := filterInapplicableTerms([]*models.BusinessGlossaryTerm{}, entities)
+
+	assert.Empty(t, filtered, "Should return empty slice for empty input")
+}
+
+func TestFilterInapplicableTerms_NilTerms(t *testing.T) {
+	entities := []*models.OntologyEntity{
+		{Name: "user", PrimaryTable: "users"},
+	}
+
+	filtered := filterInapplicableTerms(nil, entities)
+
+	assert.Empty(t, filtered, "Should return empty slice for nil input")
+}
+
+func TestFilterInapplicableTerms_EmptyEntities(t *testing.T) {
+	terms := []*models.BusinessGlossaryTerm{
+		{Term: "Active Subscribers", Definition: "Users with active subscriptions"},
+		{Term: "Revenue", Definition: "Total revenue"},
+	}
+
+	// With no entities, should filter terms requiring specific entity types
+	filtered := filterInapplicableTerms(terms, []*models.OntologyEntity{})
+
+	termNames := make([]string, len(filtered))
+	for i, t := range filtered {
+		termNames[i] = t.Term
+	}
+
+	assert.Contains(t, termNames, "Revenue", "Should keep generic term")
+	assert.NotContains(t, termNames, "Active Subscribers", "Should filter subscription term with no entities")
+}
+
+func TestMatchesAny_MatchesSubstrings(t *testing.T) {
+	tests := []struct {
+		term     string
+		patterns []string
+		expected bool
+	}{
+		{"active subscribers", []string{"subscriber", "subscription"}, true},
+		{"monthly recurring revenue", []string{"mrr", "monthly recurring"}, true},
+		{"revenue", []string{"subscriber", "churn"}, false},
+		{"mrr", []string{"mrr"}, true}, // Exact match
+		{"", []string{"subscriber"}, false},
+		{"revenue", []string{}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.term, func(t *testing.T) {
+			result := matchesAny(tt.term, tt.patterns)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestFilterInapplicableTerms_IntegrationWithSuggestTerms(t *testing.T) {
+	// This test verifies the integration of filterInapplicableTerms with SuggestTerms
+	// by ensuring that generic SaaS terms are filtered when entities don't support them
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	// Engagement-based business (like Tikr) - no subscription/inventory/ecommerce entities
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Engagement",
+			PrimaryTable: "billing_engagements",
+		},
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Transaction",
+			PrimaryTable: "billing_transactions",
+		},
+	}
+
+	// Simulate LLM returning a mix of appropriate and generic terms
+	llmResponse := `{"terms": [
+		{
+			"term": "Engagement Revenue",
+			"definition": "Total revenue from engagement sessions"
+		},
+		{
+			"term": "Active Subscribers",
+			"definition": "Users with active subscriptions"
+		},
+		{
+			"term": "Churn Rate",
+			"definition": "Rate of subscription cancellations"
+		},
+		{
+			"term": "Inventory Turnover",
+			"definition": "Rate of inventory sold"
+		},
+		{
+			"term": "Average Order Value",
+			"definition": "Average value per order"
+		},
+		{
+			"term": "GMV",
+			"definition": "Gross merchandise value"
+		},
+		{
+			"term": "Transaction Count",
+			"definition": "Total number of transactions"
+		}
+	]}`
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	llmClient := &mockLLMClientForGlossary{responseContent: llmResponse}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, nil, logger)
+
+	suggestions, err := svc.SuggestTerms(ctx, projectID)
+	require.NoError(t, err)
+
+	// Should have filtered out subscription, inventory, and ecommerce terms
+	termNames := make([]string, len(suggestions))
+	for i, term := range suggestions {
+		termNames[i] = term.Term
+	}
+
+	// Should keep domain-appropriate terms
+	assert.Contains(t, termNames, "Engagement Revenue", "Should keep engagement-specific term")
+	assert.Contains(t, termNames, "Transaction Count", "Should keep transaction-specific term")
+
+	// Should filter out subscription terms (no subscription entities)
+	assert.NotContains(t, termNames, "Active Subscribers", "Should filter subscription term")
+	assert.NotContains(t, termNames, "Churn Rate", "Should filter subscription term")
+
+	// Should filter out inventory terms (no inventory entities)
+	assert.NotContains(t, termNames, "Inventory Turnover", "Should filter inventory term")
+
+	// Should filter out ecommerce terms (no order/cart entities)
+	assert.NotContains(t, termNames, "Average Order Value", "Should filter e-commerce term")
+	assert.NotContains(t, termNames, "GMV", "Should filter e-commerce term")
+}

@@ -210,5 +210,5 @@ Implementing BUG-5's knowledge seeding will automatically improve BUG-7 if the g
 - [x] Glossary prompt doesn't hardcode generic SaaS metrics
 - [x] Project knowledge included in glossary discovery context
 - [x] LLM instructed to avoid inapplicable patterns
-- [ ] Post-generation filtering removes obvious mismatches
+- [x] Post-generation filtering removes obvious mismatches
 - [x] Domain-specific terms generated based on actual entities

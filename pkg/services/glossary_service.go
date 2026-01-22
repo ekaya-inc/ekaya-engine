@@ -450,11 +450,15 @@ func (s *glossaryService) SuggestTerms(ctx context.Context, projectID uuid.UUID)
 		return nil, fmt.Errorf("parse LLM response: %w", err)
 	}
 
+	// Filter out inapplicable terms based on entity types
+	filtered := filterInapplicableTerms(suggestions, entities)
+
 	s.logger.Info("Generated term suggestions",
 		zap.String("project_id", projectID.String()),
-		zap.Int("count", len(suggestions)))
+		zap.Int("suggested", len(suggestions)),
+		zap.Int("filtered", len(filtered)))
 
-	return suggestions, nil
+	return filtered, nil
 }
 
 func (s *glossaryService) suggestTermsSystemMessage() string {
@@ -747,10 +751,17 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 		return 0, fmt.Errorf("parse LLM response: %w", err)
 	}
 
+	// Filter out inapplicable terms based on entity types
+	filtered := filterInapplicableTerms(suggestions, entities)
+
+	s.logger.Debug("Filtered inapplicable terms",
+		zap.Int("suggested", len(suggestions)),
+		zap.Int("after_filter", len(filtered)))
+
 	// Save discovered terms to database with source="inferred"
 	// Note: DefiningSQL is NOT generated in discovery phase - that's done in enrichment
 	discoveredCount := 0
-	for _, term := range suggestions {
+	for _, term := range filtered {
 		// Check for duplicates
 		existing, err := s.glossaryRepo.GetByTerm(ctx, projectID, term.Term)
 		if err != nil {
@@ -788,7 +799,8 @@ func (s *glossaryService) DiscoverGlossaryTerms(ctx context.Context, projectID, 
 	s.logger.Info("Completed glossary term discovery",
 		zap.String("project_id", projectID.String()),
 		zap.Int("terms_discovered", discoveredCount),
-		zap.Int("terms_suggested", len(suggestions)))
+		zap.Int("terms_suggested", len(suggestions)),
+		zap.Int("terms_after_filter", len(filtered)))
 
 	return discoveredCount, nil
 }
@@ -1201,6 +1213,69 @@ func hasRoleDistinctingColumns(ontology *models.TieredOntology) bool {
 					}
 				}
 			}
+		}
+	}
+	return false
+}
+
+// filterInapplicableTerms removes glossary terms that don't match the domain's
+// business model based on detected entity types. This provides a safety net after
+// LLM generation to catch generic SaaS terms that slipped through prompt guidance.
+func filterInapplicableTerms(
+	terms []*models.BusinessGlossaryTerm,
+	entities []*models.OntologyEntity,
+) []*models.BusinessGlossaryTerm {
+	// Terms that require subscription-based business model entities
+	subscriptionTerms := []string{
+		"subscriber", "subscription", "churn", "mrr", "arr",
+		"monthly recurring", "annual recurring", "recurring revenue",
+	}
+
+	// Terms that require inventory management entities
+	inventoryTerms := []string{
+		"inventory", "stock", "warehouse", "turnover",
+		"stock level", "reorder", "stockout",
+	}
+
+	// Terms that require e-commerce/order entities
+	ecommerceTerms := []string{
+		"order value", "cart", "checkout", "aov", "gmv",
+		"average order", "gross merchandise",
+	}
+
+	// Detect what entity types exist in the schema
+	hasSubscription := containsEntityByName(entities, "subscription", "plan", "membership", "tier")
+	hasInventory := containsEntityByName(entities, "inventory", "product", "stock", "warehouse", "sku")
+	hasEcommerce := containsEntityByName(entities, "order", "cart", "checkout", "purchase")
+
+	var filtered []*models.BusinessGlossaryTerm
+	for _, term := range terms {
+		termLower := strings.ToLower(term.Term)
+
+		// Skip subscription terms if no subscription entities
+		if !hasSubscription && matchesAny(termLower, subscriptionTerms) {
+			continue
+		}
+		// Skip inventory terms if no inventory entities
+		if !hasInventory && matchesAny(termLower, inventoryTerms) {
+			continue
+		}
+		// Skip e-commerce terms if no e-commerce entities
+		if !hasEcommerce && matchesAny(termLower, ecommerceTerms) {
+			continue
+		}
+
+		filtered = append(filtered, term)
+	}
+	return filtered
+}
+
+// matchesAny checks if the term contains any of the specified patterns.
+// The comparison is case-insensitive substring matching.
+func matchesAny(term string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if strings.Contains(term, pattern) {
+			return true
 		}
 	}
 	return false
