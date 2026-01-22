@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -11,6 +12,8 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
+
+	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 )
 
 // CodeFact represents a fact discovered from code analysis.
@@ -20,15 +23,26 @@ type CodeFact struct {
 	Context  string // Where it was found (file:line)
 }
 
-// KnowledgeDiscovery provides code analysis to extract domain knowledge.
+// KnowledgeFact represents a fact discovered from documentation analysis via LLM.
+// Used as JSON output structure from ScanDocumentation.
+type KnowledgeFact struct {
+	FactType string `json:"fact_type"` // "terminology", "business_rule", "user_role", "convention"
+	Fact     string `json:"fact"`      // The fact content
+	Context  string `json:"context"`   // Source file where fact was found
+}
+
+// KnowledgeDiscovery provides code and documentation analysis to extract domain knowledge.
 type KnowledgeDiscovery struct {
-	logger *zap.Logger
+	llmClient llm.LLMClient
+	logger    *zap.Logger
 }
 
 // NewKnowledgeDiscovery creates a new KnowledgeDiscovery service.
-func NewKnowledgeDiscovery(logger *zap.Logger) *KnowledgeDiscovery {
+// The llmClient is optional and only needed for ScanDocumentation (LLM-based extraction).
+func NewKnowledgeDiscovery(logger *zap.Logger, llmClient llm.LLMClient) *KnowledgeDiscovery {
 	return &KnowledgeDiscovery{
-		logger: logger.Named("knowledge_discovery"),
+		llmClient: llmClient,
+		logger:    logger.Named("knowledge_discovery"),
 	}
 }
 
@@ -60,7 +74,7 @@ func (kd *KnowledgeDiscovery) ScanCodeComments(ctx context.Context, repoPath str
 
 		goFacts, err := kd.parseGoFile(file)
 		if err != nil {
-			kd.logger.Warn("Failed to parse Go file",
+			kd.logger.Error("Failed to parse Go file",
 				zap.String("file", file),
 				zap.Error(err))
 			continue
@@ -78,7 +92,7 @@ func (kd *KnowledgeDiscovery) ScanCodeComments(ctx context.Context, repoPath str
 
 		tsFacts, err := kd.parseTypeScriptFile(file)
 		if err != nil {
-			kd.logger.Warn("Failed to parse TypeScript file",
+			kd.logger.Error("Failed to parse TypeScript file",
 				zap.String("file", file),
 				zap.Error(err))
 			continue
@@ -498,6 +512,205 @@ func (kd *KnowledgeDiscovery) getRelativePath(fullPath string) string {
 		return rel
 	}
 	return fullPath
+}
+
+// ScanDocumentation scans markdown documentation files in the repository and uses
+// LLM to extract domain-specific facts: business terminology, business rules,
+// user roles, and conventions.
+// It searches for: *.md, docs/**/*.md, README*
+func (kd *KnowledgeDiscovery) ScanDocumentation(ctx context.Context, repoPath string) ([]KnowledgeFact, error) {
+	if kd.llmClient == nil {
+		return nil, nil // No LLM client configured, return empty
+	}
+
+	// Find documentation files
+	files, err := kd.findDocumentationFiles(repoPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(files) == 0 {
+		kd.logger.Info("No documentation files found", zap.String("repo_path", repoPath))
+		return nil, nil
+	}
+
+	kd.logger.Info("Found documentation files",
+		zap.String("repo_path", repoPath),
+		zap.Int("file_count", len(files)))
+
+	var allFacts []KnowledgeFact
+
+	for _, file := range files {
+		select {
+		case <-ctx.Done():
+			return allFacts, ctx.Err()
+		default:
+		}
+
+		content, err := os.ReadFile(file)
+		if err != nil {
+			kd.logger.Error("Failed to read documentation file",
+				zap.String("file", file),
+				zap.Error(err))
+			continue
+		}
+
+		// Skip empty files
+		if len(content) == 0 {
+			continue
+		}
+
+		// Extract facts via LLM
+		facts, err := kd.extractFactsFromDocumentation(ctx, string(content), kd.getRelativePath(file))
+		if err != nil {
+			kd.logger.Error("Failed to extract facts from documentation",
+				zap.String("file", file),
+				zap.Error(err))
+			continue
+		}
+
+		allFacts = append(allFacts, facts...)
+	}
+
+	kd.logger.Info("Documentation scanning complete",
+		zap.Int("files_scanned", len(files)),
+		zap.Int("facts_discovered", len(allFacts)))
+
+	return allFacts, nil
+}
+
+// findDocumentationFiles finds markdown documentation files in the repository.
+// Patterns: *.md in root, docs/**/*.md, README* anywhere.
+func (kd *KnowledgeDiscovery) findDocumentationFiles(root string) ([]string, error) {
+	var files []string
+	seen := make(map[string]bool)
+
+	// Walk the directory tree
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Skip inaccessible paths
+		}
+
+		// Skip hidden directories and common non-documentation directories
+		if info.IsDir() {
+			name := info.Name()
+			if strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" || name == "dist" || name == "build" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		fileName := info.Name()
+		relPath, _ := filepath.Rel(root, path)
+
+		// Match README* files anywhere
+		if strings.HasPrefix(strings.ToUpper(fileName), "README") {
+			if !seen[path] {
+				files = append(files, path)
+				seen[path] = true
+			}
+			return nil
+		}
+
+		// Match *.md files
+		if strings.HasSuffix(strings.ToLower(fileName), ".md") {
+			// Include if in root directory or in docs/ directory
+			inRoot := !strings.Contains(relPath, string(filepath.Separator))
+			inDocs := strings.HasPrefix(relPath, "docs"+string(filepath.Separator)) ||
+				strings.HasPrefix(relPath, "doc"+string(filepath.Separator))
+
+			if inRoot || inDocs {
+				if !seen[path] {
+					files = append(files, path)
+					seen[path] = true
+				}
+			}
+		}
+
+		return nil
+	})
+
+	return files, err
+}
+
+// extractFactsFromDocumentation uses LLM to extract domain facts from documentation content.
+func (kd *KnowledgeDiscovery) extractFactsFromDocumentation(ctx context.Context, content, sourcePath string) ([]KnowledgeFact, error) {
+	// Truncate very long documents to avoid token limits
+	const maxContentLength = 15000
+	if len(content) > maxContentLength {
+		content = content[:maxContentLength] + "\n\n[Content truncated...]"
+	}
+
+	prompt := kd.buildDocumentationExtractionPrompt(content, sourcePath)
+
+	systemMessage := `You are a domain knowledge extraction specialist. Your task is to analyze documentation and extract domain-specific facts that would help someone understand the business domain.
+
+Focus on:
+1. Business terminology - unique terms, abbreviations, domain-specific concepts
+2. Business rules - calculations, thresholds, percentages, policies
+3. User roles - different user types and their meanings in the system
+4. Conventions - currency handling, time zones, naming patterns
+
+Return ONLY a valid JSON array. Do not include any explanation or markdown formatting.`
+
+	result, err := kd.llmClient.GenerateResponse(ctx, prompt, systemMessage, 0.0, false)
+	if err != nil {
+		return nil, err
+	}
+
+	return kd.parseDocumentationFacts(result.Content, sourcePath)
+}
+
+// buildDocumentationExtractionPrompt creates the prompt for LLM-based fact extraction.
+func (kd *KnowledgeDiscovery) buildDocumentationExtractionPrompt(content, sourcePath string) string {
+	return `Analyze the following documentation and extract domain-specific facts.
+
+Extract facts in these categories:
+- terminology: Domain-specific terms, abbreviations, or concepts unique to this business
+- business_rule: Calculations, percentages, thresholds, or policies
+- user_role: Different user types and what they represent in the system
+- convention: Currency handling, date formats, naming patterns, storage conventions
+
+Return a JSON array of objects with these fields:
+- fact_type: One of "terminology", "business_rule", "user_role", "convention"
+- fact: A clear, concise statement of the fact
+- context: Brief note about where in the document this was found or derived from
+
+Only extract facts that are specific to this domain. Skip generic information.
+If no domain-specific facts are found, return an empty array: []
+
+Source file: ` + sourcePath + `
+
+Documentation content:
+` + content + `
+
+Return ONLY a valid JSON array:`
+}
+
+// parseDocumentationFacts parses the LLM response into KnowledgeFact structs.
+func (kd *KnowledgeDiscovery) parseDocumentationFacts(llmResponse, sourcePath string) ([]KnowledgeFact, error) {
+	// Extract JSON from response (LLM might wrap it in markdown code blocks)
+	jsonStr := extractJSON(llmResponse)
+
+	var facts []KnowledgeFact
+	if err := json.Unmarshal([]byte(jsonStr), &facts); err != nil {
+		kd.logger.Error("Failed to parse LLM response as JSON",
+			zap.String("source", sourcePath),
+			zap.Error(err),
+			zap.String("response_preview", truncateString(llmResponse, 200)))
+		return nil, err
+	}
+
+	// Ensure all facts have the source context if not provided
+	for i := range facts {
+		if facts[i].Context == "" {
+			facts[i].Context = sourcePath
+		} else if !strings.Contains(facts[i].Context, sourcePath) {
+			facts[i].Context = sourcePath + ": " + facts[i].Context
+		}
+	}
+
+	return facts, nil
 }
 
 // itoa converts an int to a string without importing strconv.

@@ -266,4 +266,4 @@ Then use industry templates as starting context for glossary discovery.
 - [x] Domain-specific terms generated instead of generic SaaS metrics
 - [x] Host/Visitor roles captured with business meaning
 - [ ] Fee structure documented in project knowledge
-- [ ] Documentation scanner extracts facts from README/docs
+- [x] Documentation scanner extracts facts from README/docs
