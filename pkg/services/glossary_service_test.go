@@ -1502,7 +1502,7 @@ func TestGlossaryService_SuggestTerms_WithDomainKnowledge_IncludesFactsInPrompt(
 
 	// Verify the system message instructs NOT to suggest generic SaaS metrics
 	assert.Contains(t, llmClient.capturedSystemMessage, "DO NOT suggest generic SaaS metrics", "System message should warn against generic metrics")
-	assert.Contains(t, llmClient.capturedSystemMessage, "ACTUAL business model", "System message should emphasize actual business model")
+	assert.Contains(t, llmClient.capturedSystemMessage, "specific business model", "System message should emphasize specific business model")
 
 	// Verify domain-specific terms were returned
 	require.Len(t, suggestions, 3)
@@ -1719,10 +1719,19 @@ func TestGlossaryService_SystemMessage_GuidesAgainstGenericMetrics(t *testing.T)
 	// Verify the system message explicitly guides against generic metrics
 	sysMsg := llmClient.capturedSystemMessage
 
+	// Check for the critical instruction to analyze entity names first
+	assert.Contains(t, sysMsg, "Analyze entity names and descriptions to understand the business model", "Must instruct to analyze entities before suggesting terms")
+
 	// Check key phrases that prevent generic SaaS metrics
 	assert.Contains(t, sysMsg, "DO NOT suggest generic SaaS metrics", "Must warn against generic metrics")
 	assert.Contains(t, sysMsg, "unless they are clearly supported", "Must require schema/knowledge support")
-	assert.Contains(t, sysMsg, "ACTUAL business model", "Must emphasize actual business model")
+
+	// Verify domain-aware negative instructions (BUG-7 fix)
+	assert.Contains(t, sysMsg, "DO NOT suggest subscription metrics", "Must warn against subscription metrics for non-subscription models")
+	assert.Contains(t, sysMsg, "if the model is pay-per-use", "Must mention pay-per-use as alternative model")
+	assert.Contains(t, sysMsg, "DO NOT suggest inventory metrics", "Must warn against inventory metrics when no inventory")
+	assert.Contains(t, sysMsg, "DO NOT suggest e-commerce metrics", "Must warn against e-commerce metrics when no orders/products")
+	assert.Contains(t, sysMsg, "AOV, GMV", "Must explicitly mention AOV and GMV as e-commerce metrics to avoid")
 
 	// Verify it mentions domain knowledge usage
 	assert.Contains(t, sysMsg, "domain knowledge", "Must mention using domain knowledge")

@@ -458,9 +458,15 @@ func (s *glossaryService) SuggestTerms(ctx context.Context, projectID uuid.UUID)
 }
 
 func (s *glossaryService) suggestTermsSystemMessage() string {
-	return `You are a business analyst expert. Your task is to analyze a database schema and identify business metrics and terms that would help executives understand the data.
+	return `You are a business analyst expert. Your task is to analyze a database schema and identify business metrics and terms SPECIFIC TO THIS DOMAIN.
 
-IMPORTANT: DO NOT suggest generic SaaS metrics unless they are clearly supported by the schema and domain knowledge. Focus on terms that reflect the ACTUAL business model shown in the schema and domain knowledge provided.
+CRITICAL: Analyze entity names and descriptions to understand the business model BEFORE suggesting terms.
+
+IMPORTANT: Only suggest metrics that apply to the specific business model shown in the schema.
+- DO NOT suggest subscription metrics (MRR, ARR, churn, subscriber count) if the model is pay-per-use or transaction-based
+- DO NOT suggest inventory metrics (stock, turnover, warehouse) if there is no inventory
+- DO NOT suggest e-commerce metrics (AOV, GMV, cart abandonment) if there are no orders/products
+- DO NOT suggest generic SaaS metrics unless they are clearly supported by the schema and domain knowledge
 
 When domain knowledge is provided, use it to understand:
 - Industry-specific terminology (e.g., "tik" as a billing unit vs generic "session")
