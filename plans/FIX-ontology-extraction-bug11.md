@@ -151,5 +151,5 @@ Expected output should only show Tikr-related facts.
 - [ ] Stale claude_cowork facts deleted
 - [ ] Correct Tikr knowledge seeded
 - [ ] No contamination between datasources
-- [ ] BUG-10 fix prevents recurrence
+- [x] BUG-10 fix prevents recurrence
 - [ ] Knowledge facts visible via MCP tools match actual Tikr business model
