@@ -896,6 +896,112 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 			t.Errorf("expected 2 user -> order relationships (forward + reverse of each logical rel), got %d", userToOrderCount)
 		}
 	})
+
+	t.Run("IsJoinable_nil_allowed_for_id_columns", func(t *testing.T) {
+		// Test verifies that _id columns with IsJoinable=nil ARE included as FK candidates.
+		// This is the new behavior: for text UUID columns, IsJoinable may be nil initially
+		// before stats collection, so _id columns should be included for validation.
+		//
+		// Non-_id columns (like "buyer") with IsJoinable=nil are still skipped.
+
+		projectID := uuid.New()
+		datasourceID := uuid.New()
+		ontologyID := uuid.New()
+		userEntityID := uuid.New()
+		orderEntityID := uuid.New()
+
+		highDistinct := int64(100)
+		isJoinableTrue := true
+		rowCount := int64(100)
+
+		mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+		mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+			ID:            orderEntityID,
+			OntologyID:    ontologyID,
+			Name:          "order",
+			PrimarySchema: "public",
+			PrimaryTable:  "orders",
+		})
+
+		// Track AnalyzeJoin calls - we expect it to be called for user_id
+		var joinAnalysisCalls int
+		mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+			joinAnalysisCalls++
+			return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+		}
+
+		usersTableID := uuid.New()
+		ordersTableID := uuid.New()
+
+		mocks.schemaRepo.tables = []*models.SchemaTable{
+			{
+				ID:         usersTableID,
+				SchemaName: "public",
+				TableName:  "users",
+				RowCount:   &rowCount,
+				Columns: []models.SchemaColumn{
+					{
+						SchemaTableID: usersTableID,
+						ColumnName:    "id",
+						DataType:      "uuid",
+						IsPrimaryKey:  true,
+						IsJoinable:    &isJoinableTrue,
+						DistinctCount: &highDistinct,
+					},
+				},
+			},
+			{
+				ID:         ordersTableID,
+				SchemaName: "public",
+				TableName:  "orders",
+				RowCount:   &rowCount,
+				Columns: []models.SchemaColumn{
+					{
+						SchemaTableID: ordersTableID,
+						ColumnName:    "id",
+						DataType:      "int8", // Different type to prevent bidirectional matching
+						IsPrimaryKey:  true,
+						IsJoinable:    &isJoinableTrue,
+						DistinctCount: &highDistinct,
+					},
+					{
+						SchemaTableID: ordersTableID,
+						ColumnName:    "user_id", // _id column - should be included even with nil IsJoinable
+						DataType:      "uuid",
+						IsPrimaryKey:  false,
+						IsJoinable:    nil,          // nil joinability - but should be included for _id columns
+						DistinctCount: &highDistinct, // Sufficient distinct count
+					},
+				},
+			},
+		}
+
+		service := NewDeterministicRelationshipService(
+			mocks.datasourceService,
+			mocks.adapterFactory,
+			mocks.ontologyRepo,
+			mocks.entityRepo,
+			mocks.relationshipRepo,
+			mocks.schemaRepo,
+			zap.NewNop(),
+		)
+
+		result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify: AnalyzeJoin WAS called because user_id (with _id suffix) is included
+		if joinAnalysisCalls == 0 {
+			t.Errorf("expected AnalyzeJoin to be called for user_id column with nil IsJoinable, but it wasn't")
+		}
+
+		// Verify: relationships were created
+		if result.InferredRelationships == 0 {
+			t.Errorf("expected at least 1 inferred relationship (user_id with nil IsJoinable should be included), got %d", result.InferredRelationships)
+		}
+	})
 }
 
 // mockTestServices holds all mock dependencies for testing

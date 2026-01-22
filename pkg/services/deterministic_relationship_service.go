@@ -540,7 +540,14 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 		}
 
 		// Require explicit joinability determination
-		if col.IsJoinable == nil || !*col.IsJoinable {
+		// Exception: For _id columns, assume joinable if stats are unknown (IsJoinable=nil)
+		// since text UUID columns may not have IsJoinable set before stats collection.
+		if col.IsJoinable == nil {
+			if !isLikelyFKColumn(col.ColumnName) {
+				continue
+			}
+			// _id columns with nil IsJoinable are included for validation
+		} else if !*col.IsJoinable {
 			continue
 		}
 
