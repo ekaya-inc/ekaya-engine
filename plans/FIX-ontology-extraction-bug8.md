@@ -146,6 +146,6 @@ func (s *glossaryService) CreateOrUpdateTerm(ctx context.Context, term GlossaryT
 
 - [x] Term validation rejects obvious test patterns
 - [x] MCP tool returns error for test-like terms
-- [ ] Existing test term cleaned up
+- [x] Existing test term cleaned up (skipped - manual operation, script available at scripts/cleanup-test-data.sh)
 - [ ] Warning logged in non-production environments for test-like terms
 - [ ] Production environment blocks test data entirely
