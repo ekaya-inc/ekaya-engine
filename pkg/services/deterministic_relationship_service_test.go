@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -3137,6 +3138,275 @@ func TestPKMatch_LowCardinalityRatio_IDColumn(t *testing.T) {
 	}
 	if !foundVisitorRelationship {
 		t.Error("expected relationship billing_engagements.visitor_id → users.user_id to be discovered")
+	}
+}
+
+// TestPKMatch_BillingEngagement_MultiSoftFK_Discovery tests that billing_engagements
+// with multiple soft FK columns (visitor_id, host_id, session_id, offer_id) discovers
+// 4+ relationships. This is the verification test for BUG-9 fix.
+//
+// Scenario: billing_engagements table has:
+// - visitor_id → users.user_id (role: visitor)
+// - host_id → users.user_id (role: host)
+// - session_id → sessions.session_id
+// - offer_id → offers.offer_id
+//
+// All FKs use text UUIDs (soft FKs) with low cardinality ratios that would have been
+// filtered out by the old 5% threshold.
+func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+
+	// Entity IDs
+	userEntityID := uuid.New()
+	billingEngagementEntityID := uuid.New()
+	sessionEntityID := uuid.New()
+	offerEntityID := uuid.New()
+
+	// Stats - simulate low cardinality scenarios that old threshold would filter
+	billingRowCount := int64(100000) // 100k billing engagements
+	userRowCount := int64(1000)      // 1k users
+	sessionRowCount := int64(5000)   // 5k sessions
+	offerRowCount := int64(200)      // 200 offers
+	billingDistinct := int64(100000) // all unique
+	userDistinct := int64(1000)      // all unique
+	sessionDistinct := int64(5000)   // all unique
+	offerDistinct := int64(200)      // all unique
+	visitorDistinct := int64(800)    // 800/100k = 0.8% (below old 5% threshold)
+	hostDistinct := int64(500)       // 500/100k = 0.5% (below old 5% threshold)
+	sessionFKDistinct := int64(3000) // 3000/100k = 3% (below old 5% threshold)
+	offerFKDistinct := int64(150)    // 150/100k = 0.15% (below old 5% threshold)
+	isJoinableTrue := true
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Setup entities
+	mocks.entityRepo.entities = []*models.OntologyEntity{
+		{
+			ID:            userEntityID,
+			OntologyID:    ontologyID,
+			Name:          "user",
+			PrimarySchema: "public",
+			PrimaryTable:  "users",
+		},
+		{
+			ID:            billingEngagementEntityID,
+			OntologyID:    ontologyID,
+			Name:          "billing_engagement",
+			PrimarySchema: "public",
+			PrimaryTable:  "billing_engagements",
+		},
+		{
+			ID:            sessionEntityID,
+			OntologyID:    ontologyID,
+			Name:          "session",
+			PrimarySchema: "public",
+			PrimaryTable:  "sessions",
+		},
+		{
+			ID:            offerEntityID,
+			OntologyID:    ontologyID,
+			Name:          "offer",
+			PrimarySchema: "public",
+			PrimaryTable:  "offers",
+		},
+	}
+
+	// Track which columns had join analysis called
+	joinAnalysisCalls := make(map[string]bool)
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		key := fmt.Sprintf("%s.%s→%s.%s", sourceTable, sourceColumn, targetTable, targetColumn)
+		joinAnalysisCalls[key] = true
+		return &datasource.JoinAnalysis{
+			OrphanCount: 0, // All references valid
+		}, nil
+	}
+
+	// Table IDs
+	usersTableID := uuid.New()
+	billingTableID := uuid.New()
+	sessionsTableID := uuid.New()
+	offersTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &userRowCount,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: usersTableID,
+					ColumnName:    "user_id",
+					DataType:      "text", // text UUID
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &userDistinct,
+				},
+			},
+		},
+		{
+			ID:         sessionsTableID,
+			SchemaName: "public",
+			TableName:  "sessions",
+			RowCount:   &sessionRowCount,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: sessionsTableID,
+					ColumnName:    "session_id",
+					DataType:      "text", // text UUID
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &sessionDistinct,
+				},
+			},
+		},
+		{
+			ID:         offersTableID,
+			SchemaName: "public",
+			TableName:  "offers",
+			RowCount:   &offerRowCount,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: offersTableID,
+					ColumnName:    "offer_id",
+					DataType:      "text", // text UUID
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &offerDistinct,
+				},
+			},
+		},
+		{
+			ID:         billingTableID,
+			SchemaName: "public",
+			TableName:  "billing_engagements",
+			RowCount:   &billingRowCount, // 100k rows
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: billingTableID,
+					ColumnName:    "engagement_id",
+					DataType:      "text",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &billingDistinct,
+				},
+				{
+					SchemaTableID: billingTableID,
+					ColumnName:    "visitor_id", // FK to users.user_id (role: visitor)
+					DataType:      "text",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &visitorDistinct, // 0.8% cardinality
+				},
+				{
+					SchemaTableID: billingTableID,
+					ColumnName:    "host_id", // FK to users.user_id (role: host)
+					DataType:      "text",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &hostDistinct, // 0.5% cardinality
+				},
+				{
+					SchemaTableID: billingTableID,
+					ColumnName:    "session_id", // FK to sessions.session_id
+					DataType:      "text",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &sessionFKDistinct, // 3% cardinality
+				},
+				{
+					SchemaTableID: billingTableID,
+					ColumnName:    "offer_id", // FK to offers.offer_id
+					DataType:      "text",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &offerFKDistinct, // 0.15% cardinality
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: All 4 FK columns should have had join analysis called
+	expectedJoinCalls := []string{
+		"billing_engagements.visitor_id",
+		"billing_engagements.host_id",
+		"billing_engagements.session_id",
+		"billing_engagements.offer_id",
+	}
+	for _, col := range expectedJoinCalls {
+		found := false
+		for key := range joinAnalysisCalls {
+			if strings.HasPrefix(key, col+"→") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected join analysis to be called for %s (should bypass cardinality ratio check for _id columns)", col)
+		}
+	}
+
+	// Verify: At least 4 inferred relationships
+	if result.InferredRelationships < 4 {
+		t.Errorf("expected at least 4 inferred relationships (billing_engagements → users, sessions, offers), got %d", result.InferredRelationships)
+	}
+
+	// Verify: Specific relationships exist
+	type expectedRel struct {
+		sourceTable  string
+		sourceColumn string
+		targetTable  string
+		targetColumn string
+	}
+	expectedRels := []expectedRel{
+		{"billing_engagements", "visitor_id", "users", "user_id"},
+		{"billing_engagements", "host_id", "users", "user_id"},
+		{"billing_engagements", "session_id", "sessions", "session_id"},
+		{"billing_engagements", "offer_id", "offers", "offer_id"},
+	}
+
+	for _, exp := range expectedRels {
+		found := false
+		for _, rel := range mocks.relationshipRepo.created {
+			if rel.SourceColumnTable == exp.sourceTable &&
+				rel.SourceColumnName == exp.sourceColumn &&
+				rel.TargetColumnTable == exp.targetTable &&
+				rel.TargetColumnName == exp.targetColumn {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected relationship %s.%s → %s.%s to be discovered",
+				exp.sourceTable, exp.sourceColumn, exp.targetTable, exp.targetColumn)
+		}
+	}
+
+	// Log summary for debugging
+	t.Logf("Total relationships created: %d", len(mocks.relationshipRepo.created))
+	for i, rel := range mocks.relationshipRepo.created {
+		t.Logf("  %d: %s.%s → %s.%s (method=%s)",
+			i+1, rel.SourceColumnTable, rel.SourceColumnName,
+			rel.TargetColumnTable, rel.TargetColumnName,
+			rel.DetectionMethod)
 	}
 }
 

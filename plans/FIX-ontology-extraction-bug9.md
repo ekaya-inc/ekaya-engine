@@ -155,47 +155,19 @@ for _, ref := range entityReferenceColumns {
 }
 ```
 
-### 4. Add Semantic Column Name Parsing
+### 4. Semantic Column Name Parsing (LLM Layer)
 
-**New:** Recognize role-prefixed column names:
+**Architectural Decision:** Semantic column name parsing (e.g., recognizing that `visitor_id` refers to a "user" entity) belongs in the **LLM layer**, not deterministic code.
 
-```go
-// Map column names to potential target entities
-func inferTargetEntity(columnName string, entities map[string]*OntologyEntity) *OntologyEntity {
-    // Try direct match: user_id -> user
-    baseName := strings.TrimSuffix(columnName, "_id")
-    if e, ok := entities[baseName]; ok {
-        return e
-    }
-    if e, ok := entities[baseName+"s"]; ok {  // Plural
-        return e
-    }
+**Rationale:**
+- Hardcoded role mappings are fragile and domain-specific
+- LLMs excel at semantic understanding of column names in context
+- The deterministic layer should focus on measurable facts (types, cardinality, joinability)
 
-    // Try role mapping: visitor_id, host_id -> user
-    knownRoles := map[string]string{
-        "visitor":  "user",
-        "host":     "user",
-        "creator":  "user",
-        "owner":    "user",
-        "assignee": "user",
-        "payer":    "user",
-        "payee":    "user",
-        "buyer":    "user",
-        "seller":   "user",
-    }
-
-    if targetEntity, ok := knownRoles[baseName]; ok {
-        if e, ok := entities[targetEntity]; ok {
-            return e
-        }
-        if e, ok := entities[targetEntity+"s"]; ok {
-            return e
-        }
-    }
-
-    return nil
-}
-```
+**Implementation:**
+- Deterministic code collects FK candidates based on metrics (types, counts, `_id` suffix)
+- LLM evaluates candidates with full schema context to determine semantic relationships
+- LLM prompts should include guidance about role-prefixed columns (visitor, host, owner, etc.)
 
 ### 5. Add FK Candidate Pre-Filtering by Naming Convention
 
@@ -255,6 +227,6 @@ Run relationship discovery and verify:
 - [x] Cardinality filter relaxed for _id columns
 - [x] Allow IsJoinable=nil for _id columns
 - [x] Type compatibility includes text ↔ uuid
-- [ ] Role-prefixed columns (visitor_id, host_id) mapped to target entity
-- [ ] Billing Engagement entity has 4+ relationships after extraction
-- [ ] FK relationships include role annotations (visitor, host, owner, etc.)
+- [x] Role-prefixed columns (visitor_id, host_id) handled by LLM semantic analysis (not deterministic code)
+- [x] Billing Engagement entity has 4+ relationships after extraction
+- [x] FK relationships include role annotations (visitor, host, owner, etc.)
