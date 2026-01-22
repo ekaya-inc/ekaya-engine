@@ -178,7 +178,7 @@ func setupChatIntegrationTestWithRealServices(t *testing.T) *chatIntegrationTest
 	projectRepo := repositories.NewProjectRepository()
 
 	// Create real services
-	knowledgeSvc := services.NewKnowledgeService(knowledgeRepo, projectRepo, zap.NewNop())
+	knowledgeSvc := services.NewKnowledgeService(knowledgeRepo, projectRepo, ontologyRepo, zap.NewNop())
 
 	// Use a unique project ID for chat tests
 	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000045")

@@ -192,5 +192,5 @@ WHERE NOT EXISTS (
 - [x] `engine_business_glossary` linked to `ontology_id` with CASCADE
 - [x] Existing stale data cleaned up (skipped - manual operation; migrations backfill to active ontology, cleanup SQL in plan above for orphaned rows)
 - [x] Ontology delete removes all associated data
-- [ ] Datasource change doesn't retain old domain facts
+- [x] Datasource change doesn't retain old domain facts
 - [ ] MCP tools continue to work correctly
