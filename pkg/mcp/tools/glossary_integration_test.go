@@ -55,10 +55,13 @@ func setupGlossaryToolIntegrationTest(t *testing.T) *glossaryToolTestContext {
 	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
 	glossaryRepo := repositories.NewGlossaryRepository()
 
-	// Configure mock to enable glossary tools (developer tools enabled)
+	// Configure mock to enable glossary tools (developer tools enabled with ontology maintenance)
+	// update_glossary_term and delete_glossary_term are in LoadoutOntologyMaintenance,
+	// which requires AddOntologyMaintenance=true for developer tools.
 	mockMCPConfig := &mockMCPConfigService{
 		config: &models.ToolGroupConfig{
-			Enabled: true, // Enables developer tools including glossary tools
+			Enabled:                true, // Enables developer tools
+			AddOntologyMaintenance: true, // Enables ontology maintenance tools including glossary write tools
 		},
 	}
 
