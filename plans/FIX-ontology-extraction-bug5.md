@@ -264,6 +264,6 @@ Then use industry templates as starting context for glossary discovery.
 - [x] Knowledge seed file format defined
 - [x] Seeded knowledge included in glossary discovery prompt
 - [x] Domain-specific terms generated instead of generic SaaS metrics
-- [ ] Host/Visitor roles captured with business meaning
+- [x] Host/Visitor roles captured with business meaning
 - [ ] Fee structure documented in project knowledge
 - [ ] Documentation scanner extracts facts from README/docs
