@@ -49,6 +49,9 @@ func (r *projectRepository) Create(ctx context.Context, project *models.Project)
 	if project.Status == "" {
 		project.Status = "active"
 	}
+	if project.IndustryType == "" {
+		project.IndustryType = models.IndustryGeneral
+	}
 
 	params, err := json.Marshal(project.Parameters)
 	if err != nil {
@@ -56,13 +59,14 @@ func (r *projectRepository) Create(ctx context.Context, project *models.Project)
 	}
 
 	query := `
-		INSERT INTO engine_projects (id, name, parameters, created_at, updated_at, status)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO engine_projects (id, name, parameters, created_at, updated_at, status, industry_type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (id) DO UPDATE
 		SET name = EXCLUDED.name,
 		    parameters = EXCLUDED.parameters,
 		    updated_at = EXCLUDED.updated_at,
-		    status = EXCLUDED.status`
+		    status = EXCLUDED.status,
+		    industry_type = EXCLUDED.industry_type`
 
 	_, err = scope.Conn.Exec(ctx, query,
 		project.ID,
@@ -71,6 +75,7 @@ func (r *projectRepository) Create(ctx context.Context, project *models.Project)
 		project.CreatedAt,
 		project.UpdatedAt,
 		project.Status,
+		project.IndustryType,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create project: %w", err)
@@ -87,7 +92,7 @@ func (r *projectRepository) Get(ctx context.Context, id uuid.UUID) (*models.Proj
 	}
 
 	query := `
-		SELECT id, name, parameters, created_at, updated_at, status
+		SELECT id, name, parameters, created_at, updated_at, status, COALESCE(industry_type, 'general')
 		FROM engine_projects
 		WHERE id = $1`
 
@@ -101,6 +106,7 @@ func (r *projectRepository) Get(ctx context.Context, id uuid.UUID) (*models.Proj
 		&project.CreatedAt,
 		&project.UpdatedAt,
 		&project.Status,
+		&project.IndustryType,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -124,6 +130,9 @@ func (r *projectRepository) Update(ctx context.Context, project *models.Project)
 	}
 
 	project.UpdatedAt = time.Now()
+	if project.IndustryType == "" {
+		project.IndustryType = models.IndustryGeneral
+	}
 
 	params, err := json.Marshal(project.Parameters)
 	if err != nil {
@@ -132,10 +141,10 @@ func (r *projectRepository) Update(ctx context.Context, project *models.Project)
 
 	query := `
 		UPDATE engine_projects
-		SET name = $2, parameters = $3, updated_at = $4
+		SET name = $2, parameters = $3, updated_at = $4, industry_type = $5
 		WHERE id = $1`
 
-	result, err := scope.Conn.Exec(ctx, query, project.ID, project.Name, params, project.UpdatedAt)
+	result, err := scope.Conn.Exec(ctx, query, project.ID, project.Name, params, project.UpdatedAt, project.IndustryType)
 	if err != nil {
 		return fmt.Errorf("failed to update project: %w", err)
 	}

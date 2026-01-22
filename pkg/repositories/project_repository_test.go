@@ -412,6 +412,97 @@ func TestProjectRepository_Update_UpdatesNameAndParameters(t *testing.T) {
 	}
 }
 
+// TestProjectRepository_Create_DefaultIndustryType tests that Create defaults industry_type to 'general'.
+func TestProjectRepository_Create_DefaultIndustryType(t *testing.T) {
+	tc := setupProjectTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	project := &models.Project{
+		ID:         tc.projectID,
+		Name:       "Industry Type Test",
+		Parameters: map[string]interface{}{},
+		// IndustryType not set - should default to 'general'
+	}
+
+	err := tc.repo.Create(ctx, project)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Verify default industry_type
+	retrieved, err := tc.repo.Get(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if retrieved.IndustryType != models.IndustryGeneral {
+		t.Errorf("expected industry_type %q, got %q", models.IndustryGeneral, retrieved.IndustryType)
+	}
+}
+
+// TestProjectRepository_Create_CustomIndustryType tests that Create preserves custom industry_type.
+func TestProjectRepository_Create_CustomIndustryType(t *testing.T) {
+	tc := setupProjectTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	project := &models.Project{
+		ID:           tc.projectID,
+		Name:         "Creator Economy Project",
+		Parameters:   map[string]interface{}{},
+		IndustryType: models.IndustryCreatorEcon,
+	}
+
+	err := tc.repo.Create(ctx, project)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Verify custom industry_type persisted
+	retrieved, err := tc.repo.Get(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if retrieved.IndustryType != models.IndustryCreatorEcon {
+		t.Errorf("expected industry_type %q, got %q", models.IndustryCreatorEcon, retrieved.IndustryType)
+	}
+}
+
+// TestProjectRepository_Update_IndustryType tests that Update correctly updates industry_type.
+func TestProjectRepository_Update_IndustryType(t *testing.T) {
+	tc := setupProjectTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create with default industry_type
+	project := tc.createTestProject(ctx, "Industry Update Test")
+
+	// Update industry_type
+	project.IndustryType = models.IndustryMarketplace
+	err := tc.repo.Update(ctx, project)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	// Verify industry_type was updated
+	retrieved, err := tc.repo.Get(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if retrieved.IndustryType != models.IndustryMarketplace {
+		t.Errorf("expected industry_type %q, got %q", models.IndustryMarketplace, retrieved.IndustryType)
+	}
+}
+
 // TestProjectRepository_NoTenantScope tests that operations fail without tenant scope.
 func TestProjectRepository_NoTenantScope(t *testing.T) {
 	tc := setupProjectTest(t)

@@ -12,13 +12,22 @@ import (
 
 // Project represents a project in the system.
 type Project struct {
-	ID         uuid.UUID              `json:"id"`
-	Name       string                 `json:"name"`
-	Parameters map[string]interface{} `json:"parameters"`
-	CreatedAt  time.Time              `json:"created_at"`
-	UpdatedAt  time.Time              `json:"updated_at"`
-	Status     string                 `json:"status"`
+	ID           uuid.UUID              `json:"id"`
+	Name         string                 `json:"name"`
+	Parameters   map[string]interface{} `json:"parameters"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+	Status       string                 `json:"status"`
+	IndustryType string                 `json:"industry_type"`
 }
+
+// IndustryType constants for template selection.
+const (
+	IndustryGeneral     = "general"
+	IndustryVideoStream = "video_streaming"
+	IndustryMarketplace = "marketplace"
+	IndustryCreatorEcon = "creator_economy"
+)
 
 // JSONBMap is a map type that handles PostgreSQL JSONB serialization.
 type JSONBMap map[string]interface{}
