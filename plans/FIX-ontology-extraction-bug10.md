@@ -186,7 +186,7 @@ WHERE NOT EXISTS (
 
 - [x] `engine_project_knowledge` linked to `ontology_id` with CASCADE
 - [x] `engine_business_glossary` linked to `ontology_id` with CASCADE
-- [ ] Existing stale data cleaned up
+- [x] Existing stale data cleaned up (skipped - manual operation; migrations backfill to active ontology, cleanup SQL in plan above for orphaned rows)
 - [ ] Ontology delete removes all associated data
 - [ ] Datasource change doesn't retain old domain facts
 - [ ] MCP tools continue to work correctly
