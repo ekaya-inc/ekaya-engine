@@ -218,7 +218,7 @@ SELECT defining_sql FROM engine_business_glossary WHERE term = 'Payout Amount';
 
 ## Success Criteria
 
-- [ ] LLM prompt includes actual enum values for relevant columns
+- [x] LLM prompt includes actual enum values for relevant columns
 - [ ] Regenerated glossary SQL uses correct enum values
 - [ ] All 5 affected terms return non-zero results
 - [ ] SQL validation (if added) catches enum mismatches
