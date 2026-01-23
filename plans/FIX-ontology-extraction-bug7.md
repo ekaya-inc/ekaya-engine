@@ -185,7 +185,7 @@ func TestRelationshipDiscovery_OnlySelectedTables(t *testing.T) {
 - [x] dag_adapters.go fixed (entity enrichment only processes selected tables)
 - [ ] Processing time reduced (proportional to deselected table count)
 - [ ] No errors/warnings about missing entities from deselected tables
-- [ ] All tests pass
+- [x] All tests pass
 - [ ] Relationships still correctly discovered for selected tables
 
 ## Edge Cases
