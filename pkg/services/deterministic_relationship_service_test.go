@@ -4166,7 +4166,7 @@ func TestPKMatch_DataBased_CardinalityRatioAlwaysApplied(t *testing.T) {
 	eventEntityID := uuid.New()
 
 	highDistinct := int64(100)
-	lowDistinct := int64(50)   // Low distinct
+	lowDistinct := int64(50)     // Low distinct
 	highRowCount := int64(10000) // 50/10000 = 0.5% < 5% threshold
 	isJoinableTrue := true
 
