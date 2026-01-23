@@ -101,7 +101,7 @@ Fix BUG-9 to ensure stats are collected for all columns. Once stats are reliable
 
 ## Implementation Plan
 
-### Phase 1: Remove Blocking Filter (Option B)
+### Phase 1: Remove Blocking Filter (Option B) ✅
 
 **File:** `pkg/services/deterministic_relationship_service.go`
 
@@ -127,7 +127,7 @@ if col.DistinctCount != nil {
 // Join validation will determine actual FK validity
 ```
 
-### Phase 2: Add Logging for NULL-Stats Candidates
+### Phase 2: Add Logging for NULL-Stats Candidates ✅
 
 Add debug logging to track columns passing through without stats:
 ```go
@@ -139,7 +139,7 @@ if col.DistinctCount == nil {
 }
 ```
 
-### Phase 3: Fix Stats Collection (BUG-9)
+### Phase 3: Fix Stats Collection (BUG-9) ✅
 
 This is documented in FIX-ontology-extraction-bug9.md. Fixing stats collection will reduce the number of NULL-stats columns, making the filtering more effective.
 
