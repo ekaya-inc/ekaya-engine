@@ -108,7 +108,7 @@ Keep existing methods for admin/management use cases.
 
 ## Implementation Steps
 
-### Step 1: Update Repository Interface
+### Step 1: Update Repository Interface ✓
 
 **File:** `pkg/repositories/schema_repository.go`
 
@@ -116,7 +116,7 @@ Add `selectedOnly` parameter to:
 - `GetColumnsByTables(ctx, projectID, tableNames, selectedOnly bool)`
 - `ListColumnsByTable(ctx, projectID, tableID, selectedOnly bool)`
 
-### Step 2: Update Repository Implementation
+### Step 2: Update Repository Implementation ✓
 
 Modify SQL queries to conditionally add `AND is_selected = true` when `selectedOnly=true`.
 
@@ -139,7 +139,7 @@ Update all services to pass `selectedOnly=true` during ontology extraction:
 
 Ensure `GetColumnsContext` uses `selectedOnly=true`.
 
-### Step 5: Update Tests
+### Step 5: Update Tests ✓
 
 Update test mocks and expectations to handle `selectedOnly` parameter.
 
