@@ -176,7 +176,7 @@ This replaces file-based knowledge with schema-inferred knowledge.
 - [x] Knowledge comes only from schema inference or MCP tool updates
 - [x] Tests pass without file fixtures
 - [x] `grep` verification commands return no results
-- [ ] `make check` passes
+- [x] `make check` passes
 
 ## Risk Assessment
 

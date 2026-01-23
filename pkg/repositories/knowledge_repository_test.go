@@ -15,22 +15,25 @@ import (
 
 // knowledgeTestContext holds test dependencies for knowledge repository tests.
 type knowledgeTestContext struct {
-	t         *testing.T
-	engineDB  *testhelpers.EngineDB
-	repo      KnowledgeRepository
-	projectID uuid.UUID
+	t          *testing.T
+	engineDB   *testhelpers.EngineDB
+	repo       KnowledgeRepository
+	projectID  uuid.UUID
+	ontologyID uuid.UUID
 }
 
 // setupKnowledgeTest initializes the test context with shared testcontainer.
 func setupKnowledgeTest(t *testing.T) *knowledgeTestContext {
 	engineDB := testhelpers.GetEngineDB(t)
 	tc := &knowledgeTestContext{
-		t:         t,
-		engineDB:  engineDB,
-		repo:      NewKnowledgeRepository(),
-		projectID: uuid.MustParse("00000000-0000-0000-0000-000000000043"),
+		t:          t,
+		engineDB:   engineDB,
+		repo:       NewKnowledgeRepository(),
+		projectID:  uuid.MustParse("00000000-0000-0000-0000-000000000043"),
+		ontologyID: uuid.MustParse("00000000-0000-0000-0000-000000000044"),
 	}
 	tc.ensureTestProject()
+	tc.ensureTestOntology()
 	return tc
 }
 
@@ -51,6 +54,26 @@ func (tc *knowledgeTestContext) ensureTestProject() {
 	`, tc.projectID, "Knowledge Test Project")
 	if err != nil {
 		tc.t.Fatalf("failed to ensure test project: %v", err)
+	}
+}
+
+// ensureTestOntology creates the test ontology if it doesn't exist.
+func (tc *knowledgeTestContext) ensureTestOntology() {
+	tc.t.Helper()
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	if err != nil {
+		tc.t.Fatalf("failed to create scope for ontology setup: %v", err)
+	}
+	defer scope.Close()
+
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_ontologies (id, project_id, version, is_active)
+		VALUES ($1, $2, 1, true)
+		ON CONFLICT (id) DO NOTHING
+	`, tc.ontologyID, tc.projectID)
+	if err != nil {
+		tc.t.Fatalf("failed to ensure test ontology: %v", err)
 	}
 }
 
@@ -83,11 +106,12 @@ func (tc *knowledgeTestContext) createTestContext() (context.Context, func()) {
 func (tc *knowledgeTestContext) createTestFact(ctx context.Context, factType, key, value string) *models.KnowledgeFact {
 	tc.t.Helper()
 	fact := &models.KnowledgeFact{
-		ProjectID: tc.projectID,
-		FactType:  factType,
-		Key:       key,
-		Value:     value,
-		Context:   "Test context",
+		ProjectID:  tc.projectID,
+		OntologyID: &tc.ontologyID,
+		FactType:   factType,
+		Key:        key,
+		Value:      value,
+		Context:    "Test context",
 	}
 	err := tc.repo.Upsert(ctx, fact)
 	if err != nil {
@@ -189,11 +213,12 @@ func TestKnowledgeRepository_Upsert_Update(t *testing.T) {
 
 	// Upsert with same key should update
 	updated := &models.KnowledgeFact{
-		ProjectID: tc.projectID,
-		FactType:  models.FactTypeBusinessRule,
-		Key:       "discount_threshold",
-		Value:     "150", // Changed value
-		Context:   "Updated policy",
+		ProjectID:  tc.projectID,
+		OntologyID: &tc.ontologyID,
+		FactType:   models.FactTypeBusinessRule,
+		Key:        "discount_threshold",
+		Value:      "150", // Changed value
+		Context:    "Updated policy",
 	}
 
 	err := tc.repo.Upsert(ctx, updated)

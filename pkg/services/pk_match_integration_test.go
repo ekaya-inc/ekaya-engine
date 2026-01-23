@@ -338,6 +338,7 @@ func importSchemaWithStats(
 			SchemaName:   schemaName,
 			TableName:    tableName,
 			RowCount:     &rowCount,
+			IsSelected:   true, // Must be selected for PK-match discovery
 		}
 
 		if err := schemaRepo.UpsertTable(ctx, table); err != nil {
