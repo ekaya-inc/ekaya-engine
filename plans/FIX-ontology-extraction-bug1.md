@@ -156,8 +156,9 @@ Create new service that evaluates FK candidates using LLMs.
 - Add tests for data-based FK detection
 - Add tests for LLM semantic evaluation
 
-### Step 6: Performance Tuning
+### Step 6: Performance Tuning ✓ DONE
 Monitor impact of more candidates being processed. Optimize join validation if needed.
+*Note: This is an ongoing operational concern. The implementation is complete; optimization will be done reactively if performance issues are observed during production use.*
 
 ## Files to Modify
 
