@@ -238,6 +238,7 @@ func (d *SchemaDiscoverer) DiscoverForeignKeys(ctx context.Context) ([]datasourc
 
 // AnalyzeColumnStats gathers statistics for columns.
 // Continues processing other columns when one fails (e.g., type cast errors for arrays/bytea).
+// If the main query fails, retries with a simplified query (without length calculation).
 // Failed columns are included in results with zero/nil stats.
 func (d *SchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, tableName string, columnNames []string) ([]datasource.ColumnStats, error) {
 	if len(columnNames) == 0 {
@@ -249,6 +250,7 @@ func (d *SchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, t
 	quotedTable := pgx.Identifier{tableName}.Sanitize()
 
 	var stats []datasource.ColumnStats
+	var retriedColumns []string
 	for _, colName := range columnNames {
 		quotedCol := pgx.Identifier{colName}.Sanitize()
 
@@ -285,22 +287,46 @@ func (d *SchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, t
 
 		row := d.pool.QueryRow(ctx, query)
 		if err := row.Scan(&s.RowCount, &s.NonNullCount, &s.DistinctCount, &s.MinLength, &s.MaxLength); err != nil {
-			// Log warning but continue with other columns.
-			// This commonly happens for array columns, bytea, or custom types that can't cast to text.
-			d.logger.Warn("Failed to analyze column stats, using zero values",
-				zap.String("schema", schemaName),
-				zap.String("table", tableName),
-				zap.String("column", colName),
-				zap.Error(err))
-			// Keep zero values for stats so the column is still tracked
-			s.RowCount = 0
-			s.NonNullCount = 0
-			s.DistinctCount = 0
+			// Main query failed - retry with simplified query (no length calculation).
+			// This handles edge cases where pg_typeof or the CTE causes issues.
+			retriedColumns = append(retriedColumns, colName)
+
+			simplifiedQuery := fmt.Sprintf(`
+				SELECT
+					COUNT(*) as row_count,
+					COUNT(%s) as non_null_count,
+					COUNT(DISTINCT %s) as distinct_count
+				FROM %s.%s
+			`, quotedCol, quotedCol, quotedSchema, quotedTable)
+
+			retryRow := d.pool.QueryRow(ctx, simplifiedQuery)
+			if retryErr := retryRow.Scan(&s.RowCount, &s.NonNullCount, &s.DistinctCount); retryErr != nil {
+				// Both queries failed - log warning and use zero values
+				d.logger.Warn("Failed to analyze column stats after retry, using zero values",
+					zap.String("schema", schemaName),
+					zap.String("table", tableName),
+					zap.String("column", colName),
+					zap.Error(err),
+					zap.NamedError("retry_error", retryErr))
+				s.RowCount = 0
+				s.NonNullCount = 0
+				s.DistinctCount = 0
+			}
+			// Length stats are nil for retried columns (simplified query doesn't calculate them)
 			s.MinLength = nil
 			s.MaxLength = nil
 		}
 
 		stats = append(stats, s)
+	}
+
+	// Log summary if any columns needed retry
+	if len(retriedColumns) > 0 {
+		d.logger.Info("Some columns required simplified stats query (no length calculation)",
+			zap.String("schema", schemaName),
+			zap.String("table", tableName),
+			zap.Int("retried_count", len(retriedColumns)),
+			zap.Strings("retried_columns", retriedColumns))
 	}
 
 	return stats, nil

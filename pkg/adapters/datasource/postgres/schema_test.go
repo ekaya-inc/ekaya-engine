@@ -443,7 +443,10 @@ func TestSchemaDiscoverer_AnalyzeColumnStats_PartialFailure(t *testing.T) {
 
 	// Request stats for columns including a nonexistent one.
 	// This simulates the scenario where a column might fail due to permissions, type issues, etc.
-	// The function should continue processing after a column fails.
+	// The function should:
+	// 1. Try the main query (with pg_typeof/length detection) - will fail for nonexistent column
+	// 2. Retry with simplified query (just COUNT stats) - will also fail for nonexistent column
+	// 3. Continue processing remaining columns after both queries fail
 	columnNames := []string{"id", "nonexistent_column", "name"}
 	stats, err := tc.discoverer.AnalyzeColumnStats(ctx, "pg_temp", "test_partial_failure", columnNames)
 
@@ -598,6 +601,98 @@ func TestSchemaDiscoverer_AnalyzeColumnStats_NonTextTypes(t *testing.T) {
 	}
 	if numStats.MaxLength != nil {
 		t.Errorf("expected integer column 'num' to have nil max_length, got %d", *numStats.MaxLength)
+	}
+}
+
+func TestSchemaDiscoverer_AnalyzeColumnStats_RetryWithSimplifiedQuery(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// This test verifies the retry mechanism works.
+	// We create a scenario where the main query works but a nonexistent column triggers retry.
+	// Both valid and invalid columns are processed, verifying:
+	// 1. Valid columns get full stats
+	// 2. Invalid columns trigger retry (both queries fail) and get zero values
+	// 3. Processing continues after failures
+
+	setupSQL := `
+		CREATE TEMP TABLE test_retry_behavior (
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL,
+			count INTEGER NOT NULL
+		);
+		INSERT INTO test_retry_behavior (name, count) VALUES
+			('alice', 10),
+			('bob', 20),
+			('charlie', 30);
+	`
+
+	_, err := tc.discoverer.pool.Exec(ctx, setupSQL)
+	if err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+
+	// Mix of valid columns and invalid columns to test retry behavior
+	// The nonexistent column will fail both main and simplified queries
+	columnNames := []string{"id", "invalid_col_1", "name", "invalid_col_2", "count"}
+	stats, err := tc.discoverer.AnalyzeColumnStats(ctx, "pg_temp", "test_retry_behavior", columnNames)
+
+	if err != nil {
+		t.Fatalf("AnalyzeColumnStats should not return error, got: %v", err)
+	}
+
+	if len(stats) != 5 {
+		t.Fatalf("expected 5 stat results, got %d", len(stats))
+	}
+
+	// Verify valid columns have correct stats
+	// id column (index 0)
+	if stats[0].ColumnName != "id" {
+		t.Errorf("expected column 0 to be 'id', got %q", stats[0].ColumnName)
+	}
+	if stats[0].RowCount != 3 || stats[0].DistinctCount != 3 {
+		t.Errorf("id column: expected row_count=3, distinct_count=3, got %d, %d",
+			stats[0].RowCount, stats[0].DistinctCount)
+	}
+
+	// invalid_col_1 (index 1) - should have zero values after retry fails
+	if stats[1].ColumnName != "invalid_col_1" {
+		t.Errorf("expected column 1 to be 'invalid_col_1', got %q", stats[1].ColumnName)
+	}
+	if stats[1].RowCount != 0 || stats[1].DistinctCount != 0 {
+		t.Errorf("invalid_col_1: expected zero values after retry, got row_count=%d, distinct_count=%d",
+			stats[1].RowCount, stats[1].DistinctCount)
+	}
+
+	// name column (index 2) - should still have correct stats after previous failure
+	if stats[2].ColumnName != "name" {
+		t.Errorf("expected column 2 to be 'name', got %q", stats[2].ColumnName)
+	}
+	if stats[2].RowCount != 3 || stats[2].DistinctCount != 3 {
+		t.Errorf("name column: expected row_count=3, distinct_count=3, got %d, %d",
+			stats[2].RowCount, stats[2].DistinctCount)
+	}
+	// Text column should have length stats
+	if stats[2].MinLength == nil || stats[2].MaxLength == nil {
+		t.Error("name column should have length stats")
+	}
+
+	// invalid_col_2 (index 3) - should have zero values after retry fails
+	if stats[3].ColumnName != "invalid_col_2" {
+		t.Errorf("expected column 3 to be 'invalid_col_2', got %q", stats[3].ColumnName)
+	}
+	if stats[3].RowCount != 0 || stats[3].DistinctCount != 0 {
+		t.Errorf("invalid_col_2: expected zero values after retry, got row_count=%d, distinct_count=%d",
+			stats[3].RowCount, stats[3].DistinctCount)
+	}
+
+	// count column (index 4) - should still have correct stats after previous failures
+	if stats[4].ColumnName != "count" {
+		t.Errorf("expected column 4 to be 'count', got %q", stats[4].ColumnName)
+	}
+	if stats[4].RowCount != 3 || stats[4].DistinctCount != 3 {
+		t.Errorf("count column: expected row_count=3, distinct_count=3, got %d, %d",
+			stats[4].RowCount, stats[4].DistinctCount)
 	}
 }
 
