@@ -558,13 +558,15 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 		}
 
 		// Require explicit joinability determination
-		// Exception: For _id columns, assume joinable if stats are unknown (IsJoinable=nil)
-		// since text UUID columns may not have IsJoinable set before stats collection.
+		// When legacy pattern matching is enabled, _id/_uuid/_key columns are exempted
+		// from requiring explicit joinability (they're included even with IsJoinable=nil).
+		// When disabled, all columns must have explicit joinability determination.
 		if col.IsJoinable == nil {
-			if !isLikelyFKColumn(col.ColumnName) {
-				continue
+			if useLegacyPatternMatching && isLikelyFKColumn(col.ColumnName) {
+				// _id columns with nil IsJoinable are included for validation (legacy behavior)
+			} else {
+				continue // No joinability info = skip (new behavior)
 			}
-			// _id columns with nil IsJoinable are included for validation
 		} else if !*col.IsJoinable {
 			continue
 		}
@@ -581,10 +583,12 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			continue
 		}
 		// Check cardinality ratio if row count available
-		// Skip this check for likely FK columns (ending in _id, _uuid, _key) since they
-		// are often valid FK columns even with low cardinality (e.g., 500 unique visitors
-		// in 100,000 rows = 0.5%). Let the actual join validation decide.
-		if table.RowCount != nil && *table.RowCount > 0 && !isLikelyFKColumn(col.ColumnName) {
+		// When legacy pattern matching is enabled, _id/_uuid/_key columns skip this check
+		// since they are often valid FK columns even with low cardinality (e.g., 500 unique
+		// visitors in 100,000 rows = 0.5%).
+		// When disabled, all columns are subject to the cardinality ratio check.
+		skipCardinalityCheck := useLegacyPatternMatching && isLikelyFKColumn(col.ColumnName)
+		if table.RowCount != nil && *table.RowCount > 0 && !skipCardinalityCheck {
 			ratio := float64(*col.DistinctCount) / float64(*table.RowCount)
 			if ratio < 0.05 {
 				continue
