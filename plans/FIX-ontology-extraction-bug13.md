@@ -271,10 +271,10 @@ WHERE deleted_at IS NULL
 
 ## Success Criteria
 
-- [ ] All glossary SQL returns exactly one row
+- [x] All glossary SQL returns exactly one row
 - [ ] Formulas match semantic meaning of term names
 - [ ] No UNION/UNION ALL in aggregate metrics
-- [ ] Row count validation prevents multi-row queries
+- [x] Row count validation prevents multi-row queries
 - [ ] Domain expert reviews ambiguous terms
 
 ## Notes

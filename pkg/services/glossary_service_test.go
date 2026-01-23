@@ -3880,3 +3880,126 @@ func TestBuildEnhancedEnrichTermPrompt_IncludesComplexMetricExamples(t *testing.
 	assert.Contains(t, prompt, "Participation Rate", "Should include participation rate pattern")
 	assert.Contains(t, prompt, "Multi-table Join", "Should include join pattern example")
 }
+
+// ============================================================================
+// Tests - TestSQL Multi-Row Validation
+// ============================================================================
+
+// mockQueryExecutorWithMultipleRows returns multiple rows to test multi-row validation
+type mockQueryExecutorWithMultipleRows struct {
+	mockQueryExecutorForGlossary
+}
+
+func (m *mockQueryExecutorWithMultipleRows) Query(ctx context.Context, sqlQuery string, limit int) (*datasource.QueryExecutionResult, error) {
+	// Return multiple rows to simulate UNION ALL or non-aggregate queries
+	return &datasource.QueryExecutionResult{
+		Columns: []datasource.ColumnInfo{
+			{Name: "result", Type: "bigint"},
+		},
+		Rows: []map[string]any{
+			{"result": 100},
+			{"result": 200},
+		},
+		RowCount: 2,
+	}, nil
+}
+
+type mockAdapterFactoryWithMultipleRows struct{}
+
+func (m *mockAdapterFactoryWithMultipleRows) NewConnectionTester(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.ConnectionTester, error) {
+	return nil, nil
+}
+
+func (m *mockAdapterFactoryWithMultipleRows) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.SchemaDiscoverer, error) {
+	return nil, nil
+}
+
+func (m *mockAdapterFactoryWithMultipleRows) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.QueryExecutor, error) {
+	return &mockQueryExecutorWithMultipleRows{}, nil
+}
+
+func (m *mockAdapterFactoryWithMultipleRows) ListTypes() []datasource.DatasourceAdapterInfo {
+	return []datasource.DatasourceAdapterInfo{}
+}
+
+func TestTestSQL_MultipleRows_ReturnsError(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	logger := zap.NewNop()
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{}
+	entityRepo := &mockEntityRepoForGlossary{}
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryWithMultipleRows{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, nil, nil, logger, "test")
+
+	// SQL that would return multiple rows (e.g., UNION ALL)
+	sql := "SELECT 1 UNION ALL SELECT 2"
+
+	result, err := svc.TestSQL(ctx, projectID, sql)
+
+	require.NoError(t, err)
+	assert.False(t, result.Valid)
+	assert.Contains(t, result.Error, "multiple rows")
+	assert.Contains(t, result.Error, "Aggregate metrics should return a single row")
+}
+
+func TestTestSQL_SingleRow_ReturnsValid(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	logger := zap.NewNop()
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{}
+	entityRepo := &mockEntityRepoForGlossary{}
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	// Use the standard mock that returns a single row
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, nil, nil, logger, "test")
+
+	// SQL that returns a single row (aggregate)
+	sql := "SELECT COUNT(*) AS total FROM users"
+
+	result, err := svc.TestSQL(ctx, projectID, sql)
+
+	require.NoError(t, err)
+	assert.True(t, result.Valid)
+	assert.Empty(t, result.Error)
+	assert.NotEmpty(t, result.OutputColumns)
+}
+
+func TestCreateTerm_WithMultiRowSQL_ReturnsError(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	logger := zap.NewNop()
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{}
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryWithMultipleRows{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, nil, nil, logger, "test")
+
+	term := &models.BusinessGlossaryTerm{
+		Term:       "Test Metric",
+		Definition: "A test metric with multi-row SQL",
+		// SQL that returns multiple rows (simulated by mock)
+		DefiningSQL: "SELECT rating FROM reviews UNION ALL SELECT rating FROM channel_reviews",
+	}
+
+	err := svc.CreateTerm(ctx, projectID, term)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SQL validation failed")
+	assert.Contains(t, err.Error(), "multiple rows")
+}

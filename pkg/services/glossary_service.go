@@ -390,13 +390,22 @@ func (s *glossaryService) TestSQL(ctx context.Context, projectID uuid.UUID, sql 
 	}
 	defer executor.Close()
 
-	// Execute query with limit 1 to capture output columns
+	// Execute query with limit 5 to check for multi-row results
 	// The adapter handles dialect-specific limit wrapping (LIMIT for PostgreSQL, TOP for SQL Server)
-	result, err := executor.Query(ctx, sql, 1)
+	result, err := executor.Query(ctx, sql, 5)
 	if err != nil {
 		return &SQLTestResult{
 			Valid: false,
 			Error: err.Error(),
+		}, nil
+	}
+
+	// Check for single-row result (for aggregate metrics)
+	// Glossary terms should define aggregate metrics that return a single row
+	if len(result.Rows) > 1 {
+		return &SQLTestResult{
+			Valid: false,
+			Error: "Query returns multiple rows. Aggregate metrics should return a single row.",
 		}, nil
 	}
 
