@@ -276,6 +276,8 @@ func (s *deterministicRelationshipService) collectColumnStats(
 	// Process each table
 	tableCount := len(columnsByTable)
 	processedTables := 0
+	failedTables := 0
+	columnsWithStats := 0
 	for tableID, tableCols := range columnsByTable {
 		table := tableByID[tableID]
 		if table == nil {
@@ -300,9 +302,11 @@ func (s *deterministicRelationshipService) collectColumnStats(
 		// Analyze column stats from target database
 		stats, err := discoverer.AnalyzeColumnStats(ctx, table.SchemaName, table.TableName, columnNames)
 		if err != nil {
-			s.logger.Warn("Failed to analyze column stats",
+			s.logger.Error("Failed to analyze column stats - table skipped",
 				zap.String("table", fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)),
+				zap.Int("column_count", len(columnNames)),
 				zap.Error(err))
+			failedTables++
 			continue
 		}
 
@@ -337,6 +341,7 @@ func (s *deterministicRelationshipService) collectColumnStats(
 				rowCount = &st.RowCount
 				nonNullCount = &st.NonNullCount
 				distinctCount = &st.DistinctCount
+				columnsWithStats++
 			}
 
 			// Update column joinability in database
@@ -349,6 +354,8 @@ func (s *deterministicRelationshipService) collectColumnStats(
 
 	s.logger.Info("Column stats collection complete",
 		zap.Int("tables_processed", processedTables),
+		zap.Int("tables_failed", failedTables),
+		zap.Int("columns_with_stats", columnsWithStats),
 		zap.Duration("total_duration", time.Since(startTime)))
 
 	return nil
