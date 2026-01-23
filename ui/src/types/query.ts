@@ -71,6 +71,7 @@ export interface Query {
   sql_query: string;
   dialect: string;
   is_enabled: boolean;
+  allows_modification: boolean;
   usage_count: number;
   last_used_at: string | null;
   created_at: string;
@@ -89,6 +90,7 @@ export interface CreateQueryRequest {
   additional_context?: string;
   sql_query: string;
   is_enabled: boolean;
+  allows_modification?: boolean;
   parameters?: QueryParameter[];
   output_columns?: OutputColumn[];
   constraints?: string;
@@ -104,6 +106,7 @@ export interface UpdateQueryRequest {
   additional_context?: string | undefined;
   sql_query?: string;
   is_enabled?: boolean;
+  allows_modification?: boolean;
   output_columns?: OutputColumn[];
   constraints?: string;
 }

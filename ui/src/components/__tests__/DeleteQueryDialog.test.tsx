@@ -37,6 +37,7 @@ const mockQuery: Query = {
   sql_query: 'SELECT * FROM customers WHERE active = true ORDER BY revenue DESC LIMIT 10',
   dialect: 'postgres',
   is_enabled: true,
+  allows_modification: false,
   usage_count: 5,
   last_used_at: '2024-01-20T00:00:00Z',
   created_at: '2024-01-15T00:00:00Z',
