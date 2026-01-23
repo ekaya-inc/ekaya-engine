@@ -680,6 +680,9 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			status := models.RelationshipStatusConfirmed
 			confidence := 0.9
 
+			// Calculate cardinality from join analysis
+			cardinality := InferCardinality(joinResult)
+
 			// Create bidirectional relationship (both forward and reverse)
 			rel := &models.EntityRelationship{
 				OntologyID:         ontology.ID,
@@ -694,6 +697,7 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 				DetectionMethod:    models.DetectionMethodPKMatch,
 				Confidence:         confidence,
 				Status:             status,
+				Cardinality:        cardinality,
 			}
 
 			err = s.createBidirectionalRelationship(ctx, rel)

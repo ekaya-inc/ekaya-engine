@@ -184,7 +184,7 @@ Line 206-219: Add cardinality calculation for FK relationships.
 
 ### Step 3: Update PK-Match Relationship Creation
 
-**File:** `pkg/services/deterministic_relationship_service.go`
+[x] **File:** `pkg/services/deterministic_relationship_service.go`
 
 Line 652-665: Add cardinality calculation using join analysis data.
 
