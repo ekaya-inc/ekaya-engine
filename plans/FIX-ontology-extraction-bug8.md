@@ -194,12 +194,12 @@ func TestColumnEnrichment_OnlySelectedColumns(t *testing.T) {
 
 ## Success Criteria
 
-- [ ] Deselected columns do NOT appear in the ontology
-- [ ] `get_context(depth='columns')` only returns selected columns
-- [ ] Column enrichment only processes selected columns
-- [ ] MCP clients cannot query deselected column metadata
-- [ ] LLM prompts do not include deselected column information
-- [ ] All tests pass
+- [x] Deselected columns do NOT appear in the ontology
+- [x] `get_context(depth='columns')` only returns selected columns
+- [x] Column enrichment only processes selected columns
+- [x] MCP clients cannot query deselected column metadata
+- [x] LLM prompts do not include deselected column information
+- [x] All tests pass
 
 ## Security Considerations
 

@@ -41,7 +41,7 @@ type rdMockSchemaRepository struct {
 	columnsByTable map[uuid.UUID][]*models.SchemaColumn
 }
 
-func (m *rdMockSchemaRepository) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+func (m *rdMockSchemaRepository) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
 	if m.listColumnsErr != nil {
 		return nil, m.listColumnsErr
 	}

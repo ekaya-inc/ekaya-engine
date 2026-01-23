@@ -291,7 +291,7 @@ func (s *schemaService) syncColumnsForTable(
 	tableFQN := table.SchemaName + "." + table.TableName
 
 	// Get existing columns before sync to detect changes
-	existingColumns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID)
+	existingColumns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID, false)
 	if err != nil {
 		return nil, fmt.Errorf("list existing columns: %w", err)
 	}
@@ -589,7 +589,7 @@ func (s *schemaService) GetDatasourceTable(ctx context.Context, projectID, datas
 	}
 
 	// Get columns
-	columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID)
+	columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list columns: %w", err)
 	}
@@ -924,7 +924,7 @@ func (s *schemaService) SaveSelections(ctx context.Context, projectID, datasourc
 	// Update column selections
 	for tableID, selectedColumnIDs := range columnSelections {
 		// Get all columns for this table to determine which should be deselected
-		columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, tableID)
+		columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, tableID, false)
 		if err != nil {
 			return fmt.Errorf("failed to list columns for table %s: %w", tableID.String(), err)
 		}

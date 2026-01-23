@@ -237,7 +237,7 @@ func probeColumn(ctx context.Context, deps *ProbeToolDeps, projectID uuid.UUID, 
 
 	// Get datasource ID (assume first datasource for now)
 	// TODO: Support multi-datasource projects
-	tables, err := deps.SchemaRepo.GetColumnsByTables(ctx, projectID, []string{tableName})
+	tables, err := deps.SchemaRepo.GetColumnsByTables(ctx, projectID, []string{tableName}, false)
 	if err != nil {
 		// Database connection failures remain as Go errors
 		return nil, fmt.Errorf("failed to get columns for table: %w", err)

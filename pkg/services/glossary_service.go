@@ -1124,6 +1124,15 @@ func (s *glossaryService) buildEnrichTermPrompt(
 						colInfo += fmt.Sprintf(" - %s", col.Description)
 					}
 					sb.WriteString(colInfo + "\n")
+
+					// Include enum values if present so LLM uses exact values in SQL
+					if len(col.EnumValues) > 0 {
+						values := make([]string, len(col.EnumValues))
+						for i, v := range col.EnumValues {
+							values[i] = fmt.Sprintf("'%s'", v.Value)
+						}
+						sb.WriteString(fmt.Sprintf("  Allowed values: %s\n", strings.Join(values, ", ")))
+					}
 				}
 				sb.WriteString("\n")
 			}

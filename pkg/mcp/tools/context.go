@@ -423,7 +423,7 @@ func buildColumnDetails(
 	// Get full schema columns if we need additional stats or sample values
 	var schemaColumns map[string]*models.SchemaColumn
 	if include.Statistics || include.SampleValues {
-		cols, err := deps.SchemaRepo.GetColumnsByTables(ctx, projectID, []string{table.TableName})
+		cols, err := deps.SchemaRepo.GetColumnsByTables(ctx, projectID, []string{table.TableName}, false)
 		if err != nil {
 			deps.Logger.Warn("Failed to get schema columns for statistics",
 				zap.String("table", table.TableName),

@@ -164,7 +164,7 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 		// Extract row count for use in inner loop (defensive - nil already checked above)
 		tableRowCount := *table.RowCount
 
-		columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID)
+		columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID, false)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list columns for %s: %w", table.TableName, err)
 		}
@@ -865,7 +865,7 @@ func (s *relationshipDiscoveryService) findReviewCandidates(
 // If the table has a primary key, only PK columns are returned (more restrictive).
 // If the table has no primary key, all numeric columns are returned.
 func (s *relationshipDiscoveryService) getSourceColumnsForReview(ctx context.Context, projectID uuid.UUID, table *models.SchemaTable) ([]*models.SchemaColumn, error) {
-	columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID)
+	columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID, false)
 	if err != nil {
 		return nil, err
 	}

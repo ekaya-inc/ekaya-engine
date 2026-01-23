@@ -152,7 +152,7 @@ func (s *dataChangeDetectionService) ScanTables(
 		}
 
 		// Get columns for the table
-		columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID)
+		columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID, false)
 		if err != nil {
 			s.logger.Warn("Failed to list columns for table",
 				zap.String("table", tableName),
@@ -364,7 +364,7 @@ func (s *dataChangeDetectionService) detectPotentialFKs(
 		}
 
 		// Find target table's primary key column
-		targetColumns, err := s.schemaRepo.ListColumnsByTable(ctx, targetTable.ProjectID, targetTable.ID)
+		targetColumns, err := s.schemaRepo.ListColumnsByTable(ctx, targetTable.ProjectID, targetTable.ID, false)
 		if err != nil {
 			continue
 		}

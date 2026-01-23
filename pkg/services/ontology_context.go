@@ -322,7 +322,7 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 	}
 
 	// Get columns for the requested tables
-	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tablesToInclude)
+	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tablesToInclude, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}
@@ -452,7 +452,7 @@ func (s *ontologyContextService) GetColumnsContext(ctx context.Context, projectI
 	}
 
 	// Get columns for the requested tables
-	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames)
+	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}

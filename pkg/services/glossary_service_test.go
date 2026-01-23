@@ -2929,3 +2929,171 @@ func TestGlossaryService_UpdateTerm_AllowsTestTermInNonProduction(t *testing.T) 
 	updated, _ := glossaryRepo.GetByID(ctx, existingTerm.ID)
 	assert.Equal(t, "TestRevenue", updated.Term)
 }
+
+// ============================================================================
+// Tests - buildEnrichTermPrompt Includes Enum Values (BUG-12 Fix)
+// ============================================================================
+
+func TestGlossaryService_EnrichTermPrompt_IncludesEnumValues(t *testing.T) {
+	// This test verifies that the enrich term prompt includes actual enum values
+	// so the LLM generates SQL with correct WHERE clause values (BUG-12 fix)
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Transaction",
+			PrimaryTable: "billing_transactions",
+		},
+	}
+
+	// LLM response for enrichment
+	enrichmentResponse := `{
+		"defining_sql": "SELECT SUM(amount) AS total_revenue\nFROM billing_transactions\nWHERE transaction_state = 'TRANSACTION_STATE_ENDED'",
+		"base_table": "billing_transactions",
+		"aliases": ["Total Revenue"]
+	}`
+
+	llmClient := &mockLLMClientCapturingPrompt{responseContent: enrichmentResponse}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+			ColumnDetails: map[string][]models.ColumnDetail{
+				"billing_transactions": {
+					{
+						Name:        "transaction_state",
+						Description: "State of the billing transaction",
+						Role:        "dimension",
+						EnumValues: []models.EnumValue{
+							{Value: "TRANSACTION_STATE_ENDED", Description: "Completed transaction"},
+							{Value: "TRANSACTION_STATE_WAITING", Description: "Pending transaction"},
+							{Value: "TRANSACTION_STATE_ERROR", Description: "Failed transaction"},
+						},
+					},
+					{
+						Name:        "amount",
+						Description: "Transaction amount in cents",
+						Role:        "measure",
+					},
+				},
+			},
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+
+	// Create unenriched term (no DefiningSQL initially)
+	term := &models.BusinessGlossaryTerm{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Term:        "Completed Revenue",
+		Definition:  "Total revenue from completed transactions",
+		Source:      models.GlossarySourceInferred,
+		DefiningSQL: "", // Empty - will be enriched by LLM
+	}
+	// Manually insert to bypass validation that requires DefiningSQL
+	glossaryRepo.terms[term.ID] = term
+
+	// Enrich terms - this will call the LLM with the enrichment prompt
+	// We ignore the error because the mock adapter doesn't provide real SQL validation
+	_ = svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+
+	// Verify the prompt includes enum values
+	prompt := llmClient.capturedPrompt
+
+	// The prompt should include the actual enum values (BUG-12 fix)
+	assert.Contains(t, prompt, "TRANSACTION_STATE_ENDED", "Prompt must include actual enum value TRANSACTION_STATE_ENDED")
+	assert.Contains(t, prompt, "TRANSACTION_STATE_WAITING", "Prompt must include actual enum value TRANSACTION_STATE_WAITING")
+	assert.Contains(t, prompt, "TRANSACTION_STATE_ERROR", "Prompt must include actual enum value TRANSACTION_STATE_ERROR")
+
+	// The prompt should include the "Allowed values:" label
+	assert.Contains(t, prompt, "Allowed values:", "Prompt must include 'Allowed values:' label for enum columns")
+}
+
+func TestGlossaryService_EnrichTermPrompt_NoEnumValuesWhenColumnHasNone(t *testing.T) {
+	// This test verifies that columns without enum values don't get the "Allowed values:" line
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Transaction",
+			PrimaryTable: "transactions",
+		},
+	}
+
+	enrichmentResponse := `{
+		"defining_sql": "SELECT SUM(amount) AS total_revenue FROM transactions",
+		"base_table": "transactions",
+		"aliases": []
+	}`
+
+	llmClient := &mockLLMClientCapturingPrompt{responseContent: enrichmentResponse}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+			ColumnDetails: map[string][]models.ColumnDetail{
+				"transactions": {
+					{
+						Name:        "amount",
+						Description: "Transaction amount",
+						Role:        "measure",
+						// No EnumValues
+					},
+					{
+						Name:        "created_at",
+						Description: "Transaction creation time",
+						Role:        "dimension",
+						// No EnumValues
+					},
+				},
+			},
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+
+	// Create unenriched term
+	term := &models.BusinessGlossaryTerm{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Term:        "Total Revenue",
+		Definition:  "Sum of all transaction amounts",
+		Source:      models.GlossarySourceInferred,
+		DefiningSQL: "",
+	}
+	glossaryRepo.terms[term.ID] = term
+
+	_ = svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+
+	prompt := llmClient.capturedPrompt
+
+	// Should NOT include "Allowed values:" when no enum values exist
+	assert.NotContains(t, prompt, "Allowed values:", "Prompt should NOT include 'Allowed values:' when columns have no enum values")
+}
