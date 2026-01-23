@@ -48,7 +48,7 @@ func (a *EntityEnrichmentAdapter) EnrichEntitiesWithLLM(ctx context.Context, pro
 	}
 	defer cleanup()
 
-	tables, err := a.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID, false)
+	tables, err := a.schemaRepo.ListTablesByDatasource(tenantCtx, projectID, datasourceID, true)
 	if err != nil {
 		return err
 	}
