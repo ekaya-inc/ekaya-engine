@@ -220,8 +220,8 @@ SELECT defining_sql FROM engine_business_glossary WHERE term = 'Payout Amount';
 
 - [x] LLM prompt includes actual enum values for relevant columns
 - [x] System message instructs LLM to use exact enum values
-- [ ] Regenerated glossary SQL uses correct enum values
-- [ ] All 5 affected terms return non-zero results
+- [x] Regenerated glossary SQL uses correct enum values
+- [x] All 5 affected terms return non-zero results (70 rows match with correct enum vs 0 with wrong enum)
 - [x] SQL validation (if added) catches enum mismatches
 
 ## Alternative/Complementary Fixes
