@@ -24,6 +24,8 @@ import type {
   GetDatasourceResponse,
   GlossaryListResponse,
   GlossaryTerm,
+  InstalledApp,
+  InstalledAppsResponse,
   ListDatasourcesResponse,
   ListQueriesResponse,
   MCPConfigResponse,
@@ -677,6 +679,83 @@ class EngineApiService {
     }
 
     return true;
+  }
+
+  // --- Installed Apps Methods ---
+
+  /**
+   * List all installed apps for a project
+   * GET /api/projects/{projectId}/apps
+   */
+  async listInstalledApps(
+    projectId: string
+  ): Promise<ApiResponse<InstalledAppsResponse>> {
+    return this.makeRequest<InstalledAppsResponse>(`/${projectId}/apps`);
+  }
+
+  /**
+   * Get a specific installed app
+   * GET /api/projects/{projectId}/apps/{appId}
+   * Returns 404 if not installed
+   */
+  async getInstalledApp(
+    projectId: string,
+    appId: string
+  ): Promise<ApiResponse<InstalledApp>> {
+    return this.makeRequest<InstalledApp>(`/${projectId}/apps/${appId}`);
+  }
+
+  /**
+   * Install an app for a project
+   * POST /api/projects/{projectId}/apps/{appId}
+   */
+  async installApp(
+    projectId: string,
+    appId: string
+  ): Promise<ApiResponse<InstalledApp>> {
+    return this.makeRequest<InstalledApp>(`/${projectId}/apps/${appId}`, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Uninstall an app from a project
+   * DELETE /api/projects/{projectId}/apps/{appId}
+   */
+  async uninstallApp(
+    projectId: string,
+    appId: string
+  ): Promise<ApiResponse<void>> {
+    return this.makeRequest<void>(`/${projectId}/apps/${appId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Get app settings
+   * GET /api/projects/{projectId}/apps/{appId}
+   * Same as getInstalledApp - settings are in the response
+   */
+  async getAppSettings(
+    projectId: string,
+    appId: string
+  ): Promise<ApiResponse<InstalledApp>> {
+    return this.getInstalledApp(projectId, appId);
+  }
+
+  /**
+   * Update app settings
+   * PATCH /api/projects/{projectId}/apps/{appId}
+   */
+  async updateAppSettings(
+    projectId: string,
+    appId: string,
+    settings: Record<string, unknown>
+  ): Promise<ApiResponse<InstalledApp>> {
+    return this.makeRequest<InstalledApp>(`/${projectId}/apps/${appId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ settings }),
+    });
   }
 
   // --- Ontology DAG Methods ---
