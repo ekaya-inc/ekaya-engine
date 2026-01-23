@@ -14,3 +14,4 @@ export * from './ai';
 export * from './mcp';
 export * from './entity';
 export * from './glossary';
+export * from './installedApp';

@@ -2,10 +2,14 @@ import type { LucideIcon } from 'lucide-react';
 import {
   ArrowLeft,
   BrainCircuit,
+  Check,
+  ExternalLink,
+  Loader2,
   MessageSquare,
   Package,
   Sparkles,
 } from 'lucide-react';
+import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { Button } from '../components/ui/Button';
@@ -16,6 +20,8 @@ import {
   CardHeader,
   CardTitle,
 } from '../components/ui/Card';
+import { useInstalledApps, useInstallApp } from '../hooks/useInstalledApps';
+import { APP_ID_AI_DATA_LIAISON } from '../types';
 import { cn } from '../utils/cn';
 
 type AppColor = 'blue' | 'purple' | 'green' | 'gray';
@@ -27,6 +33,10 @@ interface ApplicationInfo {
   icon: LucideIcon;
   color: AppColor;
   available: boolean;
+  /** If true, this app can be installed (has install button) */
+  installable?: boolean;
+  /** URL for Learn More link */
+  learnMoreUrl?: string;
 }
 
 const applications: ApplicationInfo[] = [
@@ -37,6 +47,8 @@ const applications: ApplicationInfo[] = [
     icon: BrainCircuit,
     color: 'blue',
     available: true,
+    installable: true,
+    learnMoreUrl: 'https://ekaya.ai/enterprise/',
   },
   {
     id: 'product-kit',
@@ -77,6 +89,9 @@ const getColorClasses = (color: AppColor): { bg: string; text: string } => {
 const ApplicationsPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
+  const { isInstalled, refetch } = useInstalledApps(pid);
+  const { install, isLoading: isInstalling } = useInstallApp(pid);
+  const [installingAppId, setInstallingAppId] = useState<string | null>(null);
 
   const handleContactSales = (app: ApplicationInfo) => {
     const subject = encodeURIComponent(
@@ -85,6 +100,103 @@ const ApplicationsPage = () => {
     const link = document.createElement('a');
     link.href = `mailto:sales@ekaya.ai?subject=${subject}`;
     link.click();
+  };
+
+  const handleInstall = async (appId: string) => {
+    setInstallingAppId(appId);
+    const result = await install(appId);
+    setInstallingAppId(null);
+    if (result) {
+      await refetch();
+      // Navigate to the app's configuration page
+      navigate(`/projects/${pid}/${appId}`);
+    }
+  };
+
+  const handleLearnMore = (url: string) => {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const renderAppFooter = (app: ApplicationInfo) => {
+    // Not available (Coming Soon)
+    if (!app.available) {
+      return (
+        <CardFooter className="pt-0">
+          <span className="text-xs text-text-secondary">Coming Soon</span>
+        </CardFooter>
+      );
+    }
+
+    // AI Data Liaison - special handling with Install/Installed state
+    if (app.id === APP_ID_AI_DATA_LIAISON) {
+      const appIsInstalled = isInstalled(app.id);
+      const isCurrentlyInstalling = installingAppId === app.id && isInstalling;
+
+      if (appIsInstalled) {
+        // Installed state - show "Installed" badge and Configure button
+        return (
+          <CardFooter className="pt-0 flex gap-2">
+            <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+              <Check className="h-3 w-3" />
+              Installed
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate(`/projects/${pid}/ai-data-liaison`)}
+            >
+              Configure
+            </Button>
+          </CardFooter>
+        );
+      }
+
+      // Not installed - show Learn More and Install buttons
+      const learnMoreUrl = app.learnMoreUrl;
+      return (
+        <CardFooter className="pt-0 flex gap-2">
+          {learnMoreUrl ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleLearnMore(learnMoreUrl)}
+            >
+              <ExternalLink className="h-3 w-3 mr-1" />
+              Learn More
+            </Button>
+          ) : null}
+          <Button
+            variant="default"
+            size="sm"
+            disabled={isCurrentlyInstalling}
+            onClick={() => handleInstall(app.id)}
+          >
+            {isCurrentlyInstalling ? (
+              <>
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                Installing...
+              </>
+            ) : (
+              'Install'
+            )}
+          </Button>
+        </CardFooter>
+      );
+    }
+
+    // Default: Contact Sales button for other available apps
+    return (
+      <CardFooter className="pt-0">
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full opacity-0 transition-opacity group-hover:opacity-100"
+          onClick={() => handleContactSales(app)}
+        >
+          Contact Sales
+        </Button>
+      </CardFooter>
+    );
   };
 
   return (
@@ -100,7 +212,7 @@ const ApplicationsPage = () => {
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
-          <h1 className="text-2xl font-bold">Install Application</h1>
+          <h1 className="text-2xl font-bold">Applications</h1>
           <p className="text-text-secondary">
             Choose an application to add to your project
           </p>
@@ -112,6 +224,7 @@ const ApplicationsPage = () => {
         {applications.map((app) => {
           const Icon = app.icon;
           const colors = getColorClasses(app.color);
+          const appIsInstalled = app.id === APP_ID_AI_DATA_LIAISON && isInstalled(app.id);
 
           return (
             <Card
@@ -120,9 +233,16 @@ const ApplicationsPage = () => {
               className={cn(
                 'group relative transition-all',
                 app.available
-                  ? 'hover:shadow-md'
+                  ? appIsInstalled
+                    ? 'cursor-pointer hover:shadow-md'
+                    : 'hover:shadow-md'
                   : 'cursor-not-allowed border-dashed opacity-60',
               )}
+              onClick={
+                appIsInstalled
+                  ? () => navigate(`/projects/${pid}/${app.id}`)
+                  : undefined
+              }
             >
               <CardHeader className="pb-2">
                 <div
@@ -138,24 +258,7 @@ const ApplicationsPage = () => {
                   {app.subtitle}
                 </CardDescription>
               </CardHeader>
-              {app.available ? (
-                <CardFooter className="pt-0">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full opacity-0 transition-opacity group-hover:opacity-100"
-                    onClick={() => handleContactSales(app)}
-                  >
-                    Contact Sales
-                  </Button>
-                </CardFooter>
-              ) : (
-                <CardFooter className="pt-0">
-                  <span className="text-xs text-text-secondary">
-                    Coming Soon
-                  </span>
-                </CardFooter>
-              )}
+              {renderAppFooter(app)}
             </Card>
           );
         })}

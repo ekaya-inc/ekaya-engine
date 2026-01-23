@@ -3,6 +3,7 @@ import {
   BookOpen,
   Boxes,
   Brain,
+  BrainCircuit,
   Check,
   ChevronDown,
   Database,
@@ -15,7 +16,7 @@ import {
   Search,
   Server,
 } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import MCPLogo from '../components/icons/MCPLogo';
@@ -32,6 +33,7 @@ import {
   DialogTitle,
 } from '../components/ui/Dialog';
 import { useDatasourceConnection } from '../contexts/DatasourceConnectionContext';
+import { useInstalledApps } from '../hooks/useInstalledApps';
 import { fetchWithAuth } from '../lib/api';
 import { ontologyService } from '../services/ontologyService';
 import type {
@@ -41,6 +43,7 @@ import type {
   AITestResult,
   OntologyWorkflowStatus,
 } from '../types';
+import { APP_ID_AI_DATA_LIAISON } from '../types';
 
 type TileColor = 'blue' | 'green' | 'purple' | 'orange' | 'gray' | 'indigo' | 'cyan';
 
@@ -65,6 +68,7 @@ const ProjectDashboard = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
   const { isConnected, hasSelectedTables } = useDatasourceConnection();
+  const { apps: installedApps } = useInstalledApps(pid);
   const [selectedAIOption, setSelectedAIOption] = useState<AIOption>(null);
   const [activeAIConfig, setActiveAIConfig] = useState<AIOption>(null);
 
@@ -432,15 +436,30 @@ const ProjectDashboard = () => {
     },
   ];
 
-  const applicationTiles: Tile[] = [
-    {
-      title: 'MCP Server',
-      icon: Server,
-      path: `/projects/${pid}/mcp-server`,
-      disabled: !isConnected, // Requires datasource
-      color: 'cyan',
-    },
-  ];
+  const applicationTiles: Tile[] = useMemo(() => {
+    const tiles: Tile[] = [
+      {
+        title: 'MCP Server',
+        icon: Server,
+        path: `/projects/${pid}/mcp-server`,
+        disabled: !isConnected, // Requires datasource
+        color: 'cyan',
+      },
+    ];
+
+    // Add AI Data Liaison tile if installed
+    if (installedApps.some((app) => app.app_id === APP_ID_AI_DATA_LIAISON)) {
+      tiles.push({
+        title: 'AI Data Liaison',
+        icon: BrainCircuit,
+        path: `/projects/${pid}/ai-data-liaison`,
+        disabled: false,
+        color: 'blue',
+      });
+    }
+
+    return tiles;
+  }, [pid, isConnected, installedApps]);
 
   const handleTileClick = (tile: Tile): void => {
     if (!tile.disabled) {
@@ -569,7 +588,7 @@ const ProjectDashboard = () => {
             onClick={() => navigate(`/projects/${pid}/applications`)}
           >
             <Plus className="h-4 w-4" />
-            Install Application
+            Install Applications
           </Button>
         </div>
         <p className="text-text-secondary mb-4">

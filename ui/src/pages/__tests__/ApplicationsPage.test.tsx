@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -14,6 +14,26 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
+// Mock the useInstalledApps hook
+const mockRefetch = vi.fn().mockResolvedValue(undefined);
+const mockInstall = vi.fn();
+let mockInstalledApps: string[] = [];
+
+vi.mock('../../hooks/useInstalledApps', () => ({
+  useInstalledApps: () => ({
+    apps: mockInstalledApps.map((id) => ({ app_id: id })),
+    isLoading: false,
+    error: null,
+    refetch: mockRefetch,
+    isInstalled: (appId: string) => mockInstalledApps.includes(appId),
+  }),
+  useInstallApp: () => ({
+    install: mockInstall,
+    isLoading: false,
+    error: null,
+  }),
+}));
+
 describe('ApplicationsPage', () => {
   const mockClick = vi.fn();
   let capturedHref = '';
@@ -24,6 +44,7 @@ describe('ApplicationsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     capturedHref = '';
+    mockInstalledApps = [];
 
     // Mock document.createElement for anchor elements only
     vi.spyOn(document, 'createElement').mockImplementation(
@@ -63,7 +84,7 @@ describe('ApplicationsPage', () => {
   it('renders page header with correct title', () => {
     renderPage();
 
-    expect(screen.getByText('Install Application')).toBeInTheDocument();
+    expect(screen.getByText('Applications')).toBeInTheDocument();
     expect(
       screen.getByText('Choose an application to add to your project')
     ).toBeInTheDocument();
@@ -78,27 +99,59 @@ describe('ApplicationsPage', () => {
     expect(screen.getByText('More Coming!')).toBeInTheDocument();
   });
 
-  it('renders Contact Sales buttons for available applications', () => {
+  it('renders Contact Sales buttons for Product Kit and On-Premise Chat', () => {
     renderPage();
 
     const contactSalesButtons = screen.getAllByRole('button', {
       name: 'Contact Sales',
     });
-    // Should have 3 Contact Sales buttons (one for each available app)
-    expect(contactSalesButtons).toHaveLength(3);
+    // Should have 2 Contact Sales buttons (Product Kit and On-Premise Chat)
+    // AI Data Liaison now has Install button instead
+    expect(contactSalesButtons).toHaveLength(2);
   });
 
-  it('opens mailto link when clicking Contact Sales on AI Data Liaison', () => {
+  it('renders Install button for AI Data Liaison when not installed', () => {
     renderPage();
 
-    const contactSalesButtons = screen.getAllByRole('button', {
-      name: 'Contact Sales',
-    });
-    fireEvent.click(contactSalesButtons[0] as HTMLElement);
+    expect(screen.getByRole('button', { name: 'Install' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Learn More/i })
+    ).toBeInTheDocument();
+  });
 
-    expect(mockClick).toHaveBeenCalled();
-    expect(capturedHref).toBe(
-      'mailto:sales@ekaya.ai?subject=Interest%20in%20AI%20Data%20Liaison%20for%20my%20Ekaya%20project'
+  it('renders Installed badge and Configure button when AI Data Liaison is installed', () => {
+    mockInstalledApps = ['ai-data-liaison'];
+    renderPage();
+
+    expect(screen.getByText('Installed')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Configure' })
+    ).toBeInTheDocument();
+    // Install button should not be present
+    expect(screen.queryByRole('button', { name: 'Install' })).toBeNull();
+  });
+
+  it('calls install and navigates when clicking Install on AI Data Liaison', async () => {
+    mockInstall.mockResolvedValue({ id: 'test-id', app_id: 'ai-data-liaison' });
+    renderPage();
+
+    const installButton = screen.getByRole('button', { name: 'Install' });
+    fireEvent.click(installButton);
+
+    await waitFor(() => {
+      expect(mockInstall).toHaveBeenCalledWith('ai-data-liaison');
+    });
+  });
+
+  it('navigates to config page when clicking Configure on installed AI Data Liaison', () => {
+    mockInstalledApps = ['ai-data-liaison'];
+    renderPage();
+
+    const configureButton = screen.getByRole('button', { name: 'Configure' });
+    fireEvent.click(configureButton);
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      '/projects/proj-1/ai-data-liaison'
     );
   });
 
@@ -108,7 +161,8 @@ describe('ApplicationsPage', () => {
     const contactSalesButtons = screen.getAllByRole('button', {
       name: 'Contact Sales',
     });
-    fireEvent.click(contactSalesButtons[1] as HTMLElement);
+    // First Contact Sales button is Product Kit (AI Data Liaison has Install button now)
+    fireEvent.click(contactSalesButtons[0] as HTMLElement);
 
     expect(mockClick).toHaveBeenCalled();
     expect(capturedHref).toBe(
@@ -122,7 +176,8 @@ describe('ApplicationsPage', () => {
     const contactSalesButtons = screen.getAllByRole('button', {
       name: 'Contact Sales',
     });
-    fireEvent.click(contactSalesButtons[2] as HTMLElement);
+    // Second Contact Sales button is On-Premise Chat
+    fireEvent.click(contactSalesButtons[1] as HTMLElement);
 
     expect(mockClick).toHaveBeenCalled();
     expect(capturedHref).toBe(
@@ -156,5 +211,21 @@ describe('ApplicationsPage', () => {
 
     // The "More Coming!" tile should have "Coming Soon" footer text
     expect(screen.getByText('Coming Soon')).toBeInTheDocument();
+  });
+
+  it('opens Learn More link in new tab', () => {
+    const mockOpen = vi.fn();
+    vi.spyOn(window, 'open').mockImplementation(mockOpen);
+
+    renderPage();
+
+    const learnMoreButton = screen.getByRole('button', { name: /Learn More/i });
+    fireEvent.click(learnMoreButton);
+
+    expect(mockOpen).toHaveBeenCalledWith(
+      'https://ekaya.ai/enterprise/',
+      '_blank',
+      'noopener,noreferrer'
+    );
   });
 });

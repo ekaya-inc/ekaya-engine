@@ -184,7 +184,7 @@ PATCH /api/projects/{pid}/apps/{appId}     → Update app settings
 
 ---
 
-## Phase 2: UI Updates
+## Phase 2: UI Updates [x]
 
 ### 2.1 Project Dashboard Changes
 
