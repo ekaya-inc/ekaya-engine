@@ -1017,7 +1017,15 @@ func (s *glossaryService) enrichSingleTerm(
 		return result
 	}
 
-	// Both attempts failed - return the retry error (more informative)
+	// Both attempts failed - update term with failure status before returning error
+	term.EnrichmentStatus = models.GlossaryEnrichmentFailed
+	term.EnrichmentError = retryErr.Error()
+	if updateErr := s.glossaryRepo.Update(tenantCtx, term); updateErr != nil {
+		s.logger.Error("Failed to save enrichment failure status",
+			zap.String("term", term.Term),
+			zap.Error(updateErr))
+	}
+
 	return enrichmentResult{termName: term.Term, err: fmt.Errorf("enrichment failed after retry: %w", retryErr)}
 }
 
@@ -1086,6 +1094,8 @@ func (s *glossaryService) tryEnrichTerm(
 	term.DefiningSQL = enrichment.DefiningSQL
 	term.BaseTable = enrichment.BaseTable
 	term.OutputColumns = testResult.OutputColumns
+	term.EnrichmentStatus = models.GlossaryEnrichmentSuccess
+	term.EnrichmentError = "" // Clear any previous error
 	// Merge aliases - keep existing ones and add new ones from enrichment
 	if len(enrichment.Aliases) > 0 {
 		aliasSet := make(map[string]bool)
