@@ -301,6 +301,14 @@ func (m *mockProjectServiceForOntology) SetAutoApproveSettings(ctx context.Conte
 	return nil
 }
 
+func (m *mockProjectServiceForOntology) GetOntologySettings(ctx context.Context, projectID uuid.UUID) (*OntologySettings, error) {
+	return &OntologySettings{UseLegacyPatternMatching: true}, nil
+}
+
+func (m *mockProjectServiceForOntology) SetOntologySettings(ctx context.Context, projectID uuid.UUID, settings *OntologySettings) error {
+	return nil
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

@@ -137,7 +137,7 @@ Pass candidate columns (after join validation) to LLMs for final semantic judgme
 
 ## Implementation Steps
 
-### Step 1: Create Feature Flag
+### Step 1: Create Feature Flag ✓
 Add `use_legacy_pattern_matching` flag to allow gradual rollout.
 
 ### Step 2: Remove Exclusion Filters (Behind Flag)

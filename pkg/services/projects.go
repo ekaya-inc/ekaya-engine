@@ -35,6 +35,15 @@ type AutoApproveSettings struct {
 	InferenceChanges bool `json:"inference_changes"` // Auto-approve inference changes (LLM-generated)
 }
 
+// OntologySettings contains ontology extraction configuration for a project.
+type OntologySettings struct {
+	// UseLegacyPatternMatching controls whether column name pattern matching is used
+	// during FK candidate filtering. When true (default), columns are filtered based
+	// on naming patterns (e.g., _id suffix, is_ prefix). When false, filtering relies
+	// solely on data-based analysis (cardinality, join validation).
+	UseLegacyPatternMatching bool `json:"use_legacy_pattern_matching"`
+}
+
 // ProjectService defines the interface for project operations.
 type ProjectService interface {
 	Provision(ctx context.Context, projectID uuid.UUID, name string, params map[string]interface{}) (*ProvisionResult, error)
@@ -51,6 +60,10 @@ type ProjectService interface {
 	// Auto-approve settings for living ontology changes
 	GetAutoApproveSettings(ctx context.Context, projectID uuid.UUID) (*AutoApproveSettings, error)
 	SetAutoApproveSettings(ctx context.Context, projectID uuid.UUID, settings *AutoApproveSettings) error
+
+	// Ontology extraction settings
+	GetOntologySettings(ctx context.Context, projectID uuid.UUID) (*OntologySettings, error)
+	SetOntologySettings(ctx context.Context, projectID uuid.UUID, settings *OntologySettings) error
 }
 
 // projectService implements ProjectService.
@@ -374,6 +387,56 @@ func (s *projectService) SetAutoApproveSettings(ctx context.Context, projectID u
 		zap.String("project_id", projectID.String()),
 		zap.Bool("schema_changes", settings.SchemaChanges),
 		zap.Bool("inference_changes", settings.InferenceChanges))
+
+	return nil
+}
+
+// GetOntologySettings returns the ontology extraction settings for a project.
+// Returns default settings (UseLegacyPatternMatching=true) if not configured.
+func (s *projectService) GetOntologySettings(ctx context.Context, projectID uuid.UUID) (*OntologySettings, error) {
+	project, err := s.projectRepo.Get(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get project: %w", err)
+	}
+
+	// Default: use legacy pattern matching for backward compatibility
+	settings := &OntologySettings{
+		UseLegacyPatternMatching: true,
+	}
+
+	if project.Parameters != nil {
+		if ontology, ok := project.Parameters["ontology"].(map[string]interface{}); ok {
+			if v, ok := ontology["use_legacy_pattern_matching"].(bool); ok {
+				settings.UseLegacyPatternMatching = v
+			}
+		}
+	}
+
+	return settings, nil
+}
+
+// SetOntologySettings updates the ontology extraction settings in project parameters.
+func (s *projectService) SetOntologySettings(ctx context.Context, projectID uuid.UUID, settings *OntologySettings) error {
+	project, err := s.projectRepo.Get(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("failed to get project: %w", err)
+	}
+
+	if project.Parameters == nil {
+		project.Parameters = make(map[string]interface{})
+	}
+
+	project.Parameters["ontology"] = map[string]interface{}{
+		"use_legacy_pattern_matching": settings.UseLegacyPatternMatching,
+	}
+
+	if err := s.projectRepo.Update(ctx, project); err != nil {
+		return fmt.Errorf("failed to update project: %w", err)
+	}
+
+	s.logger.Info("Updated ontology settings for project",
+		zap.String("project_id", projectID.String()),
+		zap.Bool("use_legacy_pattern_matching", settings.UseLegacyPatternMatching))
 
 	return nil
 }

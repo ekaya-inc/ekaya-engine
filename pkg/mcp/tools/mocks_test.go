@@ -192,6 +192,14 @@ func (m *mockProjectService) SetAutoApproveSettings(ctx context.Context, project
 	return nil
 }
 
+func (m *mockProjectService) GetOntologySettings(ctx context.Context, projectID uuid.UUID) (*services.OntologySettings, error) {
+	return &services.OntologySettings{UseLegacyPatternMatching: true}, nil
+}
+
+func (m *mockProjectService) SetOntologySettings(ctx context.Context, projectID uuid.UUID, settings *services.OntologySettings) error {
+	return nil
+}
+
 // mockDatasourceService implements services.DatasourceService for testing.
 type mockDatasourceService struct {
 	datasource      *models.Datasource
