@@ -51,7 +51,7 @@ CREATE INDEX idx_installed_apps_project ON engine_installed_apps(project_id);
 
 ---
 
-## Phase 1: Backend - Installed Apps Tracking
+## Phase 1: Backend - Installed Apps Tracking [x]
 
 ### 1.1 Database Migration
 

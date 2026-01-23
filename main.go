@@ -122,6 +122,9 @@ func main() {
 	// MCP config repository
 	mcpConfigRepo := repositories.NewMCPConfigRepository()
 
+	// Installed apps repository
+	installedAppRepo := repositories.NewInstalledAppRepository()
+
 	// Agent API key service (needed for MCP auth middleware)
 	agentAPIKeyService := services.NewAgentAPIKeyService(mcpConfigRepo, credentialEncryptor, logger)
 
@@ -166,6 +169,7 @@ func main() {
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
 	mcpConfigService := services.NewMCPConfigService(mcpConfigRepo, queryService, projectService, cfg.BaseURL, logger)
+	installedAppService := services.NewInstalledAppService(installedAppRepo, logger)
 
 	// LLM factory for creating clients per project configuration
 	llmFactory := llm.NewClientFactory(aiConfigService, logger)
@@ -414,6 +418,10 @@ func main() {
 	// Register glossary handler (protected) - business glossary for MCP clients
 	glossaryHandler := handlers.NewGlossaryHandler(glossaryService, logger)
 	glossaryHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register installed apps handler (protected) - application installation tracking
+	installedAppHandler := handlers.NewInstalledAppHandler(installedAppService, logger)
+	installedAppHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register glossary MCP tools (uses glossaryService for get_glossary tool)
 	glossaryToolDeps := &mcptools.GlossaryToolDeps{
