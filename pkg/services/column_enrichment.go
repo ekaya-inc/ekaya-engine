@@ -253,7 +253,7 @@ func (s *columnEnrichmentService) getEntityByTableName(ctx context.Context, proj
 
 // getColumnsForTable retrieves schema columns for a given table name.
 func (s *columnEnrichmentService) getColumnsForTable(ctx context.Context, projectID uuid.UUID, tableName string) ([]*models.SchemaColumn, error) {
-	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, []string{tableName}, false)
+	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, []string{tableName}, true)
 	if err != nil {
 		return nil, err
 	}

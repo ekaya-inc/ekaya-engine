@@ -120,7 +120,7 @@ Add `selectedOnly` parameter to:
 
 Modify SQL queries to conditionally add `AND is_selected = true` when `selectedOnly=true`.
 
-### Step 3: Update All Callers
+### Step 3: Update All Callers ✓
 
 Update all services to pass `selectedOnly=true` during ontology extraction:
 

@@ -197,7 +197,7 @@ func (s *ontologyFinalizationService) buildEntitySummaries(
 	}
 
 	// Get column counts per table
-	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames, false)
+	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames, true)
 	if err != nil {
 		return nil, fmt.Errorf("get columns by tables: %w", err)
 	}
@@ -406,7 +406,7 @@ func (s *ontologyFinalizationService) discoverConventions(
 	}
 
 	// Get all columns for these tables
-	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames, false)
+	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames, true)
 	if err != nil {
 		return nil, fmt.Errorf("get columns by tables: %w", err)
 	}

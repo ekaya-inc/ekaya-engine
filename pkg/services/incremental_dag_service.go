@@ -671,7 +671,7 @@ func (s *incrementalDAGService) getEntityByTable(ctx context.Context, projectID 
 }
 
 func (s *incrementalDAGService) getTableColumns(ctx context.Context, projectID uuid.UUID, tableName string) ([]*models.SchemaColumn, error) {
-	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, []string{tableName}, false)
+	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, []string{tableName}, true)
 	if err != nil {
 		return nil, err
 	}
