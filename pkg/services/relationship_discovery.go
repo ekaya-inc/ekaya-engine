@@ -134,8 +134,8 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 		OrphanTableNames: make([]string, 0),
 	}
 
-	// Phase 1: Get all tables and columns
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
+	// Phase 1: Get all tables and columns (selected tables only)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}
