@@ -3428,3 +3428,423 @@ func TestLevenshteinDistance(t *testing.T) {
 		})
 	}
 }
+
+// ============================================================================
+// Tests for Enhanced Retry Logic (BUG-10 fix)
+// ============================================================================
+
+// mockLLMClientWithRetry supports testing retry behavior by returning different
+// responses on subsequent calls. It tracks call count and captured prompts.
+type mockLLMClientWithRetry struct {
+	callCount         int
+	capturedPrompts   []string
+	responses         []string // Responses for each call (cycles if exhausted)
+	errors            []error  // Errors for each call (nil = success)
+	failFirstNAttempt int      // How many times to fail before succeeding
+	failureError      error    // Error to return on failure
+	successResponse   string   // Response to return on success
+}
+
+func (m *mockLLMClientWithRetry) GenerateResponse(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+	m.capturedPrompts = append(m.capturedPrompts, prompt)
+	callNum := m.callCount
+	m.callCount++
+
+	// If using failFirstNAttempt pattern
+	if m.failFirstNAttempt > 0 {
+		if callNum < m.failFirstNAttempt {
+			return nil, m.failureError
+		}
+		return &llm.GenerateResponseResult{
+			Content:          m.successResponse,
+			PromptTokens:     100,
+			CompletionTokens: 50,
+			TotalTokens:      150,
+		}, nil
+	}
+
+	// Use indexed responses/errors
+	idx := callNum
+	if idx >= len(m.responses) {
+		idx = len(m.responses) - 1
+	}
+
+	if idx < len(m.errors) && m.errors[idx] != nil {
+		return nil, m.errors[idx]
+	}
+
+	content := ""
+	if idx < len(m.responses) {
+		content = m.responses[idx]
+	}
+
+	return &llm.GenerateResponseResult{
+		Content:          content,
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		TotalTokens:      150,
+	}, nil
+}
+
+func (m *mockLLMClientWithRetry) CreateEmbedding(ctx context.Context, input string, model string) ([]float32, error) {
+	return nil, nil
+}
+
+func (m *mockLLMClientWithRetry) CreateEmbeddings(ctx context.Context, inputs []string, model string) ([][]float32, error) {
+	return nil, nil
+}
+
+func (m *mockLLMClientWithRetry) GetModel() string {
+	return "test-model"
+}
+
+func (m *mockLLMClientWithRetry) GetEndpoint() string {
+	return "https://test.endpoint"
+}
+
+func TestGlossaryService_EnrichSingleTerm_RetriesOnFailure(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Offer",
+			PrimaryTable: "offers",
+		},
+	}
+
+	// First response: empty SQL (will trigger retry)
+	// Second response: valid enrichment
+	emptyResponse := `{"defining_sql": "", "base_table": "offers", "aliases": []}`
+	validResponse := `{
+		"defining_sql": "SELECT COUNT(*) FILTER (WHERE status = 'used') * 100.0 / NULLIF(COUNT(*), 0) AS utilization_rate FROM offers",
+		"base_table": "offers",
+		"aliases": ["Usage Rate"]
+	}`
+
+	llmClient := &mockLLMClientWithRetry{
+		responses: []string{emptyResponse, validResponse},
+	}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+			ColumnDetails: map[string][]models.ColumnDetail{
+				"offers": {
+					{Name: "id", Role: "identifier", IsPrimaryKey: true},
+					{Name: "status", Role: "dimension", EnumValues: []models.EnumValue{{Value: "active"}, {Value: "used"}, {Value: "expired"}}},
+					{Name: "created_at", Role: "attribute"},
+				},
+			},
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+
+	// Create unenriched term
+	term := &models.BusinessGlossaryTerm{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Term:        "Offer Utilization Rate",
+		Definition:  "Percentage of offers that were used",
+		Source:      models.GlossarySourceInferred,
+		DefiningSQL: "",
+	}
+	glossaryRepo.terms[term.ID] = term
+
+	// Enrich terms
+	err := svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	require.NoError(t, err)
+
+	// Verify LLM was called twice (first attempt + retry)
+	assert.Equal(t, 2, llmClient.callCount, "LLM should be called twice: initial attempt + retry")
+
+	// Verify enrichment succeeded
+	enrichedTerm, err := svc.GetTerm(ctx, term.ID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, enrichedTerm.DefiningSQL, "Term should have SQL after retry")
+	assert.Equal(t, "offers", enrichedTerm.BaseTable)
+}
+
+func TestGlossaryService_EnrichSingleTerm_EnhancedPromptIncludesAllColumns(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Transaction",
+			PrimaryTable: "transactions",
+		},
+	}
+
+	// First response triggers parse error, second succeeds
+	invalidResponse := `{not valid json`
+	validResponse := `{
+		"defining_sql": "SELECT SUM(amount) AS total FROM transactions",
+		"base_table": "transactions",
+		"aliases": []
+	}`
+
+	llmClient := &mockLLMClientWithRetry{
+		responses: []string{invalidResponse, validResponse},
+	}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+			ColumnDetails: map[string][]models.ColumnDetail{
+				"transactions": {
+					// Identifier column (not measure/dimension)
+					{Name: "id", Role: "identifier", IsPrimaryKey: true},
+					// Measure column
+					{Name: "amount", Role: "measure"},
+					// Attribute column (not measure/dimension)
+					{Name: "created_at", Role: "attribute"},
+					// Foreign key column
+					{Name: "user_id", Role: "identifier", IsForeignKey: true, ForeignTable: "users"},
+				},
+			},
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+
+	term := &models.BusinessGlossaryTerm{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Term:        "Total Revenue",
+		Definition:  "Sum of all transaction amounts",
+		Source:      models.GlossarySourceInferred,
+		DefiningSQL: "",
+	}
+	glossaryRepo.terms[term.ID] = term
+
+	_ = svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+
+	require.Len(t, llmClient.capturedPrompts, 2, "Should have captured 2 prompts")
+
+	// First prompt (normal) should only include measures/dimensions
+	firstPrompt := llmClient.capturedPrompts[0]
+	assert.Contains(t, firstPrompt, "`amount`", "First prompt should include measure columns")
+	assert.NotContains(t, firstPrompt, "Complete Column Reference", "First prompt should NOT have enhanced header")
+
+	// Second prompt (enhanced) should include ALL columns and enhanced context
+	secondPrompt := llmClient.capturedPrompts[1]
+	assert.Contains(t, secondPrompt, "Complete Column Reference", "Enhanced prompt should have complete column header")
+	assert.Contains(t, secondPrompt, "`id`", "Enhanced prompt should include identifier columns")
+	assert.Contains(t, secondPrompt, "`user_id`", "Enhanced prompt should include FK columns")
+	assert.Contains(t, secondPrompt, "`created_at`", "Enhanced prompt should include attribute columns")
+	assert.Contains(t, secondPrompt, "Previous Attempt Failed", "Enhanced prompt should include previous error context")
+	assert.Contains(t, secondPrompt, "SQL Pattern Examples", "Enhanced prompt should include SQL examples")
+}
+
+func TestGlossaryService_EnrichSingleTerm_FailsAfterBothAttemptsFail(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Widget",
+			PrimaryTable: "widgets",
+		},
+	}
+
+	// Both responses return empty SQL
+	emptyResponse := `{"defining_sql": "", "base_table": "widgets", "aliases": []}`
+
+	llmClient := &mockLLMClientWithRetry{
+		responses: []string{emptyResponse, emptyResponse},
+	}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+
+	term := &models.BusinessGlossaryTerm{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Term:        "Widget Complexity",
+		Definition:  "A very complex metric that cannot be computed",
+		Source:      models.GlossarySourceInferred,
+		DefiningSQL: "",
+	}
+	glossaryRepo.terms[term.ID] = term
+
+	// Enrich terms - should complete without error but term remains unenriched
+	err := svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	require.NoError(t, err)
+
+	// Verify LLM was called twice
+	assert.Equal(t, 2, llmClient.callCount, "LLM should be called twice even when both fail")
+
+	// Verify term was NOT enriched (both attempts failed)
+	unenrichedTerm, err := svc.GetTerm(ctx, term.ID)
+	require.NoError(t, err)
+	assert.Empty(t, unenrichedTerm.DefiningSQL, "Term should remain unenriched when both attempts fail")
+}
+
+func TestGlossaryService_EnrichSingleTerm_SucceedsOnFirstAttempt(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "User",
+			PrimaryTable: "users",
+		},
+	}
+
+	// First response succeeds - no retry needed
+	validResponse := `{
+		"defining_sql": "SELECT COUNT(*) AS active_users FROM users WHERE status = 'active'",
+		"base_table": "users",
+		"aliases": ["Active User Count"]
+	}`
+
+	llmClient := &mockLLMClientWithRetry{
+		responses: []string{validResponse},
+	}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+			ColumnDetails: map[string][]models.ColumnDetail{
+				"users": {
+					{Name: "status", Role: "dimension"},
+				},
+			},
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+
+	term := &models.BusinessGlossaryTerm{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Term:        "Active Users",
+		Definition:  "Count of users with active status",
+		Source:      models.GlossarySourceInferred,
+		DefiningSQL: "",
+	}
+	glossaryRepo.terms[term.ID] = term
+
+	err := svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	require.NoError(t, err)
+
+	// Verify LLM was called only once (first attempt succeeded)
+	assert.Equal(t, 1, llmClient.callCount, "LLM should only be called once when first attempt succeeds")
+
+	// Verify enrichment succeeded
+	enrichedTerm, err := svc.GetTerm(ctx, term.ID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, enrichedTerm.DefiningSQL)
+	assert.Contains(t, enrichedTerm.Aliases, "Active User Count")
+}
+
+func TestBuildEnhancedEnrichTermPrompt_IncludesPreviousError(t *testing.T) {
+	// Create a minimal glossary service to access the method
+	logger := zap.NewNop()
+	svc := &glossaryService{logger: logger}
+
+	term := &models.BusinessGlossaryTerm{
+		Term:       "Test Metric",
+		Definition: "A test metric definition",
+	}
+
+	ontology := &models.TieredOntology{
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"test_table": {
+				{Name: "id", Role: "identifier"},
+				{Name: "value", Role: "measure"},
+			},
+		},
+	}
+
+	entities := []*models.OntologyEntity{
+		{Name: "Test", PrimaryTable: "test_table"},
+	}
+
+	previousError := "SQL validation failed: column 'nonexistent' does not exist"
+
+	prompt := svc.buildEnhancedEnrichTermPrompt(term, ontology, entities, previousError)
+
+	// Verify previous error is included
+	assert.Contains(t, prompt, "Previous Attempt Failed", "Enhanced prompt should include previous attempt header")
+	assert.Contains(t, prompt, previousError, "Enhanced prompt should include the actual error message")
+	assert.Contains(t, prompt, "analyze this error", "Enhanced prompt should ask LLM to analyze the error")
+}
+
+func TestBuildEnhancedEnrichTermPrompt_IncludesComplexMetricExamples(t *testing.T) {
+	logger := zap.NewNop()
+	svc := &glossaryService{logger: logger}
+
+	term := &models.BusinessGlossaryTerm{
+		Term:       "Utilization Rate",
+		Definition: "Percentage of items used",
+	}
+
+	ontology := &models.TieredOntology{}
+	entities := []*models.OntologyEntity{}
+
+	prompt := svc.buildEnhancedEnrichTermPrompt(term, ontology, entities, "")
+
+	// Verify SQL pattern examples are included
+	assert.Contains(t, prompt, "SQL Pattern Examples", "Enhanced prompt should include SQL examples section")
+	assert.Contains(t, prompt, "Utilization/Conversion Rate", "Should include utilization rate pattern")
+	assert.Contains(t, prompt, "FILTER (WHERE", "Should include PostgreSQL FILTER syntax example")
+	assert.Contains(t, prompt, "NULLIF", "Should include NULLIF for division safety")
+	assert.Contains(t, prompt, "Participation Rate", "Should include participation rate pattern")
+	assert.Contains(t, prompt, "Multi-table Join", "Should include join pattern example")
+}

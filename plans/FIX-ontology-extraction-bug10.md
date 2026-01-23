@@ -219,7 +219,7 @@ func TestEnrichTerms_ComplexMetrics(t *testing.T) {
 - [ ] Terms that can't have SQL are clearly marked
 - [ ] `get_glossary_sql` works for all returned terms
 - [ ] MCP clients can calculate any documented metric
-- [ ] Retry logic improves enrichment success rate
+- [x] Retry logic improves enrichment success rate
 
 ## Affected Terms Analysis
 

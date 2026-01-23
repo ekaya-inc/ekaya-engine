@@ -981,6 +981,7 @@ type enrichmentResult struct {
 
 // enrichSingleTerm generates SQL for a single term, validates it, and updates the database.
 // Each call acquires its own database connection from the pool to allow parallel execution.
+// On failure, it retries with enhanced context (more schema detail, examples) before giving up.
 func (s *glossaryService) enrichSingleTerm(
 	ctx context.Context,
 	term *models.BusinessGlossaryTerm,
@@ -998,33 +999,73 @@ func (s *glossaryService) enrichSingleTerm(
 	}
 	defer cleanup()
 
-	prompt := s.buildEnrichTermPrompt(term, ontology, entities)
+	// First attempt: normal enrichment
+	result, firstErr := s.tryEnrichTerm(tenantCtx, term, ontology, entities, llmClient, projectID, false, "")
+	if firstErr == nil {
+		return result
+	}
+
+	// Retry with enhanced context (includes more schema detail, examples)
+	s.logger.Debug("Retrying enrichment with enhanced context",
+		zap.String("term", term.Term),
+		zap.Error(firstErr))
+
+	result, retryErr := s.tryEnrichTerm(tenantCtx, term, ontology, entities, llmClient, projectID, true, firstErr.Error())
+	if retryErr == nil {
+		s.logger.Info("Enrichment succeeded on retry with enhanced context",
+			zap.String("term", term.Term))
+		return result
+	}
+
+	// Both attempts failed - return the retry error (more informative)
+	return enrichmentResult{termName: term.Term, err: fmt.Errorf("enrichment failed after retry: %w", retryErr)}
+}
+
+// tryEnrichTerm attempts to enrich a single term with LLM-generated SQL.
+// When enhanced=true, the prompt includes ALL columns (not just measures/dimensions),
+// additional examples for complex metrics, and context from the previous failure.
+func (s *glossaryService) tryEnrichTerm(
+	ctx context.Context,
+	term *models.BusinessGlossaryTerm,
+	ontology *models.TieredOntology,
+	entities []*models.OntologyEntity,
+	llmClient llm.LLMClient,
+	projectID uuid.UUID,
+	enhanced bool,
+	previousError string,
+) (enrichmentResult, error) {
+	var prompt string
+	if enhanced {
+		prompt = s.buildEnhancedEnrichTermPrompt(term, ontology, entities, previousError)
+	} else {
+		prompt = s.buildEnrichTermPrompt(term, ontology, entities)
+	}
 	systemMessage := s.enrichTermSystemMessage()
 
 	// Call LLM to generate SQL (uses tenantCtx so SavePending has its own connection)
-	result, err := llmClient.GenerateResponse(tenantCtx, prompt, systemMessage, 0.3, false)
+	result, err := llmClient.GenerateResponse(ctx, prompt, systemMessage, 0.3, false)
 	if err != nil {
-		return enrichmentResult{termName: term.Term, err: fmt.Errorf("LLM generate: %w", err)}
+		return enrichmentResult{termName: term.Term}, fmt.Errorf("LLM generate: %w", err)
 	}
 
 	// Parse enrichment response
 	enrichment, err := s.parseEnrichTermResponse(result.Content)
 	if err != nil {
-		return enrichmentResult{termName: term.Term, err: fmt.Errorf("parse response: %w", err)}
+		return enrichmentResult{termName: term.Term}, fmt.Errorf("parse response: %w", err)
 	}
 
 	if enrichment.DefiningSQL == "" {
-		return enrichmentResult{termName: term.Term, err: fmt.Errorf("LLM returned empty SQL")}
+		return enrichmentResult{termName: term.Term}, fmt.Errorf("LLM returned empty SQL")
 	}
 
 	// Validate SQL and capture output columns (uses tenantCtx for datasource lookup)
-	testResult, err := s.TestSQL(tenantCtx, projectID, enrichment.DefiningSQL)
+	testResult, err := s.TestSQL(ctx, projectID, enrichment.DefiningSQL)
 	if err != nil {
-		return enrichmentResult{termName: term.Term, err: fmt.Errorf("test SQL: %w", err)}
+		return enrichmentResult{termName: term.Term}, fmt.Errorf("test SQL: %w", err)
 	}
 
 	if !testResult.Valid {
-		return enrichmentResult{termName: term.Term, err: fmt.Errorf("SQL validation failed: %s", testResult.Error)}
+		return enrichmentResult{termName: term.Term}, fmt.Errorf("SQL validation failed: %s", testResult.Error)
 	}
 
 	// Check for potential enum value mismatches (best-effort validation)
@@ -1058,11 +1099,11 @@ func (s *glossaryService) enrichSingleTerm(
 		}
 	}
 
-	if err := s.glossaryRepo.Update(tenantCtx, term); err != nil {
-		return enrichmentResult{termName: term.Term, err: fmt.Errorf("update term: %w", err)}
+	if err := s.glossaryRepo.Update(ctx, term); err != nil {
+		return enrichmentResult{termName: term.Term}, fmt.Errorf("update term: %w", err)
 	}
 
-	return enrichmentResult{termName: term.Term, outputColumns: len(testResult.OutputColumns)}
+	return enrichmentResult{termName: term.Term, outputColumns: len(testResult.OutputColumns)}, nil
 }
 
 func (s *glossaryService) enrichTermSystemMessage() string {
@@ -1186,6 +1227,154 @@ func (s *glossaryService) buildEnrichTermPrompt(
 }
 `)
 	sb.WriteString("```\n")
+
+	return sb.String()
+}
+
+// buildEnhancedEnrichTermPrompt builds a more detailed prompt for retry attempts.
+// It includes ALL columns (not just measures/dimensions), additional examples for
+// complex metrics like utilization rates and percentages, and context from the
+// previous failure to help the LLM avoid the same mistake.
+func (s *glossaryService) buildEnhancedEnrichTermPrompt(
+	term *models.BusinessGlossaryTerm,
+	ontology *models.TieredOntology,
+	entities []*models.OntologyEntity,
+	previousError string,
+) string {
+	var sb strings.Builder
+
+	sb.WriteString("# Schema Context (Enhanced Detail)\n\n")
+
+	// Include previous error context to help LLM avoid the same mistake
+	if previousError != "" {
+		sb.WriteString("## Previous Attempt Failed\n\n")
+		sb.WriteString("The first attempt to generate SQL for this term failed with the following error:\n")
+		sb.WriteString(fmt.Sprintf("```\n%s\n```\n\n", previousError))
+		sb.WriteString("Please analyze this error and generate valid SQL that avoids this issue.\n\n")
+	}
+
+	// Include domain summary
+	if ontology.DomainSummary != nil && ontology.DomainSummary.Description != "" {
+		sb.WriteString("## Domain Overview\n\n")
+		sb.WriteString(ontology.DomainSummary.Description)
+		sb.WriteString("\n\n")
+	}
+
+	// Include conventions
+	if ontology.DomainSummary != nil && ontology.DomainSummary.Conventions != nil {
+		conv := ontology.DomainSummary.Conventions
+		sb.WriteString("## Conventions\n\n")
+
+		if conv.SoftDelete != nil && conv.SoftDelete.Enabled {
+			sb.WriteString(fmt.Sprintf("- Soft delete: Filter with `%s`\n", conv.SoftDelete.Filter))
+		}
+		if conv.Currency != nil {
+			if conv.Currency.Format == "cents" {
+				sb.WriteString("- Currency: Stored in cents, divide by 100 for display\n")
+			} else {
+				sb.WriteString("- Currency: Stored as dollars/decimal\n")
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// List entities with descriptions
+	sb.WriteString("## Entities\n\n")
+	for _, e := range entities {
+		if e.IsDeleted {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("### %s\n", e.Name))
+		sb.WriteString(fmt.Sprintf("- Table: `%s`\n", e.PrimaryTable))
+		if e.Description != "" {
+			sb.WriteString(fmt.Sprintf("- Description: %s\n", e.Description))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Include ALL column details (not just measures/dimensions)
+	if len(ontology.ColumnDetails) > 0 {
+		sb.WriteString("## Complete Column Reference\n\n")
+		sb.WriteString("All available columns by table (use these exact names in your SQL):\n\n")
+		for tableName, columns := range ontology.ColumnDetails {
+			sb.WriteString(fmt.Sprintf("**%s:**\n", tableName))
+			for _, col := range columns {
+				colInfo := fmt.Sprintf("- `%s`", col.Name)
+				if col.Role != "" {
+					colInfo += fmt.Sprintf(" [%s]", col.Role)
+				}
+				if col.IsPrimaryKey {
+					colInfo += " (PK)"
+				}
+				if col.IsForeignKey {
+					colInfo += fmt.Sprintf(" (FK→%s)", col.ForeignTable)
+				}
+				if col.Description != "" {
+					colInfo += fmt.Sprintf(" - %s", col.Description)
+				}
+				sb.WriteString(colInfo + "\n")
+
+				// Include enum values if present so LLM uses exact values in SQL
+				if len(col.EnumValues) > 0 {
+					values := make([]string, len(col.EnumValues))
+					for i, v := range col.EnumValues {
+						if v.Description != "" {
+							values[i] = fmt.Sprintf("'%s' (%s)", v.Value, v.Description)
+						} else {
+							values[i] = fmt.Sprintf("'%s'", v.Value)
+						}
+					}
+					sb.WriteString(fmt.Sprintf("  Allowed values: %s\n", strings.Join(values, ", ")))
+				}
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// Add the term to enrich
+	sb.WriteString("## Term to Enrich\n\n")
+	sb.WriteString(fmt.Sprintf("**Term:** %s\n", term.Term))
+	sb.WriteString(fmt.Sprintf("**Definition:** %s\n\n", term.Definition))
+
+	// Add examples for complex metrics
+	sb.WriteString("## SQL Pattern Examples\n\n")
+	sb.WriteString("For complex metrics like rates, percentages, and multi-table calculations:\n\n")
+	sb.WriteString("**Utilization/Conversion Rate (percentage of items in a state):**\n")
+	sb.WriteString("```sql\n")
+	sb.WriteString("SELECT\n")
+	sb.WriteString("    COUNT(*) FILTER (WHERE status = 'used') * 100.0 / NULLIF(COUNT(*), 0) AS utilization_rate\n")
+	sb.WriteString("FROM offers\n")
+	sb.WriteString("WHERE created_at >= NOW() - INTERVAL '30 days'\n")
+	sb.WriteString("```\n\n")
+	sb.WriteString("**Participation Rate (distinct participants / total eligible):**\n")
+	sb.WriteString("```sql\n")
+	sb.WriteString("SELECT\n")
+	sb.WriteString("    COUNT(DISTINCT participant_id) * 100.0 / NULLIF((SELECT COUNT(*) FROM users WHERE eligible = true), 0) AS participation_rate\n")
+	sb.WriteString("FROM program_participants\n")
+	sb.WriteString("```\n\n")
+	sb.WriteString("**Multi-table Join for Related Metrics:**\n")
+	sb.WriteString("```sql\n")
+	sb.WriteString("SELECT\n")
+	sb.WriteString("    u.id AS user_id,\n")
+	sb.WriteString("    COUNT(t.id) AS transaction_count,\n")
+	sb.WriteString("    COALESCE(SUM(t.amount), 0) AS total_amount\n")
+	sb.WriteString("FROM users u\n")
+	sb.WriteString("LEFT JOIN transactions t ON u.id = t.user_id\n")
+	sb.WriteString("GROUP BY u.id\n")
+	sb.WriteString("```\n\n")
+
+	// Response format
+	sb.WriteString("## Response Format\n\n")
+	sb.WriteString("Respond with a JSON object containing the enrichment:\n")
+	sb.WriteString("```json\n")
+	sb.WriteString(`{
+  "defining_sql": "SELECT COUNT(*) FILTER (WHERE status = 'used') * 100.0 / NULLIF(COUNT(*), 0) AS utilization_rate\nFROM offers\nWHERE created_at >= NOW() - INTERVAL '30 days'",
+  "base_table": "offers",
+  "aliases": ["Usage Rate", "Redemption Rate"]
+}
+`)
+	sb.WriteString("```\n\n")
+	sb.WriteString("IMPORTANT: Use exact table and column names from the schema above. The SQL must execute successfully.\n")
 
 	return sb.String()
 }
