@@ -807,6 +807,226 @@ func TestGlossaryRepository_OutputColumns(t *testing.T) {
 }
 
 // ============================================================================
+// Enrichment Status Tests
+// ============================================================================
+
+func TestGlossaryRepository_EnrichmentStatus_Create(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	term := &models.BusinessGlossaryTerm{
+		ProjectID:        tc.projectID,
+		Term:             "Pending Metric",
+		Definition:       "A metric awaiting SQL enrichment",
+		DefiningSQL:      "",
+		Source:           models.GlossarySourceInferred,
+		EnrichmentStatus: models.GlossaryEnrichmentPending,
+	}
+
+	err := tc.repo.Create(ctx, term)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	retrieved, err := tc.repo.GetByID(ctx, term.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if retrieved.EnrichmentStatus != models.GlossaryEnrichmentPending {
+		t.Errorf("expected enrichment_status 'pending', got %q", retrieved.EnrichmentStatus)
+	}
+	if retrieved.EnrichmentError != "" {
+		t.Errorf("expected empty enrichment_error, got %q", retrieved.EnrichmentError)
+	}
+}
+
+func TestGlossaryRepository_EnrichmentStatus_Failed(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	term := &models.BusinessGlossaryTerm{
+		ProjectID:        tc.projectID,
+		Term:             "Failed Metric",
+		Definition:       "A metric that failed SQL enrichment",
+		DefiningSQL:      "",
+		Source:           models.GlossarySourceInferred,
+		EnrichmentStatus: models.GlossaryEnrichmentFailed,
+		EnrichmentError:  "LLM returned empty SQL after 3 retries",
+	}
+
+	err := tc.repo.Create(ctx, term)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	retrieved, err := tc.repo.GetByID(ctx, term.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if retrieved.EnrichmentStatus != models.GlossaryEnrichmentFailed {
+		t.Errorf("expected enrichment_status 'failed', got %q", retrieved.EnrichmentStatus)
+	}
+	if retrieved.EnrichmentError != "LLM returned empty SQL after 3 retries" {
+		t.Errorf("expected enrichment_error, got %q", retrieved.EnrichmentError)
+	}
+}
+
+func TestGlossaryRepository_EnrichmentStatus_Success(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	term := &models.BusinessGlossaryTerm{
+		ProjectID:        tc.projectID,
+		Term:             "Successful Metric",
+		Definition:       "A metric with successful SQL enrichment",
+		DefiningSQL:      "SELECT COUNT(*) FROM users",
+		Source:           models.GlossarySourceInferred,
+		EnrichmentStatus: models.GlossaryEnrichmentSuccess,
+	}
+
+	err := tc.repo.Create(ctx, term)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	retrieved, err := tc.repo.GetByID(ctx, term.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if retrieved.EnrichmentStatus != models.GlossaryEnrichmentSuccess {
+		t.Errorf("expected enrichment_status 'success', got %q", retrieved.EnrichmentStatus)
+	}
+}
+
+func TestGlossaryRepository_EnrichmentStatus_Update(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create with pending status
+	term := &models.BusinessGlossaryTerm{
+		ProjectID:        tc.projectID,
+		Term:             "Updating Metric",
+		Definition:       "A metric transitioning from pending to success",
+		DefiningSQL:      "",
+		Source:           models.GlossarySourceInferred,
+		EnrichmentStatus: models.GlossaryEnrichmentPending,
+	}
+
+	err := tc.repo.Create(ctx, term)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Update to success with SQL
+	term.EnrichmentStatus = models.GlossaryEnrichmentSuccess
+	term.DefiningSQL = "SELECT SUM(amount) FROM transactions"
+
+	err = tc.repo.Update(ctx, term)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	retrieved, err := tc.repo.GetByID(ctx, term.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if retrieved.EnrichmentStatus != models.GlossaryEnrichmentSuccess {
+		t.Errorf("expected enrichment_status 'success', got %q", retrieved.EnrichmentStatus)
+	}
+	if retrieved.DefiningSQL != "SELECT SUM(amount) FROM transactions" {
+		t.Errorf("expected updated defining_sql, got %q", retrieved.DefiningSQL)
+	}
+}
+
+func TestGlossaryRepository_EnrichmentStatus_UpdateToFailed(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create with pending status
+	term := &models.BusinessGlossaryTerm{
+		ProjectID:        tc.projectID,
+		Term:             "Failing Metric",
+		Definition:       "A metric that will fail enrichment",
+		DefiningSQL:      "",
+		Source:           models.GlossarySourceInferred,
+		EnrichmentStatus: models.GlossaryEnrichmentPending,
+	}
+
+	err := tc.repo.Create(ctx, term)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Update to failed with error message
+	term.EnrichmentStatus = models.GlossaryEnrichmentFailed
+	term.EnrichmentError = "SQL validation failed: syntax error near FROM"
+
+	err = tc.repo.Update(ctx, term)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	retrieved, err := tc.repo.GetByID(ctx, term.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if retrieved.EnrichmentStatus != models.GlossaryEnrichmentFailed {
+		t.Errorf("expected enrichment_status 'failed', got %q", retrieved.EnrichmentStatus)
+	}
+	if retrieved.EnrichmentError != "SQL validation failed: syntax error near FROM" {
+		t.Errorf("expected enrichment_error, got %q", retrieved.EnrichmentError)
+	}
+}
+
+func TestGlossaryRepository_EnrichmentStatus_NullByDefault(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create without setting enrichment status (for backwards compatibility)
+	term := &models.BusinessGlossaryTerm{
+		ProjectID:   tc.projectID,
+		Term:        "Legacy Metric",
+		Definition:  "A metric created without enrichment status",
+		DefiningSQL: "SELECT 1",
+		Source:      models.GlossarySourceManual,
+	}
+
+	err := tc.repo.Create(ctx, term)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	retrieved, err := tc.repo.GetByID(ctx, term.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	// Without explicit status, database default 'pending' should apply
+	// OR empty string if no enrichment status was set (based on nullString behavior)
+	// The database has DEFAULT 'pending' so if we pass NULL, it should use the default
+	if retrieved.EnrichmentStatus != "" && retrieved.EnrichmentStatus != models.GlossaryEnrichmentPending {
+		t.Errorf("expected enrichment_status to be empty or 'pending', got %q", retrieved.EnrichmentStatus)
+	}
+}
+
+// ============================================================================
 // No Tenant Scope Tests (RLS Enforcement)
 // ============================================================================
 

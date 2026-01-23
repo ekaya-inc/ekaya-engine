@@ -216,7 +216,7 @@ func TestEnrichTerms_ComplexMetrics(t *testing.T) {
 ## Success Criteria
 
 - [ ] All glossary terms have valid `defining_sql`
-- [ ] Terms that can't have SQL are clearly marked
+- [x] Terms that can't have SQL are clearly marked
 - [ ] `get_glossary_sql` works for all returned terms
 - [ ] MCP clients can calculate any documented metric
 - [x] Retry logic improves enrichment success rate
