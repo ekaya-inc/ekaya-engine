@@ -2,7 +2,6 @@ package dag
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -11,18 +10,6 @@ import (
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
-
-// mockKnowledgeSeedingMethods is a mock implementation for testing.
-type mockKnowledgeSeedingMethods struct {
-	seedFunc func(ctx context.Context, projectID uuid.UUID) (int, error)
-}
-
-func (m *mockKnowledgeSeedingMethods) SeedKnowledgeFromFile(ctx context.Context, projectID uuid.UUID) (int, error) {
-	if m.seedFunc != nil {
-		return m.seedFunc(ctx, projectID)
-	}
-	return 0, nil
-}
 
 // mockKnowledgeDAGRepo is a minimal mock for the DAG repository.
 type mockKnowledgeDAGRepo struct {
@@ -93,35 +80,7 @@ func (m *mockKnowledgeDAGRepo) GetNextPendingNode(ctx context.Context, dagID uui
 	return nil, nil
 }
 
-func TestKnowledgeSeedingNode_Execute_Success_NoSeedPath(t *testing.T) {
-	mockMethods := &mockKnowledgeSeedingMethods{
-		seedFunc: func(ctx context.Context, projectID uuid.UUID) (int, error) {
-			return 0, nil // No seed path configured
-		},
-	}
-
-	node := NewKnowledgeSeedingNode(&mockKnowledgeDAGRepo{}, mockMethods, zap.NewNop())
-	nodeID := uuid.New()
-	node.SetCurrentNodeID(nodeID)
-
-	dag := &models.OntologyDAG{
-		ID:        uuid.New(),
-		ProjectID: uuid.New(),
-	}
-
-	err := node.Execute(context.Background(), dag)
-	assert.NoError(t, err)
-}
-
-func TestKnowledgeSeedingNode_Execute_Success_WithFacts(t *testing.T) {
-	calledWithProjectID := uuid.Nil
-	mockMethods := &mockKnowledgeSeedingMethods{
-		seedFunc: func(ctx context.Context, projectID uuid.UUID) (int, error) {
-			calledWithProjectID = projectID
-			return 5, nil // Seeded 5 facts
-		},
-	}
-
+func TestKnowledgeSeedingNode_Execute_NoOp(t *testing.T) {
 	progressMessages := make([]string, 0)
 	mockRepo := &mockKnowledgeDAGRepo{
 		updateProgressFunc: func(ctx context.Context, nodeID uuid.UUID, progress *models.DAGNodeProgress) error {
@@ -130,34 +89,7 @@ func TestKnowledgeSeedingNode_Execute_Success_WithFacts(t *testing.T) {
 		},
 	}
 
-	node := NewKnowledgeSeedingNode(mockRepo, mockMethods, zap.NewNop())
-	nodeID := uuid.New()
-	node.SetCurrentNodeID(nodeID)
-
-	projectID := uuid.New()
-	dag := &models.OntologyDAG{
-		ID:        uuid.New(),
-		ProjectID: projectID,
-	}
-
-	err := node.Execute(context.Background(), dag)
-	assert.NoError(t, err)
-	assert.Equal(t, projectID, calledWithProjectID)
-
-	// Verify progress messages
-	assert.Contains(t, progressMessages, "Loading project knowledge...")
-	assert.Contains(t, progressMessages, "Seeded 5 knowledge facts")
-}
-
-func TestKnowledgeSeedingNode_Execute_Error(t *testing.T) {
-	expectedErr := errors.New("failed to read seed file")
-	mockMethods := &mockKnowledgeSeedingMethods{
-		seedFunc: func(ctx context.Context, projectID uuid.UUID) (int, error) {
-			return 0, expectedErr
-		},
-	}
-
-	node := NewKnowledgeSeedingNode(&mockKnowledgeDAGRepo{}, mockMethods, zap.NewNop())
+	node := NewKnowledgeSeedingNode(mockRepo, zap.NewNop())
 	nodeID := uuid.New()
 	node.SetCurrentNodeID(nodeID)
 
@@ -167,11 +99,13 @@ func TestKnowledgeSeedingNode_Execute_Error(t *testing.T) {
 	}
 
 	err := node.Execute(context.Background(), dag)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "seed knowledge from file")
+	assert.NoError(t, err)
+
+	// Verify progress message indicates no-op behavior
+	assert.Contains(t, progressMessages, "Knowledge seeding complete (inference-based)")
 }
 
 func TestKnowledgeSeedingNode_Name(t *testing.T) {
-	node := NewKnowledgeSeedingNode(&mockKnowledgeDAGRepo{}, &mockKnowledgeSeedingMethods{}, zap.NewNop())
+	node := NewKnowledgeSeedingNode(&mockKnowledgeDAGRepo{}, zap.NewNop())
 	assert.Equal(t, models.DAGNodeKnowledgeSeeding, node.Name())
 }

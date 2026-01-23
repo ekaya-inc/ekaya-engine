@@ -223,7 +223,6 @@ func main() {
 		getTenantCtx, logger)
 
 	// Wire DAG adapters using setter pattern (avoids import cycles)
-	ontologyDAGService.SetKnowledgeSeedingMethods(services.NewKnowledgeSeedingAdapter(knowledgeService))
 	ontologyDAGService.SetEntityDiscoveryMethods(services.NewEntityDiscoveryAdapter(entityDiscoveryService))
 	ontologyDAGService.SetEntityEnrichmentMethods(services.NewEntityEnrichmentAdapter(entityDiscoveryService, schemaRepo, getTenantCtx))
 	ontologyDAGService.SetFKDiscoveryMethods(services.NewFKDiscoveryAdapter(deterministicRelationshipService))

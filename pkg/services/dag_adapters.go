@@ -196,17 +196,3 @@ func NewGlossaryEnrichmentAdapter(svc GlossaryService) dag.GlossaryEnrichmentMet
 func (a *GlossaryEnrichmentAdapter) EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error {
 	return a.svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
 }
-
-// KnowledgeSeedingAdapter adapts KnowledgeService for the dag package.
-type KnowledgeSeedingAdapter struct {
-	svc KnowledgeService
-}
-
-// NewKnowledgeSeedingAdapter creates a new adapter.
-func NewKnowledgeSeedingAdapter(svc KnowledgeService) dag.KnowledgeSeedingMethods {
-	return &KnowledgeSeedingAdapter{svc: svc}
-}
-
-func (a *KnowledgeSeedingAdapter) SeedKnowledgeFromFile(ctx context.Context, projectID uuid.UUID) (int, error) {
-	return a.svc.SeedKnowledgeFromFile(ctx, projectID)
-}

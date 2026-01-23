@@ -130,25 +130,30 @@ rm pkg/services/knowledge_discovery.go
 rm pkg/services/knowledge_discovery_test.go
 ```
 
-### Step 2: Update knowledge.go
+### Step 2: Update knowledge.go ✓
 Remove the interface method, implementation, structs, and helper functions.
 
-### Step 3: Update DAG Node
-Either make it a no-op or remove it entirely from the DAG definition.
+### Step 3: Update DAG Node ✓
+Made it a no-op - knowledge seeding now immediately succeeds with "inference-based" message.
 
-### Step 4: Remove Adapter
-Remove `KnowledgeSeedingAdapter` from dag_adapters.go.
+### Step 4: Remove Adapter ✓
+Removed `KnowledgeSeedingAdapter` from dag_adapters.go.
 
-### Step 5: Update project.go
-Remove `ParseEnumFile`, keep `ParseEnumFileContent`.
+### Step 5: Update project.go ✓
+Removed `ParseEnumFile`, kept `ParseEnumFileContent`.
 
-### Step 6: Update column_enrichment.go
-Remove `loadEnumDefinitions` and its usage.
+### Step 6: Update column_enrichment.go ✓
+Removed `loadEnumDefinitions` and its usage.
 
-### Step 7: Update Tests
-Remove or update test files as listed above.
+### Step 7: Update Tests ✓
+- Removed `knowledge_test.go` (file-based tests)
+- Removed `knowledge_seeding_integration_test.go` (file-based tests)
+- Updated `knowledge_seeding_node_test.go` to test no-op behavior
+- Removed `TestParseEnumFile*` tests from `project_test.go`
+- Removed `TestColumnEnrichmentService_loadEnumDefinitions` from `column_enrichment_test.go`
+- Removed mock `SeedKnowledgeFromFile` from handler tests
 
-### Step 8: Verify No File I/O Remains
+### Step 8: Verify No File I/O Remains ✓
 ```bash
 # Should find NO results after cleanup:
 grep -r "os.ReadFile\|ioutil.ReadFile" pkg/services/ --include="*.go" | grep -v "_test.go"
@@ -166,11 +171,11 @@ This replaces file-based knowledge with schema-inferred knowledge.
 
 ## Success Criteria
 
-- [ ] No file I/O for project-specific data
-- [ ] DAG completes without file loading step
-- [ ] Knowledge comes only from schema inference or MCP tool updates
-- [ ] Tests pass without file fixtures
-- [ ] `grep` verification commands return no results
+- [x] No file I/O for project-specific data
+- [x] DAG completes without file loading step
+- [x] Knowledge comes only from schema inference or MCP tool updates
+- [x] Tests pass without file fixtures
+- [x] `grep` verification commands return no results
 - [ ] `make check` passes
 
 ## Risk Assessment
