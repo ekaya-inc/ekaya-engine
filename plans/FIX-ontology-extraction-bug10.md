@@ -218,7 +218,7 @@ func TestEnrichTerms_ComplexMetrics(t *testing.T) {
 - [ ] All glossary terms have valid `defining_sql`
 - [x] Terms that can't have SQL are clearly marked
 - [x] `get_glossary_sql` works for all returned terms (returns enrichment_status/error for failed terms)
-- [ ] MCP clients can calculate any documented metric
+- [x] MCP clients can calculate any documented metric
 - [x] Retry logic improves enrichment success rate
 - [x] LLM prompt includes examples for complex metrics (utilization rates, participation rates, etc.)
 
