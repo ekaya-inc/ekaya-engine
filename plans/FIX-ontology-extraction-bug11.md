@@ -190,7 +190,7 @@ Line 652-665: Add cardinality calculation using join analysis data.
 
 ### Step 4: Update Reverse Relationship Creation
 
-**File:** `pkg/services/deterministic_relationship_service.go`
+[x] **File:** `pkg/services/deterministic_relationship_service.go`
 
 Line 89-103: Include cardinality (with direction swap: N:1 becomes 1:N for reverse).
 
