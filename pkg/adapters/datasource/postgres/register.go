@@ -30,7 +30,8 @@ func init() {
 			if err != nil {
 				return nil, err
 			}
-			return NewSchemaDiscoverer(ctx, cfg, connMgr, projectID, datasourceID, userID)
+			// Pass nil logger - a no-op logger will be used internally
+			return NewSchemaDiscoverer(ctx, cfg, connMgr, projectID, datasourceID, userID, nil)
 		},
 		QueryExecutorFactory: func(ctx context.Context, config map[string]any, connMgr *datasource.ConnectionManager, projectID, datasourceID uuid.UUID, userID string) (datasource.QueryExecutor, error) {
 			cfg, err := FromMap(config)

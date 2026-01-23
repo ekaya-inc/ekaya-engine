@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 )
@@ -21,12 +22,18 @@ type SchemaDiscoverer struct {
 	userID       string
 	datasourceID uuid.UUID
 	ownedPool    bool // true if we created the pool (for tests or direct instantiation)
+	logger       *zap.Logger
 }
 
 // NewSchemaDiscoverer creates a PostgreSQL schema discoverer using the connection manager.
 // If connMgr is nil, creates an unmanaged pool (for tests or direct instantiation).
-func NewSchemaDiscoverer(ctx context.Context, cfg *Config, connMgr *datasource.ConnectionManager, projectID, datasourceID uuid.UUID, userID string) (*SchemaDiscoverer, error) {
+// If logger is nil, a no-op logger is used.
+func NewSchemaDiscoverer(ctx context.Context, cfg *Config, connMgr *datasource.ConnectionManager, projectID, datasourceID uuid.UUID, userID string, logger *zap.Logger) (*SchemaDiscoverer, error) {
 	connStr := buildConnectionString(cfg)
+
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 
 	if connMgr == nil {
 		// Fallback for direct instantiation (tests)
@@ -38,6 +45,7 @@ func NewSchemaDiscoverer(ctx context.Context, cfg *Config, connMgr *datasource.C
 		return &SchemaDiscoverer{
 			pool:      pool,
 			ownedPool: true,
+			logger:    logger,
 		}, nil
 	}
 
@@ -60,6 +68,7 @@ func NewSchemaDiscoverer(ctx context.Context, cfg *Config, connMgr *datasource.C
 		userID:       userID,
 		datasourceID: datasourceID,
 		ownedPool:    false,
+		logger:       logger,
 	}, nil
 }
 
@@ -228,6 +237,8 @@ func (d *SchemaDiscoverer) DiscoverForeignKeys(ctx context.Context) ([]datasourc
 }
 
 // AnalyzeColumnStats gathers statistics for columns.
+// Continues processing other columns when one fails (e.g., type cast errors for arrays/bytea).
+// Failed columns are included in results with zero/nil stats.
 func (d *SchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, tableName string, columnNames []string) ([]datasource.ColumnStats, error) {
 	if len(columnNames) == 0 {
 		return nil, nil
@@ -257,7 +268,19 @@ func (d *SchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, t
 
 		row := d.pool.QueryRow(ctx, query)
 		if err := row.Scan(&s.RowCount, &s.NonNullCount, &s.DistinctCount, &s.MinLength, &s.MaxLength); err != nil {
-			return nil, fmt.Errorf("analyze column %s: %w", colName, err)
+			// Log warning but continue with other columns.
+			// This commonly happens for array columns, bytea, or custom types that can't cast to text.
+			d.logger.Warn("Failed to analyze column stats, using zero values",
+				zap.String("schema", schemaName),
+				zap.String("table", tableName),
+				zap.String("column", colName),
+				zap.Error(err))
+			// Keep zero values for stats so the column is still tracked
+			s.RowCount = 0
+			s.NonNullCount = 0
+			s.DistinctCount = 0
+			s.MinLength = nil
+			s.MaxLength = nil
 		}
 
 		stats = append(stats, s)

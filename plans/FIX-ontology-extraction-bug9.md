@@ -249,10 +249,10 @@ func TestStatsCollection_AllColumnsProcessed(t *testing.T) {
 
 ## Success Criteria
 
-- [ ] Per-column failures don't abort entire table stats collection
+- [x] Per-column failures don't abort entire table stats collection
 - [ ] All text-compatible columns have accurate distinct_count
 - [ ] Non-text columns have NULL length but valid distinct_count
-- [ ] Error logging shows which columns/tables had issues
+- [x] Error logging shows which columns/tables had issues
 - [ ] 90%+ of joinable columns have stats (up from 73%)
 - [ ] BUG-3, BUG-6, BUG-11 symptoms reduced after fix
 

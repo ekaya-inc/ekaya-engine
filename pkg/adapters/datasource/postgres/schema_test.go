@@ -50,8 +50,8 @@ func setupSchemaDiscovererTest(t *testing.T) *schemaDiscovererTestContext {
 		SSLMode:  "disable",
 	}
 
-	// Pass nil for connection manager and zero IDs for unmanaged pool (test mode)
-	discoverer, err := NewSchemaDiscoverer(ctx, cfg, nil, uuid.Nil, uuid.Nil, "")
+	// Pass nil for connection manager, zero IDs, and nil logger for unmanaged pool (test mode)
+	discoverer, err := NewSchemaDiscoverer(ctx, cfg, nil, uuid.Nil, uuid.Nil, "", nil)
 	if err != nil {
 		t.Fatalf("failed to create schema discoverer: %v", err)
 	}
@@ -423,6 +423,82 @@ func TestSchemaDiscoverer_AnalyzeColumnStats_EmptyList(t *testing.T) {
 	}
 }
 
+func TestSchemaDiscoverer_AnalyzeColumnStats_PartialFailure(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// Create a temporary table with valid columns
+	setupSQL := `
+		CREATE TEMP TABLE test_partial_failure (
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL
+		);
+		INSERT INTO test_partial_failure (name) VALUES ('alice'), ('bob'), ('charlie');
+	`
+
+	_, err := tc.discoverer.pool.Exec(ctx, setupSQL)
+	if err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+
+	// Request stats for columns including a nonexistent one.
+	// This simulates the scenario where a column might fail due to permissions, type issues, etc.
+	// The function should continue processing after a column fails.
+	columnNames := []string{"id", "nonexistent_column", "name"}
+	stats, err := tc.discoverer.AnalyzeColumnStats(ctx, "pg_temp", "test_partial_failure", columnNames)
+
+	// Should NOT return an error - partial failures are handled gracefully
+	if err != nil {
+		t.Fatalf("AnalyzeColumnStats should handle partial failures, got error: %v", err)
+	}
+
+	// Should return stats for all requested columns
+	if len(stats) != 3 {
+		t.Fatalf("expected 3 stat results, got %d", len(stats))
+	}
+
+	// Verify column names are preserved in order
+	if stats[0].ColumnName != "id" {
+		t.Errorf("expected first column to be 'id', got %q", stats[0].ColumnName)
+	}
+	if stats[1].ColumnName != "nonexistent_column" {
+		t.Errorf("expected second column to be 'nonexistent_column', got %q", stats[1].ColumnName)
+	}
+	if stats[2].ColumnName != "name" {
+		t.Errorf("expected third column to be 'name', got %q", stats[2].ColumnName)
+	}
+
+	// Verify id column has accurate stats (3 rows, 3 distinct)
+	if stats[0].RowCount != 3 {
+		t.Errorf("expected id row count 3, got %d", stats[0].RowCount)
+	}
+	if stats[0].DistinctCount != 3 {
+		t.Errorf("expected id distinct count 3, got %d", stats[0].DistinctCount)
+	}
+
+	// Verify nonexistent_column has zero stats (failed to analyze)
+	if stats[1].RowCount != 0 {
+		t.Errorf("expected nonexistent_column row count 0, got %d", stats[1].RowCount)
+	}
+	if stats[1].DistinctCount != 0 {
+		t.Errorf("expected nonexistent_column distinct count 0, got %d", stats[1].DistinctCount)
+	}
+	if stats[1].MinLength != nil {
+		t.Errorf("expected nonexistent_column min_length nil, got %d", *stats[1].MinLength)
+	}
+	if stats[1].MaxLength != nil {
+		t.Errorf("expected nonexistent_column max_length nil, got %d", *stats[1].MaxLength)
+	}
+
+	// Verify name column still has accurate stats (processed after the failure)
+	if stats[2].RowCount != 3 {
+		t.Errorf("expected name row count 3, got %d", stats[2].RowCount)
+	}
+	if stats[2].DistinctCount != 3 {
+		t.Errorf("expected name distinct count 3, got %d", stats[2].DistinctCount)
+	}
+}
+
 func TestSchemaDiscoverer_CheckValueOverlap(t *testing.T) {
 	tc := setupSchemaDiscovererTest(t)
 	ctx := context.Background()
@@ -611,8 +687,8 @@ func TestSchemaDiscoverer_Close(t *testing.T) {
 		SSLMode:  "disable",
 	}
 
-	// Pass nil for connection manager and zero IDs for unmanaged pool (test mode)
-	discoverer, err := NewSchemaDiscoverer(ctx, cfg, nil, uuid.Nil, uuid.Nil, "")
+	// Pass nil for connection manager, zero IDs, and nil logger for unmanaged pool (test mode)
+	discoverer, err := NewSchemaDiscoverer(ctx, cfg, nil, uuid.Nil, uuid.Nil, "", nil)
 	if err != nil {
 		t.Fatalf("failed to create discoverer: %v", err)
 	}
