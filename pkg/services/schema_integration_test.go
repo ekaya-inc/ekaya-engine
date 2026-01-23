@@ -707,11 +707,3 @@ func TestSchemaService_GetDatasourceSchemaForPrompt_Empty_Integration(t *testing
 		t.Error("expected prompt to NOT contain 'RELATIONSHIPS:' when empty")
 	}
 }
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-func ptr[T any](v T) *T {
-	return &v
-}
