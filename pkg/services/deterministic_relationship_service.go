@@ -103,7 +103,7 @@ func (s *deterministicRelationshipService) createBidirectionalRelationship(ctx c
 		Confidence:         rel.Confidence,
 		Status:             rel.Status,
 		Cardinality:        ReverseCardinality(rel.Cardinality), // swap: N:1 ↔ 1:N
-		Description:        nil, // reverse direction gets its own description during enrichment
+		Description:        nil,                                 // reverse direction gets its own description during enrichment
 	}
 
 	// Create reverse relationship

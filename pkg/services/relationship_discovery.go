@@ -659,7 +659,6 @@ func normalizeType(t string) string {
 	return t
 }
 
-
 func (s *relationshipDiscoveryService) recordRejectedCandidate(
 	ctx context.Context,
 	projectID uuid.UUID,

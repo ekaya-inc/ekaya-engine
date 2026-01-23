@@ -4513,10 +4513,10 @@ func TestCreateBidirectionalRelationship_Cardinality(t *testing.T) {
 	)
 
 	testCases := []struct {
-		name               string
-		inputCardinality   string
-		expectedForward    string
-		expectedReverse    string
+		name             string
+		inputCardinality string
+		expectedForward  string
+		expectedReverse  string
 	}{
 		{
 			name:             "N:1 becomes 1:N for reverse",
