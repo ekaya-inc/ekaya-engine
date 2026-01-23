@@ -187,8 +187,8 @@ func TestDetectSQLType(t *testing.T) {
 
 func TestIsModifyingStatement(t *testing.T) {
 	tests := []struct {
-		name       string
-		sqlType    SQLStatementType
+		name        string
+		sqlType     SQLStatementType
 		isModifying bool
 	}{
 		{"SELECT", SQLTypeSelect, false},

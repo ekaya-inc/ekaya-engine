@@ -162,19 +162,18 @@ func Test_031_GlossaryDefiningSql(t *testing.T) {
 		assert.True(t, indexExists, "Index %s should exist", indexName)
 	}
 
-	// Verify unique constraint on (project_id, term)
+	// Verify unique index on (project_id, ontology_id, term)
+	// Note: Migration 016 changed this from a constraint to a unique index that includes ontology_id
 	var uniqueExists bool
 	err = engineDB.DB.Pool.QueryRow(ctx, `
 		SELECT EXISTS (
-			SELECT FROM pg_constraint c
-			JOIN pg_class t ON c.conrelid = t.oid
-			WHERE t.relname = 'engine_business_glossary'
-			AND c.contype = 'u'
-			AND c.conname = 'engine_business_glossary_project_term_unique'
+			SELECT FROM pg_indexes
+			WHERE tablename = 'engine_business_glossary'
+			AND indexname = 'engine_business_glossary_project_ontology_term_unique'
 		)
 	`).Scan(&uniqueExists)
 	require.NoError(t, err)
-	assert.True(t, uniqueExists, "Unique constraint on (project_id, term) should exist")
+	assert.True(t, uniqueExists, "Unique index on (project_id, ontology_id, term) should exist")
 
 	// Verify unique constraint on aliases (glossary_id, alias)
 	var aliasUniqueExists bool

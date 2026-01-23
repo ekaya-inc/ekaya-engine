@@ -347,7 +347,7 @@ type ApprovedQueryInfo struct {
 
 ---
 
-## Phase 5: Safety Considerations
+## Phase 5: Safety Considerations ✅
 
 ### 5.1 Audit Logging
 
@@ -382,7 +382,7 @@ DELETE FROM tasks WHERE id = {{task_id}} RETURNING id, title
 DELETE FROM tasks WHERE id = {{task_id}}
 ```
 
-UI could suggest adding RETURNING if not present.
+UI suggests adding RETURNING if not present.
 
 ---
 

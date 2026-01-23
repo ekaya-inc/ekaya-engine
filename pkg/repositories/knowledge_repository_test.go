@@ -15,22 +15,25 @@ import (
 
 // knowledgeTestContext holds test dependencies for knowledge repository tests.
 type knowledgeTestContext struct {
-	t         *testing.T
-	engineDB  *testhelpers.EngineDB
-	repo      KnowledgeRepository
-	projectID uuid.UUID
+	t          *testing.T
+	engineDB   *testhelpers.EngineDB
+	repo       KnowledgeRepository
+	projectID  uuid.UUID
+	ontologyID uuid.UUID
 }
 
 // setupKnowledgeTest initializes the test context with shared testcontainer.
 func setupKnowledgeTest(t *testing.T) *knowledgeTestContext {
 	engineDB := testhelpers.GetEngineDB(t)
 	tc := &knowledgeTestContext{
-		t:         t,
-		engineDB:  engineDB,
-		repo:      NewKnowledgeRepository(),
-		projectID: uuid.MustParse("00000000-0000-0000-0000-000000000043"),
+		t:          t,
+		engineDB:   engineDB,
+		repo:       NewKnowledgeRepository(),
+		projectID:  uuid.MustParse("00000000-0000-0000-0000-000000000043"),
+		ontologyID: uuid.MustParse("00000000-0000-0000-0000-000000000143"),
 	}
 	tc.ensureTestProject()
+	tc.ensureTestOntology()
 	return tc
 }
 
@@ -51,6 +54,27 @@ func (tc *knowledgeTestContext) ensureTestProject() {
 	`, tc.projectID, "Knowledge Test Project")
 	if err != nil {
 		tc.t.Fatalf("failed to ensure test project: %v", err)
+	}
+}
+
+// ensureTestOntology creates the test ontology if it doesn't exist.
+func (tc *knowledgeTestContext) ensureTestOntology() {
+	tc.t.Helper()
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	scope, _ := database.GetTenantScope(ctx)
+	// Use ON CONFLICT on the unique constraint (project_id, version) - version defaults to 1
+	// Don't change the ID if an ontology already exists (would violate FK constraints)
+	// Return the actual ID in case one already exists
+	err := scope.Conn.QueryRow(ctx, `
+		INSERT INTO engine_ontologies (id, project_id, is_active, domain_summary, entity_summaries, column_details)
+		VALUES ($1, $2, true, '{}', '{}', '{}')
+		ON CONFLICT (project_id, version) DO UPDATE SET is_active = true
+		RETURNING id
+	`, tc.ontologyID, tc.projectID).Scan(&tc.ontologyID)
+	if err != nil {
+		tc.t.Fatalf("failed to ensure test ontology: %v", err)
 	}
 }
 
@@ -83,11 +107,12 @@ func (tc *knowledgeTestContext) createTestContext() (context.Context, func()) {
 func (tc *knowledgeTestContext) createTestFact(ctx context.Context, factType, key, value string) *models.KnowledgeFact {
 	tc.t.Helper()
 	fact := &models.KnowledgeFact{
-		ProjectID: tc.projectID,
-		FactType:  factType,
-		Key:       key,
-		Value:     value,
-		Context:   "Test context",
+		ProjectID:  tc.projectID,
+		OntologyID: &tc.ontologyID,
+		FactType:   factType,
+		Key:        key,
+		Value:      value,
+		Context:    "Test context",
 	}
 	err := tc.repo.Upsert(ctx, fact)
 	if err != nil {
@@ -108,11 +133,12 @@ func TestKnowledgeRepository_Upsert_Insert(t *testing.T) {
 	defer cleanup()
 
 	fact := &models.KnowledgeFact{
-		ProjectID: tc.projectID,
-		FactType:  models.FactTypeFiscalYear,
-		Key:       "start_month",
-		Value:     "July",
-		Context:   "Company follows July-June fiscal year",
+		ProjectID:  tc.projectID,
+		OntologyID: &tc.ontologyID,
+		FactType:   models.FactTypeFiscalYear,
+		Key:        "start_month",
+		Value:      "July",
+		Context:    "Company follows July-June fiscal year",
 	}
 
 	err := tc.repo.Upsert(ctx, fact)
@@ -151,10 +177,11 @@ func TestKnowledgeRepository_Upsert_InsertWithoutContext(t *testing.T) {
 	defer cleanup()
 
 	fact := &models.KnowledgeFact{
-		ProjectID: tc.projectID,
-		FactType:  models.FactTypeTerminology,
-		Key:       "customer",
-		Value:     "A person or organization that purchases goods",
+		ProjectID:  tc.projectID,
+		OntologyID: &tc.ontologyID,
+		FactType:   models.FactTypeTerminology,
+		Key:        "customer",
+		Value:      "A person or organization that purchases goods",
 		// No context
 	}
 
@@ -189,11 +216,12 @@ func TestKnowledgeRepository_Upsert_Update(t *testing.T) {
 
 	// Upsert with same key should update
 	updated := &models.KnowledgeFact{
-		ProjectID: tc.projectID,
-		FactType:  models.FactTypeBusinessRule,
-		Key:       "discount_threshold",
-		Value:     "150", // Changed value
-		Context:   "Updated policy",
+		ProjectID:  tc.projectID,
+		OntologyID: &tc.ontologyID,
+		FactType:   models.FactTypeBusinessRule,
+		Key:        "discount_threshold",
+		Value:      "150", // Changed value
+		Context:    "Updated policy",
 	}
 
 	err := tc.repo.Upsert(ctx, updated)
@@ -259,12 +287,13 @@ func TestKnowledgeRepository_Upsert_UpdateByID(t *testing.T) {
 
 	// Update by ID with a NEW key (this was the bug - it would fail with duplicate key error)
 	updated := &models.KnowledgeFact{
-		ID:        originalID, // Explicitly set ID for update-by-ID
-		ProjectID: tc.projectID,
-		FactType:  models.FactTypeTerminology,
-		Key:       "updated_key", // Different key
-		Value:     "Updated value",
-		Context:   "New context",
+		ID:         originalID, // Explicitly set ID for update-by-ID
+		ProjectID:  tc.projectID,
+		OntologyID: &tc.ontologyID,
+		FactType:   models.FactTypeTerminology,
+		Key:        "updated_key", // Different key
+		Value:      "Updated value",
+		Context:    "New context",
 	}
 
 	err := tc.repo.Upsert(ctx, updated)
@@ -317,11 +346,12 @@ func TestKnowledgeRepository_Upsert_UpdateByID_NotFound(t *testing.T) {
 	// Try to update a non-existent ID
 	nonExistentID := uuid.New()
 	fact := &models.KnowledgeFact{
-		ID:        nonExistentID,
-		ProjectID: tc.projectID,
-		FactType:  models.FactTypeTerminology,
-		Key:       "some_key",
-		Value:     "Some value",
+		ID:         nonExistentID,
+		ProjectID:  tc.projectID,
+		OntologyID: &tc.ontologyID,
+		FactType:   models.FactTypeTerminology,
+		Key:        "some_key",
+		Value:      "Some value",
 	}
 
 	err := tc.repo.Upsert(ctx, fact)
@@ -600,10 +630,11 @@ func TestKnowledgeRepository_NoTenantScope(t *testing.T) {
 	ctx := context.Background() // No tenant scope
 
 	fact := &models.KnowledgeFact{
-		ProjectID: tc.projectID,
-		FactType:  models.FactTypeTerminology,
-		Key:       "test",
-		Value:     "value",
+		ProjectID:  tc.projectID,
+		OntologyID: &tc.ontologyID,
+		FactType:   models.FactTypeTerminology,
+		Key:        "test",
+		Value:      "value",
 	}
 
 	// Upsert should fail

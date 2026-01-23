@@ -12,6 +12,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/audit"
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
@@ -24,6 +25,7 @@ type QueryToolDeps struct {
 	MCPConfigService services.MCPConfigService
 	ProjectService   services.ProjectService
 	QueryService     services.QueryService
+	Auditor          *audit.SecurityAuditor
 	Logger           *zap.Logger
 }
 
@@ -104,9 +106,9 @@ type approvedQueryInfo struct {
 	SQL                string             `json:"sql"`         // The SQL template
 	Parameters         []parameterInfo    `json:"parameters"`
 	OutputColumns      []outputColumnInfo `json:"output_columns,omitempty"`
-	Constraints        string             `json:"constraints,omitempty"`        // Limitations and assumptions
-	Tags               []string           `json:"tags,omitempty"`               // Tags for organizing queries
-	AllowsModification bool               `json:"allows_modification"`          // Can execute INSERT/UPDATE/DELETE/CALL
+	Constraints        string             `json:"constraints,omitempty"` // Limitations and assumptions
+	Tags               []string           `json:"tags,omitempty"`        // Tags for organizing queries
+	AllowsModification bool               `json:"allows_modification"`   // Can execute INSERT/UPDATE/DELETE/CALL
 	Dialect            string             `json:"dialect"`
 }
 
@@ -282,7 +284,7 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			"limit",
 			mcp.Description("Max rows to return (default: 100, max: 1000)"),
 		),
-		mcp.WithReadOnlyHintAnnotation(false), // Some queries may modify data (INSERT/UPDATE/DELETE)
+		mcp.WithReadOnlyHintAnnotation(false),    // Some queries may modify data (INSERT/UPDATE/DELETE)
 		mcp.WithDestructiveHintAnnotation(false), // Individual queries may be destructive
 		mcp.WithIdempotentHintAnnotation(false),  // Modifying queries are not idempotent
 		mcp.WithOpenWorldHintAnnotation(false),
@@ -362,11 +364,38 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 				tenantCtx, projectID, queryID, params)
 			executionTimeMs := time.Since(startTime).Milliseconds()
 			if err != nil {
+				// Log failed execution for audit
+				go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
+					ProjectID:       projectID,
+					QueryID:         queryID,
+					QueryName:       query.NaturalLanguagePrompt,
+					SQL:             query.SQLQuery,
+					SQLType:         string(sqlType),
+					Params:          params,
+					RowCount:        0,
+					RowsAffected:    0,
+					ExecutionTimeMs: int(executionTimeMs),
+					IsModifying:     true,
+					Success:         false,
+					ErrorMessage:    err.Error(),
+				})
 				return convertQueryExecutionError(err, query.NaturalLanguagePrompt, queryID.String())
 			}
 
-			// Log execution to history
-			go logQueryExecution(tenantCtx, deps, projectID, queryID, query.SQLQuery, params, modifyResult.RowCount, int(executionTimeMs))
+			// Log successful execution to history
+			go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
+				ProjectID:       projectID,
+				QueryID:         queryID,
+				QueryName:       query.NaturalLanguagePrompt,
+				SQL:             query.SQLQuery,
+				SQLType:         string(sqlType),
+				Params:          params,
+				RowCount:        modifyResult.RowCount,
+				RowsAffected:    modifyResult.RowsAffected,
+				ExecutionTimeMs: int(executionTimeMs),
+				IsModifying:     true,
+				Success:         true,
+			})
 
 			// Format response for modifying query
 			response := struct {
@@ -404,7 +433,19 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		}
 
 		// Log execution to history (best effort - don't fail request if logging fails)
-		go logQueryExecution(tenantCtx, deps, projectID, queryID, query.SQLQuery, params, len(result.Rows), int(executionTimeMs))
+		go logQueryExecution(tenantCtx, deps, QueryExecutionLog{
+			ProjectID:       projectID,
+			QueryID:         queryID,
+			QueryName:       query.NaturalLanguagePrompt,
+			SQL:             query.SQLQuery,
+			SQLType:         string(sqlType),
+			Params:          params,
+			RowCount:        len(result.Rows),
+			RowsAffected:    0,
+			ExecutionTimeMs: int(executionTimeMs),
+			IsModifying:     false,
+			Success:         true,
+		})
 
 		// NOTE: Retention policy cleanup is deferred to Enterprise App Suite (see PLAN-app-enterprise.md)
 		// Enterprise admins will configure retention periods via the Audit & Visibility module
@@ -798,9 +839,25 @@ func buildColumnInfo(columns []columnDetail) []columnDetail {
 	return columns
 }
 
+// QueryExecutionLog contains all fields needed to log a query execution.
+type QueryExecutionLog struct {
+	ProjectID       uuid.UUID
+	QueryID         uuid.UUID
+	QueryName       string
+	SQL             string
+	SQLType         string // SELECT, INSERT, UPDATE, DELETE, CALL
+	Params          map[string]any
+	RowCount        int
+	RowsAffected    int64
+	ExecutionTimeMs int
+	IsModifying     bool
+	Success         bool
+	ErrorMessage    string
+}
+
 // logQueryExecution logs a query execution to the history table.
 // This runs in a goroutine and uses best-effort logging - failures are logged but don't affect the caller.
-func logQueryExecution(ctx context.Context, deps *QueryToolDeps, projectID, queryID uuid.UUID, sql string, params map[string]any, rowCount, executionTimeMs int) {
+func logQueryExecution(ctx context.Context, deps *QueryToolDeps, log QueryExecutionLog) {
 	// Get user ID from context if available
 	userID := auth.GetUserIDFromContext(ctx)
 
@@ -813,41 +870,76 @@ func logQueryExecution(ctx context.Context, deps *QueryToolDeps, projectID, quer
 
 	// Marshal parameters to JSON
 	var paramsJSON []byte
-	if len(params) > 0 {
+	if len(log.Params) > 0 {
 		var err error
-		paramsJSON, err = json.Marshal(params)
+		paramsJSON, err = json.Marshal(log.Params)
 		if err != nil {
 			deps.Logger.Warn("Failed to marshal parameters for query execution log",
 				zap.Error(err),
-				zap.String("query_id", queryID.String()))
+				zap.String("query_id", log.QueryID.String()))
 			paramsJSON = nil
 		}
 	}
 
-	// Insert execution record
+	// Insert execution record with enhanced audit fields
 	query := `
 		INSERT INTO engine_query_executions
-			(project_id, query_id, sql, row_count, execution_time_ms, parameters, user_id, source)
+			(project_id, query_id, sql, row_count, execution_time_ms, parameters, user_id, source,
+			 is_modifying, rows_affected, success, error_message)
 		VALUES
-			($1, $2, $3, $4, $5, $6, $7, $8)
+			($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`
 
+	// Convert rows_affected to *int64 for nullable column
+	var rowsAffected *int64
+	if log.IsModifying {
+		rowsAffected = &log.RowsAffected
+	}
+
+	// Convert error_message to *string for nullable column
+	var errorMessage *string
+	if log.ErrorMessage != "" {
+		errorMessage = &log.ErrorMessage
+	}
+
 	_, err := scope.Conn.Exec(ctx, query,
-		projectID,
-		queryID,
-		sql,
-		rowCount,
-		executionTimeMs,
+		log.ProjectID,
+		log.QueryID,
+		log.SQL,
+		log.RowCount,
+		log.ExecutionTimeMs,
 		paramsJSON,
 		userID,
 		"mcp",
+		log.IsModifying,
+		rowsAffected,
+		log.Success,
+		errorMessage,
 	)
 
 	if err != nil {
 		deps.Logger.Error("Failed to log query execution",
 			zap.Error(err),
-			zap.String("project_id", projectID.String()),
-			zap.String("query_id", queryID.String()))
+			zap.String("project_id", log.ProjectID.String()),
+			zap.String("query_id", log.QueryID.String()))
+	}
+
+	// For modifying queries, also log to SIEM audit trail
+	if log.IsModifying && deps.Auditor != nil {
+		deps.Auditor.LogModifyingQueryExecution(ctx, log.ProjectID, log.QueryID,
+			audit.ModifyingQueryDetails{
+				QueryName:       log.QueryName,
+				SQLType:         log.SQLType,
+				SQL:             log.SQL,
+				Parameters:      log.Params,
+				RowsAffected:    log.RowsAffected,
+				RowCount:        log.RowCount,
+				Success:         log.Success,
+				ErrorMessage:    log.ErrorMessage,
+				ExecutionTimeMs: int64(log.ExecutionTimeMs),
+			},
+			"", // Client IP not available in MCP context
+		)
 	}
 }
 

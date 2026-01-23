@@ -191,6 +191,27 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
     []
   );
 
+  // Check if modifying query is missing RETURNING clause
+  const isModifyingQueryMissingReturning = useCallback(
+    (sql: string, allowsModification: boolean): boolean => {
+      if (!allowsModification) return false;
+
+      const normalizedSql = sql.trim().toUpperCase();
+
+      // Check if it's a modifying statement (INSERT, UPDATE, DELETE)
+      const isModifying =
+        normalizedSql.startsWith('INSERT') ||
+        normalizedSql.startsWith('UPDATE') ||
+        normalizedSql.startsWith('DELETE');
+
+      if (!isModifying) return false;
+
+      // Check if RETURNING clause is present
+      return !normalizedSql.includes('RETURNING');
+    },
+    []
+  );
+
   // Filter queries based on search and type filter
   const filteredQueries = queries.filter((query) => {
     // Text search filter
@@ -858,6 +879,21 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                         </div>
                       </div>
                     )}
+                    {isModifyingQueryMissingReturning(newQuery.sql_query, newQuery.allows_modification) && (
+                      <div className="mt-2 bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+                        <div className="flex items-start gap-2">
+                          <MessageSquare className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+                              Suggestion: Add RETURNING clause
+                            </p>
+                            <p className="text-xs text-blue-600/80 dark:text-blue-400/80 mt-1">
+                              Consider adding a RETURNING clause (e.g., <code className="bg-blue-500/20 px-1 rounded">RETURNING id, name</code>) to see which rows were affected.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <ParameterEditor
@@ -1119,6 +1155,21 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                             <p className="text-sm text-amber-600 dark:text-amber-400">
                               This query will be able to modify or delete data. Ensure the SQL
                               and parameters are thoroughly reviewed before enabling.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {isModifyingQueryMissingReturning(editingState.sql_query, editingState.allows_modification) && (
+                      <div className="mt-2 bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+                        <div className="flex items-start gap-2">
+                          <MessageSquare className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+                              Suggestion: Add RETURNING clause
+                            </p>
+                            <p className="text-xs text-blue-600/80 dark:text-blue-400/80 mt-1">
+                              Consider adding a RETURNING clause (e.g., <code className="bg-blue-500/20 px-1 rounded">RETURNING id, name</code>) to see which rows were affected.
                             </p>
                           </div>
                         </div>

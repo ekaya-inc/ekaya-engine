@@ -351,3 +351,188 @@ func TestLoggerNamespace(t *testing.T) {
 	// Verify logger name includes security_audit namespace
 	assert.Equal(t, "security_audit", logs[0].LoggerName)
 }
+
+func TestLogModifyingQueryExecution_Success(t *testing.T) {
+	logger, recorded := setupTestLogger(t)
+	auditor := NewSecurityAuditor(logger)
+
+	projectID := uuid.New()
+	queryID := uuid.New()
+	clientIP := "10.0.0.1"
+
+	claims := &auth.Claims{
+		ProjectID: projectID.String(),
+	}
+	claims.Subject = "user-modify-123"
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
+
+	details := ModifyingQueryDetails{
+		QueryName:       "Delete inactive users",
+		SQLType:         "DELETE",
+		SQL:             "DELETE FROM users WHERE last_login < '2024-01-01' RETURNING id",
+		Parameters:      map[string]any{"cutoff": "2024-01-01"},
+		RowsAffected:    42,
+		RowCount:        42,
+		Success:         true,
+		ExecutionTimeMs: 150,
+	}
+
+	auditor.LogModifyingQueryExecution(ctx, projectID, queryID, details, clientIP)
+
+	// Verify log entry
+	logs := recorded.All()
+	require.Len(t, logs, 1)
+
+	entry := logs[0]
+	assert.Equal(t, zapcore.InfoLevel, entry.Level, "Should log at INFO level for successful execution")
+	assert.Equal(t, "Modifying query executed", entry.Message)
+
+	// Verify structured fields
+	fields := entry.ContextMap()
+	assert.Equal(t, projectID.String(), fields["project_id"])
+	assert.Equal(t, queryID.String(), fields["query_id"])
+	assert.Equal(t, "Delete inactive users", fields["query_name"])
+	assert.Equal(t, "DELETE", fields["sql_type"])
+	assert.Equal(t, int64(42), fields["rows_affected"])
+	assert.Equal(t, int64(150), fields["execution_time_ms"])
+	assert.Equal(t, clientIP, fields["client_ip"])
+	assert.Equal(t, "user-modify-123", fields["user_id"])
+	assert.Equal(t, "info", fields["severity"])
+
+	// Verify JSON event structure
+	eventJSON, ok := fields["event_json"].(string)
+	require.True(t, ok, "event_json should be a string")
+
+	var event SecurityEvent
+	err := json.Unmarshal([]byte(eventJSON), &event)
+	require.NoError(t, err, "event_json should be valid JSON")
+
+	assert.Equal(t, EventModifyingQueryExecution, event.EventType)
+	assert.Equal(t, projectID, event.ProjectID)
+	assert.Equal(t, queryID, event.QueryID)
+	assert.Equal(t, "user-modify-123", event.UserID)
+	assert.Equal(t, clientIP, event.ClientIP)
+	assert.Equal(t, "info", event.Severity)
+
+	// Verify details
+	detailsMap, ok := event.Details.(map[string]any)
+	require.True(t, ok, "Details should be a map")
+	assert.Equal(t, "Delete inactive users", detailsMap["query_name"])
+	assert.Equal(t, "DELETE", detailsMap["sql_type"])
+	assert.Equal(t, float64(42), detailsMap["rows_affected"]) // JSON numbers are float64
+	assert.Equal(t, true, detailsMap["success"])
+}
+
+func TestLogModifyingQueryExecution_Failure(t *testing.T) {
+	logger, recorded := setupTestLogger(t)
+	auditor := NewSecurityAuditor(logger)
+
+	projectID := uuid.New()
+	queryID := uuid.New()
+	clientIP := "10.0.0.2"
+
+	claims := &auth.Claims{
+		ProjectID: projectID.String(),
+	}
+	claims.Subject = "user-fail-456"
+	ctx := context.WithValue(context.Background(), auth.ClaimsKey, claims)
+
+	details := ModifyingQueryDetails{
+		QueryName:       "Update user status",
+		SQLType:         "UPDATE",
+		SQL:             "UPDATE users SET status = 'active' WHERE id = $1",
+		Parameters:      map[string]any{"id": "invalid-uuid"},
+		RowsAffected:    0,
+		RowCount:        0,
+		Success:         false,
+		ErrorMessage:    "invalid input syntax for type uuid: \"invalid-uuid\"",
+		ExecutionTimeMs: 50,
+	}
+
+	auditor.LogModifyingQueryExecution(ctx, projectID, queryID, details, clientIP)
+
+	// Verify log entry
+	logs := recorded.All()
+	require.Len(t, logs, 1)
+
+	entry := logs[0]
+	assert.Equal(t, zapcore.WarnLevel, entry.Level, "Should log at WARN level for failed execution")
+	assert.Equal(t, "Modifying query failed", entry.Message)
+
+	// Verify structured fields
+	fields := entry.ContextMap()
+	assert.Equal(t, projectID.String(), fields["project_id"])
+	assert.Equal(t, queryID.String(), fields["query_id"])
+	assert.Equal(t, "Update user status", fields["query_name"])
+	assert.Equal(t, "UPDATE", fields["sql_type"])
+	assert.Contains(t, fields["error"], "invalid input syntax")
+	assert.Equal(t, int64(50), fields["execution_time_ms"])
+	assert.Equal(t, clientIP, fields["client_ip"])
+	assert.Equal(t, "user-fail-456", fields["user_id"])
+	assert.Equal(t, "warning", fields["severity"])
+
+	// Verify JSON event structure
+	eventJSON, ok := fields["event_json"].(string)
+	require.True(t, ok, "event_json should be a string")
+
+	var event SecurityEvent
+	err := json.Unmarshal([]byte(eventJSON), &event)
+	require.NoError(t, err, "event_json should be valid JSON")
+
+	assert.Equal(t, EventModifyingQueryExecution, event.EventType)
+	assert.Equal(t, "warning", event.Severity)
+
+	// Verify error message in details
+	detailsMap, ok := event.Details.(map[string]any)
+	require.True(t, ok, "Details should be a map")
+	assert.Equal(t, false, detailsMap["success"])
+	assert.Contains(t, detailsMap["error_message"], "invalid input syntax")
+}
+
+func TestModifyingQueryEventSerialization(t *testing.T) {
+	// Test that ModifyingQueryDetails serializes correctly
+	details := ModifyingQueryDetails{
+		QueryName:       "Insert new order",
+		SQLType:         "INSERT",
+		SQL:             "INSERT INTO orders (customer_id, total) VALUES ($1, $2) RETURNING id",
+		Parameters:      map[string]any{"customer_id": "cust-123", "total": 99.99},
+		RowsAffected:    1,
+		RowCount:        1,
+		Success:         true,
+		ExecutionTimeMs: 25,
+	}
+
+	event := SecurityEvent{
+		EventType: EventModifyingQueryExecution,
+		ProjectID: uuid.New(),
+		QueryID:   uuid.New(),
+		UserID:    "test-user",
+		ClientIP:  "127.0.0.1",
+		Details:   details,
+		Severity:  "info",
+	}
+
+	// Verify it serializes to valid JSON
+	jsonBytes, err := json.Marshal(event)
+	require.NoError(t, err)
+
+	// Verify it deserializes correctly
+	var decoded SecurityEvent
+	err = json.Unmarshal(jsonBytes, &decoded)
+	require.NoError(t, err)
+
+	assert.Equal(t, event.EventType, decoded.EventType)
+	assert.Equal(t, event.ProjectID, decoded.ProjectID)
+	assert.Equal(t, event.QueryID, decoded.QueryID)
+	assert.Equal(t, event.UserID, decoded.UserID)
+	assert.Equal(t, event.ClientIP, decoded.ClientIP)
+	assert.Equal(t, event.Severity, decoded.Severity)
+
+	// Verify details
+	detailsMap, ok := decoded.Details.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Insert new order", detailsMap["query_name"])
+	assert.Equal(t, "INSERT", detailsMap["sql_type"])
+	assert.Equal(t, true, detailsMap["success"])
+	assert.Equal(t, float64(1), detailsMap["rows_affected"])
+}

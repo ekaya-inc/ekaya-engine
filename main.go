@@ -322,6 +322,7 @@ func main() {
 		MCPConfigService: mcpConfigService,
 		ProjectService:   projectService,
 		QueryService:     queryService,
+		Auditor:          securityAuditor,
 		Logger:           logger,
 	}
 	mcptools.RegisterApprovedQueriesTools(mcpServer.MCP(), queryToolDeps)

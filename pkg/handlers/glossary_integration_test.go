@@ -217,11 +217,39 @@ func (tc *glossaryTestContext) ensureTestProject() {
 	}
 }
 
+// ensureTestOntology creates an active ontology for the test project.
+func (tc *glossaryTestContext) ensureTestOntology() {
+	tc.t.Helper()
+
+	// Generate a stable ontology ID for this test context
+	tc.ontologyID = uuid.MustParse("00000000-0000-0000-0000-000000000103")
+
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	if err != nil {
+		tc.t.Fatalf("Failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	// Use ON CONFLICT on the unique constraint (project_id, version) - version defaults to 1
+	// Don't change the ID if an ontology already exists (would violate FK constraints)
+	err = scope.Conn.QueryRow(ctx, `
+		INSERT INTO engine_ontologies (id, project_id, is_active, domain_summary, entity_summaries, column_details)
+		VALUES ($1, $2, true, '{}', '{}', '{}')
+		ON CONFLICT (project_id, version) DO UPDATE SET is_active = true
+		RETURNING id
+	`, tc.ontologyID, tc.projectID).Scan(&tc.ontologyID)
+	if err != nil {
+		tc.t.Fatalf("Failed to ensure test ontology: %v", err)
+	}
+}
+
 // ensureTestDatasource creates a datasource pointing to the test_data database.
 func (tc *glossaryTestContext) ensureTestDatasource() {
 	tc.t.Helper()
 
 	tc.ensureTestProject()
+	tc.ensureTestOntology()
 
 	ctx := context.Background()
 	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)

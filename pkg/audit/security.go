@@ -24,6 +24,9 @@ const (
 	EventParameterValidation SecurityEventType = "parameter_validation_failure"
 	// EventQueryExecution is logged for successful query execution (optional, can be high volume).
 	EventQueryExecution SecurityEventType = "query_execution"
+	// EventModifyingQueryExecution is logged for data-modifying query execution (INSERT/UPDATE/DELETE/CALL).
+	// This is always logged regardless of volume as it represents data changes.
+	EventModifyingQueryExecution SecurityEventType = "modifying_query_execution"
 )
 
 // SecurityEvent represents an auditable security event with all relevant context
@@ -45,6 +48,19 @@ type SQLInjectionDetails struct {
 	ParamValue  string `json:"param_value"`
 	Fingerprint string `json:"fingerprint"` // libinjection fingerprint for pattern analysis
 	QueryName   string `json:"query_name"`
+}
+
+// ModifyingQueryDetails contains audit information for data-modifying queries.
+type ModifyingQueryDetails struct {
+	QueryName       string         `json:"query_name"`
+	SQLType         string         `json:"sql_type"` // INSERT, UPDATE, DELETE, CALL
+	SQL             string         `json:"sql"`      // Full SQL with parameters substituted
+	Parameters      map[string]any `json:"parameters,omitempty"`
+	RowsAffected    int64          `json:"rows_affected"`
+	RowCount        int            `json:"row_count"` // Rows returned (from RETURNING clause)
+	Success         bool           `json:"success"`
+	ErrorMessage    string         `json:"error_message,omitempty"`
+	ExecutionTimeMs int64          `json:"execution_time_ms"`
 }
 
 // SecurityAuditor logs security events for SIEM consumption.
@@ -199,4 +215,79 @@ func (a *SecurityAuditor) LogQueryExecution(
 		zap.String("user_id", userID),
 		zap.String("severity", "info"),
 	)
+}
+
+// LogModifyingQueryExecution records a data-modifying query execution for audit trail.
+// This is ALWAYS logged (not optional) as it represents changes to the database.
+// Logged at INFO level for successful executions, WARN level for failures.
+//
+// Example usage:
+//
+//	auditor.LogModifyingQueryExecution(ctx, projectID, queryID,
+//	    audit.ModifyingQueryDetails{
+//	        QueryName:       "Delete inactive users",
+//	        SQLType:         "DELETE",
+//	        SQL:             "DELETE FROM users WHERE last_login < '2024-01-01'",
+//	        Parameters:      map[string]any{"cutoff": "2024-01-01"},
+//	        RowsAffected:    42,
+//	        RowCount:        42,
+//	        Success:         true,
+//	        ExecutionTimeMs: 150,
+//	    },
+//	    r.RemoteAddr,
+//	)
+func (a *SecurityAuditor) LogModifyingQueryExecution(
+	ctx context.Context,
+	projectID, queryID uuid.UUID,
+	details ModifyingQueryDetails,
+	clientIP string,
+) {
+	userID := auth.GetUserIDFromContext(ctx)
+
+	severity := "info"
+	if !details.Success {
+		severity = "warning"
+	}
+
+	event := SecurityEvent{
+		Timestamp: time.Now().UTC(),
+		EventType: EventModifyingQueryExecution,
+		ProjectID: projectID,
+		QueryID:   queryID,
+		UserID:    userID,
+		ClientIP:  clientIP,
+		Details:   details,
+		Severity:  severity,
+	}
+
+	eventJSON, _ := json.Marshal(event)
+
+	// Use INFO for success, WARN for failure
+	if details.Success {
+		a.logger.Info("Modifying query executed",
+			zap.String("event_json", string(eventJSON)),
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", queryID.String()),
+			zap.String("query_name", details.QueryName),
+			zap.String("sql_type", details.SQLType),
+			zap.Int64("rows_affected", details.RowsAffected),
+			zap.Int64("execution_time_ms", details.ExecutionTimeMs),
+			zap.String("client_ip", clientIP),
+			zap.String("user_id", userID),
+			zap.String("severity", severity),
+		)
+	} else {
+		a.logger.Warn("Modifying query failed",
+			zap.String("event_json", string(eventJSON)),
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", queryID.String()),
+			zap.String("query_name", details.QueryName),
+			zap.String("sql_type", details.SQLType),
+			zap.String("error", details.ErrorMessage),
+			zap.Int64("execution_time_ms", details.ExecutionTimeMs),
+			zap.String("client_ip", clientIP),
+			zap.String("user_id", userID),
+			zap.String("severity", severity),
+		)
+	}
 }
