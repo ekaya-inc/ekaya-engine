@@ -372,7 +372,7 @@ export function useInstallApp() {
 
 ---
 
-## Phase 3: AI Data Liaison Configuration Page
+## Phase 3: AI Data Liaison Configuration Page [x]
 
 ### 3.1 New Page Component
 
