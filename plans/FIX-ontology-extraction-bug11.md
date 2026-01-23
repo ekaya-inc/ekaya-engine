@@ -174,9 +174,7 @@ func inferCardinalityFromStats(sourceCol, targetCol *models.SchemaColumn, source
 
 ### Step 1: Move/Share Cardinality Inference
 
-Either:
-- Move `inferCardinality` from `relationship_discovery.go` to a shared location
-- Or duplicate the logic in `deterministic_relationship_service.go`
+[x] Move `inferCardinality` from `relationship_discovery.go` to a shared `relationship_utils.go`
 
 ### Step 2: Update FK Relationship Creation
 

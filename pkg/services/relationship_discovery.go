@@ -372,7 +372,7 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 		}
 
 		// Phase 5: Create verified relationship
-		cardinality := s.inferCardinality(joinAnalysis)
+		cardinality := InferCardinality(joinAnalysis)
 		inferenceMethod := models.InferenceMethodValueOverlap
 
 		rel := &models.SchemaRelationship{
@@ -659,33 +659,6 @@ func normalizeType(t string) string {
 	return t
 }
 
-func (s *relationshipDiscoveryService) inferCardinality(join *datasource.JoinAnalysis) string {
-	if join.SourceMatched == 0 || join.TargetMatched == 0 {
-		return models.CardinalityUnknown
-	}
-
-	// Ratio of join rows to source/target matched
-	sourceRatio := float64(join.JoinCount) / float64(join.SourceMatched)
-	targetRatio := float64(join.JoinCount) / float64(join.TargetMatched)
-
-	// 1:1 - both sides have unique matches
-	if sourceRatio <= CardinalityUniqueThreshold && targetRatio <= CardinalityUniqueThreshold {
-		return models.Cardinality1To1
-	}
-
-	// N:1 - multiple source rows match one target (typical FK)
-	if sourceRatio <= CardinalityUniqueThreshold && targetRatio > CardinalityUniqueThreshold {
-		return models.CardinalityNTo1
-	}
-
-	// 1:N - one source matches multiple targets (reverse FK)
-	if sourceRatio > CardinalityUniqueThreshold && targetRatio <= CardinalityUniqueThreshold {
-		return models.Cardinality1ToN
-	}
-
-	// N:M - many-to-many
-	return models.CardinalityNToM
-}
 
 func (s *relationshipDiscoveryService) recordRejectedCandidate(
 	ctx context.Context,

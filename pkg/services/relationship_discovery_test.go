@@ -696,74 +696,69 @@ func TestAreTypesCompatible_NormalizedTypes(t *testing.T) {
 }
 
 // ============================================================================
-// inferCardinality Tests
+// InferCardinality Tests (shared function in relationship_utils.go)
 // ============================================================================
 
 func TestInferCardinality_OneToOne(t *testing.T) {
-	service := &relationshipDiscoveryService{logger: zap.NewNop()}
 	join := &datasource.JoinAnalysis{
 		SourceMatched: 100,
 		TargetMatched: 100,
 		JoinCount:     100,
 	}
 
-	cardinality := service.inferCardinality(join)
+	cardinality := InferCardinality(join)
 	if cardinality != models.Cardinality1To1 {
 		t.Errorf("expected 1:1, got %s", cardinality)
 	}
 }
 
 func TestInferCardinality_NToOne(t *testing.T) {
-	service := &relationshipDiscoveryService{logger: zap.NewNop()}
 	join := &datasource.JoinAnalysis{
 		SourceMatched: 100,
 		TargetMatched: 10,
 		JoinCount:     100,
 	}
 
-	cardinality := service.inferCardinality(join)
+	cardinality := InferCardinality(join)
 	if cardinality != models.CardinalityNTo1 {
 		t.Errorf("expected N:1, got %s", cardinality)
 	}
 }
 
 func TestInferCardinality_OneToN(t *testing.T) {
-	service := &relationshipDiscoveryService{logger: zap.NewNop()}
 	join := &datasource.JoinAnalysis{
 		SourceMatched: 10,
 		TargetMatched: 100,
 		JoinCount:     100,
 	}
 
-	cardinality := service.inferCardinality(join)
+	cardinality := InferCardinality(join)
 	if cardinality != models.Cardinality1ToN {
 		t.Errorf("expected 1:N, got %s", cardinality)
 	}
 }
 
 func TestInferCardinality_NToM(t *testing.T) {
-	service := &relationshipDiscoveryService{logger: zap.NewNop()}
 	join := &datasource.JoinAnalysis{
 		SourceMatched: 50,
 		TargetMatched: 50,
 		JoinCount:     200, // Many-to-many
 	}
 
-	cardinality := service.inferCardinality(join)
+	cardinality := InferCardinality(join)
 	if cardinality != models.CardinalityNToM {
 		t.Errorf("expected N:M, got %s", cardinality)
 	}
 }
 
 func TestInferCardinality_Unknown(t *testing.T) {
-	service := &relationshipDiscoveryService{logger: zap.NewNop()}
 	join := &datasource.JoinAnalysis{
 		SourceMatched: 0,
 		TargetMatched: 0,
 		JoinCount:     0,
 	}
 
-	cardinality := service.inferCardinality(join)
+	cardinality := InferCardinality(join)
 	if cardinality != models.CardinalityUnknown {
 		t.Errorf("expected unknown, got %s", cardinality)
 	}
