@@ -445,7 +445,7 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	}
 
 	// Load tables and columns
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
 	if err != nil {
 		return nil, fmt.Errorf("list tables: %w", err)
 	}

@@ -180,6 +180,7 @@ func TestRelationshipDiscovery_OnlySelectedTables(t *testing.T) {
 ## Success Criteria
 
 - [x] Relationship discovery only processes selected tables
+- [x] PK match discovery only processes selected tables
 - [ ] Data change detection only monitors selected tables
 - [ ] Processing time reduced (proportional to deselected table count)
 - [ ] No errors/warnings about missing entities from deselected tables
