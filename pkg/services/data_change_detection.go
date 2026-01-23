@@ -84,8 +84,8 @@ func (s *dataChangeDetectionService) ScanForChanges(
 	ctx context.Context,
 	projectID, datasourceID uuid.UUID,
 ) ([]*models.PendingChange, error) {
-	// Get all tables for the datasource
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
+	// Get all selected tables for the datasource
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}
