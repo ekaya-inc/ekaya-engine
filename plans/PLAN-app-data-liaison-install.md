@@ -526,7 +526,7 @@ Add route for AI Data Liaison page:
 
 ---
 
-## Phase 4: Default App Installation
+## Phase 4: Default App Installation [x]
 
 ### 4.1 MCP Server Auto-Install
 
