@@ -3,6 +3,7 @@
 **Bug Reference:** BUGS-ontology-extraction.md, BUG-6
 **Severity:** Medium
 **Type:** Symptom of Other Bugs
+**Status:** ✅ Verified Fixed (2026-01-23)
 
 ## Problem Summary
 
@@ -123,9 +124,9 @@ WHERE e.name = 'Billing Engagement';
 
 ## Success Criteria
 
-- [ ] Entities with FK references to them have occurrence_count > 0
-- [ ] Occurrence count matches number of inbound relationships
-- [ ] Entities without inbound references correctly have count = 0
+- [x] Entities with FK references to them have occurrence_count > 0
+- [x] Occurrence count matches number of inbound relationships
+- [x] Entities without inbound references correctly have count = 0
 - [x] BUG-3 and BUG-9 are fixed first
 
 ## Dependencies
@@ -137,10 +138,10 @@ WHERE e.name = 'Billing Engagement';
 
 ## Implementation Order
 
-1. **First:** Fix BUG-9 (Stats collection) - ensures all columns have stats
-2. **Second:** Fix BUG-3 (Missing FK relationships) - ensures columns aren't filtered
-3. **Third:** Re-run ontology extraction
-4. **Fourth:** Verify BUG-6 is resolved
+1. ✅ **First:** Fix BUG-9 (Stats collection) - ensures all columns have stats
+2. ✅ **Second:** Fix BUG-3 (Missing FK relationships) - ensures columns aren't filtered
+3. ✅ **Third:** Re-run ontology extraction
+4. ✅ **Fourth:** Verify BUG-6 is resolved
 
 ## Notes
 
