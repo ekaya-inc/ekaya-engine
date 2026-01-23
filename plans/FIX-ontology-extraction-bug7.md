@@ -183,10 +183,10 @@ func TestRelationshipDiscovery_OnlySelectedTables(t *testing.T) {
 - [x] PK match discovery only processes selected tables
 - [x] Data change detection only monitors selected tables (DetectSchemaChanges fixed)
 - [x] dag_adapters.go fixed (entity enrichment only processes selected tables)
-- [ ] Processing time reduced (proportional to deselected table count)
-- [ ] No errors/warnings about missing entities from deselected tables
+- [x] Processing time reduced (proportional to deselected table count)
+- [x] No errors/warnings about missing entities from deselected tables
 - [x] All tests pass
-- [ ] Relationships still correctly discovered for selected tables
+- [x] Relationships still correctly discovered for selected tables
 
 ## Edge Cases
 
