@@ -3196,6 +3196,33 @@ func TestGlossaryService_EnrichTermSystemMessage_IncludesComplexMetricExamples(t
 	assert.Contains(t, systemMessage, "COALESCE", "System message should show COALESCE for null handling")
 }
 
+func TestGlossaryService_EnrichTermSystemMessage_IncludesSingleRowAndSemanticRequirements(t *testing.T) {
+	// This test verifies that the system message includes explicit requirements about
+	// single-row results and formula semantic patterns (BUG-13 fix)
+	logger := zap.NewNop()
+	svc := &glossaryService{logger: logger}
+
+	systemMessage := svc.enrichTermSystemMessage()
+
+	// Verify CRITICAL REQUIREMENTS section is present
+	assert.Contains(t, systemMessage, "CRITICAL REQUIREMENTS", "System message should include critical requirements section")
+
+	// Verify single-row requirement
+	assert.Contains(t, systemMessage, "MUST return exactly ONE row", "System message must require single-row results")
+
+	// Verify UNION/UNION ALL restriction
+	assert.Contains(t, systemMessage, "UNION", "System message must mention UNION restriction")
+	assert.Contains(t, systemMessage, "single row", "System message must emphasize single row requirement")
+
+	// Verify semantic formula patterns
+	assert.Contains(t, systemMessage, "Average X Per Y", "System message should include 'Average X Per Y' pattern")
+	assert.Contains(t, systemMessage, "SUM(X) / COUNT(Y)", "System message should show correct formula for averages")
+	assert.Contains(t, systemMessage, "X Rate", "System message should include 'X Rate' pattern")
+	assert.Contains(t, systemMessage, "X Ratio", "System message should include 'X Ratio' pattern")
+	assert.Contains(t, systemMessage, "X Utilization", "System message should include 'X Utilization' pattern")
+	assert.Contains(t, systemMessage, "X Count", "System message should include 'X Count' pattern")
+}
+
 // ============================================================================
 // Tests for Enum Value Validation (BUG-12 Task 3)
 // ============================================================================

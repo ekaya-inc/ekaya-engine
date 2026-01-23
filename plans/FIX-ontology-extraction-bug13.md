@@ -187,7 +187,7 @@ type GlossaryTerm struct {
 
 Modify `TestSQL` to check for multi-row results.
 
-### Step 2: Update LLM Prompts
+### Step 2: Update LLM Prompts ✅
 
 Add explicit instructions about single-row results and formula patterns.
 

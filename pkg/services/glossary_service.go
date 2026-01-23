@@ -1133,6 +1133,17 @@ For each business term, provide:
 - The primary table being queried (base_table)
 - Alternative names that business users might use (aliases)
 
+CRITICAL REQUIREMENTS:
+1. The SQL MUST return exactly ONE row (aggregate/summary metrics)
+2. Do NOT use UNION/UNION ALL unless combining results into a single row
+3. The formula must match the term name semantically:
+   - "Average X Per Y" → SUM(X) / COUNT(Y), not a percentage calculation
+   - "X Rate" → X per unit time (e.g., revenue per hour)
+   - "X Ratio" → X / Total, typically as a percentage
+   - "Total X" → SUM(X), a simple aggregate
+   - "X Utilization" → used / authorized, as a percentage (0-100)
+   - "X Count" → COUNT of items matching criteria
+
 IMPORTANT: The defining_sql must be a complete SELECT statement that can be executed as-is. It should:
 - Start with SELECT and include column aliases that represent the metric
 - Include all necessary FROM, JOIN, WHERE, GROUP BY, ORDER BY clauses
