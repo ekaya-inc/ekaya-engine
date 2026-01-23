@@ -90,6 +90,10 @@ func (m *mockQueryExecutor) Execute(ctx context.Context, sqlStatement string) (*
 	return &ExecuteResult{}, nil
 }
 
+func (m *mockQueryExecutor) ExecuteWithParams(ctx context.Context, sqlStatement string, params []any) (*ExecuteResult, error) {
+	return &ExecuteResult{}, nil
+}
+
 func (m *mockQueryExecutor) ValidateQuery(ctx context.Context, sqlQuery string) error {
 	return nil
 }

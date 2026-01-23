@@ -424,5 +424,58 @@ func pgTypeNameFromOID(oid uint32) string {
 	}
 }
 
+// ExecuteWithParams runs a parameterized DML statement (INSERT/UPDATE/DELETE/CALL).
+func (e *QueryExecutor) ExecuteWithParams(ctx context.Context, sqlStatement string, params []any) (*datasource.ExecuteResult, error) {
+	rows, err := e.pool.Query(ctx, sqlStatement, params...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute statement: %w", err)
+	}
+	defer rows.Close()
+
+	result := &datasource.ExecuteResult{}
+
+	// Check if the statement returns rows (SELECT, INSERT/UPDATE/DELETE with RETURNING)
+	fieldDescs := rows.FieldDescriptions()
+	if len(fieldDescs) > 0 {
+		// Statement returns rows - collect them
+		result.Columns = make([]string, len(fieldDescs))
+		for i, fd := range fieldDescs {
+			result.Columns[i] = string(fd.Name)
+		}
+
+		result.Rows = make([]map[string]any, 0)
+		for rows.Next() {
+			values, err := rows.Values()
+			if err != nil {
+				return nil, fmt.Errorf("failed to read row values: %w", err)
+			}
+
+			rowMap := make(map[string]any)
+			for i, col := range result.Columns {
+				rowMap[col] = values[i]
+			}
+			result.Rows = append(result.Rows, rowMap)
+		}
+		result.RowCount = len(result.Rows)
+	} else {
+		// For DML without RETURNING, we must still consume the result
+		// to trigger execution and populate errors/CommandTag.
+		// pgx defers execution until rows are consumed.
+		for rows.Next() {
+			// No rows expected, but iteration triggers execution
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error during execution: %w", err)
+	}
+
+	// Get rows affected from command tag
+	cmdTag := rows.CommandTag()
+	result.RowsAffected = cmdTag.RowsAffected()
+
+	return result, nil
+}
+
 // Ensure QueryExecutor implements datasource.QueryExecutor at compile time.
 var _ datasource.QueryExecutor = (*QueryExecutor)(nil)

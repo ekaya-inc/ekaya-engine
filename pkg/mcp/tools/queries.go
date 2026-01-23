@@ -98,15 +98,16 @@ type listApprovedQueriesResult struct {
 }
 
 type approvedQueryInfo struct {
-	ID            string             `json:"id"`
-	Name          string             `json:"name"`        // natural_language_prompt
-	Description   string             `json:"description"` // additional_context
-	SQL           string             `json:"sql"`         // The SQL template
-	Parameters    []parameterInfo    `json:"parameters"`
-	OutputColumns []outputColumnInfo `json:"output_columns,omitempty"`
-	Constraints   string             `json:"constraints,omitempty"` // Limitations and assumptions
-	Tags          []string           `json:"tags,omitempty"`        // Tags for organizing queries
-	Dialect       string             `json:"dialect"`
+	ID                 string             `json:"id"`
+	Name               string             `json:"name"`        // natural_language_prompt
+	Description        string             `json:"description"` // additional_context
+	SQL                string             `json:"sql"`         // The SQL template
+	Parameters         []parameterInfo    `json:"parameters"`
+	OutputColumns      []outputColumnInfo `json:"output_columns,omitempty"`
+	Constraints        string             `json:"constraints,omitempty"`        // Limitations and assumptions
+	Tags               []string           `json:"tags,omitempty"`               // Tags for organizing queries
+	AllowsModification bool               `json:"allows_modification"`          // Can execute INSERT/UPDATE/DELETE/CALL
+	Dialect            string             `json:"dialect"`
 }
 
 type parameterInfo struct {
@@ -240,15 +241,16 @@ func registerListApprovedQueriesTool(s *server.MCPServer, deps *QueryToolDeps) {
 			}
 
 			result.Queries[i] = approvedQueryInfo{
-				ID:            q.ID.String(),
-				Name:          q.NaturalLanguagePrompt,
-				Description:   desc,
-				SQL:           q.SQLQuery,
-				Parameters:    params,
-				OutputColumns: outputCols,
-				Constraints:   constraints,
-				Tags:          q.Tags,
-				Dialect:       q.Dialect,
+				ID:                 q.ID.String(),
+				Name:               q.NaturalLanguagePrompt,
+				Description:        desc,
+				SQL:                q.SQLQuery,
+				Parameters:         params,
+				OutputColumns:      outputCols,
+				Constraints:        constraints,
+				Tags:               q.Tags,
+				AllowsModification: q.AllowsModification,
+				Dialect:            q.Dialect,
 			}
 		}
 
@@ -280,9 +282,9 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			"limit",
 			mcp.Description("Max rows to return (default: 100, max: 1000)"),
 		),
-		mcp.WithReadOnlyHintAnnotation(true), // Approved queries should be SELECT only
-		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithReadOnlyHintAnnotation(false), // Some queries may modify data (INSERT/UPDATE/DELETE)
+		mcp.WithDestructiveHintAnnotation(false), // Individual queries may be destructive
+		mcp.WithIdempotentHintAnnotation(false),  // Modifying queries are not idempotent
 		mcp.WithOpenWorldHintAnnotation(false),
 	)
 
@@ -340,9 +342,59 @@ func registerExecuteApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 				fmt.Sprintf("query %q (ID: %s) is not enabled. Only enabled queries can be executed.", query.NaturalLanguagePrompt, queryID)), nil
 		}
 
-		// Execute with parameters (includes injection detection)
-		execReq := &services.ExecuteQueryRequest{Limit: limit}
+		// Detect SQL statement type
+		sqlType := services.DetectSQLType(query.SQLQuery)
+		isModifying := services.IsModifyingStatement(sqlType)
+
+		// Validate: modifying statements require allows_modification flag
+		if isModifying && !query.AllowsModification {
+			return NewErrorResult("QUERY_NOT_AUTHORIZED",
+				fmt.Sprintf("query %q is a %s statement but is not authorized for data modification",
+					query.NaturalLanguagePrompt, sqlType)), nil
+		}
+
 		startTime := time.Now()
+
+		// Route to appropriate execution path based on SQL type
+		if isModifying {
+			// Execute as modifying query (no row limit, returns rows_affected)
+			modifyResult, err := deps.QueryService.ExecuteModifyingWithParameters(
+				tenantCtx, projectID, queryID, params)
+			executionTimeMs := time.Since(startTime).Milliseconds()
+			if err != nil {
+				return convertQueryExecutionError(err, query.NaturalLanguagePrompt, queryID.String())
+			}
+
+			// Log execution to history
+			go logQueryExecution(tenantCtx, deps, projectID, queryID, query.SQLQuery, params, modifyResult.RowCount, int(executionTimeMs))
+
+			// Format response for modifying query
+			response := struct {
+				QueryName       string           `json:"query_name"`
+				ParametersUsed  map[string]any   `json:"parameters_used"`
+				Columns         []string         `json:"columns,omitempty"`
+				Rows            []map[string]any `json:"rows,omitempty"`
+				RowCount        int              `json:"row_count"`
+				RowsAffected    int64            `json:"rows_affected"`
+				ModifiedData    bool             `json:"modified_data"`
+				ExecutionTimeMs int64            `json:"execution_time_ms"`
+			}{
+				QueryName:       query.NaturalLanguagePrompt,
+				ParametersUsed:  params,
+				Columns:         modifyResult.Columns,
+				Rows:            modifyResult.Rows,
+				RowCount:        modifyResult.RowCount,
+				RowsAffected:    modifyResult.RowsAffected,
+				ModifiedData:    true,
+				ExecutionTimeMs: executionTimeMs,
+			}
+
+			jsonResult, _ := json.Marshal(response)
+			return mcp.NewToolResultText(string(jsonResult)), nil
+		}
+
+		// Execute as read-only query (with row limit)
+		execReq := &services.ExecuteQueryRequest{Limit: limit}
 		result, err := deps.QueryService.ExecuteWithParameters(
 			tenantCtx, projectID, queryID, params, execReq)
 		executionTimeMs := time.Since(startTime).Milliseconds()

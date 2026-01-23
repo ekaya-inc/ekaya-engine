@@ -137,6 +137,14 @@ type QueryExecutor interface {
 	// For INSERT/UPDATE/DELETE without RETURNING, returns RowsAffected.
 	Execute(ctx context.Context, sqlStatement string) (*ExecuteResult, error)
 
+	// ExecuteWithParams runs a parameterized DML statement (INSERT/UPDATE/DELETE/CALL).
+	// The SQL should use $1, $2, etc. for parameter placeholders.
+	// The params slice provides values in order corresponding to the placeholders.
+	//
+	// For statements with RETURNING clauses, returns rows in the result.
+	// For INSERT/UPDATE/DELETE without RETURNING, returns RowsAffected.
+	ExecuteWithParams(ctx context.Context, sqlStatement string, params []any) (*ExecuteResult, error)
+
 	// ValidateQuery checks if a SQL query is syntactically valid without executing it.
 	// Returns nil if valid, error with details if invalid.
 	ValidateQuery(ctx context.Context, sqlQuery string) error

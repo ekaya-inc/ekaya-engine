@@ -46,6 +46,12 @@ type QueryService interface {
 	// Query Execution
 	Execute(ctx context.Context, projectID, queryID uuid.UUID, req *ExecuteQueryRequest) (*datasource.QueryExecutionResult, error)
 	ExecuteWithParameters(ctx context.Context, projectID, queryID uuid.UUID, params map[string]any, req *ExecuteQueryRequest) (*datasource.QueryExecutionResult, error)
+	// ExecuteModifyingWithParameters executes a data-modifying query (INSERT/UPDATE/DELETE/CALL).
+	// Unlike ExecuteWithParameters which is for SELECT queries, this method:
+	// - Does not apply row limits (modifying queries affect all matching rows)
+	// - Returns RowsAffected for statements without RETURNING clause
+	// - Returns result rows for statements with RETURNING clause
+	ExecuteModifyingWithParameters(ctx context.Context, projectID, queryID uuid.UUID, params map[string]any) (*datasource.ExecuteResult, error)
 	Test(ctx context.Context, projectID, datasourceID uuid.UUID, req *TestQueryRequest) (*datasource.QueryExecutionResult, error)
 	Validate(ctx context.Context, projectID, datasourceID uuid.UUID, sqlQuery string) (*ValidationResult, error)
 	ValidateParameterizedQuery(sqlQuery string, params []models.QueryParameter) error
@@ -65,6 +71,7 @@ type CreateQueryRequest struct {
 	Status                string                  `json:"status,omitempty"`             // pending, approved, rejected (default: "approved")
 	SuggestedBy           string                  `json:"suggested_by,omitempty"`       // user, agent, admin
 	SuggestionContext     map[string]any          `json:"suggestion_context,omitempty"` // validation results, etc.
+	AllowsModification    bool                    `json:"allows_modification"`          // Allow INSERT/UPDATE/DELETE/CALL
 }
 
 // UpdateQueryRequest contains fields for updating a query.
@@ -77,6 +84,7 @@ type UpdateQueryRequest struct {
 	IsEnabled             *bool                  `json:"is_enabled,omitempty"`
 	OutputColumns         *[]models.OutputColumn `json:"output_columns,omitempty"`
 	Constraints           *string                `json:"constraints,omitempty"`
+	AllowsModification    *bool                  `json:"allows_modification,omitempty"` // Allow INSERT/UPDATE/DELETE/CALL
 }
 
 // ExecuteQueryRequest contains options for executing a saved query.
@@ -134,6 +142,17 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 	}
 	req.SQLQuery = validationResult.NormalizedSQL
 
+	// Validate SQL statement type and allows_modification flag
+	sqlType, err := ValidateSQLType(req.SQLQuery, req.AllowsModification)
+	if err != nil {
+		return nil, err
+	}
+
+	// Auto-correct: SELECT statements don't need allows_modification flag
+	if ShouldAutoCorrectAllowsModification(sqlType, req.AllowsModification) {
+		req.AllowsModification = false
+	}
+
 	// Fetch datasource to derive dialect from type
 	ds, err := s.datasourceSvc.Get(ctx, projectID, datasourceID)
 	if err != nil {
@@ -186,6 +205,7 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 		Status:                status,
 		SuggestionContext:     req.SuggestionContext,
 		UsageCount:            0,
+		AllowsModification:    req.AllowsModification,
 	}
 
 	if req.AdditionalContext != "" {
@@ -280,6 +300,20 @@ func (s *queryService) Update(ctx context.Context, projectID, queryID uuid.UUID,
 	}
 	if req.Constraints != nil {
 		query.Constraints = req.Constraints
+	}
+	if req.AllowsModification != nil {
+		query.AllowsModification = *req.AllowsModification
+	}
+
+	// Validate SQL statement type and allows_modification flag
+	sqlType, err := ValidateSQLType(query.SQLQuery, query.AllowsModification)
+	if err != nil {
+		return nil, err
+	}
+
+	// Auto-correct: SELECT statements don't need allows_modification flag
+	if ShouldAutoCorrectAllowsModification(sqlType, query.AllowsModification) {
+		query.AllowsModification = false
 	}
 
 	// Validate that all {{param}} in SQL have corresponding parameter definitions
@@ -654,6 +688,99 @@ func (s *queryService) ExecuteWithParameters(
 	}
 
 	// 9. Increment usage count (fire-and-forget, log warning on failure)
+	if err := s.queryRepo.IncrementUsageCount(ctx, queryID); err != nil {
+		s.logger.Warn("Failed to increment usage count",
+			zap.String("query_id", queryID.String()),
+			zap.Error(err),
+		)
+	}
+
+	return result, nil
+}
+
+// ExecuteModifyingWithParameters executes a data-modifying query (INSERT/UPDATE/DELETE/CALL).
+func (s *queryService) ExecuteModifyingWithParameters(
+	ctx context.Context,
+	projectID, queryID uuid.UUID,
+	params map[string]any,
+) (*datasource.ExecuteResult, error) {
+	// Extract userID from context (JWT claims)
+	userID, err := auth.RequireUserIDFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("user ID not found in context: %w", err)
+	}
+
+	// 1. Get query
+	query, err := s.queryRepo.GetByID(ctx, projectID, queryID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return nil, apperrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get query: %w", err)
+	}
+
+	// 2. Verify the query allows modification
+	if !query.AllowsModification {
+		return nil, fmt.Errorf("query is not authorized for data modification")
+	}
+
+	// 3. Validate required parameters are provided
+	if err := s.validateRequiredParameters(query.Parameters, params); err != nil {
+		return nil, err
+	}
+
+	// 4. Type-check and coerce parameter values
+	coercedParams, err := s.coerceParameterTypes(query.Parameters, params)
+	if err != nil {
+		return nil, err
+	}
+
+	// 5. Check for SQL injection attempts
+	injectionResults := sqlpkg.CheckAllParameters(coercedParams)
+	if len(injectionResults) > 0 {
+		// Log to SIEM for all detected injection attempts
+		for _, result := range injectionResults {
+			s.auditor.LogInjectionAttempt(ctx, projectID, queryID,
+				audit.SQLInjectionDetails{
+					ParamName:   result.ParamName,
+					ParamValue:  fmt.Sprintf("%v", result.ParamValue),
+					Fingerprint: result.Fingerprint,
+					QueryName:   query.NaturalLanguagePrompt,
+				},
+				getClientIPFromContext(ctx),
+			)
+		}
+		return nil, fmt.Errorf("potential SQL injection detected in parameter '%s'",
+			injectionResults[0].ParamName)
+	}
+
+	// 6. Substitute parameters to get prepared SQL
+	preparedSQL, orderedValues, err := sqlpkg.SubstituteParameters(
+		query.SQLQuery, query.Parameters, coercedParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to substitute parameters: %w", err)
+	}
+
+	// 7. Get datasource config
+	ds, err := s.datasourceSvc.Get(ctx, projectID, query.DatasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get datasource: %w", err)
+	}
+
+	// 8. Create query executor with identity parameters for connection pooling
+	executor, err := s.adapterFactory.NewQueryExecutor(ctx, ds.DatasourceType, ds.Config, projectID, query.DatasourceID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create query executor: %w", err)
+	}
+	defer executor.Close()
+
+	// 9. Execute with parameterized binding (no limit for modifying statements)
+	result, err := executor.ExecuteWithParams(ctx, preparedSQL, orderedValues)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute query: %w", err)
+	}
+
+	// 10. Increment usage count (fire-and-forget, log warning on failure)
 	if err := s.queryRepo.IncrementUsageCount(ctx, queryID); err != nil {
 		s.logger.Warn("Failed to increment usage count",
 			zap.String("query_id", queryID.String()),

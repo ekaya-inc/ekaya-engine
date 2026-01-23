@@ -381,6 +381,12 @@ func (m *mockQueryExecutorForGlossary) Execute(ctx context.Context, sqlStatement
 	}, nil
 }
 
+func (m *mockQueryExecutorForGlossary) ExecuteWithParams(ctx context.Context, sqlStatement string, params []any) (*datasource.ExecuteResult, error) {
+	return &datasource.ExecuteResult{
+		RowsAffected: 1,
+	}, nil
+}
+
 func (m *mockQueryExecutorForGlossary) ValidateQuery(ctx context.Context, sqlQuery string) error {
 	return nil // All queries are valid in test mock
 }

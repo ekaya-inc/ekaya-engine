@@ -837,6 +837,10 @@ func (m *mockQueryExecutorForTest) Execute(ctx context.Context, sqlStatement str
 	return &datasource.ExecuteResult{RowsAffected: 0}, nil
 }
 
+func (m *mockQueryExecutorForTest) ExecuteWithParams(ctx context.Context, sqlStatement string, params []any) (*datasource.ExecuteResult, error) {
+	return &datasource.ExecuteResult{RowsAffected: 0}, nil
+}
+
 func (m *mockQueryExecutorForTest) ValidateQuery(ctx context.Context, sqlQuery string) error {
 	return nil
 }
