@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
@@ -35,6 +36,7 @@ func TestCreateBidirectionalRelationship(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -332,6 +334,7 @@ func TestPKMatch_RequiresDistinctCount(t *testing.T) {
 	// Create service
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -439,6 +442,7 @@ func TestPKMatch_WorksWithoutRowCount(t *testing.T) {
 	// Create service
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -645,6 +649,7 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 
 		service := NewDeterministicRelationshipService(
 			mocks.datasourceService,
+			mocks.projectService,
 			mocks.adapterFactory,
 			mocks.ontologyRepo,
 			mocks.entityRepo,
@@ -751,6 +756,7 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 
 		service := NewDeterministicRelationshipService(
 			mocks.datasourceService,
+			mocks.projectService,
 			mocks.adapterFactory,
 			mocks.ontologyRepo,
 			mocks.entityRepo,
@@ -853,6 +859,7 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 
 		service := NewDeterministicRelationshipService(
 			mocks.datasourceService,
+			mocks.projectService,
 			mocks.adapterFactory,
 			mocks.ontologyRepo,
 			mocks.entityRepo,
@@ -980,6 +987,7 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 
 		service := NewDeterministicRelationshipService(
 			mocks.datasourceService,
+			mocks.projectService,
 			mocks.adapterFactory,
 			mocks.ontologyRepo,
 			mocks.entityRepo,
@@ -1008,6 +1016,7 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 // mockTestServices holds all mock dependencies for testing
 type mockTestServices struct {
 	datasourceService *mockTestDatasourceService
+	projectService    *mockTestProjectService
 	adapterFactory    *mockTestAdapterFactory
 	discoverer        *mockTestSchemaDiscoverer
 	ontologyRepo      *mockTestOntologyRepo
@@ -1027,6 +1036,9 @@ func setupMocks(projectID, ontologyID, datasourceID, entityID uuid.UUID) *mockTe
 				DatasourceType: "postgres",
 				Config:         map[string]any{},
 			},
+		},
+		projectService: &mockTestProjectService{
+			ontologySettings: &OntologySettings{UseLegacyPatternMatching: true},
 		},
 		adapterFactory: &mockTestAdapterFactory{
 			discoverer: discoverer,
@@ -1093,6 +1105,68 @@ func (m *mockTestDatasourceService) TestConnection(ctx context.Context, dsType s
 }
 
 func (m *mockTestDatasourceService) SetDefault(ctx context.Context, projectID, datasourceID uuid.UUID) error {
+	return nil
+}
+
+type mockTestProjectService struct {
+	ontologySettings *OntologySettings
+}
+
+func (m *mockTestProjectService) Provision(ctx context.Context, projectID uuid.UUID, name string, params map[string]interface{}) (*ProvisionResult, error) {
+	return nil, nil
+}
+
+func (m *mockTestProjectService) ProvisionFromClaims(ctx context.Context, claims *auth.Claims) (*ProvisionResult, error) {
+	return nil, nil
+}
+
+func (m *mockTestProjectService) GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error) {
+	return nil, nil
+}
+
+func (m *mockTestProjectService) GetByIDWithoutTenant(ctx context.Context, id uuid.UUID) (*models.Project, error) {
+	return nil, nil
+}
+
+func (m *mockTestProjectService) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (m *mockTestProjectService) GetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+
+func (m *mockTestProjectService) SetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID, datasourceID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockTestProjectService) SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string) {
+}
+
+func (m *mockTestProjectService) GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error) {
+	return "", nil
+}
+
+func (m *mockTestProjectService) UpdateAuthServerURL(ctx context.Context, projectID uuid.UUID, authServerURL string) error {
+	return nil
+}
+
+func (m *mockTestProjectService) GetAutoApproveSettings(ctx context.Context, projectID uuid.UUID) (*AutoApproveSettings, error) {
+	return nil, nil
+}
+
+func (m *mockTestProjectService) SetAutoApproveSettings(ctx context.Context, projectID uuid.UUID, settings *AutoApproveSettings) error {
+	return nil
+}
+
+func (m *mockTestProjectService) GetOntologySettings(ctx context.Context, projectID uuid.UUID) (*OntologySettings, error) {
+	if m.ontologySettings != nil {
+		return m.ontologySettings, nil
+	}
+	return &OntologySettings{UseLegacyPatternMatching: true}, nil
+}
+
+func (m *mockTestProjectService) SetOntologySettings(ctx context.Context, projectID uuid.UUID, settings *OntologySettings) error {
 	return nil
 }
 
@@ -1617,6 +1691,7 @@ func TestPKMatch_SmallIntegerValues(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -1729,6 +1804,7 @@ func TestPKMatch_SmallIntegerValues_LookupTable(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -1852,6 +1928,7 @@ func TestPKMatch_LowCardinality_Excluded(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -1974,6 +2051,7 @@ func TestPKMatch_CountColumns_NeverJoined(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -2098,6 +2176,7 @@ func TestPKMatch_RatingColumns_NeverJoined(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -2214,6 +2293,7 @@ func TestPKMatch_NoGarbageRelationships(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -2315,6 +2395,7 @@ func TestFKDiscovery_ManualRelationshipType(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -2424,6 +2505,7 @@ func TestFKDiscovery_ForeignKeyRelationshipType(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -2527,6 +2609,7 @@ func TestFKDiscovery_SelfReferentialRelationship(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -2658,6 +2741,7 @@ func TestPKMatch_LowCardinalityRatio(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -2802,6 +2886,7 @@ func TestFKDiscovery_LegitimateFK_EmailNotDiscovered(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -2966,6 +3051,7 @@ func TestPKMatch_EmailColumnsExcluded(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -3104,6 +3190,7 @@ func TestPKMatch_LowCardinalityRatio_IDColumn(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -3331,6 +3418,7 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -3524,6 +3612,7 @@ func TestPKMatch_NonIDColumn_StillFilteredByCardinality(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -3669,6 +3758,7 @@ func TestPKMatch_ReversedDirectionRejected(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,

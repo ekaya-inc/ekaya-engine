@@ -146,7 +146,7 @@ func TestFilterEntityCandidates(t *testing.T) {
 		},
 	}
 
-	candidates, excluded := FilterEntityCandidates(columns, tableByID, statsMap, logger)
+	candidates, excluded := FilterEntityCandidates(columns, tableByID, statsMap, true, logger)
 
 	// Verify candidates
 	if len(candidates) != 3 {

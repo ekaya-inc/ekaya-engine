@@ -161,7 +161,7 @@ func main() {
 	datasourceService := services.NewDatasourceService(datasourceRepo, ontologyRepo, credentialEncryptor, adapterFactory, projectService, logger)
 	schemaService := services.NewSchemaService(schemaRepo, ontologyEntityRepo, ontologyRepo, entityRelationshipRepo, datasourceService, adapterFactory, logger)
 	schemaChangeDetectionService := services.NewSchemaChangeDetectionService(pendingChangeRepo, logger)
-	dataChangeDetectionService := services.NewDataChangeDetectionService(schemaRepo, ontologyRepo, pendingChangeRepo, datasourceService, adapterFactory, logger)
+	dataChangeDetectionService := services.NewDataChangeDetectionService(schemaRepo, ontologyRepo, pendingChangeRepo, datasourceService, projectService, adapterFactory, logger)
 	discoveryService := services.NewRelationshipDiscoveryService(schemaRepo, datasourceService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
@@ -189,7 +189,7 @@ func main() {
 		ontologyEntityRepo, entityRelationshipRepo,
 		llmFactory, datasourceService, adapterFactory, logger)
 	deterministicRelationshipService := services.NewDeterministicRelationshipService(
-		datasourceService, adapterFactory, ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, logger)
+		datasourceService, projectService, adapterFactory, ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, logger)
 	ontologyFinalizationService := services.NewOntologyFinalizationService(
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, convRepo, llmFactory, getTenantCtx, logger)
 	entityService := services.NewEntityService(ontologyEntityRepo, entityRelationshipRepo, ontologyRepo, logger)

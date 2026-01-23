@@ -47,6 +47,7 @@ type DeterministicRelationshipService interface {
 
 type deterministicRelationshipService struct {
 	datasourceService DatasourceService
+	projectService    ProjectService
 	adapterFactory    datasource.DatasourceAdapterFactory
 	ontologyRepo      repositories.OntologyRepository
 	entityRepo        repositories.OntologyEntityRepository
@@ -58,6 +59,7 @@ type deterministicRelationshipService struct {
 // NewDeterministicRelationshipService creates a new DeterministicRelationshipService.
 func NewDeterministicRelationshipService(
 	datasourceService DatasourceService,
+	projectService ProjectService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	ontologyRepo repositories.OntologyRepository,
 	entityRepo repositories.OntologyEntityRepository,
@@ -67,6 +69,7 @@ func NewDeterministicRelationshipService(
 ) DeterministicRelationshipService {
 	return &deterministicRelationshipService{
 		datasourceService: datasourceService,
+		projectService:    projectService,
 		adapterFactory:    adapterFactory,
 		ontologyRepo:      ontologyRepo,
 		entityRepo:        entityRepo,
@@ -426,6 +429,13 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	startTime := time.Now()
 	s.logger.Info("Starting PK-match relationship discovery")
 
+	// Get ontology settings to determine if we should use legacy pattern matching
+	ontologySettings, err := s.projectService.GetOntologySettings(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("get ontology settings: %w", err)
+	}
+	useLegacyPatternMatching := ontologySettings.UseLegacyPatternMatching
+
 	// Get active ontology for the project
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
 	if err != nil {
@@ -514,7 +524,8 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			}
 
 			// Exclude names unlikely to be join keys (count, rating, score, etc.)
-			if isPKMatchExcludedName(col.ColumnName) {
+			// Only apply when legacy pattern matching is enabled
+			if useLegacyPatternMatching && isPKMatchExcludedName(col.ColumnName) {
 				continue
 			}
 
@@ -541,7 +552,8 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 		}
 
 		// Exclude names unlikely to be entity references
-		if isPKMatchExcludedName(col.ColumnName) {
+		// Only apply when legacy pattern matching is enabled
+		if useLegacyPatternMatching && isPKMatchExcludedName(col.ColumnName) {
 			continue
 		}
 

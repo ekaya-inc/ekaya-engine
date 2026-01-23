@@ -140,7 +140,7 @@ Pass candidate columns (after join validation) to LLMs for final semantic judgme
 ### Step 1: Create Feature Flag ✓
 Add `use_legacy_pattern_matching` flag to allow gradual rollout.
 
-### Step 2: Remove Exclusion Filters (Behind Flag)
+### Step 2: Remove Exclusion Filters (Behind Flag) ✓ DONE
 When flag is off, don't call:
 - `isPKMatchExcludedName()`
 - `isExcludedName()`
