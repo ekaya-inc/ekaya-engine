@@ -111,7 +111,7 @@ AND t.project_id = o.project_id;
 
 ## Success Criteria
 
-- [ ] `get_schema(selected_only=true)` returns only entities whose `PrimaryTable` is in selected tables
-- [ ] Entity list matches tables shown in schema output
-- [ ] Deselecting sample tables excludes their entities from output
-- [ ] Unit test validates filtering behavior
+- [x] `get_schema(selected_only=true)` returns only entities whose `PrimaryTable` is in selected tables
+- [x] Entity list matches tables shown in schema output
+- [x] Deselecting sample tables excludes their entities from output
+- [x] Unit test validates filtering behavior

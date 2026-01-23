@@ -1102,6 +1102,22 @@ func (s *schemaService) GetDatasourceSchemaWithEntities(ctx context.Context, pro
 		return "", fmt.Errorf("failed to get entities: %w", err)
 	}
 
+	// Filter entities to only include those from selected tables
+	if selectedOnly {
+		selectedTableNames := make(map[string]bool)
+		for _, table := range schema.Tables {
+			selectedTableNames[table.TableName] = true
+		}
+
+		filteredEntities := make([]*models.OntologyEntity, 0)
+		for _, entity := range entities {
+			if selectedTableNames[entity.PrimaryTable] {
+				filteredEntities = append(filteredEntities, entity)
+			}
+		}
+		entities = filteredEntities
+	}
+
 	// TODO: Compute occurrences from relationships (task 2.9 or later)
 	// This function needs to be updated to query relationships and compute occurrences at runtime
 	// similar to how entity_service.go and ontology_context.go were updated in tasks 2.5 and 2.6.

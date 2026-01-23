@@ -2343,3 +2343,389 @@ func TestSchemaService_RefreshDatasourceSchema_AutoSelectFalse(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================================
+// Mock Entity Repository
+// ============================================================================
+
+// mockEntityRepository is a mock for OntologyEntityRepository.
+type mockEntityRepository struct {
+	entities     []*models.OntologyEntity
+	getByProjErr error
+}
+
+func (m *mockEntityRepository) Create(ctx context.Context, entity *models.OntologyEntity) error {
+	return nil
+}
+
+func (m *mockEntityRepository) GetByID(ctx context.Context, entityID uuid.UUID) (*models.OntologyEntity, error) {
+	return nil, nil
+}
+
+func (m *mockEntityRepository) GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
+	return nil, nil
+}
+
+func (m *mockEntityRepository) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
+	if m.getByProjErr != nil {
+		return nil, m.getByProjErr
+	}
+	return m.entities, nil
+}
+
+func (m *mockEntityRepository) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	return nil, nil
+}
+
+func (m *mockEntityRepository) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	return nil, nil
+}
+
+func (m *mockEntityRepository) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepository) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepository) Update(ctx context.Context, entity *models.OntologyEntity) error {
+	return nil
+}
+
+func (m *mockEntityRepository) SoftDelete(ctx context.Context, entityID uuid.UUID, reason string) error {
+	return nil
+}
+
+func (m *mockEntityRepository) Restore(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepository) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {
+	return nil
+}
+
+func (m *mockEntityRepository) GetAliasesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityAlias, error) {
+	return nil, nil
+}
+
+func (m *mockEntityRepository) GetAllAliasesByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityAlias, error) {
+	return nil, nil
+}
+
+func (m *mockEntityRepository) DeleteAlias(ctx context.Context, aliasID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepository) CreateKeyColumn(ctx context.Context, keyColumn *models.OntologyEntityKeyColumn) error {
+	return nil
+}
+
+func (m *mockEntityRepository) GetKeyColumnsByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityKeyColumn, error) {
+	return nil, nil
+}
+
+func (m *mockEntityRepository) GetAllKeyColumnsByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityKeyColumn, error) {
+	return nil, nil
+}
+
+func (m *mockEntityRepository) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockEntityRepository) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	return nil, nil
+}
+
+// newTestSchemaServiceWithEntityRepo creates a test schema service with entity repo support.
+func newTestSchemaServiceWithEntityRepo(repo *mockSchemaRepository, entityRepo *mockEntityRepository, dsSvc *mockDatasourceService, factory *mockSchemaAdapterFactory) SchemaService {
+	return NewSchemaService(repo, entityRepo, nil, nil, dsSvc, factory, zap.NewNop())
+}
+
+// ============================================================================
+// Tests for GetDatasourceSchemaWithEntities Entity Filtering
+// ============================================================================
+
+func TestSchemaService_GetDatasourceSchemaWithEntities_FiltersBySelectedTables(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID1 := uuid.New()
+	tableID2 := uuid.New()
+	columnID1 := uuid.New()
+	columnID2 := uuid.New()
+
+	// Create schema with two tables - one selected, one not
+	schemaRepo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           tableID1,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users", // Selected
+				IsSelected:   true,
+			},
+			{
+				ID:           tableID2,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "sample_data", // Not selected
+				IsSelected:   false,
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            columnID1,
+				ProjectID:     projectID,
+				SchemaTableID: tableID1,
+				ColumnName:    "id",
+				DataType:      "uuid",
+				IsPrimaryKey:  true,
+				IsSelected:    true,
+			},
+			{
+				ID:            columnID2,
+				ProjectID:     projectID,
+				SchemaTableID: tableID2,
+				ColumnName:    "id",
+				DataType:      "uuid",
+				IsPrimaryKey:  true,
+				IsSelected:    true,
+			},
+		},
+		relationships: []*models.SchemaRelationship{},
+	}
+
+	// Create entities - one for each table
+	entityID1 := uuid.New()
+	entityID2 := uuid.New()
+	entityRepo := &mockEntityRepository{
+		entities: []*models.OntologyEntity{
+			{
+				ID:            entityID1,
+				Name:          "User",
+				Description:   "A user in the system",
+				PrimarySchema: "public",
+				PrimaryTable:  "users", // Matches selected table
+				PrimaryColumn: "id",
+			},
+			{
+				ID:            entityID2,
+				Name:          "SampleEntity",
+				Description:   "A sample entity",
+				PrimarySchema: "public",
+				PrimaryTable:  "sample_data", // Matches deselected table
+				PrimaryColumn: "id",
+			},
+		},
+	}
+
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaServiceWithEntityRepo(schemaRepo, entityRepo, dsSvc, factory)
+
+	// Test with selectedOnly=true - should filter entities
+	result, err := service.GetDatasourceSchemaWithEntities(context.Background(), projectID, datasourceID, true)
+	if err != nil {
+		t.Fatalf("GetDatasourceSchemaWithEntities failed: %v", err)
+	}
+
+	// Should include User entity (from selected table)
+	if !contains(result, "User:") {
+		t.Error("expected User entity in output (from selected table)")
+	}
+
+	// Should NOT include SampleEntity (from deselected table)
+	if contains(result, "SampleEntity:") {
+		t.Error("SampleEntity should not be in output (from deselected table)")
+	}
+
+	// Should include users table
+	if !contains(result, "Table: public.users") {
+		t.Error("expected users table in output")
+	}
+
+	// Should NOT include sample_data table
+	if contains(result, "sample_data") {
+		t.Error("sample_data table should not be in output")
+	}
+}
+
+func TestSchemaService_GetDatasourceSchemaWithEntities_AllEntitiesWhenNotFiltered(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID1 := uuid.New()
+	tableID2 := uuid.New()
+	columnID1 := uuid.New()
+	columnID2 := uuid.New()
+
+	// Create schema with two tables
+	schemaRepo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           tableID1,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users",
+				IsSelected:   true,
+			},
+			{
+				ID:           tableID2,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "sample_data",
+				IsSelected:   false,
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            columnID1,
+				ProjectID:     projectID,
+				SchemaTableID: tableID1,
+				ColumnName:    "id",
+				DataType:      "uuid",
+				IsPrimaryKey:  true,
+				IsSelected:    true,
+			},
+			{
+				ID:            columnID2,
+				ProjectID:     projectID,
+				SchemaTableID: tableID2,
+				ColumnName:    "id",
+				DataType:      "uuid",
+				IsPrimaryKey:  true,
+				IsSelected:    true,
+			},
+		},
+		relationships: []*models.SchemaRelationship{},
+	}
+
+	// Create entities for both tables
+	entityID1 := uuid.New()
+	entityID2 := uuid.New()
+	entityRepo := &mockEntityRepository{
+		entities: []*models.OntologyEntity{
+			{
+				ID:            entityID1,
+				Name:          "User",
+				Description:   "A user in the system",
+				PrimarySchema: "public",
+				PrimaryTable:  "users",
+				PrimaryColumn: "id",
+			},
+			{
+				ID:            entityID2,
+				Name:          "SampleEntity",
+				Description:   "A sample entity",
+				PrimarySchema: "public",
+				PrimaryTable:  "sample_data",
+				PrimaryColumn: "id",
+			},
+		},
+	}
+
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaServiceWithEntityRepo(schemaRepo, entityRepo, dsSvc, factory)
+
+	// Test with selectedOnly=false - should include ALL entities
+	result, err := service.GetDatasourceSchemaWithEntities(context.Background(), projectID, datasourceID, false)
+	if err != nil {
+		t.Fatalf("GetDatasourceSchemaWithEntities failed: %v", err)
+	}
+
+	// Should include BOTH entities
+	if !contains(result, "User:") {
+		t.Error("expected User entity in output")
+	}
+	if !contains(result, "SampleEntity:") {
+		t.Error("expected SampleEntity in output when selectedOnly=false")
+	}
+
+	// Should include both tables
+	if !contains(result, "Table: public.users") {
+		t.Error("expected users table in output")
+	}
+	if !contains(result, "Table: public.sample_data") {
+		t.Error("expected sample_data table in output when selectedOnly=false")
+	}
+}
+
+func TestSchemaService_GetDatasourceSchemaWithEntities_NoEntitiesMatchSelectedTables(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	tableID1 := uuid.New()
+	columnID1 := uuid.New()
+
+	// Create schema with one selected table
+	schemaRepo := &mockSchemaRepository{
+		tables: []*models.SchemaTable{
+			{
+				ID:           tableID1,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				SchemaName:   "public",
+				TableName:    "users",
+				IsSelected:   true,
+			},
+		},
+		columns: []*models.SchemaColumn{
+			{
+				ID:            columnID1,
+				ProjectID:     projectID,
+				SchemaTableID: tableID1,
+				ColumnName:    "id",
+				DataType:      "uuid",
+				IsPrimaryKey:  true,
+				IsSelected:    true,
+			},
+		},
+		relationships: []*models.SchemaRelationship{},
+	}
+
+	// Create entity for a different table (not in selected tables)
+	entityID1 := uuid.New()
+	entityRepo := &mockEntityRepository{
+		entities: []*models.OntologyEntity{
+			{
+				ID:            entityID1,
+				Name:          "Order",
+				Description:   "An order",
+				PrimarySchema: "public",
+				PrimaryTable:  "orders", // This table is not in the schema
+				PrimaryColumn: "id",
+			},
+		},
+	}
+
+	dsSvc := &mockDatasourceService{}
+	factory := &mockSchemaAdapterFactory{}
+
+	service := newTestSchemaServiceWithEntityRepo(schemaRepo, entityRepo, dsSvc, factory)
+
+	// Test with selectedOnly=true - should filter out all entities
+	result, err := service.GetDatasourceSchemaWithEntities(context.Background(), projectID, datasourceID, true)
+	if err != nil {
+		t.Fatalf("GetDatasourceSchemaWithEntities failed: %v", err)
+	}
+
+	// Should NOT include Order entity (its table is not selected)
+	if contains(result, "Order:") {
+		t.Error("Order entity should not be in output (its table is not in selected tables)")
+	}
+
+	// Should NOT have DOMAIN ENTITIES section if no entities match
+	if contains(result, "DOMAIN ENTITIES:") {
+		t.Error("DOMAIN ENTITIES section should not appear when no entities match selected tables")
+	}
+
+	// Should still include the schema
+	if !contains(result, "Table: public.users") {
+		t.Error("expected users table in output")
+	}
+}
