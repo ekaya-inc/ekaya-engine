@@ -3914,3 +3914,456 @@ func TestAreTypesCompatibleForFK_CaseInsensitive(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================================
+// Data-Based FK Detection Tests (UseLegacyPatternMatching=false)
+// ============================================================================
+
+// TestPKMatch_DataBased_ExcludedNamesNotFiltered verifies that when
+// UseLegacyPatternMatching=false, columns with "excluded" name patterns
+// (like num_users, rating, score) are still considered as FK candidates.
+// This is the new behavior where only data (joinability, cardinality) matters.
+func TestPKMatch_DataBased_ExcludedNamesNotFiltered(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	productEntityID := uuid.New()
+	categoryEntityID := uuid.New()
+
+	highDistinct := int64(100)
+	isJoinableTrue := true
+
+	// Create mocks with legacy pattern matching DISABLED
+	mocks := setupMocks(projectID, ontologyID, datasourceID, productEntityID)
+	mocks.projectService.ontologySettings = &OntologySettings{UseLegacyPatternMatching: false}
+
+	mocks.entityRepo.entities = []*models.OntologyEntity{
+		{
+			ID:            productEntityID,
+			OntologyID:    ontologyID,
+			Name:          "product",
+			PrimarySchema: "public",
+			PrimaryTable:  "products",
+		},
+		{
+			ID:            categoryEntityID,
+			OntologyID:    ontologyID,
+			Name:          "category",
+			PrimarySchema: "public",
+			PrimaryTable:  "categories",
+		},
+	}
+
+	// Track join analysis calls
+	joinAnalysisCalls := make(map[string]bool)
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		key := fmt.Sprintf("%s.%s→%s.%s", sourceTable, sourceColumn, targetTable, targetColumn)
+		joinAnalysisCalls[key] = true
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil // 0 orphans = valid FK
+	}
+
+	productsTableID := uuid.New()
+	categoriesTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         productsTableID,
+			SchemaName: "public",
+			TableName:  "products",
+			RowCount:   &highDistinct,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: productsTableID,
+					ColumnName:    "id",
+					DataType:      "integer",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+				// "num_products" would be excluded by legacy pattern matching but should
+				// be included when data-based detection is enabled
+				{
+					SchemaTableID: productsTableID,
+					ColumnName:    "num_products",
+					DataType:      "integer",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct, // High distinct = good FK candidate
+				},
+			},
+		},
+		{
+			ID:         categoriesTableID,
+			SchemaName: "public",
+			TableName:  "categories",
+			RowCount:   &highDistinct,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: categoriesTableID,
+					ColumnName:    "id",
+					DataType:      "integer",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	_, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// With data-based detection, "num_products" should have been evaluated
+	// (not filtered out by name pattern)
+	numProductsEvaluated := false
+	for key := range joinAnalysisCalls {
+		if strings.Contains(key, "num_products") {
+			numProductsEvaluated = true
+			break
+		}
+	}
+	if !numProductsEvaluated {
+		t.Error("expected 'num_products' to be evaluated as FK candidate when UseLegacyPatternMatching=false")
+	}
+}
+
+// TestPKMatch_DataBased_RequiresExplicitJoinability verifies that when
+// UseLegacyPatternMatching=false, ALL columns (even those with _id suffix)
+// must have explicit IsJoinable=true to be considered as SOURCE candidates.
+//
+// Note: This test verifies SOURCE candidate filtering via join analysis calls.
+// Columns with nil IsJoinable can still appear in relationships as TARGETS
+// (via entityRefColumns which don't check IsJoinable) and then as SOURCE
+// in the reverse relationship created for bidirectional navigation.
+//
+// The key constraint tested: join analysis should NOT be triggered with
+// a nil-IsJoinable column as the source.
+func TestPKMatch_DataBased_RequiresExplicitJoinability(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	highDistinct := int64(100)
+	isJoinableTrue := true
+
+	// Create mocks with legacy pattern matching DISABLED
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+	mocks.projectService.ontologySettings = &OntologySettings{UseLegacyPatternMatching: false}
+
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	// Track which columns are used as SOURCE in join analysis
+	// In data-based mode, user_id_nil should NOT be used as source in join analysis
+	// (This is the key constraint - nil IsJoinable columns are not candidates)
+	joinAnalysisSourceColumns := make(map[string]bool)
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		joinAnalysisSourceColumns[sourceColumn] = true
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+	}
+
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &highDistinct,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			RowCount:   &highDistinct,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: ordersTableID,
+					ColumnName:    "id",
+					DataType:      "int8",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+				// This _id column has nil IsJoinable - should NOT be used as SOURCE
+				// in join analysis calls (not added to candidates list)
+				{
+					SchemaTableID: ordersTableID,
+					ColumnName:    "user_id_nil",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					IsJoinable:    nil, // nil = no joinability info = NOT a candidate
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	_, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify user_id_nil was NOT used as SOURCE in any join analysis call
+	// This is the key constraint: nil IsJoinable columns should not be candidates
+	if joinAnalysisSourceColumns["user_id_nil"] {
+		t.Error("user_id_nil should NOT be used as source in join analysis (nil IsJoinable in data-based mode)")
+	}
+}
+
+// TestPKMatch_DataBased_CardinalityRatioAlwaysApplied verifies that when
+// UseLegacyPatternMatching=false, the cardinality ratio check applies to ALL columns,
+// including those with _id suffix.
+func TestPKMatch_DataBased_CardinalityRatioAlwaysApplied(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	eventEntityID := uuid.New()
+
+	highDistinct := int64(100)
+	lowDistinct := int64(50)   // Low distinct
+	highRowCount := int64(10000) // 50/10000 = 0.5% < 5% threshold
+	isJoinableTrue := true
+
+	// Create mocks with legacy pattern matching DISABLED
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+	mocks.projectService.ontologySettings = &OntologySettings{UseLegacyPatternMatching: false}
+
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            eventEntityID,
+		OntologyID:    ontologyID,
+		Name:          "event",
+		PrimarySchema: "public",
+		PrimaryTable:  "events",
+	})
+
+	// Join analysis should NOT be called for columns with low cardinality ratio
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		if sourceColumn == "user_id" && sourceTable == "events" {
+			t.Errorf("AnalyzeJoin should NOT be called for events.user_id (low cardinality ratio in non-legacy mode)")
+		}
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+	}
+
+	usersTableID := uuid.New()
+	eventsTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &highDistinct,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+		{
+			ID:         eventsTableID,
+			SchemaName: "public",
+			TableName:  "events",
+			RowCount:   &highRowCount, // 10,000 rows
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: eventsTableID,
+					ColumnName:    "id",
+					DataType:      "int8",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highRowCount,
+				},
+				// This _id column has low cardinality ratio (0.5% < 5%)
+				// In legacy mode, _id columns skip this check
+				// In data-based mode, this column would be filtered out
+				{
+					SchemaTableID: eventsTableID,
+					ColumnName:    "user_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &lowDistinct, // 50/10000 = 0.5% < 5%
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify no relationships involving events.user_id (filtered by cardinality ratio)
+	for _, rel := range mocks.relationshipRepo.created {
+		if rel.SourceColumnTable == "events" && rel.SourceColumnName == "user_id" {
+			t.Errorf("unexpected relationship from events.user_id: data-based mode should filter by cardinality ratio")
+		}
+	}
+	_ = result
+}
+
+// TestPKMatch_LegacyMode_IDColumnsExemptFromFilters verifies that when
+// UseLegacyPatternMatching=true (legacy mode), _id columns are exempt from
+// certain filters like cardinality ratio check.
+func TestPKMatch_LegacyMode_IDColumnsExemptFromFilters(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	eventEntityID := uuid.New()
+
+	highDistinct := int64(100)
+	lowDistinct := int64(50)     // Low distinct
+	highRowCount := int64(10000) // 50/10000 = 0.5% < 5% threshold
+	isJoinableTrue := true
+
+	// Create mocks with legacy pattern matching ENABLED (default)
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+	// UseLegacyPatternMatching defaults to true in setupMocks
+
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            eventEntityID,
+		OntologyID:    ontologyID,
+		Name:          "event",
+		PrimarySchema: "public",
+		PrimaryTable:  "events",
+	})
+
+	// In legacy mode, _id columns should be evaluated even with low cardinality ratio
+	joinAnalysisCalled := false
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		if sourceColumn == "user_id" && sourceTable == "events" {
+			joinAnalysisCalled = true
+		}
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+	}
+
+	usersTableID := uuid.New()
+	eventsTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &highDistinct,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+		{
+			ID:         eventsTableID,
+			SchemaName: "public",
+			TableName:  "events",
+			RowCount:   &highRowCount, // 10,000 rows
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: eventsTableID,
+					ColumnName:    "id",
+					DataType:      "int8",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highRowCount,
+				},
+				// This _id column has low cardinality ratio (0.5% < 5%)
+				// In legacy mode, _id columns skip this check
+				{
+					SchemaTableID: eventsTableID,
+					ColumnName:    "user_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &lowDistinct, // 50/10000 = 0.5% < 5%
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	_, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// In legacy mode, user_id should have been evaluated (exempt from cardinality ratio check)
+	if !joinAnalysisCalled {
+		t.Error("expected events.user_id to be evaluated in legacy mode (_id columns exempt from cardinality ratio check)")
+	}
+}

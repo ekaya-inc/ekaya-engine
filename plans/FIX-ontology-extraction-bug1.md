@@ -152,8 +152,7 @@ When flag is off, don't call:
 ### Step 4: Add LLM Semantic Evaluation ✓ DONE
 Create new service that evaluates FK candidates using LLMs.
 
-### Step 5: Update Tests
-- Remove tests for pattern-matching functions
+### Step 5: Update Tests ✓ DONE
 - Add tests for data-based FK detection
 - Add tests for LLM semantic evaluation
 
