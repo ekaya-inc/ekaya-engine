@@ -126,14 +126,14 @@ WHERE e.name = 'Billing Engagement';
 - [ ] Entities with FK references to them have occurrence_count > 0
 - [ ] Occurrence count matches number of inbound relationships
 - [ ] Entities without inbound references correctly have count = 0
-- [ ] BUG-3 and BUG-9 are fixed first
+- [x] BUG-3 and BUG-9 are fixed first
 
 ## Dependencies
 
 | Dependency | Status | Impact |
 |------------|--------|--------|
-| BUG-3 (Missing FK relationships) | Must fix first | Root cause of missing relationships |
-| BUG-9 (Stats collection) | Must fix first | Root cause of missing stats → filtered columns |
+| BUG-3 (Missing FK relationships) | ✅ Fixed | Root cause of missing relationships |
+| BUG-9 (Stats collection) | ✅ Fixed | Root cause of missing stats → filtered columns |
 
 ## Implementation Order
 
