@@ -188,7 +188,7 @@ s.logger.Info("Column stats collection complete",
 - Log warning for each failed column
 - Return partial results instead of failing entirely
 
-### Step 2: Fix Type Cast Issues
+### Step 2: Fix Type Cast Issues ✓
 - Use conditional casting for length stats
 - Skip length for non-text types (set to NULL)
 
@@ -250,8 +250,8 @@ func TestStatsCollection_AllColumnsProcessed(t *testing.T) {
 ## Success Criteria
 
 - [x] Per-column failures don't abort entire table stats collection
-- [ ] All text-compatible columns have accurate distinct_count
-- [ ] Non-text columns have NULL length but valid distinct_count
+- [x] All text-compatible columns have accurate distinct_count
+- [x] Non-text columns have NULL length but valid distinct_count
 - [x] Error logging shows which columns/tables had issues
 - [ ] 90%+ of joinable columns have stats (up from 73%)
 - [ ] BUG-3, BUG-6, BUG-11 symptoms reduced after fix

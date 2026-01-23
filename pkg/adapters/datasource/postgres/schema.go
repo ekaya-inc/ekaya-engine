@@ -252,16 +252,33 @@ func (d *SchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, t
 	for _, colName := range columnNames {
 		quotedCol := pgx.Identifier{colName}.Sanitize()
 
-		// Query includes length stats for text columns (used to detect uniform-length IDs like UUIDs)
+		// Query includes length stats for text-compatible columns (used to detect uniform-length IDs like UUIDs).
+		// For non-text types (arrays, bytea, json, etc.), length is set to NULL to avoid cast errors.
+		// We use a subquery to determine the column type, then conditionally calculate length.
 		query := fmt.Sprintf(`
+			WITH col_type AS (
+				SELECT pg_typeof(%s)::text AS dtype
+				FROM %s.%s
+				WHERE %s IS NOT NULL
+				LIMIT 1
+			)
 			SELECT
 				COUNT(*) as row_count,
 				COUNT(%s) as non_null_count,
 				COUNT(DISTINCT %s) as distinct_count,
-				MIN(LENGTH(%s::text)) as min_length,
-				MAX(LENGTH(%s::text)) as max_length
+				CASE
+					WHEN (SELECT dtype FROM col_type) IN ('text', 'character varying', 'character', 'uuid', 'name', 'bpchar')
+					THEN MIN(LENGTH(%s::text))
+					ELSE NULL
+				END as min_length,
+				CASE
+					WHEN (SELECT dtype FROM col_type) IN ('text', 'character varying', 'character', 'uuid', 'name', 'bpchar')
+					THEN MAX(LENGTH(%s::text))
+					ELSE NULL
+				END as max_length
 			FROM %s.%s
-		`, quotedCol, quotedCol, quotedCol, quotedCol, quotedSchema, quotedTable)
+		`, quotedCol, quotedSchema, quotedTable, quotedCol,
+			quotedCol, quotedCol, quotedCol, quotedCol, quotedSchema, quotedTable)
 
 		var s datasource.ColumnStats
 		s.ColumnName = colName

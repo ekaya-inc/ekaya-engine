@@ -499,6 +499,108 @@ func TestSchemaDiscoverer_AnalyzeColumnStats_PartialFailure(t *testing.T) {
 	}
 }
 
+func TestSchemaDiscoverer_AnalyzeColumnStats_NonTextTypes(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// Create a temporary table with non-text column types that would fail ::text casting.
+	// Array columns cannot be cast to text with LENGTH() in PostgreSQL.
+	setupSQL := `
+		CREATE TEMP TABLE test_nonttext_types (
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL,
+			tags TEXT[] NOT NULL,
+			data BYTEA,
+			num INTEGER NOT NULL
+		);
+		INSERT INTO test_nonttext_types (name, tags, data, num)
+		VALUES
+			('alice', ARRAY['a', 'b'], E'\\xDEADBEEF', 42),
+			('bob', ARRAY['c'], E'\\xCAFE', 100);
+	`
+
+	_, err := tc.discoverer.pool.Exec(ctx, setupSQL)
+	if err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+
+	// Request stats for all columns including array and bytea types
+	columnNames := []string{"id", "name", "tags", "data", "num"}
+	stats, err := tc.discoverer.AnalyzeColumnStats(ctx, "pg_temp", "test_nonttext_types", columnNames)
+
+	// Should NOT return an error - non-text types should be handled gracefully
+	if err != nil {
+		t.Fatalf("AnalyzeColumnStats should handle non-text types, got error: %v", err)
+	}
+
+	if len(stats) != 5 {
+		t.Fatalf("expected 5 stat results, got %d", len(stats))
+	}
+
+	// Verify all columns have correct basic stats (row_count, distinct_count)
+	for _, s := range stats {
+		if s.RowCount != 2 {
+			t.Errorf("column %s: expected row count 2, got %d", s.ColumnName, s.RowCount)
+		}
+		// All columns in our test data have 2 distinct values
+		if s.DistinctCount != 2 {
+			t.Errorf("column %s: expected distinct count 2, got %d", s.ColumnName, s.DistinctCount)
+		}
+	}
+
+	// Verify text column has length stats
+	nameStats := stats[1] // name column
+	if nameStats.ColumnName != "name" {
+		t.Fatalf("expected second column to be 'name', got %q", nameStats.ColumnName)
+	}
+	if nameStats.MinLength == nil {
+		t.Error("expected text column 'name' to have min_length, got nil")
+	} else if *nameStats.MinLength != 3 { // "bob" = 3
+		t.Errorf("expected name min_length 3, got %d", *nameStats.MinLength)
+	}
+	if nameStats.MaxLength == nil {
+		t.Error("expected text column 'name' to have max_length, got nil")
+	} else if *nameStats.MaxLength != 5 { // "alice" = 5
+		t.Errorf("expected name max_length 5, got %d", *nameStats.MaxLength)
+	}
+
+	// Verify array column has NULL length stats (not a type cast error)
+	tagsStats := stats[2] // tags column (TEXT[])
+	if tagsStats.ColumnName != "tags" {
+		t.Fatalf("expected third column to be 'tags', got %q", tagsStats.ColumnName)
+	}
+	if tagsStats.MinLength != nil {
+		t.Errorf("expected array column 'tags' to have nil min_length, got %d", *tagsStats.MinLength)
+	}
+	if tagsStats.MaxLength != nil {
+		t.Errorf("expected array column 'tags' to have nil max_length, got %d", *tagsStats.MaxLength)
+	}
+
+	// Verify bytea column has NULL length stats
+	dataStats := stats[3] // data column (BYTEA)
+	if dataStats.ColumnName != "data" {
+		t.Fatalf("expected fourth column to be 'data', got %q", dataStats.ColumnName)
+	}
+	if dataStats.MinLength != nil {
+		t.Errorf("expected bytea column 'data' to have nil min_length, got %d", *dataStats.MinLength)
+	}
+	if dataStats.MaxLength != nil {
+		t.Errorf("expected bytea column 'data' to have nil max_length, got %d", *dataStats.MaxLength)
+	}
+
+	// Verify integer column has NULL length stats
+	numStats := stats[4] // num column (INTEGER)
+	if numStats.ColumnName != "num" {
+		t.Fatalf("expected fifth column to be 'num', got %q", numStats.ColumnName)
+	}
+	if numStats.MinLength != nil {
+		t.Errorf("expected integer column 'num' to have nil min_length, got %d", *numStats.MinLength)
+	}
+	if numStats.MaxLength != nil {
+		t.Errorf("expected integer column 'num' to have nil max_length, got %d", *numStats.MaxLength)
+	}
+}
+
 func TestSchemaDiscoverer_CheckValueOverlap(t *testing.T) {
 	tc := setupSchemaDiscovererTest(t)
 	ctx := context.Background()
