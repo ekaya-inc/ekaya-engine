@@ -196,7 +196,7 @@ Line 89-103: Include cardinality (with direction swap: N:1 becomes 1:N for rever
 
 ### Step 5: Handle Cardinality Swapping for Reverse
 
-When creating reverse relationship, swap cardinality direction:
+[x] When creating reverse relationship, swap cardinality direction:
 ```go
 func reverseCardinality(cardinality string) string {
     switch cardinality {
