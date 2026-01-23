@@ -210,6 +210,10 @@ func reverseCardinality(cardinality string) string {
 }
 ```
 
+### Step 6: Add Tests for Cardinality
+
+[x] Add unit tests for cardinality inference and relationship creation
+
 ## Files to Modify
 
 | File | Change |
