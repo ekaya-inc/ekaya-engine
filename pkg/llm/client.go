@@ -16,6 +16,27 @@ import (
 // This prevents hanging indefinitely when the LLM server stops responding.
 const DefaultRequestTimeout = 5 * time.Minute
 
+// requestIDHeader is the header name used to pass conversation ID to the model gateway.
+// The gateway uses chi's middleware.RequestID which recognizes this header.
+const requestIDHeader = "X-Request-Id"
+
+// contextAwareTransport wraps an http.RoundTripper to inject headers from context.
+// It reads the conversation ID from context and sets it as X-Request-Id header,
+// enabling end-to-end request tracing between client and model gateway.
+type contextAwareTransport struct {
+	base http.RoundTripper
+}
+
+func (t *contextAwareTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Check if conversation ID is in context and add as X-Request-Id header
+	if id, ok := GetConversationID(req.Context()); ok {
+		// Clone the request to avoid mutating the original
+		req = req.Clone(req.Context())
+		req.Header.Set(requestIDHeader, id.String())
+	}
+	return t.base.RoundTrip(req)
+}
+
 // Client provides access to OpenAI-compatible LLM endpoints.
 type Client struct {
 	client    *openai.Client
@@ -47,9 +68,14 @@ func NewClient(cfg *Config, logger *zap.Logger) (*Client, error) {
 	clientConfig := openai.DefaultConfig(cfg.APIKey)
 	clientConfig.BaseURL = strings.TrimSuffix(cfg.Endpoint, "/")
 
-	// Use custom HTTP client with timeout to prevent hanging on unresponsive servers
+	// Use custom HTTP client with:
+	// - Timeout to prevent hanging on unresponsive servers
+	// - Custom transport to inject X-Request-Id header from context for tracing
 	clientConfig.HTTPClient = &http.Client{
 		Timeout: DefaultRequestTimeout,
+		Transport: &contextAwareTransport{
+			base: http.DefaultTransport,
+		},
 	}
 
 	return &Client{
