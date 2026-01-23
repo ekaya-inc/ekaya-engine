@@ -133,7 +133,7 @@ Update all services to pass `selectedOnly=true` during ontology extraction:
 | `pkg/services/data_change_detection.go:367` | `ListColumnsByTable` | Pass `true` |
 | `pkg/services/incremental_dag_service.go:674` | `GetColumnsByTables` | Pass `true` |
 
-### Step 4: Update MCP Context Service
+### Step 4: Update MCP Context Service ✓
 
 **File:** `pkg/services/ontology_context.go`
 
