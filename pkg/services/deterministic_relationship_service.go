@@ -102,6 +102,7 @@ func (s *deterministicRelationshipService) createBidirectionalRelationship(ctx c
 		DetectionMethod:    rel.DetectionMethod,
 		Confidence:         rel.Confidence,
 		Status:             rel.Status,
+		Cardinality:        ReverseCardinality(rel.Cardinality), // swap: N:1 ↔ 1:N
 		Description:        nil, // reverse direction gets its own description during enrichment
 	}
 
@@ -206,6 +207,8 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 		}
 
 		// Create bidirectional relationship (both forward and reverse)
+		// FK constraints are typically N:1 (many-to-one): the FK column (source)
+		// has many values pointing to one PK (target)
 		rel := &models.EntityRelationship{
 			OntologyID:         ontology.ID,
 			SourceEntityID:     sourceEntity.ID,
@@ -219,6 +222,7 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 			DetectionMethod:    detectionMethod,
 			Confidence:         1.0,
 			Status:             models.RelationshipStatusConfirmed,
+			Cardinality:        models.CardinalityNTo1,
 		}
 
 		err := s.createBidirectionalRelationship(ctx, rel)

@@ -178,7 +178,7 @@ func inferCardinalityFromStats(sourceCol, targetCol *models.SchemaColumn, source
 
 ### Step 2: Update FK Relationship Creation
 
-**File:** `pkg/services/deterministic_relationship_service.go`
+[x] **File:** `pkg/services/deterministic_relationship_service.go`
 
 Line 206-219: Add cardinality calculation for FK relationships.
 

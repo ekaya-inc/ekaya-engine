@@ -4369,3 +4369,232 @@ func TestPKMatch_LegacyMode_IDColumnsExemptFromFilters(t *testing.T) {
 		t.Error("expected events.user_id to be evaluated in legacy mode (_id columns exempt from cardinality ratio check)")
 	}
 }
+
+// TestFKDiscovery_Cardinality verifies that FK relationships have N:1 cardinality
+// (many FK values point to one PK value) and reverse relationships have 1:N cardinality.
+func TestFKDiscovery_Cardinality(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Add order entity
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	userIDColumnID := uuid.New()
+	orderUserIDColumnID := uuid.New()
+
+	// Setup tables with columns
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            userIDColumnID,
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            orderUserIDColumnID,
+					SchemaTableID: ordersTableID,
+					ColumnName:    "user_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+				},
+			},
+		},
+	}
+
+	// Add FK relationship: orders.user_id → users.id
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
+		{
+			ID:               uuid.New(),
+			ProjectID:        projectID,
+			SourceTableID:    ordersTableID,
+			SourceColumnID:   orderUserIDColumnID,
+			TargetTableID:    usersTableID,
+			TargetColumnID:   userIDColumnID,
+			RelationshipType: models.RelationshipTypeFK,
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: 1 FK relationship discovered (creates 2 rows: forward + reverse)
+	if result.FKRelationships != 1 {
+		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
+	}
+
+	// Bidirectional: 2 relationships created (forward + reverse)
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	}
+
+	// Verify forward relationship: orders → users has cardinality N:1
+	// (many orders belong to one user)
+	forwardRel := mocks.relationshipRepo.created[0]
+	if forwardRel.Cardinality != models.CardinalityNTo1 {
+		t.Errorf("expected forward cardinality=%q, got %q", models.CardinalityNTo1, forwardRel.Cardinality)
+	}
+
+	// Verify reverse relationship: users → orders has cardinality 1:N
+	// (one user has many orders)
+	reverseRel := mocks.relationshipRepo.created[1]
+	if reverseRel.Cardinality != models.Cardinality1ToN {
+		t.Errorf("expected reverse cardinality=%q, got %q", models.Cardinality1ToN, reverseRel.Cardinality)
+	}
+}
+
+// TestCreateBidirectionalRelationship_Cardinality verifies that cardinality is
+// correctly swapped when creating bidirectional relationships.
+func TestCreateBidirectionalRelationship_Cardinality(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	testCases := []struct {
+		name               string
+		inputCardinality   string
+		expectedForward    string
+		expectedReverse    string
+	}{
+		{
+			name:             "N:1 becomes 1:N for reverse",
+			inputCardinality: models.CardinalityNTo1,
+			expectedForward:  models.CardinalityNTo1,
+			expectedReverse:  models.Cardinality1ToN,
+		},
+		{
+			name:             "1:N becomes N:1 for reverse",
+			inputCardinality: models.Cardinality1ToN,
+			expectedForward:  models.Cardinality1ToN,
+			expectedReverse:  models.CardinalityNTo1,
+		},
+		{
+			name:             "1:1 stays 1:1",
+			inputCardinality: models.Cardinality1To1,
+			expectedForward:  models.Cardinality1To1,
+			expectedReverse:  models.Cardinality1To1,
+		},
+		{
+			name:             "N:M stays N:M",
+			inputCardinality: models.CardinalityNToM,
+			expectedForward:  models.CardinalityNToM,
+			expectedReverse:  models.CardinalityNToM,
+		},
+		{
+			name:             "unknown stays unknown",
+			inputCardinality: models.CardinalityUnknown,
+			expectedForward:  models.CardinalityUnknown,
+			expectedReverse:  models.CardinalityUnknown,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Clear previous created relationships
+			mocks.relationshipRepo.created = nil
+
+			// Create a test relationship with specified cardinality
+			rel := &models.EntityRelationship{
+				OntologyID:         ontologyID,
+				SourceEntityID:     orderEntityID,
+				TargetEntityID:     userEntityID,
+				SourceColumnSchema: "public",
+				SourceColumnTable:  "orders",
+				SourceColumnName:   "user_id",
+				TargetColumnSchema: "public",
+				TargetColumnTable:  "users",
+				TargetColumnName:   "id",
+				DetectionMethod:    models.DetectionMethodForeignKey,
+				Confidence:         1.0,
+				Status:             models.RelationshipStatusConfirmed,
+				Cardinality:        tc.inputCardinality,
+			}
+
+			// Call createBidirectionalRelationship
+			svc := service.(*deterministicRelationshipService)
+			err := svc.createBidirectionalRelationship(context.Background(), rel)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			// Verify: 2 relationships created (forward and reverse)
+			if len(mocks.relationshipRepo.created) != 2 {
+				t.Fatalf("expected 2 relationships (forward and reverse), got %d", len(mocks.relationshipRepo.created))
+			}
+
+			// Verify forward relationship cardinality
+			forward := mocks.relationshipRepo.created[0]
+			if forward.Cardinality != tc.expectedForward {
+				t.Errorf("forward cardinality: expected %q, got %q", tc.expectedForward, forward.Cardinality)
+			}
+
+			// Verify reverse relationship cardinality
+			reverse := mocks.relationshipRepo.created[1]
+			if reverse.Cardinality != tc.expectedReverse {
+				t.Errorf("reverse cardinality: expected %q, got %q", tc.expectedReverse, reverse.Cardinality)
+			}
+		})
+	}
+}
