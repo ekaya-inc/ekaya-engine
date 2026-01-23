@@ -131,7 +131,7 @@ func (s *dataChangeDetectionService) ScanTables(
 	}
 
 	// Get tables for schema info
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}
