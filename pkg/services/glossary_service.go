@@ -1467,10 +1467,10 @@ func validateEnumValues(sql string, ontology *models.TieredOntology) []EnumMisma
 }
 
 // extractStringLiterals extracts all single-quoted string literals from SQL.
-// It handles escaped quotes ('') within strings.
+// It handles escaped quotes (”) within strings.
 // Examples:
 //   - SELECT * FROM t WHERE status = 'active' → ["active"]
-//   - WHERE name = 'O''Brien' → ["O'Brien"]
+//   - WHERE name = 'O”Brien' → ["O'Brien"]
 func extractStringLiterals(sql string) []string {
 	var literals []string
 	var current strings.Builder
@@ -1591,9 +1591,9 @@ func levenshteinDistance(s1, s2 string) int {
 				cost = 1
 			}
 			curr[j] = minInt(
-				curr[j-1]+1,       // insertion
-				prev[j]+1,         // deletion
-				prev[j-1]+cost,    // substitution
+				curr[j-1]+1,    // insertion
+				prev[j]+1,      // deletion
+				prev[j-1]+cost, // substitution
 			)
 		}
 		prev, curr = curr, prev
