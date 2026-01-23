@@ -149,7 +149,7 @@ When flag is off, don't call:
 When flag is off, don't call:
 - `isLikelyFKColumn()` for special treatment
 
-### Step 4: Add LLM Semantic Evaluation
+### Step 4: Add LLM Semantic Evaluation ✓ DONE
 Create new service that evaluates FK candidates using LLMs.
 
 ### Step 5: Update Tests
