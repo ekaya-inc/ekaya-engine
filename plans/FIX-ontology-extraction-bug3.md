@@ -183,11 +183,11 @@ WHERE be.visitor_id IN (SELECT user_id FROM users);
 
 ## Success Criteria
 
-- [ ] Billing Engagement shows 4+ relationships (visitor, host, session, offer)
-- [ ] Columns with NULL stats but `is_joinable=true` are evaluated
-- [ ] Join validation correctly identifies valid FK relationships
-- [ ] Performance impact measured and acceptable
-- [ ] Integration test verifies NULL-stats handling
+- [x] Billing Engagement shows 4+ relationships (visitor, host, session, offer)
+- [x] Columns with NULL stats but `is_joinable=true` are evaluated
+- [x] Join validation correctly identifies valid FK relationships
+- [x] Performance impact measured and acceptable
+- [x] Integration test verifies NULL-stats handling
 
 ## Dependencies
 

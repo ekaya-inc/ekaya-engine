@@ -250,9 +250,11 @@ func TestOldOccByTableBehaviorWasBroken(t *testing.T) {
 	}
 }
 
-// TestPKMatch_RequiresDistinctCount verifies that columns without DistinctCount
-// are skipped and do not create relationships.
-func TestPKMatch_RequiresDistinctCount(t *testing.T) {
+// TestPKMatch_NilStatsWithJoinableTrue verifies that columns with IsJoinable=true
+// but DistinctCount=nil proceed to join validation instead of being skipped.
+// This fixes BUG-3: columns like visitor_id, host_id with NULL stats but is_joinable=true
+// should create relationships when join validation succeeds.
+func TestPKMatch_NilStatsWithJoinableTrue(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 	ontologyID := uuid.New()
@@ -265,8 +267,7 @@ func TestPKMatch_RequiresDistinctCount(t *testing.T) {
 	// Create mocks with user entity
 	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
 
-	// Add order entity - we need both entities to test that the FILTER logic
-	// (not the entity lookup) is what prevents relationship creation
+	// Add order entity
 	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
 		ID:            orderEntityID,
 		OntologyID:    ontologyID,
@@ -275,16 +276,17 @@ func TestPKMatch_RequiresDistinctCount(t *testing.T) {
 		PrimaryTable:  "orders",
 	})
 
-	// Mock discoverer would return 0 orphans if called - but should NOT be called
+	// Track if AnalyzeJoin is called for the nil-stats column
+	analyzeJoinCalled := false
 	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
-		t.Errorf("AnalyzeJoin should not be called (column without DistinctCount): %s.%s.%s -> %s.%s.%s",
-			sourceSchema, sourceTable, sourceColumn,
-			targetSchema, targetTable, targetColumn)
-		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+		if sourceColumn == "buyer_id" {
+			analyzeJoinCalled = true
+		}
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil // Valid FK: all rows match
 	}
 
-	// Schema: orders.buyer has IsJoinable=true but no DistinctCount - should be skipped as candidate
-	// Using column name "buyer" (not "buyer_id") to ensure it's not treated as an entityRefColumn
+	// Schema: orders.buyer_id has IsJoinable=true but no DistinctCount
+	// With the fix, it should proceed to join validation
 	usersTableID := uuid.New()
 	ordersTableID := uuid.New()
 
@@ -301,7 +303,7 @@ func TestPKMatch_RequiresDistinctCount(t *testing.T) {
 					DataType:      "uuid",
 					IsPrimaryKey:  true,
 					IsJoinable:    &isJoinableTrue,
-					DistinctCount: &distinctCount, // Has stats
+					DistinctCount: &distinctCount,
 				},
 			},
 		},
@@ -314,18 +316,18 @@ func TestPKMatch_RequiresDistinctCount(t *testing.T) {
 				{
 					SchemaTableID: ordersTableID,
 					ColumnName:    "id",
-					DataType:      "uuid",
+					DataType:      "int8", // Different type prevents bidirectional matching
 					IsPrimaryKey:  true,
 					IsJoinable:    &isJoinableTrue,
-					DistinctCount: &distinctCount, // Orders PK
+					DistinctCount: &distinctCount,
 				},
 				{
 					SchemaTableID: ordersTableID,
-					ColumnName:    "buyer", // Not ending in _id, so won't be entityRefColumn
+					ColumnName:    "buyer_id",
 					DataType:      "uuid",
 					IsPrimaryKey:  false,
-					IsJoinable:    &isJoinableTrue, // Would be joinable...
-					DistinctCount: nil,             // ...but NO stats - should be skipped as candidate
+					IsJoinable:    &isJoinableTrue, // Marked as joinable
+					DistinctCount: nil,             // But NO stats (BUG-3 scenario)
 				},
 			},
 		},
@@ -349,14 +351,14 @@ func TestPKMatch_RequiresDistinctCount(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: NO relationships created because orders.user_id lacks stats
-	if result.InferredRelationships != 0 {
-		t.Errorf("expected 0 inferred relationships (column without stats should be skipped), got %d", result.InferredRelationships)
+	// Verify: AnalyzeJoin was called for the nil-stats column
+	if !analyzeJoinCalled {
+		t.Error("expected AnalyzeJoin to be called for buyer_id (nil stats with is_joinable=true)")
 	}
 
-	// Verify no relationships were persisted
-	if len(mocks.relationshipRepo.created) != 0 {
-		t.Errorf("expected 0 relationships to be created, got %d", len(mocks.relationshipRepo.created))
+	// Verify: relationship was created since join validation passed
+	if result.InferredRelationships == 0 {
+		t.Error("expected relationship to be created for nil-stats column with valid join")
 	}
 }
 

@@ -571,29 +571,29 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			continue
 		}
 
-		// Require stats to exist (fail-fast on missing data)
-		// Note: While IsJoinable=true typically implies stats exist (from classifyJoinability),
-		// PK columns can be marked joinable without stats. This defensive check prevents
-		// nil pointer access during cardinality filtering.
-		if col.DistinctCount == nil {
-			continue // No stats = cannot evaluate = skip
-		}
-		// Check cardinality threshold
-		if *col.DistinctCount < 20 {
-			continue
-		}
-		// Check cardinality ratio if row count available
-		// When legacy pattern matching is enabled, _id/_uuid/_key columns skip this check
-		// since they are often valid FK columns even with low cardinality (e.g., 500 unique
-		// visitors in 100,000 rows = 0.5%).
-		// When disabled, all columns are subject to the cardinality ratio check.
-		skipCardinalityCheck := useLegacyPatternMatching && isLikelyFKColumn(col.ColumnName)
-		if table.RowCount != nil && *table.RowCount > 0 && !skipCardinalityCheck {
-			ratio := float64(*col.DistinctCount) / float64(*table.RowCount)
-			if ratio < 0.05 {
+		// Apply cardinality filters only if stats exist
+		// Columns with is_joinable=true but no stats proceed to join validation
+		// where CheckValueOverlap will determine actual FK validity.
+		if col.DistinctCount != nil {
+			// Check cardinality threshold
+			if *col.DistinctCount < 20 {
 				continue
 			}
+			// Check cardinality ratio if row count available
+			// When legacy pattern matching is enabled, _id/_uuid/_key columns skip this check
+			// since they are often valid FK columns even with low cardinality (e.g., 500 unique
+			// visitors in 100,000 rows = 0.5%).
+			// When disabled, all columns are subject to the cardinality ratio check.
+			skipCardinalityCheck := useLegacyPatternMatching && isLikelyFKColumn(col.ColumnName)
+			if table.RowCount != nil && *table.RowCount > 0 && !skipCardinalityCheck {
+				ratio := float64(*col.DistinctCount) / float64(*table.RowCount)
+				if ratio < 0.05 {
+					continue
+				}
+			}
 		}
+		// Columns without stats but with is_joinable=true proceed to validation
+		// Join validation will determine actual FK validity via CheckValueOverlap
 
 		allCandidates = append(allCandidates, &pkMatchCandidate{
 			column: col,
