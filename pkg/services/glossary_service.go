@@ -1052,6 +1052,9 @@ IMPORTANT: The defining_sql must be a complete SELECT statement that can be exec
 - Be ready to execute without modification
 - Return meaningful column names that business users will understand
 
+IMPORTANT: When filtering on enumeration columns, use the EXACT values provided in the schema context.
+Do NOT simplify or normalize enum values (e.g., use 'TRANSACTION_STATE_ENDED' not 'ended').
+
 Be specific and use exact table/column names from the provided schema.`
 }
 

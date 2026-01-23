@@ -3097,3 +3097,69 @@ func TestGlossaryService_EnrichTermPrompt_NoEnumValuesWhenColumnHasNone(t *testi
 	// Should NOT include "Allowed values:" when no enum values exist
 	assert.NotContains(t, prompt, "Allowed values:", "Prompt should NOT include 'Allowed values:' when columns have no enum values")
 }
+
+func TestGlossaryService_EnrichTermSystemMessage_IncludesEnumInstructions(t *testing.T) {
+	// This test verifies that the system message for term enrichment includes
+	// instructions to use EXACT enum values from schema context (BUG-12 fix)
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Transaction",
+			PrimaryTable: "billing_transactions",
+		},
+	}
+
+	enrichmentResponse := `{
+		"defining_sql": "SELECT SUM(amount) AS total FROM billing_transactions",
+		"base_table": "billing_transactions",
+		"aliases": []
+	}`
+
+	llmClient := &mockLLMClientCapturingPrompt{responseContent: enrichmentResponse}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+			ColumnDetails: map[string][]models.ColumnDetail{
+				"billing_transactions": {
+					{Name: "amount", Role: "measure"},
+				},
+			},
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+
+	term := &models.BusinessGlossaryTerm{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Term:        "Total Revenue",
+		Definition:  "Sum of all transaction amounts",
+		Source:      models.GlossarySourceInferred,
+		DefiningSQL: "",
+	}
+	glossaryRepo.terms[term.ID] = term
+
+	_ = svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+
+	systemMessage := llmClient.capturedSystemMessage
+
+	// System message must include instructions about using exact enum values
+	assert.Contains(t, systemMessage, "EXACT", "System message must emphasize using EXACT enum values")
+	assert.Contains(t, systemMessage, "enumeration columns", "System message must mention enumeration columns")
+	assert.Contains(t, systemMessage, "Do NOT simplify or normalize", "System message must warn against normalizing enum values")
+}
