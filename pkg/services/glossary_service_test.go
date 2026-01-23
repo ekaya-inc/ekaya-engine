@@ -3164,6 +3164,38 @@ func TestGlossaryService_EnrichTermSystemMessage_IncludesEnumInstructions(t *tes
 	assert.Contains(t, systemMessage, "Do NOT simplify or normalize", "System message must warn against normalizing enum values")
 }
 
+func TestGlossaryService_EnrichTermSystemMessage_IncludesComplexMetricExamples(t *testing.T) {
+	// This test verifies that the system message includes examples for complex metrics
+	// like utilization rates, participation rates, and other ratio-based calculations (BUG-10 fix)
+	logger := zap.NewNop()
+	svc := &glossaryService{logger: logger}
+
+	systemMessage := svc.enrichTermSystemMessage()
+
+	// System message must include examples header
+	assert.Contains(t, systemMessage, "EXAMPLES FOR COMPLEX METRICS", "System message should include complex metrics examples section")
+
+	// Verify utilization rate example is present
+	assert.Contains(t, systemMessage, "utilization", "System message should include utilization rate example")
+	assert.Contains(t, systemMessage, "FILTER (WHERE", "System message should show PostgreSQL FILTER syntax")
+	assert.Contains(t, systemMessage, "NULLIF", "System message should show NULLIF for division safety")
+
+	// Verify participation rate example is present
+	assert.Contains(t, systemMessage, "participation_rate", "System message should include participation rate example")
+	assert.Contains(t, systemMessage, "COUNT(DISTINCT", "System message should show distinct count pattern")
+
+	// Verify completion rate example is present
+	assert.Contains(t, systemMessage, "completion_rate", "System message should include completion rate example")
+
+	// Verify average with filter example is present
+	assert.Contains(t, systemMessage, "AVG(", "System message should include average example")
+	assert.Contains(t, systemMessage, "avg_duration", "System message should include average duration example")
+
+	// Verify multi-table join example is present
+	assert.Contains(t, systemMessage, "LEFT JOIN", "System message should include join example")
+	assert.Contains(t, systemMessage, "COALESCE", "System message should show COALESCE for null handling")
+}
+
 // ============================================================================
 // Tests for Enum Value Validation (BUG-12 Task 3)
 // ============================================================================

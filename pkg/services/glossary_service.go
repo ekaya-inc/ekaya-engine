@@ -1124,6 +1124,43 @@ IMPORTANT: The defining_sql must be a complete SELECT statement that can be exec
 IMPORTANT: When filtering on enumeration columns, use the EXACT values provided in the schema context.
 Do NOT simplify or normalize enum values (e.g., use 'TRANSACTION_STATE_ENDED' not 'ended').
 
+EXAMPLES FOR COMPLEX METRICS:
+
+For utilization/conversion rates (percentage of items in a specific state):
+{
+  "defining_sql": "SELECT COUNT(*) FILTER (WHERE status = 'used') * 100.0 / NULLIF(COUNT(*), 0) AS utilization_rate FROM offers WHERE created_at >= NOW() - INTERVAL '30 days'",
+  "base_table": "offers",
+  "aliases": ["usage rate", "redemption rate"]
+}
+
+For participation rates (distinct participants vs total eligible):
+{
+  "defining_sql": "SELECT COUNT(DISTINCT r.referrer_id) * 100.0 / NULLIF((SELECT COUNT(*) FROM users WHERE is_eligible = true), 0) AS participation_rate FROM referrals r WHERE r.bonus_paid = true",
+  "base_table": "referrals",
+  "aliases": ["adoption rate", "enrollment rate"]
+}
+
+For completion rates (successful vs total attempts):
+{
+  "defining_sql": "SELECT COUNT(*) FILTER (WHERE state = 'COMPLETED') * 100.0 / NULLIF(COUNT(*), 0) AS completion_rate FROM transactions",
+  "base_table": "transactions",
+  "aliases": ["success rate", "fulfillment rate"]
+}
+
+For averages with conditional filtering:
+{
+  "defining_sql": "SELECT AVG(duration_seconds) FILTER (WHERE state = 'COMPLETED') AS avg_duration FROM sessions",
+  "base_table": "sessions",
+  "aliases": ["mean duration", "average session length"]
+}
+
+For metrics requiring multi-table joins:
+{
+  "defining_sql": "SELECT u.id AS user_id, COUNT(t.id) AS transaction_count, COALESCE(SUM(t.amount), 0) AS total_amount FROM users u LEFT JOIN transactions t ON u.id = t.user_id GROUP BY u.id",
+  "base_table": "users",
+  "aliases": ["user transaction summary"]
+}
+
 Be specific and use exact table/column names from the provided schema.`
 }
 
