@@ -203,12 +203,13 @@ s.logger.Info("Column stats collection complete",
 
 ## Files to Modify
 
-| File | Change |
-|------|--------|
-| `pkg/adapters/datasource/postgres/schema.go` | Continue on per-column errors, fix type casting |
-| `pkg/adapters/datasource/mssql/schema.go` | Same fixes for MSSQL adapter |
-| `pkg/services/deterministic_relationship_service.go` | Better error logging |
-| `pkg/adapters/datasource/postgres/schema_test.go` | Test error handling |
+| File | Change | Status |
+|------|--------|--------|
+| `pkg/adapters/datasource/postgres/schema.go` | Continue on per-column errors, fix type casting | ✅ Done |
+| `pkg/adapters/datasource/mssql/schema.go` | Same fixes for MSSQL adapter (uses sys.columns metadata for type detection instead of SQL_VARIANT_PROPERTY) | ✅ Done |
+| `pkg/services/deterministic_relationship_service.go` | Better error logging | ✅ Done |
+| `pkg/adapters/datasource/postgres/schema_test.go` | Test error handling | ✅ Done |
+| `pkg/adapters/datasource/mssql/schema_test.go` | Test error handling (PartialFailure, NonTextTypes, RetryWithSimplifiedQuery) | ✅ Done |
 
 ## Testing
 
