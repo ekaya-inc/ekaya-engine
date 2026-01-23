@@ -1013,6 +1013,20 @@ func (s *glossaryService) enrichSingleTerm(
 		return enrichmentResult{termName: term.Term, err: fmt.Errorf("SQL validation failed: %s", testResult.Error)}
 	}
 
+	// Check for potential enum value mismatches (best-effort validation)
+	// This logs warnings but doesn't fail the enrichment
+	if mismatches := validateEnumValues(enrichment.DefiningSQL, ontology); len(mismatches) > 0 {
+		for _, mismatch := range mismatches {
+			s.logger.Warn("Potential enum value mismatch in generated SQL",
+				zap.String("term", term.Term),
+				zap.String("sql_value", mismatch.SQLValue),
+				zap.String("table", mismatch.Table),
+				zap.String("column", mismatch.Column),
+				zap.String("suggested_value", mismatch.BestMatch),
+				zap.Strings("actual_values", mismatch.ActualValues))
+		}
+	}
+
 	// Update term with enrichment and output columns
 	term.DefiningSQL = enrichment.DefiningSQL
 	term.BaseTable = enrichment.BaseTable
@@ -1355,4 +1369,246 @@ func matchesAny(term string, patterns []string) bool {
 		}
 	}
 	return false
+}
+
+// EnumMismatch represents a detected enum value issue in generated SQL.
+// It captures when the SQL uses a string literal that appears to be a simplified
+// or incorrect version of an actual enum value in the ontology.
+type EnumMismatch struct {
+	SQLValue      string   // The value found in the SQL
+	Column        string   // The column this likely refers to
+	Table         string   // The table containing the column
+	ActualValues  []string // The actual enum values for this column
+	BestMatch     string   // The best matching actual value (if found)
+	MatchDistance int      // How different the values are (lower is better match)
+}
+
+// enumInfo holds metadata about where an enum value comes from.
+type enumInfo struct {
+	table    string
+	column   string
+	original string
+}
+
+// validateEnumValues checks generated SQL for potential enum value mismatches.
+// It extracts string literals from the SQL and compares them against known enum
+// columns in the ontology. Returns a list of potential issues.
+//
+// This is a best-effort heuristic check - it may produce false positives for
+// string literals that aren't meant to be enum values. The caller should use
+// these results as warnings/logs rather than hard failures.
+func validateEnumValues(sql string, ontology *models.TieredOntology) []EnumMismatch {
+	if ontology == nil || len(ontology.ColumnDetails) == 0 {
+		return nil
+	}
+
+	// Extract string literals from SQL
+	literals := extractStringLiterals(sql)
+	if len(literals) == 0 {
+		return nil
+	}
+
+	// Build a map of all known enum values across the ontology
+	// key: lowercase enum value, value: struct with table, column, original value
+	knownEnums := make(map[string]enumInfo)
+	enumColumns := make(map[string][]string) // key: "table.column", values: all enum values
+
+	for tableName, columns := range ontology.ColumnDetails {
+		for _, col := range columns {
+			if len(col.EnumValues) > 0 {
+				key := tableName + "." + col.Name
+				for _, ev := range col.EnumValues {
+					knownEnums[strings.ToLower(ev.Value)] = enumInfo{
+						table:    tableName,
+						column:   col.Name,
+						original: ev.Value,
+					}
+					enumColumns[key] = append(enumColumns[key], ev.Value)
+				}
+			}
+		}
+	}
+
+	if len(knownEnums) == 0 {
+		return nil
+	}
+
+	var mismatches []EnumMismatch
+
+	for _, literal := range literals {
+		literalLower := strings.ToLower(literal)
+
+		// If the literal exactly matches a known enum, it's fine
+		if _, exists := knownEnums[literalLower]; exists {
+			continue
+		}
+
+		// Check if this literal is a simplified/shortened version of an enum value
+		bestMatch, matchInfo, distance := findBestEnumMatch(literalLower, knownEnums)
+		if bestMatch != "" && distance <= 3 {
+			// This literal is suspiciously close to an enum value but doesn't match
+			// Skip if it's too short (might just be a coincidental word)
+			if len(literal) < 3 {
+				continue
+			}
+
+			mismatches = append(mismatches, EnumMismatch{
+				SQLValue:      literal,
+				Column:        matchInfo.column,
+				Table:         matchInfo.table,
+				ActualValues:  enumColumns[matchInfo.table+"."+matchInfo.column],
+				BestMatch:     matchInfo.original,
+				MatchDistance: distance,
+			})
+		}
+	}
+
+	return mismatches
+}
+
+// extractStringLiterals extracts all single-quoted string literals from SQL.
+// It handles escaped quotes ('') within strings.
+// Examples:
+//   - SELECT * FROM t WHERE status = 'active' → ["active"]
+//   - WHERE name = 'O''Brien' → ["O'Brien"]
+func extractStringLiterals(sql string) []string {
+	var literals []string
+	var current strings.Builder
+	inString := false
+
+	for i := 0; i < len(sql); i++ {
+		if sql[i] == '\'' {
+			if inString {
+				// Check for escaped quote ('')
+				if i+1 < len(sql) && sql[i+1] == '\'' {
+					current.WriteByte('\'')
+					i++ // Skip the next quote
+				} else {
+					// End of string literal
+					if current.Len() > 0 {
+						literals = append(literals, current.String())
+					}
+					current.Reset()
+					inString = false
+				}
+			} else {
+				// Start of string literal
+				inString = true
+			}
+		} else if inString {
+			current.WriteByte(sql[i])
+		}
+	}
+
+	return literals
+}
+
+// findBestEnumMatch finds the best matching enum value for a given literal.
+// Uses Levenshtein-inspired suffix matching to detect when a literal like 'ended'
+// might be a simplified version of 'TRANSACTION_STATE_ENDED'.
+//
+// Returns the best match, its info, and a distance score (0 = perfect suffix match).
+func findBestEnumMatch(literalLower string, knownEnums map[string]enumInfo) (string, enumInfo, int) {
+	var bestMatch string
+	var bestInfo enumInfo
+	bestDistance := 999
+
+	for enumLower, info := range knownEnums {
+		// Check if the literal is a suffix of the enum (common pattern)
+		// e.g., "ended" matches "TRANSACTION_STATE_ENDED"
+		if strings.HasSuffix(enumLower, "_"+literalLower) || strings.HasSuffix(enumLower, literalLower) {
+			// Suffix match - very likely a simplified version
+			distance := 0
+			if distance < bestDistance {
+				bestDistance = distance
+				bestMatch = enumLower
+				bestInfo = info
+			}
+			continue
+		}
+
+		// Check if literal is a prefix stripped of underscores
+		// e.g., "waiting" vs "TRANSACTION_STATE_WAITING"
+		parts := strings.Split(enumLower, "_")
+		for _, part := range parts {
+			if part == literalLower {
+				distance := 1 // Partial match via part
+				if distance < bestDistance {
+					bestDistance = distance
+					bestMatch = enumLower
+					bestInfo = info
+				}
+				break
+			}
+		}
+
+		// Check Levenshtein distance for very similar values
+		// Only check if the literal and enum have similar lengths
+		if absInt(len(literalLower)-len(enumLower)) <= 5 {
+			distance := levenshteinDistance(literalLower, enumLower)
+			if distance <= 3 && distance < bestDistance {
+				bestDistance = distance
+				bestMatch = enumLower
+				bestInfo = info
+			}
+		}
+	}
+
+	return bestMatch, bestInfo, bestDistance
+}
+
+// absInt returns the absolute value of an integer.
+func absInt(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// levenshteinDistance calculates the edit distance between two strings.
+// This is used to detect near-misses in enum values.
+func levenshteinDistance(s1, s2 string) int {
+	if len(s1) == 0 {
+		return len(s2)
+	}
+	if len(s2) == 0 {
+		return len(s1)
+	}
+
+	// Use a single row of the DP table for space efficiency
+	prev := make([]int, len(s2)+1)
+	curr := make([]int, len(s2)+1)
+
+	for j := range prev {
+		prev[j] = j
+	}
+
+	for i := 1; i <= len(s1); i++ {
+		curr[0] = i
+		for j := 1; j <= len(s2); j++ {
+			cost := 0
+			if s1[i-1] != s2[j-1] {
+				cost = 1
+			}
+			curr[j] = minInt(
+				curr[j-1]+1,       // insertion
+				prev[j]+1,         // deletion
+				prev[j-1]+cost,    // substitution
+			)
+		}
+		prev, curr = curr, prev
+	}
+
+	return prev[len(s2)]
+}
+
+// minInt returns the minimum of three integers.
+func minInt(a, b, c int) int {
+	if a <= b && a <= c {
+		return a
+	}
+	if b <= c {
+		return b
+	}
+	return c
 }

@@ -3163,3 +3163,268 @@ func TestGlossaryService_EnrichTermSystemMessage_IncludesEnumInstructions(t *tes
 	assert.Contains(t, systemMessage, "enumeration columns", "System message must mention enumeration columns")
 	assert.Contains(t, systemMessage, "Do NOT simplify or normalize", "System message must warn against normalizing enum values")
 }
+
+// ============================================================================
+// Tests for Enum Value Validation (BUG-12 Task 3)
+// ============================================================================
+
+func TestExtractStringLiterals(t *testing.T) {
+	tests := []struct {
+		name     string
+		sql      string
+		expected []string
+	}{
+		{
+			name:     "simple single literal",
+			sql:      "SELECT * FROM t WHERE status = 'active'",
+			expected: []string{"active"},
+		},
+		{
+			name:     "multiple literals",
+			sql:      "SELECT * FROM t WHERE status = 'active' AND type = 'user'",
+			expected: []string{"active", "user"},
+		},
+		{
+			name:     "escaped quotes",
+			sql:      "SELECT * FROM t WHERE name = 'O''Brien'",
+			expected: []string{"O'Brien"},
+		},
+		{
+			name:     "empty literal",
+			sql:      "SELECT * FROM t WHERE name = ''",
+			expected: nil, // empty strings are not captured
+		},
+		{
+			name:     "literal with spaces",
+			sql:      "SELECT * FROM t WHERE name = 'John Doe'",
+			expected: []string{"John Doe"},
+		},
+		{
+			name:     "uppercase enum value",
+			sql:      "SELECT * FROM t WHERE state = 'TRANSACTION_STATE_ENDED'",
+			expected: []string{"TRANSACTION_STATE_ENDED"},
+		},
+		{
+			name:     "no literals",
+			sql:      "SELECT COUNT(*) FROM t WHERE id = 123",
+			expected: nil,
+		},
+		{
+			name:     "multiple escaped quotes",
+			sql:      "SELECT * FROM t WHERE x = 'it''s' AND y = 'they''re'",
+			expected: []string{"it's", "they're"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := extractStringLiterals(tc.sql)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestValidateEnumValues_DetectsMismatch(t *testing.T) {
+	// This is the core BUG-12 scenario: 'ended' is used instead of 'TRANSACTION_STATE_ENDED'
+	ontology := &models.TieredOntology{
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"billing_transactions": {
+				{
+					Name: "transaction_state",
+					Role: "dimension",
+					EnumValues: []models.EnumValue{
+						{Value: "TRANSACTION_STATE_ENDED"},
+						{Value: "TRANSACTION_STATE_WAITING"},
+						{Value: "TRANSACTION_STATE_ERROR"},
+					},
+				},
+			},
+		},
+	}
+
+	sql := "SELECT SUM(amount) FROM billing_transactions WHERE transaction_state = 'ended'"
+	mismatches := validateEnumValues(sql, ontology)
+
+	require.Len(t, mismatches, 1)
+	assert.Equal(t, "ended", mismatches[0].SQLValue)
+	assert.Equal(t, "billing_transactions", mismatches[0].Table)
+	assert.Equal(t, "transaction_state", mismatches[0].Column)
+	assert.Equal(t, "TRANSACTION_STATE_ENDED", mismatches[0].BestMatch)
+	assert.Contains(t, mismatches[0].ActualValues, "TRANSACTION_STATE_ENDED")
+}
+
+func TestValidateEnumValues_AcceptsCorrectValues(t *testing.T) {
+	ontology := &models.TieredOntology{
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"billing_transactions": {
+				{
+					Name: "transaction_state",
+					Role: "dimension",
+					EnumValues: []models.EnumValue{
+						{Value: "TRANSACTION_STATE_ENDED"},
+						{Value: "TRANSACTION_STATE_WAITING"},
+					},
+				},
+			},
+		},
+	}
+
+	// Correct enum value used
+	sql := "SELECT SUM(amount) FROM billing_transactions WHERE transaction_state = 'TRANSACTION_STATE_ENDED'"
+	mismatches := validateEnumValues(sql, ontology)
+
+	assert.Empty(t, mismatches, "Should not flag correct enum values")
+}
+
+func TestValidateEnumValues_DetectsPartialMatch(t *testing.T) {
+	ontology := &models.TieredOntology{
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"orders": {
+				{
+					Name: "status",
+					Role: "dimension",
+					EnumValues: []models.EnumValue{
+						{Value: "ORDER_STATUS_PENDING"},
+						{Value: "ORDER_STATUS_SHIPPED"},
+						{Value: "ORDER_STATUS_DELIVERED"},
+					},
+				},
+			},
+		},
+	}
+
+	// 'shipped' is a part of 'ORDER_STATUS_SHIPPED'
+	sql := "SELECT * FROM orders WHERE status = 'shipped'"
+	mismatches := validateEnumValues(sql, ontology)
+
+	require.Len(t, mismatches, 1)
+	assert.Equal(t, "shipped", mismatches[0].SQLValue)
+	assert.Equal(t, "ORDER_STATUS_SHIPPED", mismatches[0].BestMatch)
+}
+
+func TestValidateEnumValues_NoOntology(t *testing.T) {
+	sql := "SELECT * FROM t WHERE status = 'active'"
+	mismatches := validateEnumValues(sql, nil)
+	assert.Nil(t, mismatches)
+}
+
+func TestValidateEnumValues_NoEnumColumns(t *testing.T) {
+	ontology := &models.TieredOntology{
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"users": {
+				{Name: "id", Role: "identifier"},
+				{Name: "name", Role: "attribute"},
+			},
+		},
+	}
+
+	sql := "SELECT * FROM users WHERE name = 'John'"
+	mismatches := validateEnumValues(sql, ontology)
+
+	assert.Nil(t, mismatches)
+}
+
+func TestValidateEnumValues_IgnoresShortLiterals(t *testing.T) {
+	ontology := &models.TieredOntology{
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"transactions": {
+				{
+					Name: "type",
+					Role: "dimension",
+					EnumValues: []models.EnumValue{
+						{Value: "PAYMENT_TYPE_CC"},
+						{Value: "PAYMENT_TYPE_BANK"},
+					},
+				},
+			},
+		},
+	}
+
+	// Short values like 'cc' should be ignored (too likely to be false positives)
+	sql := "SELECT * FROM transactions WHERE type = 'cc'"
+	mismatches := validateEnumValues(sql, ontology)
+
+	assert.Empty(t, mismatches, "Should ignore very short literals to avoid false positives")
+}
+
+func TestValidateEnumValues_MultipleEnumColumns(t *testing.T) {
+	ontology := &models.TieredOntology{
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"billing_transactions": {
+				{
+					Name: "transaction_state",
+					Role: "dimension",
+					EnumValues: []models.EnumValue{
+						{Value: "TRANSACTION_STATE_ENDED"},
+						{Value: "TRANSACTION_STATE_WAITING"},
+					},
+				},
+				{
+					Name: "payment_method",
+					Role: "dimension",
+					EnumValues: []models.EnumValue{
+						{Value: "PAYMENT_METHOD_CARD"},
+						{Value: "PAYMENT_METHOD_BANK"},
+					},
+				},
+			},
+		},
+	}
+
+	// Multiple mismatches in one query
+	sql := "SELECT * FROM billing_transactions WHERE transaction_state = 'ended' AND payment_method = 'card'"
+	mismatches := validateEnumValues(sql, ontology)
+
+	require.Len(t, mismatches, 2)
+	assert.Equal(t, "ended", mismatches[0].SQLValue)
+	assert.Equal(t, "card", mismatches[1].SQLValue)
+}
+
+func TestFindBestEnumMatch_SuffixMatch(t *testing.T) {
+	knownEnums := map[string]enumInfo{
+		"transaction_state_ended":   {table: "transactions", column: "state", original: "TRANSACTION_STATE_ENDED"},
+		"transaction_state_waiting": {table: "transactions", column: "state", original: "TRANSACTION_STATE_WAITING"},
+	}
+
+	match, info, distance := findBestEnumMatch("ended", knownEnums)
+
+	assert.Equal(t, "transaction_state_ended", match)
+	assert.Equal(t, "TRANSACTION_STATE_ENDED", info.original)
+	assert.Equal(t, 0, distance, "Suffix match should have distance 0")
+}
+
+func TestFindBestEnumMatch_PartMatch(t *testing.T) {
+	knownEnums := map[string]enumInfo{
+		"order_status_pending": {table: "orders", column: "status", original: "ORDER_STATUS_PENDING"},
+	}
+
+	match, info, distance := findBestEnumMatch("pending", knownEnums)
+
+	assert.Equal(t, "order_status_pending", match)
+	assert.Equal(t, "ORDER_STATUS_PENDING", info.original)
+	assert.Equal(t, 0, distance, "Suffix/part match should be detected")
+}
+
+func TestLevenshteinDistance(t *testing.T) {
+	tests := []struct {
+		s1       string
+		s2       string
+		expected int
+	}{
+		{"", "", 0},
+		{"abc", "", 3},
+		{"", "abc", 3},
+		{"abc", "abc", 0},
+		{"abc", "abd", 1},
+		{"abc", "adc", 1},
+		{"abc", "abcd", 1},
+		{"kitten", "sitting", 3},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.s1+"_"+tc.s2, func(t *testing.T) {
+			result := levenshteinDistance(tc.s1, tc.s2)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
