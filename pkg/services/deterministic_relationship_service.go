@@ -591,9 +591,14 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 					continue
 				}
 			}
+		} else {
+			// Columns without stats but with is_joinable=true proceed to validation
+			// Join validation will determine actual FK validity via CheckValueOverlap
+			s.logger.Debug("Including column with NULL stats for validation",
+				zap.String("table", table.TableName),
+				zap.String("column", col.ColumnName),
+				zap.Bool("is_joinable", col.IsJoinable != nil && *col.IsJoinable))
 		}
-		// Columns without stats but with is_joinable=true proceed to validation
-		// Join validation will determine actual FK validity via CheckValueOverlap
 
 		allCandidates = append(allCandidates, &pkMatchCandidate{
 			column: col,
