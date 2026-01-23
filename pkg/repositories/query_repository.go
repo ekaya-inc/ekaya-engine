@@ -59,14 +59,14 @@ func (r *queryRepository) Create(ctx context.Context, query *models.Query) error
 			id, project_id, datasource_id, natural_language_prompt, additional_context,
 			sql_query, dialect, is_enabled, parameters, output_columns, constraints, tags,
 			status, suggested_by, suggestion_context,
-			usage_count, last_used_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`
+			usage_count, last_used_at, allows_modification, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`
 
 	_, err := scope.Conn.Exec(ctx, sql,
 		query.ID, query.ProjectID, query.DatasourceID, query.NaturalLanguagePrompt, query.AdditionalContext,
 		query.SQLQuery, query.Dialect, query.IsEnabled, query.Parameters, query.OutputColumns, query.Constraints, query.Tags,
 		query.Status, query.SuggestedBy, query.SuggestionContext,
-		query.UsageCount, query.LastUsedAt, query.CreatedAt, query.UpdatedAt,
+		query.UsageCount, query.LastUsedAt, query.AllowsModification, query.CreatedAt, query.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create query: %w", err)
@@ -85,7 +85,7 @@ func (r *queryRepository) GetByID(ctx context.Context, projectID, queryID uuid.U
 		SELECT id, project_id, datasource_id, natural_language_prompt, additional_context,
 		       sql_query, dialect, is_enabled, parameters, output_columns, constraints, tags,
 		       status, suggested_by, suggestion_context,
-		       usage_count, last_used_at, created_at, updated_at
+		       usage_count, last_used_at, allows_modification, created_at, updated_at
 		FROM engine_queries
 		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
 
@@ -111,7 +111,7 @@ func (r *queryRepository) ListByDatasource(ctx context.Context, projectID, datas
 		SELECT id, project_id, datasource_id, natural_language_prompt, additional_context,
 		       sql_query, dialect, is_enabled, parameters, output_columns, constraints, tags,
 		       status, suggested_by, suggestion_context,
-		       usage_count, last_used_at, created_at, updated_at
+		       usage_count, last_used_at, allows_modification, created_at, updated_at
 		FROM engine_queries
 		WHERE project_id = $1 AND datasource_id = $2 AND deleted_at IS NULL
 		ORDER BY created_at DESC`
@@ -159,7 +159,8 @@ func (r *queryRepository) Update(ctx context.Context, query *models.Query) error
 		    status = $12,
 		    suggested_by = $13,
 		    suggestion_context = $14,
-		    updated_at = $15
+		    allows_modification = $15,
+		    updated_at = $16
 		WHERE project_id = $1 AND id = $2 AND deleted_at IS NULL`
 
 	result, err := scope.Conn.Exec(ctx, sql,
@@ -168,7 +169,7 @@ func (r *queryRepository) Update(ctx context.Context, query *models.Query) error
 		query.SQLQuery, query.Dialect, query.IsEnabled, query.Parameters,
 		query.OutputColumns, query.Constraints, query.Tags,
 		query.Status, query.SuggestedBy, query.SuggestionContext,
-		query.UpdatedAt,
+		query.AllowsModification, query.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update query: %w", err)
@@ -214,7 +215,7 @@ func (r *queryRepository) ListEnabled(ctx context.Context, projectID, datasource
 		SELECT id, project_id, datasource_id, natural_language_prompt, additional_context,
 		       sql_query, dialect, is_enabled, parameters, output_columns, constraints, tags,
 		       status, suggested_by, suggestion_context,
-		       usage_count, last_used_at, created_at, updated_at
+		       usage_count, last_used_at, allows_modification, created_at, updated_at
 		FROM engine_queries
 		WHERE project_id = $1 AND datasource_id = $2 AND is_enabled = true AND deleted_at IS NULL
 		ORDER BY created_at DESC`
@@ -255,7 +256,7 @@ func (r *queryRepository) ListEnabledByTags(ctx context.Context, projectID, data
 		SELECT id, project_id, datasource_id, natural_language_prompt, additional_context,
 		       sql_query, dialect, is_enabled, parameters, output_columns, constraints, tags,
 		       status, suggested_by, suggestion_context,
-		       usage_count, last_used_at, created_at, updated_at
+		       usage_count, last_used_at, allows_modification, created_at, updated_at
 		FROM engine_queries
 		WHERE project_id = $1 AND datasource_id = $2 AND is_enabled = true
 		  AND deleted_at IS NULL AND tags && $3
@@ -363,7 +364,7 @@ func scanQuery(rows pgx.Rows) (*models.Query, error) {
 		&q.ID, &q.ProjectID, &q.DatasourceID, &q.NaturalLanguagePrompt, &q.AdditionalContext,
 		&q.SQLQuery, &q.Dialect, &q.IsEnabled, &q.Parameters, &q.OutputColumns, &q.Constraints, &q.Tags,
 		&q.Status, &q.SuggestedBy, &q.SuggestionContext,
-		&q.UsageCount, &q.LastUsedAt, &q.CreatedAt, &q.UpdatedAt,
+		&q.UsageCount, &q.LastUsedAt, &q.AllowsModification, &q.CreatedAt, &q.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan query: %w", err)
@@ -377,7 +378,7 @@ func scanQueryRow(row pgx.Row) (*models.Query, error) {
 		&q.ID, &q.ProjectID, &q.DatasourceID, &q.NaturalLanguagePrompt, &q.AdditionalContext,
 		&q.SQLQuery, &q.Dialect, &q.IsEnabled, &q.Parameters, &q.OutputColumns, &q.Constraints, &q.Tags,
 		&q.Status, &q.SuggestedBy, &q.SuggestionContext,
-		&q.UsageCount, &q.LastUsedAt, &q.CreatedAt, &q.UpdatedAt,
+		&q.UsageCount, &q.LastUsedAt, &q.AllowsModification, &q.CreatedAt, &q.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
