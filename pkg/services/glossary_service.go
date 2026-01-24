@@ -1882,3 +1882,101 @@ func minInt(a, b, c int) int {
 	}
 	return c
 }
+
+// SemanticWarning represents a potential issue in the formula semantics.
+// These are advisory warnings, not hard errors - the SQL may still be valid
+// but might not match the term's intended meaning.
+type SemanticWarning struct {
+	Code    string // Short identifier (e.g., "MISSING_COUNT", "UNION_MULTI_ROW")
+	Message string // Human-readable description
+}
+
+// ValidateFormulaSemantics checks if the SQL formula matches the semantic
+// meaning implied by the term name. This is a best-effort heuristic check
+// that catches common mismatches between term names and their formulas.
+//
+// Returns a list of warnings (empty if no issues detected). These warnings
+// are advisory - the SQL may still be syntactically valid and executable.
+//
+// Patterns checked:
+//   - "Average X Per Y" should divide by COUNT (not by another SUM)
+//   - UNION/UNION ALL typically returns multiple rows (unless wrapped in subquery)
+func ValidateFormulaSemantics(termName string, sql string) []SemanticWarning {
+	var warnings []SemanticWarning
+
+	termLower := strings.ToLower(termName)
+	sqlUpper := strings.ToUpper(sql)
+
+	// Check "Average X Per Y" pattern
+	// Terms with "average" and "per" typically mean: SUM(X) / COUNT(Y)
+	// Not: SUM(X) / SUM(Y) (which would be a ratio/percentage)
+	if strings.Contains(termLower, "average") && strings.Contains(termLower, "per") {
+		// Check if SQL contains COUNT - it should for "per" calculations
+		if !strings.Contains(sqlUpper, "COUNT(") && !strings.Contains(sqlUpper, "COUNT (") {
+			warnings = append(warnings, SemanticWarning{
+				Code:    "MISSING_COUNT",
+				Message: "Term mentions 'average per' but SQL doesn't divide by COUNT. For 'Average X Per Y', the formula should typically be SUM(X) / COUNT(Y).",
+			})
+		}
+	}
+
+	// Check for UNION/UNION ALL which may return multiple rows
+	// This is a warning because UNIONs are sometimes wrapped in subqueries
+	// to produce a single row (e.g., SELECT AVG(*) FROM (... UNION ...))
+	if strings.Contains(sqlUpper, "UNION") {
+		// Check if the UNION is inside a subquery that aggregates the result
+		// Simple heuristic: if there's an outer SELECT with AVG/SUM/COUNT over the union
+		// This is imperfect but catches the obvious multi-row cases
+		if !isUnionInAggregatingSubquery(sql) {
+			warnings = append(warnings, SemanticWarning{
+				Code:    "UNION_MULTI_ROW",
+				Message: "SQL uses UNION which may return multiple rows. Consider wrapping in a subquery with aggregation if a single result is needed.",
+			})
+		}
+	}
+
+	return warnings
+}
+
+// isUnionInAggregatingSubquery checks if a UNION is wrapped in a subquery
+// that aggregates the results into a single row.
+//
+// This is a simple heuristic check - it looks for patterns like:
+//   - SELECT AVG(*) FROM (... UNION ...)
+//   - SELECT SUM(*) FROM (SELECT ... UNION SELECT ...)
+//
+// Returns true if the UNION appears to be properly aggregated.
+func isUnionInAggregatingSubquery(sql string) bool {
+	sqlUpper := strings.ToUpper(sql)
+
+	// Find the position of UNION
+	unionPos := strings.Index(sqlUpper, "UNION")
+	if unionPos == -1 {
+		return false
+	}
+
+	// Count opening and closing parentheses before UNION
+	// If UNION is inside parentheses, it's likely in a subquery
+	openCount := strings.Count(sqlUpper[:unionPos], "(")
+	closeCount := strings.Count(sqlUpper[:unionPos], ")")
+
+	// If more opens than closes, UNION is inside parentheses (subquery)
+	if openCount > closeCount {
+		// Check if there's an aggregate function in the outer SELECT
+		// Look at the SQL before the first opening paren that contains the UNION
+		outerSQL := strings.TrimSpace(sqlUpper[:strings.Index(sqlUpper, "(")])
+		aggregateFuncs := []string{"AVG(", "AVG ", "SUM(", "SUM ", "COUNT(", "COUNT ", "MAX(", "MAX ", "MIN(", "MIN "}
+		for _, agg := range aggregateFuncs {
+			// Check if aggregate appears after the outer SELECT
+			selectPos := strings.Index(outerSQL, "SELECT")
+			if selectPos != -1 {
+				afterSelect := sqlUpper[selectPos:]
+				if strings.Contains(afterSelect[:min(len(afterSelect), 100)], agg) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}

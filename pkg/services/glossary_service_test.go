@@ -4030,3 +4030,179 @@ func TestCreateTerm_WithMultiRowSQL_ReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "SQL validation failed")
 	assert.Contains(t, err.Error(), "multiple rows")
 }
+
+// ============================================================================
+// Tests for ValidateFormulaSemantics (BUG-13 fix)
+// ============================================================================
+
+func TestValidateFormulaSemantics_AveragePerWithoutCount_ReturnsWarning(t *testing.T) {
+	// Term says "Average Fee Per Engagement" but SQL divides by revenue (not COUNT)
+	termName := "Average Fee Per Engagement"
+	sql := "SELECT SUM(platform_fees) / NULLIF(SUM(total_amount), 0) * 100 AS avg_fee FROM billing_transactions"
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	require.Len(t, warnings, 1)
+	assert.Equal(t, "MISSING_COUNT", warnings[0].Code)
+	assert.Contains(t, warnings[0].Message, "average per")
+	assert.Contains(t, warnings[0].Message, "COUNT")
+}
+
+func TestValidateFormulaSemantics_AveragePerWithCount_NoWarning(t *testing.T) {
+	// Correct formula: divides by COUNT
+	termName := "Average Fee Per Engagement"
+	sql := "SELECT SUM(platform_fees) / COUNT(*) AS avg_fee FROM billing_transactions WHERE deleted_at IS NULL"
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	assert.Empty(t, warnings, "Should not warn when COUNT is present")
+}
+
+func TestValidateFormulaSemantics_UnionWithoutAggregation_ReturnsWarning(t *testing.T) {
+	// UNION ALL returns multiple rows (not wrapped in aggregating subquery)
+	termName := "User Review Rating"
+	sql := `SELECT AVG(ur.reviewee_rating) AS rating FROM user_reviews ur
+			UNION ALL
+			SELECT AVG(cr.rating) AS rating FROM channel_reviews cr`
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	// Should warn about UNION potentially returning multiple rows
+	found := false
+	for _, w := range warnings {
+		if w.Code == "UNION_MULTI_ROW" {
+			found = true
+			assert.Contains(t, w.Message, "UNION")
+			assert.Contains(t, w.Message, "multiple rows")
+			break
+		}
+	}
+	assert.True(t, found, "Should warn about UNION returning multiple rows")
+}
+
+func TestValidateFormulaSemantics_UnionInAggregatingSubquery_NoWarning(t *testing.T) {
+	// UNION is wrapped in subquery with outer AVG - returns single row
+	termName := "Combined Review Rating"
+	sql := `SELECT AVG(rating) AS combined_rating FROM (
+				SELECT reviewee_rating AS rating FROM user_reviews
+				UNION ALL
+				SELECT rating FROM channel_reviews
+			) combined`
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	// Should NOT warn because UNION is inside an aggregating subquery
+	for _, w := range warnings {
+		if w.Code == "UNION_MULTI_ROW" {
+			t.Error("Should not warn about UNION when it's in an aggregating subquery")
+		}
+	}
+}
+
+func TestValidateFormulaSemantics_NoIssues_EmptyWarnings(t *testing.T) {
+	// Simple, correct metric formula
+	termName := "Total Revenue"
+	sql := "SELECT SUM(earned_amount) AS total_revenue FROM billing_transactions WHERE deleted_at IS NULL"
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	assert.Empty(t, warnings, "Simple correct formula should have no warnings")
+}
+
+func TestValidateFormulaSemantics_AverageWithoutPer_NoWarning(t *testing.T) {
+	// Term has "Average" but not "Per" - different semantic meaning
+	termName := "Average Order Value"
+	sql := "SELECT AVG(total_amount) AS avg_value FROM orders"
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	// No warning - "Average X" without "Per Y" doesn't require COUNT
+	for _, w := range warnings {
+		if w.Code == "MISSING_COUNT" {
+			t.Error("Should not warn about COUNT for 'Average X' without 'Per Y'")
+		}
+	}
+}
+
+func TestValidateFormulaSemantics_CountInCountFunction_Detected(t *testing.T) {
+	// COUNT(*) should be detected
+	termName := "Average Revenue Per Customer"
+	sql := "SELECT SUM(revenue) / COUNT(*) AS avg_revenue FROM sales GROUP BY customer_id"
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	for _, w := range warnings {
+		if w.Code == "MISSING_COUNT" {
+			t.Error("COUNT(*) should be detected - no warning expected")
+		}
+	}
+}
+
+func TestValidateFormulaSemantics_CountWithSpace_Detected(t *testing.T) {
+	// COUNT (*) with space should be detected
+	termName := "Average Fee Per Transaction"
+	sql := "SELECT SUM(fee) / COUNT (*) AS avg_fee FROM transactions"
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	for _, w := range warnings {
+		if w.Code == "MISSING_COUNT" {
+			t.Error("COUNT (*) with space should be detected - no warning expected")
+		}
+	}
+}
+
+func TestValidateFormulaSemantics_CaseInsensitive_TermName(t *testing.T) {
+	// Term name should be case-insensitive
+	termName := "AVERAGE fee PER engagement"
+	sql := "SELECT SUM(fee) / SUM(amount) AS ratio FROM transactions" // Missing COUNT
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	require.Len(t, warnings, 1)
+	assert.Equal(t, "MISSING_COUNT", warnings[0].Code)
+}
+
+func TestValidateFormulaSemantics_MultipleIssues_ReturnsAllWarnings(t *testing.T) {
+	// Term with both "average per" missing COUNT and UNION
+	termName := "Average Rating Per User"
+	sql := `SELECT AVG(rating) / SUM(count) AS avg
+			FROM (SELECT rating, 1 as count FROM reviews_a
+				  UNION ALL
+				  SELECT rating, 1 FROM reviews_b) combined`
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	// Should have MISSING_COUNT warning (no COUNT in formula)
+	hasMissingCount := false
+	for _, w := range warnings {
+		if w.Code == "MISSING_COUNT" {
+			hasMissingCount = true
+		}
+	}
+	assert.True(t, hasMissingCount, "Should warn about missing COUNT")
+}
+
+func TestIsUnionInAggregatingSubquery_SimpleUnion_False(t *testing.T) {
+	sql := "SELECT a FROM t1 UNION SELECT b FROM t2"
+	result := isUnionInAggregatingSubquery(sql)
+	assert.False(t, result, "Simple UNION should not be considered aggregated")
+}
+
+func TestIsUnionInAggregatingSubquery_UnionInSubqueryWithAvg_True(t *testing.T) {
+	sql := "SELECT AVG(x) FROM (SELECT a AS x FROM t1 UNION SELECT b FROM t2) sub"
+	result := isUnionInAggregatingSubquery(sql)
+	assert.True(t, result, "UNION in subquery with outer AVG should be considered aggregated")
+}
+
+func TestIsUnionInAggregatingSubquery_UnionInSubqueryWithSum_True(t *testing.T) {
+	sql := "SELECT SUM(val) FROM (SELECT amount AS val FROM sales UNION ALL SELECT refund FROM returns) combined"
+	result := isUnionInAggregatingSubquery(sql)
+	assert.True(t, result, "UNION in subquery with outer SUM should be considered aggregated")
+}
+
+func TestIsUnionInAggregatingSubquery_NoUnion_False(t *testing.T) {
+	sql := "SELECT AVG(amount) FROM sales"
+	result := isUnionInAggregatingSubquery(sql)
+	assert.False(t, result, "Query without UNION should return false")
+}

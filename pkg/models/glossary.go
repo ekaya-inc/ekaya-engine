@@ -35,6 +35,8 @@ type BusinessGlossaryTerm struct {
 	Source           string         `json:"source"`
 	EnrichmentStatus string         `json:"enrichment_status,omitempty"` // "pending", "success", "failed"
 	EnrichmentError  string         `json:"enrichment_error,omitempty"`  // Error message if enrichment failed
+	NeedsReview      bool           `json:"needs_review,omitempty"`      // Flagged for domain expert review
+	ReviewReason     string         `json:"review_reason,omitempty"`     // Why the term needs review (e.g., "Formula may not match term semantics")
 	CreatedBy        *uuid.UUID     `json:"created_by,omitempty"`
 	UpdatedBy        *uuid.UUID     `json:"updated_by,omitempty"`
 	CreatedAt        time.Time      `json:"created_at"`
