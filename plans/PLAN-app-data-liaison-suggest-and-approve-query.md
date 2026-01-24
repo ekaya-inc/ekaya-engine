@@ -53,9 +53,9 @@ This creates a governed workflow where Business Users (using ChatGPT, Claude Des
 | Query.ParentQueryID field | ✅ Done | Task 1.1 |
 | Database migration (audit) | ✅ Done | Task 1.2 |
 | **Repository** | | |
-| ListPending method | ❌ Pending | Task 1.3 |
-| CountPending method | ❌ Pending | Task 1.3 |
-| UpdateApprovalStatus method | ❌ Pending | Task 1.3 |
+| ListPending method | ✅ Done | Task 1.3 |
+| CountPending method | ✅ Done | Task 1.3 |
+| UpdateApprovalStatus method | ✅ Done | Task 1.3 |
 | **Service** | | |
 | SuggestUpdate method | ❌ Pending | Task 1.4 |
 | ApproveQuery method | ❌ Pending | Task 1.4 |
