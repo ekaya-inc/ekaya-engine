@@ -25,6 +25,7 @@ type QueryResponse struct {
 	SQLQuery              string                  `json:"sql_query"`
 	Dialect               string                  `json:"dialect"`
 	IsEnabled             bool                    `json:"is_enabled"`
+	AllowsModification    bool                    `json:"allows_modification"`
 	Parameters            []models.QueryParameter `json:"parameters,omitempty"`
 	OutputColumns         []models.OutputColumn   `json:"output_columns,omitempty"`
 	Constraints           *string                 `json:"constraints,omitempty"`
@@ -54,12 +55,13 @@ type CreateQueryRequest struct {
 // UpdateQueryRequest for PUT body (all fields optional).
 // Note: Dialect cannot be updated - it's derived from datasource type.
 type UpdateQueryRequest struct {
-	NaturalLanguagePrompt *string                `json:"natural_language_prompt,omitempty"`
-	AdditionalContext     *string                `json:"additional_context,omitempty"`
-	SQLQuery              *string                `json:"sql_query,omitempty"`
-	IsEnabled             *bool                  `json:"is_enabled,omitempty"`
-	OutputColumns         *[]models.OutputColumn `json:"output_columns,omitempty"`
-	Constraints           *string                `json:"constraints,omitempty"`
+	NaturalLanguagePrompt *string                  `json:"natural_language_prompt,omitempty"`
+	AdditionalContext     *string                  `json:"additional_context,omitempty"`
+	SQLQuery              *string                  `json:"sql_query,omitempty"`
+	IsEnabled             *bool                    `json:"is_enabled,omitempty"`
+	Parameters            *[]models.QueryParameter `json:"parameters,omitempty"`
+	OutputColumns         *[]models.OutputColumn   `json:"output_columns,omitempty"`
+	Constraints           *string                  `json:"constraints,omitempty"`
 }
 
 // ExecuteQueryRequest for POST execute body.
@@ -321,6 +323,7 @@ func (h *QueriesHandler) Update(w http.ResponseWriter, r *http.Request) {
 		AdditionalContext:     req.AdditionalContext,
 		SQLQuery:              req.SQLQuery,
 		IsEnabled:             req.IsEnabled,
+		Parameters:            req.Parameters,
 		OutputColumns:         req.OutputColumns,
 		Constraints:           req.Constraints,
 	}
@@ -681,6 +684,7 @@ func (h *QueriesHandler) toQueryResponse(q *models.Query) QueryResponse {
 		SQLQuery:              q.SQLQuery,
 		Dialect:               q.Dialect,
 		IsEnabled:             q.IsEnabled,
+		AllowsModification:    q.AllowsModification,
 		Parameters:            q.Parameters,
 		OutputColumns:         q.OutputColumns,
 		Constraints:           q.Constraints,

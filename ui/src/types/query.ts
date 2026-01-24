@@ -107,6 +107,7 @@ export interface UpdateQueryRequest {
   sql_query?: string;
   is_enabled?: boolean;
   allows_modification?: boolean;
+  parameters?: QueryParameter[];
   output_columns?: OutputColumn[];
   constraints?: string;
 }
