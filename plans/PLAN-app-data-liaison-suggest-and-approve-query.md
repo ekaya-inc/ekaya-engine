@@ -48,9 +48,9 @@ This creates a governed workflow where Business Users (using ChatGPT, Claude Des
 | Query.Status field | ✅ Done | "pending", "approved", "rejected" |
 | Query.SuggestedBy field | ✅ Done | "user", "agent", "admin" |
 | Query.SuggestionContext field | ✅ Done | JSONB for validation results |
-| Query.ReviewedBy/ReviewedAt fields | ❌ Pending | Task 1.1 |
-| Query.RejectionReason field | ❌ Pending | Task 1.1 |
-| Query.ParentQueryID field | ❌ Pending | Task 1.1 |
+| Query.ReviewedBy/ReviewedAt fields | ✅ Done | Task 1.1 |
+| Query.RejectionReason field | ✅ Done | Task 1.1 |
+| Query.ParentQueryID field | ✅ Done | Task 1.1 |
 | Database migration (audit) | ❌ Pending | Task 1.2 |
 | **Repository** | | |
 | ListPending method | ❌ Pending | Task 1.3 |
