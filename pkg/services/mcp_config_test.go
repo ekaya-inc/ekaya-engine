@@ -111,6 +111,30 @@ func (m *mockQueryServiceForMCP) ValidateParameterizedQuery(sqlQuery string, par
 	return nil
 }
 
+func (m *mockQueryServiceForMCP) SuggestUpdate(ctx context.Context, projectID uuid.UUID, req *SuggestUpdateRequest) (*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryServiceForMCP) DirectCreate(ctx context.Context, projectID, datasourceID uuid.UUID, req *CreateQueryRequest) (*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryServiceForMCP) DirectUpdate(ctx context.Context, projectID, queryID uuid.UUID, req *UpdateQueryRequest) (*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryServiceForMCP) ApproveQuery(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string) error {
+	return nil
+}
+
+func (m *mockQueryServiceForMCP) RejectQuery(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string, reason string) error {
+	return nil
+}
+
+func (m *mockQueryServiceForMCP) ListPending(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error) {
+	return nil, nil
+}
+
 type mockProjectServiceForMCP struct {
 	defaultDatasourceID uuid.UUID
 	err                 error

@@ -57,11 +57,11 @@ This creates a governed workflow where Business Users (using ChatGPT, Claude Des
 | CountPending method | ✅ Done | Task 1.3 |
 | UpdateApprovalStatus method | ✅ Done | Task 1.3 |
 | **Service** | | |
-| SuggestUpdate method | ❌ Pending | Task 1.4 |
-| ApproveQuery method | ❌ Pending | Task 1.4 |
-| RejectQuery method | ❌ Pending | Task 1.4 |
-| DirectCreate method | ❌ Pending | Task 1.4 |
-| DirectUpdate method | ❌ Pending | Task 1.4 |
+| SuggestUpdate method | ✅ Done | Task 1.4 |
+| ApproveQuery method | ✅ Done | Task 1.4 |
+| RejectQuery method | ✅ Done | Task 1.4 |
+| DirectCreate method | ✅ Done | Task 1.4 |
+| DirectUpdate method | ✅ Done | Task 1.4 |
 | **Business User MCP Tools** | | |
 | suggest_approved_query | ✅ Done | Creates pending record |
 | suggest_query_update | ❌ Pending | Task 2.1 |

@@ -55,6 +55,27 @@ type QueryService interface {
 	Test(ctx context.Context, projectID, datasourceID uuid.UUID, req *TestQueryRequest) (*datasource.QueryExecutionResult, error)
 	Validate(ctx context.Context, projectID, datasourceID uuid.UUID, sqlQuery string) (*ValidationResult, error)
 	ValidateParameterizedQuery(sqlQuery string, params []models.QueryParameter) error
+
+	// Approval Workflow - Business User Operations (creates pending records)
+	// SuggestUpdate creates a pending update suggestion for an existing query.
+	// The original query remains active until the suggestion is approved.
+	SuggestUpdate(ctx context.Context, projectID uuid.UUID, req *SuggestUpdateRequest) (*models.Query, error)
+
+	// Approval Workflow - Admin Operations (direct operations, no pending record)
+	// DirectCreate creates a new query with status="approved" (no review required).
+	DirectCreate(ctx context.Context, projectID, datasourceID uuid.UUID, req *CreateQueryRequest) (*models.Query, error)
+	// DirectUpdate updates an existing query directly (no pending record).
+	DirectUpdate(ctx context.Context, projectID, queryID uuid.UUID, req *UpdateQueryRequest) (*models.Query, error)
+
+	// Approval Workflow - Review Operations
+	// ApproveQuery approves a pending query suggestion.
+	// For new queries: sets status="approved" and enables the query.
+	// For update suggestions: applies changes to original query and soft-deletes pending record.
+	ApproveQuery(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string) error
+	// RejectQuery rejects a pending query suggestion with a reason.
+	RejectQuery(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string, reason string) error
+	// ListPending returns all pending query suggestions for a project.
+	ListPending(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error)
 }
 
 // CreateQueryRequest contains fields for creating a new query.
@@ -99,6 +120,22 @@ type TestQueryRequest struct {
 	Limit                int                     `json:"limit,omitempty"` // 0 = use DefaultPreviewLimit (100)
 	ParameterDefinitions []models.QueryParameter `json:"parameter_definitions,omitempty"`
 	ParameterValues      map[string]any          `json:"parameter_values,omitempty"`
+}
+
+// SuggestUpdateRequest contains fields for suggesting an update to an existing query.
+// The original query remains active until the suggestion is approved.
+type SuggestUpdateRequest struct {
+	QueryID                   uuid.UUID                `json:"query_id"`                               // ID of the original query to update
+	NaturalLanguagePrompt     *string                  `json:"natural_language_prompt,omitempty"`      // Updated name/prompt
+	AdditionalContext         *string                  `json:"additional_context,omitempty"`           // Updated context
+	SQLQuery                  *string                  `json:"sql_query,omitempty"`                    // Updated SQL
+	Parameters                *[]models.QueryParameter `json:"parameters,omitempty"`                   // Updated parameters
+	OutputColumns             *[]models.OutputColumn   `json:"output_columns,omitempty"`               // Updated output columns
+	Constraints               *string                  `json:"constraints,omitempty"`                  // Updated constraints
+	Tags                      *[]string                `json:"tags,omitempty"`                         // Updated tags
+	AllowsModification        *bool                    `json:"allows_modification,omitempty"`          // Updated modification flag
+	SuggestionContext         map[string]any           `json:"suggestion_context,omitempty"`           // Why this update is needed
+	OutputColumnDescriptions  map[string]string        `json:"output_column_descriptions,omitempty"`   // For MCP tool compatibility
 }
 
 type queryService struct {
@@ -1073,4 +1110,238 @@ func getClientIPFromContext(ctx context.Context) string {
 	// In a real implementation, this would extract from HTTP context
 	// For now, return a placeholder
 	return ""
+}
+
+// ============================================================================
+// Approval Workflow Methods
+// ============================================================================
+
+// SuggestUpdate creates a pending update suggestion for an existing query.
+// The original query remains active until the suggestion is approved.
+func (s *queryService) SuggestUpdate(ctx context.Context, projectID uuid.UUID, req *SuggestUpdateRequest) (*models.Query, error) {
+	// Fetch the original query
+	original, err := s.queryRepo.GetByID(ctx, projectID, req.QueryID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return nil, apperrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get original query: %w", err)
+	}
+
+	// Create a copy of the original query with proposed changes
+	suggestion := &models.Query{
+		ProjectID:             original.ProjectID,
+		DatasourceID:          original.DatasourceID,
+		NaturalLanguagePrompt: original.NaturalLanguagePrompt,
+		AdditionalContext:     original.AdditionalContext,
+		SQLQuery:              original.SQLQuery,
+		Dialect:               original.Dialect,
+		IsEnabled:             false, // Pending suggestions are not enabled
+		Parameters:            original.Parameters,
+		OutputColumns:         original.OutputColumns,
+		Constraints:           original.Constraints,
+		Tags:                  original.Tags,
+		Status:                "pending",
+		SuggestionContext:     req.SuggestionContext,
+		AllowsModification:    original.AllowsModification,
+		ParentQueryID:         &req.QueryID, // Link to original query
+	}
+
+	// Apply updates from request
+	if req.NaturalLanguagePrompt != nil {
+		suggestion.NaturalLanguagePrompt = *req.NaturalLanguagePrompt
+	}
+	if req.AdditionalContext != nil {
+		suggestion.AdditionalContext = req.AdditionalContext
+	}
+	if req.SQLQuery != nil {
+		// Validate and normalize SQL
+		validationResult := sqlvalidator.ValidateAndNormalize(*req.SQLQuery)
+		if validationResult.Error != nil {
+			return nil, validationResult.Error
+		}
+		suggestion.SQLQuery = validationResult.NormalizedSQL
+	}
+	if req.Parameters != nil {
+		suggestion.Parameters = *req.Parameters
+	}
+	if req.OutputColumns != nil {
+		suggestion.OutputColumns = *req.OutputColumns
+	}
+	if req.Constraints != nil {
+		suggestion.Constraints = req.Constraints
+	}
+	if req.Tags != nil {
+		suggestion.Tags = *req.Tags
+	}
+	if req.AllowsModification != nil {
+		suggestion.AllowsModification = *req.AllowsModification
+	}
+
+	// Validate SQL statement type and allows_modification flag
+	sqlType, err := ValidateSQLType(suggestion.SQLQuery, suggestion.AllowsModification)
+	if err != nil {
+		return nil, err
+	}
+
+	// Auto-correct: SELECT statements don't need allows_modification flag
+	if ShouldAutoCorrectAllowsModification(sqlType, suggestion.AllowsModification) {
+		suggestion.AllowsModification = false
+	}
+
+	// Validate parameters if SQL was updated
+	if err := s.ValidateParameterizedQuery(suggestion.SQLQuery, suggestion.Parameters); err != nil {
+		return nil, fmt.Errorf("parameter validation failed: %w", err)
+	}
+
+	// Set suggested_by to "agent" (this is typically called by MCP tools)
+	suggestedBy := "agent"
+	suggestion.SuggestedBy = &suggestedBy
+
+	if err := s.queryRepo.Create(ctx, suggestion); err != nil {
+		return nil, fmt.Errorf("failed to create update suggestion: %w", err)
+	}
+
+	s.logger.Info("Created update suggestion",
+		zap.String("id", suggestion.ID.String()),
+		zap.String("parent_query_id", req.QueryID.String()),
+		zap.String("project_id", projectID.String()),
+	)
+
+	return suggestion, nil
+}
+
+// DirectCreate creates a new query with status="approved" (no review required).
+// This is for admin users who can bypass the approval workflow.
+func (s *queryService) DirectCreate(ctx context.Context, projectID, datasourceID uuid.UUID, req *CreateQueryRequest) (*models.Query, error) {
+	// Force approved status and admin suggested_by
+	req.Status = "approved"
+	req.SuggestedBy = "admin"
+
+	// Enable the query by default for direct creation
+	req.IsEnabled = true
+
+	return s.Create(ctx, projectID, datasourceID, req)
+}
+
+// DirectUpdate updates an existing query directly (no pending record).
+// This is for admin users who can bypass the approval workflow.
+func (s *queryService) DirectUpdate(ctx context.Context, projectID, queryID uuid.UUID, req *UpdateQueryRequest) (*models.Query, error) {
+	// Use the existing Update method - it already handles direct updates
+	return s.Update(ctx, projectID, queryID, req)
+}
+
+// ApproveQuery approves a pending query suggestion.
+// For new queries: sets status="approved" and enables the query.
+// For update suggestions: applies changes to original query and soft-deletes pending record.
+func (s *queryService) ApproveQuery(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string) error {
+	// Get the pending query
+	pending, err := s.queryRepo.GetByID(ctx, projectID, queryID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return apperrors.ErrNotFound
+		}
+		return fmt.Errorf("failed to get query: %w", err)
+	}
+
+	// Verify it's pending
+	if pending.Status != "pending" {
+		return fmt.Errorf("query is not pending approval (status: %s)", pending.Status)
+	}
+
+	// Check if this is an update suggestion (has parent_query_id)
+	if pending.ParentQueryID != nil {
+		// This is an update suggestion - apply changes to the original query
+		original, err := s.queryRepo.GetByID(ctx, projectID, *pending.ParentQueryID)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				// Original was deleted - reject this suggestion instead
+				reason := "Original query was deleted"
+				return s.queryRepo.UpdateApprovalStatus(ctx, projectID, queryID, "rejected", reviewerID, &reason)
+			}
+			return fmt.Errorf("failed to get original query: %w", err)
+		}
+
+		// Apply changes from pending to original
+		original.NaturalLanguagePrompt = pending.NaturalLanguagePrompt
+		original.AdditionalContext = pending.AdditionalContext
+		original.SQLQuery = pending.SQLQuery
+		original.Parameters = pending.Parameters
+		original.OutputColumns = pending.OutputColumns
+		original.Constraints = pending.Constraints
+		original.Tags = pending.Tags
+		original.AllowsModification = pending.AllowsModification
+
+		// Update the original query
+		if err := s.queryRepo.Update(ctx, original); err != nil {
+			return fmt.Errorf("failed to update original query: %w", err)
+		}
+
+		// Soft-delete the pending suggestion
+		if err := s.queryRepo.SoftDelete(ctx, projectID, queryID); err != nil {
+			return fmt.Errorf("failed to delete pending suggestion: %w", err)
+		}
+
+		s.logger.Info("Approved update suggestion and applied to original",
+			zap.String("suggestion_id", queryID.String()),
+			zap.String("original_id", pending.ParentQueryID.String()),
+			zap.String("reviewer", reviewerID),
+		)
+	} else {
+		// This is a new query suggestion - approve and enable it
+		if err := s.queryRepo.UpdateApprovalStatus(ctx, projectID, queryID, "approved", reviewerID, nil); err != nil {
+			return fmt.Errorf("failed to update approval status: %w", err)
+		}
+
+		// Enable the query
+		if err := s.queryRepo.UpdateEnabledStatus(ctx, projectID, queryID, true); err != nil {
+			return fmt.Errorf("failed to enable query: %w", err)
+		}
+
+		s.logger.Info("Approved new query suggestion",
+			zap.String("id", queryID.String()),
+			zap.String("reviewer", reviewerID),
+		)
+	}
+
+	return nil
+}
+
+// RejectQuery rejects a pending query suggestion with a reason.
+func (s *queryService) RejectQuery(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string, reason string) error {
+	// Get the pending query
+	pending, err := s.queryRepo.GetByID(ctx, projectID, queryID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return apperrors.ErrNotFound
+		}
+		return fmt.Errorf("failed to get query: %w", err)
+	}
+
+	// Verify it's pending
+	if pending.Status != "pending" {
+		return fmt.Errorf("query is not pending approval (status: %s)", pending.Status)
+	}
+
+	// Update status to rejected
+	if err := s.queryRepo.UpdateApprovalStatus(ctx, projectID, queryID, "rejected", reviewerID, &reason); err != nil {
+		return fmt.Errorf("failed to update approval status: %w", err)
+	}
+
+	s.logger.Info("Rejected query suggestion",
+		zap.String("id", queryID.String()),
+		zap.String("reviewer", reviewerID),
+		zap.String("reason", reason),
+	)
+
+	return nil
+}
+
+// ListPending returns all pending query suggestions for a project.
+func (s *queryService) ListPending(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error) {
+	queries, err := s.queryRepo.ListPending(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pending queries: %w", err)
+	}
+	return queries, nil
 }

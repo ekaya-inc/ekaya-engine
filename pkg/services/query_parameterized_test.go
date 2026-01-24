@@ -475,6 +475,26 @@ func (m *mockQueryRepository) HasEnabledQueries(ctx context.Context, projectID, 
 	return false, nil
 }
 
+func (m *mockQueryRepository) ListPending(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryRepository) ListPendingByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryRepository) CountPending(ctx context.Context, projectID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockQueryRepository) GetPendingUpdatesForQuery(ctx context.Context, projectID, queryID uuid.UUID) ([]*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryRepository) UpdateApprovalStatus(ctx context.Context, projectID, queryID uuid.UUID, status string, reviewedBy string, reason *string) error {
+	return nil
+}
+
 // mockDatasourceSvc implements DatasourceService for testing.
 type mockDatasourceSvc struct {
 	datasource *models.Datasource
@@ -1016,4 +1036,399 @@ func TestTest_DefaultPreviewLimitWithParams(t *testing.T) {
 
 	assert.Equal(t, DefaultPreviewLimit, mockExecutor.capturedLimit,
 		"Expected default preview limit %d but got %d", DefaultPreviewLimit, mockExecutor.capturedLimit)
+}
+
+// ============================================================================
+// Tests for Approval Workflow Methods
+// ============================================================================
+
+// mockQueryRepoForApproval implements repositories.QueryRepository for approval workflow testing.
+type mockQueryRepoForApproval struct {
+	queries          map[uuid.UUID]*models.Query
+	createCalled     bool
+	updateCalled     bool
+	softDeleteCalled bool
+	statusUpdates    []statusUpdate
+}
+
+type statusUpdate struct {
+	queryID    uuid.UUID
+	status     string
+	reviewedBy string
+	reason     *string
+}
+
+func newMockQueryRepoForApproval() *mockQueryRepoForApproval {
+	return &mockQueryRepoForApproval{
+		queries:       make(map[uuid.UUID]*models.Query),
+		statusUpdates: []statusUpdate{},
+	}
+}
+
+func (m *mockQueryRepoForApproval) Create(ctx context.Context, query *models.Query) error {
+	m.createCalled = true
+	query.ID = uuid.New()
+	m.queries[query.ID] = query
+	return nil
+}
+
+func (m *mockQueryRepoForApproval) GetByID(ctx context.Context, projectID, queryID uuid.UUID) (*models.Query, error) {
+	if q, ok := m.queries[queryID]; ok {
+		return q, nil
+	}
+	return nil, fmt.Errorf("query not found")
+}
+
+func (m *mockQueryRepoForApproval) ListByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryRepoForApproval) Update(ctx context.Context, query *models.Query) error {
+	m.updateCalled = true
+	m.queries[query.ID] = query
+	return nil
+}
+
+func (m *mockQueryRepoForApproval) SoftDelete(ctx context.Context, projectID, queryID uuid.UUID) error {
+	m.softDeleteCalled = true
+	return nil
+}
+
+func (m *mockQueryRepoForApproval) ListEnabled(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryRepoForApproval) ListEnabledByTags(ctx context.Context, projectID, datasourceID uuid.UUID, tags []string) ([]*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryRepoForApproval) UpdateEnabledStatus(ctx context.Context, projectID, queryID uuid.UUID, isEnabled bool) error {
+	if q, ok := m.queries[queryID]; ok {
+		q.IsEnabled = isEnabled
+	}
+	return nil
+}
+
+func (m *mockQueryRepoForApproval) IncrementUsageCount(ctx context.Context, queryID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockQueryRepoForApproval) HasEnabledQueries(ctx context.Context, projectID, datasourceID uuid.UUID) (bool, error) {
+	return false, nil
+}
+
+func (m *mockQueryRepoForApproval) ListPending(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error) {
+	var pending []*models.Query
+	for _, q := range m.queries {
+		if q.Status == "pending" {
+			pending = append(pending, q)
+		}
+	}
+	return pending, nil
+}
+
+func (m *mockQueryRepoForApproval) ListPendingByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryRepoForApproval) CountPending(ctx context.Context, projectID uuid.UUID) (int, error) {
+	count := 0
+	for _, q := range m.queries {
+		if q.Status == "pending" {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (m *mockQueryRepoForApproval) GetPendingUpdatesForQuery(ctx context.Context, projectID, queryID uuid.UUID) ([]*models.Query, error) {
+	var pending []*models.Query
+	for _, q := range m.queries {
+		if q.ParentQueryID != nil && *q.ParentQueryID == queryID && q.Status == "pending" {
+			pending = append(pending, q)
+		}
+	}
+	return pending, nil
+}
+
+func (m *mockQueryRepoForApproval) UpdateApprovalStatus(ctx context.Context, projectID, queryID uuid.UUID, status string, reviewedBy string, reason *string) error {
+	m.statusUpdates = append(m.statusUpdates, statusUpdate{queryID, status, reviewedBy, reason})
+	if q, ok := m.queries[queryID]; ok {
+		q.Status = status
+		q.ReviewedBy = &reviewedBy
+		q.RejectionReason = reason
+	}
+	return nil
+}
+
+// TestSuggestUpdate_CreatesNewPendingRecord tests that SuggestUpdate creates a new pending record.
+func TestSuggestUpdate_CreatesNewPendingRecord(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	originalQueryID := uuid.New()
+
+	// Create original query
+	mockRepo := newMockQueryRepoForApproval()
+	originalQuery := &models.Query{
+		ID:                    originalQueryID,
+		ProjectID:             projectID,
+		DatasourceID:          datasourceID,
+		NaturalLanguagePrompt: "Original query",
+		SQLQuery:              "SELECT * FROM users",
+		Status:                "approved",
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{{Name: "id", Type: "INT"}},
+	}
+	mockRepo.queries[originalQueryID] = originalQuery
+
+	svc := &queryService{
+		logger:    zap.NewNop(),
+		queryRepo: mockRepo,
+	}
+
+	// Create update suggestion
+	newName := "Updated query name"
+	newSQL := "SELECT id, name FROM users"
+	req := &SuggestUpdateRequest{
+		QueryID:               originalQueryID,
+		NaturalLanguagePrompt: &newName,
+		SQLQuery:              &newSQL,
+		SuggestionContext:     map[string]any{"reason": "Adding name column"},
+	}
+
+	result, err := svc.SuggestUpdate(context.Background(), projectID, req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Verify the suggestion was created
+	assert.True(t, mockRepo.createCalled, "Create should have been called")
+	assert.Equal(t, "pending", result.Status)
+	assert.Equal(t, &originalQueryID, result.ParentQueryID)
+	assert.Equal(t, newName, result.NaturalLanguagePrompt)
+	assert.Contains(t, result.SQLQuery, "SELECT id, name FROM users")
+	assert.False(t, result.IsEnabled, "Pending suggestions should not be enabled")
+}
+
+// TestSuggestUpdate_OriginalNotFound tests that SuggestUpdate returns error when original query doesn't exist.
+func TestSuggestUpdate_OriginalNotFound(t *testing.T) {
+	projectID := uuid.New()
+	nonExistentID := uuid.New()
+
+	mockRepo := newMockQueryRepoForApproval()
+	svc := &queryService{
+		logger:    zap.NewNop(),
+		queryRepo: mockRepo,
+	}
+
+	req := &SuggestUpdateRequest{
+		QueryID: nonExistentID,
+	}
+
+	_, err := svc.SuggestUpdate(context.Background(), projectID, req)
+	require.Error(t, err)
+}
+
+// TestApproveQuery_NewQuery tests approving a new query (no parent_query_id).
+func TestApproveQuery_NewQuery(t *testing.T) {
+	projectID := uuid.New()
+	queryID := uuid.New()
+
+	mockRepo := newMockQueryRepoForApproval()
+	pendingQuery := &models.Query{
+		ID:        queryID,
+		ProjectID: projectID,
+		Status:    "pending",
+		IsEnabled: false,
+	}
+	mockRepo.queries[queryID] = pendingQuery
+
+	svc := &queryService{
+		logger:    zap.NewNop(),
+		queryRepo: mockRepo,
+	}
+
+	err := svc.ApproveQuery(context.Background(), projectID, queryID, "admin@example.com")
+	require.NoError(t, err)
+
+	// Verify status was updated
+	require.Len(t, mockRepo.statusUpdates, 1)
+	assert.Equal(t, "approved", mockRepo.statusUpdates[0].status)
+	assert.Equal(t, "admin@example.com", mockRepo.statusUpdates[0].reviewedBy)
+
+	// Verify query is enabled
+	assert.True(t, mockRepo.queries[queryID].IsEnabled)
+}
+
+// TestApproveQuery_UpdateSuggestion tests approving an update suggestion.
+func TestApproveQuery_UpdateSuggestion(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	originalQueryID := uuid.New()
+	pendingQueryID := uuid.New()
+
+	mockRepo := newMockQueryRepoForApproval()
+
+	// Create original query
+	originalQuery := &models.Query{
+		ID:                    originalQueryID,
+		ProjectID:             projectID,
+		DatasourceID:          datasourceID,
+		NaturalLanguagePrompt: "Original query",
+		SQLQuery:              "SELECT * FROM users",
+		Status:                "approved",
+	}
+	mockRepo.queries[originalQueryID] = originalQuery
+
+	// Create pending update suggestion
+	pendingQuery := &models.Query{
+		ID:                    pendingQueryID,
+		ProjectID:             projectID,
+		DatasourceID:          datasourceID,
+		NaturalLanguagePrompt: "Updated query",
+		SQLQuery:              "SELECT id, name FROM users",
+		Status:                "pending",
+		ParentQueryID:         &originalQueryID,
+	}
+	mockRepo.queries[pendingQueryID] = pendingQuery
+
+	svc := &queryService{
+		logger:    zap.NewNop(),
+		queryRepo: mockRepo,
+	}
+
+	err := svc.ApproveQuery(context.Background(), projectID, pendingQueryID, "admin@example.com")
+	require.NoError(t, err)
+
+	// Verify original query was updated
+	assert.True(t, mockRepo.updateCalled, "Update should have been called")
+	assert.Equal(t, "Updated query", mockRepo.queries[originalQueryID].NaturalLanguagePrompt)
+	assert.Contains(t, mockRepo.queries[originalQueryID].SQLQuery, "SELECT id, name FROM users")
+
+	// Verify pending suggestion was soft-deleted
+	assert.True(t, mockRepo.softDeleteCalled, "SoftDelete should have been called")
+}
+
+// TestApproveQuery_NotPending tests that ApproveQuery fails for non-pending queries.
+func TestApproveQuery_NotPending(t *testing.T) {
+	projectID := uuid.New()
+	queryID := uuid.New()
+
+	mockRepo := newMockQueryRepoForApproval()
+	approvedQuery := &models.Query{
+		ID:        queryID,
+		ProjectID: projectID,
+		Status:    "approved", // Already approved
+	}
+	mockRepo.queries[queryID] = approvedQuery
+
+	svc := &queryService{
+		logger:    zap.NewNop(),
+		queryRepo: mockRepo,
+	}
+
+	err := svc.ApproveQuery(context.Background(), projectID, queryID, "admin@example.com")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not pending")
+}
+
+// TestRejectQuery tests rejecting a pending query.
+func TestRejectQuery(t *testing.T) {
+	projectID := uuid.New()
+	queryID := uuid.New()
+
+	mockRepo := newMockQueryRepoForApproval()
+	pendingQuery := &models.Query{
+		ID:        queryID,
+		ProjectID: projectID,
+		Status:    "pending",
+	}
+	mockRepo.queries[queryID] = pendingQuery
+
+	svc := &queryService{
+		logger:    zap.NewNop(),
+		queryRepo: mockRepo,
+	}
+
+	err := svc.RejectQuery(context.Background(), projectID, queryID, "admin@example.com", "SQL is too slow")
+	require.NoError(t, err)
+
+	// Verify status was updated
+	require.Len(t, mockRepo.statusUpdates, 1)
+	assert.Equal(t, "rejected", mockRepo.statusUpdates[0].status)
+	assert.Equal(t, "admin@example.com", mockRepo.statusUpdates[0].reviewedBy)
+	require.NotNil(t, mockRepo.statusUpdates[0].reason)
+	assert.Equal(t, "SQL is too slow", *mockRepo.statusUpdates[0].reason)
+}
+
+// TestRejectQuery_NotPending tests that RejectQuery fails for non-pending queries.
+func TestRejectQuery_NotPending(t *testing.T) {
+	projectID := uuid.New()
+	queryID := uuid.New()
+
+	mockRepo := newMockQueryRepoForApproval()
+	approvedQuery := &models.Query{
+		ID:        queryID,
+		ProjectID: projectID,
+		Status:    "approved",
+	}
+	mockRepo.queries[queryID] = approvedQuery
+
+	svc := &queryService{
+		logger:    zap.NewNop(),
+		queryRepo: mockRepo,
+	}
+
+	err := svc.RejectQuery(context.Background(), projectID, queryID, "admin@example.com", "Reason")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not pending")
+}
+
+// TestListPending tests listing pending queries.
+func TestListPending(t *testing.T) {
+	projectID := uuid.New()
+
+	mockRepo := newMockQueryRepoForApproval()
+
+	// Add some queries with different statuses
+	mockRepo.queries[uuid.New()] = &models.Query{ProjectID: projectID, Status: "pending"}
+	mockRepo.queries[uuid.New()] = &models.Query{ProjectID: projectID, Status: "pending"}
+	mockRepo.queries[uuid.New()] = &models.Query{ProjectID: projectID, Status: "approved"}
+	mockRepo.queries[uuid.New()] = &models.Query{ProjectID: projectID, Status: "rejected"}
+
+	svc := &queryService{
+		logger:    zap.NewNop(),
+		queryRepo: mockRepo,
+	}
+
+	pending, err := svc.ListPending(context.Background(), projectID)
+	require.NoError(t, err)
+	assert.Len(t, pending, 2, "Should return only pending queries")
+}
+
+// TestDirectCreate_CreatesApprovedQuery tests that DirectCreate creates a query with approved status.
+func TestDirectCreate_CreatesApprovedQuery(t *testing.T) {
+	mockRepo := newMockQueryRepoForApproval()
+	mockDS := &mockDatasourceSvc{}
+
+	svc := &queryService{
+		logger:        zap.NewNop(),
+		queryRepo:     mockRepo,
+		datasourceSvc: mockDS,
+	}
+
+	req := &CreateQueryRequest{
+		NaturalLanguagePrompt: "Test query",
+		SQLQuery:              "SELECT * FROM users",
+		OutputColumns:         []models.OutputColumn{{Name: "id", Type: "INT"}},
+	}
+
+	result, err := svc.DirectCreate(context.Background(), uuid.New(), uuid.New(), req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Verify it was created with approved status
+	assert.Equal(t, "approved", result.Status)
+	assert.True(t, result.IsEnabled, "DirectCreate should enable the query")
+	require.NotNil(t, result.SuggestedBy)
+	assert.Equal(t, "admin", *result.SuggestedBy)
 }
