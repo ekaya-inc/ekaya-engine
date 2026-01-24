@@ -125,3 +125,21 @@
     text-wrap: balance;
   }
 }
+
+/* CodeMirror width constraints for horizontal scrolling */
+@layer components {
+  .cm-editor {
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .cm-editor .cm-scroller {
+    overflow-x: auto !important;
+    overflow-y: hidden;
+  }
+
+  .cm-editor .cm-content {
+    width: fit-content;
+    min-width: 100%;
+  }
+}

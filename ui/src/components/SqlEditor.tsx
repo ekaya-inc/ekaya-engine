@@ -113,9 +113,9 @@ export function SqlEditor({
   const borderClass = getBorderClass(validationStatus);
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1 w-full max-w-full overflow-hidden">
       <div
-        className={`rounded-md border-2 overflow-hidden transition-colors ${borderClass} relative`}
+        className={`rounded-md border-2 overflow-x-auto overflow-y-hidden transition-colors ${borderClass} relative`}
         style={{ minHeight }}
       >
         {readOnly && (

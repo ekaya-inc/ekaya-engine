@@ -20,7 +20,7 @@ import {
   Search,
   Loader2,
   RefreshCw,
-  Pencil,
+  Zap,
 } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 
@@ -434,6 +434,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         sql_query: editingState.sql_query.trim(),
         is_enabled: editingState.is_enabled,
         allows_modification: editingState.allows_modification,
+        parameters: editingState.parameters,
       };
 
       if (editingState.additional_context.trim()) {
@@ -705,18 +706,16 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                         setEditingState(null);
                         setQueryResults(null);
                       }}
-                      className={`w-full text-left p-2 rounded-lg transition-colors ${
-                        selectedQuery?.query_id === query.query_id
-                          ? 'bg-purple-500/10 border border-purple-500/30'
-                          : 'hover:bg-surface-secondary/50'
-                      } ${!query.is_enabled ? 'opacity-50' : ''}`}
+                      className={`w-full text-left p-2 rounded-lg transition-colors ${selectedQuery?.query_id === query.query_id
+                        ? 'bg-purple-500/10 border border-purple-500/30'
+                        : 'hover:bg-surface-secondary/50'
+                        } ${!query.is_enabled ? 'opacity-50' : ''}`}
                     >
                       <div className="flex items-center justify-between mb-0.5">
                         <div className="flex items-center gap-1.5">
                           <div
-                            className={`h-1.5 w-1.5 rounded-full ${
-                              query.is_enabled ? 'bg-green-500' : 'bg-gray-500'
-                            }`}
+                            className={`h-1.5 w-1.5 rounded-full ${query.is_enabled ? 'bg-green-500' : 'bg-gray-500'
+                              }`}
                           />
                           <span className="text-xs text-text-tertiary">
                             {query.dialect}
@@ -732,7 +731,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                         </span>
                         {query.allows_modification && (
                           <span className="flex-shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium rounded bg-red-500/10 text-red-600 dark:text-red-400">
-                            <Pencil className="h-3 w-3" />
+                            <Zap className="h-3 w-3" />
                           </span>
                         )}
                       </div>
@@ -750,8 +749,8 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         </div>
 
         {/* Right Side - Query Editor/Viewer */}
-        <div className="flex-1">
-          <Card className="flex flex-col">
+        <div className="flex-1 w-0 overflow-hidden">
+          <Card className="flex flex-col overflow-hidden">
             {isCreating ? (
               // Create New Query Form
               <>
@@ -872,7 +871,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                           <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
                           <div className="flex-1">
                             <p className="text-sm text-amber-600 dark:text-amber-400">
-                              This query will be able to modify or delete data. Ensure the SQL
+                              This query will be able to add, modify or delete data. Ensure the SQL
                               and parameters are thoroughly reviewed before enabling.
                             </p>
                           </div>
@@ -1153,7 +1152,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                           <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
                           <div className="flex-1">
                             <p className="text-sm text-amber-600 dark:text-amber-400">
-                              This query will be able to modify or delete data. Ensure the SQL
+                              This query will be able to add, modify or delete data. Ensure the SQL
                               and parameters are thoroughly reviewed before enabling.
                             </p>
                           </div>
@@ -1327,7 +1326,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                         </CardTitle>
                         {selectedQuery.allows_modification && (
                           <span className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded bg-red-500/10 text-red-600 dark:text-red-400">
-                            <Pencil className="h-3 w-3" />
+                            <Zap className="h-3 w-3" />
                             Modifies Data
                           </span>
                         )}
@@ -1412,7 +1411,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     </div>
                     <SqlEditor
                       value={selectedQuery.sql_query}
-                      onChange={() => {}}
+                      onChange={() => { }}
                       dialect={dialect}
                       schema={codeMirrorSchema}
                       readOnly
@@ -1433,7 +1432,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                   <div className="flex gap-2 pt-4 border-t border-border-light">
                     <Button
                       onClick={() => handleExecuteQuery(selectedQuery)}
-                      disabled={!selectedQuery.is_enabled || isTesting}
+                      disabled={isTesting}
                     >
                       {isTesting ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
