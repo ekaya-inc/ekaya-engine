@@ -590,3 +590,156 @@ func TestQuerySuggestionInfo_OmitsEmptyFields(t *testing.T) {
 		assert.Empty(t, changes, "changes should be empty when no changes")
 	}
 }
+
+func TestApproveQuerySuggestionResponse_Structure(t *testing.T) {
+	// Test that the response structure is correct
+	response := approveQuerySuggestionResponse{
+		Success: true,
+		Message: "Query approved and enabled for execution.",
+		QueryID: uuid.New().String(),
+		Type:    "new",
+	}
+
+	// Verify JSON serialization works
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	// Verify all required fields
+	assert.Equal(t, true, parsed["success"])
+	assert.NotEmpty(t, parsed["message"])
+	assert.NotEmpty(t, parsed["query_id"])
+	assert.Equal(t, "new", parsed["type"])
+}
+
+func TestApproveQuerySuggestion_ResponseForUpdateType(t *testing.T) {
+	parentQueryID := uuid.New()
+
+	response := approveQuerySuggestionResponse{
+		Success: true,
+		Message: "Update suggestion approved. Changes applied to query " + parentQueryID.String() + ".",
+		QueryID: parentQueryID.String(),
+		Type:    "update",
+	}
+
+	// Verify JSON serialization
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	assert.Equal(t, true, parsed["success"])
+	assert.Equal(t, "update", parsed["type"])
+	assert.Equal(t, parentQueryID.String(), parsed["query_id"])
+	assert.Contains(t, parsed["message"], "Update suggestion approved")
+}
+
+func TestApproveQuerySuggestion_ToolRegistration(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &DevQueryToolDeps{
+		MCPConfigService: &mockMCPConfigService{
+			config: &models.ToolGroupConfig{Enabled: true},
+		},
+		ProjectService: &mockProjectService{},
+		QueryService:   &mockQueryService{},
+		Logger:         zap.NewNop(),
+	}
+
+	RegisterDevQueryTools(mcpServer, deps)
+
+	// Verify tools are registered
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				InputSchema struct {
+					Required   []string       `json:"required"`
+					Properties map[string]any `json:"properties"`
+				} `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	// Check both tools are registered
+	toolNames := make(map[string]bool)
+	for _, tool := range response.Result.Tools {
+		toolNames[tool.Name] = true
+	}
+
+	assert.True(t, toolNames["list_query_suggestions"], "list_query_suggestions tool should be registered")
+	assert.True(t, toolNames["approve_query_suggestion"], "approve_query_suggestion tool should be registered")
+}
+
+func TestApproveQuerySuggestion_ToolDescription(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &DevQueryToolDeps{
+		MCPConfigService: &mockMCPConfigService{
+			config: &models.ToolGroupConfig{Enabled: true},
+		},
+		ProjectService: &mockProjectService{},
+		QueryService:   &mockQueryService{},
+		Logger:         zap.NewNop(),
+	}
+
+	RegisterDevQueryTools(mcpServer, deps)
+
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				InputSchema struct {
+					Required   []string       `json:"required"`
+					Properties map[string]any `json:"properties"`
+				} `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	// Find approve_query_suggestion tool
+	var approveTool *struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		InputSchema struct {
+			Required   []string       `json:"required"`
+			Properties map[string]any `json:"properties"`
+		} `json:"inputSchema"`
+	}
+	for i, tool := range response.Result.Tools {
+		if tool.Name == "approve_query_suggestion" {
+			approveTool = &response.Result.Tools[i]
+			break
+		}
+	}
+
+	require.NotNil(t, approveTool, "approve_query_suggestion tool should be found")
+
+	// Verify description mentions key points
+	assert.Contains(t, approveTool.Description, "Approve")
+	assert.Contains(t, approveTool.Description, "pending")
+	assert.Contains(t, approveTool.Description, "suggestion")
+
+	// Verify suggestion_id parameter exists and is required
+	assert.Contains(t, approveTool.InputSchema.Properties, "suggestion_id")
+	assert.Contains(t, approveTool.InputSchema.Required, "suggestion_id")
+}

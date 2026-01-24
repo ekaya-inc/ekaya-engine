@@ -11,6 +11,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
@@ -44,6 +45,7 @@ func (d *DevQueryToolDeps) GetLogger() *zap.Logger {
 // These tools are for administrators to manage query suggestions.
 func RegisterDevQueryTools(mcpServer *server.MCPServer, deps *DevQueryToolDeps) {
 	registerListQuerySuggestionsTool(mcpServer, deps)
+	registerApproveQuerySuggestionTool(mcpServer, deps)
 }
 
 // querySuggestionInfo represents a single query suggestion in the response.
@@ -315,4 +317,139 @@ func tagsEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// approveQuerySuggestionResponse is the response format for approve_query_suggestion.
+type approveQuerySuggestionResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	QueryID string `json:"query_id"`
+	Type    string `json:"type"` // "new" or "update"
+}
+
+// registerApproveQuerySuggestionTool registers the approve_query_suggestion tool.
+func registerApproveQuerySuggestionTool(mcpServer *server.MCPServer, deps *DevQueryToolDeps) {
+	tool := mcp.NewTool(
+		"approve_query_suggestion",
+		mcp.WithDescription(`Approve a pending query suggestion.
+For new queries: Sets status to approved and enables the query for execution.
+For update suggestions: Applies the changes to the original query and removes the pending record.
+Use list_query_suggestions first to see pending suggestions.`),
+		mcp.WithString("suggestion_id",
+			mcp.Required(),
+			mcp.Description("UUID of the pending suggestion to approve")),
+	)
+
+	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Check tool access
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "approve_query_suggestion")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Parse arguments
+		args, _ := request.Params.Arguments.(map[string]any)
+
+		// Parse required suggestion_id
+		suggestionIDStr, ok := args["suggestion_id"].(string)
+		if !ok || suggestionIDStr == "" {
+			return NewErrorResultWithDetails("invalid_parameters",
+				"suggestion_id is required",
+				map[string]any{
+					"parameter": "suggestion_id",
+				}), nil
+		}
+
+		suggestionID, err := uuid.Parse(suggestionIDStr)
+		if err != nil {
+			return NewErrorResultWithDetails("invalid_parameters",
+				"suggestion_id is not a valid UUID",
+				map[string]any{
+					"parameter":    "suggestion_id",
+					"actual_value": suggestionIDStr,
+				}), nil
+		}
+
+		// Get the suggestion to determine its type before approval
+		suggestion, err := deps.QueryService.Get(tenantCtx, projectID, suggestionID)
+		if err != nil {
+			deps.Logger.Error("Failed to get query suggestion",
+				zap.String("project_id", projectID.String()),
+				zap.String("suggestion_id", suggestionID.String()),
+				zap.Error(err))
+			return NewErrorResultWithDetails("not_found",
+				"suggestion not found",
+				map[string]any{
+					"suggestion_id": suggestionIDStr,
+				}), nil
+		}
+
+		// Verify it's a pending suggestion
+		if suggestion.Status != "pending" {
+			return NewErrorResultWithDetails("invalid_state",
+				fmt.Sprintf("suggestion is not pending (status: %s)", suggestion.Status),
+				map[string]any{
+					"suggestion_id": suggestionIDStr,
+					"status":        suggestion.Status,
+				}), nil
+		}
+
+		// Determine suggestion type
+		suggestionType := "new"
+		if suggestion.ParentQueryID != nil {
+			suggestionType = "update"
+		}
+
+		// Get reviewer ID from context
+		reviewerID := auth.GetUserIDFromContext(ctx)
+		if reviewerID == "" {
+			reviewerID = "mcp-session" // Fallback for MCP sessions without user context
+		}
+
+		// Approve the query
+		err = deps.QueryService.ApproveQuery(tenantCtx, projectID, suggestionID, reviewerID)
+		if err != nil {
+			deps.Logger.Error("Failed to approve query suggestion",
+				zap.String("project_id", projectID.String()),
+				zap.String("suggestion_id", suggestionID.String()),
+				zap.String("reviewer_id", reviewerID),
+				zap.Error(err))
+			return nil, fmt.Errorf("failed to approve query: %w", err)
+		}
+
+		// Build response message based on type
+		var message string
+		var queryID string
+		if suggestionType == "update" {
+			queryID = suggestion.ParentQueryID.String()
+			message = fmt.Sprintf("Update suggestion approved. Changes applied to query %s.", queryID)
+		} else {
+			queryID = suggestionID.String()
+			message = "Query approved and enabled for execution."
+		}
+
+		deps.Logger.Info("Approved query suggestion",
+			zap.String("project_id", projectID.String()),
+			zap.String("suggestion_id", suggestionID.String()),
+			zap.String("type", suggestionType),
+			zap.String("reviewer_id", reviewerID),
+		)
+
+		response := approveQuerySuggestionResponse{
+			Success: true,
+			Message: message,
+			QueryID: queryID,
+			Type:    suggestionType,
+		}
+
+		responseJSON, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal response: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(responseJSON)), nil
+	}
+
+	mcpServer.AddTool(tool, handler)
 }
