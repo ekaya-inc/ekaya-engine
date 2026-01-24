@@ -66,7 +66,7 @@ This creates a governed workflow where Business Users (using ChatGPT, Claude Des
 | suggest_approved_query | ✅ Done | Creates pending record |
 | suggest_query_update | ✅ Done | Task 2.1 |
 | **Dev MCP Tools** | | |
-| list_query_suggestions | ❌ Pending | Task 3.1 |
+| list_query_suggestions | ✅ Done | Task 3.1 |
 | approve_query_suggestion | ❌ Pending | Task 3.2 |
 | reject_query_suggestion | ❌ Pending | Task 3.3 |
 | create_approved_query | ❌ Pending | Task 3.4 |
