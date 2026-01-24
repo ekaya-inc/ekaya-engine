@@ -51,7 +51,7 @@ This creates a governed workflow where Business Users (using ChatGPT, Claude Des
 | Query.ReviewedBy/ReviewedAt fields | ✅ Done | Task 1.1 |
 | Query.RejectionReason field | ✅ Done | Task 1.1 |
 | Query.ParentQueryID field | ✅ Done | Task 1.1 |
-| Database migration (audit) | ❌ Pending | Task 1.2 |
+| Database migration (audit) | ✅ Done | Task 1.2 |
 | **Repository** | | |
 | ListPending method | ❌ Pending | Task 1.3 |
 | CountPending method | ❌ Pending | Task 1.3 |
