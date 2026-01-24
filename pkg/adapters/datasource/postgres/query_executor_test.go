@@ -1,4 +1,4 @@
-//go:build integration
+//go:build integration && (postgres || all_adapters)
 
 package postgres
 
@@ -1174,6 +1174,342 @@ func TestQueryExecutor_ExplainQuery_PerformanceHints(t *testing.T) {
 	for i, hint := range result.PerformanceHints {
 		if hint == "" {
 			t.Errorf("hint %d is empty", i)
+		}
+	}
+}
+
+// ============================================================================
+// Modifying Statement Tests (INSERT/UPDATE/DELETE with parameters)
+// These tests verify that QueryWithParams and Query correctly handle
+// data-modifying statements, which cannot be wrapped in SELECT * FROM (...).
+// ============================================================================
+
+func TestQueryExecutor_QueryWithParams_INSERT_WithReturning(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// Create a test table for this test
+	_, err := tc.executor.pool.Exec(ctx, `
+		DROP TABLE IF EXISTS test_insert_params;
+		CREATE TABLE test_insert_params (
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL,
+			value INTEGER DEFAULT 0,
+			created_at TIMESTAMP DEFAULT now()
+		);
+	`)
+	if err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+	defer func() {
+		_, _ = tc.executor.pool.Exec(ctx, "DROP TABLE IF EXISTS test_insert_params")
+	}()
+
+	// INSERT with parameters and RETURNING clause
+	sql := "INSERT INTO test_insert_params (name, value) VALUES ($1, $2) RETURNING id, name, value"
+	params := []any{"test-name", 42}
+
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 10)
+	if err != nil {
+		t.Fatalf("INSERT with RETURNING should succeed, got error: %v", err)
+	}
+
+	// Should return exactly one row
+	if result.RowCount != 1 {
+		t.Errorf("expected 1 row returned, got %d", result.RowCount)
+	}
+
+	// Should have 3 columns: id, name, value
+	if len(result.Columns) != 3 {
+		t.Errorf("expected 3 columns, got %d", len(result.Columns))
+	}
+
+	// Verify returned data
+	if len(result.Rows) > 0 {
+		row := result.Rows[0]
+		if name, ok := row["name"].(string); !ok || name != "test-name" {
+			t.Errorf("expected name='test-name', got %v", row["name"])
+		}
+	}
+
+	// Verify data was actually inserted
+	var count int
+	err = tc.executor.pool.QueryRow(ctx, "SELECT COUNT(*) FROM test_insert_params").Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to verify insert: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 row in table, got %d", count)
+	}
+}
+
+func TestQueryExecutor_QueryWithParams_UPDATE_WithReturning(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// Create and populate test table
+	_, err := tc.executor.pool.Exec(ctx, `
+		DROP TABLE IF EXISTS test_update_params;
+		CREATE TABLE test_update_params (
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL,
+			value INTEGER DEFAULT 0
+		);
+		INSERT INTO test_update_params (name, value) VALUES ('original', 10), ('other', 20);
+	`)
+	if err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+	defer func() {
+		_, _ = tc.executor.pool.Exec(ctx, "DROP TABLE IF EXISTS test_update_params")
+	}()
+
+	// UPDATE with parameters and RETURNING clause
+	sql := "UPDATE test_update_params SET value = $1 WHERE name = $2 RETURNING name, value"
+	params := []any{99, "original"}
+
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 10)
+	if err != nil {
+		t.Fatalf("UPDATE with RETURNING should succeed, got error: %v", err)
+	}
+
+	// Should return exactly one row (the updated row)
+	if result.RowCount != 1 {
+		t.Errorf("expected 1 row returned, got %d", result.RowCount)
+	}
+
+	// Verify returned data shows updated value
+	if len(result.Rows) > 0 {
+		row := result.Rows[0]
+		// PostgreSQL INTEGER returns as int32
+		var valueMatches bool
+		switch v := row["value"].(type) {
+		case int32:
+			valueMatches = v == 99
+		case int64:
+			valueMatches = v == 99
+		}
+		if !valueMatches {
+			t.Errorf("expected value=99, got %v (type: %T)", row["value"], row["value"])
+		}
+	}
+
+	// Verify data was actually updated
+	var newValue int
+	err = tc.executor.pool.QueryRow(ctx, "SELECT value FROM test_update_params WHERE name = 'original'").Scan(&newValue)
+	if err != nil {
+		t.Fatalf("failed to verify update: %v", err)
+	}
+	if newValue != 99 {
+		t.Errorf("expected value=99, got %d", newValue)
+	}
+
+	// Verify other row was not affected
+	var otherValue int
+	err = tc.executor.pool.QueryRow(ctx, "SELECT value FROM test_update_params WHERE name = 'other'").Scan(&otherValue)
+	if err != nil {
+		t.Fatalf("failed to verify other row: %v", err)
+	}
+	if otherValue != 20 {
+		t.Errorf("expected other value=20, got %d", otherValue)
+	}
+}
+
+func TestQueryExecutor_QueryWithParams_DELETE_WithReturning(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// Create and populate test table
+	_, err := tc.executor.pool.Exec(ctx, `
+		DROP TABLE IF EXISTS test_delete_params;
+		CREATE TABLE test_delete_params (
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL
+		);
+		INSERT INTO test_delete_params (name) VALUES ('to-delete'), ('keep');
+	`)
+	if err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+	defer func() {
+		_, _ = tc.executor.pool.Exec(ctx, "DROP TABLE IF EXISTS test_delete_params")
+	}()
+
+	// DELETE with parameters and RETURNING clause
+	sql := "DELETE FROM test_delete_params WHERE name = $1 RETURNING id, name"
+	params := []any{"to-delete"}
+
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 10)
+	if err != nil {
+		t.Fatalf("DELETE with RETURNING should succeed, got error: %v", err)
+	}
+
+	// Should return exactly one row (the deleted row)
+	if result.RowCount != 1 {
+		t.Errorf("expected 1 row returned, got %d", result.RowCount)
+	}
+
+	// Verify returned data
+	if len(result.Rows) > 0 {
+		row := result.Rows[0]
+		if name, ok := row["name"].(string); !ok || name != "to-delete" {
+			t.Errorf("expected name='to-delete', got %v", row["name"])
+		}
+	}
+
+	// Verify data was actually deleted
+	var count int
+	err = tc.executor.pool.QueryRow(ctx, "SELECT COUNT(*) FROM test_delete_params").Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to verify delete: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 row remaining, got %d", count)
+	}
+}
+
+func TestQueryExecutor_QueryWithParams_INSERT_WithoutReturning(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// Create test table
+	_, err := tc.executor.pool.Exec(ctx, `
+		DROP TABLE IF EXISTS test_insert_no_return;
+		CREATE TABLE test_insert_no_return (
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL
+		);
+	`)
+	if err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+	defer func() {
+		_, _ = tc.executor.pool.Exec(ctx, "DROP TABLE IF EXISTS test_insert_no_return")
+	}()
+
+	// INSERT without RETURNING clause - should still work but return empty result
+	sql := "INSERT INTO test_insert_no_return (name) VALUES ($1)"
+	params := []any{"test-name"}
+
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 10)
+	if err != nil {
+		t.Fatalf("INSERT without RETURNING should succeed, got error: %v", err)
+	}
+
+	// Should return zero rows (no RETURNING clause)
+	if result.RowCount != 0 {
+		t.Errorf("expected 0 rows returned (no RETURNING), got %d", result.RowCount)
+	}
+
+	// Verify data was actually inserted
+	var count int
+	err = tc.executor.pool.QueryRow(ctx, "SELECT COUNT(*) FROM test_insert_no_return").Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to verify insert: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 row in table, got %d", count)
+	}
+}
+
+func TestQueryExecutor_Query_INSERT_WithReturning(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// Create test table
+	_, err := tc.executor.pool.Exec(ctx, `
+		DROP TABLE IF EXISTS test_insert_query;
+		CREATE TABLE test_insert_query (
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL
+		);
+	`)
+	if err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+	defer func() {
+		_, _ = tc.executor.pool.Exec(ctx, "DROP TABLE IF EXISTS test_insert_query")
+	}()
+
+	// INSERT with RETURNING (no parameters) via Query method
+	sql := "INSERT INTO test_insert_query (name) VALUES ('hardcoded-name') RETURNING id, name"
+
+	result, err := tc.executor.Query(ctx, sql, 10)
+	if err != nil {
+		t.Fatalf("INSERT with RETURNING via Query should succeed, got error: %v", err)
+	}
+
+	// Should return exactly one row
+	if result.RowCount != 1 {
+		t.Errorf("expected 1 row returned, got %d", result.RowCount)
+	}
+
+	// Verify data was actually inserted
+	var count int
+	err = tc.executor.pool.QueryRow(ctx, "SELECT COUNT(*) FROM test_insert_query").Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to verify insert: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 row in table, got %d", count)
+	}
+}
+
+func TestQueryExecutor_QueryWithParams_INSERT_UUID_Generation(t *testing.T) {
+	tc := setupQueryExecutorTest(t)
+	ctx := context.Background()
+
+	// Create test table with UUID primary key
+	_, err := tc.executor.pool.Exec(ctx, `
+		DROP TABLE IF EXISTS test_insert_uuid;
+		CREATE TABLE test_insert_uuid (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			name TEXT NOT NULL,
+			created_at TIMESTAMP DEFAULT now()
+		);
+	`)
+	if err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+	defer func() {
+		_, _ = tc.executor.pool.Exec(ctx, "DROP TABLE IF EXISTS test_insert_uuid")
+	}()
+
+	// INSERT letting the database generate the UUID
+	sql := "INSERT INTO test_insert_uuid (name) VALUES ($1) RETURNING id, name, created_at"
+	params := []any{"uuid-test"}
+
+	result, err := tc.executor.QueryWithParams(ctx, sql, params, 10)
+	if err != nil {
+		t.Fatalf("INSERT with UUID generation should succeed, got error: %v", err)
+	}
+
+	// Should return exactly one row
+	if result.RowCount != 1 {
+		t.Errorf("expected 1 row returned, got %d", result.RowCount)
+	}
+
+	// Verify UUID was generated
+	if len(result.Rows) > 0 {
+		row := result.Rows[0]
+		id := row["id"]
+		if id == nil {
+			t.Error("expected id to be generated, got nil")
+		}
+		// UUID should be parseable
+		switch v := id.(type) {
+		case [16]byte:
+			// pgx returns UUID as [16]byte
+			parsedUUID := uuid.UUID(v)
+			if parsedUUID == uuid.Nil {
+				t.Error("expected non-nil UUID")
+			}
+		case string:
+			if _, err := uuid.Parse(v); err != nil {
+				t.Errorf("expected valid UUID string, got %v: %v", v, err)
+			}
+		default:
+			t.Errorf("unexpected UUID type: %T", id)
 		}
 	}
 }
