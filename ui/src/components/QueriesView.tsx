@@ -20,6 +20,7 @@ import {
   Search,
   Loader2,
   RefreshCw,
+  Pencil,
 } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 
@@ -56,10 +57,13 @@ interface EditingState {
   additional_context: string;
   sql_query: string;
   is_enabled: boolean;
+  allows_modification: boolean;
   parameters: QueryParameter[];
   output_columns: OutputColumn[];
   constraints: string;
 }
+
+type QueryFilterType = 'all' | 'read-only' | 'modifying';
 
 const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => {
   const { toast } = useToast();
@@ -76,6 +80,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
   const [isCreating, setIsCreating] = useState(false);
   const [editingQueryId, setEditingQueryId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [queryFilter, setQueryFilter] = useState<QueryFilterType>('all');
 
   // Form state for creating
   const [newQuery, setNewQuery] = useState<EditingState>({
@@ -83,6 +88,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
     additional_context: '',
     sql_query: '',
     is_enabled: true,
+    allows_modification: false,
     parameters: [],
     output_columns: [],
     constraints: '',
@@ -185,14 +191,44 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
     []
   );
 
-  // Filter queries based on search
-  const filteredQueries = queries.filter(
-    (query) =>
+  // Check if modifying query is missing RETURNING clause
+  const isModifyingQueryMissingReturning = useCallback(
+    (sql: string, allowsModification: boolean): boolean => {
+      if (!allowsModification) return false;
+
+      const normalizedSql = sql.trim().toUpperCase();
+
+      // Check if it's a modifying statement (INSERT, UPDATE, DELETE)
+      const isModifying =
+        normalizedSql.startsWith('INSERT') ||
+        normalizedSql.startsWith('UPDATE') ||
+        normalizedSql.startsWith('DELETE');
+
+      if (!isModifying) return false;
+
+      // Check if RETURNING clause is present
+      return !normalizedSql.includes('RETURNING');
+    },
+    []
+  );
+
+  // Filter queries based on search and type filter
+  const filteredQueries = queries.filter((query) => {
+    // Text search filter
+    const matchesSearch =
       query.natural_language_prompt
         .toLowerCase()
         .includes(searchTerm.toLowerCase()) ||
-      query.sql_query.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+      query.sql_query.toLowerCase().includes(searchTerm.toLowerCase());
+
+    // Type filter
+    const matchesTypeFilter =
+      queryFilter === 'all' ||
+      (queryFilter === 'read-only' && !query.allows_modification) ||
+      (queryFilter === 'modifying' && query.allows_modification);
+
+    return matchesSearch && matchesTypeFilter;
+  });
 
   /**
    * Reset create form
@@ -203,6 +239,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
       additional_context: '',
       sql_query: '',
       is_enabled: true,
+      allows_modification: false,
       parameters: [],
       output_columns: [],
       constraints: '',
@@ -306,6 +343,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         natural_language_prompt: newQuery.natural_language_prompt.trim(),
         sql_query: newQuery.sql_query.trim(),
         is_enabled: newQuery.is_enabled,
+        allows_modification: newQuery.allows_modification,
       };
 
       if (newQuery.additional_context.trim()) {
@@ -364,6 +402,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
       additional_context: query.additional_context ?? '',
       sql_query: query.sql_query,
       is_enabled: query.is_enabled,
+      allows_modification: query.allows_modification,
       parameters: query.parameters ?? [],
       output_columns: query.output_columns ?? [],
       constraints: query.constraints ?? '',
@@ -394,6 +433,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         natural_language_prompt: editingState.natural_language_prompt.trim(),
         sql_query: editingState.sql_query.trim(),
         is_enabled: editingState.is_enabled,
+        allows_modification: editingState.allows_modification,
       };
 
       if (editingState.additional_context.trim()) {
@@ -635,6 +675,15 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                   className="pl-8 h-9"
                 />
               </div>
+              <select
+                value={queryFilter}
+                onChange={(e) => setQueryFilter(e.target.value as QueryFilterType)}
+                className="mt-2 h-8 w-full px-2 text-xs border border-border-medium rounded-md bg-surface-primary text-text-primary focus:outline-none focus:ring-2 focus:ring-brand-purple"
+              >
+                <option value="all">All queries</option>
+                <option value="read-only">Read-only</option>
+                <option value="modifying">Modifies data</option>
+              </select>
             </CardHeader>
             <CardContent className="flex-1 overflow-y-auto p-2">
               {filteredQueries.length === 0 ? (
@@ -677,8 +726,15 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                           <AlertCircle className="h-3 w-3 text-gray-500" />
                         )}
                       </div>
-                      <div className="text-sm font-medium text-text-primary line-clamp-1">
-                        {query.natural_language_prompt}
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-text-primary line-clamp-1 flex-1">
+                          {query.natural_language_prompt}
+                        </span>
+                        {query.allows_modification && (
+                          <span className="flex-shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium rounded bg-red-500/10 text-red-600 dark:text-red-400">
+                            <Pencil className="h-3 w-3" />
+                          </span>
+                        )}
                       </div>
                       {query.usage_count > 0 && (
                         <div className="text-xs text-text-tertiary mt-0.5">
@@ -789,6 +845,55 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                         </div>
                       </div>
                     )}
+                    <div className="flex items-center gap-2 mt-4">
+                      <input
+                        type="checkbox"
+                        id="allows-modification-create"
+                        checked={newQuery.allows_modification}
+                        onChange={(e) => {
+                          setNewQuery({
+                            ...newQuery,
+                            allows_modification: e.target.checked,
+                          });
+                          setTestPassed(false);
+                        }}
+                        className="rounded border-border-medium"
+                      />
+                      <label
+                        htmlFor="allows-modification-create"
+                        className="text-sm text-text-primary cursor-pointer"
+                      >
+                        Allow data modification (INSERT, UPDATE, DELETE, CALL)
+                      </label>
+                    </div>
+                    {newQuery.allows_modification && (
+                      <div className="mt-2 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-sm text-amber-600 dark:text-amber-400">
+                              This query will be able to modify or delete data. Ensure the SQL
+                              and parameters are thoroughly reviewed before enabling.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {isModifyingQueryMissingReturning(newQuery.sql_query, newQuery.allows_modification) && (
+                      <div className="mt-2 bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+                        <div className="flex items-start gap-2">
+                          <MessageSquare className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+                              Suggestion: Add RETURNING clause
+                            </p>
+                            <p className="text-xs text-blue-600/80 dark:text-blue-400/80 mt-1">
+                              Consider adding a RETURNING clause (e.g., <code className="bg-blue-500/20 px-1 rounded">RETURNING id, name</code>) to see which rows were affected.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <ParameterEditor
@@ -814,8 +919,24 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                   )}
 
                   <div>
+                    {newQuery.allows_modification && (
+                      <div className="mb-4 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-red-600 dark:text-red-400">
+                              Warning: Testing modifies live data
+                            </p>
+                            <p className="text-xs text-red-600/80 dark:text-red-400/80 mt-1">
+                              Testing this query will execute it against your live database and may
+                              modify data. Use test parameters that won&apos;t cause harm.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     <Button
-                      variant="outline"
+                      variant={newQuery.allows_modification ? 'destructive' : 'outline'}
                       onClick={() =>
                         handleTestQuery(
                           newQuery.sql_query,
@@ -835,7 +956,9 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                       ) : (
                         <Play className="mr-2 h-4 w-4" />
                       )}
-                      Test Query
+                      {newQuery.allows_modification
+                        ? 'Test Query (Modifies Data)'
+                        : 'Test Query'}
                     </Button>
                   </div>
 
@@ -1003,6 +1126,55 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                         </div>
                       </div>
                     )}
+                    <div className="flex items-center gap-2 mt-4">
+                      <input
+                        type="checkbox"
+                        id="allows-modification-edit"
+                        checked={editingState.allows_modification}
+                        onChange={(e) => {
+                          setEditingState({
+                            ...editingState,
+                            allows_modification: e.target.checked,
+                          });
+                          setEditTestPassed(false);
+                        }}
+                        className="rounded border-border-medium"
+                      />
+                      <label
+                        htmlFor="allows-modification-edit"
+                        className="text-sm text-text-primary cursor-pointer"
+                      >
+                        Allow data modification (INSERT, UPDATE, DELETE, CALL)
+                      </label>
+                    </div>
+                    {editingState.allows_modification && (
+                      <div className="mt-2 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-sm text-amber-600 dark:text-amber-400">
+                              This query will be able to modify or delete data. Ensure the SQL
+                              and parameters are thoroughly reviewed before enabling.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {isModifyingQueryMissingReturning(editingState.sql_query, editingState.allows_modification) && (
+                      <div className="mt-2 bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+                        <div className="flex items-start gap-2">
+                          <MessageSquare className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+                              Suggestion: Add RETURNING clause
+                            </p>
+                            <p className="text-xs text-blue-600/80 dark:text-blue-400/80 mt-1">
+                              Consider adding a RETURNING clause (e.g., <code className="bg-blue-500/20 px-1 rounded">RETURNING id, name</code>) to see which rows were affected.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <ParameterEditor
@@ -1028,8 +1200,24 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                   )}
 
                   <div>
+                    {editingState.allows_modification && (
+                      <div className="mb-4 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-red-600 dark:text-red-400">
+                              Warning: Testing modifies live data
+                            </p>
+                            <p className="text-xs text-red-600/80 dark:text-red-400/80 mt-1">
+                              Testing this query will execute it against your live database and may
+                              modify data. Use test parameters that won&apos;t cause harm.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     <Button
-                      variant="outline"
+                      variant={editingState.allows_modification ? 'destructive' : 'outline'}
                       onClick={() =>
                         handleTestQuery(
                           editingState.sql_query,
@@ -1049,7 +1237,9 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                       ) : (
                         <Play className="mr-2 h-4 w-4" />
                       )}
-                      Test Query
+                      {editingState.allows_modification
+                        ? 'Test Query (Modifies Data)'
+                        : 'Test Query'}
                     </Button>
                   </div>
 
@@ -1135,6 +1325,12 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                         <CardTitle className="line-clamp-1">
                           {selectedQuery.natural_language_prompt}
                         </CardTitle>
+                        {selectedQuery.allows_modification && (
+                          <span className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded bg-red-500/10 text-red-600 dark:text-red-400">
+                            <Pencil className="h-3 w-3" />
+                            Modifies Data
+                          </span>
+                        )}
                       </div>
                       <CardDescription>
                         Created{' '}

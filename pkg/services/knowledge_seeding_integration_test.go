@@ -62,7 +62,7 @@ func setupKnowledgeSeedingTest(t *testing.T) *knowledgeSeedingTestContext {
 	seedFilePath := filepath.Join(tempDir, "knowledge.yaml")
 
 	// Create knowledge service
-	knowledgeSvc := NewKnowledgeService(knowledgeRepo, projectRepo, logger)
+	knowledgeSvc := NewKnowledgeService(knowledgeRepo, projectRepo, ontologyRepo, logger)
 
 	tc := &knowledgeSeedingTestContext{
 		t:             t,
@@ -81,6 +81,7 @@ func setupKnowledgeSeedingTest(t *testing.T) *knowledgeSeedingTestContext {
 
 	// Ensure project exists with seed path
 	tc.ensureTestProject()
+	tc.ensureTestOntology()
 
 	return tc
 }
@@ -133,6 +134,28 @@ func (tc *knowledgeSeedingTestContext) ensureTestProject() {
 	`, tc.dsID, tc.projectID)
 	if err != nil {
 		tc.t.Fatalf("Failed to ensure test datasource: %v", err)
+	}
+}
+
+// ensureTestOntology creates an active ontology for the test project.
+func (tc *knowledgeSeedingTestContext) ensureTestOntology() {
+	tc.t.Helper()
+
+	ontologyID := uuid.MustParse("00000000-0000-0000-0000-000000000243")
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	scope, _ := database.GetTenantScope(ctx)
+	// Use ON CONFLICT on the unique constraint (project_id, version) - version defaults to 1
+	// Don't change the ID if an ontology already exists (would violate FK constraints)
+	_, err := scope.Conn.Exec(ctx, `
+		INSERT INTO engine_ontologies (id, project_id, is_active, domain_summary, entity_summaries, column_details)
+		VALUES ($1, $2, true, '{}', '{}', '{}')
+		ON CONFLICT (project_id, version) DO UPDATE SET is_active = true
+	`, ontologyID, tc.projectID)
+	if err != nil {
+		tc.t.Fatalf("Failed to ensure test ontology: %v", err)
 	}
 }
 
@@ -631,6 +654,9 @@ func TestKnowledgeSeeding_Integration_IdempotentSeeding(t *testing.T) {
 	tc := setupKnowledgeSeedingTest(t)
 	tc.cleanup()
 	defer tc.cleanup()
+
+	// Re-ensure ontology exists after cleanup (cleanup deletes it)
+	tc.ensureTestOntology()
 
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()

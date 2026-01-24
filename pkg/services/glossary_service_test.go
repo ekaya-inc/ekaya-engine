@@ -381,6 +381,12 @@ func (m *mockQueryExecutorForGlossary) Execute(ctx context.Context, sqlStatement
 	}, nil
 }
 
+func (m *mockQueryExecutorForGlossary) ExecuteWithParams(ctx context.Context, sqlStatement string, params []any) (*datasource.ExecuteResult, error) {
+	return &datasource.ExecuteResult{
+		RowsAffected: 1,
+	}, nil
+}
+
 func (m *mockQueryExecutorForGlossary) ValidateQuery(ctx context.Context, sqlQuery string) error {
 	return nil // All queries are valid in test mock
 }
@@ -433,7 +439,13 @@ func TestGlossaryService_CreateTerm(t *testing.T) {
 	ctx := withTestAuth(context.Background(), projectID)
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{}
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
 	entityRepo := &mockEntityRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
@@ -509,7 +521,13 @@ func TestGlossaryService_UpdateTerm(t *testing.T) {
 	ctx := withTestAuth(context.Background(), projectID)
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{}
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
 	entityRepo := &mockEntityRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
@@ -566,7 +584,13 @@ func TestGlossaryService_DeleteTerm(t *testing.T) {
 	ctx := withTestAuth(context.Background(), projectID)
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{}
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
 	entityRepo := &mockEntityRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
@@ -599,7 +623,13 @@ func TestGlossaryService_GetTerms(t *testing.T) {
 	ctx := withTestAuth(context.Background(), projectID)
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{}
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
 	entityRepo := &mockEntityRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()
@@ -2809,7 +2839,13 @@ func TestGlossaryService_CreateTerm_AllowsTestTermInNonProduction(t *testing.T) 
 	ctx := withTestAuth(context.Background(), projectID)
 
 	glossaryRepo := newMockGlossaryRepo()
-	ontologyRepo := &mockOntologyRepoForGlossary{}
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
 	entityRepo := &mockEntityRepoForGlossary{}
 	llmFactory := &mockLLMFactoryForGlossary{}
 	logger := zap.NewNop()

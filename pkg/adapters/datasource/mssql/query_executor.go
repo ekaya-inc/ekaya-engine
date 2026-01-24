@@ -536,5 +536,111 @@ func (e *QueryExecutor) Close() error {
 	return nil
 }
 
+// ExecuteWithParams runs a parameterized DML statement (INSERT/UPDATE/DELETE/CALL).
+// Converts PostgreSQL-style $1, $2 placeholders to SQL Server @p1, @p2 named parameters.
+func (e *QueryExecutor) ExecuteWithParams(ctx context.Context, sqlStatement string, params []any) (*datasource.ExecuteResult, error) {
+	result := &datasource.ExecuteResult{}
+
+	// Convert PostgreSQL-style parameters ($1, $2, ...) to SQL Server (@p1, @p2, ...)
+	convertedQuery := convertPostgreSQLParamsToMSSQL(sqlStatement)
+
+	// Convert params slice to named parameters for SQL Server
+	namedParams := make([]any, len(params))
+	for i, p := range params {
+		namedParams[i] = sql.Named(fmt.Sprintf("p%d", i+1), p)
+	}
+
+	// Try QueryContext first to check if statement returns rows
+	rows, err := e.db.QueryContext(ctx, convertedQuery, namedParams...)
+	if err != nil {
+		// QueryContext failed - likely a DML statement without OUTPUT
+		// Fall back to ExecContext to get rows affected
+		execResult, execErr := e.db.ExecContext(ctx, convertedQuery, namedParams...)
+		if execErr != nil {
+			return nil, fmt.Errorf("failed to execute statement: %w", execErr)
+		}
+
+		rowsAffected, err := execResult.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get rows affected: %w", err)
+		}
+
+		result.RowsAffected = rowsAffected
+		result.RowCount = 0
+		return result, nil
+	}
+	defer rows.Close()
+
+	// Check if the statement returns rows by checking column types
+	columnTypes, err := rows.ColumnTypes()
+	if err != nil || len(columnTypes) == 0 {
+		// No columns - use ExecContext instead
+		rows.Close()
+		execResult, execErr := e.db.ExecContext(ctx, convertedQuery, namedParams...)
+		if execErr != nil {
+			return nil, fmt.Errorf("failed to execute statement: %w", execErr)
+		}
+
+		rowsAffected, err := execResult.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get rows affected: %w", err)
+		}
+
+		result.RowsAffected = rowsAffected
+		result.RowCount = 0
+		return result, nil
+	}
+
+	// Statement returns rows - collect them
+	columnNames, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	result.Columns = columnNames
+	result.Rows = make([]map[string]any, 0)
+
+	for rows.Next() {
+		// Create slice of interface{} to hold values
+		values := make([]any, len(columnNames))
+		valuePtrs := make([]any, len(columnNames))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		// Scan row into value pointers
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		// Convert to map
+		rowMap := make(map[string]any)
+		for i, col := range columnNames {
+			val := values[i]
+
+			// Handle SQL Server specific types
+			if val != nil {
+				// Convert []byte to string for text columns
+				if b, ok := val.([]byte); ok {
+					colType := columnTypes[i].DatabaseTypeName()
+					if isStringType(colType) {
+						val = string(b)
+					}
+				}
+			}
+
+			rowMap[col] = val
+		}
+		result.Rows = append(result.Rows, rowMap)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	result.RowCount = len(result.Rows)
+	return result, nil
+}
+
 // Ensure QueryExecutor implements datasource.QueryExecutor at compile time.
 var _ datasource.QueryExecutor = (*QueryExecutor)(nil)

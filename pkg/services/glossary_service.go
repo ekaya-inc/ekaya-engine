@@ -174,6 +174,16 @@ func (s *glossaryService) CreateTerm(ctx context.Context, projectID uuid.UUID, t
 		term.Source = models.GlossarySourceManual
 	}
 
+	// Get active ontology and set ontology_id for proper CASCADE delete and uniqueness
+	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("get active ontology: %w", err)
+	}
+	if ontology == nil {
+		return fmt.Errorf("no active ontology found for project")
+	}
+	term.OntologyID = &ontology.ID
+
 	// Validate SQL and capture output columns
 	testResult, err := s.TestSQL(ctx, projectID, term.DefiningSQL)
 	if err != nil {

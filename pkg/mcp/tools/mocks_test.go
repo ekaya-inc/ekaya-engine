@@ -123,6 +123,10 @@ func (m *mockQueryService) ExecuteWithParameters(ctx context.Context, projectID,
 	return m.executeResult, m.executeError
 }
 
+func (m *mockQueryService) ExecuteModifyingWithParameters(ctx context.Context, projectID, queryID uuid.UUID, params map[string]any) (*datasource.ExecuteResult, error) {
+	return nil, nil
+}
+
 func (m *mockQueryService) Test(ctx context.Context, projectID, datasourceID uuid.UUID, req *services.TestQueryRequest) (*datasource.QueryExecutionResult, error) {
 	return nil, nil
 }

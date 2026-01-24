@@ -41,6 +41,9 @@ type Query struct {
 	SuggestionContext     map[string]any   `json:"suggestion_context,omitempty"` // validation results, example usage
 	UsageCount            int              `json:"usage_count"`
 	LastUsedAt            *time.Time       `json:"last_used_at,omitempty"`
-	CreatedAt             time.Time        `json:"created_at"`
-	UpdatedAt             time.Time        `json:"updated_at"`
+	// AllowsModification indicates this query can modify data (INSERT/UPDATE/DELETE/CALL).
+	// When false (default), only SELECT statements are allowed.
+	AllowsModification bool      `json:"allows_modification" db:"allows_modification"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
