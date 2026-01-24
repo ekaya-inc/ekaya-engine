@@ -14,6 +14,16 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 )
 
+// isModifyingStatement detects if a SQL statement is INSERT, UPDATE, DELETE, or CALL.
+// These statements cannot be wrapped in SELECT * FROM (...) LIMIT N.
+func isModifyingStatement(sql string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(sql))
+	return strings.HasPrefix(normalized, "INSERT") ||
+		strings.HasPrefix(normalized, "UPDATE") ||
+		strings.HasPrefix(normalized, "DELETE") ||
+		strings.HasPrefix(normalized, "CALL")
+}
+
 // QueryExecutor provides PostgreSQL query execution.
 type QueryExecutor struct {
 	pool         *pgxpool.Pool
@@ -64,15 +74,23 @@ func NewQueryExecutor(ctx context.Context, cfg *Config, connMgr *datasource.Conn
 	}, nil
 }
 
-// Query runs a SELECT statement and returns bounded results.
-// See datasource.QueryExecutor.Query for limit behavior.
+// Query runs a SQL statement and returns bounded results.
+// For SELECT statements, wraps in a subquery with LIMIT for safety.
+// For modifying statements (INSERT/UPDATE/DELETE/CALL), executes directly.
 func (e *QueryExecutor) Query(ctx context.Context, sqlQuery string, limit int) (*datasource.QueryExecutionResult, error) {
-	// Apply limit - always wrap query with bounded limit
-	effectiveLimit := limit
-	if effectiveLimit <= 0 || effectiveLimit > datasource.MaxQueryLimit {
-		effectiveLimit = datasource.MaxQueryLimit
+	// Determine the query to run based on statement type
+	var queryToRun string
+	if isModifyingStatement(sqlQuery) {
+		// Modifying statements cannot be wrapped - execute directly
+		queryToRun = sqlQuery
+	} else {
+		// SELECT statements - wrap with bounded limit for safety
+		effectiveLimit := limit
+		if effectiveLimit <= 0 || effectiveLimit > datasource.MaxQueryLimit {
+			effectiveLimit = datasource.MaxQueryLimit
+		}
+		queryToRun = fmt.Sprintf("SELECT * FROM (%s) AS _limited LIMIT %d", sqlQuery, effectiveLimit)
 	}
-	queryToRun := fmt.Sprintf("SELECT * FROM (%s) AS _limited LIMIT %d", sqlQuery, effectiveLimit)
 
 	rows, err := e.pool.Query(ctx, queryToRun)
 	if err != nil {
@@ -116,17 +134,25 @@ func (e *QueryExecutor) Query(ctx context.Context, sqlQuery string, limit int) (
 	}, nil
 }
 
-// QueryWithParams runs a parameterized SELECT with bounded results.
+// QueryWithParams runs a parameterized SQL statement with bounded results.
 // The SQL should use $1, $2, etc. for parameter placeholders.
 // pgx handles parameterized queries natively, preventing SQL injection.
-// See datasource.QueryExecutor.Query for limit behavior.
+// For SELECT statements, wraps in a subquery with LIMIT for safety.
+// For modifying statements (INSERT/UPDATE/DELETE/CALL), executes directly.
 func (e *QueryExecutor) QueryWithParams(ctx context.Context, sqlQuery string, params []any, limit int) (*datasource.QueryExecutionResult, error) {
-	// Apply limit - always wrap query with bounded limit
-	effectiveLimit := limit
-	if effectiveLimit <= 0 || effectiveLimit > datasource.MaxQueryLimit {
-		effectiveLimit = datasource.MaxQueryLimit
+	// Determine the query to run based on statement type
+	var queryToRun string
+	if isModifyingStatement(sqlQuery) {
+		// Modifying statements cannot be wrapped - execute directly
+		queryToRun = sqlQuery
+	} else {
+		// SELECT statements - wrap with bounded limit for safety
+		effectiveLimit := limit
+		if effectiveLimit <= 0 || effectiveLimit > datasource.MaxQueryLimit {
+			effectiveLimit = datasource.MaxQueryLimit
+		}
+		queryToRun = fmt.Sprintf("SELECT * FROM (%s) AS _limited LIMIT %d", sqlQuery, effectiveLimit)
 	}
-	queryToRun := fmt.Sprintf("SELECT * FROM (%s) AS _limited LIMIT %d", sqlQuery, effectiveLimit)
 
 	// Execute with parameters - pgx handles parameterized queries natively
 	rows, err := e.pool.Query(ctx, queryToRun, params...)

@@ -78,13 +78,14 @@ type CreateQueryRequest struct {
 // All fields are optional - only non-nil values are updated.
 // Note: Dialect cannot be updated - it's derived from datasource type.
 type UpdateQueryRequest struct {
-	NaturalLanguagePrompt *string                `json:"natural_language_prompt,omitempty"`
-	AdditionalContext     *string                `json:"additional_context,omitempty"`
-	SQLQuery              *string                `json:"sql_query,omitempty"`
-	IsEnabled             *bool                  `json:"is_enabled,omitempty"`
-	OutputColumns         *[]models.OutputColumn `json:"output_columns,omitempty"`
-	Constraints           *string                `json:"constraints,omitempty"`
-	AllowsModification    *bool                  `json:"allows_modification,omitempty"` // Allow INSERT/UPDATE/DELETE/CALL
+	NaturalLanguagePrompt *string                  `json:"natural_language_prompt,omitempty"`
+	AdditionalContext     *string                  `json:"additional_context,omitempty"`
+	SQLQuery              *string                  `json:"sql_query,omitempty"`
+	IsEnabled             *bool                    `json:"is_enabled,omitempty"`
+	Parameters            *[]models.QueryParameter `json:"parameters,omitempty"`
+	OutputColumns         *[]models.OutputColumn   `json:"output_columns,omitempty"`
+	Constraints           *string                  `json:"constraints,omitempty"`
+	AllowsModification    *bool                    `json:"allows_modification,omitempty"` // Allow INSERT/UPDATE/DELETE/CALL
 }
 
 // ExecuteQueryRequest contains options for executing a saved query.
@@ -165,8 +166,10 @@ func (s *queryService) Create(ctx context.Context, projectID, datasourceID uuid.
 		return nil, fmt.Errorf("parameter validation failed: %w", err)
 	}
 
-	// Require output_columns - must be populated from test execution
-	if len(req.OutputColumns) == 0 {
+	// Require output_columns for SELECT queries.
+	// Modifying queries (INSERT/UPDATE/DELETE/CALL) may not have output columns
+	// unless they use RETURNING clause, so empty is allowed for those.
+	if len(req.OutputColumns) == 0 && !req.AllowsModification {
 		return nil, fmt.Errorf("output_columns required: test query before saving to capture result columns")
 	}
 
@@ -275,10 +278,21 @@ func (s *queryService) Update(ctx context.Context, projectID, queryID uuid.UUID,
 		req.SQLQuery = &normalized
 	}
 
-	// If SQL is being updated, require new output_columns from test execution
+	// If SQL is being updated, require new output_columns from test execution.
+	// Exception: Modifying queries (INSERT/UPDATE/DELETE/CALL) may not have output columns
+	// unless they use RETURNING clause, so empty is allowed for those.
 	if req.SQLQuery != nil && *req.SQLQuery != query.SQLQuery {
-		if req.OutputColumns == nil || len(*req.OutputColumns) == 0 {
-			return nil, fmt.Errorf("output_columns required when updating SQL: test query before saving to capture result columns")
+		// Determine effective AllowsModification: use request value if provided, else existing
+		effectiveAllowsModification := query.AllowsModification
+		if req.AllowsModification != nil {
+			effectiveAllowsModification = *req.AllowsModification
+		}
+
+		// Only require output_columns for SELECT queries (non-modifying)
+		if !effectiveAllowsModification {
+			if req.OutputColumns == nil || len(*req.OutputColumns) == 0 {
+				return nil, fmt.Errorf("output_columns required when updating SQL: test query before saving to capture result columns")
+			}
 		}
 	}
 
@@ -303,6 +317,9 @@ func (s *queryService) Update(ctx context.Context, projectID, queryID uuid.UUID,
 	}
 	if req.AllowsModification != nil {
 		query.AllowsModification = *req.AllowsModification
+	}
+	if req.Parameters != nil {
+		query.Parameters = *req.Parameters
 	}
 
 	// Validate SQL statement type and allows_modification flag

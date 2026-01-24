@@ -664,6 +664,10 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 		// Merge output column descriptions with detected columns
 		outputColumns := buildOutputColumns(validationResult.Columns, outputColDescs)
 
+		// Detect if this is a modifying statement (INSERT/UPDATE/DELETE/CALL)
+		sqlType := services.DetectSQLType(sqlQuery)
+		isModifying := services.IsModifyingStatement(sqlType)
+
 		// Build suggestion context
 		suggestionContext := map[string]any{
 			"validation": map[string]any{
@@ -671,9 +675,12 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 				"dry_run_rows":    validationResult.DryRunRows,
 				"parameters_used": validationResult.ParametersUsed,
 			},
+			"sql_type":     string(sqlType),
+			"is_modifying": isModifying,
 		}
 
 		// Create query with status='pending' and suggested_by='agent'
+		// Auto-set allows_modification for INSERT/UPDATE/DELETE/CALL statements
 		createReq := &services.CreateQueryRequest{
 			NaturalLanguagePrompt: name,
 			AdditionalContext:     description,
@@ -685,6 +692,7 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 			Status:                "pending",
 			SuggestedBy:           "agent",
 			SuggestionContext:     suggestionContext,
+			AllowsModification:    isModifying,
 		}
 
 		query, err := deps.QueryService.Create(tenantCtx, projectID, dsID, createReq)
@@ -780,6 +788,8 @@ func parseParameterDefinitions(paramsArray []any) ([]models.QueryParameter, erro
 }
 
 // validateAndTestQuery validates SQL and runs a dry-run with example parameters.
+// For modifying statements (INSERT/UPDATE/DELETE/CALL), uses EXPLAIN validation
+// instead of actually executing the query.
 func validateAndTestQuery(ctx context.Context, deps *QueryToolDeps, projectID, dsID uuid.UUID, sqlQuery string, paramDefs []models.QueryParameter) (*validationResult, error) {
 	// Build parameter values from examples
 	paramValues := make(map[string]any)
@@ -791,7 +801,15 @@ func validateAndTestQuery(ctx context.Context, deps *QueryToolDeps, projectID, d
 		}
 	}
 
-	// Test the query with a limit of 1 to detect output columns
+	// Detect SQL type to determine validation approach
+	sqlType := services.DetectSQLType(sqlQuery)
+
+	// For modifying statements, use EXPLAIN validation instead of executing
+	if services.IsModifyingStatement(sqlType) {
+		return validateModifyingQuery(ctx, deps, projectID, dsID, sqlQuery, paramDefs, paramValues)
+	}
+
+	// For SELECT statements, execute with dry-run to detect output columns
 	testReq := &services.TestQueryRequest{
 		SQLQuery:             sqlQuery,
 		Limit:                1,
@@ -817,6 +835,30 @@ func validateAndTestQuery(ctx context.Context, deps *QueryToolDeps, projectID, d
 		SQLValid:       true,
 		DryRunRows:     len(result.Rows),
 		Columns:        columns,
+		ParametersUsed: paramValues,
+	}, nil
+}
+
+// validateModifyingQuery validates INSERT/UPDATE/DELETE/CALL statements using EXPLAIN.
+// These cannot be wrapped in SELECT, so we validate syntax instead of executing.
+func validateModifyingQuery(ctx context.Context, deps *QueryToolDeps, projectID, dsID uuid.UUID, sqlQuery string, paramDefs []models.QueryParameter, paramValues map[string]any) (*validationResult, error) {
+	// Use the service's Validate method (which uses EXPLAIN)
+	validationRes, err := deps.QueryService.Validate(ctx, projectID, dsID, sqlQuery)
+	if err != nil {
+		return nil, fmt.Errorf("query validation failed: %w", err)
+	}
+
+	if !validationRes.Valid {
+		return nil, fmt.Errorf("invalid SQL: %s", validationRes.Message)
+	}
+
+	// For modifying queries, we can't easily detect output columns without executing.
+	// Output columns would come from RETURNING clause, but EXPLAIN doesn't return them.
+	// Return empty columns - the user can specify them manually if needed.
+	return &validationResult{
+		SQLValid:       true,
+		DryRunRows:     0, // No dry-run for modifying queries
+		Columns:        []columnDetail{},
 		ParametersUsed: paramValues,
 	}, nil
 }

@@ -52,7 +52,7 @@ export const ParameterEditor = ({
   onChange,
   sqlQuery,
 }: ParameterEditorProps) => {
-  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set([0]));
+  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 
   // Extract parameters from SQL
   const extractedParams = useMemo(
@@ -72,10 +72,13 @@ export const ParameterEditor = ({
     return parameters.filter((p) => !usedNames.has(p.name));
   }, [extractedParams, parameters]);
 
-  // Auto-expand first row when creating new parameter
+  // Expand all parameters by default - Description is an important field
   useEffect(() => {
-    if (parameters.length > 0 && !expandedRows.has(parameters.length - 1)) {
-      setExpandedRows((prev) => new Set([...prev, parameters.length - 1]));
+    const allIndices = new Set(parameters.map((_, i) => i));
+    // Only update if there are new indices to add
+    const hasNewIndices = [...allIndices].some((i) => !expandedRows.has(i));
+    if (hasNewIndices) {
+      setExpandedRows((prev) => new Set([...prev, ...allIndices]));
     }
   }, [parameters.length, expandedRows]);
 
