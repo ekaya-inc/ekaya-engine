@@ -32,6 +32,10 @@ type EntityRelationshipResponse struct {
 	IsApproved       *bool   `json:"is_approved,omitempty"`
 	Status           string  `json:"status,omitempty"` // "confirmed" or "pending"
 	Description      string  `json:"description,omitempty"`
+	// Provenance fields
+	IsStale   bool    `json:"is_stale"`
+	CreatedBy string  `json:"created_by"`           // 'manual', 'mcp', 'inference'
+	UpdatedBy *string `json:"updated_by,omitempty"` // nil if never updated
 }
 
 // EntityRelationshipListResponse for GET /relationships
@@ -181,6 +185,10 @@ func (h *EntityRelationshipHandler) List(w http.ResponseWriter, r *http.Request)
 			IsApproved:       isApproved,
 			Status:           rel.Status,
 			Description:      deref(rel.Description),
+			// Provenance fields
+			IsStale:   rel.IsStale,
+			CreatedBy: rel.CreatedBy,
+			UpdatedBy: rel.UpdatedBy,
 		})
 	}
 

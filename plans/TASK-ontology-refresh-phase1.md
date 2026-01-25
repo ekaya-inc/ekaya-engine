@@ -121,4 +121,4 @@ Modify re-extract to:
 - [x] Provenance fields exist on entities and relationships
 - [x] New extractions populate source and confidence
 - [x] User-verified items are preserved during re-extract
-- [ ] API returns provenance fields
+- [x] API returns provenance fields

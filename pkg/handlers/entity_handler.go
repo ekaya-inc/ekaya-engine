@@ -33,6 +33,11 @@ type EntityDetailResponse struct {
 	OccurrenceCount int                        `json:"occurrence_count"`
 	IsDeleted       bool                       `json:"is_deleted"`
 	DeletionReason  *string                    `json:"deletion_reason,omitempty"`
+	// Provenance fields
+	Confidence float64 `json:"confidence"`
+	IsStale    bool    `json:"is_stale"`
+	CreatedBy  string  `json:"created_by"`           // 'manual', 'mcp', 'inference'
+	UpdatedBy  *string `json:"updated_by,omitempty"` // nil if never updated
 }
 
 // EntityOccurrenceResponse represents an occurrence of an entity in the schema.
@@ -424,5 +429,10 @@ func (h *EntityHandler) toEntityDetailResponse(e *services.EntityWithDetails) En
 		OccurrenceCount: e.OccurrenceCount,
 		IsDeleted:       e.Entity.IsDeleted,
 		DeletionReason:  e.Entity.DeletionReason,
+		// Provenance fields
+		Confidence: e.Entity.Confidence,
+		IsStale:    e.Entity.IsStale,
+		CreatedBy:  e.Entity.CreatedBy,
+		UpdatedBy:  e.Entity.UpdatedBy,
 	}
 }
