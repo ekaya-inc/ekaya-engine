@@ -2194,7 +2194,7 @@ func validateColumnReferences(sql string, schemaColumnsByTable map[string][]*mod
 	}
 
 	// Build a set of all valid column names (lowercased for case-insensitive matching)
-	validColumns := make(map[string]bool)         // column_name -> exists
+	validColumns := make(map[string]bool)            // column_name -> exists
 	tableColumns := make(map[string]map[string]bool) // table -> column -> exists
 	for tableName, columns := range schemaColumnsByTable {
 		tableColumns[strings.ToLower(tableName)] = make(map[string]bool)
@@ -2571,10 +2571,10 @@ func findTableWithColumn(column string, tableColumns map[string]map[string]bool)
 func findSimilarColumn(column string, validColumns map[string]bool) string {
 	// Common substitutions LLMs make
 	substitutions := map[string]string{
-		"started_at": "created_at",
-		"start_time": "created_at",
-		"begin_at":   "created_at",
-		"ended_at":   "updated_at", // or completed_at if exists
+		"started_at":  "created_at",
+		"start_time":  "created_at",
+		"begin_at":    "created_at",
+		"ended_at":    "updated_at", // or completed_at if exists
 		"finished_at": "completed_at",
 		"modified_at": "updated_at",
 		"changed_at":  "updated_at",

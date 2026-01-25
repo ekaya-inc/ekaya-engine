@@ -547,9 +547,9 @@ func TestIsCrypticValue(t *testing.T) {
 		{"pending", false},
 		{"approved", false},
 		{"active", false},
-		{"PENDING", false},   // Readable word
-		{"USA", true},        // 3-letter abbreviation - cryptic without context
-		{"ABCD", false},      // 4-letter abbreviation might be readable
+		{"PENDING", false}, // Readable word
+		{"USA", true},      // 3-letter abbreviation - cryptic without context
+		{"ABCD", false},    // 4-letter abbreviation might be readable
 		{"completed", false},
 		{"", false},
 		{"   ", false},

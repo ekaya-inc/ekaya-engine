@@ -441,7 +441,7 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 
 // relationshipEnrichmentResponse wraps the LLM response for standardization.
 type relationshipEnrichmentResponse struct {
-	Relationships []relationshipEnrichment              `json:"relationships"`
+	Relationships []relationshipEnrichment            `json:"relationships"`
 	Questions     []relationshipOntologyQuestionInput `json:"questions,omitempty"`
 }
 

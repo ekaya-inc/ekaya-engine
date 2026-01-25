@@ -689,12 +689,12 @@ func TestCreateGlossaryTermTool_Integration_RejectsTestTerm(t *testing.T) {
 
 	// Test terms that should be rejected (patterns from services.IsTestTerm)
 	testTerms := []string{
-		"TestMetric",     // Starts with "test"
-		"MetricTest",     // Ends with "test"
-		"DebugRevenue",   // Debug prefix
-		"DummyUsers",     // Dummy prefix
-		"ExampleMetric",  // Example prefix
-		"Metric2025",     // Ends with 4 digits
+		"TestMetric",    // Starts with "test"
+		"MetricTest",    // Ends with "test"
+		"DebugRevenue",  // Debug prefix
+		"DummyUsers",    // Dummy prefix
+		"ExampleMetric", // Example prefix
+		"Metric2025",    // Ends with 4 digits
 	}
 
 	for _, testTerm := range testTerms {
