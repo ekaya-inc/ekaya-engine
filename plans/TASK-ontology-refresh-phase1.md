@@ -50,7 +50,7 @@ ALTER TABLE engine_entity_relationships
   ADD CONSTRAINT valid_rel_source CHECK (source IN ('ddl', 'llm', 'user', 'mcp'));
 ```
 
-### Step 2: Update Models
+### Step 2: Update Models ✓
 
 **File:** `pkg/models/ontology_entity.go`
 ```go
@@ -75,7 +75,7 @@ type EntityRelationship struct {
 }
 ```
 
-### Step 3: Update Repositories
+### Step 3: Update Repositories ✓
 
 Update INSERT/UPDATE queries to include new fields.
 Update SELECT queries to return new fields.
