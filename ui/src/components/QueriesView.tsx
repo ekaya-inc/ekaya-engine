@@ -21,6 +21,12 @@ import {
   Loader2,
   RefreshCw,
   Zap,
+  Clock,
+  CheckCircle,
+  XCircle,
+  GitCompare,
+  User,
+  Bot,
 } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 
@@ -35,6 +41,7 @@ import { OutputColumnEditor } from './OutputColumnEditor';
 import { ParameterEditor } from './ParameterEditor';
 import { ParameterInputForm } from './ParameterInputForm';
 import { QueryResultsTable } from './QueryResultsTable';
+import { RejectionReasonDialog } from './RejectionReasonDialog';
 import { SqlEditor } from './SqlEditor';
 import { Button } from './ui/Button';
 import {
@@ -66,8 +73,7 @@ interface EditingState {
 
 type QueryFilterType = 'all' | 'read-only' | 'modifying' | 'pending' | 'rejected';
 
-// Note: _onPendingCountChange will be used in Task 6.3/6.4 when approve/reject functionality is added
-const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange: _onPendingCountChange }: QueriesViewProps) => {
+const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange }: QueriesViewProps) => {
   const { toast } = useToast();
 
   // Data state
@@ -112,6 +118,11 @@ const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange: _
   // Delete dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [queryToDelete, setQueryToDelete] = useState<Query | null>(null);
+
+  // Pending query review state
+  const [parentQuery, setParentQuery] = useState<Query | null>(null);
+  const [isApproving, setIsApproving] = useState(false);
+  const [rejectionDialogOpen, setRejectionDialogOpen] = useState(false);
 
   // SQL validation for create form
   const createValidation = useSqlValidation({
@@ -163,6 +174,30 @@ const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange: _
     };
     fetchSchema();
   }, [projectId, datasourceId]);
+
+  // Fetch parent query when viewing an update suggestion (pending query with parent_query_id)
+  useEffect(() => {
+    const fetchParentQuery = async () => {
+      if (
+        selectedQuery?.status === 'pending' &&
+        selectedQuery.parent_query_id
+      ) {
+        const response = await engineApi.getQuery(
+          projectId,
+          datasourceId,
+          selectedQuery.parent_query_id
+        );
+        if (response.success && response.data) {
+          setParentQuery(response.data);
+        } else {
+          setParentQuery(null);
+        }
+      } else {
+        setParentQuery(null);
+      }
+    };
+    fetchParentQuery();
+  }, [projectId, datasourceId, selectedQuery?.query_id, selectedQuery?.status, selectedQuery?.parent_query_id]);
 
   // Transform schema to CodeMirror format for autocomplete
   const codeMirrorSchema = useMemo(
@@ -530,6 +565,78 @@ const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange: _
   };
 
   /**
+   * Approve a pending query suggestion
+   */
+  const handleApproveQuery = async (query: Query) => {
+    setIsApproving(true);
+
+    try {
+      const response = await engineApi.approveQuery(projectId, query.query_id);
+
+      if (response.success) {
+        toast({
+          title: 'Query approved',
+          description: response.data?.message ?? 'Query has been approved and enabled',
+          variant: 'success',
+        });
+
+        // Reload queries to reflect the change
+        await loadQueries();
+        setSelectedQuery(null);
+        setParentQuery(null);
+
+        // Notify parent to update pending count
+        onPendingCountChange?.();
+      } else {
+        toast({
+          title: 'Failed to approve query',
+          description: response.error ?? 'Unknown error',
+          variant: 'destructive',
+        });
+      }
+    } catch (err) {
+      toast({
+        title: 'Failed to approve query',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsApproving(false);
+    }
+  };
+
+  /**
+   * Reject a pending query suggestion
+   */
+  const handleRejectQuery = async (reason: string) => {
+    if (!selectedQuery) return;
+
+    const response = await engineApi.rejectQuery(
+      projectId,
+      selectedQuery.query_id,
+      reason
+    );
+
+    if (response.success) {
+      toast({
+        title: 'Query rejected',
+        description: 'Query has been rejected',
+        variant: 'success',
+      });
+
+      // Reload queries to reflect the change
+      await loadQueries();
+      setSelectedQuery(null);
+      setParentQuery(null);
+
+      // Notify parent to update pending count
+      onPendingCountChange?.();
+    } else {
+      throw new Error(response.error ?? 'Failed to reject query');
+    }
+  };
+
+  /**
    * Toggle query enabled status
    */
   const handleToggleEnabled = async (query: Query) => {
@@ -727,19 +834,34 @@ const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange: _
                       className={`w-full text-left p-2 rounded-lg transition-colors ${selectedQuery?.query_id === query.query_id
                         ? 'bg-purple-500/10 border border-purple-500/30'
                         : 'hover:bg-surface-secondary/50'
-                        } ${!query.is_enabled ? 'opacity-50' : ''}`}
+                        } ${!query.is_enabled && query.status === 'approved' ? 'opacity-50' : ''}`}
                     >
                       <div className="flex items-center justify-between mb-0.5">
                         <div className="flex items-center gap-1.5">
-                          <div
-                            className={`h-1.5 w-1.5 rounded-full ${query.is_enabled ? 'bg-green-500' : 'bg-gray-500'
-                              }`}
-                          />
+                          {query.status === 'pending' ? (
+                            <Clock className="h-3 w-3 text-amber-500" />
+                          ) : query.status === 'rejected' ? (
+                            <XCircle className="h-3 w-3 text-red-500" />
+                          ) : (
+                            <div
+                              className={`h-1.5 w-1.5 rounded-full ${query.is_enabled ? 'bg-green-500' : 'bg-gray-500'}`}
+                            />
+                          )}
                           <span className="text-xs text-text-tertiary">
                             {query.dialect}
                           </span>
                         </div>
-                        {!query.is_enabled && (
+                        {query.status === 'pending' && (
+                          <span className="text-xs text-amber-500 font-medium">
+                            Pending
+                          </span>
+                        )}
+                        {query.status === 'rejected' && (
+                          <span className="text-xs text-red-500 font-medium">
+                            Rejected
+                          </span>
+                        )}
+                        {query.status === 'approved' && !query.is_enabled && (
                           <AlertCircle className="h-3 w-3 text-gray-500" />
                         )}
                       </div>
@@ -753,7 +875,7 @@ const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange: _
                           </span>
                         )}
                       </div>
-                      {query.usage_count > 0 && (
+                      {query.status === 'approved' && query.usage_count > 0 && (
                         <div className="text-xs text-text-tertiary mt-0.5">
                           Used {query.usage_count} times
                         </div>
@@ -1348,54 +1470,151 @@ const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange: _
                             Modifies Data
                           </span>
                         )}
+                        {/* Status badges for pending/rejected queries */}
+                        {selectedQuery.status === 'pending' && (
+                          <span className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                            <Clock className="h-3 w-3" />
+                            Pending Review
+                          </span>
+                        )}
+                        {selectedQuery.status === 'rejected' && (
+                          <span className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded bg-red-500/10 text-red-600 dark:text-red-400">
+                            <XCircle className="h-3 w-3" />
+                            Rejected
+                          </span>
+                        )}
                       </div>
                       <CardDescription>
-                        Created{' '}
-                        {new Date(selectedQuery.created_at).toLocaleDateString()}{' '}
-                        {selectedQuery.usage_count > 0 && (
+                        {selectedQuery.status === 'pending' ? (
                           <>
-                            {' '}
-                            • Used {selectedQuery.usage_count} time
-                            {selectedQuery.usage_count !== 1 ? 's' : ''}
+                            Suggested{' '}
+                            {new Date(selectedQuery.created_at).toLocaleDateString()}{' '}
+                            by{' '}
+                            {selectedQuery.suggested_by === 'agent' ? (
+                              <span className="inline-flex items-center gap-1">
+                                <Bot className="h-3 w-3" /> AI Agent
+                              </span>
+                            ) : selectedQuery.suggested_by === 'admin' ? (
+                              <span className="inline-flex items-center gap-1">
+                                <User className="h-3 w-3" /> Admin
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1">
+                                <User className="h-3 w-3" /> User
+                              </span>
+                            )}
+                            {selectedQuery.parent_query_id && (
+                              <>
+                                {' '}
+                                • <GitCompare className="inline h-3 w-3" /> Update suggestion
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            Created{' '}
+                            {new Date(selectedQuery.created_at).toLocaleDateString()}{' '}
+                            {selectedQuery.usage_count > 0 && (
+                              <>
+                                {' '}
+                                • Used {selectedQuery.usage_count} time
+                                {selectedQuery.usage_count !== 1 ? 's' : ''}
+                              </>
+                            )}
                           </>
                         )}
                       </CardDescription>
                     </div>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleToggleEnabled(selectedQuery)}
-                        title={
-                          selectedQuery.is_enabled
-                            ? 'Disable query'
-                            : 'Enable query'
-                        }
-                      >
-                        {selectedQuery.is_enabled ? (
-                          <CheckCircle2 className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <AlertCircle className="h-4 w-4 text-gray-500" />
-                        )}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleEditQuery(selectedQuery)}
-                      >
-                        <Edit3 className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleDeleteClick(selectedQuery)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
+                    {/* Only show edit/delete buttons for approved queries */}
+                    {selectedQuery.status === 'approved' && (
+                      <div className="flex gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleToggleEnabled(selectedQuery)}
+                          title={
+                            selectedQuery.is_enabled
+                              ? 'Disable query'
+                              : 'Enable query'
+                          }
+                        >
+                          {selectedQuery.is_enabled ? (
+                            <CheckCircle2 className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <AlertCircle className="h-4 w-4 text-gray-500" />
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleEditQuery(selectedQuery)}
+                        >
+                          <Edit3 className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteClick(selectedQuery)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
+                    {/* Delete button for rejected queries */}
+                    {selectedQuery.status === 'rejected' && (
+                      <div className="flex gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteClick(selectedQuery)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-6">
+                  {/* Suggestion context for pending queries */}
+                  {selectedQuery.status === 'pending' && selectedQuery.suggestion_context && (
+                    <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <MessageSquare className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        <h3 className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                          Suggestion Context
+                        </h3>
+                      </div>
+                      <p className="text-sm text-blue-600 dark:text-blue-400">
+                        {typeof selectedQuery.suggestion_context === 'object' && 'reason' in selectedQuery.suggestion_context
+                          ? String(selectedQuery.suggestion_context.reason)
+                          : JSON.stringify(selectedQuery.suggestion_context)}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Rejection reason for rejected queries */}
+                  {selectedQuery.status === 'rejected' && selectedQuery.rejection_reason && (
+                    <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
+                        <h3 className="text-sm font-medium text-red-700 dark:text-red-300">
+                          Rejection Reason
+                        </h3>
+                      </div>
+                      <p className="text-sm text-red-600 dark:text-red-400">
+                        {selectedQuery.rejection_reason}
+                      </p>
+                      {selectedQuery.reviewed_by && (
+                        <p className="text-xs text-red-500 dark:text-red-500 mt-2">
+                          Rejected by {selectedQuery.reviewed_by}
+                          {selectedQuery.reviewed_at && (
+                            <> on {new Date(selectedQuery.reviewed_at).toLocaleDateString()}</>
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {selectedQuery.additional_context && (
                     <div>
                       <div className="flex items-center gap-2 mb-2">
@@ -1410,32 +1629,90 @@ const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange: _
                     </div>
                   )}
 
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-text-tertiary" />
+                  {/* Side-by-side diff for update suggestions */}
+                  {selectedQuery.status === 'pending' && parentQuery ? (
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <GitCompare className="h-4 w-4 text-text-tertiary" />
                         <h3 className="text-sm font-medium text-text-primary">
-                          SQL Query
+                          SQL Changes
                         </h3>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleCopyQuery(selectedQuery.sql_query)}
-                      >
-                        <Copy className="h-3 w-3 mr-1" />
-                        Copy
-                      </Button>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-xs font-medium text-text-secondary bg-surface-secondary px-2 py-1 rounded">
+                              Original
+                            </span>
+                          </div>
+                          <div className="border border-border-light rounded-lg overflow-hidden">
+                            <SqlEditor
+                              value={parentQuery.sql_query}
+                              onChange={() => {}}
+                              dialect={dialect}
+                              schema={codeMirrorSchema}
+                              readOnly
+                              minHeight="150px"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-xs font-medium text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded">
+                              Suggested
+                            </span>
+                          </div>
+                          <div className="border border-green-300 dark:border-green-700 rounded-lg overflow-hidden">
+                            <SqlEditor
+                              value={selectedQuery.sql_query}
+                              onChange={() => {}}
+                              dialect={dialect}
+                              schema={codeMirrorSchema}
+                              readOnly
+                              minHeight="150px"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      {/* Show parameter changes if any */}
+                      {(parentQuery.parameters?.length !== selectedQuery.parameters?.length ||
+                        JSON.stringify(parentQuery.parameters) !== JSON.stringify(selectedQuery.parameters)) && (
+                        <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg">
+                          <p className="text-sm text-amber-700 dark:text-amber-300 flex items-center gap-2">
+                            <AlertTriangle className="h-4 w-4" />
+                            Parameter definitions have changed
+                          </p>
+                        </div>
+                      )}
                     </div>
-                    <SqlEditor
-                      value={selectedQuery.sql_query}
-                      onChange={() => { }}
-                      dialect={dialect}
-                      schema={codeMirrorSchema}
-                      readOnly
-                      minHeight="150px"
-                    />
-                  </div>
+                  ) : (
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-text-tertiary" />
+                          <h3 className="text-sm font-medium text-text-primary">
+                            SQL Query
+                          </h3>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleCopyQuery(selectedQuery.sql_query)}
+                        >
+                          <Copy className="h-3 w-3 mr-1" />
+                          Copy
+                        </Button>
+                      </div>
+                      <SqlEditor
+                        value={selectedQuery.sql_query}
+                        onChange={() => { }}
+                        dialect={dialect}
+                        schema={codeMirrorSchema}
+                        readOnly
+                        minHeight="150px"
+                      />
+                    </div>
+                  )}
 
                   {selectedQuery.parameters && selectedQuery.parameters.length > 0 && (
                     <div className="border-t border-border-light pt-4">
@@ -1447,19 +1724,48 @@ const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange: _
                     </div>
                   )}
 
-                  <div className="flex gap-2 pt-4 border-t border-border-light">
-                    <Button
-                      onClick={() => handleExecuteQuery(selectedQuery)}
-                      disabled={isTesting}
-                    >
-                      {isTesting ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Play className="mr-2 h-4 w-4" />
-                      )}
-                      Execute Query
-                    </Button>
-                  </div>
+                  {/* Approve/Reject buttons for pending queries */}
+                  {selectedQuery.status === 'pending' && (
+                    <div className="flex gap-3 pt-4 border-t border-border-light">
+                      <Button
+                        onClick={() => handleApproveQuery(selectedQuery)}
+                        disabled={isApproving}
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        {isApproving ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <CheckCircle className="mr-2 h-4 w-4" />
+                        )}
+                        Approve
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        onClick={() => setRejectionDialogOpen(true)}
+                        disabled={isApproving}
+                      >
+                        <XCircle className="mr-2 h-4 w-4" />
+                        Reject
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Execute button only for approved queries */}
+                  {selectedQuery.status === 'approved' && (
+                    <div className="flex gap-2 pt-4 border-t border-border-light">
+                      <Button
+                        onClick={() => handleExecuteQuery(selectedQuery)}
+                        disabled={isTesting}
+                      >
+                        {isTesting ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Play className="mr-2 h-4 w-4" />
+                        )}
+                        Execute Query
+                      </Button>
+                    </div>
+                  )}
 
                   {queryResults && (
                     <QueryResultsTable
@@ -1508,6 +1814,13 @@ const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange: _
         datasourceId={datasourceId}
         query={queryToDelete}
         onQueryDeleted={handleQueryDeleted}
+      />
+
+      <RejectionReasonDialog
+        open={rejectionDialogOpen}
+        onOpenChange={setRejectionDialogOpen}
+        queryName={selectedQuery?.natural_language_prompt ?? ''}
+        onReject={handleRejectQuery}
       />
     </>
   );

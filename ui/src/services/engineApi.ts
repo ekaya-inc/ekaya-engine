@@ -6,6 +6,7 @@
 import { fetchWithAuth } from '../lib/api';
 import type {
   ApiResponse,
+  ApproveQueryResponse,
   ConnectionDetails,
   CreateDatasourceResponse,
   CreateGlossaryTermRequest,
@@ -31,6 +32,7 @@ import type {
   ListQueriesResponse,
   MCPConfigResponse,
   Query,
+  RejectQueryResponse,
   RelationshipDetail,
   RelationshipsResponse,
   SaveSelectionsResponse,
@@ -472,6 +474,40 @@ class EngineApiService {
   ): Promise<ApiResponse<ListPendingQueriesResponse>> {
     return this.makeRequest<ListPendingQueriesResponse>(
       `/${projectId}/queries/pending`
+    );
+  }
+
+  /**
+   * Approve a pending query suggestion
+   * POST /api/projects/{projectId}/queries/{queryId}/approve
+   */
+  async approveQuery(
+    projectId: string,
+    queryId: string
+  ): Promise<ApiResponse<ApproveQueryResponse>> {
+    return this.makeRequest<ApproveQueryResponse>(
+      `/${projectId}/queries/${queryId}/approve`,
+      {
+        method: 'POST',
+      }
+    );
+  }
+
+  /**
+   * Reject a pending query suggestion
+   * POST /api/projects/{projectId}/queries/{queryId}/reject
+   */
+  async rejectQuery(
+    projectId: string,
+    queryId: string,
+    reason: string
+  ): Promise<ApiResponse<RejectQueryResponse>> {
+    return this.makeRequest<RejectQueryResponse>(
+      `/${projectId}/queries/${queryId}/reject`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      }
     );
   }
 

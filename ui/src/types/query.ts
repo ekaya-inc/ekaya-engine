@@ -225,3 +225,21 @@ export interface ListPendingQueriesResponse {
   queries: PendingQuery[];
   count: number;
 }
+
+/**
+ * Response from query approval endpoint
+ */
+export interface ApproveQueryResponse {
+  success: boolean;
+  message: string;
+  query?: Query;
+}
+
+/**
+ * Response from query rejection endpoint
+ */
+export interface RejectQueryResponse {
+  success: boolean;
+  message: string;
+  query?: PendingQuery;
+}

@@ -83,8 +83,8 @@ This creates a governed workflow where Business Users (using ChatGPT, Claude Des
 | **Admin UI** | | |
 | Pending count badge | ✅ Done | Task 6.1 |
 | Pending filter option | ✅ Done | Task 6.2 |
-| Review card with diff | ❌ Pending | Task 6.3 |
-| Rejection dialog | ❌ Pending | Task 6.4 |
+| Review card with diff | ✅ Done | Task 6.3 |
+| Rejection dialog | ✅ Done | Task 6.4 |
 
 ---
 
