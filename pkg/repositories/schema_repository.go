@@ -785,7 +785,12 @@ func (r *schemaRepository) UpdateColumnStats(ctx context.Context, columnID uuid.
 
 	query := `
 		UPDATE engine_schema_columns
-		SET distinct_count = $2, null_count = $3, min_length = $4, max_length = $5, sample_values = $6, updated_at = NOW()
+		SET distinct_count = COALESCE($2, distinct_count),
+		    null_count = COALESCE($3, null_count),
+		    min_length = COALESCE($4, min_length),
+		    max_length = COALESCE($5, max_length),
+		    sample_values = COALESCE($6, sample_values),
+		    updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL`
 
 	result, err := scope.Conn.Exec(ctx, query, columnID, distinctCount, nullCount, minLength, maxLength, sampleValues)

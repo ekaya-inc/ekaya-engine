@@ -1,7 +1,7 @@
 # FIX: Debug Stats Collection Flow (BUG-9)
 
 **Priority:** 1 (High)
-**Status:** Not Started
+**Status:** Fix Applied (pending verification via re-extraction)
 **Parent:** PLAN-ontology-next.md
 
 ## Problem
@@ -130,6 +130,6 @@ AND c.is_joinable = true;
 
 ## Success Criteria
 
-- [ ] Root cause identified via logging
-- [ ] Fix applied
-- [ ] NULL stats rate < 10% for joinable columns
+- [x] Root cause identified via logging
+- [x] Fix applied
+- [ ] NULL stats rate < 10% for joinable columns (requires re-run of ontology extraction)

@@ -1002,6 +1002,71 @@ func TestSchemaRepository_UpdateColumnStats(t *testing.T) {
 	}
 }
 
+// TestSchemaRepository_UpdateColumnStats_PreservesExistingValues ensures that passing nil
+// to UpdateColumnStats preserves existing values (COALESCE behavior), not overwrites with NULL.
+// This is critical for the sample_values update flow that only wants to set sample_values
+// without clearing other stats like distinct_count.
+func TestSchemaRepository_UpdateColumnStats_PreservesExistingValues(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	table := tc.createTestTable(ctx, "public", "preserve_stats_table")
+	column := tc.createTestColumn(ctx, table.ID, "preserve_col", 1)
+
+	// First, set initial stats
+	distinctCount := int64(100)
+	nullCount := int64(10)
+	minLength := int64(5)
+	maxLength := int64(50)
+
+	err := tc.repo.UpdateColumnStats(ctx, column.ID, &distinctCount, &nullCount, &minLength, &maxLength, nil)
+	if err != nil {
+		t.Fatalf("Initial UpdateColumnStats failed: %v", err)
+	}
+
+	// Verify initial stats were set
+	retrieved, err := tc.repo.GetColumnByID(ctx, tc.projectID, column.ID)
+	if err != nil {
+		t.Fatalf("GetColumnByID failed: %v", err)
+	}
+	if retrieved.DistinctCount == nil || *retrieved.DistinctCount != distinctCount {
+		t.Fatalf("Initial distinct_count not set correctly: got %v, want %d", retrieved.DistinctCount, distinctCount)
+	}
+
+	// Now update only sample_values, passing nil for all stats
+	// This should PRESERVE the existing stats, not clear them
+	sampleValues := []string{"value1", "value2", "value3"}
+	err = tc.repo.UpdateColumnStats(ctx, column.ID, nil, nil, nil, nil, sampleValues)
+	if err != nil {
+		t.Fatalf("UpdateColumnStats with nil stats failed: %v", err)
+	}
+
+	// Verify stats are preserved and sample_values is set
+	retrieved, err = tc.repo.GetColumnByID(ctx, tc.projectID, column.ID)
+	if err != nil {
+		t.Fatalf("GetColumnByID failed: %v", err)
+	}
+
+	if retrieved.DistinctCount == nil || *retrieved.DistinctCount != distinctCount {
+		t.Errorf("distinct_count was not preserved: got %v, want %d", retrieved.DistinctCount, distinctCount)
+	}
+	if retrieved.NullCount == nil || *retrieved.NullCount != nullCount {
+		t.Errorf("null_count was not preserved: got %v, want %d", retrieved.NullCount, nullCount)
+	}
+	if retrieved.MinLength == nil || *retrieved.MinLength != minLength {
+		t.Errorf("min_length was not preserved: got %v, want %d", retrieved.MinLength, minLength)
+	}
+	if retrieved.MaxLength == nil || *retrieved.MaxLength != maxLength {
+		t.Errorf("max_length was not preserved: got %v, want %d", retrieved.MaxLength, maxLength)
+	}
+	if len(retrieved.SampleValues) != len(sampleValues) {
+		t.Errorf("sample_values not set correctly: got %v, want %v", retrieved.SampleValues, sampleValues)
+	}
+}
+
 func TestSchemaRepository_UpdateColumnSelection(t *testing.T) {
 	tc := setupSchemaTest(t)
 	tc.cleanup()
