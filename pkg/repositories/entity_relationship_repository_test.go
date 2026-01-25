@@ -388,3 +388,243 @@ func TestEntityRelationshipRepository_UpdateDescriptionAndAssociation_ClearsStal
 		t.Errorf("expected association to be set, got %v", retrieved.Association)
 	}
 }
+
+// ============================================================================
+// GetByProject Column Types Tests
+// ============================================================================
+
+// columnTypesTestContext holds dependencies for column types tests.
+type columnTypesTestContext struct {
+	*relationshipTestContext
+	dsID           uuid.UUID
+	sourceTableID  uuid.UUID
+	targetTableID  uuid.UUID
+	sourceColumnID uuid.UUID
+	targetColumnID uuid.UUID
+}
+
+// setupColumnTypesTest creates test fixtures including schema columns.
+func setupColumnTypesTest(t *testing.T) *columnTypesTestContext {
+	tc := setupRelationshipTest(t)
+	ctc := &columnTypesTestContext{
+		relationshipTestContext: tc,
+		dsID:                    uuid.MustParse("00000000-0000-0000-0000-000000000070"),
+		sourceTableID:           uuid.MustParse("00000000-0000-0000-0000-000000000071"),
+		targetTableID:           uuid.MustParse("00000000-0000-0000-0000-000000000072"),
+		sourceColumnID:          uuid.MustParse("00000000-0000-0000-0000-000000000073"),
+		targetColumnID:          uuid.MustParse("00000000-0000-0000-0000-000000000074"),
+	}
+	ctc.ensureSchemaColumns()
+	return ctc
+}
+
+// ensureSchemaColumns creates datasource, tables, and columns for testing.
+func (ctc *columnTypesTestContext) ensureSchemaColumns() {
+	ctc.t.Helper()
+	ctx := context.Background()
+	scope, err := ctc.engineDB.DB.WithTenant(ctx, ctc.projectID)
+	if err != nil {
+		ctc.t.Fatalf("failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	// Create datasource
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_datasources (id, project_id, name, adapter_type, status)
+		VALUES ($1, $2, 'Column Types Test DS', 'postgres', 'connected')
+		ON CONFLICT (id) DO NOTHING
+	`, ctc.dsID, ctc.projectID)
+	if err != nil {
+		ctc.t.Fatalf("failed to create datasource: %v", err)
+	}
+
+	// Create source table (orders)
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_schema_tables (id, project_id, datasource_id, schema_name, table_name, is_view)
+		VALUES ($1, $2, $3, 'public', 'orders', false)
+		ON CONFLICT (id) DO NOTHING
+	`, ctc.sourceTableID, ctc.projectID, ctc.dsID)
+	if err != nil {
+		ctc.t.Fatalf("failed to create source table: %v", err)
+	}
+
+	// Create target table (users)
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_schema_tables (id, project_id, datasource_id, schema_name, table_name, is_view)
+		VALUES ($1, $2, $3, 'public', 'users', false)
+		ON CONFLICT (id) DO NOTHING
+	`, ctc.targetTableID, ctc.projectID, ctc.dsID)
+	if err != nil {
+		ctc.t.Fatalf("failed to create target table: %v", err)
+	}
+
+	// Create source column (orders.user_id as bigint)
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_schema_columns (id, project_id, schema_table_id, column_name, data_type, is_nullable, ordinal_position)
+		VALUES ($1, $2, $3, 'user_id', 'bigint', false, 1)
+		ON CONFLICT (id) DO UPDATE SET data_type = EXCLUDED.data_type
+	`, ctc.sourceColumnID, ctc.projectID, ctc.sourceTableID)
+	if err != nil {
+		ctc.t.Fatalf("failed to create source column: %v", err)
+	}
+
+	// Create target column (users.id as uuid)
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_schema_columns (id, project_id, schema_table_id, column_name, data_type, is_nullable, ordinal_position)
+		VALUES ($1, $2, $3, 'id', 'uuid', false, 1)
+		ON CONFLICT (id) DO UPDATE SET data_type = EXCLUDED.data_type
+	`, ctc.targetColumnID, ctc.projectID, ctc.targetTableID)
+	if err != nil {
+		ctc.t.Fatalf("failed to create target column: %v", err)
+	}
+}
+
+// createRelationshipWithColumnIDs creates a relationship with source and target column IDs.
+func (ctc *columnTypesTestContext) createRelationshipWithColumnIDs(ctx context.Context) *models.EntityRelationship {
+	ctc.t.Helper()
+	rel := &models.EntityRelationship{
+		OntologyID:         ctc.ontologyID,
+		SourceEntityID:     ctc.sourceEntityID,
+		TargetEntityID:     ctc.targetEntityID,
+		SourceColumnSchema: "public",
+		SourceColumnTable:  "orders",
+		SourceColumnName:   "user_id",
+		SourceColumnID:     &ctc.sourceColumnID,
+		TargetColumnSchema: "public",
+		TargetColumnTable:  "users",
+		TargetColumnName:   "id",
+		TargetColumnID:     &ctc.targetColumnID,
+		DetectionMethod:    models.DetectionMethodForeignKey,
+		Confidence:         1.0,
+		Status:             models.RelationshipStatusConfirmed,
+		Cardinality:        models.CardinalityNTo1,
+		CreatedBy:          models.ProvenanceInference,
+	}
+
+	// Insert with column IDs directly via SQL since Create doesn't handle column IDs
+	relID := uuid.New()
+	rel.ID = relID
+
+	scope, _ := database.GetTenantScope(ctx)
+	_, err := scope.Conn.Exec(ctx, `
+		INSERT INTO engine_entity_relationships (
+			id, ontology_id, source_entity_id, target_entity_id,
+			source_column_schema, source_column_table, source_column_name, source_column_id,
+			target_column_schema, target_column_table, target_column_name, target_column_id,
+			detection_method, confidence, status, cardinality, created_by, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, now())
+	`, rel.ID, rel.OntologyID, rel.SourceEntityID, rel.TargetEntityID,
+		rel.SourceColumnSchema, rel.SourceColumnTable, rel.SourceColumnName, rel.SourceColumnID,
+		rel.TargetColumnSchema, rel.TargetColumnTable, rel.TargetColumnName, rel.TargetColumnID,
+		rel.DetectionMethod, rel.Confidence, rel.Status, rel.Cardinality, rel.CreatedBy)
+	if err != nil {
+		ctc.t.Fatalf("failed to create relationship with column IDs: %v", err)
+	}
+	return rel
+}
+
+func TestEntityRelationshipRepository_GetByProject_ColumnTypes(t *testing.T) {
+	ctc := setupColumnTypesTest(t)
+	ctc.cleanup()
+	defer ctc.cleanup()
+
+	ctx, cleanup := ctc.createTestContext()
+	defer cleanup()
+
+	// Create a relationship with column IDs
+	rel := ctc.createRelationshipWithColumnIDs(ctx)
+
+	// Get by project
+	relationships, err := ctc.repo.GetByProject(ctx, ctc.projectID)
+	if err != nil {
+		t.Fatalf("GetByProject failed: %v", err)
+	}
+
+	if len(relationships) == 0 {
+		t.Fatal("expected at least one relationship")
+	}
+
+	// Find our test relationship
+	var found *models.EntityRelationship
+	for _, r := range relationships {
+		if r.ID == rel.ID {
+			found = r
+			break
+		}
+	}
+
+	if found == nil {
+		t.Fatal("test relationship not found in results")
+	}
+
+	// Verify column types are populated from JOIN
+	if found.SourceColumnType != "bigint" {
+		t.Errorf("expected SourceColumnType='bigint', got '%s'", found.SourceColumnType)
+	}
+
+	if found.TargetColumnType != "uuid" {
+		t.Errorf("expected TargetColumnType='uuid', got '%s'", found.TargetColumnType)
+	}
+
+	// Verify column IDs are returned
+	if found.SourceColumnID == nil || *found.SourceColumnID != ctc.sourceColumnID {
+		t.Errorf("expected SourceColumnID=%s, got %v", ctc.sourceColumnID, found.SourceColumnID)
+	}
+
+	if found.TargetColumnID == nil || *found.TargetColumnID != ctc.targetColumnID {
+		t.Errorf("expected TargetColumnID=%s, got %v", ctc.targetColumnID, found.TargetColumnID)
+	}
+}
+
+func TestEntityRelationshipRepository_GetByProject_NilColumnIDs(t *testing.T) {
+	tc := setupRelationshipTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create a relationship WITHOUT column IDs (legacy data scenario)
+	rel := tc.createTestRelationship(ctx, "user_id", "id", models.ProvenanceInference)
+
+	// Get by project
+	relationships, err := tc.repo.GetByProject(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("GetByProject failed: %v", err)
+	}
+
+	if len(relationships) == 0 {
+		t.Fatal("expected at least one relationship")
+	}
+
+	// Find our test relationship
+	var found *models.EntityRelationship
+	for _, r := range relationships {
+		if r.ID == rel.ID {
+			found = r
+			break
+		}
+	}
+
+	if found == nil {
+		t.Fatal("test relationship not found in results")
+	}
+
+	// Verify column types are empty (COALESCE returns '')
+	if found.SourceColumnType != "" {
+		t.Errorf("expected SourceColumnType='', got '%s'", found.SourceColumnType)
+	}
+
+	if found.TargetColumnType != "" {
+		t.Errorf("expected TargetColumnType='', got '%s'", found.TargetColumnType)
+	}
+
+	// Verify column IDs are nil
+	if found.SourceColumnID != nil {
+		t.Errorf("expected SourceColumnID=nil, got %v", found.SourceColumnID)
+	}
+
+	if found.TargetColumnID != nil {
+		t.Errorf("expected TargetColumnID=nil, got %v", found.TargetColumnID)
+	}
+}

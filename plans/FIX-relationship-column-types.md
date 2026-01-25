@@ -39,7 +39,7 @@ type EntityRelationship struct {
 }
 ```
 
-### Step 3: Update Repository
+### Step 3: Update Repository ✓
 
 **File:** `pkg/repositories/entity_relationship_repository.go`
 

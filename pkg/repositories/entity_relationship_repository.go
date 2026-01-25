@@ -186,14 +186,19 @@ func (r *entityRelationshipRepository) GetByProject(ctx context.Context, project
 		return nil, fmt.Errorf("no tenant scope in context")
 	}
 
+	// JOIN with engine_schema_columns to get column types for source and target columns
 	query := `
 		SELECT r.id, r.ontology_id, r.source_entity_id, r.target_entity_id,
 		       r.source_column_schema, r.source_column_table, r.source_column_name,
-		       r.target_column_schema, r.target_column_table, r.target_column_name,
-		       r.detection_method, r.confidence, r.status, r.cardinality, r.description, r.association,
-		       r.is_stale, r.created_by, r.updated_by, r.created_at, r.updated_at
+		       r.source_column_id, r.target_column_schema, r.target_column_table, r.target_column_name,
+		       r.target_column_id, r.detection_method, r.confidence, r.status, r.cardinality,
+		       r.description, r.association, r.is_stale, r.created_by, r.updated_by, r.created_at, r.updated_at,
+		       COALESCE(sc.data_type, '') as source_column_type,
+		       COALESCE(tc.data_type, '') as target_column_type
 		FROM engine_entity_relationships r
 		JOIN engine_ontologies o ON r.ontology_id = o.id
+		LEFT JOIN engine_schema_columns sc ON r.source_column_id = sc.id
+		LEFT JOIN engine_schema_columns tc ON r.target_column_id = tc.id
 		WHERE o.project_id = $1 AND o.is_active = true
 		ORDER BY r.source_column_table, r.source_column_name`
 
@@ -205,7 +210,7 @@ func (r *entityRelationshipRepository) GetByProject(ctx context.Context, project
 
 	var relationships []*models.EntityRelationship
 	for rows.Next() {
-		rel, err := scanEntityRelationship(rows)
+		rel, err := scanEntityRelationshipWithColumnTypes(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -612,6 +617,29 @@ func scanEntityRelationship(row pgx.Row) (*models.EntityRelationship, error) {
 			return nil, err
 		}
 		return nil, fmt.Errorf("failed to scan entity relationship: %w", err)
+	}
+
+	return &rel, nil
+}
+
+// scanEntityRelationshipWithColumnTypes scans a row that includes source_column_id, target_column_id,
+// and the joined column types from engine_schema_columns.
+func scanEntityRelationshipWithColumnTypes(row pgx.Row) (*models.EntityRelationship, error) {
+	var rel models.EntityRelationship
+
+	err := row.Scan(
+		&rel.ID, &rel.OntologyID, &rel.SourceEntityID, &rel.TargetEntityID,
+		&rel.SourceColumnSchema, &rel.SourceColumnTable, &rel.SourceColumnName,
+		&rel.SourceColumnID, &rel.TargetColumnSchema, &rel.TargetColumnTable, &rel.TargetColumnName,
+		&rel.TargetColumnID, &rel.DetectionMethod, &rel.Confidence, &rel.Status, &rel.Cardinality,
+		&rel.Description, &rel.Association, &rel.IsStale, &rel.CreatedBy, &rel.UpdatedBy, &rel.CreatedAt, &rel.UpdatedAt,
+		&rel.SourceColumnType, &rel.TargetColumnType,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, err
+		}
+		return nil, fmt.Errorf("failed to scan entity relationship with column types: %w", err)
 	}
 
 	return &rel, nil
