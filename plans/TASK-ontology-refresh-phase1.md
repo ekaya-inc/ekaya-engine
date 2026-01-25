@@ -1,7 +1,7 @@
 # TASK: Ontology Refresh Phase 1 - Provenance Fields
 
 **Priority:** 2 (High)
-**Status:** Not Started
+**Status:** In Progress
 **Parent:** PLAN-ontology-next.md
 **Design Reference:** DESIGN-ontology-refresh.md (archived)
 
@@ -118,7 +118,7 @@ Modify re-extract to:
 
 ## Success Criteria
 
-- [ ] Provenance fields exist on entities and relationships
+- [x] Provenance fields exist on entities and relationships
 - [ ] New extractions populate source and confidence
 - [ ] User-verified items are preserved during re-extract
 - [ ] API returns provenance fields

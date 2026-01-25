@@ -67,8 +67,8 @@ func (r *entityRelationshipRepository) Create(ctx context.Context, rel *models.E
 			source_column_schema, source_column_table, source_column_name,
 			target_column_schema, target_column_table, target_column_name,
 			detection_method, confidence, status, cardinality, description, association,
-			created_by, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+			is_stale, created_by, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		ON CONFLICT (ontology_id, source_entity_id, target_entity_id,
 			source_column_schema, source_column_table, source_column_name,
 			target_column_schema, target_column_table, target_column_name)
@@ -79,7 +79,7 @@ func (r *entityRelationshipRepository) Create(ctx context.Context, rel *models.E
 		rel.SourceColumnSchema, rel.SourceColumnTable, rel.SourceColumnName,
 		rel.TargetColumnSchema, rel.TargetColumnTable, rel.TargetColumnName,
 		rel.DetectionMethod, rel.Confidence, rel.Status, rel.Cardinality, rel.Description, rel.Association,
-		rel.CreatedBy, rel.CreatedAt,
+		rel.IsStale, rel.CreatedBy, rel.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create entity relationship: %w", err)
@@ -99,7 +99,7 @@ func (r *entityRelationshipRepository) GetByOntology(ctx context.Context, ontolo
 		       source_column_schema, source_column_table, source_column_name,
 		       target_column_schema, target_column_table, target_column_name,
 		       detection_method, confidence, status, cardinality, description, association,
-		       created_by, updated_by, created_at, updated_at
+		       is_stale, created_by, updated_by, created_at, updated_at
 		FROM engine_entity_relationships
 		WHERE ontology_id = $1
 		ORDER BY source_column_table, source_column_name`
@@ -137,7 +137,7 @@ func (r *entityRelationshipRepository) GetByOntologyGroupedByTarget(ctx context.
 		       source_column_schema, source_column_table, source_column_name,
 		       target_column_schema, target_column_table, target_column_name,
 		       detection_method, confidence, status, cardinality, description, association,
-		       created_by, updated_by, created_at, updated_at
+		       is_stale, created_by, updated_by, created_at, updated_at
 		FROM engine_entity_relationships
 		WHERE ontology_id = $1
 		ORDER BY target_entity_id, source_column_table, source_column_name`
@@ -175,7 +175,7 @@ func (r *entityRelationshipRepository) GetByProject(ctx context.Context, project
 		       r.source_column_schema, r.source_column_table, r.source_column_name,
 		       r.target_column_schema, r.target_column_table, r.target_column_name,
 		       r.detection_method, r.confidence, r.status, r.cardinality, r.description, r.association,
-		       r.created_by, r.updated_by, r.created_at, r.updated_at
+		       r.is_stale, r.created_by, r.updated_by, r.created_at, r.updated_at
 		FROM engine_entity_relationships r
 		JOIN engine_ontologies o ON r.ontology_id = o.id
 		WHERE o.project_id = $1 AND o.is_active = true
@@ -218,7 +218,7 @@ func (r *entityRelationshipRepository) GetByTables(ctx context.Context, projectI
 		       r.source_column_schema, r.source_column_table, r.source_column_name,
 		       r.target_column_schema, r.target_column_table, r.target_column_name,
 		       r.detection_method, r.confidence, r.status, r.cardinality, r.description, r.association,
-		       r.created_by, r.updated_by, r.created_at, r.updated_at
+		       r.is_stale, r.created_by, r.updated_by, r.created_at, r.updated_at
 		FROM engine_entity_relationships r
 		JOIN engine_ontologies o ON r.ontology_id = o.id
 		WHERE o.project_id = $1 AND o.is_active = true
@@ -258,7 +258,7 @@ func (r *entityRelationshipRepository) GetByTargetEntity(ctx context.Context, en
 		       source_column_schema, source_column_table, source_column_name,
 		       target_column_schema, target_column_table, target_column_name,
 		       detection_method, confidence, status, cardinality, description, association,
-		       created_by, updated_by, created_at, updated_at
+		       is_stale, created_by, updated_by, created_at, updated_at
 		FROM engine_entity_relationships
 		WHERE target_entity_id = $1
 		ORDER BY source_column_table, source_column_name`
@@ -296,7 +296,7 @@ func (r *entityRelationshipRepository) GetByID(ctx context.Context, id uuid.UUID
 		       source_column_schema, source_column_table, source_column_name,
 		       target_column_schema, target_column_table, target_column_name,
 		       detection_method, confidence, status, cardinality, description, association,
-		       created_by, updated_by, created_at, updated_at
+		       is_stale, created_by, updated_by, created_at, updated_at
 		FROM engine_entity_relationships
 		WHERE id = $1`
 
@@ -324,13 +324,13 @@ func (r *entityRelationshipRepository) Update(ctx context.Context, rel *models.E
 	query := `
 		UPDATE engine_entity_relationships
 		SET cardinality = $2, description = $3, association = $4,
-		    status = $5, confidence = $6,
-		    updated_by = $7, updated_at = $8
+		    status = $5, confidence = $6, is_stale = $7,
+		    updated_by = $8, updated_at = $9
 		WHERE id = $1`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		rel.ID, rel.Cardinality, rel.Description, rel.Association,
-		rel.Status, rel.Confidence,
+		rel.Status, rel.Confidence, rel.IsStale,
 		rel.UpdatedBy, rel.UpdatedAt,
 	)
 	if err != nil {
@@ -402,7 +402,7 @@ func (r *entityRelationshipRepository) GetByEntityPair(ctx context.Context, onto
 		       source_column_schema, source_column_table, source_column_name,
 		       target_column_schema, target_column_table, target_column_name,
 		       detection_method, confidence, status, cardinality, description, association,
-		       created_by, updated_by, created_at, updated_at
+		       is_stale, created_by, updated_by, created_at, updated_at
 		FROM engine_entity_relationships
 		WHERE ontology_id = $1 AND source_entity_id = $2 AND target_entity_id = $3
 		ORDER BY created_at DESC
@@ -450,8 +450,8 @@ func (r *entityRelationshipRepository) Upsert(ctx context.Context, rel *models.E
 			source_column_schema, source_column_table, source_column_name,
 			target_column_schema, target_column_table, target_column_name,
 			detection_method, confidence, status, cardinality, description, association,
-			created_by, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+			is_stale, created_by, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		ON CONFLICT (ontology_id, source_entity_id, target_entity_id,
 			source_column_schema, source_column_table, source_column_name,
 			target_column_schema, target_column_table, target_column_name)
@@ -462,15 +462,16 @@ func (r *entityRelationshipRepository) Upsert(ctx context.Context, rel *models.E
 			status = EXCLUDED.status,
 			confidence = EXCLUDED.confidence,
 			detection_method = EXCLUDED.detection_method,
-			updated_by = $19,
-			updated_at = $20`
+			is_stale = EXCLUDED.is_stale,
+			updated_by = $20,
+			updated_at = $21`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		rel.ID, rel.OntologyID, rel.SourceEntityID, rel.TargetEntityID,
 		rel.SourceColumnSchema, rel.SourceColumnTable, rel.SourceColumnName,
 		rel.TargetColumnSchema, rel.TargetColumnTable, rel.TargetColumnName,
 		rel.DetectionMethod, rel.Confidence, rel.Status, rel.Cardinality, rel.Description, rel.Association,
-		rel.CreatedBy, rel.CreatedAt,
+		rel.IsStale, rel.CreatedBy, rel.CreatedAt,
 		rel.UpdatedBy, now,
 	)
 	if err != nil {
@@ -504,7 +505,7 @@ func scanEntityRelationship(row pgx.Row) (*models.EntityRelationship, error) {
 		&rel.SourceColumnSchema, &rel.SourceColumnTable, &rel.SourceColumnName,
 		&rel.TargetColumnSchema, &rel.TargetColumnTable, &rel.TargetColumnName,
 		&rel.DetectionMethod, &rel.Confidence, &rel.Status, &rel.Cardinality, &rel.Description, &rel.Association,
-		&rel.CreatedBy, &rel.UpdatedBy, &rel.CreatedAt, &rel.UpdatedAt,
+		&rel.IsStale, &rel.CreatedBy, &rel.UpdatedBy, &rel.CreatedAt, &rel.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
