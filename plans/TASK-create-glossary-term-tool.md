@@ -1,7 +1,7 @@
 # TASK: Add create_glossary_term MCP Tool
 
 **Priority:** 6 (Low)
-**Status:** Not Started
+**Status:** Complete
 **Parent:** PLAN-ontology-next.md
 **Design Reference:** DESIGN-glossary-client-updates.md (archived)
 
@@ -106,6 +106,6 @@ Ensure `create_glossary_term` is in the developer tools list so it requires the 
 ## Success Criteria
 
 - [x] Tool registered and callable
-- [ ] SQL validation works (invalid SQL rejected)
-- [ ] Source set to 'client' for client-created terms
-- [ ] Integration tests pass
+- [x] SQL validation works (invalid SQL rejected)
+- [x] Source set to 'mcp' for MCP-created terms (note: plan incorrectly referenced 'client')
+- [x] Integration tests pass

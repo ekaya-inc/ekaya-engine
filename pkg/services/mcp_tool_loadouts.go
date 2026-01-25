@@ -61,6 +61,7 @@ var AllToolsOrdered = []ToolSpec{
 	{Name: "skip_ontology_question", Description: "Mark a question as skipped for revisiting later (e.g., 'Need access to frontend repo')"},
 
 	// Ontology Maintenance
+	{Name: "create_glossary_term", Description: "Create a new business glossary term with SQL definition"},
 	{Name: "update_column", Description: "Add or update semantic information about a column (description, enum_values, entity, role)"},
 	{Name: "update_entity", Description: "Create or update entity metadata with upsert semantics (description, aliases, key_columns)"},
 	{Name: "update_glossary_term", Description: "Create or update a business glossary term with upsert semantics (definition, sql, aliases)"},
@@ -125,6 +126,7 @@ var Loadouts = map[string][]string{
 
 	// Ontology Maintenance -- enable MCP Client to manage ontology
 	LoadoutOntologyMaintenance: {
+		"create_glossary_term",
 		"update_column",
 		"update_entity",
 		"update_glossary_term",

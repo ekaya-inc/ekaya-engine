@@ -5,6 +5,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -103,6 +104,16 @@ func (s *testGlossaryService) CreateTerm(ctx context.Context, projectID uuid.UUI
 	if services.IsTestTerm(term.Term) {
 		return services.ErrTestTermRejected
 	}
+
+	// Check if term already exists (explicit create should fail on duplicate)
+	existing, err := s.repo.GetByTerm(ctx, projectID, term.Term)
+	if err != nil {
+		return fmt.Errorf("failed to check for existing term: %w", err)
+	}
+	if existing != nil {
+		return fmt.Errorf("term %q already exists", term.Term)
+	}
+
 	term.ProjectID = projectID
 	if term.Source == "" {
 		term.Source = models.GlossarySourceMCP
@@ -613,4 +624,178 @@ func TestDeleteGlossaryTermTool_Integration_IdempotentForNonExistentTerm(t *test
 
 	assert.Equal(t, "Non Existent Term", response.Term)
 	assert.False(t, response.Deleted, "deleted should be false for non-existent term")
+}
+
+// ============================================================================
+// Integration Tests: create_glossary_term
+// ============================================================================
+
+func TestCreateGlossaryTermTool_Integration_CreatesNewTerm(t *testing.T) {
+	tc := setupGlossaryToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	result, err := tc.callTool(ctx, "create_glossary_term", map[string]any{
+		"term":         "Net Promoter Score",
+		"definition":   "Measure of customer loyalty based on likelihood to recommend",
+		"defining_sql": "SELECT AVG(CASE WHEN score >= 9 THEN 1 WHEN score <= 6 THEN -1 ELSE 0 END) * 100 FROM surveys",
+		"base_table":   "surveys",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.IsError, "should create term successfully")
+
+	var response struct {
+		Success bool `json:"success"`
+		Term    struct {
+			ID         string `json:"id"`
+			Term       string `json:"term"`
+			Definition string `json:"definition"`
+		} `json:"term"`
+	}
+	require.Len(t, result.Content, 1)
+	err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &response)
+	require.NoError(t, err)
+
+	assert.True(t, response.Success)
+	assert.Equal(t, "Net Promoter Score", response.Term.Term)
+	assert.Contains(t, response.Term.Definition, "customer loyalty")
+	assert.NotEmpty(t, response.Term.ID, "should return term ID")
+
+	// Verify term was persisted in database
+	scope, err := tc.engineDB.DB.WithoutTenant(context.Background())
+	require.NoError(t, err)
+	defer scope.Close()
+
+	var count int
+	err = scope.Conn.QueryRow(ctx, `
+		SELECT COUNT(*) FROM engine_business_glossary
+		WHERE project_id = $1 AND term = $2
+	`, tc.projectID, "Net Promoter Score").Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count, "term should exist in database")
+}
+
+func TestCreateGlossaryTermTool_Integration_RejectsTestTerm(t *testing.T) {
+	tc := setupGlossaryToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Test terms that should be rejected (patterns from services.IsTestTerm)
+	testTerms := []string{
+		"TestMetric",     // Starts with "test"
+		"MetricTest",     // Ends with "test"
+		"DebugRevenue",   // Debug prefix
+		"DummyUsers",     // Dummy prefix
+		"ExampleMetric",  // Example prefix
+		"Metric2025",     // Ends with 4 digits
+	}
+
+	for _, testTerm := range testTerms {
+		t.Run(testTerm, func(t *testing.T) {
+			result, err := tc.callTool(ctx, "create_glossary_term", map[string]any{
+				"term":         testTerm,
+				"definition":   "Some definition",
+				"defining_sql": "SELECT 1",
+			})
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.True(t, result.IsError, "should return error for test term %q", testTerm)
+
+			var errorResp ErrorResponse
+			require.Len(t, result.Content, 1)
+			err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &errorResp)
+			require.NoError(t, err)
+
+			assert.True(t, errorResp.Error)
+			assert.Equal(t, "invalid_parameters", errorResp.Code)
+			assert.Contains(t, errorResp.Message, "test data")
+		})
+	}
+}
+
+func TestCreateGlossaryTermTool_Integration_RejectsEmptyTerm(t *testing.T) {
+	tc := setupGlossaryToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	result, err := tc.callTool(ctx, "create_glossary_term", map[string]any{
+		"term":         "   ",
+		"definition":   "Some definition",
+		"defining_sql": "SELECT 1",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.IsError, "should return error for empty term")
+
+	var errorResp ErrorResponse
+	require.Len(t, result.Content, 1)
+	err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &errorResp)
+	require.NoError(t, err)
+
+	assert.True(t, errorResp.Error)
+	assert.Equal(t, "invalid_parameters", errorResp.Code)
+	assert.Contains(t, errorResp.Message, "term")
+	assert.Contains(t, errorResp.Message, "empty")
+}
+
+func TestCreateGlossaryTermTool_Integration_FailsOnDuplicateTerm(t *testing.T) {
+	tc := setupGlossaryToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	termName := "Average Order Value"
+
+	// Create the term first
+	createResult, err := tc.callTool(ctx, "create_glossary_term", map[string]any{
+		"term":         termName,
+		"definition":   "Average value of all orders",
+		"defining_sql": "SELECT AVG(total) FROM orders",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, createResult)
+	assert.False(t, createResult.IsError, "first create should succeed")
+
+	// Try to create the same term again - should fail
+	duplicateResult, err := tc.callTool(ctx, "create_glossary_term", map[string]any{
+		"term":         termName,
+		"definition":   "Different definition",
+		"defining_sql": "SELECT AVG(amount) FROM transactions",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, duplicateResult)
+	assert.True(t, duplicateResult.IsError, "duplicate create should fail")
+
+	var errorResp ErrorResponse
+	require.Len(t, duplicateResult.Content, 1)
+	err = json.Unmarshal([]byte(duplicateResult.Content[0].(mcp.TextContent).Text), &errorResp)
+	require.NoError(t, err)
+
+	assert.True(t, errorResp.Error)
+	assert.Equal(t, "create_failed", errorResp.Code)
+
+	// Verify still only one term in database
+	scope, err := tc.engineDB.DB.WithoutTenant(context.Background())
+	require.NoError(t, err)
+	defer scope.Close()
+
+	var count int
+	err = scope.Conn.QueryRow(ctx, `
+		SELECT COUNT(*) FROM engine_business_glossary
+		WHERE project_id = $1 AND term = $2
+	`, tc.projectID, termName).Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count, "should still have exactly one term after failed duplicate create")
 }
