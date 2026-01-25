@@ -38,12 +38,23 @@ CREATE TABLE engine_ontology_entities (
     primary_column text NOT NULL,
     is_deleted boolean DEFAULT false NOT NULL,
     deletion_reason text,
+
+    -- Provenance: source tracking (how it was created/modified)
+    source text NOT NULL DEFAULT 'inference',
+    last_edit_source text,
+
+    -- Provenance: actor tracking (who created/modified)
+    created_by uuid,
+    updated_by uuid,
+
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     PRIMARY KEY (id),
     CONSTRAINT engine_ontology_entities_ontology_id_name_key UNIQUE (ontology_id, name),
     CONSTRAINT engine_ontology_entities_project_id_fkey FOREIGN KEY (project_id) REFERENCES engine_projects(id) ON DELETE CASCADE,
-    CONSTRAINT engine_ontology_entities_ontology_id_fkey FOREIGN KEY (ontology_id) REFERENCES engine_ontologies(id) ON DELETE CASCADE
+    CONSTRAINT engine_ontology_entities_ontology_id_fkey FOREIGN KEY (ontology_id) REFERENCES engine_ontologies(id) ON DELETE CASCADE,
+    CONSTRAINT engine_ontology_entities_source_check CHECK (source IN ('inference', 'mcp', 'manual')),
+    CONSTRAINT engine_ontology_entities_last_edit_source_check CHECK (last_edit_source IS NULL OR last_edit_source IN ('inference', 'mcp', 'manual'))
 );
 
 COMMENT ON TABLE engine_ontology_entities IS 'Domain entities discovered during relationship analysis (e.g., user, account, order)';
@@ -54,6 +65,10 @@ COMMENT ON COLUMN engine_ontology_entities.primary_table IS 'Primary/canonical t
 COMMENT ON COLUMN engine_ontology_entities.primary_column IS 'Primary key column in the primary table';
 COMMENT ON COLUMN engine_ontology_entities.is_deleted IS 'Soft delete flag - entities are never hard deleted';
 COMMENT ON COLUMN engine_ontology_entities.deletion_reason IS 'Optional reason why the entity was soft deleted';
+COMMENT ON COLUMN engine_ontology_entities.source IS 'How this entity was created: inference (Engine), mcp (Claude), manual (UI)';
+COMMENT ON COLUMN engine_ontology_entities.last_edit_source IS 'How this entity was last modified (null if never edited after creation)';
+COMMENT ON COLUMN engine_ontology_entities.created_by IS 'UUID of user who triggered creation (from JWT)';
+COMMENT ON COLUMN engine_ontology_entities.updated_by IS 'UUID of user who last updated this entity';
 
 CREATE INDEX idx_engine_ontology_entities_project ON engine_ontology_entities USING btree (project_id);
 CREATE INDEX idx_engine_ontology_entities_ontology ON engine_ontology_entities USING btree (ontology_id);
@@ -111,15 +126,31 @@ CREATE TABLE engine_entity_relationships (
     description text,
     association character varying(100),
     cardinality text DEFAULT 'unknown'::text NOT NULL,
+
+    -- Provenance: source tracking (how it was created/modified)
+    source text NOT NULL DEFAULT 'inference',
+    last_edit_source text,
+
+    -- Provenance: actor tracking (who created/modified)
+    created_by uuid,
+    updated_by uuid,
+
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     PRIMARY KEY (id),
     CONSTRAINT engine_entity_relationships_confidence_check CHECK (confidence >= 0 AND confidence <= 1),
     CONSTRAINT engine_entity_relationships_cardinality_check CHECK (cardinality = ANY (ARRAY['1:1'::text, '1:N'::text, 'N:1'::text, 'N:M'::text, 'unknown'::text])),
     CONSTRAINT engine_entity_relationships_unique_relationship UNIQUE (ontology_id, source_entity_id, target_entity_id, source_column_schema, source_column_table, source_column_name, target_column_schema, target_column_table, target_column_name),
     CONSTRAINT engine_entity_relationships_ontology_id_fkey FOREIGN KEY (ontology_id) REFERENCES engine_ontologies(id) ON DELETE CASCADE,
     CONSTRAINT engine_entity_relationships_source_entity_id_fkey FOREIGN KEY (source_entity_id) REFERENCES engine_ontology_entities(id) ON DELETE CASCADE,
-    CONSTRAINT engine_entity_relationships_target_entity_id_fkey FOREIGN KEY (target_entity_id) REFERENCES engine_ontology_entities(id) ON DELETE CASCADE
+    CONSTRAINT engine_entity_relationships_target_entity_id_fkey FOREIGN KEY (target_entity_id) REFERENCES engine_ontology_entities(id) ON DELETE CASCADE,
+    CONSTRAINT engine_entity_relationships_source_check CHECK (source IN ('inference', 'mcp', 'manual')),
+    CONSTRAINT engine_entity_relationships_last_edit_source_check CHECK (last_edit_source IS NULL OR last_edit_source IN ('inference', 'mcp', 'manual'))
 );
+
+CREATE TRIGGER update_engine_entity_relationships_updated_at
+    BEFORE UPDATE ON engine_entity_relationships
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 COMMENT ON TABLE engine_entity_relationships IS 'Entity-to-entity relationships discovered from FK constraints or inferred from PK matching';
 COMMENT ON COLUMN engine_entity_relationships.detection_method IS 'How the relationship was discovered: foreign_key (from DB constraint) or pk_match (inferred)';
@@ -127,6 +158,10 @@ COMMENT ON COLUMN engine_entity_relationships.confidence IS '1.0 for FK constrai
 COMMENT ON COLUMN engine_entity_relationships.status IS 'confirmed (auto-accepted), pending (needs review), rejected (user declined)';
 COMMENT ON COLUMN engine_entity_relationships.description IS 'Optional description of the relationship, typically provided when created through chat';
 COMMENT ON COLUMN engine_entity_relationships.association IS 'Semantic association describing this direction of the relationship (e.g., "placed_by", "contains", "as host")';
+COMMENT ON COLUMN engine_entity_relationships.source IS 'How this relationship was created: inference (Engine), mcp (Claude), manual (UI)';
+COMMENT ON COLUMN engine_entity_relationships.last_edit_source IS 'How this relationship was last modified (null if never edited after creation)';
+COMMENT ON COLUMN engine_entity_relationships.created_by IS 'UUID of user who triggered creation (from JWT)';
+COMMENT ON COLUMN engine_entity_relationships.updated_by IS 'UUID of user who last updated this relationship';
 COMMENT ON CONSTRAINT engine_entity_relationships_unique_relationship ON engine_entity_relationships IS 'Ensures each specific column-to-column relationship is stored once per direction. Includes target columns to support multiple FKs from same source table.';
 
 CREATE INDEX idx_engine_entity_relationships_ontology ON engine_entity_relationships USING btree (ontology_id);

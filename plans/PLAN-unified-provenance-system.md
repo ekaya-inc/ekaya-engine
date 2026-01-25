@@ -1,8 +1,17 @@
 # PLAN: Unified Provenance System for Ontology Objects
 
 **Date:** 2026-01-25
-**Status:** Planning
+**Status:** In Progress
 **Priority:** High
+
+## Tasks
+
+- [x] Task 1: Update Migration Files
+- [ ] Task 2: Update Models
+- [ ] Task 3: Implement Provenance Context
+- [ ] Task 4: Update Repositories
+- [ ] Task 5: Implement Audit Service
+- [ ] Task 6: Extract User ID from JWT
 
 ## Overview
 

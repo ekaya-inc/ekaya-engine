@@ -9,14 +9,21 @@ CREATE TABLE engine_business_glossary (
     defining_sql text NOT NULL,
     base_table text,
     output_columns jsonb,
-    source text DEFAULT 'inferred'::text NOT NULL,
+
+    -- Provenance: source tracking (how it was created/modified)
+    source text NOT NULL DEFAULT 'inference',
+    last_edit_source text,
+
+    -- Provenance: actor tracking (who created/modified)
     created_by uuid,
     updated_by uuid,
+
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     PRIMARY KEY (id),
     CONSTRAINT engine_business_glossary_project_term_unique UNIQUE (project_id, term),
-    CONSTRAINT engine_business_glossary_source_check CHECK (source = ANY (ARRAY['inferred'::text, 'manual'::text, 'client'::text])),
+    CONSTRAINT engine_business_glossary_source_check CHECK (source IN ('inference', 'mcp', 'manual')),
+    CONSTRAINT engine_business_glossary_last_edit_source_check CHECK (last_edit_source IS NULL OR last_edit_source IN ('inference', 'mcp', 'manual')),
     CONSTRAINT engine_business_glossary_project_id_fkey FOREIGN KEY (project_id) REFERENCES engine_projects(id) ON DELETE CASCADE
 );
 
@@ -26,7 +33,10 @@ COMMENT ON COLUMN engine_business_glossary.definition IS 'Human-readable descrip
 COMMENT ON COLUMN engine_business_glossary.defining_sql IS 'Complete executable SQL that defines this metric (SELECT statement)';
 COMMENT ON COLUMN engine_business_glossary.base_table IS 'Primary table being queried (for quick reference)';
 COMMENT ON COLUMN engine_business_glossary.output_columns IS 'Array of output columns with name, type, and optional description';
-COMMENT ON COLUMN engine_business_glossary.source IS 'Origin: inferred (LLM during extraction), manual (UI), or client (MCP)';
+COMMENT ON COLUMN engine_business_glossary.source IS 'How this term was created: inference (Engine), mcp (Claude), manual (UI)';
+COMMENT ON COLUMN engine_business_glossary.last_edit_source IS 'How this term was last modified (null if never edited after creation)';
+COMMENT ON COLUMN engine_business_glossary.created_by IS 'UUID of user who triggered creation (from JWT)';
+COMMENT ON COLUMN engine_business_glossary.updated_by IS 'UUID of user who last updated this term';
 
 CREATE INDEX idx_business_glossary_project ON engine_business_glossary USING btree (project_id);
 CREATE INDEX idx_business_glossary_base_table ON engine_business_glossary USING btree (base_table);
