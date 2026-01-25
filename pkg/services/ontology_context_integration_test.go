@@ -90,6 +90,14 @@ func (m *mockProjectServiceForIntegration) SetAutoApproveSettings(ctx context.Co
 	return nil
 }
 
+func (m *mockProjectServiceForIntegration) GetOntologySettings(ctx context.Context, projectID uuid.UUID) (*OntologySettings, error) {
+	return &OntologySettings{UseLegacyPatternMatching: true}, nil
+}
+
+func (m *mockProjectServiceForIntegration) SetOntologySettings(ctx context.Context, projectID uuid.UUID, settings *OntologySettings) error {
+	return nil
+}
+
 // setupOntologyContextTest creates a test context with real database.
 func setupOntologyContextTest(t *testing.T) *ontologyContextTestContext {
 	t.Helper()

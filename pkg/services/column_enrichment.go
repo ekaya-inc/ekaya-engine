@@ -208,8 +208,8 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 		enumSamples = make(map[string][]string)
 	}
 
-	// Load project-level enum definitions
-	enumDefs := s.loadEnumDefinitions(ctx, projectID)
+	// Enum definitions are no longer loaded from files (cloud service has no project files)
+	var enumDefs []models.EnumDefinition
 
 	// Build and send LLM prompt
 	enrichments, err := s.enrichColumnsWithLLM(ctx, projectID, entity, columns, fkInfo, enumSamples)
@@ -253,7 +253,7 @@ func (s *columnEnrichmentService) getEntityByTableName(ctx context.Context, proj
 
 // getColumnsForTable retrieves schema columns for a given table name.
 func (s *columnEnrichmentService) getColumnsForTable(ctx context.Context, projectID uuid.UUID, tableName string) ([]*models.SchemaColumn, error) {
-	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, []string{tableName})
+	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, []string{tableName}, true)
 	if err != nil {
 		return nil, err
 	}
@@ -855,49 +855,6 @@ func (s *columnEnrichmentService) logTableFailure(
 	}
 
 	s.logger.Error("Table enrichment failed", fields...)
-}
-
-// loadEnumDefinitions loads enum definitions from the project's configured enums_path.
-// Returns an empty slice if no path is configured or loading fails.
-func (s *columnEnrichmentService) loadEnumDefinitions(ctx context.Context, projectID uuid.UUID) []models.EnumDefinition {
-	if s.projectRepo == nil {
-		return nil
-	}
-
-	project, err := s.projectRepo.Get(ctx, projectID)
-	if err != nil {
-		s.logger.Debug("Failed to get project for enum definitions",
-			zap.String("project_id", projectID.String()),
-			zap.Error(err))
-		return nil
-	}
-
-	if project.Parameters == nil {
-		return nil
-	}
-
-	enumsPath, ok := project.Parameters["enums_path"].(string)
-	if !ok || enumsPath == "" {
-		return nil
-	}
-
-	s.logger.Info("Loading enum definitions from file",
-		zap.String("project_id", projectID.String()),
-		zap.String("enums_path", enumsPath))
-
-	defs, err := models.ParseEnumFile(enumsPath)
-	if err != nil {
-		s.logger.Warn("Failed to parse enum definitions file",
-			zap.String("enums_path", enumsPath),
-			zap.Error(err))
-		return nil
-	}
-
-	s.logger.Info("Loaded enum definitions",
-		zap.String("project_id", projectID.String()),
-		zap.Int("definition_count", len(defs)))
-
-	return defs
 }
 
 // mergeEnumDefinitions merges project-level enum definitions with sampled values.

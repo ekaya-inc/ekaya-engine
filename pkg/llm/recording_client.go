@@ -62,6 +62,10 @@ func (c *RecordingClient) GenerateResponse(
 
 	start := time.Now()
 
+	// Add conversation ID to context for HTTP request tracing
+	// This enables correlation between client logs and model gateway logs
+	ctx = WithConversationID(ctx, conv.ID)
+
 	// Call the inner client
 	result, err := c.inner.GenerateResponse(ctx, prompt, systemMessage, temperature, thinking)
 

@@ -2965,3 +2965,1280 @@ func TestGlossaryService_UpdateTerm_AllowsTestTermInNonProduction(t *testing.T) 
 	updated, _ := glossaryRepo.GetByID(ctx, existingTerm.ID)
 	assert.Equal(t, "TestRevenue", updated.Term)
 }
+
+// ============================================================================
+// Tests - buildEnrichTermPrompt Includes Enum Values (BUG-12 Fix)
+// ============================================================================
+
+func TestGlossaryService_EnrichTermPrompt_IncludesEnumValues(t *testing.T) {
+	// This test verifies that the enrich term prompt includes actual enum values
+	// so the LLM generates SQL with correct WHERE clause values (BUG-12 fix)
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Transaction",
+			PrimaryTable: "billing_transactions",
+		},
+	}
+
+	// LLM response for enrichment
+	enrichmentResponse := `{
+		"defining_sql": "SELECT SUM(amount) AS total_revenue\nFROM billing_transactions\nWHERE transaction_state = 'TRANSACTION_STATE_ENDED'",
+		"base_table": "billing_transactions",
+		"aliases": ["Total Revenue"]
+	}`
+
+	llmClient := &mockLLMClientCapturingPrompt{responseContent: enrichmentResponse}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+			ColumnDetails: map[string][]models.ColumnDetail{
+				"billing_transactions": {
+					{
+						Name:        "transaction_state",
+						Description: "State of the billing transaction",
+						Role:        "dimension",
+						EnumValues: []models.EnumValue{
+							{Value: "TRANSACTION_STATE_ENDED", Description: "Completed transaction"},
+							{Value: "TRANSACTION_STATE_WAITING", Description: "Pending transaction"},
+							{Value: "TRANSACTION_STATE_ERROR", Description: "Failed transaction"},
+						},
+					},
+					{
+						Name:        "amount",
+						Description: "Transaction amount in cents",
+						Role:        "measure",
+					},
+				},
+			},
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+
+	// Create unenriched term (no DefiningSQL initially)
+	term := &models.BusinessGlossaryTerm{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Term:        "Completed Revenue",
+		Definition:  "Total revenue from completed transactions",
+		Source:      models.GlossarySourceInferred,
+		DefiningSQL: "", // Empty - will be enriched by LLM
+	}
+	// Manually insert to bypass validation that requires DefiningSQL
+	glossaryRepo.terms[term.ID] = term
+
+	// Enrich terms - this will call the LLM with the enrichment prompt
+	// We ignore the error because the mock adapter doesn't provide real SQL validation
+	_ = svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+
+	// Verify the prompt includes enum values
+	prompt := llmClient.capturedPrompt
+
+	// The prompt should include the actual enum values (BUG-12 fix)
+	assert.Contains(t, prompt, "TRANSACTION_STATE_ENDED", "Prompt must include actual enum value TRANSACTION_STATE_ENDED")
+	assert.Contains(t, prompt, "TRANSACTION_STATE_WAITING", "Prompt must include actual enum value TRANSACTION_STATE_WAITING")
+	assert.Contains(t, prompt, "TRANSACTION_STATE_ERROR", "Prompt must include actual enum value TRANSACTION_STATE_ERROR")
+
+	// The prompt should include the "Allowed values:" label
+	assert.Contains(t, prompt, "Allowed values:", "Prompt must include 'Allowed values:' label for enum columns")
+}
+
+func TestGlossaryService_EnrichTermPrompt_NoEnumValuesWhenColumnHasNone(t *testing.T) {
+	// This test verifies that columns without enum values don't get the "Allowed values:" line
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Transaction",
+			PrimaryTable: "transactions",
+		},
+	}
+
+	enrichmentResponse := `{
+		"defining_sql": "SELECT SUM(amount) AS total_revenue FROM transactions",
+		"base_table": "transactions",
+		"aliases": []
+	}`
+
+	llmClient := &mockLLMClientCapturingPrompt{responseContent: enrichmentResponse}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+			ColumnDetails: map[string][]models.ColumnDetail{
+				"transactions": {
+					{
+						Name:        "amount",
+						Description: "Transaction amount",
+						Role:        "measure",
+						// No EnumValues
+					},
+					{
+						Name:        "created_at",
+						Description: "Transaction creation time",
+						Role:        "dimension",
+						// No EnumValues
+					},
+				},
+			},
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+
+	// Create unenriched term
+	term := &models.BusinessGlossaryTerm{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Term:        "Total Revenue",
+		Definition:  "Sum of all transaction amounts",
+		Source:      models.GlossarySourceInferred,
+		DefiningSQL: "",
+	}
+	glossaryRepo.terms[term.ID] = term
+
+	_ = svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+
+	prompt := llmClient.capturedPrompt
+
+	// Should NOT include "Allowed values:" when no enum values exist
+	assert.NotContains(t, prompt, "Allowed values:", "Prompt should NOT include 'Allowed values:' when columns have no enum values")
+}
+
+func TestGlossaryService_EnrichTermSystemMessage_IncludesEnumInstructions(t *testing.T) {
+	// This test verifies that the system message for term enrichment includes
+	// instructions to use EXACT enum values from schema context (BUG-12 fix)
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Transaction",
+			PrimaryTable: "billing_transactions",
+		},
+	}
+
+	enrichmentResponse := `{
+		"defining_sql": "SELECT SUM(amount) AS total FROM billing_transactions",
+		"base_table": "billing_transactions",
+		"aliases": []
+	}`
+
+	llmClient := &mockLLMClientCapturingPrompt{responseContent: enrichmentResponse}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+			ColumnDetails: map[string][]models.ColumnDetail{
+				"billing_transactions": {
+					{Name: "amount", Role: "measure"},
+				},
+			},
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+
+	term := &models.BusinessGlossaryTerm{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Term:        "Total Revenue",
+		Definition:  "Sum of all transaction amounts",
+		Source:      models.GlossarySourceInferred,
+		DefiningSQL: "",
+	}
+	glossaryRepo.terms[term.ID] = term
+
+	_ = svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+
+	systemMessage := llmClient.capturedSystemMessage
+
+	// System message must include instructions about using exact enum values
+	assert.Contains(t, systemMessage, "EXACT", "System message must emphasize using EXACT enum values")
+	assert.Contains(t, systemMessage, "enumeration columns", "System message must mention enumeration columns")
+	assert.Contains(t, systemMessage, "Do NOT simplify or normalize", "System message must warn against normalizing enum values")
+}
+
+func TestGlossaryService_EnrichTermSystemMessage_IncludesComplexMetricExamples(t *testing.T) {
+	// This test verifies that the system message includes examples for complex metrics
+	// like utilization rates, participation rates, and other ratio-based calculations (BUG-10 fix)
+	logger := zap.NewNop()
+	svc := &glossaryService{logger: logger}
+
+	systemMessage := svc.enrichTermSystemMessage()
+
+	// System message must include examples header
+	assert.Contains(t, systemMessage, "EXAMPLES FOR COMPLEX METRICS", "System message should include complex metrics examples section")
+
+	// Verify utilization rate example is present
+	assert.Contains(t, systemMessage, "utilization", "System message should include utilization rate example")
+	assert.Contains(t, systemMessage, "FILTER (WHERE", "System message should show PostgreSQL FILTER syntax")
+	assert.Contains(t, systemMessage, "NULLIF", "System message should show NULLIF for division safety")
+
+	// Verify participation rate example is present
+	assert.Contains(t, systemMessage, "participation_rate", "System message should include participation rate example")
+	assert.Contains(t, systemMessage, "COUNT(DISTINCT", "System message should show distinct count pattern")
+
+	// Verify completion rate example is present
+	assert.Contains(t, systemMessage, "completion_rate", "System message should include completion rate example")
+
+	// Verify average with filter example is present
+	assert.Contains(t, systemMessage, "AVG(", "System message should include average example")
+	assert.Contains(t, systemMessage, "avg_duration", "System message should include average duration example")
+
+	// Verify multi-table join example is present
+	assert.Contains(t, systemMessage, "LEFT JOIN", "System message should include join example")
+	assert.Contains(t, systemMessage, "COALESCE", "System message should show COALESCE for null handling")
+}
+
+func TestGlossaryService_EnrichTermSystemMessage_IncludesSingleRowAndSemanticRequirements(t *testing.T) {
+	// This test verifies that the system message includes explicit requirements about
+	// single-row results and formula semantic patterns (BUG-13 fix)
+	logger := zap.NewNop()
+	svc := &glossaryService{logger: logger}
+
+	systemMessage := svc.enrichTermSystemMessage()
+
+	// Verify CRITICAL REQUIREMENTS section is present
+	assert.Contains(t, systemMessage, "CRITICAL REQUIREMENTS", "System message should include critical requirements section")
+
+	// Verify single-row requirement
+	assert.Contains(t, systemMessage, "MUST return exactly ONE row", "System message must require single-row results")
+
+	// Verify UNION/UNION ALL restriction
+	assert.Contains(t, systemMessage, "UNION", "System message must mention UNION restriction")
+	assert.Contains(t, systemMessage, "single row", "System message must emphasize single row requirement")
+
+	// Verify semantic formula patterns
+	assert.Contains(t, systemMessage, "Average X Per Y", "System message should include 'Average X Per Y' pattern")
+	assert.Contains(t, systemMessage, "SUM(X) / COUNT(Y)", "System message should show correct formula for averages")
+	assert.Contains(t, systemMessage, "X Rate", "System message should include 'X Rate' pattern")
+	assert.Contains(t, systemMessage, "X Ratio", "System message should include 'X Ratio' pattern")
+	assert.Contains(t, systemMessage, "X Utilization", "System message should include 'X Utilization' pattern")
+	assert.Contains(t, systemMessage, "X Count", "System message should include 'X Count' pattern")
+}
+
+// ============================================================================
+// Tests for Enum Value Validation (BUG-12 Task 3)
+// ============================================================================
+
+func TestExtractStringLiterals(t *testing.T) {
+	tests := []struct {
+		name     string
+		sql      string
+		expected []string
+	}{
+		{
+			name:     "simple single literal",
+			sql:      "SELECT * FROM t WHERE status = 'active'",
+			expected: []string{"active"},
+		},
+		{
+			name:     "multiple literals",
+			sql:      "SELECT * FROM t WHERE status = 'active' AND type = 'user'",
+			expected: []string{"active", "user"},
+		},
+		{
+			name:     "escaped quotes",
+			sql:      "SELECT * FROM t WHERE name = 'O''Brien'",
+			expected: []string{"O'Brien"},
+		},
+		{
+			name:     "empty literal",
+			sql:      "SELECT * FROM t WHERE name = ''",
+			expected: nil, // empty strings are not captured
+		},
+		{
+			name:     "literal with spaces",
+			sql:      "SELECT * FROM t WHERE name = 'John Doe'",
+			expected: []string{"John Doe"},
+		},
+		{
+			name:     "uppercase enum value",
+			sql:      "SELECT * FROM t WHERE state = 'TRANSACTION_STATE_ENDED'",
+			expected: []string{"TRANSACTION_STATE_ENDED"},
+		},
+		{
+			name:     "no literals",
+			sql:      "SELECT COUNT(*) FROM t WHERE id = 123",
+			expected: nil,
+		},
+		{
+			name:     "multiple escaped quotes",
+			sql:      "SELECT * FROM t WHERE x = 'it''s' AND y = 'they''re'",
+			expected: []string{"it's", "they're"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := extractStringLiterals(tc.sql)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestValidateEnumValues_DetectsMismatch(t *testing.T) {
+	// This is the core BUG-12 scenario: 'ended' is used instead of 'TRANSACTION_STATE_ENDED'
+	ontology := &models.TieredOntology{
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"billing_transactions": {
+				{
+					Name: "transaction_state",
+					Role: "dimension",
+					EnumValues: []models.EnumValue{
+						{Value: "TRANSACTION_STATE_ENDED"},
+						{Value: "TRANSACTION_STATE_WAITING"},
+						{Value: "TRANSACTION_STATE_ERROR"},
+					},
+				},
+			},
+		},
+	}
+
+	sql := "SELECT SUM(amount) FROM billing_transactions WHERE transaction_state = 'ended'"
+	mismatches := validateEnumValues(sql, ontology)
+
+	require.Len(t, mismatches, 1)
+	assert.Equal(t, "ended", mismatches[0].SQLValue)
+	assert.Equal(t, "billing_transactions", mismatches[0].Table)
+	assert.Equal(t, "transaction_state", mismatches[0].Column)
+	assert.Equal(t, "TRANSACTION_STATE_ENDED", mismatches[0].BestMatch)
+	assert.Contains(t, mismatches[0].ActualValues, "TRANSACTION_STATE_ENDED")
+}
+
+func TestValidateEnumValues_AcceptsCorrectValues(t *testing.T) {
+	ontology := &models.TieredOntology{
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"billing_transactions": {
+				{
+					Name: "transaction_state",
+					Role: "dimension",
+					EnumValues: []models.EnumValue{
+						{Value: "TRANSACTION_STATE_ENDED"},
+						{Value: "TRANSACTION_STATE_WAITING"},
+					},
+				},
+			},
+		},
+	}
+
+	// Correct enum value used
+	sql := "SELECT SUM(amount) FROM billing_transactions WHERE transaction_state = 'TRANSACTION_STATE_ENDED'"
+	mismatches := validateEnumValues(sql, ontology)
+
+	assert.Empty(t, mismatches, "Should not flag correct enum values")
+}
+
+func TestValidateEnumValues_DetectsPartialMatch(t *testing.T) {
+	ontology := &models.TieredOntology{
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"orders": {
+				{
+					Name: "status",
+					Role: "dimension",
+					EnumValues: []models.EnumValue{
+						{Value: "ORDER_STATUS_PENDING"},
+						{Value: "ORDER_STATUS_SHIPPED"},
+						{Value: "ORDER_STATUS_DELIVERED"},
+					},
+				},
+			},
+		},
+	}
+
+	// 'shipped' is a part of 'ORDER_STATUS_SHIPPED'
+	sql := "SELECT * FROM orders WHERE status = 'shipped'"
+	mismatches := validateEnumValues(sql, ontology)
+
+	require.Len(t, mismatches, 1)
+	assert.Equal(t, "shipped", mismatches[0].SQLValue)
+	assert.Equal(t, "ORDER_STATUS_SHIPPED", mismatches[0].BestMatch)
+}
+
+func TestValidateEnumValues_NoOntology(t *testing.T) {
+	sql := "SELECT * FROM t WHERE status = 'active'"
+	mismatches := validateEnumValues(sql, nil)
+	assert.Nil(t, mismatches)
+}
+
+func TestValidateEnumValues_NoEnumColumns(t *testing.T) {
+	ontology := &models.TieredOntology{
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"users": {
+				{Name: "id", Role: "identifier"},
+				{Name: "name", Role: "attribute"},
+			},
+		},
+	}
+
+	sql := "SELECT * FROM users WHERE name = 'John'"
+	mismatches := validateEnumValues(sql, ontology)
+
+	assert.Nil(t, mismatches)
+}
+
+func TestValidateEnumValues_IgnoresShortLiterals(t *testing.T) {
+	ontology := &models.TieredOntology{
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"transactions": {
+				{
+					Name: "type",
+					Role: "dimension",
+					EnumValues: []models.EnumValue{
+						{Value: "PAYMENT_TYPE_CC"},
+						{Value: "PAYMENT_TYPE_BANK"},
+					},
+				},
+			},
+		},
+	}
+
+	// Short values like 'cc' should be ignored (too likely to be false positives)
+	sql := "SELECT * FROM transactions WHERE type = 'cc'"
+	mismatches := validateEnumValues(sql, ontology)
+
+	assert.Empty(t, mismatches, "Should ignore very short literals to avoid false positives")
+}
+
+func TestValidateEnumValues_MultipleEnumColumns(t *testing.T) {
+	ontology := &models.TieredOntology{
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"billing_transactions": {
+				{
+					Name: "transaction_state",
+					Role: "dimension",
+					EnumValues: []models.EnumValue{
+						{Value: "TRANSACTION_STATE_ENDED"},
+						{Value: "TRANSACTION_STATE_WAITING"},
+					},
+				},
+				{
+					Name: "payment_method",
+					Role: "dimension",
+					EnumValues: []models.EnumValue{
+						{Value: "PAYMENT_METHOD_CARD"},
+						{Value: "PAYMENT_METHOD_BANK"},
+					},
+				},
+			},
+		},
+	}
+
+	// Multiple mismatches in one query
+	sql := "SELECT * FROM billing_transactions WHERE transaction_state = 'ended' AND payment_method = 'card'"
+	mismatches := validateEnumValues(sql, ontology)
+
+	require.Len(t, mismatches, 2)
+	assert.Equal(t, "ended", mismatches[0].SQLValue)
+	assert.Equal(t, "card", mismatches[1].SQLValue)
+}
+
+func TestFindBestEnumMatch_SuffixMatch(t *testing.T) {
+	knownEnums := map[string]enumInfo{
+		"transaction_state_ended":   {table: "transactions", column: "state", original: "TRANSACTION_STATE_ENDED"},
+		"transaction_state_waiting": {table: "transactions", column: "state", original: "TRANSACTION_STATE_WAITING"},
+	}
+
+	match, info, distance := findBestEnumMatch("ended", knownEnums)
+
+	assert.Equal(t, "transaction_state_ended", match)
+	assert.Equal(t, "TRANSACTION_STATE_ENDED", info.original)
+	assert.Equal(t, 0, distance, "Suffix match should have distance 0")
+}
+
+func TestFindBestEnumMatch_PartMatch(t *testing.T) {
+	knownEnums := map[string]enumInfo{
+		"order_status_pending": {table: "orders", column: "status", original: "ORDER_STATUS_PENDING"},
+	}
+
+	match, info, distance := findBestEnumMatch("pending", knownEnums)
+
+	assert.Equal(t, "order_status_pending", match)
+	assert.Equal(t, "ORDER_STATUS_PENDING", info.original)
+	assert.Equal(t, 0, distance, "Suffix/part match should be detected")
+}
+
+func TestLevenshteinDistance(t *testing.T) {
+	tests := []struct {
+		s1       string
+		s2       string
+		expected int
+	}{
+		{"", "", 0},
+		{"abc", "", 3},
+		{"", "abc", 3},
+		{"abc", "abc", 0},
+		{"abc", "abd", 1},
+		{"abc", "adc", 1},
+		{"abc", "abcd", 1},
+		{"kitten", "sitting", 3},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.s1+"_"+tc.s2, func(t *testing.T) {
+			result := levenshteinDistance(tc.s1, tc.s2)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+// ============================================================================
+// Tests for Enhanced Retry Logic (BUG-10 fix)
+// ============================================================================
+
+// mockLLMClientWithRetry supports testing retry behavior by returning different
+// responses on subsequent calls. It tracks call count and captured prompts.
+type mockLLMClientWithRetry struct {
+	callCount         int
+	capturedPrompts   []string
+	responses         []string // Responses for each call (cycles if exhausted)
+	errors            []error  // Errors for each call (nil = success)
+	failFirstNAttempt int      // How many times to fail before succeeding
+	failureError      error    // Error to return on failure
+	successResponse   string   // Response to return on success
+}
+
+func (m *mockLLMClientWithRetry) GenerateResponse(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+	m.capturedPrompts = append(m.capturedPrompts, prompt)
+	callNum := m.callCount
+	m.callCount++
+
+	// If using failFirstNAttempt pattern
+	if m.failFirstNAttempt > 0 {
+		if callNum < m.failFirstNAttempt {
+			return nil, m.failureError
+		}
+		return &llm.GenerateResponseResult{
+			Content:          m.successResponse,
+			PromptTokens:     100,
+			CompletionTokens: 50,
+			TotalTokens:      150,
+		}, nil
+	}
+
+	// Use indexed responses/errors
+	idx := callNum
+	if idx >= len(m.responses) {
+		idx = len(m.responses) - 1
+	}
+
+	if idx < len(m.errors) && m.errors[idx] != nil {
+		return nil, m.errors[idx]
+	}
+
+	content := ""
+	if idx < len(m.responses) {
+		content = m.responses[idx]
+	}
+
+	return &llm.GenerateResponseResult{
+		Content:          content,
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		TotalTokens:      150,
+	}, nil
+}
+
+func (m *mockLLMClientWithRetry) CreateEmbedding(ctx context.Context, input string, model string) ([]float32, error) {
+	return nil, nil
+}
+
+func (m *mockLLMClientWithRetry) CreateEmbeddings(ctx context.Context, inputs []string, model string) ([][]float32, error) {
+	return nil, nil
+}
+
+func (m *mockLLMClientWithRetry) GetModel() string {
+	return "test-model"
+}
+
+func (m *mockLLMClientWithRetry) GetEndpoint() string {
+	return "https://test.endpoint"
+}
+
+func TestGlossaryService_EnrichSingleTerm_RetriesOnFailure(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Offer",
+			PrimaryTable: "offers",
+		},
+	}
+
+	// First response: empty SQL (will trigger retry)
+	// Second response: valid enrichment
+	emptyResponse := `{"defining_sql": "", "base_table": "offers", "aliases": []}`
+	validResponse := `{
+		"defining_sql": "SELECT COUNT(*) FILTER (WHERE status = 'used') * 100.0 / NULLIF(COUNT(*), 0) AS utilization_rate FROM offers",
+		"base_table": "offers",
+		"aliases": ["Usage Rate"]
+	}`
+
+	llmClient := &mockLLMClientWithRetry{
+		responses: []string{emptyResponse, validResponse},
+	}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+			ColumnDetails: map[string][]models.ColumnDetail{
+				"offers": {
+					{Name: "id", Role: "identifier", IsPrimaryKey: true},
+					{Name: "status", Role: "dimension", EnumValues: []models.EnumValue{{Value: "active"}, {Value: "used"}, {Value: "expired"}}},
+					{Name: "created_at", Role: "attribute"},
+				},
+			},
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+
+	// Create unenriched term
+	term := &models.BusinessGlossaryTerm{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Term:        "Offer Utilization Rate",
+		Definition:  "Percentage of offers that were used",
+		Source:      models.GlossarySourceInferred,
+		DefiningSQL: "",
+	}
+	glossaryRepo.terms[term.ID] = term
+
+	// Enrich terms
+	err := svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	require.NoError(t, err)
+
+	// Verify LLM was called twice (first attempt + retry)
+	assert.Equal(t, 2, llmClient.callCount, "LLM should be called twice: initial attempt + retry")
+
+	// Verify enrichment succeeded
+	enrichedTerm, err := svc.GetTerm(ctx, term.ID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, enrichedTerm.DefiningSQL, "Term should have SQL after retry")
+	assert.Equal(t, "offers", enrichedTerm.BaseTable)
+}
+
+func TestGlossaryService_EnrichSingleTerm_EnhancedPromptIncludesAllColumns(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Transaction",
+			PrimaryTable: "transactions",
+		},
+	}
+
+	// First response triggers parse error, second succeeds
+	invalidResponse := `{not valid json`
+	validResponse := `{
+		"defining_sql": "SELECT SUM(amount) AS total FROM transactions",
+		"base_table": "transactions",
+		"aliases": []
+	}`
+
+	llmClient := &mockLLMClientWithRetry{
+		responses: []string{invalidResponse, validResponse},
+	}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+			ColumnDetails: map[string][]models.ColumnDetail{
+				"transactions": {
+					// Identifier column (not measure/dimension)
+					{Name: "id", Role: "identifier", IsPrimaryKey: true},
+					// Measure column
+					{Name: "amount", Role: "measure"},
+					// Attribute column (not measure/dimension)
+					{Name: "created_at", Role: "attribute"},
+					// Foreign key column
+					{Name: "user_id", Role: "identifier", IsForeignKey: true, ForeignTable: "users"},
+				},
+			},
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+
+	term := &models.BusinessGlossaryTerm{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Term:        "Total Revenue",
+		Definition:  "Sum of all transaction amounts",
+		Source:      models.GlossarySourceInferred,
+		DefiningSQL: "",
+	}
+	glossaryRepo.terms[term.ID] = term
+
+	_ = svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+
+	require.Len(t, llmClient.capturedPrompts, 2, "Should have captured 2 prompts")
+
+	// First prompt (normal) should only include measures/dimensions
+	firstPrompt := llmClient.capturedPrompts[0]
+	assert.Contains(t, firstPrompt, "`amount`", "First prompt should include measure columns")
+	assert.NotContains(t, firstPrompt, "Complete Column Reference", "First prompt should NOT have enhanced header")
+
+	// Second prompt (enhanced) should include ALL columns and enhanced context
+	secondPrompt := llmClient.capturedPrompts[1]
+	assert.Contains(t, secondPrompt, "Complete Column Reference", "Enhanced prompt should have complete column header")
+	assert.Contains(t, secondPrompt, "`id`", "Enhanced prompt should include identifier columns")
+	assert.Contains(t, secondPrompt, "`user_id`", "Enhanced prompt should include FK columns")
+	assert.Contains(t, secondPrompt, "`created_at`", "Enhanced prompt should include attribute columns")
+	assert.Contains(t, secondPrompt, "Previous Attempt Failed", "Enhanced prompt should include previous error context")
+	assert.Contains(t, secondPrompt, "SQL Pattern Examples", "Enhanced prompt should include SQL examples")
+}
+
+func TestGlossaryService_EnrichSingleTerm_FailsAfterBothAttemptsFail(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "Widget",
+			PrimaryTable: "widgets",
+		},
+	}
+
+	// Both responses return empty SQL
+	emptyResponse := `{"defining_sql": "", "base_table": "widgets", "aliases": []}`
+
+	llmClient := &mockLLMClientWithRetry{
+		responses: []string{emptyResponse, emptyResponse},
+	}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+
+	term := &models.BusinessGlossaryTerm{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Term:        "Widget Complexity",
+		Definition:  "A very complex metric that cannot be computed",
+		Source:      models.GlossarySourceInferred,
+		DefiningSQL: "",
+	}
+	glossaryRepo.terms[term.ID] = term
+
+	// Enrich terms - should complete without error but term remains unenriched
+	err := svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	require.NoError(t, err)
+
+	// Verify LLM was called twice
+	assert.Equal(t, 2, llmClient.callCount, "LLM should be called twice even when both fail")
+
+	// Verify term was NOT enriched (both attempts failed)
+	unenrichedTerm, err := svc.GetTerm(ctx, term.ID)
+	require.NoError(t, err)
+	assert.Empty(t, unenrichedTerm.DefiningSQL, "Term should remain unenriched when both attempts fail")
+}
+
+func TestGlossaryService_EnrichSingleTerm_SucceedsOnFirstAttempt(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	ontologyID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			ProjectID:    projectID,
+			OntologyID:   ontologyID,
+			Name:         "User",
+			PrimaryTable: "users",
+		},
+	}
+
+	// First response succeeds - no retry needed
+	validResponse := `{
+		"defining_sql": "SELECT COUNT(*) AS active_users FROM users WHERE status = 'active'",
+		"base_table": "users",
+		"aliases": ["Active User Count"]
+	}`
+
+	llmClient := &mockLLMClientWithRetry{
+		responses: []string{validResponse},
+	}
+	llmFactory := &mockLLMFactoryForGlossary{client: llmClient}
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+			IsActive:  true,
+			ColumnDetails: map[string][]models.ColumnDetail{
+				"users": {
+					{Name: "status", Role: "dimension"},
+				},
+			},
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{entities: entities}
+	logger := zap.NewNop()
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, llmFactory, mockGetTenant(), logger, "test")
+
+	term := &models.BusinessGlossaryTerm{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Term:        "Active Users",
+		Definition:  "Count of users with active status",
+		Source:      models.GlossarySourceInferred,
+		DefiningSQL: "",
+	}
+	glossaryRepo.terms[term.ID] = term
+
+	err := svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
+	require.NoError(t, err)
+
+	// Verify LLM was called only once (first attempt succeeded)
+	assert.Equal(t, 1, llmClient.callCount, "LLM should only be called once when first attempt succeeds")
+
+	// Verify enrichment succeeded
+	enrichedTerm, err := svc.GetTerm(ctx, term.ID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, enrichedTerm.DefiningSQL)
+	assert.Contains(t, enrichedTerm.Aliases, "Active User Count")
+}
+
+func TestBuildEnhancedEnrichTermPrompt_IncludesPreviousError(t *testing.T) {
+	// Create a minimal glossary service to access the method
+	logger := zap.NewNop()
+	svc := &glossaryService{logger: logger}
+
+	term := &models.BusinessGlossaryTerm{
+		Term:       "Test Metric",
+		Definition: "A test metric definition",
+	}
+
+	ontology := &models.TieredOntology{
+		ColumnDetails: map[string][]models.ColumnDetail{
+			"test_table": {
+				{Name: "id", Role: "identifier"},
+				{Name: "value", Role: "measure"},
+			},
+		},
+	}
+
+	entities := []*models.OntologyEntity{
+		{Name: "Test", PrimaryTable: "test_table"},
+	}
+
+	previousError := "SQL validation failed: column 'nonexistent' does not exist"
+
+	prompt := svc.buildEnhancedEnrichTermPrompt(term, ontology, entities, previousError)
+
+	// Verify previous error is included
+	assert.Contains(t, prompt, "Previous Attempt Failed", "Enhanced prompt should include previous attempt header")
+	assert.Contains(t, prompt, previousError, "Enhanced prompt should include the actual error message")
+	assert.Contains(t, prompt, "analyze this error", "Enhanced prompt should ask LLM to analyze the error")
+}
+
+func TestBuildEnhancedEnrichTermPrompt_IncludesComplexMetricExamples(t *testing.T) {
+	logger := zap.NewNop()
+	svc := &glossaryService{logger: logger}
+
+	term := &models.BusinessGlossaryTerm{
+		Term:       "Utilization Rate",
+		Definition: "Percentage of items used",
+	}
+
+	ontology := &models.TieredOntology{}
+	entities := []*models.OntologyEntity{}
+
+	prompt := svc.buildEnhancedEnrichTermPrompt(term, ontology, entities, "")
+
+	// Verify SQL pattern examples are included
+	assert.Contains(t, prompt, "SQL Pattern Examples", "Enhanced prompt should include SQL examples section")
+	assert.Contains(t, prompt, "Utilization/Conversion Rate", "Should include utilization rate pattern")
+	assert.Contains(t, prompt, "FILTER (WHERE", "Should include PostgreSQL FILTER syntax example")
+	assert.Contains(t, prompt, "NULLIF", "Should include NULLIF for division safety")
+	assert.Contains(t, prompt, "Participation Rate", "Should include participation rate pattern")
+	assert.Contains(t, prompt, "Multi-table Join", "Should include join pattern example")
+}
+
+// ============================================================================
+// Tests - TestSQL Multi-Row Validation
+// ============================================================================
+
+// mockQueryExecutorWithMultipleRows returns multiple rows to test multi-row validation
+type mockQueryExecutorWithMultipleRows struct {
+	mockQueryExecutorForGlossary
+}
+
+func (m *mockQueryExecutorWithMultipleRows) Query(ctx context.Context, sqlQuery string, limit int) (*datasource.QueryExecutionResult, error) {
+	// Return multiple rows to simulate UNION ALL or non-aggregate queries
+	return &datasource.QueryExecutionResult{
+		Columns: []datasource.ColumnInfo{
+			{Name: "result", Type: "bigint"},
+		},
+		Rows: []map[string]any{
+			{"result": 100},
+			{"result": 200},
+		},
+		RowCount: 2,
+	}, nil
+}
+
+type mockAdapterFactoryWithMultipleRows struct{}
+
+func (m *mockAdapterFactoryWithMultipleRows) NewConnectionTester(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.ConnectionTester, error) {
+	return nil, nil
+}
+
+func (m *mockAdapterFactoryWithMultipleRows) NewSchemaDiscoverer(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.SchemaDiscoverer, error) {
+	return nil, nil
+}
+
+func (m *mockAdapterFactoryWithMultipleRows) NewQueryExecutor(ctx context.Context, dsType string, config map[string]any, projectID, datasourceID uuid.UUID, userID string) (datasource.QueryExecutor, error) {
+	return &mockQueryExecutorWithMultipleRows{}, nil
+}
+
+func (m *mockAdapterFactoryWithMultipleRows) ListTypes() []datasource.DatasourceAdapterInfo {
+	return []datasource.DatasourceAdapterInfo{}
+}
+
+func TestTestSQL_MultipleRows_ReturnsError(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	logger := zap.NewNop()
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{}
+	entityRepo := &mockEntityRepoForGlossary{}
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryWithMultipleRows{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, nil, nil, logger, "test")
+
+	// SQL that would return multiple rows (e.g., UNION ALL)
+	sql := "SELECT 1 UNION ALL SELECT 2"
+
+	result, err := svc.TestSQL(ctx, projectID, sql)
+
+	require.NoError(t, err)
+	assert.False(t, result.Valid)
+	assert.Contains(t, result.Error, "multiple rows")
+	assert.Contains(t, result.Error, "Aggregate metrics should return a single row")
+}
+
+func TestTestSQL_SingleRow_ReturnsValid(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	logger := zap.NewNop()
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{}
+	entityRepo := &mockEntityRepoForGlossary{}
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	// Use the standard mock that returns a single row
+	adapterFactory := &mockAdapterFactoryForGlossary{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, nil, nil, logger, "test")
+
+	// SQL that returns a single row (aggregate)
+	sql := "SELECT COUNT(*) AS total FROM users"
+
+	result, err := svc.TestSQL(ctx, projectID, sql)
+
+	require.NoError(t, err)
+	assert.True(t, result.Valid)
+	assert.Empty(t, result.Error)
+	assert.NotEmpty(t, result.OutputColumns)
+}
+
+func TestCreateTerm_WithMultiRowSQL_ReturnsError(t *testing.T) {
+	projectID := uuid.New()
+	ctx := withTestAuth(context.Background(), projectID)
+	logger := zap.NewNop()
+
+	glossaryRepo := newMockGlossaryRepo()
+	ontologyRepo := &mockOntologyRepoForGlossary{
+		activeOntology: &models.TieredOntology{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			IsActive:  true,
+		},
+	}
+	entityRepo := &mockEntityRepoForGlossary{}
+
+	datasourceSvc := &mockDatasourceServiceForGlossary{}
+	adapterFactory := &mockAdapterFactoryWithMultipleRows{}
+	svc := NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, nil, nil, logger, "test")
+
+	term := &models.BusinessGlossaryTerm{
+		Term:       "Test Metric",
+		Definition: "A test metric with multi-row SQL",
+		// SQL that returns multiple rows (simulated by mock)
+		DefiningSQL: "SELECT rating FROM reviews UNION ALL SELECT rating FROM channel_reviews",
+	}
+
+	err := svc.CreateTerm(ctx, projectID, term)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SQL validation failed")
+	assert.Contains(t, err.Error(), "multiple rows")
+}
+
+// ============================================================================
+// Tests for ValidateFormulaSemantics (BUG-13 fix)
+// ============================================================================
+
+func TestValidateFormulaSemantics_AveragePerWithoutCount_ReturnsWarning(t *testing.T) {
+	// Term says "Average Fee Per Engagement" but SQL divides by revenue (not COUNT)
+	termName := "Average Fee Per Engagement"
+	sql := "SELECT SUM(platform_fees) / NULLIF(SUM(total_amount), 0) * 100 AS avg_fee FROM billing_transactions"
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	require.Len(t, warnings, 1)
+	assert.Equal(t, "MISSING_COUNT", warnings[0].Code)
+	assert.Contains(t, warnings[0].Message, "average per")
+	assert.Contains(t, warnings[0].Message, "COUNT")
+}
+
+func TestValidateFormulaSemantics_AveragePerWithCount_NoWarning(t *testing.T) {
+	// Correct formula: divides by COUNT
+	termName := "Average Fee Per Engagement"
+	sql := "SELECT SUM(platform_fees) / COUNT(*) AS avg_fee FROM billing_transactions WHERE deleted_at IS NULL"
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	assert.Empty(t, warnings, "Should not warn when COUNT is present")
+}
+
+func TestValidateFormulaSemantics_UnionWithoutAggregation_ReturnsWarning(t *testing.T) {
+	// UNION ALL returns multiple rows (not wrapped in aggregating subquery)
+	termName := "User Review Rating"
+	sql := `SELECT AVG(ur.reviewee_rating) AS rating FROM user_reviews ur
+			UNION ALL
+			SELECT AVG(cr.rating) AS rating FROM channel_reviews cr`
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	// Should warn about UNION potentially returning multiple rows
+	found := false
+	for _, w := range warnings {
+		if w.Code == "UNION_MULTI_ROW" {
+			found = true
+			assert.Contains(t, w.Message, "UNION")
+			assert.Contains(t, w.Message, "multiple rows")
+			break
+		}
+	}
+	assert.True(t, found, "Should warn about UNION returning multiple rows")
+}
+
+func TestValidateFormulaSemantics_UnionInAggregatingSubquery_NoWarning(t *testing.T) {
+	// UNION is wrapped in subquery with outer AVG - returns single row
+	termName := "Combined Review Rating"
+	sql := `SELECT AVG(rating) AS combined_rating FROM (
+				SELECT reviewee_rating AS rating FROM user_reviews
+				UNION ALL
+				SELECT rating FROM channel_reviews
+			) combined`
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	// Should NOT warn because UNION is inside an aggregating subquery
+	for _, w := range warnings {
+		if w.Code == "UNION_MULTI_ROW" {
+			t.Error("Should not warn about UNION when it's in an aggregating subquery")
+		}
+	}
+}
+
+func TestValidateFormulaSemantics_NoIssues_EmptyWarnings(t *testing.T) {
+	// Simple, correct metric formula
+	termName := "Total Revenue"
+	sql := "SELECT SUM(earned_amount) AS total_revenue FROM billing_transactions WHERE deleted_at IS NULL"
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	assert.Empty(t, warnings, "Simple correct formula should have no warnings")
+}
+
+func TestValidateFormulaSemantics_AverageWithoutPer_NoWarning(t *testing.T) {
+	// Term has "Average" but not "Per" - different semantic meaning
+	termName := "Average Order Value"
+	sql := "SELECT AVG(total_amount) AS avg_value FROM orders"
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	// No warning - "Average X" without "Per Y" doesn't require COUNT
+	for _, w := range warnings {
+		if w.Code == "MISSING_COUNT" {
+			t.Error("Should not warn about COUNT for 'Average X' without 'Per Y'")
+		}
+	}
+}
+
+func TestValidateFormulaSemantics_CountInCountFunction_Detected(t *testing.T) {
+	// COUNT(*) should be detected
+	termName := "Average Revenue Per Customer"
+	sql := "SELECT SUM(revenue) / COUNT(*) AS avg_revenue FROM sales GROUP BY customer_id"
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	for _, w := range warnings {
+		if w.Code == "MISSING_COUNT" {
+			t.Error("COUNT(*) should be detected - no warning expected")
+		}
+	}
+}
+
+func TestValidateFormulaSemantics_CountWithSpace_Detected(t *testing.T) {
+	// COUNT (*) with space should be detected
+	termName := "Average Fee Per Transaction"
+	sql := "SELECT SUM(fee) / COUNT (*) AS avg_fee FROM transactions"
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	for _, w := range warnings {
+		if w.Code == "MISSING_COUNT" {
+			t.Error("COUNT (*) with space should be detected - no warning expected")
+		}
+	}
+}
+
+func TestValidateFormulaSemantics_CaseInsensitive_TermName(t *testing.T) {
+	// Term name should be case-insensitive
+	termName := "AVERAGE fee PER engagement"
+	sql := "SELECT SUM(fee) / SUM(amount) AS ratio FROM transactions" // Missing COUNT
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	require.Len(t, warnings, 1)
+	assert.Equal(t, "MISSING_COUNT", warnings[0].Code)
+}
+
+func TestValidateFormulaSemantics_MultipleIssues_ReturnsAllWarnings(t *testing.T) {
+	// Term with both "average per" missing COUNT and UNION
+	termName := "Average Rating Per User"
+	sql := `SELECT AVG(rating) / SUM(count) AS avg
+			FROM (SELECT rating, 1 as count FROM reviews_a
+				  UNION ALL
+				  SELECT rating, 1 FROM reviews_b) combined`
+
+	warnings := ValidateFormulaSemantics(termName, sql)
+
+	// Should have MISSING_COUNT warning (no COUNT in formula)
+	hasMissingCount := false
+	for _, w := range warnings {
+		if w.Code == "MISSING_COUNT" {
+			hasMissingCount = true
+		}
+	}
+	assert.True(t, hasMissingCount, "Should warn about missing COUNT")
+}
+
+func TestIsUnionInAggregatingSubquery_SimpleUnion_False(t *testing.T) {
+	sql := "SELECT a FROM t1 UNION SELECT b FROM t2"
+	result := isUnionInAggregatingSubquery(sql)
+	assert.False(t, result, "Simple UNION should not be considered aggregated")
+}
+
+func TestIsUnionInAggregatingSubquery_UnionInSubqueryWithAvg_True(t *testing.T) {
+	sql := "SELECT AVG(x) FROM (SELECT a AS x FROM t1 UNION SELECT b FROM t2) sub"
+	result := isUnionInAggregatingSubquery(sql)
+	assert.True(t, result, "UNION in subquery with outer AVG should be considered aggregated")
+}
+
+func TestIsUnionInAggregatingSubquery_UnionInSubqueryWithSum_True(t *testing.T) {
+	sql := "SELECT SUM(val) FROM (SELECT amount AS val FROM sales UNION ALL SELECT refund FROM returns) combined"
+	result := isUnionInAggregatingSubquery(sql)
+	assert.True(t, result, "UNION in subquery with outer SUM should be considered aggregated")
+}
+
+func TestIsUnionInAggregatingSubquery_NoUnion_False(t *testing.T) {
+	sql := "SELECT AVG(amount) FROM sales"
+	result := isUnionInAggregatingSubquery(sql)
+	assert.False(t, result, "Query without UNION should return false")
+}

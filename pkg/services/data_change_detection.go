@@ -52,6 +52,7 @@ type dataChangeDetectionService struct {
 	ontologyRepo      repositories.OntologyRepository
 	pendingChangeRepo repositories.PendingChangeRepository
 	datasourceService DatasourceService
+	projectService    ProjectService
 	adapterFactory    datasource.DatasourceAdapterFactory
 	config            DataChangeDetectionConfig
 	logger            *zap.Logger
@@ -63,6 +64,7 @@ func NewDataChangeDetectionService(
 	ontologyRepo repositories.OntologyRepository,
 	pendingChangeRepo repositories.PendingChangeRepository,
 	datasourceService DatasourceService,
+	projectService ProjectService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	logger *zap.Logger,
 ) DataChangeDetectionService {
@@ -71,6 +73,7 @@ func NewDataChangeDetectionService(
 		ontologyRepo:      ontologyRepo,
 		pendingChangeRepo: pendingChangeRepo,
 		datasourceService: datasourceService,
+		projectService:    projectService,
 		adapterFactory:    adapterFactory,
 		config:            DefaultDataChangeDetectionConfig(),
 		logger:            logger,
@@ -84,8 +87,8 @@ func (s *dataChangeDetectionService) ScanForChanges(
 	ctx context.Context,
 	projectID, datasourceID uuid.UUID,
 ) ([]*models.PendingChange, error) {
-	// Get all tables for the datasource
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
+	// Get all selected tables for the datasource
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}
@@ -130,8 +133,15 @@ func (s *dataChangeDetectionService) ScanTables(
 		return nil, fmt.Errorf("failed to get active ontology: %w", err)
 	}
 
+	// Get ontology settings to determine if we should use legacy pattern matching
+	ontologySettings, err := s.projectService.GetOntologySettings(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ontology settings: %w", err)
+	}
+	useLegacyPatternMatching := ontologySettings.UseLegacyPatternMatching
+
 	// Get tables for schema info
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}
@@ -152,7 +162,7 @@ func (s *dataChangeDetectionService) ScanTables(
 		}
 
 		// Get columns for the table
-		columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID)
+		columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID, true)
 		if err != nil {
 			s.logger.Warn("Failed to list columns for table",
 				zap.String("table", tableName),
@@ -197,7 +207,7 @@ func (s *dataChangeDetectionService) ScanTables(
 		}
 
 		// Detect potential FK patterns for non-FK columns
-		fkChanges, err := s.detectPotentialFKs(ctx, discoverer, table, columns, tables)
+		fkChanges, err := s.detectPotentialFKs(ctx, discoverer, table, columns, tables, useLegacyPatternMatching)
 		if err != nil {
 			s.logger.Warn("Failed to detect FK patterns",
 				zap.String("table", tableName),
@@ -321,6 +331,7 @@ func (s *dataChangeDetectionService) detectPotentialFKs(
 	table *models.SchemaTable,
 	columns []*models.SchemaColumn,
 	allTables []*models.SchemaTable,
+	useLegacyPatternMatching bool,
 ) ([]*models.PendingChange, error) {
 	var changes []*models.PendingChange
 
@@ -341,14 +352,20 @@ func (s *dataChangeDetectionService) detectPotentialFKs(
 			continue
 		}
 
-		// Check if column is likely already an FK (check schema relationships)
-		// We'll rely on the column naming convention check
-		if !strings.HasSuffix(col.ColumnName, "_id") {
+		// When legacy pattern matching is enabled, only check columns ending in _id
+		// When disabled, check all columns and let data validation decide
+		if useLegacyPatternMatching && !strings.HasSuffix(col.ColumnName, "_id") {
 			continue
 		}
 
 		// Extract potential table name from column name
-		potentialTableBase := strings.TrimSuffix(col.ColumnName, "_id")
+		// For _id columns, strip the suffix; otherwise try the full column name
+		var potentialTableBase string
+		if strings.HasSuffix(col.ColumnName, "_id") {
+			potentialTableBase = strings.TrimSuffix(col.ColumnName, "_id")
+		} else {
+			potentialTableBase = col.ColumnName
+		}
 		targetTable, ok := tableByName[potentialTableBase]
 		if !ok {
 			// Try pluralized version
@@ -364,7 +381,7 @@ func (s *dataChangeDetectionService) detectPotentialFKs(
 		}
 
 		// Find target table's primary key column
-		targetColumns, err := s.schemaRepo.ListColumnsByTable(ctx, targetTable.ProjectID, targetTable.ID)
+		targetColumns, err := s.schemaRepo.ListColumnsByTable(ctx, targetTable.ProjectID, targetTable.ID, true)
 		if err != nil {
 			continue
 		}

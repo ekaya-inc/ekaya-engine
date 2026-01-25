@@ -224,6 +224,14 @@ func (m *mockProjectService) SetAutoApproveSettings(ctx context.Context, project
 	return nil
 }
 
+func (m *mockProjectService) GetOntologySettings(ctx context.Context, projectID uuid.UUID) (*services.OntologySettings, error) {
+	return &services.OntologySettings{UseLegacyPatternMatching: true}, nil
+}
+
+func (m *mockProjectService) SetOntologySettings(ctx context.Context, projectID uuid.UUID, settings *services.OntologySettings) error {
+	return nil
+}
+
 // mockDatasourceService implements services.DatasourceService for testing.
 type mockDatasourceService struct {
 	datasource      *models.Datasource
@@ -356,13 +364,13 @@ func (m *mockSchemaRepository) UpdateTableSelection(ctx context.Context, project
 func (m *mockSchemaRepository) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
 	return nil
 }
-func (m *mockSchemaRepository) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+func (m *mockSchemaRepository) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
 func (m *mockSchemaRepository) ListColumnsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error) {
 	return m.columns, nil
 }
-func (m *mockSchemaRepository) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
+func (m *mockSchemaRepository) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error) {
 	return nil, nil
 }
 func (m *mockSchemaRepository) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {

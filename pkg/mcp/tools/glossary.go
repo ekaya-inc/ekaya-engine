@@ -157,42 +157,50 @@ func registerGetGlossarySQLTool(s *server.MCPServer, deps *GlossaryToolDeps) {
 }
 
 // listGlossaryResponse is the lightweight response format for list_glossary tool.
-// Used for discovery - only includes term, definition, and aliases.
+// Used for discovery - includes term, definition, aliases, and enrichment status.
 type listGlossaryResponse struct {
-	Term       string   `json:"term"`
-	Definition string   `json:"definition"`
-	Aliases    []string `json:"aliases,omitempty"`
+	Term             string   `json:"term"`
+	Definition       string   `json:"definition"`
+	Aliases          []string `json:"aliases,omitempty"`
+	EnrichmentStatus string   `json:"enrichment_status,omitempty"` // "pending", "success", "failed"
+	EnrichmentError  string   `json:"enrichment_error,omitempty"`  // Error message if enrichment failed
 }
 
 // getGlossarySQLResponse is the full response format for get_glossary_sql tool.
-// Includes all fields needed for query composition.
+// Includes all fields needed for query composition plus enrichment status.
 type getGlossarySQLResponse struct {
-	Term          string                `json:"term"`
-	Definition    string                `json:"definition"`
-	DefiningSQL   string                `json:"defining_sql"`
-	BaseTable     string                `json:"base_table,omitempty"`
-	OutputColumns []models.OutputColumn `json:"output_columns,omitempty"`
-	Aliases       []string              `json:"aliases,omitempty"`
+	Term             string                `json:"term"`
+	Definition       string                `json:"definition"`
+	DefiningSQL      string                `json:"defining_sql"`
+	BaseTable        string                `json:"base_table,omitempty"`
+	OutputColumns    []models.OutputColumn `json:"output_columns,omitempty"`
+	Aliases          []string              `json:"aliases,omitempty"`
+	EnrichmentStatus string                `json:"enrichment_status,omitempty"` // "pending", "success", "failed"
+	EnrichmentError  string                `json:"enrichment_error,omitempty"`  // Error message if enrichment failed
 }
 
 // toListGlossaryResponse converts a model to list_glossary response format.
 func toListGlossaryResponse(term *models.BusinessGlossaryTerm) listGlossaryResponse {
 	return listGlossaryResponse{
-		Term:       term.Term,
-		Definition: term.Definition,
-		Aliases:    term.Aliases,
+		Term:             term.Term,
+		Definition:       term.Definition,
+		Aliases:          term.Aliases,
+		EnrichmentStatus: term.EnrichmentStatus,
+		EnrichmentError:  term.EnrichmentError,
 	}
 }
 
 // toGetGlossarySQLResponse converts a model to get_glossary_sql response format.
 func toGetGlossarySQLResponse(term *models.BusinessGlossaryTerm) getGlossarySQLResponse {
 	return getGlossarySQLResponse{
-		Term:          term.Term,
-		Definition:    term.Definition,
-		DefiningSQL:   term.DefiningSQL,
-		BaseTable:     term.BaseTable,
-		OutputColumns: term.OutputColumns,
-		Aliases:       term.Aliases,
+		Term:             term.Term,
+		Definition:       term.Definition,
+		DefiningSQL:      term.DefiningSQL,
+		BaseTable:        term.BaseTable,
+		OutputColumns:    term.OutputColumns,
+		Aliases:          term.Aliases,
+		EnrichmentStatus: term.EnrichmentStatus,
+		EnrichmentError:  term.EnrichmentError,
 	}
 }
 

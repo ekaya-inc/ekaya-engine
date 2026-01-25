@@ -108,6 +108,14 @@ func (m *mockProjectService) SetAutoApproveSettings(ctx context.Context, project
 	return nil
 }
 
+func (m *mockProjectService) GetOntologySettings(ctx context.Context, projectID uuid.UUID) (*services.OntologySettings, error) {
+	return &services.OntologySettings{UseLegacyPatternMatching: true}, nil
+}
+
+func (m *mockProjectService) SetOntologySettings(ctx context.Context, projectID uuid.UUID, settings *services.OntologySettings) error {
+	return nil
+}
+
 // mockAuthService is a mock AuthService for integration testing.
 type mockAuthService struct {
 	claims *auth.Claims

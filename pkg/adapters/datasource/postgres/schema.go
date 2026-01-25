@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 )
@@ -21,12 +22,18 @@ type SchemaDiscoverer struct {
 	userID       string
 	datasourceID uuid.UUID
 	ownedPool    bool // true if we created the pool (for tests or direct instantiation)
+	logger       *zap.Logger
 }
 
 // NewSchemaDiscoverer creates a PostgreSQL schema discoverer using the connection manager.
 // If connMgr is nil, creates an unmanaged pool (for tests or direct instantiation).
-func NewSchemaDiscoverer(ctx context.Context, cfg *Config, connMgr *datasource.ConnectionManager, projectID, datasourceID uuid.UUID, userID string) (*SchemaDiscoverer, error) {
+// If logger is nil, a no-op logger is used.
+func NewSchemaDiscoverer(ctx context.Context, cfg *Config, connMgr *datasource.ConnectionManager, projectID, datasourceID uuid.UUID, userID string, logger *zap.Logger) (*SchemaDiscoverer, error) {
 	connStr := buildConnectionString(cfg)
+
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 
 	if connMgr == nil {
 		// Fallback for direct instantiation (tests)
@@ -38,6 +45,7 @@ func NewSchemaDiscoverer(ctx context.Context, cfg *Config, connMgr *datasource.C
 		return &SchemaDiscoverer{
 			pool:      pool,
 			ownedPool: true,
+			logger:    logger,
 		}, nil
 	}
 
@@ -60,6 +68,7 @@ func NewSchemaDiscoverer(ctx context.Context, cfg *Config, connMgr *datasource.C
 		userID:       userID,
 		datasourceID: datasourceID,
 		ownedPool:    false,
+		logger:       logger,
 	}, nil
 }
 
@@ -228,6 +237,9 @@ func (d *SchemaDiscoverer) DiscoverForeignKeys(ctx context.Context) ([]datasourc
 }
 
 // AnalyzeColumnStats gathers statistics for columns.
+// Continues processing other columns when one fails (e.g., type cast errors for arrays/bytea).
+// If the main query fails, retries with a simplified query (without length calculation).
+// Failed columns are included in results with zero/nil stats.
 func (d *SchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, tableName string, columnNames []string) ([]datasource.ColumnStats, error) {
 	if len(columnNames) == 0 {
 		return nil, nil
@@ -238,29 +250,83 @@ func (d *SchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, t
 	quotedTable := pgx.Identifier{tableName}.Sanitize()
 
 	var stats []datasource.ColumnStats
+	var retriedColumns []string
 	for _, colName := range columnNames {
 		quotedCol := pgx.Identifier{colName}.Sanitize()
 
-		// Query includes length stats for text columns (used to detect uniform-length IDs like UUIDs)
+		// Query includes length stats for text-compatible columns (used to detect uniform-length IDs like UUIDs).
+		// For non-text types (arrays, bytea, json, etc.), length is set to NULL to avoid cast errors.
+		// We use a subquery to determine the column type, then conditionally calculate length.
 		query := fmt.Sprintf(`
+			WITH col_type AS (
+				SELECT pg_typeof(%s)::text AS dtype
+				FROM %s.%s
+				WHERE %s IS NOT NULL
+				LIMIT 1
+			)
 			SELECT
 				COUNT(*) as row_count,
 				COUNT(%s) as non_null_count,
 				COUNT(DISTINCT %s) as distinct_count,
-				MIN(LENGTH(%s::text)) as min_length,
-				MAX(LENGTH(%s::text)) as max_length
+				CASE
+					WHEN (SELECT dtype FROM col_type) IN ('text', 'character varying', 'character', 'uuid', 'name', 'bpchar')
+					THEN MIN(LENGTH(%s::text))
+					ELSE NULL
+				END as min_length,
+				CASE
+					WHEN (SELECT dtype FROM col_type) IN ('text', 'character varying', 'character', 'uuid', 'name', 'bpchar')
+					THEN MAX(LENGTH(%s::text))
+					ELSE NULL
+				END as max_length
 			FROM %s.%s
-		`, quotedCol, quotedCol, quotedCol, quotedCol, quotedSchema, quotedTable)
+		`, quotedCol, quotedSchema, quotedTable, quotedCol,
+			quotedCol, quotedCol, quotedCol, quotedCol, quotedSchema, quotedTable)
 
 		var s datasource.ColumnStats
 		s.ColumnName = colName
 
 		row := d.pool.QueryRow(ctx, query)
 		if err := row.Scan(&s.RowCount, &s.NonNullCount, &s.DistinctCount, &s.MinLength, &s.MaxLength); err != nil {
-			return nil, fmt.Errorf("analyze column %s: %w", colName, err)
+			// Main query failed - retry with simplified query (no length calculation).
+			// This handles edge cases where pg_typeof or the CTE causes issues.
+			retriedColumns = append(retriedColumns, colName)
+
+			simplifiedQuery := fmt.Sprintf(`
+				SELECT
+					COUNT(*) as row_count,
+					COUNT(%s) as non_null_count,
+					COUNT(DISTINCT %s) as distinct_count
+				FROM %s.%s
+			`, quotedCol, quotedCol, quotedSchema, quotedTable)
+
+			retryRow := d.pool.QueryRow(ctx, simplifiedQuery)
+			if retryErr := retryRow.Scan(&s.RowCount, &s.NonNullCount, &s.DistinctCount); retryErr != nil {
+				// Both queries failed - log warning and use zero values
+				d.logger.Warn("Failed to analyze column stats after retry, using zero values",
+					zap.String("schema", schemaName),
+					zap.String("table", tableName),
+					zap.String("column", colName),
+					zap.Error(err),
+					zap.NamedError("retry_error", retryErr))
+				s.RowCount = 0
+				s.NonNullCount = 0
+				s.DistinctCount = 0
+			}
+			// Length stats are nil for retried columns (simplified query doesn't calculate them)
+			s.MinLength = nil
+			s.MaxLength = nil
 		}
 
 		stats = append(stats, s)
+	}
+
+	// Log summary if any columns needed retry
+	if len(retriedColumns) > 0 {
+		d.logger.Info("Some columns required simplified stats query (no length calculation)",
+			zap.String("schema", schemaName),
+			zap.String("table", tableName),
+			zap.Int("retried_count", len(retriedColumns)),
+			zap.Strings("retried_columns", retriedColumns))
 	}
 
 	return stats, nil

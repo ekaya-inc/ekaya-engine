@@ -727,7 +727,7 @@ func TestSchemaRepository_ListColumnsByTable(t *testing.T) {
 	tc.createTestColumn(ctx, table.ID, "created_at", 3)
 	tc.createTestColumn(ctx, table.ID, "user_id", 2)
 
-	columns, err := tc.repo.ListColumnsByTable(ctx, tc.projectID, table.ID)
+	columns, err := tc.repo.ListColumnsByTable(ctx, tc.projectID, table.ID, false)
 	if err != nil {
 		t.Fatalf("ListColumnsByTable failed: %v", err)
 	}
@@ -741,6 +741,53 @@ func TestSchemaRepository_ListColumnsByTable(t *testing.T) {
 	for i, col := range columns {
 		if col.ColumnName != expectedOrder[i] {
 			t.Errorf("expected column[%d] to be %q, got %q", i, expectedOrder[i], col.ColumnName)
+		}
+	}
+}
+
+func TestSchemaRepository_ListColumnsByTable_SelectedOnly(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	table := tc.createTestTable(ctx, "public", "users_selected")
+	idCol := tc.createTestColumn(ctx, table.ID, "id", 1)
+	tc.createTestColumn(ctx, table.ID, "email", 2) // PII - will be deselected
+	nameCol := tc.createTestColumn(ctx, table.ID, "name", 3)
+	tc.createTestColumn(ctx, table.ID, "password", 4) // PII - will be deselected
+
+	// Mark only id and name as selected
+	if err := tc.repo.UpdateColumnSelection(ctx, tc.projectID, idCol.ID, true); err != nil {
+		t.Fatalf("Failed to select id column: %v", err)
+	}
+	if err := tc.repo.UpdateColumnSelection(ctx, tc.projectID, nameCol.ID, true); err != nil {
+		t.Fatalf("Failed to select name column: %v", err)
+	}
+
+	// With selectedOnly=false, should return all 4 columns
+	allColumns, err := tc.repo.ListColumnsByTable(ctx, tc.projectID, table.ID, false)
+	if err != nil {
+		t.Fatalf("ListColumnsByTable(selectedOnly=false) failed: %v", err)
+	}
+	if len(allColumns) != 4 {
+		t.Errorf("expected 4 columns with selectedOnly=false, got %d", len(allColumns))
+	}
+
+	// With selectedOnly=true, should return only 2 selected columns
+	selectedColumns, err := tc.repo.ListColumnsByTable(ctx, tc.projectID, table.ID, true)
+	if err != nil {
+		t.Fatalf("ListColumnsByTable(selectedOnly=true) failed: %v", err)
+	}
+	if len(selectedColumns) != 2 {
+		t.Errorf("expected 2 columns with selectedOnly=true, got %d", len(selectedColumns))
+	}
+
+	// Verify only selected columns are returned
+	for _, col := range selectedColumns {
+		if col.ColumnName == "email" || col.ColumnName == "password" {
+			t.Errorf("expected PII column %q to be filtered out", col.ColumnName)
 		}
 	}
 }
@@ -770,6 +817,124 @@ func TestSchemaRepository_ListColumnsByDatasource(t *testing.T) {
 	}
 }
 
+func TestSchemaRepository_GetColumnsByTables(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	usersTable := tc.createTestTable(ctx, "public", "users")
+	ordersTable := tc.createTestTable(ctx, "public", "orders")
+
+	tc.createTestColumn(ctx, usersTable.ID, "id", 1)
+	tc.createTestColumn(ctx, usersTable.ID, "name", 2)
+	tc.createTestColumn(ctx, ordersTable.ID, "id", 1)
+	tc.createTestColumn(ctx, ordersTable.ID, "user_id", 2)
+	tc.createTestColumn(ctx, ordersTable.ID, "amount", 3)
+
+	// Get columns for both tables
+	result, err := tc.repo.GetColumnsByTables(ctx, tc.projectID, []string{"users", "orders"}, false)
+	if err != nil {
+		t.Fatalf("GetColumnsByTables failed: %v", err)
+	}
+
+	if len(result) != 2 {
+		t.Errorf("expected 2 tables in result, got %d", len(result))
+	}
+
+	if len(result["users"]) != 2 {
+		t.Errorf("expected 2 columns for users, got %d", len(result["users"]))
+	}
+
+	if len(result["orders"]) != 3 {
+		t.Errorf("expected 3 columns for orders, got %d", len(result["orders"]))
+	}
+
+	// Get columns for single table
+	result, err = tc.repo.GetColumnsByTables(ctx, tc.projectID, []string{"users"}, false)
+	if err != nil {
+		t.Fatalf("GetColumnsByTables (single table) failed: %v", err)
+	}
+
+	if len(result) != 1 {
+		t.Errorf("expected 1 table in result, got %d", len(result))
+	}
+
+	// Empty table list should return empty map
+	result, err = tc.repo.GetColumnsByTables(ctx, tc.projectID, []string{}, false)
+	if err != nil {
+		t.Fatalf("GetColumnsByTables (empty list) failed: %v", err)
+	}
+
+	if len(result) != 0 {
+		t.Errorf("expected 0 tables in result, got %d", len(result))
+	}
+}
+
+func TestSchemaRepository_GetColumnsByTables_SelectedOnly(t *testing.T) {
+	tc := setupSchemaTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	usersTable := tc.createTestTable(ctx, "public", "users")
+	ordersTable := tc.createTestTable(ctx, "public", "orders")
+
+	// Create columns - some will be selected, some deselected (PII)
+	userIdCol := tc.createTestColumn(ctx, usersTable.ID, "id", 1)
+	tc.createTestColumn(ctx, usersTable.ID, "email", 2) // PII - deselected
+	userNameCol := tc.createTestColumn(ctx, usersTable.ID, "name", 3)
+	tc.createTestColumn(ctx, usersTable.ID, "password", 4) // PII - deselected
+
+	orderIdCol := tc.createTestColumn(ctx, ordersTable.ID, "id", 1)
+	orderUserIdCol := tc.createTestColumn(ctx, ordersTable.ID, "user_id", 2)
+	tc.createTestColumn(ctx, ordersTable.ID, "ssn", 3) // PII - deselected
+
+	// Mark non-PII columns as selected
+	for _, col := range []*models.SchemaColumn{userIdCol, userNameCol, orderIdCol, orderUserIdCol} {
+		if err := tc.repo.UpdateColumnSelection(ctx, tc.projectID, col.ID, true); err != nil {
+			t.Fatalf("Failed to select column %s: %v", col.ColumnName, err)
+		}
+	}
+
+	// With selectedOnly=false, should return all columns
+	allResult, err := tc.repo.GetColumnsByTables(ctx, tc.projectID, []string{"users", "orders"}, false)
+	if err != nil {
+		t.Fatalf("GetColumnsByTables(selectedOnly=false) failed: %v", err)
+	}
+
+	if len(allResult["users"]) != 4 {
+		t.Errorf("expected 4 users columns with selectedOnly=false, got %d", len(allResult["users"]))
+	}
+	if len(allResult["orders"]) != 3 {
+		t.Errorf("expected 3 orders columns with selectedOnly=false, got %d", len(allResult["orders"]))
+	}
+
+	// With selectedOnly=true, should return only selected columns (excluding PII)
+	selectedResult, err := tc.repo.GetColumnsByTables(ctx, tc.projectID, []string{"users", "orders"}, true)
+	if err != nil {
+		t.Fatalf("GetColumnsByTables(selectedOnly=true) failed: %v", err)
+	}
+
+	if len(selectedResult["users"]) != 2 {
+		t.Errorf("expected 2 users columns with selectedOnly=true, got %d", len(selectedResult["users"]))
+	}
+	if len(selectedResult["orders"]) != 2 {
+		t.Errorf("expected 2 orders columns with selectedOnly=true, got %d", len(selectedResult["orders"]))
+	}
+
+	// Verify PII columns are NOT returned
+	for tableName, cols := range selectedResult {
+		for _, col := range cols {
+			if col.ColumnName == "email" || col.ColumnName == "password" || col.ColumnName == "ssn" {
+				t.Errorf("PII column %s.%s should be filtered out with selectedOnly=true", tableName, col.ColumnName)
+			}
+		}
+	}
+}
+
 func TestSchemaRepository_SoftDeleteRemovedColumns(t *testing.T) {
 	tc := setupSchemaTest(t)
 	tc.cleanup()
@@ -791,7 +956,7 @@ func TestSchemaRepository_SoftDeleteRemovedColumns(t *testing.T) {
 		t.Errorf("expected 2 columns deleted, got %d", deleted)
 	}
 
-	columns, err := tc.repo.ListColumnsByTable(ctx, tc.projectID, table.ID)
+	columns, err := tc.repo.ListColumnsByTable(ctx, tc.projectID, table.ID, false)
 	if err != nil {
 		t.Fatalf("ListColumnsByTable failed: %v", err)
 	}

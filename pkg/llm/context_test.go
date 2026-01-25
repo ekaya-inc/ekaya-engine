@@ -82,3 +82,27 @@ func TestGetContext_ReturnsCopy(t *testing.T) {
 		t.Errorf("expected original value 'value', got %v", c2["key"])
 	}
 }
+
+func TestWithConversationID_SetsID(t *testing.T) {
+	ctx := context.Background()
+	id := uuid.New()
+
+	ctx = WithConversationID(ctx, id)
+
+	gotID, ok := GetConversationID(ctx)
+	if !ok {
+		t.Fatal("expected conversation ID to be present")
+	}
+	if gotID != id {
+		t.Errorf("expected conversation ID %s, got %s", id, gotID)
+	}
+}
+
+func TestGetConversationID_ReturnsFalseWhenNotSet(t *testing.T) {
+	ctx := context.Background()
+
+	_, ok := GetConversationID(ctx)
+	if ok {
+		t.Error("expected ok to be false when conversation ID not set")
+	}
+}

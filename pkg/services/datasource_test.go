@@ -597,6 +597,14 @@ func (m *mockProjectServiceForDatasource) SetAutoApproveSettings(ctx context.Con
 	return nil
 }
 
+func (m *mockProjectServiceForDatasource) GetOntologySettings(ctx context.Context, projectID uuid.UUID) (*OntologySettings, error) {
+	return &OntologySettings{UseLegacyPatternMatching: true}, nil
+}
+
+func (m *mockProjectServiceForDatasource) SetOntologySettings(ctx context.Context, projectID uuid.UUID, settings *OntologySettings) error {
+	return nil
+}
+
 // TestDatasourceService_Delete_ClearsDefaultDatasourceID verifies that when the default
 // datasource is deleted, the default_datasource_id is cleared so that a new datasource
 // can become the default.

@@ -134,8 +134,8 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 		OrphanTableNames: make([]string, 0),
 	}
 
-	// Phase 1: Get all tables and columns
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
+	// Phase 1: Get all tables and columns (selected tables only)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}
@@ -164,7 +164,7 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 		// Extract row count for use in inner loop (defensive - nil already checked above)
 		tableRowCount := *table.RowCount
 
-		columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID)
+		columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID, false)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list columns for %s: %w", table.TableName, err)
 		}
@@ -372,7 +372,7 @@ func (s *relationshipDiscoveryService) DiscoverRelationships(ctx context.Context
 		}
 
 		// Phase 5: Create verified relationship
-		cardinality := s.inferCardinality(joinAnalysis)
+		cardinality := InferCardinality(joinAnalysis)
 		inferenceMethod := models.InferenceMethodValueOverlap
 
 		rel := &models.SchemaRelationship{
@@ -659,34 +659,6 @@ func normalizeType(t string) string {
 	return t
 }
 
-func (s *relationshipDiscoveryService) inferCardinality(join *datasource.JoinAnalysis) string {
-	if join.SourceMatched == 0 || join.TargetMatched == 0 {
-		return models.CardinalityUnknown
-	}
-
-	// Ratio of join rows to source/target matched
-	sourceRatio := float64(join.JoinCount) / float64(join.SourceMatched)
-	targetRatio := float64(join.JoinCount) / float64(join.TargetMatched)
-
-	// 1:1 - both sides have unique matches
-	if sourceRatio <= CardinalityUniqueThreshold && targetRatio <= CardinalityUniqueThreshold {
-		return models.Cardinality1To1
-	}
-
-	// N:1 - multiple source rows match one target (typical FK)
-	if sourceRatio <= CardinalityUniqueThreshold && targetRatio > CardinalityUniqueThreshold {
-		return models.CardinalityNTo1
-	}
-
-	// 1:N - one source matches multiple targets (reverse FK)
-	if sourceRatio > CardinalityUniqueThreshold && targetRatio <= CardinalityUniqueThreshold {
-		return models.Cardinality1ToN
-	}
-
-	// N:M - many-to-many
-	return models.CardinalityNToM
-}
-
 func (s *relationshipDiscoveryService) recordRejectedCandidate(
 	ctx context.Context,
 	projectID uuid.UUID,
@@ -865,7 +837,7 @@ func (s *relationshipDiscoveryService) findReviewCandidates(
 // If the table has a primary key, only PK columns are returned (more restrictive).
 // If the table has no primary key, all numeric columns are returned.
 func (s *relationshipDiscoveryService) getSourceColumnsForReview(ctx context.Context, projectID uuid.UUID, table *models.SchemaTable) ([]*models.SchemaColumn, error) {
-	columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID)
+	columns, err := s.schemaRepo.ListColumnsByTable(ctx, projectID, table.ID, false)
 	if err != nil {
 		return nil, err
 	}

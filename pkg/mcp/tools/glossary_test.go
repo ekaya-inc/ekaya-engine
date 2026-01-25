@@ -229,6 +229,55 @@ func TestToListGlossaryResponse(t *testing.T) {
 		assert.Equal(t, "User with recent activity", resp.Definition)
 		assert.Nil(t, resp.Aliases)
 	})
+
+	t.Run("term with enrichment status success", func(t *testing.T) {
+		term := &models.BusinessGlossaryTerm{
+			ID:               uuid.New(),
+			ProjectID:        uuid.New(),
+			Term:             "Revenue",
+			Definition:       "Total earned amount",
+			EnrichmentStatus: models.GlossaryEnrichmentSuccess,
+		}
+
+		resp := toListGlossaryResponse(term)
+
+		assert.Equal(t, "Revenue", resp.Term)
+		assert.Equal(t, models.GlossaryEnrichmentSuccess, resp.EnrichmentStatus)
+		assert.Empty(t, resp.EnrichmentError)
+	})
+
+	t.Run("term with enrichment status failed", func(t *testing.T) {
+		term := &models.BusinessGlossaryTerm{
+			ID:               uuid.New(),
+			ProjectID:        uuid.New(),
+			Term:             "Offer Utilization Rate",
+			Definition:       "Percentage of offers used",
+			EnrichmentStatus: models.GlossaryEnrichmentFailed,
+			EnrichmentError:  "LLM returned empty SQL",
+		}
+
+		resp := toListGlossaryResponse(term)
+
+		assert.Equal(t, "Offer Utilization Rate", resp.Term)
+		assert.Equal(t, models.GlossaryEnrichmentFailed, resp.EnrichmentStatus)
+		assert.Equal(t, "LLM returned empty SQL", resp.EnrichmentError)
+	})
+
+	t.Run("term with enrichment status pending", func(t *testing.T) {
+		term := &models.BusinessGlossaryTerm{
+			ID:               uuid.New(),
+			ProjectID:        uuid.New(),
+			Term:             "New Metric",
+			Definition:       "A new metric awaiting enrichment",
+			EnrichmentStatus: models.GlossaryEnrichmentPending,
+		}
+
+		resp := toListGlossaryResponse(term)
+
+		assert.Equal(t, "New Metric", resp.Term)
+		assert.Equal(t, models.GlossaryEnrichmentPending, resp.EnrichmentStatus)
+		assert.Empty(t, resp.EnrichmentError)
+	})
 }
 
 // TestToGetGlossarySQLResponse verifies the model to SQL response conversion.
@@ -246,7 +295,8 @@ WHERE transaction_state = 'completed'`,
 			OutputColumns: []models.OutputColumn{
 				{Name: "revenue", Type: "numeric"},
 			},
-			Aliases: []string{"total_revenue", "earnings"},
+			Aliases:          []string{"total_revenue", "earnings"},
+			EnrichmentStatus: models.GlossaryEnrichmentSuccess,
 		}
 
 		resp := toGetGlossarySQLResponse(term)
@@ -259,6 +309,8 @@ WHERE transaction_state = 'completed'`,
 		assert.Equal(t, "revenue", resp.OutputColumns[0].Name)
 		assert.Equal(t, "numeric", resp.OutputColumns[0].Type)
 		assert.Equal(t, []string{"total_revenue", "earnings"}, resp.Aliases)
+		assert.Equal(t, models.GlossaryEnrichmentSuccess, resp.EnrichmentStatus)
+		assert.Empty(t, resp.EnrichmentError)
 	})
 
 	t.Run("minimal term with only required fields", func(t *testing.T) {
@@ -278,6 +330,25 @@ WHERE transaction_state = 'completed'`,
 		assert.Equal(t, "", resp.BaseTable)
 		assert.Nil(t, resp.OutputColumns)
 		assert.Nil(t, resp.Aliases)
+	})
+
+	t.Run("term with enrichment failure includes error message", func(t *testing.T) {
+		term := &models.BusinessGlossaryTerm{
+			ID:               uuid.New(),
+			ProjectID:        uuid.New(),
+			Term:             "Offer Utilization Rate",
+			Definition:       "Percentage of offers that were used",
+			DefiningSQL:      "", // Empty SQL due to enrichment failure
+			EnrichmentStatus: models.GlossaryEnrichmentFailed,
+			EnrichmentError:  "SQL validation failed: column 'used_count' not found in table 'offers'",
+		}
+
+		resp := toGetGlossarySQLResponse(term)
+
+		assert.Equal(t, "Offer Utilization Rate", resp.Term)
+		assert.Equal(t, "", resp.DefiningSQL)
+		assert.Equal(t, models.GlossaryEnrichmentFailed, resp.EnrichmentStatus)
+		assert.Equal(t, "SQL validation failed: column 'used_count' not found in table 'offers'", resp.EnrichmentError)
 	})
 }
 

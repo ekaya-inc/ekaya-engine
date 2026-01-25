@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 )
@@ -14,11 +15,13 @@ import (
 type SchemaDiscoverer struct {
 	config *Config
 	db     *sql.DB
+	logger *zap.Logger
 }
 
 // NewSchemaDiscoverer creates a new SQL Server schema discoverer.
 // Uses connection manager for connection pooling.
-func NewSchemaDiscoverer(ctx context.Context, cfg *Config, connMgr *datasource.ConnectionManager, projectID, datasourceID uuid.UUID, userID string) (*SchemaDiscoverer, error) {
+// If logger is nil, a no-op logger is used.
+func NewSchemaDiscoverer(ctx context.Context, cfg *Config, connMgr *datasource.ConnectionManager, projectID, datasourceID uuid.UUID, userID string, logger *zap.Logger) (*SchemaDiscoverer, error) {
 	// Extract Azure token from context for user_delegation before validation
 	if cfg.AuthMethod == "user_delegation" {
 		if err := extractAndSetAzureToken(ctx, cfg); err != nil {
@@ -31,6 +34,10 @@ func NewSchemaDiscoverer(ctx context.Context, cfg *Config, connMgr *datasource.C
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
 	// Use the same connection logic as Adapter
 	adapter, err := NewAdapter(ctx, cfg, connMgr, projectID, datasourceID, userID)
 	if err != nil {
@@ -40,6 +47,7 @@ func NewSchemaDiscoverer(ctx context.Context, cfg *Config, connMgr *datasource.C
 	return &SchemaDiscoverer{
 		config: cfg,
 		db:     adapter.DB(),
+		logger: logger,
 	}, nil
 }
 
@@ -198,65 +206,160 @@ func (s *SchemaDiscoverer) SupportsForeignKeys() bool {
 	return true
 }
 
-// AnalyzeColumnStats gathers statistics for columns (for relationship inference).
+// getColumnType queries the data type of a column from SQL Server metadata.
+// Returns the type name (e.g., "varchar", "int", "uniqueidentifier") or empty string if not found.
+func (s *SchemaDiscoverer) getColumnType(ctx context.Context, schemaName, tableName, columnName string) (string, error) {
+	query := `
+		SET NOCOUNT ON;
+		SELECT tp.name
+		FROM sys.columns c
+		INNER JOIN sys.types tp ON c.user_type_id = tp.user_type_id
+		WHERE c.object_id = OBJECT_ID(QUOTENAME(@schema) + N'.' + QUOTENAME(@table))
+		AND c.name = @column
+	`
+	var typeName string
+	err := s.db.QueryRowContext(ctx, query,
+		sql.Named("schema", schemaName),
+		sql.Named("table", tableName),
+		sql.Named("column", columnName),
+	).Scan(&typeName)
+	if err != nil {
+		return "", err
+	}
+	return typeName, nil
+}
+
+// AnalyzeColumnStats gathers statistics for columns.
+// Continues processing other columns when one fails (e.g., type cast errors).
+// If the main query fails, retries with a simplified query (without length calculation).
+// Failed columns are included in results with zero/nil stats.
 func (s *SchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, tableName string, columnNames []string) ([]datasource.ColumnStats, error) {
 	if len(columnNames) == 0 {
-		return []datasource.ColumnStats{}, nil
+		return nil, nil
 	}
 
-	// Build dynamic SQL for multi-column stats query
-	// This is more efficient than separate queries per column
-	var selectClauses []string
-	for i, colName := range columnNames {
-		selectClauses = append(selectClauses, fmt.Sprintf(
-			`'%s' AS col%d_name, COUNT(*) AS col%d_count, COUNT(%s) AS col%d_nonnull, COUNT(DISTINCT %s) AS col%d_distinct`,
-			escapeStringLiteral(colName), i, i,
-			quoteName(colName), i,
-			quoteName(colName), i,
-		))
-	}
+	fullyQualifiedTable := buildFullyQualifiedName(schemaName, tableName)
 
-	query := fmt.Sprintf(`
-	SET NOCOUNT ON;
-	SELECT %s
-	FROM %s WITH (NOLOCK)
-	`, selectClauses[0], buildFullyQualifiedName(schemaName, tableName))
-
-	rows, err := s.db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("query column stats: %w", err)
-	}
-	defer rows.Close()
-
-	if !rows.Next() {
-		return nil, fmt.Errorf("no stats returned")
-	}
-
-	// Scan results into stats
 	var stats []datasource.ColumnStats
-	for i, colName := range columnNames {
+	var retriedColumns []string
+	for _, colName := range columnNames {
+		quotedCol := quoteName(colName)
+
 		var stat datasource.ColumnStats
 		stat.ColumnName = colName
 
-		// Skip column name (already set)
-		var tempName string
-		scanArgs := []any{&tempName, &stat.RowCount, &stat.NonNullCount, &stat.DistinctCount}
+		// Query column type from metadata to determine if length calculation is appropriate.
+		// This is more reliable than SQL_VARIANT_PROPERTY which only works on sql_variant columns.
+		colType, typeErr := s.getColumnType(ctx, schemaName, tableName, colName)
+		if typeErr != nil {
+			// Column type lookup failed (column may not exist) - use simplified query
+			s.logger.Debug("Could not determine column type, using simplified stats query",
+				zap.String("schema", schemaName),
+				zap.String("table", tableName),
+				zap.String("column", colName),
+				zap.Error(typeErr))
+		}
 
-		// For first column, scan all args
-		if i == 0 {
-			if err := rows.Scan(scanArgs...); err != nil {
-				return nil, fmt.Errorf("scan stats for column %s: %w", colName, err)
+		var query string
+		if typeErr == nil && isTextCompatibleType(colType) {
+			// Text-compatible type: include length calculation
+			query = fmt.Sprintf(`
+				SET NOCOUNT ON;
+				SELECT
+					COUNT(*) as row_count,
+					COUNT(%s) as non_null_count,
+					COUNT(DISTINCT %s) as distinct_count,
+					MIN(LEN(CAST(%s AS NVARCHAR(MAX)))) as min_length,
+					MAX(LEN(CAST(%s AS NVARCHAR(MAX)))) as max_length
+				FROM %s WITH (NOLOCK)
+			`, quotedCol, quotedCol, quotedCol, quotedCol, fullyQualifiedTable)
+
+			row := s.db.QueryRowContext(ctx, query)
+			if err := row.Scan(&stat.RowCount, &stat.NonNullCount, &stat.DistinctCount, &stat.MinLength, &stat.MaxLength); err != nil {
+				// Query failed - retry with simplified query
+				retriedColumns = append(retriedColumns, colName)
+				stat = s.analyzeColumnStatsSimplified(ctx, schemaName, tableName, colName, fullyQualifiedTable, err)
 			}
+		} else {
+			// Non-text type or type lookup failed: use simplified query (no length calculation)
+			query = fmt.Sprintf(`
+				SET NOCOUNT ON;
+				SELECT
+					COUNT(*) as row_count,
+					COUNT(%s) as non_null_count,
+					COUNT(DISTINCT %s) as distinct_count
+				FROM %s WITH (NOLOCK)
+			`, quotedCol, quotedCol, fullyQualifiedTable)
+
+			row := s.db.QueryRowContext(ctx, query)
+			if err := row.Scan(&stat.RowCount, &stat.NonNullCount, &stat.DistinctCount); err != nil {
+				// Query failed - log warning and use zero values
+				s.logger.Warn("Failed to analyze column stats, using zero values",
+					zap.String("schema", schemaName),
+					zap.String("table", tableName),
+					zap.String("column", colName),
+					zap.Error(err))
+				stat.RowCount = 0
+				stat.NonNullCount = 0
+				stat.DistinctCount = 0
+			}
+			// Length stats are nil for non-text types
+			stat.MinLength = nil
+			stat.MaxLength = nil
 		}
 
 		stats = append(stats, stat)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate stats rows: %w", err)
+	// Log summary if any columns needed retry
+	if len(retriedColumns) > 0 {
+		s.logger.Info("Some columns required simplified stats query (no length calculation)",
+			zap.String("schema", schemaName),
+			zap.String("table", tableName),
+			zap.Int("retried_count", len(retriedColumns)),
+			zap.Strings("retried_columns", retriedColumns))
 	}
 
 	return stats, nil
+}
+
+// analyzeColumnStatsSimplified runs a simplified stats query without length calculation.
+// Used as a fallback when the main query fails.
+func (s *SchemaDiscoverer) analyzeColumnStatsSimplified(ctx context.Context, schemaName, tableName, colName, fullyQualifiedTable string, originalErr error) datasource.ColumnStats {
+	quotedCol := quoteName(colName)
+
+	stat := datasource.ColumnStats{
+		ColumnName: colName,
+	}
+
+	simplifiedQuery := fmt.Sprintf(`
+		SET NOCOUNT ON;
+		SELECT
+			COUNT(*) as row_count,
+			COUNT(%s) as non_null_count,
+			COUNT(DISTINCT %s) as distinct_count
+		FROM %s WITH (NOLOCK)
+	`, quotedCol, quotedCol, fullyQualifiedTable)
+
+	row := s.db.QueryRowContext(ctx, simplifiedQuery)
+	if retryErr := row.Scan(&stat.RowCount, &stat.NonNullCount, &stat.DistinctCount); retryErr != nil {
+		// Both queries failed - log warning and use zero values
+		s.logger.Warn("Failed to analyze column stats after retry, using zero values",
+			zap.String("schema", schemaName),
+			zap.String("table", tableName),
+			zap.String("column", colName),
+			zap.Error(originalErr),
+			zap.NamedError("retry_error", retryErr))
+		stat.RowCount = 0
+		stat.NonNullCount = 0
+		stat.DistinctCount = 0
+	}
+
+	// Length stats are nil for retried columns
+	stat.MinLength = nil
+	stat.MaxLength = nil
+
+	return stat
 }
 
 // CheckValueOverlap checks value overlap between two columns (for relationship inference).

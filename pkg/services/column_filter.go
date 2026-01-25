@@ -26,10 +26,13 @@ type ColumnFilterResult struct {
 
 // FilterEntityCandidates applies heuristics to identify entity candidate columns.
 // Returns separate lists of candidates and excluded columns with reasons.
+// When useLegacyPatternMatching is true, columns are filtered based on naming patterns
+// (e.g., _at suffix, is_ prefix). When false, filtering relies solely on data-based analysis.
 func FilterEntityCandidates(
 	columns []*models.SchemaColumn,
 	tableByID map[string]*models.SchemaTable,
 	statsByTableColumn map[string]datasource.ColumnStats,
+	useLegacyPatternMatching bool,
 	logger *zap.Logger,
 ) (candidates []ColumnFilterResult, excluded []ColumnFilterResult) {
 	candidates = make([]ColumnFilterResult, 0)
@@ -75,7 +78,9 @@ func FilterEntityCandidates(
 			continue
 		}
 
-		if isExcludedName(col.ColumnName) {
+		// Exclude names unlikely to be entity references
+		// Only apply when legacy pattern matching is enabled
+		if useLegacyPatternMatching && isExcludedName(col.ColumnName) {
 			result.IsCandidate = false
 			result.Reason = fmt.Sprintf("excluded name pattern (%s)", col.ColumnName)
 			excluded = append(excluded, result)

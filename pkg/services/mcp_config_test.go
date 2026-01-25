@@ -192,6 +192,14 @@ func (m *mockProjectServiceForMCP) SetAutoApproveSettings(ctx context.Context, p
 	return nil
 }
 
+func (m *mockProjectServiceForMCP) GetOntologySettings(ctx context.Context, projectID uuid.UUID) (*OntologySettings, error) {
+	return &OntologySettings{UseLegacyPatternMatching: true}, nil
+}
+
+func (m *mockProjectServiceForMCP) SetOntologySettings(ctx context.Context, projectID uuid.UUID, settings *OntologySettings) error {
+	return nil
+}
+
 // Tests
 
 func TestMCPConfigService_Get_ReturnsStoredConfigState(t *testing.T) {

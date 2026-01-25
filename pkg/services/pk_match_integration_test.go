@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -155,9 +156,14 @@ func TestPKMatchDiscovery_ChannelsOwnerToUsersUserID(t *testing.T) {
 		schemaDiscoverer: &pkMatchRealSchemaDiscoverer{pool: testDB.Pool},
 	}
 
+	mockProjectService := &pkMatchMockProjectService{
+		ontologySettings: &OntologySettings{UseLegacyPatternMatching: true},
+	}
+
 	// Create deterministic relationship service
 	detRelService := NewDeterministicRelationshipService(
 		mockDS,
+		mockProjectService,
 		adapterFactory,
 		ontologyRepo,
 		entityRepo,
@@ -338,6 +344,7 @@ func importSchemaWithStats(
 			SchemaName:   schemaName,
 			TableName:    tableName,
 			RowCount:     &rowCount,
+			IsSelected:   true, // Must be selected for PK-match discovery
 		}
 
 		if err := schemaRepo.UpsertTable(ctx, table); err != nil {
@@ -517,6 +524,68 @@ func (m *pkMatchMockDatasourceService) SetDefault(ctx context.Context, projectID
 }
 
 func (m *pkMatchMockDatasourceService) Delete(ctx context.Context, datasourceID uuid.UUID) error {
+	return nil
+}
+
+type pkMatchMockProjectService struct {
+	ontologySettings *OntologySettings
+}
+
+func (m *pkMatchMockProjectService) Provision(ctx context.Context, projectID uuid.UUID, name string, params map[string]interface{}) (*ProvisionResult, error) {
+	return nil, nil
+}
+
+func (m *pkMatchMockProjectService) ProvisionFromClaims(ctx context.Context, claims *auth.Claims) (*ProvisionResult, error) {
+	return nil, nil
+}
+
+func (m *pkMatchMockProjectService) GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error) {
+	return nil, nil
+}
+
+func (m *pkMatchMockProjectService) GetByIDWithoutTenant(ctx context.Context, id uuid.UUID) (*models.Project, error) {
+	return nil, nil
+}
+
+func (m *pkMatchMockProjectService) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (m *pkMatchMockProjectService) GetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+
+func (m *pkMatchMockProjectService) SetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID, datasourceID uuid.UUID) error {
+	return nil
+}
+
+func (m *pkMatchMockProjectService) SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string) {
+}
+
+func (m *pkMatchMockProjectService) GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error) {
+	return "", nil
+}
+
+func (m *pkMatchMockProjectService) UpdateAuthServerURL(ctx context.Context, projectID uuid.UUID, authServerURL string) error {
+	return nil
+}
+
+func (m *pkMatchMockProjectService) GetAutoApproveSettings(ctx context.Context, projectID uuid.UUID) (*AutoApproveSettings, error) {
+	return nil, nil
+}
+
+func (m *pkMatchMockProjectService) SetAutoApproveSettings(ctx context.Context, projectID uuid.UUID, settings *AutoApproveSettings) error {
+	return nil
+}
+
+func (m *pkMatchMockProjectService) GetOntologySettings(ctx context.Context, projectID uuid.UUID) (*OntologySettings, error) {
+	if m.ontologySettings != nil {
+		return m.ontologySettings, nil
+	}
+	return &OntologySettings{UseLegacyPatternMatching: true}, nil
+}
+
+func (m *pkMatchMockProjectService) SetOntologySettings(ctx context.Context, projectID uuid.UUID, settings *OntologySettings) error {
 	return nil
 }
 

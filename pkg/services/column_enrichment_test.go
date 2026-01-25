@@ -226,7 +226,7 @@ type testColEnrichmentSchemaRepo struct {
 	columnsByTable map[string][]*models.SchemaColumn
 }
 
-func (r *testColEnrichmentSchemaRepo) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
+func (r *testColEnrichmentSchemaRepo) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error) {
 	result := make(map[string][]*models.SchemaColumn)
 	for _, tableName := range tableNames {
 		if cols, ok := r.columnsByTable[tableName]; ok {
@@ -268,7 +268,7 @@ func (r *testColEnrichmentSchemaRepo) UpdateTableMetadata(ctx context.Context, p
 	return nil
 }
 
-func (r *testColEnrichmentSchemaRepo) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+func (r *testColEnrichmentSchemaRepo) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
 
@@ -2157,101 +2157,6 @@ func TestColumnEnrichmentService_toEnumValues(t *testing.T) {
 			}
 		})
 	}
-}
-
-// testEnumDefProjectRepo is a mock project repository for testing enum definition loading
-type testEnumDefProjectRepo struct {
-	project *models.Project
-}
-
-func (r *testEnumDefProjectRepo) Create(ctx context.Context, project *models.Project) error {
-	return nil
-}
-
-func (r *testEnumDefProjectRepo) Get(ctx context.Context, id uuid.UUID) (*models.Project, error) {
-	return r.project, nil
-}
-
-func (r *testEnumDefProjectRepo) Update(ctx context.Context, project *models.Project) error {
-	return nil
-}
-
-func (r *testEnumDefProjectRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	return nil
-}
-
-// TestColumnEnrichmentService_loadEnumDefinitions tests loading enum definitions
-// from project configuration.
-func TestColumnEnrichmentService_loadEnumDefinitions(t *testing.T) {
-	projectID := uuid.New()
-
-	t.Run("no_project_repo", func(t *testing.T) {
-		service := &columnEnrichmentService{
-			projectRepo: nil,
-			logger:      zap.NewNop(),
-		}
-
-		result := service.loadEnumDefinitions(context.Background(), projectID)
-		assert.Nil(t, result)
-	})
-
-	t.Run("project_without_parameters", func(t *testing.T) {
-		projectRepo := &testEnumDefProjectRepo{
-			project: &models.Project{
-				ID:         projectID,
-				Name:       "Test Project",
-				Parameters: nil,
-			},
-		}
-
-		service := &columnEnrichmentService{
-			projectRepo: projectRepo,
-			logger:      zap.NewNop(),
-		}
-
-		result := service.loadEnumDefinitions(context.Background(), projectID)
-		assert.Nil(t, result)
-	})
-
-	t.Run("project_without_enums_path", func(t *testing.T) {
-		projectRepo := &testEnumDefProjectRepo{
-			project: &models.Project{
-				ID:   projectID,
-				Name: "Test Project",
-				Parameters: map[string]interface{}{
-					"some_other_param": "value",
-				},
-			},
-		}
-
-		service := &columnEnrichmentService{
-			projectRepo: projectRepo,
-			logger:      zap.NewNop(),
-		}
-
-		result := service.loadEnumDefinitions(context.Background(), projectID)
-		assert.Nil(t, result)
-	})
-
-	t.Run("invalid_file_path", func(t *testing.T) {
-		projectRepo := &testEnumDefProjectRepo{
-			project: &models.Project{
-				ID:   projectID,
-				Name: "Test Project",
-				Parameters: map[string]interface{}{
-					"enums_path": "/nonexistent/path/enums.yaml",
-				},
-			},
-		}
-
-		service := &columnEnrichmentService{
-			projectRepo: projectRepo,
-			logger:      zap.NewNop(),
-		}
-
-		result := service.loadEnumDefinitions(context.Background(), projectID)
-		assert.Nil(t, result)
-	})
 }
 
 // TestColumnEnrichmentService_convertToColumnDetails_WithEnumDefinitions tests that

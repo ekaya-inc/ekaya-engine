@@ -117,10 +117,6 @@ func (m *mockKnowledgeServiceUnit) Delete(ctx context.Context, id uuid.UUID) err
 	return nil
 }
 
-func (m *mockKnowledgeServiceUnit) SeedKnowledgeFromFile(ctx context.Context, projectID uuid.UUID) (int, error) {
-	return 0, nil
-}
-
 // ============================================================================
 // Initialize Tests
 // ============================================================================

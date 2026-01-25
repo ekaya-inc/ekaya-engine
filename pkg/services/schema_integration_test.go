@@ -375,7 +375,7 @@ func TestSchemaService_SaveSelections_Integration(t *testing.T) {
 	}
 
 	// Verify column selections
-	usersColumns, err := tc.repo.ListColumnsByTable(ctx, tc.projectID, usersTable.ID)
+	usersColumns, err := tc.repo.ListColumnsByTable(ctx, tc.projectID, usersTable.ID, false)
 	if err != nil {
 		t.Fatalf("ListColumnsByTable failed: %v", err)
 	}
@@ -433,7 +433,7 @@ func TestSchemaService_SaveSelections_Deselect_Integration(t *testing.T) {
 	}
 
 	// Verify column deselected
-	columns, err := tc.repo.ListColumnsByTable(ctx, tc.projectID, table.ID)
+	columns, err := tc.repo.ListColumnsByTable(ctx, tc.projectID, table.ID, false)
 	if err != nil {
 		t.Fatalf("ListColumnsByTable failed: %v", err)
 	}
@@ -706,12 +706,4 @@ func TestSchemaService_GetDatasourceSchemaForPrompt_Empty_Integration(t *testing
 	if strings.Contains(prompt, "RELATIONSHIPS:") {
 		t.Error("expected prompt to NOT contain 'RELATIONSHIPS:' when empty")
 	}
-}
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-func ptr[T any](v T) *T {
-	return &v
 }

@@ -50,8 +50,8 @@ func setupSchemaDiscovererTest(t *testing.T) *schemaDiscovererTestContext {
 		SSLMode:  "disable",
 	}
 
-	// Pass nil for connection manager and zero IDs for unmanaged pool (test mode)
-	discoverer, err := NewSchemaDiscoverer(ctx, cfg, nil, uuid.Nil, uuid.Nil, "")
+	// Pass nil for connection manager, zero IDs, and nil logger for unmanaged pool (test mode)
+	discoverer, err := NewSchemaDiscoverer(ctx, cfg, nil, uuid.Nil, uuid.Nil, "", nil)
 	if err != nil {
 		t.Fatalf("failed to create schema discoverer: %v", err)
 	}
@@ -423,6 +423,279 @@ func TestSchemaDiscoverer_AnalyzeColumnStats_EmptyList(t *testing.T) {
 	}
 }
 
+func TestSchemaDiscoverer_AnalyzeColumnStats_PartialFailure(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// Create a temporary table with valid columns
+	setupSQL := `
+		CREATE TEMP TABLE test_partial_failure (
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL
+		);
+		INSERT INTO test_partial_failure (name) VALUES ('alice'), ('bob'), ('charlie');
+	`
+
+	_, err := tc.discoverer.pool.Exec(ctx, setupSQL)
+	if err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+
+	// Request stats for columns including a nonexistent one.
+	// This simulates the scenario where a column might fail due to permissions, type issues, etc.
+	// The function should:
+	// 1. Try the main query (with pg_typeof/length detection) - will fail for nonexistent column
+	// 2. Retry with simplified query (just COUNT stats) - will also fail for nonexistent column
+	// 3. Continue processing remaining columns after both queries fail
+	columnNames := []string{"id", "nonexistent_column", "name"}
+	stats, err := tc.discoverer.AnalyzeColumnStats(ctx, "pg_temp", "test_partial_failure", columnNames)
+
+	// Should NOT return an error - partial failures are handled gracefully
+	if err != nil {
+		t.Fatalf("AnalyzeColumnStats should handle partial failures, got error: %v", err)
+	}
+
+	// Should return stats for all requested columns
+	if len(stats) != 3 {
+		t.Fatalf("expected 3 stat results, got %d", len(stats))
+	}
+
+	// Verify column names are preserved in order
+	if stats[0].ColumnName != "id" {
+		t.Errorf("expected first column to be 'id', got %q", stats[0].ColumnName)
+	}
+	if stats[1].ColumnName != "nonexistent_column" {
+		t.Errorf("expected second column to be 'nonexistent_column', got %q", stats[1].ColumnName)
+	}
+	if stats[2].ColumnName != "name" {
+		t.Errorf("expected third column to be 'name', got %q", stats[2].ColumnName)
+	}
+
+	// Verify id column has accurate stats (3 rows, 3 distinct)
+	if stats[0].RowCount != 3 {
+		t.Errorf("expected id row count 3, got %d", stats[0].RowCount)
+	}
+	if stats[0].DistinctCount != 3 {
+		t.Errorf("expected id distinct count 3, got %d", stats[0].DistinctCount)
+	}
+
+	// Verify nonexistent_column has zero stats (failed to analyze)
+	if stats[1].RowCount != 0 {
+		t.Errorf("expected nonexistent_column row count 0, got %d", stats[1].RowCount)
+	}
+	if stats[1].DistinctCount != 0 {
+		t.Errorf("expected nonexistent_column distinct count 0, got %d", stats[1].DistinctCount)
+	}
+	if stats[1].MinLength != nil {
+		t.Errorf("expected nonexistent_column min_length nil, got %d", *stats[1].MinLength)
+	}
+	if stats[1].MaxLength != nil {
+		t.Errorf("expected nonexistent_column max_length nil, got %d", *stats[1].MaxLength)
+	}
+
+	// Verify name column still has accurate stats (processed after the failure)
+	if stats[2].RowCount != 3 {
+		t.Errorf("expected name row count 3, got %d", stats[2].RowCount)
+	}
+	if stats[2].DistinctCount != 3 {
+		t.Errorf("expected name distinct count 3, got %d", stats[2].DistinctCount)
+	}
+}
+
+func TestSchemaDiscoverer_AnalyzeColumnStats_NonTextTypes(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// Create a temporary table with non-text column types that would fail ::text casting.
+	// Array columns cannot be cast to text with LENGTH() in PostgreSQL.
+	setupSQL := `
+		CREATE TEMP TABLE test_nonttext_types (
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL,
+			tags TEXT[] NOT NULL,
+			data BYTEA,
+			num INTEGER NOT NULL
+		);
+		INSERT INTO test_nonttext_types (name, tags, data, num)
+		VALUES
+			('alice', ARRAY['a', 'b'], E'\\xDEADBEEF', 42),
+			('bob', ARRAY['c'], E'\\xCAFE', 100);
+	`
+
+	_, err := tc.discoverer.pool.Exec(ctx, setupSQL)
+	if err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+
+	// Request stats for all columns including array and bytea types
+	columnNames := []string{"id", "name", "tags", "data", "num"}
+	stats, err := tc.discoverer.AnalyzeColumnStats(ctx, "pg_temp", "test_nonttext_types", columnNames)
+
+	// Should NOT return an error - non-text types should be handled gracefully
+	if err != nil {
+		t.Fatalf("AnalyzeColumnStats should handle non-text types, got error: %v", err)
+	}
+
+	if len(stats) != 5 {
+		t.Fatalf("expected 5 stat results, got %d", len(stats))
+	}
+
+	// Verify all columns have correct basic stats (row_count, distinct_count)
+	for _, s := range stats {
+		if s.RowCount != 2 {
+			t.Errorf("column %s: expected row count 2, got %d", s.ColumnName, s.RowCount)
+		}
+		// All columns in our test data have 2 distinct values
+		if s.DistinctCount != 2 {
+			t.Errorf("column %s: expected distinct count 2, got %d", s.ColumnName, s.DistinctCount)
+		}
+	}
+
+	// Verify text column has length stats
+	nameStats := stats[1] // name column
+	if nameStats.ColumnName != "name" {
+		t.Fatalf("expected second column to be 'name', got %q", nameStats.ColumnName)
+	}
+	if nameStats.MinLength == nil {
+		t.Error("expected text column 'name' to have min_length, got nil")
+	} else if *nameStats.MinLength != 3 { // "bob" = 3
+		t.Errorf("expected name min_length 3, got %d", *nameStats.MinLength)
+	}
+	if nameStats.MaxLength == nil {
+		t.Error("expected text column 'name' to have max_length, got nil")
+	} else if *nameStats.MaxLength != 5 { // "alice" = 5
+		t.Errorf("expected name max_length 5, got %d", *nameStats.MaxLength)
+	}
+
+	// Verify array column has NULL length stats (not a type cast error)
+	tagsStats := stats[2] // tags column (TEXT[])
+	if tagsStats.ColumnName != "tags" {
+		t.Fatalf("expected third column to be 'tags', got %q", tagsStats.ColumnName)
+	}
+	if tagsStats.MinLength != nil {
+		t.Errorf("expected array column 'tags' to have nil min_length, got %d", *tagsStats.MinLength)
+	}
+	if tagsStats.MaxLength != nil {
+		t.Errorf("expected array column 'tags' to have nil max_length, got %d", *tagsStats.MaxLength)
+	}
+
+	// Verify bytea column has NULL length stats
+	dataStats := stats[3] // data column (BYTEA)
+	if dataStats.ColumnName != "data" {
+		t.Fatalf("expected fourth column to be 'data', got %q", dataStats.ColumnName)
+	}
+	if dataStats.MinLength != nil {
+		t.Errorf("expected bytea column 'data' to have nil min_length, got %d", *dataStats.MinLength)
+	}
+	if dataStats.MaxLength != nil {
+		t.Errorf("expected bytea column 'data' to have nil max_length, got %d", *dataStats.MaxLength)
+	}
+
+	// Verify integer column has NULL length stats
+	numStats := stats[4] // num column (INTEGER)
+	if numStats.ColumnName != "num" {
+		t.Fatalf("expected fifth column to be 'num', got %q", numStats.ColumnName)
+	}
+	if numStats.MinLength != nil {
+		t.Errorf("expected integer column 'num' to have nil min_length, got %d", *numStats.MinLength)
+	}
+	if numStats.MaxLength != nil {
+		t.Errorf("expected integer column 'num' to have nil max_length, got %d", *numStats.MaxLength)
+	}
+}
+
+func TestSchemaDiscoverer_AnalyzeColumnStats_RetryWithSimplifiedQuery(t *testing.T) {
+	tc := setupSchemaDiscovererTest(t)
+	ctx := context.Background()
+
+	// This test verifies the retry mechanism works.
+	// We create a scenario where the main query works but a nonexistent column triggers retry.
+	// Both valid and invalid columns are processed, verifying:
+	// 1. Valid columns get full stats
+	// 2. Invalid columns trigger retry (both queries fail) and get zero values
+	// 3. Processing continues after failures
+
+	setupSQL := `
+		CREATE TEMP TABLE test_retry_behavior (
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL,
+			count INTEGER NOT NULL
+		);
+		INSERT INTO test_retry_behavior (name, count) VALUES
+			('alice', 10),
+			('bob', 20),
+			('charlie', 30);
+	`
+
+	_, err := tc.discoverer.pool.Exec(ctx, setupSQL)
+	if err != nil {
+		t.Fatalf("failed to create test table: %v", err)
+	}
+
+	// Mix of valid columns and invalid columns to test retry behavior
+	// The nonexistent column will fail both main and simplified queries
+	columnNames := []string{"id", "invalid_col_1", "name", "invalid_col_2", "count"}
+	stats, err := tc.discoverer.AnalyzeColumnStats(ctx, "pg_temp", "test_retry_behavior", columnNames)
+
+	if err != nil {
+		t.Fatalf("AnalyzeColumnStats should not return error, got: %v", err)
+	}
+
+	if len(stats) != 5 {
+		t.Fatalf("expected 5 stat results, got %d", len(stats))
+	}
+
+	// Verify valid columns have correct stats
+	// id column (index 0)
+	if stats[0].ColumnName != "id" {
+		t.Errorf("expected column 0 to be 'id', got %q", stats[0].ColumnName)
+	}
+	if stats[0].RowCount != 3 || stats[0].DistinctCount != 3 {
+		t.Errorf("id column: expected row_count=3, distinct_count=3, got %d, %d",
+			stats[0].RowCount, stats[0].DistinctCount)
+	}
+
+	// invalid_col_1 (index 1) - should have zero values after retry fails
+	if stats[1].ColumnName != "invalid_col_1" {
+		t.Errorf("expected column 1 to be 'invalid_col_1', got %q", stats[1].ColumnName)
+	}
+	if stats[1].RowCount != 0 || stats[1].DistinctCount != 0 {
+		t.Errorf("invalid_col_1: expected zero values after retry, got row_count=%d, distinct_count=%d",
+			stats[1].RowCount, stats[1].DistinctCount)
+	}
+
+	// name column (index 2) - should still have correct stats after previous failure
+	if stats[2].ColumnName != "name" {
+		t.Errorf("expected column 2 to be 'name', got %q", stats[2].ColumnName)
+	}
+	if stats[2].RowCount != 3 || stats[2].DistinctCount != 3 {
+		t.Errorf("name column: expected row_count=3, distinct_count=3, got %d, %d",
+			stats[2].RowCount, stats[2].DistinctCount)
+	}
+	// Text column should have length stats
+	if stats[2].MinLength == nil || stats[2].MaxLength == nil {
+		t.Error("name column should have length stats")
+	}
+
+	// invalid_col_2 (index 3) - should have zero values after retry fails
+	if stats[3].ColumnName != "invalid_col_2" {
+		t.Errorf("expected column 3 to be 'invalid_col_2', got %q", stats[3].ColumnName)
+	}
+	if stats[3].RowCount != 0 || stats[3].DistinctCount != 0 {
+		t.Errorf("invalid_col_2: expected zero values after retry, got row_count=%d, distinct_count=%d",
+			stats[3].RowCount, stats[3].DistinctCount)
+	}
+
+	// count column (index 4) - should still have correct stats after previous failures
+	if stats[4].ColumnName != "count" {
+		t.Errorf("expected column 4 to be 'count', got %q", stats[4].ColumnName)
+	}
+	if stats[4].RowCount != 3 || stats[4].DistinctCount != 3 {
+		t.Errorf("count column: expected row_count=3, distinct_count=3, got %d, %d",
+			stats[4].RowCount, stats[4].DistinctCount)
+	}
+}
+
 func TestSchemaDiscoverer_CheckValueOverlap(t *testing.T) {
 	tc := setupSchemaDiscovererTest(t)
 	ctx := context.Background()
@@ -611,8 +884,8 @@ func TestSchemaDiscoverer_Close(t *testing.T) {
 		SSLMode:  "disable",
 	}
 
-	// Pass nil for connection manager and zero IDs for unmanaged pool (test mode)
-	discoverer, err := NewSchemaDiscoverer(ctx, cfg, nil, uuid.Nil, uuid.Nil, "")
+	// Pass nil for connection manager, zero IDs, and nil logger for unmanaged pool (test mode)
+	discoverer, err := NewSchemaDiscoverer(ctx, cfg, nil, uuid.Nil, uuid.Nil, "", nil)
 	if err != nil {
 		t.Fatalf("failed to create discoverer: %v", err)
 	}
