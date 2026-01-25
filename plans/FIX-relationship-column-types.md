@@ -1,7 +1,7 @@
 # FIX: Add Column Types to Entity Relationships
 
 **Priority:** 7 (Low)
-**Status:** Not Started
+**Status:** In Progress
 **Parent:** PLAN-ontology-next.md
 **Design Reference:** FIX-add-column-type-to-entity-relationships.md (archived)
 
@@ -15,7 +15,7 @@ Add foreign keys from `engine_entity_relationships` to `engine_schema_columns` f
 
 ## Implementation
 
-### Step 1: Migration
+### Step 1: Migration ✓
 
 ```sql
 ALTER TABLE engine_entity_relationships
