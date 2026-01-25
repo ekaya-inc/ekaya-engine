@@ -20,6 +20,7 @@ type knowledgeTestContext struct {
 	repo       KnowledgeRepository
 	projectID  uuid.UUID
 	ontologyID uuid.UUID
+	testUserID uuid.UUID // User ID for provenance context
 }
 
 // setupKnowledgeTest initializes the test context with shared testcontainer.
@@ -31,6 +32,7 @@ func setupKnowledgeTest(t *testing.T) *knowledgeTestContext {
 		repo:       NewKnowledgeRepository(),
 		projectID:  uuid.MustParse("00000000-0000-0000-0000-000000000043"),
 		ontologyID: uuid.MustParse("00000000-0000-0000-0000-000000000143"),
+		testUserID: uuid.MustParse("00000000-0000-0000-0000-000000000046"), // Test user for provenance
 	}
 	tc.ensureTestProject()
 	tc.ensureTestOntology()
@@ -91,8 +93,13 @@ func (tc *knowledgeTestContext) cleanup() {
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_project_knowledge WHERE project_id = $1", tc.projectID)
 }
 
-// createTestContext returns a context with tenant scope.
+// createTestContext returns a context with tenant scope and manual provenance.
 func (tc *knowledgeTestContext) createTestContext() (context.Context, func()) {
+	return tc.createTestContextWithSource(models.SourceManual)
+}
+
+// createTestContextWithSource returns a context with tenant scope and specified provenance source.
+func (tc *knowledgeTestContext) createTestContextWithSource(source models.ProvenanceSource) (context.Context, func()) {
 	tc.t.Helper()
 	ctx := context.Background()
 	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
@@ -100,6 +107,10 @@ func (tc *knowledgeTestContext) createTestContext() (context.Context, func()) {
 		tc.t.Fatalf("failed to create tenant scope: %v", err)
 	}
 	ctx = database.SetTenantScope(ctx, scope)
+	ctx = models.WithProvenance(ctx, models.ProvenanceContext{
+		Source: source,
+		UserID: tc.testUserID,
+	})
 	return ctx, func() { scope.Close() }
 }
 
@@ -665,5 +676,285 @@ func TestKnowledgeRepository_NoTenantScope(t *testing.T) {
 	err = tc.repo.Delete(ctx, uuid.New())
 	if err == nil {
 		t.Error("expected error for Delete without tenant scope")
+	}
+}
+
+// ============================================================================
+// Provenance Tests
+// ============================================================================
+
+func TestKnowledgeRepository_Upsert_Provenance_Create(t *testing.T) {
+	tc := setupKnowledgeTest(t)
+	tc.cleanup()
+
+	// Test with manual provenance
+	ctx, cleanup := tc.createTestContextWithSource(models.SourceManual)
+	defer cleanup()
+
+	fact := &models.KnowledgeFact{
+		ProjectID:  tc.projectID,
+		OntologyID: &tc.ontologyID,
+		FactType:   models.FactTypeTerminology,
+		Key:        "provenance_test",
+		Value:      "Testing provenance on create",
+	}
+
+	err := tc.repo.Upsert(ctx, fact)
+	if err != nil {
+		t.Fatalf("Upsert failed: %v", err)
+	}
+
+	// Verify Source was set from context
+	if fact.Source != "manual" {
+		t.Errorf("expected Source 'manual', got %q", fact.Source)
+	}
+	// Verify CreatedBy was set from context
+	if fact.CreatedBy == nil {
+		t.Error("expected CreatedBy to be set")
+	}
+	if fact.CreatedBy != nil && *fact.CreatedBy != tc.testUserID {
+		t.Errorf("expected CreatedBy to be %v, got %v", tc.testUserID, *fact.CreatedBy)
+	}
+
+	// Verify persisted correctly
+	retrieved, err := tc.repo.GetByKey(ctx, tc.projectID, models.FactTypeTerminology, "provenance_test")
+	if err != nil {
+		t.Fatalf("GetByKey failed: %v", err)
+	}
+	if retrieved.Source != "manual" {
+		t.Errorf("expected persisted Source 'manual', got %q", retrieved.Source)
+	}
+	if retrieved.CreatedBy == nil || *retrieved.CreatedBy != tc.testUserID {
+		t.Errorf("expected persisted CreatedBy %v, got %v", tc.testUserID, retrieved.CreatedBy)
+	}
+}
+
+func TestKnowledgeRepository_Upsert_Provenance_Inference(t *testing.T) {
+	tc := setupKnowledgeTest(t)
+	tc.cleanup()
+
+	// Test with inference provenance
+	ctx, cleanup := tc.createTestContextWithSource(models.SourceInference)
+	defer cleanup()
+
+	fact := &models.KnowledgeFact{
+		ProjectID:  tc.projectID,
+		OntologyID: &tc.ontologyID,
+		FactType:   models.FactTypeTerminology,
+		Key:        "inferred_fact",
+		Value:      "Created by inference",
+	}
+
+	err := tc.repo.Upsert(ctx, fact)
+	if err != nil {
+		t.Fatalf("Upsert failed: %v", err)
+	}
+
+	// Verify Source was set from context
+	if fact.Source != "inference" {
+		t.Errorf("expected Source 'inference', got %q", fact.Source)
+	}
+
+	// Verify persisted correctly
+	retrieved, err := tc.repo.GetByKey(ctx, tc.projectID, models.FactTypeTerminology, "inferred_fact")
+	if err != nil {
+		t.Fatalf("GetByKey failed: %v", err)
+	}
+	if retrieved.Source != "inference" {
+		t.Errorf("expected persisted Source 'inference', got %q", retrieved.Source)
+	}
+}
+
+func TestKnowledgeRepository_Upsert_NoProvenance(t *testing.T) {
+	tc := setupKnowledgeTest(t)
+	tc.cleanup()
+
+	// Create context with tenant scope but NO provenance
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
+	if err != nil {
+		t.Fatalf("failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+	ctx = database.SetTenantScope(ctx, scope)
+	// Note: no provenance set
+
+	fact := &models.KnowledgeFact{
+		ProjectID:  tc.projectID,
+		OntologyID: &tc.ontologyID,
+		FactType:   models.FactTypeTerminology,
+		Key:        "no_provenance",
+		Value:      "Created without provenance",
+	}
+
+	err = tc.repo.Upsert(ctx, fact)
+	if err == nil {
+		t.Error("expected error when creating without provenance context")
+	}
+	if err != nil && err.Error() != "provenance context required" {
+		t.Errorf("expected 'provenance context required' error, got: %v", err)
+	}
+}
+
+func TestKnowledgeRepository_Upsert_Provenance_Update(t *testing.T) {
+	tc := setupKnowledgeTest(t)
+	tc.cleanup()
+
+	// Create fact with inference provenance
+	ctxInference, cleanupCreate := tc.createTestContextWithSource(models.SourceInference)
+	defer cleanupCreate()
+
+	fact := &models.KnowledgeFact{
+		ProjectID:  tc.projectID,
+		OntologyID: &tc.ontologyID,
+		FactType:   models.FactTypeTerminology,
+		Key:        "updatable_fact",
+		Value:      "Original value",
+	}
+
+	err := tc.repo.Upsert(ctxInference, fact)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Verify initial state
+	if fact.Source != "inference" {
+		t.Errorf("expected initial Source 'inference', got %q", fact.Source)
+	}
+	if fact.LastEditSource != nil {
+		t.Errorf("expected nil LastEditSource initially, got %v", fact.LastEditSource)
+	}
+
+	originalID := fact.ID
+
+	// Update by ID with manual provenance
+	ctxManual, cleanupUpdate := tc.createTestContextWithSource(models.SourceManual)
+	defer cleanupUpdate()
+
+	// Update by ID
+	updateFact := &models.KnowledgeFact{
+		ID:         originalID,
+		ProjectID:  tc.projectID,
+		OntologyID: &tc.ontologyID,
+		FactType:   models.FactTypeTerminology,
+		Key:        "updatable_fact_renamed",
+		Value:      "Updated by user",
+		Context:    "Manual update",
+	}
+
+	err = tc.repo.Upsert(ctxManual, updateFact)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	// Verify LastEditSource was set
+	if updateFact.LastEditSource == nil || *updateFact.LastEditSource != "manual" {
+		t.Errorf("expected LastEditSource 'manual', got %v", updateFact.LastEditSource)
+	}
+	// Verify UpdatedBy was set
+	if updateFact.UpdatedBy == nil || *updateFact.UpdatedBy != tc.testUserID {
+		t.Errorf("expected UpdatedBy %v, got %v", tc.testUserID, updateFact.UpdatedBy)
+	}
+
+	// Verify persisted correctly
+	retrieved, err := tc.repo.GetByKey(ctxManual, tc.projectID, models.FactTypeTerminology, "updatable_fact_renamed")
+	if err != nil {
+		t.Fatalf("GetByKey failed: %v", err)
+	}
+	if retrieved == nil {
+		t.Fatal("expected fact to be found")
+	}
+	// Note: Source is now whatever the upsert set (since update doesn't preserve original source)
+	// LastEditSource should be set to manual
+	if retrieved.LastEditSource == nil || *retrieved.LastEditSource != "manual" {
+		t.Errorf("expected persisted LastEditSource 'manual', got %v", retrieved.LastEditSource)
+	}
+	// UpdatedBy should be set
+	if retrieved.UpdatedBy == nil || *retrieved.UpdatedBy != tc.testUserID {
+		t.Errorf("expected persisted UpdatedBy %v, got %v", tc.testUserID, retrieved.UpdatedBy)
+	}
+}
+
+func TestKnowledgeRepository_DeleteBySource(t *testing.T) {
+	tc := setupKnowledgeTest(t)
+	tc.cleanup()
+
+	// Create facts with inference provenance
+	ctxInference, cleanupInference := tc.createTestContextWithSource(models.SourceInference)
+	defer cleanupInference()
+
+	fact1 := &models.KnowledgeFact{
+		ProjectID:  tc.projectID,
+		OntologyID: &tc.ontologyID,
+		FactType:   models.FactTypeTerminology,
+		Key:        "inferred_fact_1",
+		Value:      "Created by inference",
+	}
+	if err := tc.repo.Upsert(ctxInference, fact1); err != nil {
+		t.Fatalf("Create fact1 failed: %v", err)
+	}
+
+	fact2 := &models.KnowledgeFact{
+		ProjectID:  tc.projectID,
+		OntologyID: &tc.ontologyID,
+		FactType:   models.FactTypeBusinessRule,
+		Key:        "inferred_fact_2",
+		Value:      "Also created by inference",
+	}
+	if err := tc.repo.Upsert(ctxInference, fact2); err != nil {
+		t.Fatalf("Create fact2 failed: %v", err)
+	}
+
+	// Create fact with manual provenance
+	ctxManual, cleanupManual := tc.createTestContextWithSource(models.SourceManual)
+	defer cleanupManual()
+
+	fact3 := &models.KnowledgeFact{
+		ProjectID:  tc.projectID,
+		OntologyID: &tc.ontologyID,
+		FactType:   models.FactTypeTerminology,
+		Key:        "manual_fact",
+		Value:      "Created manually",
+	}
+	if err := tc.repo.Upsert(ctxManual, fact3); err != nil {
+		t.Fatalf("Create fact3 failed: %v", err)
+	}
+
+	// Delete inference facts
+	err := tc.repo.DeleteBySource(ctxManual, tc.projectID, models.SourceInference)
+	if err != nil {
+		t.Fatalf("DeleteBySource failed: %v", err)
+	}
+
+	// Verify inference facts are deleted
+	retrieved1, _ := tc.repo.GetByKey(ctxManual, tc.projectID, models.FactTypeTerminology, "inferred_fact_1")
+	if retrieved1 != nil {
+		t.Error("expected inferred fact1 to be deleted")
+	}
+
+	retrieved2, _ := tc.repo.GetByKey(ctxManual, tc.projectID, models.FactTypeBusinessRule, "inferred_fact_2")
+	if retrieved2 != nil {
+		t.Error("expected inferred fact2 to be deleted")
+	}
+
+	// Verify manual fact still exists
+	retrieved3, err := tc.repo.GetByKey(ctxManual, tc.projectID, models.FactTypeTerminology, "manual_fact")
+	if err != nil {
+		t.Fatalf("GetByKey for manual fact failed: %v", err)
+	}
+	if retrieved3 == nil {
+		t.Error("expected manual fact to still exist")
+	}
+}
+
+func TestKnowledgeRepository_DeleteBySource_NoTenantScope(t *testing.T) {
+	tc := setupKnowledgeTest(t)
+	tc.cleanup()
+
+	ctx := context.Background() // No tenant scope
+
+	err := tc.repo.DeleteBySource(ctx, tc.projectID, models.SourceInference)
+	if err == nil {
+		t.Error("expected error for DeleteBySource without tenant scope")
 	}
 }
