@@ -338,7 +338,23 @@ func (s *deterministicRelationshipService) collectColumnStats(
 
 		// Classify joinability and update columns
 		for _, col := range tableCols {
-			st := statsMap[col.ColumnName]
+			st, found := statsMap[col.ColumnName]
+			if found {
+				s.logger.Debug("Found stats for column",
+					zap.String("table", fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)),
+					zap.String("column", col.ColumnName),
+					zap.Int64("distinct_count", st.DistinctCount))
+			} else {
+				// Collect available keys for debugging
+				availableKeys := make([]string, 0, len(statsMap))
+				for k := range statsMap {
+					availableKeys = append(availableKeys, k)
+				}
+				s.logger.Warn("No stats found for column",
+					zap.String("table", fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)),
+					zap.String("column", col.ColumnName),
+					zap.Strings("available_keys", availableKeys))
+			}
 
 			isJoinable, reason := classifyJoinability(col, st, tableRowCount)
 

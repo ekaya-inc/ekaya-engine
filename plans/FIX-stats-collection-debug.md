@@ -48,7 +48,7 @@ s.logger.Debug("Updating column joinability",
     zap.Any("distinct_count_ptr", col.DistinctCount))
 ```
 
-### Step 2: Check statsMap Lookup
+### Step 2: Check statsMap Lookup ✓
 
 In `deterministic_relationship_service.go`, verify the statsMap key matches what's being looked up:
 ```go
