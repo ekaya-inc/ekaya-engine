@@ -40,6 +40,7 @@ var AllToolsOrdered = []ToolSpec{
 	{Name: "list_approved_queries", Description: "List pre-approved SQL queries"},
 	{Name: "execute_approved_query", Description: "Execute a pre-approved query by ID"},
 	{Name: "suggest_approved_query", Description: "Suggest a reusable parameterized query for approval"},
+	{Name: "suggest_query_update", Description: "Suggest an update to an existing pre-approved query for review"},
 	{Name: "search_schema", Description: "Full-text search across tables, columns, and entities using pattern matching with relevance ranking"},
 	{Name: "get_schema", Description: "Get database schema with entity semantics"},
 	{Name: "get_context", Description: "Get unified database context with progressive depth (consolidates ontology, schema, glossary)"},
@@ -79,6 +80,14 @@ var AllToolsOrdered = []ToolSpec{
 	{Name: "approve_change", Description: "Approve a pending ontology change and apply it"},
 	{Name: "reject_change", Description: "Reject a pending ontology change without applying it"},
 	{Name: "approve_all_changes", Description: "Approve all pending ontology changes that can be applied"},
+
+	// Query Management (Admin Tools)
+	{Name: "list_query_suggestions", Description: "List pending query suggestions awaiting review"},
+	{Name: "approve_query_suggestion", Description: "Approve a pending query suggestion"},
+	{Name: "reject_query_suggestion", Description: "Reject a pending query suggestion with reason"},
+	{Name: "create_approved_query", Description: "Create a new pre-approved query directly (no review required)"},
+	{Name: "update_approved_query", Description: "Update an existing pre-approved query directly (no review required)"},
+	{Name: "delete_approved_query", Description: "Delete a pre-approved query"},
 }
 
 // Loadouts defines which tools belong to each loadout.
@@ -109,6 +118,7 @@ var Loadouts = map[string][]string{
 		"list_approved_queries",
 		"execute_approved_query",
 		"suggest_approved_query",
+		"suggest_query_update",
 		"search_schema",
 		"get_schema",
 		"get_context",
@@ -142,6 +152,13 @@ var Loadouts = map[string][]string{
 		"approve_change",
 		"reject_change",
 		"approve_all_changes",
+		// Query management (admin tools)
+		"list_query_suggestions",
+		"approve_query_suggestion",
+		"reject_query_suggestion",
+		"create_approved_query",
+		"update_approved_query",
+		"delete_approved_query",
 	},
 
 	// Ontology Questions -- special mode for MCP Client to enumerate and answer pending questions

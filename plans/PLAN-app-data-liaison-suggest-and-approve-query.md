@@ -75,7 +75,7 @@ This creates a governed workflow where Business Users (using ChatGPT, Claude Des
 | **Tool Group Configuration** | | |
 | ToolGroupConfig.AllowClientSuggestions | ✅ Done | Field exists in model |
 | UI toggle for Allow Suggestions | ✅ Done | Toggle in MCP Server page |
-| Dev tools tool group | ❌ Pending | Task 4.1 |
+| Dev tools tool group | ✅ Done | Task 4.1 |
 | **Admin REST API** | | |
 | GET /queries/pending | ❌ Pending | Task 5.1 |
 | POST /queries/{id}/approve | ❌ Pending | Task 5.2 |
