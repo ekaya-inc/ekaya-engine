@@ -62,25 +62,14 @@ if stat, ok := statsMap[col.ColumnName]; ok {
 }
 ```
 
-### Step 3: Check Pointer Assignment
+### Step 3: Check Pointer Assignment ✓
 
-Verify the pointer assignment for distinct_count:
-```go
-// In models/schema.go or wherever DistinctCount is defined
-type SchemaColumn struct {
-    DistinctCount *int64 // Is this a pointer?
-}
-```
+Verified: No pointer bug exists.
 
-If it's a pointer, check if the assignment is correct:
-```go
-// Bad: This creates a pointer to a loop variable
-col.DistinctCount = &stat.DistinctCount // Bug if stat is loop var
-
-// Good: Create a copy first
-dc := stat.DistinctCount
-col.DistinctCount = &dc
-```
+- `SchemaColumn.DistinctCount` is `*int64` (pointer) in `pkg/models/schema.go:39`
+- `datasource.ColumnStats.DistinctCount` is `int64` (value) in `pkg/adapters/datasource/metadata.go:37`
+- Code uses `for i := range stats` with `&stats[i]` (not `for _, stat := range` with `&stat`)
+- This correctly takes address of slice element, not loop variable - slice elements persist
 
 ### Step 4: Check Type Differences
 
