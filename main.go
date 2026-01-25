@@ -205,7 +205,7 @@ func main() {
 	llmWorkerPool := llm.NewWorkerPool(workerPoolConfig, logger)
 
 	entityDiscoveryService := services.NewEntityDiscoveryService(
-		ontologyEntityRepo, schemaRepo, ontologyRepo, convRepo,
+		ontologyEntityRepo, schemaRepo, ontologyRepo, convRepo, ontologyQuestionService,
 		llmFactory, llmWorkerPool, getTenantCtx, logger)
 
 	// Create circuit breaker for LLM resilience
@@ -213,10 +213,10 @@ func main() {
 	llmCircuitBreaker := llm.NewCircuitBreaker(circuitBreakerConfig)
 
 	columnEnrichmentService := services.NewColumnEnrichmentService(
-		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, convRepo, projectRepo,
+		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, convRepo, projectRepo, ontologyQuestionService,
 		datasourceService, adapterFactory, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
 	relationshipEnrichmentService := services.NewRelationshipEnrichmentService(
-		entityRelationshipRepo, ontologyEntityRepo, knowledgeRepo, convRepo, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
+		entityRelationshipRepo, ontologyEntityRepo, knowledgeRepo, convRepo, ontologyQuestionService, ontologyRepo, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
 	glossaryRepo := repositories.NewGlossaryRepository()
 	glossaryService := services.NewGlossaryService(glossaryRepo, ontologyRepo, ontologyEntityRepo, knowledgeRepo, datasourceService, adapterFactory, llmFactory, getTenantCtx, logger, cfg.Env)
 

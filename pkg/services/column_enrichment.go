@@ -44,6 +44,7 @@ type columnEnrichmentService struct {
 	schemaRepo       repositories.SchemaRepository
 	conversationRepo repositories.ConversationRepository
 	projectRepo      repositories.ProjectRepository
+	questionService  OntologyQuestionService
 	dsSvc            DatasourceService
 	adapterFactory   datasource.DatasourceAdapterFactory
 	llmFactory       llm.LLMClientFactory
@@ -61,6 +62,7 @@ func NewColumnEnrichmentService(
 	schemaRepo repositories.SchemaRepository,
 	conversationRepo repositories.ConversationRepository,
 	projectRepo repositories.ProjectRepository,
+	questionService OntologyQuestionService,
 	dsSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
@@ -76,6 +78,7 @@ func NewColumnEnrichmentService(
 		schemaRepo:       schemaRepo,
 		conversationRepo: conversationRepo,
 		projectRepo:      projectRepo,
+		questionService:  questionService,
 		dsSvc:            dsSvc,
 		adapterFactory:   adapterFactory,
 		llmFactory:       llmFactory,
@@ -657,19 +660,42 @@ func (s *columnEnrichmentService) enrichColumnBatch(
 		return nil, fmt.Errorf("parse LLM response: %w", err)
 	}
 
-	// Log questions generated during enrichment (storage will be wired up in a later task)
+	// Store questions generated during enrichment
 	if len(response.Questions) > 0 {
 		s.logger.Info("LLM generated questions during column enrichment",
 			zap.String("table", entity.PrimaryTable),
 			zap.Int("question_count", len(response.Questions)),
 			zap.String("project_id", projectID.String()))
-		for _, q := range response.Questions {
-			s.logger.Debug("Column enrichment question",
-				zap.String("table", entity.PrimaryTable),
-				zap.String("category", q.Category),
-				zap.Int("priority", q.Priority),
-				zap.String("question", q.Question),
-				zap.String("context", q.Context))
+
+		// Get active ontology for question storage
+		ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+		if err != nil {
+			s.logger.Error("failed to get active ontology for question storage", zap.Error(err))
+			// Non-fatal: continue even if we can't store questions
+		} else if ontology != nil && s.questionService != nil {
+			questionInputs := make([]OntologyQuestionInput, len(response.Questions))
+			for i, q := range response.Questions {
+				questionInputs[i] = OntologyQuestionInput{
+					Category: q.Category,
+					Priority: q.Priority,
+					Question: q.Question,
+					Context:  q.Context,
+				}
+			}
+			questionModels := ConvertQuestionInputs(questionInputs, projectID, ontology.ID, nil)
+			if len(questionModels) > 0 {
+				if err := s.questionService.CreateQuestions(ctx, questionModels); err != nil {
+					s.logger.Error("failed to store ontology questions from column enrichment",
+						zap.String("table", entity.PrimaryTable),
+						zap.Int("question_count", len(questionModels)),
+						zap.Error(err))
+					// Non-fatal: continue even if question storage fails
+				} else {
+					s.logger.Debug("Stored ontology questions from column enrichment",
+						zap.String("table", entity.PrimaryTable),
+						zap.Int("question_count", len(questionModels)))
+				}
+			}
 		}
 	}
 

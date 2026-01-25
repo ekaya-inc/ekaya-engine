@@ -43,6 +43,8 @@ type relationshipEnrichmentService struct {
 	entityRepo       repositories.OntologyEntityRepository
 	knowledgeRepo    repositories.KnowledgeRepository
 	conversationRepo repositories.ConversationRepository
+	questionService  OntologyQuestionService
+	ontologyRepo     repositories.OntologyRepository
 	llmFactory       llm.LLMClientFactory
 	workerPool       *llm.WorkerPool
 	circuitBreaker   *llm.CircuitBreaker
@@ -56,6 +58,8 @@ func NewRelationshipEnrichmentService(
 	entityRepo repositories.OntologyEntityRepository,
 	knowledgeRepo repositories.KnowledgeRepository,
 	conversationRepo repositories.ConversationRepository,
+	questionService OntologyQuestionService,
+	ontologyRepo repositories.OntologyRepository,
 	llmFactory llm.LLMClientFactory,
 	workerPool *llm.WorkerPool,
 	circuitBreaker *llm.CircuitBreaker,
@@ -67,6 +71,8 @@ func NewRelationshipEnrichmentService(
 		entityRepo:       entityRepo,
 		knowledgeRepo:    knowledgeRepo,
 		conversationRepo: conversationRepo,
+		questionService:  questionService,
+		ontologyRepo:     ontologyRepo,
 		llmFactory:       llmFactory,
 		workerPool:       workerPool,
 		circuitBreaker:   circuitBreaker,
@@ -337,17 +343,39 @@ func (s *relationshipEnrichmentService) enrichBatchInternal(
 	}
 	enrichments := response.Relationships
 
-	// Log questions generated during enrichment (storage will be wired up in a later task)
+	// Store questions generated during enrichment
 	if len(response.Questions) > 0 {
 		s.logger.Info("LLM generated questions during relationship enrichment",
 			zap.Int("question_count", len(response.Questions)),
 			zap.String("project_id", projectID.String()))
-		for _, q := range response.Questions {
-			s.logger.Debug("Relationship enrichment question",
-				zap.String("category", q.Category),
-				zap.Int("priority", q.Priority),
-				zap.String("question", q.Question),
-				zap.String("context", q.Context))
+
+		// Get active ontology for question storage
+		ontology, err := s.ontologyRepo.GetActive(batchCtx, projectID)
+		if err != nil {
+			s.logger.Error("failed to get active ontology for question storage", zap.Error(err))
+			// Non-fatal: continue even if we can't store questions
+		} else if ontology != nil && s.questionService != nil {
+			questionInputs := make([]OntologyQuestionInput, len(response.Questions))
+			for i, q := range response.Questions {
+				questionInputs[i] = OntologyQuestionInput{
+					Category: q.Category,
+					Priority: q.Priority,
+					Question: q.Question,
+					Context:  q.Context,
+				}
+			}
+			questionModels := ConvertQuestionInputs(questionInputs, projectID, ontology.ID, nil)
+			if len(questionModels) > 0 {
+				if err := s.questionService.CreateQuestions(batchCtx, questionModels); err != nil {
+					s.logger.Error("failed to store ontology questions from relationship enrichment",
+						zap.Int("question_count", len(questionModels)),
+						zap.Error(err))
+					// Non-fatal: continue even if question storage fails
+				} else {
+					s.logger.Debug("Stored ontology questions from relationship enrichment",
+						zap.Int("question_count", len(questionModels)))
+				}
+			}
 		}
 	}
 

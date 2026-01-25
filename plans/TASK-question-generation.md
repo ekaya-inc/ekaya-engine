@@ -59,7 +59,7 @@ type OntologyQuestionInput struct {
 }
 ```
 
-### Step 3: Wire Up Question Storage in DAG Steps
+### Step 3: Wire Up Question Storage in DAG Steps [x]
 
 After each DAG step's LLM processing:
 

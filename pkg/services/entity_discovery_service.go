@@ -32,6 +32,7 @@ type entityDiscoveryService struct {
 	schemaRepo       repositories.SchemaRepository
 	ontologyRepo     repositories.OntologyRepository
 	conversationRepo repositories.ConversationRepository
+	questionService  OntologyQuestionService
 	llmFactory       llm.LLMClientFactory
 	workerPool       *llm.WorkerPool
 	getTenantCtx     TenantContextFunc
@@ -44,6 +45,7 @@ func NewEntityDiscoveryService(
 	schemaRepo repositories.SchemaRepository,
 	ontologyRepo repositories.OntologyRepository,
 	conversationRepo repositories.ConversationRepository,
+	questionService OntologyQuestionService,
 	llmFactory llm.LLMClientFactory,
 	workerPool *llm.WorkerPool,
 	getTenantCtx TenantContextFunc,
@@ -54,6 +56,7 @@ func NewEntityDiscoveryService(
 		schemaRepo:       schemaRepo,
 		ontologyRepo:     ontologyRepo,
 		conversationRepo: conversationRepo,
+		questionService:  questionService,
 		llmFactory:       llmFactory,
 		workerPool:       workerPool,
 		getTenantCtx:     getTenantCtx,
@@ -488,17 +491,34 @@ func (s *entityDiscoveryService) enrichEntityBatch(
 		return fmt.Errorf("entity enrichment parse failure: %w", err)
 	}
 
-	// Log questions generated during enrichment (storage will be wired up in a later task)
+	// Store questions generated during enrichment
 	if len(questions) > 0 {
 		s.logger.Info("LLM generated questions during entity enrichment",
 			zap.Int("question_count", len(questions)),
 			zap.String("project_id", projectID.String()))
-		for _, q := range questions {
-			s.logger.Debug("Entity enrichment question",
-				zap.String("category", q.Category),
-				zap.Int("priority", q.Priority),
-				zap.String("question", q.Question),
-				zap.String("context", q.Context))
+
+		// Get ontology ID for question storage
+		ontologyID := entities[0].OntologyID
+		questionInputs := make([]OntologyQuestionInput, len(questions))
+		for i, q := range questions {
+			questionInputs[i] = OntologyQuestionInput{
+				Category: q.Category,
+				Priority: q.Priority,
+				Question: q.Question,
+				Context:  q.Context,
+			}
+		}
+		questionModels := ConvertQuestionInputs(questionInputs, projectID, ontologyID, nil)
+		if s.questionService != nil && len(questionModels) > 0 {
+			if err := s.questionService.CreateQuestions(ctx, questionModels); err != nil {
+				s.logger.Error("failed to store ontology questions from entity enrichment",
+					zap.Int("question_count", len(questionModels)),
+					zap.Error(err))
+				// Non-fatal: continue even if question storage fails
+			} else {
+				s.logger.Debug("Stored ontology questions from entity enrichment",
+					zap.Int("question_count", len(questionModels)))
+			}
 		}
 	}
 
