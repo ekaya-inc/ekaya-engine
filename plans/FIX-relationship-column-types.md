@@ -54,7 +54,7 @@ LEFT JOIN engine_schema_columns tc ON r.target_column_id = tc.id
 WHERE ...
 ```
 
-### Step 4: Update Service
+### Step 4: Update Service ✓
 
 **File:** `pkg/services/deterministic_relationship_service.go`
 

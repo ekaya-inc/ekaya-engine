@@ -97,6 +97,87 @@ func TestCreateBidirectionalRelationship(t *testing.T) {
 	}
 }
 
+// TestCreateBidirectionalRelationship_ColumnIDs verifies that column IDs are properly
+// swapped when creating the reverse relationship.
+func TestCreateBidirectionalRelationship_ColumnIDs(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+	sourceColumnID := uuid.New()
+	targetColumnID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	// Create a test relationship with column IDs
+	rel := &models.EntityRelationship{
+		OntologyID:         ontologyID,
+		SourceEntityID:     orderEntityID,
+		TargetEntityID:     userEntityID,
+		SourceColumnSchema: "public",
+		SourceColumnTable:  "orders",
+		SourceColumnName:   "user_id",
+		SourceColumnID:     &sourceColumnID,
+		TargetColumnSchema: "public",
+		TargetColumnTable:  "users",
+		TargetColumnName:   "id",
+		TargetColumnID:     &targetColumnID,
+		DetectionMethod:    models.DetectionMethodForeignKey,
+		Confidence:         1.0,
+		Status:             models.RelationshipStatusConfirmed,
+	}
+
+	// Call createBidirectionalRelationship
+	svc := service.(*deterministicRelationshipService)
+	err := svc.createBidirectionalRelationship(context.Background(), rel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: 2 relationships created (forward and reverse)
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Fatalf("expected 2 relationships (forward and reverse), got %d", len(mocks.relationshipRepo.created))
+	}
+
+	// Verify forward relationship column IDs
+	forward := mocks.relationshipRepo.created[0]
+	if forward.SourceColumnID == nil || *forward.SourceColumnID != sourceColumnID {
+		t.Errorf("forward relationship source column ID incorrect: got %v, want %v", forward.SourceColumnID, sourceColumnID)
+	}
+	if forward.TargetColumnID == nil || *forward.TargetColumnID != targetColumnID {
+		t.Errorf("forward relationship target column ID incorrect: got %v, want %v", forward.TargetColumnID, targetColumnID)
+	}
+
+	// Verify reverse relationship column IDs are swapped
+	reverse := mocks.relationshipRepo.created[1]
+	if reverse.SourceColumnID == nil || *reverse.SourceColumnID != targetColumnID {
+		t.Errorf("reverse relationship source column ID incorrect: got %v, want %v (should be target from forward)", reverse.SourceColumnID, targetColumnID)
+	}
+	if reverse.TargetColumnID == nil || *reverse.TargetColumnID != sourceColumnID {
+		t.Errorf("reverse relationship target column ID incorrect: got %v, want %v (should be source from forward)", reverse.TargetColumnID, sourceColumnID)
+	}
+}
+
 // TestEntityByPrimaryTableMapping verifies that entityByPrimaryTable uses
 // PrimarySchema/PrimaryTable rather than occurrences.
 //

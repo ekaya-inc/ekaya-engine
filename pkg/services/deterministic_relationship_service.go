@@ -96,9 +96,11 @@ func (s *deterministicRelationshipService) createBidirectionalRelationship(ctx c
 		SourceColumnSchema: rel.TargetColumnSchema, // swap
 		SourceColumnTable:  rel.TargetColumnTable,  // swap
 		SourceColumnName:   rel.TargetColumnName,   // swap
+		SourceColumnID:     rel.TargetColumnID,     // swap
 		TargetColumnSchema: rel.SourceColumnSchema, // swap
 		TargetColumnTable:  rel.SourceColumnTable,  // swap
 		TargetColumnName:   rel.SourceColumnName,   // swap
+		TargetColumnID:     rel.SourceColumnID,     // swap
 		DetectionMethod:    rel.DetectionMethod,
 		Confidence:         rel.Confidence,
 		Status:             rel.Status,
@@ -216,9 +218,11 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 			SourceColumnSchema: sourceTable.SchemaName,
 			SourceColumnTable:  sourceTable.TableName,
 			SourceColumnName:   sourceCol.ColumnName,
+			SourceColumnID:     &sourceCol.ID,
 			TargetColumnSchema: targetTable.SchemaName,
 			TargetColumnTable:  targetTable.TableName,
 			TargetColumnName:   targetCol.ColumnName,
+			TargetColumnID:     &targetCol.ID,
 			DetectionMethod:    detectionMethod,
 			Confidence:         1.0,
 			Status:             models.RelationshipStatusConfirmed,
@@ -721,9 +725,11 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 				SourceColumnSchema: candidate.schema,
 				SourceColumnTable:  candidate.table,
 				SourceColumnName:   candidate.column.ColumnName,
+				SourceColumnID:     &candidate.column.ID,
 				TargetColumnSchema: ref.schema,
 				TargetColumnTable:  ref.table,
 				TargetColumnName:   ref.column.ColumnName,
+				TargetColumnID:     &ref.column.ID,
 				DetectionMethod:    models.DetectionMethodPKMatch,
 				Confidence:         confidence,
 				Status:             status,
