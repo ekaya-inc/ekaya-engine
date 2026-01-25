@@ -46,6 +46,7 @@ func (d *DevQueryToolDeps) GetLogger() *zap.Logger {
 func RegisterDevQueryTools(mcpServer *server.MCPServer, deps *DevQueryToolDeps) {
 	registerListQuerySuggestionsTool(mcpServer, deps)
 	registerApproveQuerySuggestionTool(mcpServer, deps)
+	registerRejectQuerySuggestionTool(mcpServer, deps)
 }
 
 // querySuggestionInfo represents a single query suggestion in the response.
@@ -441,6 +442,136 @@ Use list_query_suggestions first to see pending suggestions.`),
 			Message: message,
 			QueryID: queryID,
 			Type:    suggestionType,
+		}
+
+		responseJSON, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal response: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(responseJSON)), nil
+	}
+
+	mcpServer.AddTool(tool, handler)
+}
+
+// rejectQuerySuggestionResponse is the response format for reject_query_suggestion.
+type rejectQuerySuggestionResponse struct {
+	Success      bool   `json:"success"`
+	Message      string `json:"message"`
+	SuggestionID string `json:"suggestion_id"`
+	Reason       string `json:"reason"`
+}
+
+// registerRejectQuerySuggestionTool registers the reject_query_suggestion tool.
+func registerRejectQuerySuggestionTool(mcpServer *server.MCPServer, deps *DevQueryToolDeps) {
+	tool := mcp.NewTool(
+		"reject_query_suggestion",
+		mcp.WithDescription(`Reject a pending query suggestion with a reason.
+The suggestion will be marked as rejected and the reason will be recorded.
+Use list_query_suggestions first to see pending suggestions.`),
+		mcp.WithString("suggestion_id",
+			mcp.Required(),
+			mcp.Description("UUID of the pending suggestion to reject")),
+		mcp.WithString("reason",
+			mcp.Required(),
+			mcp.Description("Explanation for why the suggestion was rejected")),
+	)
+
+	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Check tool access
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "reject_query_suggestion")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Parse arguments
+		args, _ := request.Params.Arguments.(map[string]any)
+
+		// Parse required suggestion_id
+		suggestionIDStr, ok := args["suggestion_id"].(string)
+		if !ok || suggestionIDStr == "" {
+			return NewErrorResultWithDetails("invalid_parameters",
+				"suggestion_id is required",
+				map[string]any{
+					"parameter": "suggestion_id",
+				}), nil
+		}
+
+		suggestionID, err := uuid.Parse(suggestionIDStr)
+		if err != nil {
+			return NewErrorResultWithDetails("invalid_parameters",
+				"suggestion_id is not a valid UUID",
+				map[string]any{
+					"parameter":    "suggestion_id",
+					"actual_value": suggestionIDStr,
+				}), nil
+		}
+
+		// Parse required reason
+		reason, ok := args["reason"].(string)
+		if !ok || reason == "" {
+			return NewErrorResultWithDetails("invalid_parameters",
+				"reason is required",
+				map[string]any{
+					"parameter": "reason",
+				}), nil
+		}
+
+		// Get the suggestion to verify it exists and is pending
+		suggestion, err := deps.QueryService.Get(tenantCtx, projectID, suggestionID)
+		if err != nil {
+			deps.Logger.Error("Failed to get query suggestion",
+				zap.String("project_id", projectID.String()),
+				zap.String("suggestion_id", suggestionID.String()),
+				zap.Error(err))
+			return NewErrorResultWithDetails("not_found",
+				"suggestion not found",
+				map[string]any{
+					"suggestion_id": suggestionIDStr,
+				}), nil
+		}
+
+		// Verify it's a pending suggestion
+		if suggestion.Status != "pending" {
+			return NewErrorResultWithDetails("invalid_state",
+				fmt.Sprintf("suggestion is not pending (status: %s)", suggestion.Status),
+				map[string]any{
+					"suggestion_id": suggestionIDStr,
+					"status":        suggestion.Status,
+				}), nil
+		}
+
+		// Get reviewer ID from context
+		reviewerID := auth.GetUserIDFromContext(ctx)
+		if reviewerID == "" {
+			reviewerID = "mcp-session" // Fallback for MCP sessions without user context
+		}
+
+		// Reject the query
+		err = deps.QueryService.RejectQuery(tenantCtx, projectID, suggestionID, reviewerID, reason)
+		if err != nil {
+			deps.Logger.Error("Failed to reject query suggestion",
+				zap.String("project_id", projectID.String()),
+				zap.String("suggestion_id", suggestionID.String()),
+				zap.String("reviewer_id", reviewerID),
+				zap.Error(err))
+			return nil, fmt.Errorf("failed to reject query: %w", err)
+		}
+
+		deps.Logger.Info("Rejected query suggestion",
+			zap.String("project_id", projectID.String()),
+			zap.String("suggestion_id", suggestionID.String()),
+			zap.String("reviewer_id", reviewerID),
+			zap.String("reason", reason),
+		)
+
+		response := rejectQuerySuggestionResponse{
+			Success:      true,
+			Message:      "Suggestion rejected.",
+			SuggestionID: suggestionID.String(),
+			Reason:       reason,
 		}
 
 		responseJSON, err := json.Marshal(response)

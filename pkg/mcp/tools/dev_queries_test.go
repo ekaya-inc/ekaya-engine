@@ -743,3 +743,134 @@ func TestApproveQuerySuggestion_ToolDescription(t *testing.T) {
 	assert.Contains(t, approveTool.InputSchema.Properties, "suggestion_id")
 	assert.Contains(t, approveTool.InputSchema.Required, "suggestion_id")
 }
+
+func TestRejectQuerySuggestionResponse_Structure(t *testing.T) {
+	// Test that the response structure is correct
+	suggestionID := uuid.New()
+	response := rejectQuerySuggestionResponse{
+		Success:      true,
+		Message:      "Suggestion rejected.",
+		SuggestionID: suggestionID.String(),
+		Reason:       "SQL is too slow for production use",
+	}
+
+	// Verify JSON serialization works
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	// Verify all required fields
+	assert.Equal(t, true, parsed["success"])
+	assert.Equal(t, "Suggestion rejected.", parsed["message"])
+	assert.Equal(t, suggestionID.String(), parsed["suggestion_id"])
+	assert.Equal(t, "SQL is too slow for production use", parsed["reason"])
+}
+
+func TestRejectQuerySuggestion_ToolRegistration(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &DevQueryToolDeps{
+		MCPConfigService: &mockMCPConfigService{
+			config: &models.ToolGroupConfig{Enabled: true},
+		},
+		ProjectService: &mockProjectService{},
+		QueryService:   &mockQueryService{},
+		Logger:         zap.NewNop(),
+	}
+
+	RegisterDevQueryTools(mcpServer, deps)
+
+	// Verify tools are registered
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	// Check all three dev query tools are registered
+	toolNames := make(map[string]bool)
+	for _, tool := range response.Result.Tools {
+		toolNames[tool.Name] = true
+	}
+
+	assert.True(t, toolNames["list_query_suggestions"], "list_query_suggestions tool should be registered")
+	assert.True(t, toolNames["approve_query_suggestion"], "approve_query_suggestion tool should be registered")
+	assert.True(t, toolNames["reject_query_suggestion"], "reject_query_suggestion tool should be registered")
+}
+
+func TestRejectQuerySuggestion_ToolDescription(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &DevQueryToolDeps{
+		MCPConfigService: &mockMCPConfigService{
+			config: &models.ToolGroupConfig{Enabled: true},
+		},
+		ProjectService: &mockProjectService{},
+		QueryService:   &mockQueryService{},
+		Logger:         zap.NewNop(),
+	}
+
+	RegisterDevQueryTools(mcpServer, deps)
+
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				InputSchema struct {
+					Required   []string       `json:"required"`
+					Properties map[string]any `json:"properties"`
+				} `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	// Find reject_query_suggestion tool
+	var rejectTool *struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		InputSchema struct {
+			Required   []string       `json:"required"`
+			Properties map[string]any `json:"properties"`
+		} `json:"inputSchema"`
+	}
+	for i, tool := range response.Result.Tools {
+		if tool.Name == "reject_query_suggestion" {
+			rejectTool = &response.Result.Tools[i]
+			break
+		}
+	}
+
+	require.NotNil(t, rejectTool, "reject_query_suggestion tool should be found")
+
+	// Verify description mentions key points
+	assert.Contains(t, rejectTool.Description, "Reject")
+	assert.Contains(t, rejectTool.Description, "pending")
+	assert.Contains(t, rejectTool.Description, "suggestion")
+	assert.Contains(t, rejectTool.Description, "reason")
+
+	// Verify parameters exist and are required
+	assert.Contains(t, rejectTool.InputSchema.Properties, "suggestion_id")
+	assert.Contains(t, rejectTool.InputSchema.Properties, "reason")
+	assert.Contains(t, rejectTool.InputSchema.Required, "suggestion_id")
+	assert.Contains(t, rejectTool.InputSchema.Required, "reason")
+}
