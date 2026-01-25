@@ -26,7 +26,7 @@ CREATE INDEX idx_entity_rel_source_col ON engine_entity_relationships(source_col
 CREATE INDEX idx_entity_rel_target_col ON engine_entity_relationships(target_column_id);
 ```
 
-### Step 2: Update Model
+### Step 2: Update Model ✓
 
 **File:** `pkg/models/entity_relationship.go`
 ```go
