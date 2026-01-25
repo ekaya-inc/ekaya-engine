@@ -107,12 +107,18 @@ func (r *ontologyQuestionRepository) Create(ctx context.Context, question *model
 		return fmt.Errorf("marshal affects: %w", err)
 	}
 
+	// Compute content hash for deduplication
+	if question.ContentHash == "" {
+		question.ContentHash = question.ComputeContentHash()
+	}
+
 	query := `
 		INSERT INTO engine_ontology_questions (
-			id, project_id, ontology_id, text, reasoning, category,
+			id, project_id, ontology_id, content_hash, text, reasoning, category,
 			priority, is_required, affects, source_entity_type, source_entity_key,
 			status, answer, answered_by, answered_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		ON CONFLICT (ontology_id, content_hash) WHERE content_hash IS NOT NULL DO NOTHING`
 
 	var sourceEntityType, sourceEntityKey *string
 	// Extract source entity info from affects if available
@@ -123,7 +129,7 @@ func (r *ontologyQuestionRepository) Create(ctx context.Context, question *model
 	}
 
 	_, err = scope.Conn.Exec(ctx, query,
-		question.ID, question.ProjectID, question.OntologyID,
+		question.ID, question.ProjectID, question.OntologyID, question.ContentHash,
 		question.Text, nullableString(question.Reasoning), nullableString(question.Category),
 		question.Priority, question.IsRequired, affectsJSON,
 		sourceEntityType, sourceEntityKey,
@@ -150,14 +156,15 @@ func (r *ontologyQuestionRepository) CreateBatch(ctx context.Context, questions 
 
 	now := time.Now()
 
-	// Build batch insert
+	// Build batch insert with ON CONFLICT for deduplication
 	batch := &pgx.Batch{}
 	query := `
 		INSERT INTO engine_ontology_questions (
-			id, project_id, ontology_id, text, reasoning, category,
+			id, project_id, ontology_id, content_hash, text, reasoning, category,
 			priority, is_required, affects, source_entity_type, source_entity_key,
 			status, answer, answered_by, answered_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		ON CONFLICT (ontology_id, content_hash) WHERE content_hash IS NOT NULL DO NOTHING`
 
 	for _, q := range questions {
 		if q.ID == uuid.Nil {
@@ -169,6 +176,10 @@ func (r *ontologyQuestionRepository) CreateBatch(ctx context.Context, questions 
 		q.UpdatedAt = now
 		if q.Status == "" {
 			q.Status = models.QuestionStatusPending
+		}
+		// Compute content hash for deduplication
+		if q.ContentHash == "" {
+			q.ContentHash = q.ComputeContentHash()
 		}
 
 		affectsJSON, err := json.Marshal(q.Affects)
@@ -184,7 +195,7 @@ func (r *ontologyQuestionRepository) CreateBatch(ctx context.Context, questions 
 		}
 
 		batch.Queue(query,
-			q.ID, q.ProjectID, q.OntologyID,
+			q.ID, q.ProjectID, q.OntologyID, q.ContentHash,
 			q.Text, nullableString(q.Reasoning), nullableString(q.Category),
 			q.Priority, q.IsRequired, affectsJSON,
 			sourceEntityType, sourceEntityKey,
@@ -213,7 +224,7 @@ func (r *ontologyQuestionRepository) GetByID(ctx context.Context, id uuid.UUID) 
 	}
 
 	query := `
-		SELECT id, project_id, ontology_id, text, reasoning, category,
+		SELECT id, project_id, ontology_id, content_hash, text, reasoning, category,
 		       priority, is_required, affects, source_entity_type, source_entity_key,
 		       status, status_reason, answer, answered_by, answered_at, created_at, updated_at
 		FROM engine_ontology_questions
@@ -237,7 +248,7 @@ func (r *ontologyQuestionRepository) ListPending(ctx context.Context, projectID 
 	}
 
 	query := `
-		SELECT id, project_id, ontology_id, text, reasoning, category,
+		SELECT id, project_id, ontology_id, content_hash, text, reasoning, category,
 		       priority, is_required, affects, source_entity_type, source_entity_key,
 		       status, status_reason, answer, answered_by, answered_at, created_at, updated_at
 		FROM engine_ontology_questions
@@ -273,7 +284,7 @@ func (r *ontologyQuestionRepository) GetNextPending(ctx context.Context, project
 
 	// Return required questions first (priority 1-2), then by priority, then by creation order
 	query := `
-		SELECT id, project_id, ontology_id, text, reasoning, category,
+		SELECT id, project_id, ontology_id, content_hash, text, reasoning, category,
 		       priority, is_required, affects, source_entity_type, source_entity_key,
 		       status, status_reason, answer, answered_by, answered_at, created_at, updated_at
 		FROM engine_ontology_questions
@@ -390,7 +401,7 @@ func (r *ontologyQuestionRepository) ListByOntologyID(ctx context.Context, ontol
 	}
 
 	query := `
-		SELECT id, project_id, ontology_id, text, reasoning, category,
+		SELECT id, project_id, ontology_id, content_hash, text, reasoning, category,
 		       priority, is_required, affects, source_entity_type, source_entity_key,
 		       status, status_reason, answer, answered_by, answered_at, created_at, updated_at
 		FROM engine_ontology_questions
@@ -543,7 +554,7 @@ func (r *ontologyQuestionRepository) List(ctx context.Context, projectID uuid.UU
 
 	// Get paginated questions
 	query := fmt.Sprintf(`
-		SELECT id, project_id, ontology_id, text, reasoning, category,
+		SELECT id, project_id, ontology_id, content_hash, text, reasoning, category,
 		       priority, is_required, affects, source_entity_type, source_entity_key,
 		       status, status_reason, answer, answered_by, answered_at, created_at, updated_at
 		FROM engine_ontology_questions
@@ -591,12 +602,12 @@ func nullableString(s string) *string {
 
 func scanQuestionRow(row pgx.Row) (*models.OntologyQuestion, error) {
 	var q models.OntologyQuestion
-	var reasoning, category, sourceEntityType, sourceEntityKey, statusReason, answer *string
+	var contentHash, reasoning, category, sourceEntityType, sourceEntityKey, statusReason, answer *string
 	var status string
 	var affectsJSON []byte
 
 	err := row.Scan(
-		&q.ID, &q.ProjectID, &q.OntologyID, &q.Text, &reasoning, &category,
+		&q.ID, &q.ProjectID, &q.OntologyID, &contentHash, &q.Text, &reasoning, &category,
 		&q.Priority, &q.IsRequired, &affectsJSON, &sourceEntityType, &sourceEntityKey,
 		&status, &statusReason, &answer, &q.AnsweredBy, &q.AnsweredAt, &q.CreatedAt, &q.UpdatedAt,
 	)
@@ -604,6 +615,9 @@ func scanQuestionRow(row pgx.Row) (*models.OntologyQuestion, error) {
 		return nil, err
 	}
 
+	if contentHash != nil {
+		q.ContentHash = *contentHash
+	}
 	if reasoning != nil {
 		q.Reasoning = *reasoning
 	}
@@ -630,12 +644,12 @@ func scanQuestionRow(row pgx.Row) (*models.OntologyQuestion, error) {
 
 func scanQuestionRows(rows pgx.Rows) (*models.OntologyQuestion, error) {
 	var q models.OntologyQuestion
-	var reasoning, category, sourceEntityType, sourceEntityKey, statusReason, answer *string
+	var contentHash, reasoning, category, sourceEntityType, sourceEntityKey, statusReason, answer *string
 	var status string
 	var affectsJSON []byte
 
 	err := rows.Scan(
-		&q.ID, &q.ProjectID, &q.OntologyID, &q.Text, &reasoning, &category,
+		&q.ID, &q.ProjectID, &q.OntologyID, &contentHash, &q.Text, &reasoning, &category,
 		&q.Priority, &q.IsRequired, &affectsJSON, &sourceEntityType, &sourceEntityKey,
 		&status, &statusReason, &answer, &q.AnsweredBy, &q.AnsweredAt, &q.CreatedAt, &q.UpdatedAt,
 	)
@@ -643,6 +657,9 @@ func scanQuestionRows(rows pgx.Rows) (*models.OntologyQuestion, error) {
 		return nil, fmt.Errorf("scan question: %w", err)
 	}
 
+	if contentHash != nil {
+		q.ContentHash = *contentHash
+	}
 	if reasoning != nil {
 		q.Reasoning = *reasoning
 	}

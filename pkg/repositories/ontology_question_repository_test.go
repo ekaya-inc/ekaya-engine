@@ -253,3 +253,220 @@ func TestListByOntologyID_OnlyReturnsMatchingOntology(t *testing.T) {
 	_, _ = cleanupScope.Conn.Exec(context.Background(), "DELETE FROM engine_ontology_questions WHERE ontology_id = $1", otherOntologyID)
 	cleanupScope.Close()
 }
+
+func TestCreate_ContentHashDeduplication(t *testing.T) {
+	tc := setupQuestionTest(t)
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create a question
+	q1 := &models.OntologyQuestion{
+		ID:         uuid.New(),
+		ProjectID:  tc.projectID,
+		OntologyID: tc.ontologyID,
+		Category:   models.QuestionCategoryTerminology,
+		Text:       "What does 'tik' mean in tiks_count?",
+		Priority:   2,
+		Status:     models.QuestionStatusPending,
+	}
+
+	if err := tc.repo.Create(ctx, q1); err != nil {
+		t.Fatalf("failed to create q1: %v", err)
+	}
+
+	// Verify content_hash was computed
+	if q1.ContentHash == "" {
+		t.Error("ContentHash should have been computed")
+	}
+
+	// Try to create a duplicate question (same category + text)
+	q2 := &models.OntologyQuestion{
+		ID:         uuid.New(),
+		ProjectID:  tc.projectID,
+		OntologyID: tc.ontologyID,
+		Category:   models.QuestionCategoryTerminology,
+		Text:       "What does 'tik' mean in tiks_count?",
+		Priority:   1, // Different priority doesn't matter
+		Status:     models.QuestionStatusPending,
+	}
+
+	// Create should succeed (ON CONFLICT DO NOTHING)
+	if err := tc.repo.Create(ctx, q2); err != nil {
+		t.Fatalf("Create duplicate should not return error: %v", err)
+	}
+
+	// But there should still be only 1 question
+	questions, err := tc.repo.ListByOntologyID(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("ListByOntologyID failed: %v", err)
+	}
+
+	if len(questions) != 1 {
+		t.Errorf("expected 1 question (duplicate ignored), got %d", len(questions))
+	}
+
+	// Verify the original question was kept (by ID)
+	if questions[0].ID != q1.ID {
+		t.Errorf("expected original question ID %s, got %s", q1.ID, questions[0].ID)
+	}
+}
+
+func TestCreateBatch_ContentHashDeduplication(t *testing.T) {
+	tc := setupQuestionTest(t)
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create batch with duplicates
+	questions := []*models.OntologyQuestion{
+		{
+			ID:         uuid.New(),
+			ProjectID:  tc.projectID,
+			OntologyID: tc.ontologyID,
+			Category:   models.QuestionCategoryEnumeration,
+			Text:       "What do status values mean?",
+			Priority:   1,
+			Status:     models.QuestionStatusPending,
+		},
+		{
+			ID:         uuid.New(),
+			ProjectID:  tc.projectID,
+			OntologyID: tc.ontologyID,
+			Category:   models.QuestionCategoryEnumeration,
+			Text:       "What do status values mean?", // Duplicate
+			Priority:   2,
+			Status:     models.QuestionStatusPending,
+		},
+		{
+			ID:         uuid.New(),
+			ProjectID:  tc.projectID,
+			OntologyID: tc.ontologyID,
+			Category:   models.QuestionCategoryRelationship,
+			Text:       "Is this a self-reference?", // Different question
+			Priority:   2,
+			Status:     models.QuestionStatusPending,
+		},
+	}
+
+	if err := tc.repo.CreateBatch(ctx, questions); err != nil {
+		t.Fatalf("CreateBatch failed: %v", err)
+	}
+
+	// Should have 2 questions (one duplicate ignored)
+	result, err := tc.repo.ListByOntologyID(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("ListByOntologyID failed: %v", err)
+	}
+
+	if len(result) != 2 {
+		t.Errorf("expected 2 questions (1 duplicate ignored), got %d", len(result))
+	}
+}
+
+func TestContentHash_DifferentOntologiesSameQuestion(t *testing.T) {
+	tc := setupQuestionTest(t)
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create another ontology
+	otherOntologyID := uuid.MustParse("00000000-0000-0000-0000-000000000504")
+	setupScope, err := tc.engineDB.DB.WithoutTenant(context.Background())
+	if err != nil {
+		t.Fatalf("failed to create scope: %v", err)
+	}
+	_, err = setupScope.Conn.Exec(context.Background(), `
+		INSERT INTO engine_ontologies (id, project_id, version, is_active)
+		VALUES ($1, $2, 3, false)
+		ON CONFLICT (id) DO NOTHING
+	`, otherOntologyID, tc.projectID)
+	setupScope.Close()
+	if err != nil {
+		t.Fatalf("failed to create other ontology: %v", err)
+	}
+
+	// Create same question in different ontologies - should both succeed
+	q1 := &models.OntologyQuestion{
+		ID:         uuid.New(),
+		ProjectID:  tc.projectID,
+		OntologyID: tc.ontologyID,
+		Category:   models.QuestionCategoryTerminology,
+		Text:       "Shared question across ontologies",
+		Priority:   2,
+		Status:     models.QuestionStatusPending,
+	}
+	q2 := &models.OntologyQuestion{
+		ID:         uuid.New(),
+		ProjectID:  tc.projectID,
+		OntologyID: otherOntologyID, // Different ontology
+		Category:   models.QuestionCategoryTerminology,
+		Text:       "Shared question across ontologies", // Same text
+		Priority:   2,
+		Status:     models.QuestionStatusPending,
+	}
+
+	if err := tc.repo.Create(ctx, q1); err != nil {
+		t.Fatalf("failed to create q1: %v", err)
+	}
+	if err := tc.repo.Create(ctx, q2); err != nil {
+		t.Fatalf("failed to create q2: %v", err)
+	}
+
+	// Both should exist in their respective ontologies
+	questions1, _ := tc.repo.ListByOntologyID(ctx, tc.ontologyID)
+	questions2, _ := tc.repo.ListByOntologyID(ctx, otherOntologyID)
+
+	if len(questions1) != 1 {
+		t.Errorf("expected 1 question in main ontology, got %d", len(questions1))
+	}
+	if len(questions2) != 1 {
+		t.Errorf("expected 1 question in other ontology, got %d", len(questions2))
+	}
+
+	// Clean up
+	cleanupScope, _ := tc.engineDB.DB.WithoutTenant(context.Background())
+	_, _ = cleanupScope.Conn.Exec(context.Background(), "DELETE FROM engine_ontology_questions WHERE ontology_id = $1", otherOntologyID)
+	cleanupScope.Close()
+}
+
+func TestCreate_ContentHashIsReturned(t *testing.T) {
+	tc := setupQuestionTest(t)
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	q := &models.OntologyQuestion{
+		ID:         uuid.New(),
+		ProjectID:  tc.projectID,
+		OntologyID: tc.ontologyID,
+		Category:   models.QuestionCategoryDataQuality,
+		Text:       "Column has 80% NULL - expected?",
+		Priority:   3,
+		Status:     models.QuestionStatusPending,
+	}
+
+	if err := tc.repo.Create(ctx, q); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Retrieve and verify content_hash is stored
+	retrieved, err := tc.repo.GetByID(ctx, q.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+
+	if retrieved.ContentHash == "" {
+		t.Error("ContentHash should be stored in database")
+	}
+
+	// Verify the computed hash matches
+	expectedHash := q.ComputeContentHash()
+	if retrieved.ContentHash != expectedHash {
+		t.Errorf("ContentHash mismatch: got %s, want %s", retrieved.ContentHash, expectedHash)
+	}
+}

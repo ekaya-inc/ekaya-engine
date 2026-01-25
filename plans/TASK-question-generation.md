@@ -110,7 +110,7 @@ func GenerateDeterministicQuestions(stats *ColumnStats) []*models.OntologyQuesti
 }
 ```
 
-### Step 5: Question Deduplication
+### Step 5: Question Deduplication [x]
 
 Prevent duplicate questions across extraction runs:
 
