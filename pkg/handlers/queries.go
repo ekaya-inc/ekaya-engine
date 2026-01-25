@@ -152,9 +152,21 @@ type DeleteQueryResponse struct {
 
 // ApproveQueryResponse for query approval result.
 type ApproveQueryResponse struct {
-	Success bool               `json:"success"`
-	Message string             `json:"message"`
-	Query   *QueryResponse     `json:"query,omitempty"`
+	Success bool           `json:"success"`
+	Message string         `json:"message"`
+	Query   *QueryResponse `json:"query,omitempty"`
+}
+
+// RejectQueryRequest for POST reject body.
+type RejectQueryRequest struct {
+	Reason string `json:"reason"`
+}
+
+// RejectQueryResponse for query rejection result.
+type RejectQueryResponse struct {
+	Success bool                  `json:"success"`
+	Message string                `json:"message"`
+	Query   *PendingQueryResponse `json:"query,omitempty"`
 }
 
 // QueriesHandler handles query-related HTTP requests.
@@ -210,6 +222,8 @@ func (h *QueriesHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.ListPending)))
 	mux.HandleFunc("POST "+projectBase+"/{qid}/approve",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Approve)))
+	mux.HandleFunc("POST "+projectBase+"/{qid}/reject",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Reject)))
 }
 
 // List handles GET /api/projects/{pid}/datasources/{dsid}/queries
@@ -815,6 +829,97 @@ func (h *QueriesHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	data := ApproveQueryResponse{
 		Success: true,
 		Message: "Query approved and enabled",
+		Query:   &queryResp,
+	}
+
+	response := ApiResponse{Success: true, Data: data}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// Reject handles POST /api/projects/{pid}/queries/{qid}/reject
+// Rejects a pending query suggestion with a reason.
+func (h *QueriesHandler) Reject(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	queryID, ok := ParseQueryID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	var req RejectQueryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if req.Reason == "" {
+		if err := ErrorResponse(w, http.StatusBadRequest, "missing_reason", "Rejection reason is required"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Get reviewer ID from auth context
+	reviewerID := auth.GetUserIDFromContext(r.Context())
+	if reviewerID == "" {
+		if err := ErrorResponse(w, http.StatusUnauthorized, "unauthorized", "User ID not found in context"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// First get the query to return in response (before rejecting)
+	query, err := h.queryService.Get(r.Context(), projectID, queryID)
+	if err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			if err := ErrorResponse(w, http.StatusNotFound, "not_found", "Query not found"); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
+		h.logger.Error("Failed to get query",
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", queryID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "internal_error", "Failed to get query"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Reject the query
+	if err := h.queryService.RejectQuery(r.Context(), projectID, queryID, reviewerID, req.Reason); err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			if err := ErrorResponse(w, http.StatusNotFound, "not_found", "Query not found"); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
+		h.logger.Error("Failed to reject query",
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", queryID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusBadRequest, "reject_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Update the query status in response to reflect rejection
+	query.Status = "rejected"
+	query.RejectionReason = &req.Reason
+
+	queryResp := h.toPendingQueryResponse(query)
+	data := RejectQueryResponse{
+		Success: true,
+		Message: "Query rejected",
 		Query:   &queryResp,
 	}
 
