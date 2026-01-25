@@ -3,7 +3,7 @@
 **Bug Reference:** BUGS-ontology-extraction.md, BUG-9
 **Severity:** High
 **Type:** Data Collection Bug
-**Status:** Confirmed - Root cause of missing relationships
+**Status:** NOT FIXED - Code changes applied but issue persists (32.8% null stats)
 
 ## Problem Summary
 
@@ -251,11 +251,27 @@ func TestStatsCollection_AllColumnsProcessed(t *testing.T) {
 ## Success Criteria
 
 - [x] Per-column failures don't abort entire table stats collection
-- [x] All text-compatible columns have accurate distinct_count
-- [x] Non-text columns have NULL length but valid distinct_count
+- [ ] All text-compatible columns have accurate distinct_count
+- [ ] Non-text columns have NULL length but valid distinct_count
 - [x] Error logging shows which columns/tables had issues
 - [ ] 90%+ of joinable columns have stats (up from 73%)
 - [ ] BUG-3, BUG-6, BUG-11 symptoms reduced after fix
+
+## Current Status (2026-01-25)
+
+**Issue persists despite code fixes.** Testing shows:
+- 134/409 (32.8%) joinable columns have NULL `distinct_count`
+- All affected columns have `row_count` and `non_null_count` populated
+- Pattern: primarily `text` columns (60% null) and `integer` columns (50% null)
+- `timestamp` and `numeric` columns work correctly (0% null)
+
+**SQL queries work correctly** when tested directly via MCP - the issue is in the Go code path between `AnalyzeColumnStats` returning results and `UpdateColumnJoinability` storing them.
+
+**Investigation needed:**
+1. Why does `distinct_count` get lost while `row_count` and `non_null_count` are preserved?
+2. Is there a column name mismatch in the statsMap lookup?
+3. Is there a type conversion issue with the pointer assignment?
+4. Runtime logging needed to trace exact values through the flow
 
 ## Connection to Other Bugs
 
