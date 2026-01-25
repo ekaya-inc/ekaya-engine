@@ -51,7 +51,7 @@ func (s *glossaryService) validateColumnReferences(ctx context.Context, projectI
 }
 ```
 
-### Step 3: Add Type Information to Prompt Context
+### Step 3: Add Type Information to Prompt Context [COMPLETE]
 
 For type mismatch errors, include column type information:
 ```

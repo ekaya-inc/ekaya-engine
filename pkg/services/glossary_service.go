@@ -1322,6 +1322,12 @@ func (s *glossaryService) buildEnrichTermPrompt(
 			}
 			sb.WriteString("\n")
 		}
+
+		// Add type comparison guidance to prevent type mismatch errors
+		typeGuidance := generateTypeComparisonGuidance(schemaColumnsByTable)
+		if typeGuidance != "" {
+			sb.WriteString(typeGuidance)
+		}
 	}
 
 	// Include semantic column details from ontology (enriched information)
@@ -1480,6 +1486,12 @@ func (s *glossaryService) buildEnhancedEnrichTermPrompt(
 			}
 			sb.WriteString("\n")
 		}
+
+		// Add type comparison guidance to prevent type mismatch errors
+		typeGuidance := generateTypeComparisonGuidance(schemaColumnsByTable)
+		if typeGuidance != "" {
+			sb.WriteString(typeGuidance)
+		}
 	}
 
 	// Include semantic column details from ontology
@@ -1636,6 +1648,87 @@ func containsWarning(warnings []string, warning string) bool {
 		}
 	}
 	return false
+}
+
+// generateTypeComparisonGuidance creates guidance for avoiding type mismatch errors.
+// Numeric types (bigint, integer, etc.) should be compared with numbers, not strings.
+// Text types should be compared with quoted strings.
+func generateTypeComparisonGuidance(schemaColumnsByTable map[string][]*models.SchemaColumn) string {
+	var sb strings.Builder
+
+	// Collect examples of numeric and text columns for type guidance
+	var numericExamples []string
+	var textExamples []string
+
+	numericTypes := map[string]bool{
+		"bigint": true, "int8": true,
+		"integer": true, "int": true, "int4": true,
+		"smallint": true, "int2": true,
+		"numeric": true, "decimal": true,
+		"real": true, "float4": true,
+		"double precision": true, "float8": true,
+	}
+
+	textTypes := map[string]bool{
+		"text": true, "varchar": true, "character varying": true,
+		"char": true, "character": true, "bpchar": true,
+	}
+
+	// Collect up to 3 examples of each type
+	for tableName, columns := range schemaColumnsByTable {
+		for _, col := range columns {
+			normalizedType := strings.ToLower(col.DataType)
+			// Strip size suffixes like varchar(255)
+			if idx := strings.Index(normalizedType, "("); idx > 0 {
+				normalizedType = normalizedType[:idx]
+			}
+
+			if numericTypes[normalizedType] && len(numericExamples) < 3 {
+				// Prefer columns with _id suffix as they're commonly misused
+				if strings.HasSuffix(strings.ToLower(col.ColumnName), "_id") || len(numericExamples) < 2 {
+					numericExamples = append(numericExamples, fmt.Sprintf("`%s.%s` (%s)", tableName, col.ColumnName, col.DataType))
+				}
+			}
+			if textTypes[normalizedType] && len(textExamples) < 3 {
+				textExamples = append(textExamples, fmt.Sprintf("`%s.%s` (%s)", tableName, col.ColumnName, col.DataType))
+			}
+		}
+	}
+
+	// Only add guidance if we found relevant columns
+	if len(numericExamples) == 0 && len(textExamples) == 0 {
+		return ""
+	}
+
+	sb.WriteString("## TYPE COMPARISON RULES\n\n")
+	sb.WriteString("CRITICAL: PostgreSQL is strictly typed. Type mismatches will cause query failures.\n\n")
+
+	if len(numericExamples) > 0 {
+		sb.WriteString("**Numeric columns (compare with integers, NOT quoted strings):**\n")
+		for _, ex := range numericExamples {
+			sb.WriteString(fmt.Sprintf("- %s\n", ex))
+		}
+		sb.WriteString("\n")
+		sb.WriteString("```\n")
+		sb.WriteString("WRONG: WHERE offer_id = 'abc'    -- String comparison on numeric column\n")
+		sb.WriteString("WRONG: WHERE offer_id = '123'   -- Still wrong - quoted number is a string\n")
+		sb.WriteString("RIGHT: WHERE offer_id = 123     -- Unquoted integer for numeric column\n")
+		sb.WriteString("```\n\n")
+	}
+
+	if len(textExamples) > 0 {
+		sb.WriteString("**Text columns (compare with quoted strings):**\n")
+		for _, ex := range textExamples {
+			sb.WriteString(fmt.Sprintf("- %s\n", ex))
+		}
+		sb.WriteString("\n")
+		sb.WriteString("```\n")
+		sb.WriteString("WRONG: WHERE status = active    -- Unquoted will be treated as column name\n")
+		sb.WriteString("RIGHT: WHERE status = 'active'  -- Quoted string for text column\n")
+		sb.WriteString("```\n\n")
+	}
+
+	return sb.String()
 }
 
 type termEnrichment struct {

@@ -4336,6 +4336,94 @@ func TestGlossaryService_DetectColumnConfusions(t *testing.T) {
 	})
 }
 
+// ============================================================================
+// Tests - generateTypeComparisonGuidance
+// ============================================================================
+
+func TestGenerateTypeComparisonGuidance(t *testing.T) {
+	t.Run("includes numeric type guidance with examples", func(t *testing.T) {
+		schemaColumns := map[string][]*models.SchemaColumn{
+			"offers": {
+				{ColumnName: "id", DataType: "uuid"},
+				{ColumnName: "offer_id", DataType: "bigint"},
+				{ColumnName: "amount", DataType: "integer"},
+			},
+		}
+		guidance := generateTypeComparisonGuidance(schemaColumns)
+
+		assert.Contains(t, guidance, "TYPE COMPARISON RULES", "Should have type rules header")
+		assert.Contains(t, guidance, "Numeric columns", "Should have numeric section")
+		assert.Contains(t, guidance, "offer_id", "Should mention offer_id as numeric example")
+		assert.Contains(t, guidance, "WRONG:", "Should have wrong usage example")
+		assert.Contains(t, guidance, "RIGHT:", "Should have right usage example")
+		assert.Contains(t, guidance, "= 123", "Should show unquoted integer as correct")
+	})
+
+	t.Run("includes text type guidance with examples", func(t *testing.T) {
+		schemaColumns := map[string][]*models.SchemaColumn{
+			"users": {
+				{ColumnName: "id", DataType: "uuid"},
+				{ColumnName: "status", DataType: "text"},
+				{ColumnName: "name", DataType: "varchar(255)"},
+			},
+		}
+		guidance := generateTypeComparisonGuidance(schemaColumns)
+
+		assert.Contains(t, guidance, "Text columns", "Should have text section")
+		assert.Contains(t, guidance, "status", "Should mention status as text example")
+		assert.Contains(t, guidance, "'active'", "Should show quoted string as correct")
+	})
+
+	t.Run("handles mixed numeric and text columns", func(t *testing.T) {
+		schemaColumns := map[string][]*models.SchemaColumn{
+			"transactions": {
+				{ColumnName: "id", DataType: "bigint"},
+				{ColumnName: "user_id", DataType: "bigint"},
+				{ColumnName: "status", DataType: "text"},
+				{ColumnName: "category", DataType: "varchar"},
+			},
+		}
+		guidance := generateTypeComparisonGuidance(schemaColumns)
+
+		assert.Contains(t, guidance, "Numeric columns", "Should have numeric section")
+		assert.Contains(t, guidance, "Text columns", "Should have text section")
+	})
+
+	t.Run("returns empty string for empty schema", func(t *testing.T) {
+		guidance := generateTypeComparisonGuidance(nil)
+		assert.Empty(t, guidance, "Empty schema should produce no guidance")
+
+		guidance = generateTypeComparisonGuidance(map[string][]*models.SchemaColumn{})
+		assert.Empty(t, guidance, "Empty column map should produce no guidance")
+	})
+
+	t.Run("returns empty string when only uuid columns exist", func(t *testing.T) {
+		// uuid is neither in numericTypes nor textTypes
+		schemaColumns := map[string][]*models.SchemaColumn{
+			"items": {
+				{ColumnName: "id", DataType: "uuid"},
+				{ColumnName: "parent_id", DataType: "uuid"},
+			},
+		}
+		guidance := generateTypeComparisonGuidance(schemaColumns)
+		assert.Empty(t, guidance, "Schema with only uuid columns should produce no guidance")
+	})
+
+	t.Run("prefers _id suffix columns for numeric examples", func(t *testing.T) {
+		schemaColumns := map[string][]*models.SchemaColumn{
+			"orders": {
+				{ColumnName: "quantity", DataType: "integer"},
+				{ColumnName: "order_id", DataType: "bigint"}, // Should be preferred
+				{ColumnName: "total", DataType: "numeric"},
+			},
+		}
+		guidance := generateTypeComparisonGuidance(schemaColumns)
+
+		// order_id should appear in the guidance because it has _id suffix
+		assert.Contains(t, guidance, "order_id", "Should prefer _id suffix columns as examples")
+	})
+}
+
 func TestGlossaryService_EnrichPrompt_IncludesSchemaColumns(t *testing.T) {
 	// Test that buildEnrichTermPrompt includes actual schema columns
 	logger := zap.NewNop()
@@ -4370,6 +4458,44 @@ func TestGlossaryService_EnrichPrompt_IncludesSchemaColumns(t *testing.T) {
 	// Should include column confusion warnings
 	assert.Contains(t, prompt, "Mistakes to Avoid", "Prompt should have mistakes to avoid section")
 	assert.Contains(t, prompt, "started_at", "Prompt should warn about started_at confusion")
+
+	// Should include type comparison guidance for text columns
+	assert.Contains(t, prompt, "TYPE COMPARISON RULES", "Prompt should have type guidance section")
+	assert.Contains(t, prompt, "Text columns", "Prompt should have text type guidance")
+}
+
+func TestGlossaryService_EnrichPrompt_IncludesTypeGuidance(t *testing.T) {
+	// Test that buildEnrichTermPrompt includes type comparison guidance for numeric types
+	logger := zap.NewNop()
+	svc := &glossaryService{logger: logger}
+
+	term := &models.BusinessGlossaryTerm{
+		Term:       "Offer Redemption Rate",
+		Definition: "Percentage of offers that were redeemed",
+	}
+	ontology := &models.TieredOntology{}
+	entities := []*models.OntologyEntity{}
+
+	schemaColumns := map[string][]*models.SchemaColumn{
+		"offers": {
+			{ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+			{ColumnName: "offer_id", DataType: "bigint"},
+			{ColumnName: "status", DataType: "text"},
+			{ColumnName: "amount", DataType: "integer"},
+		},
+	}
+
+	prompt := svc.buildEnrichTermPrompt(term, ontology, entities, schemaColumns)
+
+	// Should include type comparison rules
+	assert.Contains(t, prompt, "TYPE COMPARISON RULES", "Prompt should have type rules section")
+	assert.Contains(t, prompt, "Numeric columns", "Prompt should have numeric type guidance")
+	assert.Contains(t, prompt, "WRONG:", "Prompt should have wrong usage examples")
+	assert.Contains(t, prompt, "RIGHT:", "Prompt should have right usage examples")
+
+	// Test enhanced prompt includes the same guidance
+	enhancedPrompt := svc.buildEnhancedEnrichTermPrompt(term, ontology, entities, schemaColumns, "previous error")
+	assert.Contains(t, enhancedPrompt, "TYPE COMPARISON RULES", "Enhanced prompt should also have type rules")
 }
 
 // ============================================================================
