@@ -219,6 +219,10 @@ func (m *mockEntityRepoForGlossary) DeleteInferenceEntitiesByOntology(ctx contex
 	return nil
 }
 
+func (m *mockEntityRepoForGlossary) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
+
 func (m *mockEntityRepoForGlossary) Update(ctx context.Context, entity *models.OntologyEntity) error {
 	return nil
 }

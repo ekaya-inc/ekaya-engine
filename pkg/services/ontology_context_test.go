@@ -100,6 +100,10 @@ func (m *mockOntologyEntityRepository) DeleteInferenceEntitiesByOntology(ctx con
 	return nil
 }
 
+func (m *mockOntologyEntityRepository) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
+
 func (m *mockOntologyEntityRepository) Update(ctx context.Context, entity *models.OntologyEntity) error {
 	return nil
 }
@@ -266,6 +270,10 @@ func (m *mockEntityRelationshipRepository) ClearStaleFlag(ctx context.Context, r
 
 func (m *mockEntityRelationshipRepository) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
 	return nil, nil
+}
+
+func (m *mockEntityRelationshipRepository) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
 }
 
 // mockProjectServiceForOntology is a mock for ProjectService in ontology context tests.

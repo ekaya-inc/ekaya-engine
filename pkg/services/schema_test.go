@@ -2389,6 +2389,10 @@ func (m *mockEntityRepository) DeleteInferenceEntitiesByOntology(ctx context.Con
 	return nil
 }
 
+func (m *mockEntityRepository) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
+
 func (m *mockEntityRepository) Update(ctx context.Context, entity *models.OntologyEntity) error {
 	return nil
 }

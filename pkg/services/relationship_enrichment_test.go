@@ -157,6 +157,10 @@ func (r *testRelEnrichmentEntityRepo) DeleteInferenceEntitiesByOntology(ctx cont
 	return nil
 }
 
+func (r *testRelEnrichmentEntityRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
+
 func (r *testRelEnrichmentEntityRepo) DeleteAlias(ctx context.Context, aliasID uuid.UUID) error {
 	return nil
 }

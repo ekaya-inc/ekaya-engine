@@ -50,6 +50,9 @@ func (m *mockEntityDiscoveryEntityRepo) DeleteByOntology(ctx context.Context, on
 func (m *mockEntityDiscoveryEntityRepo) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }
+func (m *mockEntityDiscoveryEntityRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
 func (m *mockEntityDiscoveryEntityRepo) Update(ctx context.Context, entity *models.OntologyEntity) error {
 	return nil
 }

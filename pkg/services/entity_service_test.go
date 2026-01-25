@@ -104,6 +104,9 @@ func (m *mockEntityRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.U
 func (m *mockEntityRepo) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }
+func (m *mockEntityRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
 func (m *mockEntityRepo) GetAllAliasesByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityAlias, error) {
 	return nil, nil
 }
@@ -200,6 +203,10 @@ func (m *mockRelationshipRepo) ClearStaleFlag(ctx context.Context, relationshipI
 
 func (m *mockRelationshipRepo) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
 	return nil, nil
+}
+
+func (m *mockRelationshipRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
 }
 
 type mockOntologyRepo struct {
