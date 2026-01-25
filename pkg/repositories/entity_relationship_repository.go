@@ -70,16 +70,17 @@ func (r *entityRelationshipRepository) Create(ctx context.Context, rel *models.E
 	// When an existing relationship is re-discovered:
 	// - Clear is_stale flag (relationship still exists in schema)
 	// - Update confidence and detection_method (may have changed)
+	// - Update column IDs (may have changed if schema was refreshed)
 	// - Preserve description/association if already enriched (don't overwrite with NULL)
 	now := time.Now()
 	query := `
 		INSERT INTO engine_entity_relationships (
 			id, ontology_id, source_entity_id, target_entity_id,
-			source_column_schema, source_column_table, source_column_name,
-			target_column_schema, target_column_table, target_column_name,
+			source_column_schema, source_column_table, source_column_name, source_column_id,
+			target_column_schema, target_column_table, target_column_name, target_column_id,
 			detection_method, confidence, status, cardinality, description, association,
 			is_stale, created_by, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 		ON CONFLICT (ontology_id, source_entity_id, target_entity_id,
 			source_column_schema, source_column_table, source_column_name,
 			target_column_schema, target_column_table, target_column_name)
@@ -87,12 +88,14 @@ func (r *entityRelationshipRepository) Create(ctx context.Context, rel *models.E
 			is_stale = false,
 			confidence = EXCLUDED.confidence,
 			detection_method = EXCLUDED.detection_method,
-			updated_at = $20`
+			source_column_id = EXCLUDED.source_column_id,
+			target_column_id = EXCLUDED.target_column_id,
+			updated_at = $22`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		rel.ID, rel.OntologyID, rel.SourceEntityID, rel.TargetEntityID,
-		rel.SourceColumnSchema, rel.SourceColumnTable, rel.SourceColumnName,
-		rel.TargetColumnSchema, rel.TargetColumnTable, rel.TargetColumnName,
+		rel.SourceColumnSchema, rel.SourceColumnTable, rel.SourceColumnName, rel.SourceColumnID,
+		rel.TargetColumnSchema, rel.TargetColumnTable, rel.TargetColumnName, rel.TargetColumnID,
 		rel.DetectionMethod, rel.Confidence, rel.Status, rel.Cardinality, rel.Description, rel.Association,
 		rel.IsStale, rel.CreatedBy, rel.CreatedAt,
 		now,
@@ -552,11 +555,11 @@ func (r *entityRelationshipRepository) Upsert(ctx context.Context, rel *models.E
 	query := `
 		INSERT INTO engine_entity_relationships (
 			id, ontology_id, source_entity_id, target_entity_id,
-			source_column_schema, source_column_table, source_column_name,
-			target_column_schema, target_column_table, target_column_name,
+			source_column_schema, source_column_table, source_column_name, source_column_id,
+			target_column_schema, target_column_table, target_column_name, target_column_id,
 			detection_method, confidence, status, cardinality, description, association,
 			is_stale, created_by, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 		ON CONFLICT (ontology_id, source_entity_id, target_entity_id,
 			source_column_schema, source_column_table, source_column_name,
 			target_column_schema, target_column_table, target_column_name)
@@ -567,14 +570,16 @@ func (r *entityRelationshipRepository) Upsert(ctx context.Context, rel *models.E
 			status = EXCLUDED.status,
 			confidence = EXCLUDED.confidence,
 			detection_method = EXCLUDED.detection_method,
+			source_column_id = EXCLUDED.source_column_id,
+			target_column_id = EXCLUDED.target_column_id,
 			is_stale = EXCLUDED.is_stale,
-			updated_by = $20,
-			updated_at = $21`
+			updated_by = $22,
+			updated_at = $23`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		rel.ID, rel.OntologyID, rel.SourceEntityID, rel.TargetEntityID,
-		rel.SourceColumnSchema, rel.SourceColumnTable, rel.SourceColumnName,
-		rel.TargetColumnSchema, rel.TargetColumnTable, rel.TargetColumnName,
+		rel.SourceColumnSchema, rel.SourceColumnTable, rel.SourceColumnName, rel.SourceColumnID,
+		rel.TargetColumnSchema, rel.TargetColumnTable, rel.TargetColumnName, rel.TargetColumnID,
 		rel.DetectionMethod, rel.Confidence, rel.Status, rel.Cardinality, rel.Description, rel.Association,
 		rel.IsStale, rel.CreatedBy, rel.CreatedAt,
 		rel.UpdatedBy, now,

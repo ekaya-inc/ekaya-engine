@@ -430,8 +430,8 @@ func (ctc *columnTypesTestContext) ensureSchemaColumns() {
 
 	// Create datasource
 	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_datasources (id, project_id, name, adapter_type, status)
-		VALUES ($1, $2, 'Column Types Test DS', 'postgres', 'connected')
+		INSERT INTO engine_datasources (id, project_id, name, datasource_type, datasource_config)
+		VALUES ($1, $2, 'Column Types Test DS', 'postgres', '{}')
 		ON CONFLICT (id) DO NOTHING
 	`, ctc.dsID, ctc.projectID)
 	if err != nil {
@@ -440,8 +440,8 @@ func (ctc *columnTypesTestContext) ensureSchemaColumns() {
 
 	// Create source table (orders)
 	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_schema_tables (id, project_id, datasource_id, schema_name, table_name, is_view)
-		VALUES ($1, $2, $3, 'public', 'orders', false)
+		INSERT INTO engine_schema_tables (id, project_id, datasource_id, schema_name, table_name)
+		VALUES ($1, $2, $3, 'public', 'orders')
 		ON CONFLICT (id) DO NOTHING
 	`, ctc.sourceTableID, ctc.projectID, ctc.dsID)
 	if err != nil {
@@ -450,8 +450,8 @@ func (ctc *columnTypesTestContext) ensureSchemaColumns() {
 
 	// Create target table (users)
 	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_schema_tables (id, project_id, datasource_id, schema_name, table_name, is_view)
-		VALUES ($1, $2, $3, 'public', 'users', false)
+		INSERT INTO engine_schema_tables (id, project_id, datasource_id, schema_name, table_name)
+		VALUES ($1, $2, $3, 'public', 'users')
 		ON CONFLICT (id) DO NOTHING
 	`, ctc.targetTableID, ctc.projectID, ctc.dsID)
 	if err != nil {
@@ -501,22 +501,8 @@ func (ctc *columnTypesTestContext) createRelationshipWithColumnIDs(ctx context.C
 		CreatedBy:          models.ProvenanceInference,
 	}
 
-	// Insert with column IDs directly via SQL since Create doesn't handle column IDs
-	relID := uuid.New()
-	rel.ID = relID
-
-	scope, _ := database.GetTenantScope(ctx)
-	_, err := scope.Conn.Exec(ctx, `
-		INSERT INTO engine_entity_relationships (
-			id, ontology_id, source_entity_id, target_entity_id,
-			source_column_schema, source_column_table, source_column_name, source_column_id,
-			target_column_schema, target_column_table, target_column_name, target_column_id,
-			detection_method, confidence, status, cardinality, created_by, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, now())
-	`, rel.ID, rel.OntologyID, rel.SourceEntityID, rel.TargetEntityID,
-		rel.SourceColumnSchema, rel.SourceColumnTable, rel.SourceColumnName, rel.SourceColumnID,
-		rel.TargetColumnSchema, rel.TargetColumnTable, rel.TargetColumnName, rel.TargetColumnID,
-		rel.DetectionMethod, rel.Confidence, rel.Status, rel.Cardinality, rel.CreatedBy)
+	// Create uses the repository method which now handles column IDs
+	err := ctc.repo.Create(ctx, rel)
 	if err != nil {
 		ctc.t.Fatalf("failed to create relationship with column IDs: %v", err)
 	}
@@ -573,6 +559,158 @@ func TestEntityRelationshipRepository_GetByProject_ColumnTypes(t *testing.T) {
 
 	if found.TargetColumnID == nil || *found.TargetColumnID != ctc.targetColumnID {
 		t.Errorf("expected TargetColumnID=%s, got %v", ctc.targetColumnID, found.TargetColumnID)
+	}
+}
+
+func TestEntityRelationshipRepository_Create_PersistsColumnIDs(t *testing.T) {
+	ctc := setupColumnTypesTest(t)
+	ctc.cleanup()
+	defer ctc.cleanup()
+
+	ctx, cleanup := ctc.createTestContext()
+	defer cleanup()
+
+	// Create a relationship WITH column IDs using the Create method
+	rel := &models.EntityRelationship{
+		OntologyID:         ctc.ontologyID,
+		SourceEntityID:     ctc.sourceEntityID,
+		TargetEntityID:     ctc.targetEntityID,
+		SourceColumnSchema: "public",
+		SourceColumnTable:  "orders",
+		SourceColumnName:   "user_id",
+		SourceColumnID:     &ctc.sourceColumnID,
+		TargetColumnSchema: "public",
+		TargetColumnTable:  "users",
+		TargetColumnName:   "id",
+		TargetColumnID:     &ctc.targetColumnID,
+		DetectionMethod:    models.DetectionMethodForeignKey,
+		Confidence:         1.0,
+		Status:             models.RelationshipStatusConfirmed,
+		Cardinality:        models.CardinalityNTo1,
+		CreatedBy:          models.ProvenanceInference,
+	}
+
+	// Use the Create method (not raw SQL)
+	err := ctc.repo.Create(ctx, rel)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Get by project to verify column IDs and types
+	relationships, err := ctc.repo.GetByProject(ctx, ctc.projectID)
+	if err != nil {
+		t.Fatalf("GetByProject failed: %v", err)
+	}
+
+	// Find our test relationship
+	var found *models.EntityRelationship
+	for _, r := range relationships {
+		if r.ID == rel.ID {
+			found = r
+			break
+		}
+	}
+
+	if found == nil {
+		t.Fatal("test relationship not found in results")
+	}
+
+	// Verify column IDs are persisted by Create method
+	if found.SourceColumnID == nil {
+		t.Error("expected SourceColumnID to be persisted, got nil")
+	} else if *found.SourceColumnID != ctc.sourceColumnID {
+		t.Errorf("expected SourceColumnID=%s, got %s", ctc.sourceColumnID, *found.SourceColumnID)
+	}
+
+	if found.TargetColumnID == nil {
+		t.Error("expected TargetColumnID to be persisted, got nil")
+	} else if *found.TargetColumnID != ctc.targetColumnID {
+		t.Errorf("expected TargetColumnID=%s, got %s", ctc.targetColumnID, *found.TargetColumnID)
+	}
+
+	// Verify column types are populated from JOIN (only works if column IDs are persisted)
+	if found.SourceColumnType != "bigint" {
+		t.Errorf("expected SourceColumnType='bigint', got '%s'", found.SourceColumnType)
+	}
+
+	if found.TargetColumnType != "uuid" {
+		t.Errorf("expected TargetColumnType='uuid', got '%s'", found.TargetColumnType)
+	}
+}
+
+func TestEntityRelationshipRepository_Upsert_PersistsColumnIDs(t *testing.T) {
+	ctc := setupColumnTypesTest(t)
+	ctc.cleanup()
+	defer ctc.cleanup()
+
+	ctx, cleanup := ctc.createTestContext()
+	defer cleanup()
+
+	// Create a relationship WITH column IDs using the Upsert method
+	rel := &models.EntityRelationship{
+		OntologyID:         ctc.ontologyID,
+		SourceEntityID:     ctc.sourceEntityID,
+		TargetEntityID:     ctc.targetEntityID,
+		SourceColumnSchema: "public",
+		SourceColumnTable:  "orders",
+		SourceColumnName:   "user_id",
+		SourceColumnID:     &ctc.sourceColumnID,
+		TargetColumnSchema: "public",
+		TargetColumnTable:  "users",
+		TargetColumnName:   "id",
+		TargetColumnID:     &ctc.targetColumnID,
+		DetectionMethod:    models.DetectionMethodForeignKey,
+		Confidence:         1.0,
+		Status:             models.RelationshipStatusConfirmed,
+		Cardinality:        models.CardinalityNTo1,
+		CreatedBy:          models.ProvenanceInference,
+	}
+
+	// Use the Upsert method
+	err := ctc.repo.Upsert(ctx, rel)
+	if err != nil {
+		t.Fatalf("Upsert failed: %v", err)
+	}
+
+	// Get by project to verify column IDs and types
+	relationships, err := ctc.repo.GetByProject(ctx, ctc.projectID)
+	if err != nil {
+		t.Fatalf("GetByProject failed: %v", err)
+	}
+
+	// Find our test relationship
+	var found *models.EntityRelationship
+	for _, r := range relationships {
+		if r.ID == rel.ID {
+			found = r
+			break
+		}
+	}
+
+	if found == nil {
+		t.Fatal("test relationship not found in results")
+	}
+
+	// Verify column IDs are persisted by Upsert method
+	if found.SourceColumnID == nil {
+		t.Error("expected SourceColumnID to be persisted, got nil")
+	} else if *found.SourceColumnID != ctc.sourceColumnID {
+		t.Errorf("expected SourceColumnID=%s, got %s", ctc.sourceColumnID, *found.SourceColumnID)
+	}
+
+	if found.TargetColumnID == nil {
+		t.Error("expected TargetColumnID to be persisted, got nil")
+	} else if *found.TargetColumnID != ctc.targetColumnID {
+		t.Errorf("expected TargetColumnID=%s, got %s", ctc.targetColumnID, *found.TargetColumnID)
+	}
+
+	// Verify column types are populated from JOIN
+	if found.SourceColumnType != "bigint" {
+		t.Errorf("expected SourceColumnType='bigint', got '%s'", found.SourceColumnType)
+	}
+
+	if found.TargetColumnType != "uuid" {
+		t.Errorf("expected TargetColumnType='uuid', got '%s'", found.TargetColumnType)
 	}
 }
 
