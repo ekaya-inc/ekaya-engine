@@ -762,3 +762,119 @@ func TestQueriesIntegration_ListQueries(t *testing.T) {
 		t.Errorf("Expected 2 enabled queries, got %d", len(enabledQueries))
 	}
 }
+
+func TestQueriesIntegration_ListPending(t *testing.T) {
+	tc := setupQueriesIntegrationTest(t)
+	tc.ensureTestDatasource()
+	tc.cleanupQueries()
+
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	// Insert pending queries directly into the database
+	// (We need to set status='pending' which isn't possible via normal Create API)
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_queries (
+			id, project_id, datasource_id, natural_language_prompt, sql_query,
+			dialect, is_enabled, status, suggested_by, parameters, output_columns, tags
+		) VALUES
+		($1, $2, $3, 'Pending Query 1', 'SELECT 1', 'postgres', false, 'pending', 'agent', '[]'::jsonb, '[{"name":"col","type":"INT4","description":""}]'::jsonb, '{}'::text[]),
+		($4, $2, $3, 'Pending Query 2', 'SELECT 2', 'postgres', false, 'pending', 'user', '[]'::jsonb, '[{"name":"col","type":"INT4","description":""}]'::jsonb, '{}'::text[]),
+		($5, $2, $3, 'Approved Query', 'SELECT 3', 'postgres', true, 'approved', 'admin', '[]'::jsonb, '[{"name":"col","type":"INT4","description":""}]'::jsonb, '{}'::text[])
+	`, uuid.New(), tc.projectID, tc.createdDsID, uuid.New(), uuid.New())
+	if err != nil {
+		t.Fatalf("Failed to insert test queries: %v", err)
+	}
+
+	// List pending queries
+	listReq, listCleanup := tc.makeRequest(http.MethodGet,
+		"/api/projects/"+tc.projectID.String()+"/queries/pending",
+		nil)
+	listReq.SetPathValue("pid", tc.projectID.String())
+
+	listRec := httptest.NewRecorder()
+	tc.queriesHandler.ListPending(listRec, listReq)
+	listCleanup()
+
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("ListPending failed with status %d: %s", listRec.Code, listRec.Body.String())
+	}
+
+	var listResp ApiResponse
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("Failed to parse list response: %v", err)
+	}
+
+	if !listResp.Success {
+		t.Fatalf("Expected success, got error: %s", listResp.Error)
+	}
+
+	listData := listResp.Data.(map[string]any)
+
+	// Verify count field
+	count := int(listData["count"].(float64))
+	if count != 2 {
+		t.Errorf("Expected count=2, got %d", count)
+	}
+
+	// Verify queries array
+	pendingQueries := listData["queries"].([]any)
+	if len(pendingQueries) != 2 {
+		t.Errorf("Expected 2 pending queries, got %d", len(pendingQueries))
+	}
+
+	// Verify all queries have pending status
+	for _, q := range pendingQueries {
+		query := q.(map[string]any)
+		if query["status"] != "pending" {
+			t.Errorf("Expected status 'pending', got '%v'", query["status"])
+		}
+	}
+}
+
+func TestQueriesIntegration_ListPending_Empty(t *testing.T) {
+	tc := setupQueriesIntegrationTest(t)
+	tc.ensureTestDatasource()
+	tc.cleanupQueries()
+
+	// List pending queries (should be empty)
+	listReq, listCleanup := tc.makeRequest(http.MethodGet,
+		"/api/projects/"+tc.projectID.String()+"/queries/pending",
+		nil)
+	listReq.SetPathValue("pid", tc.projectID.String())
+
+	listRec := httptest.NewRecorder()
+	tc.queriesHandler.ListPending(listRec, listReq)
+	listCleanup()
+
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("ListPending failed with status %d: %s", listRec.Code, listRec.Body.String())
+	}
+
+	var listResp ApiResponse
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("Failed to parse list response: %v", err)
+	}
+
+	if !listResp.Success {
+		t.Fatalf("Expected success, got error: %s", listResp.Error)
+	}
+
+	listData := listResp.Data.(map[string]any)
+
+	// Verify count is 0
+	count := int(listData["count"].(float64))
+	if count != 0 {
+		t.Errorf("Expected count=0, got %d", count)
+	}
+
+	// Verify queries array is empty
+	pendingQueries := listData["queries"].([]any)
+	if len(pendingQueries) != 0 {
+		t.Errorf("Expected 0 pending queries, got %d", len(pendingQueries))
+	}
+}

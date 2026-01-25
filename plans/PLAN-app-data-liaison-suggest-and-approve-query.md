@@ -77,7 +77,7 @@ This creates a governed workflow where Business Users (using ChatGPT, Claude Des
 | UI toggle for Allow Suggestions | ✅ Done | Toggle in MCP Server page |
 | Dev tools tool group | ✅ Done | Task 4.1 |
 | **Admin REST API** | | |
-| GET /queries/pending | ❌ Pending | Task 5.1 |
+| GET /queries/pending | ✅ Done | Task 5.1 |
 | POST /queries/{id}/approve | ❌ Pending | Task 5.2 |
 | POST /queries/{id}/reject | ❌ Pending | Task 5.3 |
 | **Admin UI** | | |
