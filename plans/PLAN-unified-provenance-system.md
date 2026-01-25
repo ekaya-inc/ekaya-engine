@@ -10,6 +10,10 @@
 - [x] Task 2: Update Models
 - [x] Task 3: Implement Provenance Context
 - [ ] Task 4: Update Repositories
+  - [x] 4.1: Update Entity Repository with Provenance Support
+  - [ ] 4.2: Update Relationship Repository with Provenance Support
+  - [ ] 4.3: Update Glossary Repository with Provenance Support
+  - [ ] 4.4: Update Project Knowledge Repository with Provenance Support
 - [ ] Task 5: Implement Audit Service
 - [ ] Task 6: Extract User ID from JWT
 
@@ -301,8 +305,125 @@ Update Go structs to match new schema.
 
 ### Step 4: Update Repositories
 
-- Modify Create/Update methods to use provenance context
-- Add `DeleteBySource` methods for re-extraction
+#### 4.1 Update Entity Repository with Provenance Support
+
+Update `pkg/repositories/ontology_entity_repository.go` to use provenance context:
+
+**Files to modify:**
+- `pkg/repositories/ontology_entity_repository.go`
+
+**Changes required:**
+
+1. Modify the `Create` method to:
+   - Extract provenance from context using `models.GetProvenance(ctx)`
+   - Return error if provenance context is missing
+   - Set `entity.Source = string(prov.Source)`
+   - Set `entity.CreatedBy = prov.UserID`
+   - Update SQL INSERT to include `source` and `created_by` columns
+
+2. Modify the `Update` method to:
+   - Extract provenance from context
+   - Set `entity.LastEditSource = ptr(string(prov.Source))`
+   - Set `entity.UpdatedBy = &prov.UserID`
+   - Update SQL UPDATE to include `last_edit_source` and `updated_by` columns
+
+3. Add `DeleteBySource` method:
+   ```go
+   DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error
+   ```
+   This deletes all entities where `source` matches the given value, supporting re-extraction policy.
+
+**Note:** Audit service integration will be added in Task 5 after the audit service is implemented.
+
+---
+
+#### 4.2 Update Relationship Repository with Provenance Support
+
+Update `pkg/repositories/entity_relationship_repository.go` to use provenance context:
+
+**Files to modify:**
+- `pkg/repositories/entity_relationship_repository.go`
+
+**Changes required:**
+
+1. Modify the `Create` method to:
+   - Extract provenance from context using `models.GetProvenance(ctx)`
+   - Return error if provenance context is missing
+   - Set `relationship.Source = string(prov.Source)`
+   - Set `relationship.CreatedBy = prov.UserID`
+   - Update SQL INSERT to include `source` and `created_by` columns
+
+2. Modify the `Update` method to:
+   - Extract provenance from context
+   - Set `relationship.LastEditSource = ptr(string(prov.Source))`
+   - Set `relationship.UpdatedBy = &prov.UserID`
+   - Update SQL UPDATE to include `last_edit_source` and `updated_by` columns
+
+3. Add `DeleteBySource` method:
+   ```go
+   DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error
+   ```
+
+**Pattern:** Follow the same pattern established in subtask 4.1 for entities.
+
+---
+
+#### 4.3 Update Glossary Repository with Provenance Support
+
+Update the glossary repository (`pkg/repositories/glossary_repository.go` or similar) to use provenance context:
+
+**Files to modify:**
+- `pkg/repositories/glossary_repository.go` (or `business_glossary_repository.go`)
+
+**Changes required:**
+
+1. The glossary table already has a `source` field. Modify `Create` to also set:
+   - `created_by = prov.UserID` (new field from migration)
+   - Extract provenance from context, return error if missing
+
+2. Modify the `Update` method to:
+   - Extract provenance from context
+   - Set `last_edit_source` (new field from migration)
+   - Set `updated_by = &prov.UserID`
+   - Update SQL to include these columns
+
+3. Add `DeleteBySource` method:
+   ```go
+   DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error
+   ```
+
+**Note:** The glossary table (`engine_business_glossary`) already has a `source` column but the migration added `last_edit_source`, `created_by`, and `updated_by`.
+
+---
+
+#### 4.4 Update Project Knowledge Repository with Provenance Support
+
+Update `pkg/repositories/project_knowledge_repository.go` to use provenance context:
+
+**Files to modify:**
+- `pkg/repositories/project_knowledge_repository.go`
+
+**Changes required:**
+
+1. Modify the `Create` method to:
+   - Extract provenance from context using `models.GetProvenance(ctx)`
+   - Return error if provenance context is missing
+   - Set `knowledge.Source = string(prov.Source)`
+   - Set `knowledge.CreatedBy = prov.UserID`
+   - Update SQL INSERT to include all four provenance columns
+
+2. Modify the `Update` method to:
+   - Extract provenance from context
+   - Set `knowledge.LastEditSource = ptr(string(prov.Source))`
+   - Set `knowledge.UpdatedBy = &prov.UserID`
+   - Update SQL UPDATE accordingly
+
+3. Add `DeleteBySource` method:
+   ```go
+   DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error
+   ```
+
+**Note:** Project knowledge previously had NO provenance fields. The migration added all four fields (`source`, `last_edit_source`, `created_by`, `updated_by`), so this is a more significant change than the other repositories.
 
 ### Step 5: Implement Audit Service
 

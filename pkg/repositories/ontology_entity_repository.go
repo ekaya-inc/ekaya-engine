@@ -23,6 +23,7 @@ type OntologyEntityRepository interface {
 	GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error)
 	DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error
 	DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error
+	DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error
 	Update(ctx context.Context, entity *models.OntologyEntity) error
 
 	// Stale marking for incremental refresh
@@ -69,6 +70,12 @@ func (r *ontologyEntityRepository) Create(ctx context.Context, entity *models.On
 		return fmt.Errorf("no tenant scope in context")
 	}
 
+	// Extract provenance from context
+	prov, ok := models.GetProvenance(ctx)
+	if !ok {
+		return fmt.Errorf("provenance context required")
+	}
+
 	now := time.Now()
 	entity.CreatedAt = now
 	entity.UpdatedAt = now
@@ -77,21 +84,20 @@ func (r *ontologyEntityRepository) Create(ctx context.Context, entity *models.On
 		entity.ID = uuid.New()
 	}
 
-	// Default created_by to 'inference' if not set
-	if entity.CreatedBy == "" {
-		entity.CreatedBy = models.ProvenanceInference
-	}
+	// Set provenance fields from context
+	entity.Source = prov.Source.String()
+	entity.CreatedBy = &prov.UserID
 
 	// Use ON CONFLICT to handle duplicate entity names within the same ontology.
 	// On conflict, merge descriptions by preferring the new description if it's non-empty,
-	// otherwise keep the existing one.
+	// otherwise keep the existing one. On conflict, also set last_edit_source and updated_by.
 	query := `
 		INSERT INTO engine_ontology_entities (
 			id, project_id, ontology_id, name, description, domain,
 			primary_schema, primary_table, primary_column,
 			confidence, is_stale,
-			created_by, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+			source, created_by, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		ON CONFLICT (ontology_id, name) DO UPDATE SET
 			description = COALESCE(NULLIF(EXCLUDED.description, ''), engine_ontology_entities.description),
 			domain = COALESCE(EXCLUDED.domain, engine_ontology_entities.domain),
@@ -100,6 +106,8 @@ func (r *ontologyEntityRepository) Create(ctx context.Context, entity *models.On
 			primary_column = EXCLUDED.primary_column,
 			confidence = EXCLUDED.confidence,
 			is_stale = EXCLUDED.is_stale,
+			last_edit_source = EXCLUDED.source,
+			updated_by = EXCLUDED.created_by,
 			updated_at = EXCLUDED.updated_at
 		RETURNING id, created_at`
 
@@ -107,7 +115,7 @@ func (r *ontologyEntityRepository) Create(ctx context.Context, entity *models.On
 		entity.ID, entity.ProjectID, entity.OntologyID, entity.Name, entity.Description, entity.Domain,
 		entity.PrimarySchema, entity.PrimaryTable, entity.PrimaryColumn,
 		entity.Confidence, entity.IsStale,
-		entity.CreatedBy, entity.CreatedAt, entity.UpdatedAt,
+		entity.Source, entity.CreatedBy, entity.CreatedAt, entity.UpdatedAt,
 	)
 
 	// Retrieve the actual ID and created_at (may be different if row already existed)
@@ -135,7 +143,7 @@ func (r *ontologyEntityRepository) GetByOntology(ctx context.Context, ontologyID
 		       primary_schema, primary_table, primary_column,
 		       is_deleted, deletion_reason,
 		       confidence, is_stale,
-		       created_by, updated_by, created_at, updated_at
+		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_entities
 		WHERE ontology_id = $1 AND NOT is_deleted
 		ORDER BY name`
@@ -173,7 +181,7 @@ func (r *ontologyEntityRepository) GetByProject(ctx context.Context, projectID u
 		       e.primary_schema, e.primary_table, e.primary_column,
 		       e.is_deleted, e.deletion_reason,
 		       e.confidence, e.is_stale,
-		       e.created_by, e.updated_by, e.created_at, e.updated_at
+		       e.source, e.last_edit_source, e.created_by, e.updated_by, e.created_at, e.updated_at
 		FROM engine_ontology_entities e
 		JOIN engine_ontologies o ON e.ontology_id = o.id
 		WHERE e.project_id = $1 AND o.is_active = true AND NOT e.is_deleted
@@ -212,7 +220,7 @@ func (r *ontologyEntityRepository) GetByName(ctx context.Context, ontologyID uui
 		       primary_schema, primary_table, primary_column,
 		       is_deleted, deletion_reason,
 		       confidence, is_stale,
-		       created_by, updated_by, created_at, updated_at
+		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_entities
 		WHERE ontology_id = $1 AND name = $2 AND NOT is_deleted`
 
@@ -241,7 +249,7 @@ func (r *ontologyEntityRepository) GetByProjectAndName(ctx context.Context, proj
 		       e.primary_schema, e.primary_table, e.primary_column,
 		       e.is_deleted, e.deletion_reason,
 		       e.confidence, e.is_stale,
-		       e.created_by, e.updated_by, e.created_at, e.updated_at
+		       e.source, e.last_edit_source, e.created_by, e.updated_by, e.created_at, e.updated_at
 		FROM engine_ontology_entities e
 		JOIN engine_ontologies o ON e.ontology_id = o.id
 		WHERE e.project_id = $1 AND e.name = $2 AND o.is_active = true AND NOT e.is_deleted`
@@ -282,11 +290,29 @@ func (r *ontologyEntityRepository) DeleteInferenceEntitiesByOntology(ctx context
 		return fmt.Errorf("no tenant scope in context")
 	}
 
-	query := `DELETE FROM engine_ontology_entities WHERE ontology_id = $1 AND created_by = 'inference'`
+	query := `DELETE FROM engine_ontology_entities WHERE ontology_id = $1 AND source = 'inference'`
 
 	_, err := scope.Conn.Exec(ctx, query, ontologyID)
 	if err != nil {
 		return fmt.Errorf("failed to delete inference entities: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteBySource deletes all entities for a project where source matches the given value.
+// This supports re-extraction policy: delete inference items while preserving mcp/manual items.
+func (r *ontologyEntityRepository) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `DELETE FROM engine_ontology_entities WHERE project_id = $1 AND source = $2`
+
+	_, err := scope.Conn.Exec(ctx, query, projectID, source.String())
+	if err != nil {
+		return fmt.Errorf("failed to delete entities by source: %w", err)
 	}
 
 	return nil
@@ -304,7 +330,7 @@ func (r *ontologyEntityRepository) MarkInferenceEntitiesStale(ctx context.Contex
 	query := `
 		UPDATE engine_ontology_entities
 		SET is_stale = true, updated_at = $2
-		WHERE ontology_id = $1 AND created_by = 'inference' AND NOT is_deleted`
+		WHERE ontology_id = $1 AND source = 'inference' AND NOT is_deleted`
 
 	_, err := scope.Conn.Exec(ctx, query, ontologyID, time.Now())
 	if err != nil {
@@ -343,7 +369,7 @@ func (r *ontologyEntityRepository) GetStaleEntities(ctx context.Context, ontolog
 		       primary_schema, primary_table, primary_column,
 		       is_deleted, deletion_reason,
 		       confidence, is_stale,
-		       created_by, updated_by, created_at, updated_at
+		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_entities
 		WHERE ontology_id = $1 AND is_stale = true AND NOT is_deleted
 		ORDER BY name`
@@ -385,7 +411,7 @@ func (r *ontologyEntityRepository) GetByID(ctx context.Context, entityID uuid.UU
 		       primary_schema, primary_table, primary_column,
 		       is_deleted, deletion_reason,
 		       confidence, is_stale,
-		       created_by, updated_by, created_at, updated_at
+		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_entities
 		WHERE id = $1`
 
@@ -407,21 +433,32 @@ func (r *ontologyEntityRepository) Update(ctx context.Context, entity *models.On
 		return fmt.Errorf("no tenant scope in context")
 	}
 
+	// Extract provenance from context
+	prov, ok := models.GetProvenance(ctx)
+	if !ok {
+		return fmt.Errorf("provenance context required")
+	}
+
 	entity.UpdatedAt = time.Now()
+
+	// Set provenance fields from context
+	lastEditSource := prov.Source.String()
+	entity.LastEditSource = &lastEditSource
+	entity.UpdatedBy = &prov.UserID
 
 	query := `
 		UPDATE engine_ontology_entities
 		SET name = $2, description = $3, domain = $4,
 		    primary_schema = $5, primary_table = $6, primary_column = $7,
 		    confidence = $8, is_stale = $9,
-		    updated_by = $10, updated_at = $11
+		    last_edit_source = $10, updated_by = $11, updated_at = $12
 		WHERE id = $1`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		entity.ID, entity.Name, entity.Description, entity.Domain,
 		entity.PrimarySchema, entity.PrimaryTable, entity.PrimaryColumn,
 		entity.Confidence, entity.IsStale,
-		entity.UpdatedBy, entity.UpdatedAt,
+		entity.LastEditSource, entity.UpdatedBy, entity.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update entity: %w", err)
@@ -601,7 +638,7 @@ func scanOntologyEntity(row pgx.Row) (*models.OntologyEntity, error) {
 		&e.PrimarySchema, &e.PrimaryTable, &e.PrimaryColumn,
 		&e.IsDeleted, &e.DeletionReason,
 		&e.Confidence, &e.IsStale,
-		&e.CreatedBy, &e.UpdatedBy, &e.CreatedAt, &e.UpdatedAt,
+		&e.Source, &e.LastEditSource, &e.CreatedBy, &e.UpdatedBy, &e.CreatedAt, &e.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {

@@ -20,6 +20,7 @@ type ontologyEntityTestContext struct {
 	repo       OntologyEntityRepository
 	projectID  uuid.UUID
 	ontologyID uuid.UUID
+	testUserID uuid.UUID // User ID for provenance context
 }
 
 // setupOntologyEntityTest initializes the test context with shared testcontainer.
@@ -31,6 +32,7 @@ func setupOntologyEntityTest(t *testing.T) *ontologyEntityTestContext {
 		repo:       NewOntologyEntityRepository(),
 		projectID:  uuid.MustParse("00000000-0000-0000-0000-000000000050"),
 		ontologyID: uuid.MustParse("00000000-0000-0000-0000-000000000051"),
+		testUserID: uuid.MustParse("00000000-0000-0000-0000-000000000052"), // Test user for provenance
 	}
 	tc.ensureTestProjectAndOntology()
 	return tc
@@ -84,8 +86,13 @@ func (tc *ontologyEntityTestContext) cleanup() {
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontology_entities WHERE ontology_id = $1", tc.ontologyID)
 }
 
-// createTestContext returns a context with tenant scope.
+// createTestContext returns a context with tenant scope and inference provenance.
 func (tc *ontologyEntityTestContext) createTestContext() (context.Context, func()) {
+	return tc.createTestContextWithProvenance(models.SourceInference)
+}
+
+// createTestContextWithProvenance returns a context with tenant scope and the specified provenance source.
+func (tc *ontologyEntityTestContext) createTestContextWithProvenance(source models.ProvenanceSource) (context.Context, func()) {
 	tc.t.Helper()
 	ctx := context.Background()
 	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
@@ -93,17 +100,15 @@ func (tc *ontologyEntityTestContext) createTestContext() (context.Context, func(
 		tc.t.Fatalf("failed to create tenant scope: %v", err)
 	}
 	ctx = database.SetTenantScope(ctx, scope)
+	ctx = models.WithProvenance(ctx, models.ProvenanceContext{
+		Source: source,
+		UserID: tc.testUserID,
+	})
 	return ctx, func() { scope.Close() }
 }
 
-// createTestEntity creates a schema entity for testing.
+// createTestEntity creates a schema entity for testing using the provenance from context.
 func (tc *ontologyEntityTestContext) createTestEntity(ctx context.Context, name string) *models.OntologyEntity {
-	tc.t.Helper()
-	return tc.createTestEntityWithProvenance(ctx, name, models.ProvenanceInference)
-}
-
-// createTestEntityWithProvenance creates a schema entity with the specified provenance.
-func (tc *ontologyEntityTestContext) createTestEntityWithProvenance(ctx context.Context, name string, createdBy string) *models.OntologyEntity {
 	tc.t.Helper()
 	entity := &models.OntologyEntity{
 		ProjectID:     tc.projectID,
@@ -113,9 +118,48 @@ func (tc *ontologyEntityTestContext) createTestEntityWithProvenance(ctx context.
 		PrimarySchema: "public",
 		PrimaryTable:  name + "s",
 		PrimaryColumn: "id",
-		CreatedBy:     createdBy,
 	}
 	err := tc.repo.Create(ctx, entity)
+	if err != nil {
+		tc.t.Fatalf("failed to create test entity: %v", err)
+	}
+	return entity
+}
+
+// createTestEntityWithProvenance creates a schema entity with the specified provenance source.
+// This creates a new context with the specified provenance, using the same scope as the input context.
+func (tc *ontologyEntityTestContext) createTestEntityWithProvenance(ctx context.Context, name string, sourceStr string) *models.OntologyEntity {
+	tc.t.Helper()
+
+	// Map string source to ProvenanceSource
+	var source models.ProvenanceSource
+	switch sourceStr {
+	case models.ProvenanceInference:
+		source = models.SourceInference
+	case models.ProvenanceMCP:
+		source = models.SourceMCP
+	case models.ProvenanceManual:
+		source = models.SourceManual
+	default:
+		tc.t.Fatalf("invalid provenance source: %s", sourceStr)
+	}
+
+	// Create a new context with the specified provenance
+	ctxWithProv := models.WithProvenance(ctx, models.ProvenanceContext{
+		Source: source,
+		UserID: tc.testUserID,
+	})
+
+	entity := &models.OntologyEntity{
+		ProjectID:     tc.projectID,
+		OntologyID:    tc.ontologyID,
+		Name:          name,
+		Description:   "Test " + name + " entity",
+		PrimarySchema: "public",
+		PrimaryTable:  name + "s",
+		PrimaryColumn: "id",
+	}
+	err := tc.repo.Create(ctxWithProv, entity)
 	if err != nil {
 		tc.t.Fatalf("failed to create test entity: %v", err)
 	}
@@ -1453,5 +1497,300 @@ func TestOntologyEntityRepository_Create_ClearsStaleOnRediscovery(t *testing.T) 
 	}
 	if retrieved.IsStale {
 		t.Error("expected IsStale to be false after rediscovery")
+	}
+}
+
+// ============================================================================
+// Provenance Context Tests
+// ============================================================================
+
+func TestOntologyEntityRepository_Create_RequiresProvenanceContext(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	// Create context WITHOUT provenance
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
+	if err != nil {
+		t.Fatalf("failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+	ctx = database.SetTenantScope(ctx, scope)
+	// Note: NOT adding provenance context
+
+	entity := &models.OntologyEntity{
+		ProjectID:     tc.projectID,
+		OntologyID:    tc.ontologyID,
+		Name:          "user",
+		Description:   "Test user",
+		PrimarySchema: "public",
+		PrimaryTable:  "users",
+		PrimaryColumn: "id",
+	}
+
+	err = tc.repo.Create(ctx, entity)
+	if err == nil {
+		t.Error("expected error when creating entity without provenance context")
+	}
+	if err != nil && err.Error() != "provenance context required" {
+		t.Errorf("expected 'provenance context required' error, got: %v", err)
+	}
+}
+
+func TestOntologyEntityRepository_Create_SetsProvenanceFields(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContextWithProvenance(models.SourceManual)
+	defer cleanup()
+
+	entity := &models.OntologyEntity{
+		ProjectID:     tc.projectID,
+		OntologyID:    tc.ontologyID,
+		Name:          "user",
+		Description:   "Test user",
+		PrimarySchema: "public",
+		PrimaryTable:  "users",
+		PrimaryColumn: "id",
+	}
+
+	err := tc.repo.Create(ctx, entity)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Verify provenance fields were set on entity
+	if entity.Source != "manual" {
+		t.Errorf("expected Source to be 'manual', got %q", entity.Source)
+	}
+	if entity.CreatedBy == nil {
+		t.Error("expected CreatedBy to be set")
+	}
+	if entity.CreatedBy != nil && *entity.CreatedBy != tc.testUserID {
+		t.Errorf("expected CreatedBy to be %v, got %v", tc.testUserID, *entity.CreatedBy)
+	}
+
+	// Verify by fetching
+	retrieved, err := tc.repo.GetByID(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if retrieved.Source != "manual" {
+		t.Errorf("expected Source to be 'manual', got %q", retrieved.Source)
+	}
+	if retrieved.CreatedBy == nil || *retrieved.CreatedBy != tc.testUserID {
+		t.Errorf("expected CreatedBy to be %v, got %v", tc.testUserID, retrieved.CreatedBy)
+	}
+}
+
+func TestOntologyEntityRepository_Update_RequiresProvenanceContext(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	// Create entity first with proper context
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+	entity := tc.createTestEntity(ctx, "user")
+
+	// Now try to update WITHOUT provenance context
+	ctxWithoutProv := context.Background()
+	scope, err := tc.engineDB.DB.WithoutTenant(ctxWithoutProv)
+	if err != nil {
+		t.Fatalf("failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+	ctxWithoutProv = database.SetTenantScope(ctxWithoutProv, scope)
+	// Note: NOT adding provenance context
+
+	entity.Description = "Updated description"
+	err = tc.repo.Update(ctxWithoutProv, entity)
+	if err == nil {
+		t.Error("expected error when updating entity without provenance context")
+	}
+	if err != nil && err.Error() != "provenance context required" {
+		t.Errorf("expected 'provenance context required' error, got: %v", err)
+	}
+}
+
+func TestOntologyEntityRepository_Update_SetsProvenanceFields(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	// Create entity with inference provenance
+	ctx, cleanup := tc.createTestContextWithProvenance(models.SourceInference)
+	defer cleanup()
+
+	entity := tc.createTestEntity(ctx, "user")
+
+	// Update with manual provenance
+	ctxManual := models.WithProvenance(ctx, models.ProvenanceContext{
+		Source: models.SourceManual,
+		UserID: tc.testUserID,
+	})
+
+	entity.Description = "Updated by user"
+	err := tc.repo.Update(ctxManual, entity)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	// Verify provenance fields were set
+	if entity.LastEditSource == nil || *entity.LastEditSource != "manual" {
+		t.Errorf("expected LastEditSource to be 'manual', got %v", entity.LastEditSource)
+	}
+	if entity.UpdatedBy == nil || *entity.UpdatedBy != tc.testUserID {
+		t.Errorf("expected UpdatedBy to be %v, got %v", tc.testUserID, entity.UpdatedBy)
+	}
+
+	// Verify by fetching
+	retrieved, err := tc.repo.GetByID(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	// Source should still be inference (from creation)
+	if retrieved.Source != "inference" {
+		t.Errorf("expected Source to still be 'inference', got %q", retrieved.Source)
+	}
+	// LastEditSource should be manual
+	if retrieved.LastEditSource == nil || *retrieved.LastEditSource != "manual" {
+		t.Errorf("expected LastEditSource to be 'manual', got %v", retrieved.LastEditSource)
+	}
+	if retrieved.UpdatedBy == nil || *retrieved.UpdatedBy != tc.testUserID {
+		t.Errorf("expected UpdatedBy to be %v, got %v", tc.testUserID, retrieved.UpdatedBy)
+	}
+}
+
+func TestOntologyEntityRepository_DeleteBySource_Success(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create entities with different sources
+	tc.createTestEntityWithProvenance(ctx, "inference_entity1", models.ProvenanceInference)
+	tc.createTestEntityWithProvenance(ctx, "inference_entity2", models.ProvenanceInference)
+	tc.createTestEntityWithProvenance(ctx, "manual_entity", models.ProvenanceManual)
+	tc.createTestEntityWithProvenance(ctx, "mcp_entity", models.ProvenanceMCP)
+
+	// Delete inference entities by source
+	err := tc.repo.DeleteBySource(ctx, tc.projectID, models.SourceInference)
+	if err != nil {
+		t.Fatalf("DeleteBySource failed: %v", err)
+	}
+
+	// Verify only manual and MCP entities remain
+	entities, err := tc.repo.GetByOntology(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("GetByOntology failed: %v", err)
+	}
+	if len(entities) != 2 {
+		t.Errorf("expected 2 entities (manual + mcp), got %d", len(entities))
+	}
+
+	// Verify the correct entities remain
+	entityNames := make(map[string]bool)
+	for _, e := range entities {
+		entityNames[e.Name] = true
+	}
+	if !entityNames["manual_entity"] {
+		t.Error("expected manual_entity to be preserved")
+	}
+	if !entityNames["mcp_entity"] {
+		t.Error("expected mcp_entity to be preserved")
+	}
+}
+
+func TestOntologyEntityRepository_DeleteBySource_NoMatchingEntities(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create only manual entities
+	tc.createTestEntityWithProvenance(ctx, "manual_entity1", models.ProvenanceManual)
+	tc.createTestEntityWithProvenance(ctx, "manual_entity2", models.ProvenanceManual)
+
+	// Delete inference entities (none exist) - should not error
+	err := tc.repo.DeleteBySource(ctx, tc.projectID, models.SourceInference)
+	if err != nil {
+		t.Fatalf("DeleteBySource failed: %v", err)
+	}
+
+	// All manual entities should remain
+	entities, err := tc.repo.GetByOntology(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("GetByOntology failed: %v", err)
+	}
+	if len(entities) != 2 {
+		t.Errorf("expected 2 entities, got %d", len(entities))
+	}
+}
+
+func TestOntologyEntityRepository_DeleteBySource_NoTenantScope(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx := context.Background() // No tenant scope
+
+	err := tc.repo.DeleteBySource(ctx, tc.projectID, models.SourceInference)
+	if err == nil {
+		t.Error("expected error for DeleteBySource without tenant scope")
+	}
+}
+
+func TestOntologyEntityRepository_Create_UpsertSetsLastEditSourceOnConflict(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	// Create entity with inference provenance
+	ctxInference, cleanup := tc.createTestContextWithProvenance(models.SourceInference)
+	defer cleanup()
+
+	original := tc.createTestEntity(ctxInference, "user")
+
+	// Upsert with manual provenance
+	ctxManual := models.WithProvenance(ctxInference, models.ProvenanceContext{
+		Source: models.SourceManual,
+		UserID: tc.testUserID,
+	})
+
+	updated := &models.OntologyEntity{
+		ProjectID:     tc.projectID,
+		OntologyID:    tc.ontologyID,
+		Name:          "user",
+		Description:   "Updated description",
+		PrimarySchema: "public",
+		PrimaryTable:  "users",
+		PrimaryColumn: "id",
+	}
+
+	err := tc.repo.Create(ctxManual, updated)
+	if err != nil {
+		t.Fatalf("Create (upsert) failed: %v", err)
+	}
+
+	// Verify the entity was upserted (same ID)
+	if updated.ID != original.ID {
+		t.Errorf("expected ID to be preserved on upsert, got different IDs")
+	}
+
+	// Verify last_edit_source and updated_by were set on upsert
+	retrieved, err := tc.repo.GetByID(ctxInference, updated.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	// Source should still be inference (from original creation)
+	if retrieved.Source != "inference" {
+		t.Errorf("expected Source to still be 'inference', got %q", retrieved.Source)
+	}
+	// LastEditSource should be manual (from upsert)
+	if retrieved.LastEditSource == nil || *retrieved.LastEditSource != "manual" {
+		t.Errorf("expected LastEditSource to be 'manual', got %v", retrieved.LastEditSource)
+	}
+	// UpdatedBy should be set
+	if retrieved.UpdatedBy == nil || *retrieved.UpdatedBy != tc.testUserID {
+		t.Errorf("expected UpdatedBy to be %v, got %v", tc.testUserID, retrieved.UpdatedBy)
 	}
 }
