@@ -1117,3 +1117,197 @@ func TestParseDevQueryParameterDefinitions(t *testing.T) {
 		})
 	}
 }
+
+// Tests for update_approved_query tool
+
+func TestUpdateApprovedQueryResponse_Structure(t *testing.T) {
+	// Test that the response structure is correct
+	response := updateApprovedQueryResponse{
+		Success: true,
+		Message: "Query updated successfully. Changed fields: [name sql]",
+		QueryID: uuid.New().String(),
+		Name:    "Updated query name",
+		Updated: []string{"name", "sql"},
+	}
+
+	// Verify JSON serialization works
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	// Verify all required fields
+	assert.Equal(t, true, parsed["success"])
+	assert.NotEmpty(t, parsed["message"])
+	assert.NotEmpty(t, parsed["query_id"])
+	assert.Equal(t, "Updated query name", parsed["name"])
+
+	// Verify updated fields array
+	updated, ok := parsed["updated"].([]any)
+	require.True(t, ok)
+	assert.Len(t, updated, 2)
+	assert.Equal(t, "name", updated[0])
+	assert.Equal(t, "sql", updated[1])
+}
+
+func TestUpdateApprovedQuery_ToolRegistration(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &DevQueryToolDeps{
+		MCPConfigService: &mockMCPConfigService{
+			config: &models.ToolGroupConfig{Enabled: true},
+		},
+		ProjectService: &mockProjectService{},
+		QueryService:   &mockQueryService{},
+		Logger:         zap.NewNop(),
+	}
+
+	RegisterDevQueryTools(mcpServer, deps)
+
+	// Verify tools are registered
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	// Check all dev query tools are registered including update_approved_query
+	toolNames := make(map[string]bool)
+	for _, tool := range response.Result.Tools {
+		toolNames[tool.Name] = true
+	}
+
+	assert.True(t, toolNames["list_query_suggestions"], "list_query_suggestions tool should be registered")
+	assert.True(t, toolNames["approve_query_suggestion"], "approve_query_suggestion tool should be registered")
+	assert.True(t, toolNames["reject_query_suggestion"], "reject_query_suggestion tool should be registered")
+	assert.True(t, toolNames["create_approved_query"], "create_approved_query tool should be registered")
+	assert.True(t, toolNames["update_approved_query"], "update_approved_query tool should be registered")
+}
+
+func TestUpdateApprovedQuery_ToolDescription(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &DevQueryToolDeps{
+		MCPConfigService: &mockMCPConfigService{
+			config: &models.ToolGroupConfig{Enabled: true},
+		},
+		ProjectService: &mockProjectService{},
+		QueryService:   &mockQueryService{},
+		Logger:         zap.NewNop(),
+	}
+
+	RegisterDevQueryTools(mcpServer, deps)
+
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				InputSchema struct {
+					Required   []string       `json:"required"`
+					Properties map[string]any `json:"properties"`
+				} `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	// Find update_approved_query tool
+	var updateTool *struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		InputSchema struct {
+			Required   []string       `json:"required"`
+			Properties map[string]any `json:"properties"`
+		} `json:"inputSchema"`
+	}
+	for i, tool := range response.Result.Tools {
+		if tool.Name == "update_approved_query" {
+			updateTool = &response.Result.Tools[i]
+			break
+		}
+	}
+
+	require.NotNil(t, updateTool, "update_approved_query tool should be found")
+
+	// Verify description mentions key points
+	assert.Contains(t, updateTool.Description, "Update")
+	assert.Contains(t, updateTool.Description, "existing")
+	assert.Contains(t, updateTool.Description, "no review")
+
+	// Verify required parameter exists
+	assert.Contains(t, updateTool.InputSchema.Properties, "query_id")
+	assert.Contains(t, updateTool.InputSchema.Required, "query_id")
+
+	// Verify optional parameters exist
+	assert.Contains(t, updateTool.InputSchema.Properties, "sql")
+	assert.Contains(t, updateTool.InputSchema.Properties, "name")
+	assert.Contains(t, updateTool.InputSchema.Properties, "description")
+	assert.Contains(t, updateTool.InputSchema.Properties, "parameters")
+	assert.Contains(t, updateTool.InputSchema.Properties, "output_column_descriptions")
+	assert.Contains(t, updateTool.InputSchema.Properties, "tags")
+	assert.Contains(t, updateTool.InputSchema.Properties, "is_enabled")
+
+	// Only query_id should be required
+	assert.Len(t, updateTool.InputSchema.Required, 1)
+}
+
+func TestUpdateApprovedQueryResponse_SingleFieldUpdate(t *testing.T) {
+	// Test response when only one field is updated
+	response := updateApprovedQueryResponse{
+		Success: true,
+		Message: "Query updated successfully. Changed fields: [name]",
+		QueryID: uuid.New().String(),
+		Name:    "New name",
+		Updated: []string{"name"},
+	}
+
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	updated, ok := parsed["updated"].([]any)
+	require.True(t, ok)
+	assert.Len(t, updated, 1)
+	assert.Equal(t, "name", updated[0])
+}
+
+func TestUpdateApprovedQueryResponse_AllFieldsUpdated(t *testing.T) {
+	// Test response when all fields are updated
+	response := updateApprovedQueryResponse{
+		Success: true,
+		Message: "Query updated successfully. Changed fields: [sql name description parameters output_columns tags is_enabled]",
+		QueryID: uuid.New().String(),
+		Name:    "Updated query",
+		Updated: []string{"sql", "name", "description", "parameters", "output_columns", "tags", "is_enabled"},
+	}
+
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	updated, ok := parsed["updated"].([]any)
+	require.True(t, ok)
+	assert.Len(t, updated, 7)
+}

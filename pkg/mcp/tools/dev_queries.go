@@ -48,6 +48,7 @@ func RegisterDevQueryTools(mcpServer *server.MCPServer, deps *DevQueryToolDeps) 
 	registerApproveQuerySuggestionTool(mcpServer, deps)
 	registerRejectQuerySuggestionTool(mcpServer, deps)
 	registerCreateApprovedQueryTool(mcpServer, deps)
+	registerUpdateApprovedQueryTool(mcpServer, deps)
 }
 
 // querySuggestionInfo represents a single query suggestion in the response.
@@ -833,4 +834,224 @@ func parseDevQueryParameterDefinitions(paramsArray []any) ([]models.QueryParamet
 	}
 
 	return params, nil
+}
+
+// updateApprovedQueryResponse is the response format for update_approved_query.
+type updateApprovedQueryResponse struct {
+	Success bool     `json:"success"`
+	Message string   `json:"message"`
+	QueryID string   `json:"query_id"`
+	Name    string   `json:"name"`
+	Updated []string `json:"updated"` // List of fields that were updated
+}
+
+// registerUpdateApprovedQueryTool registers the update_approved_query tool.
+func registerUpdateApprovedQueryTool(mcpServer *server.MCPServer, deps *DevQueryToolDeps) {
+	tool := mcp.NewTool(
+		"update_approved_query",
+		mcp.WithDescription(`Update an existing pre-approved query directly (no review required).
+Changes are applied immediately. SQL syntax is validated if a new SQL query is provided.
+Use this for admin-initiated updates that bypass the suggestion workflow.`),
+		mcp.WithString("query_id",
+			mcp.Required(),
+			mcp.Description("UUID of the query to update")),
+		mcp.WithString("sql",
+			mcp.Description("Updated SQL query with {{parameter}} placeholders")),
+		mcp.WithString("name",
+			mcp.Description("Updated human-readable name for the query")),
+		mcp.WithString("description",
+			mcp.Description("Updated description of what business question this query answers")),
+		mcp.WithArray("parameters",
+			mcp.Description("Updated parameter definitions (array of objects with name, type, description, required, example)")),
+		mcp.WithObject("output_column_descriptions",
+			mcp.Description("Updated descriptions for output columns (e.g., {\"total\": \"Total amount in USD\"})")),
+		mcp.WithArray("tags",
+			mcp.Description("Updated tags for organizing queries (e.g., [\"billing\", \"reporting\"])")),
+		mcp.WithBoolean("is_enabled",
+			mcp.Description("Enable or disable the query")),
+	)
+
+	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Check tool access
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "update_approved_query")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Parse arguments
+		args, _ := request.Params.Arguments.(map[string]any)
+
+		// Parse required query_id
+		queryIDStr, ok := args["query_id"].(string)
+		if !ok || queryIDStr == "" {
+			return NewErrorResultWithDetails("invalid_parameters",
+				"query_id is required",
+				map[string]any{
+					"parameter": "query_id",
+				}), nil
+		}
+
+		queryID, err := uuid.Parse(queryIDStr)
+		if err != nil {
+			return NewErrorResultWithDetails("invalid_parameters",
+				"query_id is not a valid UUID",
+				map[string]any{
+					"parameter":    "query_id",
+					"actual_value": queryIDStr,
+				}), nil
+		}
+
+		// Get the existing query to verify it exists and get its datasource_id
+		existingQuery, err := deps.QueryService.Get(tenantCtx, projectID, queryID)
+		if err != nil {
+			deps.Logger.Error("Failed to get query for update",
+				zap.String("project_id", projectID.String()),
+				zap.String("query_id", queryID.String()),
+				zap.Error(err))
+			return NewErrorResultWithDetails("not_found",
+				"query not found",
+				map[string]any{
+					"query_id": queryIDStr,
+				}), nil
+		}
+
+		// Build update request - only include fields that were provided
+		updateReq := &services.UpdateQueryRequest{}
+		var updatedFields []string
+
+		// Parse optional sql
+		if sqlQuery, ok := args["sql"].(string); ok && sqlQuery != "" {
+			// Validate SQL syntax before update
+			validationRes, err := deps.QueryService.Validate(tenantCtx, projectID, existingQuery.DatasourceID, sqlQuery)
+			if err != nil {
+				deps.Logger.Error("Failed to validate SQL",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+				return NewErrorResultWithDetails("validation_error",
+					fmt.Sprintf("failed to validate SQL: %s", err.Error()),
+					map[string]any{
+						"sql": sqlQuery,
+					}), nil
+			}
+
+			if !validationRes.Valid {
+				return NewErrorResultWithDetails("invalid_sql",
+					fmt.Sprintf("invalid SQL: %s", validationRes.Message),
+					map[string]any{
+						"sql":   sqlQuery,
+						"error": validationRes.Message,
+					}), nil
+			}
+
+			updateReq.SQLQuery = &sqlQuery
+			updatedFields = append(updatedFields, "sql")
+
+			// Detect if this is a modifying statement and update allows_modification
+			sqlType := services.DetectSQLType(sqlQuery)
+			isModifying := services.IsModifyingStatement(sqlType)
+			updateReq.AllowsModification = &isModifying
+		}
+
+		// Parse optional name
+		if name, ok := args["name"].(string); ok && name != "" {
+			updateReq.NaturalLanguagePrompt = &name
+			updatedFields = append(updatedFields, "name")
+		}
+
+		// Parse optional description
+		if description, ok := args["description"].(string); ok && description != "" {
+			updateReq.AdditionalContext = &description
+			updatedFields = append(updatedFields, "description")
+		}
+
+		// Parse optional is_enabled
+		if isEnabled, ok := args["is_enabled"].(bool); ok {
+			updateReq.IsEnabled = &isEnabled
+			updatedFields = append(updatedFields, "is_enabled")
+		}
+
+		// Parse optional parameters
+		if paramsArray, ok := args["parameters"].([]any); ok && len(paramsArray) > 0 {
+			paramDefs, err := parseDevQueryParameterDefinitions(paramsArray)
+			if err != nil {
+				return NewErrorResultWithDetails("invalid_parameters",
+					fmt.Sprintf("invalid parameters: %s", err.Error()),
+					map[string]any{
+						"parameter": "parameters",
+					}), nil
+			}
+			updateReq.Parameters = &paramDefs
+			updatedFields = append(updatedFields, "parameters")
+		}
+
+		// Parse optional output column descriptions
+		if descs, ok := args["output_column_descriptions"].(map[string]any); ok && len(descs) > 0 {
+			outputColumns := make([]models.OutputColumn, 0, len(descs))
+			for colName, colDesc := range descs {
+				if descStr, ok := colDesc.(string); ok {
+					outputColumns = append(outputColumns, models.OutputColumn{
+						Name:        colName,
+						Description: descStr,
+					})
+				}
+			}
+			updateReq.OutputColumns = &outputColumns
+			updatedFields = append(updatedFields, "output_columns")
+		}
+
+		// Parse optional tags
+		if tagsArray, ok := args["tags"].([]any); ok {
+			tags := make([]string, 0, len(tagsArray))
+			for _, tag := range tagsArray {
+				if str, ok := tag.(string); ok {
+					tags = append(tags, str)
+				}
+			}
+			updateReq.Tags = &tags
+			updatedFields = append(updatedFields, "tags")
+		}
+
+		// Check if any fields were actually provided for update
+		if len(updatedFields) == 0 {
+			return NewErrorResultWithDetails("invalid_parameters",
+				"at least one field must be provided for update",
+				map[string]any{
+					"available_fields": []string{"sql", "name", "description", "parameters", "output_column_descriptions", "tags", "is_enabled"},
+				}), nil
+		}
+
+		// Perform the update via DirectUpdate (no pending record)
+		updatedQuery, err := deps.QueryService.DirectUpdate(tenantCtx, projectID, queryID, updateReq)
+		if err != nil {
+			deps.Logger.Error("Failed to update approved query",
+				zap.String("project_id", projectID.String()),
+				zap.String("query_id", queryID.String()),
+				zap.Error(err))
+			return nil, fmt.Errorf("failed to update query: %w", err)
+		}
+
+		deps.Logger.Info("Updated approved query",
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", queryID.String()),
+			zap.Strings("updated_fields", updatedFields),
+		)
+
+		response := updateApprovedQueryResponse{
+			Success: true,
+			Message: fmt.Sprintf("Query updated successfully. Changed fields: %v", updatedFields),
+			QueryID: queryID.String(),
+			Name:    updatedQuery.NaturalLanguagePrompt,
+			Updated: updatedFields,
+		}
+
+		responseJSON, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal response: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(responseJSON)), nil
+	}
+
+	mcpServer.AddTool(tool, handler)
 }

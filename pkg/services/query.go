@@ -106,6 +106,7 @@ type UpdateQueryRequest struct {
 	Parameters            *[]models.QueryParameter `json:"parameters,omitempty"`
 	OutputColumns         *[]models.OutputColumn   `json:"output_columns,omitempty"`
 	Constraints           *string                  `json:"constraints,omitempty"`
+	Tags                  *[]string                `json:"tags,omitempty"`
 	AllowsModification    *bool                    `json:"allows_modification,omitempty"` // Allow INSERT/UPDATE/DELETE/CALL
 }
 
@@ -357,6 +358,9 @@ func (s *queryService) Update(ctx context.Context, projectID, queryID uuid.UUID,
 	}
 	if req.Parameters != nil {
 		query.Parameters = *req.Parameters
+	}
+	if req.Tags != nil {
+		query.Tags = *req.Tags
 	}
 
 	// Validate SQL statement type and allows_modification flag
