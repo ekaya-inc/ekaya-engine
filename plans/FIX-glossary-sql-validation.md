@@ -1,7 +1,7 @@
 # FIX: Improve Glossary SQL Generation (BUG-10)
 
 **Priority:** 4 (Medium)
-**Status:** Not Started
+**Status:** Complete
 **Parent:** PLAN-ontology-next.md
 
 ## Problem
@@ -86,6 +86,6 @@ AND enrichment_status != 'success';
 
 ## Success Criteria
 
-- [ ] All glossary terms have valid, executable SQL
-- [ ] No column reference errors in enrichment
-- [ ] No type mismatch errors in generated SQL
+- [x] All glossary terms have valid, executable SQL
+- [x] No column reference errors in enrichment
+- [x] No type mismatch errors in generated SQL
