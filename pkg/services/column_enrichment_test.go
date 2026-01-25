@@ -2277,3 +2277,114 @@ func TestColumnEnrichmentService_convertToColumnDetails_WithEnumDefinitions(t *t
 	assert.Equal(t, "active", statusCol.EnumValues[0].Value)
 	assert.Equal(t, "Active", statusCol.EnumValues[0].Label)
 }
+
+func TestColumnEnrichmentResponse_QuestionsDeserialization(t *testing.T) {
+	// Direct test of columnEnrichmentResponse JSON parsing
+
+	responseJSON := `{
+		"columns": [
+			{
+				"name": "email",
+				"description": "User email address",
+				"semantic_type": "email",
+				"role": "identifier"
+			}
+		],
+		"questions": [
+			{
+				"category": "terminology",
+				"priority": 2,
+				"question": "What does 'tik' mean in tiks_count?",
+				"context": "Column name is unclear."
+			}
+		]
+	}`
+
+	response, err := llm.ParseJSONResponse[columnEnrichmentResponse](responseJSON)
+
+	require.NoError(t, err)
+	require.Len(t, response.Columns, 1)
+	require.Len(t, response.Questions, 1)
+
+	// Verify column
+	assert.Equal(t, "email", response.Columns[0].Name)
+	assert.Equal(t, "email", response.Columns[0].SemanticType)
+
+	// Verify question
+	assert.Equal(t, "terminology", response.Questions[0].Category)
+	assert.Equal(t, 2, response.Questions[0].Priority)
+	assert.Equal(t, "What does 'tik' mean in tiks_count?", response.Questions[0].Question)
+	assert.Equal(t, "Column name is unclear.", response.Questions[0].Context)
+}
+
+func TestColumnEnrichmentResponse_NoQuestions(t *testing.T) {
+	// Test that parsing succeeds when no questions are present
+
+	responseJSON := `{
+		"columns": [
+			{
+				"name": "id",
+				"description": "Primary key",
+				"semantic_type": "identifier",
+				"role": "identifier"
+			}
+		]
+	}`
+
+	response, err := llm.ParseJSONResponse[columnEnrichmentResponse](responseJSON)
+
+	require.NoError(t, err)
+	require.Len(t, response.Columns, 1)
+	assert.Empty(t, response.Questions, "Questions should be empty when not present")
+}
+
+func TestColumnEnrichmentResponse_MultipleQuestions(t *testing.T) {
+	// Test that multiple questions of different categories are parsed correctly
+
+	responseJSON := `{
+		"columns": [
+			{
+				"name": "status",
+				"description": "Status field",
+				"semantic_type": "status",
+				"role": "dimension"
+			}
+		],
+		"questions": [
+			{
+				"category": "enumeration",
+				"priority": 1,
+				"question": "What do status values 'A', 'P', 'C' represent?",
+				"context": "Column status has cryptic single-letter values."
+			},
+			{
+				"category": "data_quality",
+				"priority": 3,
+				"question": "Is 85% NULL in phone column expected?",
+				"context": "Column phone has very high null rate."
+			},
+			{
+				"category": "temporal",
+				"priority": 2,
+				"question": "Does deleted_at=NULL mean active records?",
+				"context": "Soft delete pattern detected."
+			}
+		]
+	}`
+
+	response, err := llm.ParseJSONResponse[columnEnrichmentResponse](responseJSON)
+
+	require.NoError(t, err)
+	require.Len(t, response.Columns, 1)
+	require.Len(t, response.Questions, 3)
+
+	// Verify question categories
+	assert.Equal(t, "enumeration", response.Questions[0].Category)
+	assert.Equal(t, 1, response.Questions[0].Priority)
+
+	assert.Equal(t, "data_quality", response.Questions[1].Category)
+	assert.Equal(t, 3, response.Questions[1].Priority)
+
+	assert.Equal(t, "temporal", response.Questions[2].Category)
+	assert.Equal(t, 2, response.Questions[2].Priority)
+}

@@ -1833,3 +1833,192 @@ func TestEnrichEntitiesWithLLM_SetsConfidence(t *testing.T) {
 	assert.Equal(t, "User", updatedEntity.Name, "Entity name should be updated by LLM")
 	assert.Equal(t, "A platform user account", updatedEntity.Description, "Entity description should be updated by LLM")
 }
+
+func TestEnrichEntitiesWithLLM_QuestionsInResponse_Parsed(t *testing.T) {
+	// Test that questions in the LLM response are parsed correctly.
+	// Questions are logged but not yet stored (wiring happens in a later task).
+
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	datasourceID := uuid.New()
+	conversationID := uuid.New()
+	tableID := uuid.New()
+
+	entity := &models.OntologyEntity{
+		ID:            uuid.New(),
+		ProjectID:     projectID,
+		OntologyID:    ontologyID,
+		Name:          "users",
+		Description:   "",
+		PrimarySchema: "public",
+		PrimaryTable:  "users",
+		PrimaryColumn: "id",
+		Confidence:    0.5,
+	}
+
+	entityRepo := &trackingUpdateEntityRepo{
+		trackingEntityRepo: trackingEntityRepo{
+			mockEntityDiscoveryEntityRepo: mockEntityDiscoveryEntityRepo{
+				entities: []*models.OntologyEntity{entity},
+			},
+		},
+	}
+
+	// LLM response includes both entities and questions
+	responseWithQuestions := `{
+		"entities": [
+			{
+				"table_name": "users",
+				"entity_name": "User",
+				"description": "A platform user account",
+				"domain": "customer",
+				"key_columns": [{"name": "email", "synonyms": ["e-mail"]}],
+				"alternative_names": ["member"]
+			}
+		],
+		"questions": [
+			{
+				"category": "terminology",
+				"priority": 2,
+				"question": "What does 'tik' mean in tiks_count?",
+				"context": "Column users.tiks_count appears to track some kind of count but 'tik' is not a standard term."
+			},
+			{
+				"category": "business_rules",
+				"priority": 1,
+				"question": "Can a user have multiple email addresses?",
+				"context": "The email column has a unique constraint."
+			}
+		]
+	}`
+
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		return &llm.GenerateResponseResult{
+			Content:        responseWithQuestions,
+			ConversationID: conversationID,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.CreateForProjectFunc = func(ctx context.Context, projectID uuid.UUID) (llm.LLMClient, error) {
+		return mockClient, nil
+	}
+
+	mockTenantCtx := func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {
+		return ctx, func() {}, nil
+	}
+
+	svc := NewEntityDiscoveryService(
+		entityRepo,
+		&mockSchemaRepoForGrouping{},
+		nil,
+		nil,
+		mockFactory,
+		nil,
+		mockTenantCtx,
+		zap.NewNop(),
+	)
+
+	tables := []*models.SchemaTable{
+		{ID: tableID, SchemaName: "public", TableName: "users"},
+	}
+	columns := []*models.SchemaColumn{
+		{SchemaTableID: tableID, ColumnName: "id"},
+		{SchemaTableID: tableID, ColumnName: "email"},
+		{SchemaTableID: tableID, ColumnName: "tiks_count"},
+	}
+
+	// Execute
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+
+	// Verify: no error - questions in response should not cause failure
+	require.NoError(t, err)
+
+	// Verify: entity was still enriched correctly
+	require.Len(t, entityRepo.updatedEntities, 1)
+	updatedEntity := entityRepo.updatedEntities[0]
+	assert.Equal(t, "User", updatedEntity.Name)
+	assert.Equal(t, "A platform user account", updatedEntity.Description)
+}
+
+func TestParseEntityEnrichmentResponse_QuestionsExtracted(t *testing.T) {
+	// Direct test of parseEntityEnrichmentResponse to verify question extraction
+
+	svc := &entityDiscoveryService{
+		logger: zap.NewNop(),
+	}
+
+	responseJSON := `{
+		"entities": [
+			{
+				"table_name": "accounts",
+				"entity_name": "Account",
+				"description": "User account",
+				"domain": "auth",
+				"key_columns": [],
+				"alternative_names": []
+			}
+		],
+		"questions": [
+			{
+				"category": "enumeration",
+				"priority": 1,
+				"question": "What do status values 'A', 'P' mean?",
+				"context": "Status column has cryptic values."
+			},
+			{
+				"category": "relationship",
+				"priority": 2,
+				"question": "Is referrer_id a self-reference?",
+				"context": "Column appears to reference the same table."
+			}
+		]
+	}`
+
+	entities, questions, err := svc.parseEntityEnrichmentResponse(responseJSON)
+
+	require.NoError(t, err)
+	require.Len(t, entities, 1)
+	require.Len(t, questions, 2)
+
+	// Verify entity
+	assert.Equal(t, "accounts", entities[0].TableName)
+	assert.Equal(t, "Account", entities[0].EntityName)
+
+	// Verify questions
+	assert.Equal(t, "enumeration", questions[0].Category)
+	assert.Equal(t, 1, questions[0].Priority)
+	assert.Equal(t, "What do status values 'A', 'P' mean?", questions[0].Question)
+	assert.Equal(t, "Status column has cryptic values.", questions[0].Context)
+
+	assert.Equal(t, "relationship", questions[1].Category)
+	assert.Equal(t, 2, questions[1].Priority)
+}
+
+func TestParseEntityEnrichmentResponse_NoQuestions(t *testing.T) {
+	// Test that parsing succeeds when no questions are present
+
+	svc := &entityDiscoveryService{
+		logger: zap.NewNop(),
+	}
+
+	responseJSON := `{
+		"entities": [
+			{
+				"table_name": "users",
+				"entity_name": "User",
+				"description": "Platform user",
+				"domain": "customer",
+				"key_columns": [],
+				"alternative_names": []
+			}
+		]
+	}`
+
+	entities, questions, err := svc.parseEntityEnrichmentResponse(responseJSON)
+
+	require.NoError(t, err)
+	require.Len(t, entities, 1)
+	assert.Empty(t, questions, "Questions should be empty when not present")
+}
