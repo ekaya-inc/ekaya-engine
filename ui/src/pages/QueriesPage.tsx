@@ -4,18 +4,38 @@
  */
 
 import { ArrowLeft, Database, AlertCircle } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import QueriesView from '../components/QueriesView';
 import { Button } from '../components/ui/Button';
 import { getProviderById, getAdapterInfo } from '../constants/adapters';
 import { useDatasourceConnection } from '../contexts/DatasourceConnectionContext';
+import engineApi from '../services/engineApi';
 import { datasourceTypeToDialect } from '../types';
 
 const QueriesPage = () => {
   const navigate = useNavigate();
   const { pid } = useParams<{ pid: string }>();
   const { selectedDatasource, isConnected } = useDatasourceConnection();
+  const [pendingCount, setPendingCount] = useState<number>(0);
+
+  // Fetch pending query count
+  const fetchPendingCount = useCallback(async () => {
+    if (!pid) return;
+    try {
+      const response = await engineApi.listPendingQueries(pid);
+      if (response.success && response.data) {
+        setPendingCount(response.data.count);
+      }
+    } catch {
+      // Silently fail - badge just won't show
+    }
+  }, [pid]);
+
+  useEffect(() => {
+    fetchPendingCount();
+  }, [fetchPendingCount]);
 
   // Derive dialect from datasource type
   const dialect = selectedDatasource?.type
@@ -91,10 +111,17 @@ const QueriesPage = () => {
         </Button>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
-              <Database className="h-8 w-8 text-blue-500" />
-              Pre-Approved Queries
-            </h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
+                <Database className="h-8 w-8 text-blue-500" />
+                Pre-Approved Queries
+              </h1>
+              {pendingCount > 0 && (
+                <span className="inline-flex items-center justify-center px-2.5 py-0.5 text-sm font-medium rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                  {pendingCount} pending
+                </span>
+              )}
+            </div>
             <p className="mt-2 text-text-secondary">
               Manage pre-approved natural language queries and their
               corresponding SQL
@@ -126,6 +153,7 @@ const QueriesPage = () => {
         projectId={pid}
         datasourceId={selectedDatasource.datasourceId}
         dialect={dialect}
+        onPendingCountChange={fetchPendingCount}
       />
     </div>
   );

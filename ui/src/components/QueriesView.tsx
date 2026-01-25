@@ -50,6 +50,7 @@ interface QueriesViewProps {
   projectId: string;
   datasourceId: string;
   dialect: SqlDialect;
+  onPendingCountChange?: () => void;
 }
 
 interface EditingState {
@@ -65,7 +66,8 @@ interface EditingState {
 
 type QueryFilterType = 'all' | 'read-only' | 'modifying';
 
-const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => {
+// Note: _onPendingCountChange will be used in Task 6.3/6.4 when approve/reject functionality is added
+const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange: _onPendingCountChange }: QueriesViewProps) => {
   const { toast } = useToast();
 
   // Data state

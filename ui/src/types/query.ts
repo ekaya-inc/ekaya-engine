@@ -177,3 +177,39 @@ export interface DeleteQueryResponse {
   success: boolean;
   message: string;
 }
+
+/**
+ * Pending query for admin review
+ * Includes additional fields for suggestion tracking
+ */
+export interface PendingQuery {
+  query_id: string;
+  project_id: string;
+  datasource_id: string;
+  natural_language_prompt: string;
+  additional_context?: string | null;
+  sql_query: string;
+  dialect: string;
+  is_enabled: boolean;
+  allows_modification: boolean;
+  parameters: QueryParameter[];
+  output_columns?: OutputColumn[];
+  constraints?: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  suggested_by: 'user' | 'agent' | 'admin';
+  suggestion_context?: Record<string, unknown> | null;
+  parent_query_id?: string | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  rejection_reason?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Response wrapper for list pending queries endpoint
+ */
+export interface ListPendingQueriesResponse {
+  queries: PendingQuery[];
+  count: number;
+}

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -8,6 +8,14 @@ import QueriesPage from '../QueriesPage';
 const mockUseDatasourceConnection = vi.fn();
 vi.mock('../../contexts/DatasourceConnectionContext', () => ({
   useDatasourceConnection: () => mockUseDatasourceConnection(),
+}));
+
+// Mock engineApi
+const mockListPendingQueries = vi.fn();
+vi.mock('../../services/engineApi', () => ({
+  default: {
+    listPendingQueries: () => mockListPendingQueries(),
+  },
 }));
 
 // Mock react-router-dom hooks
@@ -22,12 +30,19 @@ vi.mock('react-router-dom', async () => {
 
 // Mock the QueriesView component to simplify testing
 vi.mock('../../components/QueriesView', () => ({
-  default: () => <div data-testid="queries-view">QueriesView</div>,
+  default: ({ onPendingCountChange: _onPendingCountChange }: { onPendingCountChange?: () => void }) => (
+    <div data-testid="queries-view">QueriesView</div>
+  ),
 }));
 
 describe('QueriesPage - Provider Display', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no pending queries
+    mockListPendingQueries.mockResolvedValue({
+      success: true,
+      data: { queries: [], count: 0 },
+    });
   });
 
   const renderPage = () => {
@@ -185,5 +200,141 @@ describe('QueriesPage - Provider Display', () => {
 
     // Should fall back to name
     expect(screen.getByText('mydb')).toBeInTheDocument();
+  });
+});
+
+describe('QueriesPage - Pending Count Badge', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const renderPage = () => {
+    return render(
+      <MemoryRouter initialEntries={['/projects/proj-1/queries']}>
+        <Routes>
+          <Route path="/projects/:pid/queries" element={<QueriesPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+  };
+
+  it('shows pending badge when there are pending queries', async () => {
+    mockUseDatasourceConnection.mockReturnValue({
+      selectedDatasource: {
+        datasourceId: 'ds-1',
+        name: 'postgres',
+        displayName: 'My DB',
+        type: 'postgres',
+      },
+      isConnected: true,
+    });
+
+    mockListPendingQueries.mockResolvedValue({
+      success: true,
+      data: { queries: [{}, {}, {}], count: 3 },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('3 pending')).toBeInTheDocument();
+    });
+  });
+
+  it('does not show pending badge when count is zero', async () => {
+    mockUseDatasourceConnection.mockReturnValue({
+      selectedDatasource: {
+        datasourceId: 'ds-1',
+        name: 'postgres',
+        displayName: 'My DB',
+        type: 'postgres',
+      },
+      isConnected: true,
+    });
+
+    mockListPendingQueries.mockResolvedValue({
+      success: true,
+      data: { queries: [], count: 0 },
+    });
+
+    renderPage();
+
+    // Wait for the API call to complete
+    await waitFor(() => {
+      expect(mockListPendingQueries).toHaveBeenCalled();
+    });
+
+    // Badge should not be shown
+    expect(screen.queryByText(/pending/)).not.toBeInTheDocument();
+  });
+
+  it('does not show pending badge when API fails', async () => {
+    mockUseDatasourceConnection.mockReturnValue({
+      selectedDatasource: {
+        datasourceId: 'ds-1',
+        name: 'postgres',
+        displayName: 'My DB',
+        type: 'postgres',
+      },
+      isConnected: true,
+    });
+
+    mockListPendingQueries.mockRejectedValue(new Error('API error'));
+
+    renderPage();
+
+    // Wait for the API call to complete
+    await waitFor(() => {
+      expect(mockListPendingQueries).toHaveBeenCalled();
+    });
+
+    // Badge should not be shown on error
+    expect(screen.queryByText(/pending/)).not.toBeInTheDocument();
+  });
+
+  it('shows singular pending count correctly', async () => {
+    mockUseDatasourceConnection.mockReturnValue({
+      selectedDatasource: {
+        datasourceId: 'ds-1',
+        name: 'postgres',
+        displayName: 'My DB',
+        type: 'postgres',
+      },
+      isConnected: true,
+    });
+
+    mockListPendingQueries.mockResolvedValue({
+      success: true,
+      data: { queries: [{}], count: 1 },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('1 pending')).toBeInTheDocument();
+    });
+  });
+
+  it('fetches pending count on mount', async () => {
+    mockUseDatasourceConnection.mockReturnValue({
+      selectedDatasource: {
+        datasourceId: 'ds-1',
+        name: 'postgres',
+        displayName: 'My DB',
+        type: 'postgres',
+      },
+      isConnected: true,
+    });
+
+    mockListPendingQueries.mockResolvedValue({
+      success: true,
+      data: { queries: [], count: 0 },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(mockListPendingQueries).toHaveBeenCalledTimes(1);
+    });
   });
 });

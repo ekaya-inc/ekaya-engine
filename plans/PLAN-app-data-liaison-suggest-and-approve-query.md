@@ -81,7 +81,7 @@ This creates a governed workflow where Business Users (using ChatGPT, Claude Des
 | POST /queries/{id}/approve | ✅ Done | Task 5.2 |
 | POST /queries/{id}/reject | ✅ Done | Task 5.3 |
 | **Admin UI** | | |
-| Pending count badge | ❌ Pending | Task 6.1 |
+| Pending count badge | ✅ Done | Task 6.1 |
 | Pending filter option | ❌ Pending | Task 6.2 |
 | Review card with diff | ❌ Pending | Task 6.3 |
 | Rejection dialog | ❌ Pending | Task 6.4 |

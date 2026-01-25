@@ -27,6 +27,7 @@ import type {
   InstalledApp,
   InstalledAppsResponse,
   ListDatasourcesResponse,
+  ListPendingQueriesResponse,
   ListQueriesResponse,
   MCPConfigResponse,
   Query,
@@ -459,6 +460,18 @@ class EngineApiService {
         method: 'POST',
         body: JSON.stringify(request),
       }
+    );
+  }
+
+  /**
+   * List pending query suggestions for admin review
+   * GET /api/projects/{projectId}/queries/pending
+   */
+  async listPendingQueries(
+    projectId: string
+  ): Promise<ApiResponse<ListPendingQueriesResponse>> {
+    return this.makeRequest<ListPendingQueriesResponse>(
+      `/${projectId}/queries/pending`
     );
   }
 
