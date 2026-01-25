@@ -67,7 +67,7 @@ rel := &models.EntityRelationship{
 }
 ```
 
-### Step 5: Update Handler
+### Step 5: Update Handler ✓
 
 Map column types from model to response.
 

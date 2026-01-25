@@ -344,3 +344,108 @@ func TestEntityRelationshipHandler_List_DescriptionMapping(t *testing.T) {
 		}
 	})
 }
+
+// TestEntityRelationshipHandler_List_ColumnTypeMapping tests that column types
+// are correctly included in the API response.
+func TestEntityRelationshipHandler_List_ColumnTypeMapping(t *testing.T) {
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	testCases := []struct {
+		name                     string
+		sourceColumnType         string
+		targetColumnType         string
+		expectedSourceColumnType string
+		expectedTargetColumnType string
+	}{
+		{
+			name:                     "both column types present",
+			sourceColumnType:         "uuid",
+			targetColumnType:         "uuid",
+			expectedSourceColumnType: "uuid",
+			expectedTargetColumnType: "uuid",
+		},
+		{
+			name:                     "different column types",
+			sourceColumnType:         "bigint",
+			targetColumnType:         "integer",
+			expectedSourceColumnType: "bigint",
+			expectedTargetColumnType: "integer",
+		},
+		{
+			name:                     "empty column types",
+			sourceColumnType:         "",
+			targetColumnType:         "",
+			expectedSourceColumnType: "",
+			expectedTargetColumnType: "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockService := &mockDeterministicRelationshipService{
+				relationships: []*models.EntityRelationship{
+					{
+						ID:                uuid.New(),
+						OntologyID:        ontologyID,
+						SourceEntityID:    uuid.New(),
+						TargetEntityID:    uuid.New(),
+						SourceColumnTable: "users",
+						SourceColumnName:  "id",
+						SourceColumnType:  tc.sourceColumnType,
+						TargetColumnTable: "orders",
+						TargetColumnName:  "user_id",
+						TargetColumnType:  tc.targetColumnType,
+						DetectionMethod:   models.DetectionMethodForeignKey,
+						Status:            "confirmed",
+						Confidence:        1.0,
+					},
+				},
+			}
+
+			handler := NewEntityRelationshipHandler(mockService, zap.NewNop())
+
+			req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/relationships", nil)
+			req.SetPathValue("pid", projectID.String())
+
+			rec := httptest.NewRecorder()
+			handler.List(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+			}
+
+			var response ApiResponse
+			if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+
+			if !response.Success {
+				t.Fatal("expected success=true")
+			}
+
+			dataBytes, err := json.Marshal(response.Data)
+			if err != nil {
+				t.Fatalf("failed to marshal data: %v", err)
+			}
+
+			var listResponse EntityRelationshipListResponse
+			if err := json.Unmarshal(dataBytes, &listResponse); err != nil {
+				t.Fatalf("failed to unmarshal list response: %v", err)
+			}
+
+			if len(listResponse.Relationships) != 1 {
+				t.Fatalf("expected 1 relationship, got %d", len(listResponse.Relationships))
+			}
+
+			rel := listResponse.Relationships[0]
+
+			if rel.SourceColumnType != tc.expectedSourceColumnType {
+				t.Errorf("expected SourceColumnType=%q, got %q", tc.expectedSourceColumnType, rel.SourceColumnType)
+			}
+			if rel.TargetColumnType != tc.expectedTargetColumnType {
+				t.Errorf("expected TargetColumnType=%q, got %q", tc.expectedTargetColumnType, rel.TargetColumnType)
+			}
+		})
+	}
+}
