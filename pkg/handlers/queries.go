@@ -150,6 +150,13 @@ type DeleteQueryResponse struct {
 	Message string `json:"message"`
 }
 
+// ApproveQueryResponse for query approval result.
+type ApproveQueryResponse struct {
+	Success bool               `json:"success"`
+	Message string             `json:"message"`
+	Query   *QueryResponse     `json:"query,omitempty"`
+}
+
 // QueriesHandler handles query-related HTTP requests.
 type QueriesHandler struct {
 	queryService services.QueryService
@@ -201,6 +208,8 @@ func (h *QueriesHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth
 	// Admin review endpoints for pending query suggestions
 	mux.HandleFunc("GET "+projectBase+"/pending",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.ListPending)))
+	mux.HandleFunc("POST "+projectBase+"/{qid}/approve",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Approve)))
 }
 
 // List handles GET /api/projects/{pid}/datasources/{dsid}/queries
@@ -735,6 +744,78 @@ func (h *QueriesHandler) ListPending(w http.ResponseWriter, r *http.Request) {
 	}
 	for i, q := range queries {
 		data.Queries[i] = h.toPendingQueryResponse(q)
+	}
+
+	response := ApiResponse{Success: true, Data: data}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// Approve handles POST /api/projects/{pid}/queries/{qid}/approve
+// Approves a pending query suggestion.
+func (h *QueriesHandler) Approve(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	queryID, ok := ParseQueryID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	// Get reviewer ID from auth context
+	reviewerID := auth.GetUserIDFromContext(r.Context())
+	if reviewerID == "" {
+		if err := ErrorResponse(w, http.StatusUnauthorized, "unauthorized", "User ID not found in context"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Approve the query
+	if err := h.queryService.ApproveQuery(r.Context(), projectID, queryID, reviewerID); err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			if err := ErrorResponse(w, http.StatusNotFound, "not_found", "Query not found"); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
+		h.logger.Error("Failed to approve query",
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", queryID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusBadRequest, "approve_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Fetch the approved query to return in response
+	query, err := h.queryService.Get(r.Context(), projectID, queryID)
+	if err != nil {
+		// Query was approved but we couldn't fetch it - this can happen for update suggestions
+		// where the pending record is soft-deleted after approval
+		h.logger.Info("Query approved (update suggestion applied to original)",
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", queryID.String()))
+		data := ApproveQueryResponse{
+			Success: true,
+			Message: "Query approved and changes applied to original",
+		}
+		response := ApiResponse{Success: true, Data: data}
+		if err := WriteJSON(w, http.StatusOK, response); err != nil {
+			h.logger.Error("Failed to write response", zap.Error(err))
+		}
+		return
+	}
+
+	queryResp := h.toQueryResponse(query)
+	data := ApproveQueryResponse{
+		Success: true,
+		Message: "Query approved and enabled",
+		Query:   &queryResp,
 	}
 
 	response := ApiResponse{Success: true, Data: data}
