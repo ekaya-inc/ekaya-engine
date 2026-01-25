@@ -1,7 +1,7 @@
 # TASK: Question Generation During Extraction
 
 **Priority:** 3 (High)
-**Status:** Not Started
+**Status:** In Progress
 **Parent:** PLAN-ontology-next.md
 **Design Reference:** PLAN-ontology-question-generation.md (archived)
 
@@ -26,7 +26,7 @@ Generate clarifying questions during ontology extraction so domain experts can i
 
 ## Implementation
 
-### Step 1: Modify LLM Prompts to Request Questions
+### Step 1: Modify LLM Prompts to Request Questions [x]
 
 Add to entity/column/relationship enrichment prompts:
 
@@ -41,7 +41,7 @@ For each uncertainty, provide:
 Return questions in the "questions" array of the response.
 ```
 
-### Step 2: Update LLM Response Parsing
+### Step 2: Update LLM Response Parsing [x]
 
 Add question extraction to response structs:
 
