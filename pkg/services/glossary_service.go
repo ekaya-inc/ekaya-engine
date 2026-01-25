@@ -106,6 +106,7 @@ type glossaryService struct {
 	ontologyRepo   repositories.OntologyRepository
 	entityRepo     repositories.OntologyEntityRepository
 	knowledgeRepo  repositories.KnowledgeRepository
+	schemaRepo     repositories.SchemaRepository
 	datasourceSvc  DatasourceService
 	adapterFactory datasource.DatasourceAdapterFactory
 	llmFactory     llm.LLMClientFactory
@@ -123,6 +124,7 @@ func NewGlossaryService(
 	ontologyRepo repositories.OntologyRepository,
 	entityRepo repositories.OntologyEntityRepository,
 	knowledgeRepo repositories.KnowledgeRepository,
+	schemaRepo repositories.SchemaRepository,
 	datasourceSvc DatasourceService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	llmFactory llm.LLMClientFactory,
@@ -135,6 +137,7 @@ func NewGlossaryService(
 		ontologyRepo:   ontologyRepo,
 		entityRepo:     entityRepo,
 		knowledgeRepo:  knowledgeRepo,
+		schemaRepo:     schemaRepo,
 		datasourceSvc:  datasourceSvc,
 		adapterFactory: adapterFactory,
 		llmFactory:     llmFactory,
@@ -931,6 +934,37 @@ func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, on
 		return fmt.Errorf("get entities: %w", err)
 	}
 
+	// Get schema columns for accurate column reference (prevents LLM hallucinations)
+	var schemaColumnsByTable map[string][]*models.SchemaColumn
+	if s.schemaRepo != nil {
+		// Get datasource for the project
+		datasources, err := s.datasourceSvc.List(ctx, projectID)
+		if err != nil {
+			s.logger.Warn("Failed to get datasources for schema columns, continuing without",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		} else if len(datasources) > 0 {
+			// Get all table names from entities
+			tableNames := make([]string, 0, len(entities))
+			for _, e := range entities {
+				if !e.IsDeleted && e.PrimaryTable != "" {
+					tableNames = append(tableNames, e.PrimaryTable)
+				}
+			}
+			// Fetch columns for all tables in one query
+			schemaColumnsByTable, err = s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames, false)
+			if err != nil {
+				s.logger.Warn("Failed to get schema columns, continuing without",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+				schemaColumnsByTable = nil
+			} else {
+				s.logger.Debug("Loaded schema columns for enrichment",
+					zap.Int("tables", len(schemaColumnsByTable)))
+			}
+		}
+	}
+
 	// Create LLM client
 	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
 	if err != nil {
@@ -946,7 +980,7 @@ func (s *glossaryService) EnrichGlossaryTerms(ctx context.Context, projectID, on
 		semaphore <- struct{}{} // Acquire
 		go func(t *models.BusinessGlossaryTerm) {
 			defer func() { <-semaphore }() // Release
-			results <- s.enrichSingleTerm(ctx, t, ontology, entities, llmClient, projectID)
+			results <- s.enrichSingleTerm(ctx, t, ontology, entities, schemaColumnsByTable, llmClient, projectID)
 		}(term)
 	}
 
@@ -992,6 +1026,7 @@ func (s *glossaryService) enrichSingleTerm(
 	term *models.BusinessGlossaryTerm,
 	ontology *models.TieredOntology,
 	entities []*models.OntologyEntity,
+	schemaColumnsByTable map[string][]*models.SchemaColumn,
 	llmClient llm.LLMClient,
 	projectID uuid.UUID,
 ) enrichmentResult {
@@ -1005,7 +1040,7 @@ func (s *glossaryService) enrichSingleTerm(
 	defer cleanup()
 
 	// First attempt: normal enrichment
-	result, firstErr := s.tryEnrichTerm(tenantCtx, term, ontology, entities, llmClient, projectID, false, "")
+	result, firstErr := s.tryEnrichTerm(tenantCtx, term, ontology, entities, schemaColumnsByTable, llmClient, projectID, false, "")
 	if firstErr == nil {
 		return result
 	}
@@ -1015,7 +1050,7 @@ func (s *glossaryService) enrichSingleTerm(
 		zap.String("term", term.Term),
 		zap.Error(firstErr))
 
-	result, retryErr := s.tryEnrichTerm(tenantCtx, term, ontology, entities, llmClient, projectID, true, firstErr.Error())
+	result, retryErr := s.tryEnrichTerm(tenantCtx, term, ontology, entities, schemaColumnsByTable, llmClient, projectID, true, firstErr.Error())
 	if retryErr == nil {
 		s.logger.Info("Enrichment succeeded on retry with enhanced context",
 			zap.String("term", term.Term))
@@ -1042,6 +1077,7 @@ func (s *glossaryService) tryEnrichTerm(
 	term *models.BusinessGlossaryTerm,
 	ontology *models.TieredOntology,
 	entities []*models.OntologyEntity,
+	schemaColumnsByTable map[string][]*models.SchemaColumn,
 	llmClient llm.LLMClient,
 	projectID uuid.UUID,
 	enhanced bool,
@@ -1049,9 +1085,9 @@ func (s *glossaryService) tryEnrichTerm(
 ) (enrichmentResult, error) {
 	var prompt string
 	if enhanced {
-		prompt = s.buildEnhancedEnrichTermPrompt(term, ontology, entities, previousError)
+		prompt = s.buildEnhancedEnrichTermPrompt(term, ontology, entities, schemaColumnsByTable, previousError)
 	} else {
-		prompt = s.buildEnrichTermPrompt(term, ontology, entities)
+		prompt = s.buildEnrichTermPrompt(term, ontology, entities, schemaColumnsByTable)
 	}
 	systemMessage := s.enrichTermSystemMessage()
 
@@ -1194,6 +1230,7 @@ func (s *glossaryService) buildEnrichTermPrompt(
 	term *models.BusinessGlossaryTerm,
 	ontology *models.TieredOntology,
 	entities []*models.OntologyEntity,
+	schemaColumnsByTable map[string][]*models.SchemaColumn,
 ) string {
 	var sb strings.Builder
 
@@ -1238,9 +1275,49 @@ func (s *glossaryService) buildEnrichTermPrompt(
 		sb.WriteString("\n")
 	}
 
-	// Include column details if available
+	// Include actual schema columns - the ground truth for SQL generation
+	// This section provides the EXACT column names and types that exist in the database
+	if len(schemaColumnsByTable) > 0 {
+		sb.WriteString("## Available Columns (EXACT names - use these in your SQL)\n\n")
+		sb.WriteString("IMPORTANT: Only use column names listed below. Do NOT invent or guess column names.\n\n")
+		for tableName, columns := range schemaColumnsByTable {
+			sb.WriteString(fmt.Sprintf("**%s:**\n", tableName))
+			for _, col := range columns {
+				colInfo := fmt.Sprintf("- `%s` (%s)", col.ColumnName, col.DataType)
+				if col.IsPrimaryKey {
+					colInfo += " [PK]"
+				}
+				if col.Description != nil && *col.Description != "" {
+					colInfo += fmt.Sprintf(" - %s", *col.Description)
+				}
+				sb.WriteString(colInfo + "\n")
+
+				// Include sample values for low-cardinality columns (helps LLM use correct values)
+				if len(col.SampleValues) > 0 && len(col.SampleValues) <= 10 {
+					quotedValues := make([]string, len(col.SampleValues))
+					for i, v := range col.SampleValues {
+						quotedValues[i] = fmt.Sprintf("'%s'", v)
+					}
+					sb.WriteString(fmt.Sprintf("  Sample values: %s\n", strings.Join(quotedValues, ", ")))
+				}
+			}
+			sb.WriteString("\n")
+		}
+
+		// Add common column confusion warnings based on actual schema
+		confusions := s.detectColumnConfusions(schemaColumnsByTable)
+		if len(confusions) > 0 {
+			sb.WriteString("## IMPORTANT: Common Column Mistakes to Avoid\n\n")
+			for _, warning := range confusions {
+				sb.WriteString(fmt.Sprintf("- %s\n", warning))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// Include semantic column details from ontology (enriched information)
 	if len(ontology.ColumnDetails) > 0 {
-		sb.WriteString("## Key Columns\n\n")
+		sb.WriteString("## Column Semantics\n\n")
 		for tableName, columns := range ontology.ColumnDetails {
 			relevantCols := make([]models.ColumnDetail, 0)
 			for _, col := range columns {
@@ -1302,6 +1379,7 @@ func (s *glossaryService) buildEnhancedEnrichTermPrompt(
 	term *models.BusinessGlossaryTerm,
 	ontology *models.TieredOntology,
 	entities []*models.OntologyEntity,
+	schemaColumnsByTable map[string][]*models.SchemaColumn,
 	previousError string,
 ) string {
 	var sb strings.Builder
@@ -1355,10 +1433,49 @@ func (s *glossaryService) buildEnhancedEnrichTermPrompt(
 		sb.WriteString("\n")
 	}
 
-	// Include ALL column details (not just measures/dimensions)
+	// Include actual schema columns - the ground truth for SQL generation (enhanced prompt)
+	if len(schemaColumnsByTable) > 0 {
+		sb.WriteString("## EXACT Available Columns (use ONLY these column names)\n\n")
+		sb.WriteString("CRITICAL: The following is the complete list of columns that exist in the database.\n")
+		sb.WriteString("Do NOT use any column name that is not listed here. Column names are case-sensitive.\n\n")
+		for tableName, columns := range schemaColumnsByTable {
+			sb.WriteString(fmt.Sprintf("**%s:**\n", tableName))
+			for _, col := range columns {
+				colInfo := fmt.Sprintf("- `%s` (%s)", col.ColumnName, col.DataType)
+				if col.IsPrimaryKey {
+					colInfo += " [PK]"
+				}
+				if col.Description != nil && *col.Description != "" {
+					colInfo += fmt.Sprintf(" - %s", *col.Description)
+				}
+				sb.WriteString(colInfo + "\n")
+
+				// Include sample values for low-cardinality columns
+				if len(col.SampleValues) > 0 && len(col.SampleValues) <= 10 {
+					quotedValues := make([]string, len(col.SampleValues))
+					for i, v := range col.SampleValues {
+						quotedValues[i] = fmt.Sprintf("'%s'", v)
+					}
+					sb.WriteString(fmt.Sprintf("  Sample values: %s\n", strings.Join(quotedValues, ", ")))
+				}
+			}
+			sb.WriteString("\n")
+		}
+
+		// Add common column confusion warnings
+		confusions := s.detectColumnConfusions(schemaColumnsByTable)
+		if len(confusions) > 0 {
+			sb.WriteString("## CRITICAL: Column Mistakes to Avoid\n\n")
+			for _, warning := range confusions {
+				sb.WriteString(fmt.Sprintf("- %s\n", warning))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// Include semantic column details from ontology
 	if len(ontology.ColumnDetails) > 0 {
-		sb.WriteString("## Complete Column Reference\n\n")
-		sb.WriteString("All available columns by table (use these exact names in your SQL):\n\n")
+		sb.WriteString("## Column Semantics and Roles\n\n")
 		for tableName, columns := range ontology.ColumnDetails {
 			sb.WriteString(fmt.Sprintf("**%s:**\n", tableName))
 			for _, col := range columns {
@@ -1437,9 +1554,79 @@ func (s *glossaryService) buildEnhancedEnrichTermPrompt(
 }
 `)
 	sb.WriteString("```\n\n")
-	sb.WriteString("IMPORTANT: Use exact table and column names from the schema above. The SQL must execute successfully.\n")
+	sb.WriteString("IMPORTANT: Use ONLY the exact table and column names from the schema above. The SQL must execute successfully.\n")
 
 	return sb.String()
+}
+
+// detectColumnConfusions analyzes schema columns to detect common naming patterns
+// that LLMs often confuse, and returns warning messages to include in the prompt.
+// For example, if a table has 'created_at' but not 'started_at', we warn the LLM
+// to avoid the common mistake of using 'started_at'.
+func (s *glossaryService) detectColumnConfusions(schemaColumnsByTable map[string][]*models.SchemaColumn) []string {
+	var warnings []string
+
+	// Common column name confusions (expected -> often hallucinated)
+	confusionPatterns := map[string][]string{
+		"created_at":  {"started_at", "start_time", "begin_at"},
+		"updated_at":  {"modified_at", "changed_at"},
+		"ended_at":    {"finished_at", "end_time", "completed_at"},
+		"deleted_at":  {"removed_at"},
+		"amount":      {"value", "total"},
+		"status":      {"state"},
+		"user_id":     {"customer_id", "account_id"},
+		"id":          {"uuid", "pk"},
+		"name":        {"title", "label"},
+		"description": {"desc", "details"},
+	}
+
+	// Build a set of all column names across all tables
+	allColumns := make(map[string]map[string]bool) // table -> column -> exists
+	for tableName, columns := range schemaColumnsByTable {
+		allColumns[tableName] = make(map[string]bool)
+		for _, col := range columns {
+			allColumns[tableName][strings.ToLower(col.ColumnName)] = true
+		}
+	}
+
+	// Check each table for confusion patterns
+	for tableName, columns := range allColumns {
+		for actual, hallucinated := range confusionPatterns {
+			if columns[actual] {
+				// This table has the actual column, warn about hallucinated alternatives
+				for _, wrong := range hallucinated {
+					if !columns[wrong] {
+						warnings = append(warnings,
+							fmt.Sprintf("Table '%s' has NO column named '%s'. Use '%s' instead.",
+								tableName, wrong, actual))
+					}
+				}
+			}
+		}
+
+		// Special case: detect timestamp columns and warn about common confusions
+		hasCreatedAt := columns["created_at"]
+		hasStartedAt := columns["started_at"]
+		if hasCreatedAt && !hasStartedAt {
+			// Only add if not already in warnings
+			warning := fmt.Sprintf("Table '%s': There is NO 'started_at' column. For start time, use 'created_at'.", tableName)
+			if !containsWarning(warnings, warning) {
+				warnings = append(warnings, warning)
+			}
+		}
+	}
+
+	return warnings
+}
+
+// containsWarning checks if a warning message already exists in the slice.
+func containsWarning(warnings []string, warning string) bool {
+	for _, w := range warnings {
+		if w == warning {
+			return true
+		}
+	}
+	return false
 }
 
 type termEnrichment struct {

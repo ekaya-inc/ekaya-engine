@@ -74,7 +74,7 @@ func setupGlossaryTest(t *testing.T) *glossaryTestContext {
 	mockLLMFactory := &mockLLMClientFactory{}
 
 	// Create service with real dependencies
-	service := services.NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, mockLLMFactory, nil, zap.NewNop(), "test")
+	service := services.NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, nil, datasourceSvc, adapterFactory, mockLLMFactory, nil, zap.NewNop(), "test")
 
 	// Create handler
 	handler := NewGlossaryHandler(service, zap.NewNop())
