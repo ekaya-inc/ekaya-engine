@@ -1,7 +1,7 @@
 # FIX: Add Column Types to Entity Relationships
 
 **Priority:** 7 (Low)
-**Status:** In Progress
+**Status:** Complete
 **Parent:** PLAN-ontology-next.md
 **Design Reference:** FIX-add-column-type-to-entity-relationships.md (archived)
 
@@ -90,6 +90,6 @@ Map column types from model to response.
 
 ## Success Criteria
 
-- [ ] Column IDs stored in relationships
-- [ ] API returns source_column_type and target_column_type
-- [ ] New extractions populate the fields
+- [x] Column IDs stored in relationships
+- [x] API returns source_column_type and target_column_type
+- [x] New extractions populate the fields
