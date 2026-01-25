@@ -368,8 +368,22 @@ func (s *deterministicRelationshipService) collectColumnStats(
 			}
 
 			// Update column joinability in database
+			// Debug: log values being passed to update
+			var dcVal int64
+			if distinctCount != nil {
+				dcVal = *distinctCount
+			}
+			s.logger.Debug("Updating column joinability",
+				zap.String("table", fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)),
+				zap.String("column", col.ColumnName),
+				zap.Int64("distinct_count_value", dcVal),
+				zap.Bool("distinct_count_is_nil", distinctCount == nil))
+
 			if err := s.schemaRepo.UpdateColumnJoinability(ctx, col.ID, rowCount, nonNullCount, distinctCount, &isJoinable, &reason); err != nil {
-				// Log warning but continue
+				s.logger.Warn("Failed to update column joinability",
+					zap.String("table", fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)),
+					zap.String("column", col.ColumnName),
+					zap.Error(err))
 				continue
 			}
 		}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
 )
@@ -899,5 +900,70 @@ func TestSchemaDiscoverer_Close(t *testing.T) {
 	_, err = discoverer.DiscoverTables(ctx)
 	if err == nil {
 		t.Error("expected error after Close, got nil")
+	}
+}
+
+// TestSchemaDiscoverer_AnalyzeColumnStats_DebugLogging verifies that debug logging
+// is working correctly for column stats collection. This test uses a development logger
+// to capture and display debug output from the AnalyzeColumnStats function.
+//
+// Run with: go test -v -tags='integration postgres' -run 'DebugLogging' ./pkg/adapters/datasource/postgres/...
+func TestSchemaDiscoverer_AnalyzeColumnStats_DebugLogging(t *testing.T) {
+	testDB := testhelpers.GetTestDB(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Get container connection info
+	host, err := testDB.Container.Host(ctx)
+	if err != nil {
+		t.Fatalf("failed to get container host: %v", err)
+	}
+
+	port, err := testDB.Container.MappedPort(ctx, "5432")
+	if err != nil {
+		t.Fatalf("failed to get container port: %v", err)
+	}
+
+	cfg := &Config{
+		Host:     host,
+		Port:     port.Int(),
+		User:     "ekaya",
+		Password: "test_password",
+		Database: "test_data",
+		SSLMode:  "disable",
+	}
+
+	// Use development logger to see debug output
+	logger, _ := zap.NewDevelopment()
+
+	// Create discoverer WITH logger to see debug output
+	discoverer, err := NewSchemaDiscoverer(ctx, cfg, nil, uuid.Nil, uuid.Nil, "", logger)
+	if err != nil {
+		t.Fatalf("failed to create schema discoverer: %v", err)
+	}
+	defer discoverer.Close()
+
+	// Test with users table which has text and integer columns
+	// This should trigger the debug logging we added
+	t.Log("===== Analyzing column stats for public.users =====")
+	columnNames := []string{"user_id", "username", "profile_url", "agent_type", "avg_rating"}
+	stats, err := discoverer.AnalyzeColumnStats(ctx, "public", "users", columnNames)
+	if err != nil {
+		t.Fatalf("AnalyzeColumnStats failed: %v", err)
+	}
+
+	t.Logf("Got %d stats results:", len(stats))
+	for _, s := range stats {
+		t.Logf("  Column: %s, row_count=%d, non_null_count=%d, distinct_count=%d",
+			s.ColumnName, s.RowCount, s.NonNullCount, s.DistinctCount)
+	}
+
+	// Verify all columns have distinct_count populated
+	for _, s := range stats {
+		if s.DistinctCount == 0 && s.NonNullCount > 0 {
+			t.Errorf("Column %s has non_null_count=%d but distinct_count=0 - this indicates a bug!",
+				s.ColumnName, s.NonNullCount)
+		}
 	}
 }

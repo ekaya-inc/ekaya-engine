@@ -110,7 +110,7 @@ Investigation complete. Key findings:
 
 ## Testing
 
-1. Run ontology extraction with DEBUG logging enabled
+1. ✓ Run ontology extraction with DEBUG logging enabled
 2. Check logs for where distinct_count value is lost
 3. Fix the identified issue
 4. Re-run extraction and verify NULL stats rate < 10%
