@@ -1665,3 +1665,159 @@ func TestEnrichEntitiesWithLLM_NoExistingNames_NoExistingNamesSection(t *testing
 	// Verify: the prompt does NOT include existing entity names section
 	assert.NotContains(t, capturedPrompt, "EXISTING ENTITY NAMES (DO NOT REUSE)")
 }
+
+// ============================================================================
+// Tests for Provenance Fields
+// ============================================================================
+
+func TestIdentifyEntitiesFromDDL_SetsConfidence(t *testing.T) {
+	// Test that DDL-based entity discovery sets confidence=0.5
+	// (DDL-derived entities have lower confidence until LLM enrichment)
+
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	datasourceID := uuid.New()
+
+	tableID := uuid.New()
+	tables := []*models.SchemaTable{
+		{ID: tableID, SchemaName: "public", TableName: "users"},
+	}
+
+	columns := []*models.SchemaColumn{
+		{SchemaTableID: tableID, ColumnName: "id", IsPrimaryKey: true},
+	}
+
+	entityRepo := &trackingEntityRepo{}
+	schemaRepo := &mockSchemaRepoForGrouping{
+		tables:  tables,
+		columns: columns,
+	}
+
+	mockTenantCtx := func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {
+		return ctx, func() {}, nil
+	}
+
+	svc := NewEntityDiscoveryService(
+		entityRepo,
+		schemaRepo,
+		nil,
+		nil,
+		llm.NewMockClientFactory(),
+		nil,
+		mockTenantCtx,
+		zap.NewNop(),
+	)
+
+	// Execute
+	entityCount, _, _, err := svc.IdentifyEntitiesFromDDL(context.Background(), projectID, ontologyID, datasourceID)
+
+	// Verify: no error
+	require.NoError(t, err)
+	assert.Equal(t, 1, entityCount)
+	require.Len(t, entityRepo.createdEntities, 1)
+
+	// Verify: DDL-based entities should have confidence=0.5
+	entity := entityRepo.createdEntities[0]
+	assert.Equal(t, 0.5, entity.Confidence, "DDL-based entities should have confidence=0.5")
+}
+
+// trackingUpdateEntityRepo extends trackingEntityRepo to also track Update calls
+type trackingUpdateEntityRepo struct {
+	trackingEntityRepo
+	updatedEntities []*models.OntologyEntity
+}
+
+func (m *trackingUpdateEntityRepo) Update(ctx context.Context, entity *models.OntologyEntity) error {
+	m.updatedEntities = append(m.updatedEntities, entity)
+	return nil
+}
+
+func TestEnrichEntitiesWithLLM_SetsConfidence(t *testing.T) {
+	// Test that LLM enrichment increases confidence to 0.8
+
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	datasourceID := uuid.New()
+	conversationID := uuid.New()
+	tableID := uuid.New()
+
+	// Create an entity with initial DDL-based confidence of 0.5
+	entity := &models.OntologyEntity{
+		ID:            uuid.New(),
+		ProjectID:     projectID,
+		OntologyID:    ontologyID,
+		Name:          "users",
+		Description:   "",
+		PrimarySchema: "public",
+		PrimaryTable:  "users",
+		PrimaryColumn: "id",
+		Confidence:    0.5, // DDL-based confidence
+	}
+
+	entityRepo := &trackingUpdateEntityRepo{
+		trackingEntityRepo: trackingEntityRepo{
+			mockEntityDiscoveryEntityRepo: mockEntityDiscoveryEntityRepo{
+				entities: []*models.OntologyEntity{entity},
+			},
+		},
+	}
+
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		return &llm.GenerateResponseResult{
+			Content: `{
+				"entities": [
+					{
+						"table_name": "users",
+						"entity_name": "User",
+						"description": "A platform user account",
+						"domain": "customer",
+						"key_columns": [],
+						"alternative_names": []
+					}
+				]
+			}`,
+			ConversationID: conversationID,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.CreateForProjectFunc = func(ctx context.Context, projectID uuid.UUID) (llm.LLMClient, error) {
+		return mockClient, nil
+	}
+
+	mockTenantCtx := func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {
+		return ctx, func() {}, nil
+	}
+
+	svc := NewEntityDiscoveryService(
+		entityRepo,
+		&mockSchemaRepoForGrouping{},
+		nil,
+		nil,
+		mockFactory,
+		nil,
+		mockTenantCtx,
+		zap.NewNop(),
+	)
+
+	tables := []*models.SchemaTable{
+		{ID: tableID, SchemaName: "public", TableName: "users"},
+	}
+	columns := []*models.SchemaColumn{
+		{SchemaTableID: tableID, ColumnName: "id"},
+	}
+
+	// Execute
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+
+	// Verify: no error
+	require.NoError(t, err)
+	require.Len(t, entityRepo.updatedEntities, 1)
+
+	// Verify: LLM-enriched entities should have confidence=0.8
+	updatedEntity := entityRepo.updatedEntities[0]
+	assert.Equal(t, 0.8, updatedEntity.Confidence, "LLM-enriched entities should have confidence=0.8")
+	assert.Equal(t, "User", updatedEntity.Name, "Entity name should be updated by LLM")
+	assert.Equal(t, "A platform user account", updatedEntity.Description, "Entity description should be updated by LLM")
+}

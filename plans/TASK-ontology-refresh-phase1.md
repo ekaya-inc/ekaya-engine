@@ -80,7 +80,7 @@ type EntityRelationship struct {
 Update INSERT/UPDATE queries to include new fields.
 Update SELECT queries to return new fields.
 
-### Step 4: Update Services
+### Step 4: Update Services ✓
 
 **Entity Discovery:** Set `source='ddl'` for entities from schema, `confidence=0.5`
 **Entity Enrichment:** Set `source='llm'`, `confidence=0.7-0.9` based on LLM response
@@ -119,6 +119,6 @@ Modify re-extract to:
 ## Success Criteria
 
 - [x] Provenance fields exist on entities and relationships
-- [ ] New extractions populate source and confidence
+- [x] New extractions populate source and confidence
 - [ ] User-verified items are preserved during re-extract
 - [ ] API returns provenance fields

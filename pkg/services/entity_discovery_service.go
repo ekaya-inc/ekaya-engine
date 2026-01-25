@@ -203,6 +203,9 @@ func (s *entityDiscoveryService) identifyEntitiesFromDDL(
 			PrimarySchema: primaryTable.SchemaName,
 			PrimaryTable:  primaryTable.TableName,
 			PrimaryColumn: c.columnName,
+			// Provenance: DDL-derived entities start with lower confidence,
+			// will be increased after LLM enrichment
+			Confidence: 0.5,
 		}
 
 		if err := s.entityRepo.Create(tenantCtx, entity); err != nil {
@@ -495,6 +498,8 @@ func (s *entityDiscoveryService) enrichEntityBatch(
 		entity.Name = enrichment.EntityName
 		entity.Description = enrichment.Description
 		entity.Domain = enrichment.Domain
+		// Provenance: LLM enrichment increases confidence from DDL-based 0.5 to 0.8
+		entity.Confidence = 0.8
 		if err := s.entityRepo.Update(ctx, entity); err != nil {
 			s.logger.Error("Failed to update entity with enrichment",
 				zap.String("entity_id", entity.ID.String()),

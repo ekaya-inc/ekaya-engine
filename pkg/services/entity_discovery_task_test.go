@@ -1,11 +1,16 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
+	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
 
 func TestParseEntityDiscoveryOutput(t *testing.T) {
@@ -269,4 +274,124 @@ func TestEntityDiscoveryOutputValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ============================================================================
+// Provenance Tests
+// ============================================================================
+
+// mockEntityRepoForTask is a mock entity repository that tracks created entities
+type mockEntityRepoForTask struct {
+	createdEntities []*models.OntologyEntity
+}
+
+func (m *mockEntityRepoForTask) Create(ctx context.Context, entity *models.OntologyEntity) error {
+	if entity.ID == uuid.Nil {
+		entity.ID = uuid.New()
+	}
+	m.createdEntities = append(m.createdEntities, entity)
+	return nil
+}
+
+// Stub implementations for the interface
+func (m *mockEntityRepoForTask) GetByID(ctx context.Context, entityID uuid.UUID) (*models.OntologyEntity, error) {
+	return nil, nil
+}
+func (m *mockEntityRepoForTask) GetByOntology(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
+	return nil, nil
+}
+func (m *mockEntityRepoForTask) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
+	return nil, nil
+}
+func (m *mockEntityRepoForTask) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	return nil, nil
+}
+func (m *mockEntityRepoForTask) GetByProjectAndName(ctx context.Context, projectID uuid.UUID, name string) (*models.OntologyEntity, error) {
+	return nil, nil
+}
+func (m *mockEntityRepoForTask) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+func (m *mockEntityRepoForTask) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+func (m *mockEntityRepoForTask) Update(ctx context.Context, entity *models.OntologyEntity) error {
+	return nil
+}
+func (m *mockEntityRepoForTask) SoftDelete(ctx context.Context, entityID uuid.UUID, reason string) error {
+	return nil
+}
+func (m *mockEntityRepoForTask) Restore(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+func (m *mockEntityRepoForTask) CreateAlias(ctx context.Context, alias *models.OntologyEntityAlias) error {
+	return nil
+}
+func (m *mockEntityRepoForTask) GetAliasesByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityAlias, error) {
+	return nil, nil
+}
+func (m *mockEntityRepoForTask) GetAllAliasesByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityAlias, error) {
+	return nil, nil
+}
+func (m *mockEntityRepoForTask) DeleteAlias(ctx context.Context, aliasID uuid.UUID) error {
+	return nil
+}
+func (m *mockEntityRepoForTask) CreateKeyColumn(ctx context.Context, keyColumn *models.OntologyEntityKeyColumn) error {
+	return nil
+}
+func (m *mockEntityRepoForTask) GetKeyColumnsByEntity(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityKeyColumn, error) {
+	return nil, nil
+}
+func (m *mockEntityRepoForTask) GetAllKeyColumnsByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityKeyColumn, error) {
+	return nil, nil
+}
+func (m *mockEntityRepoForTask) CountOccurrencesByEntity(ctx context.Context, entityID uuid.UUID) (int, error) {
+	return 0, nil
+}
+func (m *mockEntityRepoForTask) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	return nil, nil
+}
+
+var _ repositories.OntologyEntityRepository = (*mockEntityRepoForTask)(nil)
+
+func TestEntityDiscoveryTask_PersistEntities_SetsConfidence(t *testing.T) {
+	// Test that LLM-based entity discovery (EntityDiscoveryTask) sets confidence=0.7
+
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+
+	entityRepo := &mockEntityRepoForTask{}
+
+	task := &EntityDiscoveryTask{
+		entityRepo: entityRepo,
+		projectID:  projectID,
+		ontologyID: ontologyID,
+	}
+
+	output := &EntityDiscoveryOutput{
+		Entities: []DiscoveredEntity{
+			{
+				Name:          "user",
+				Description:   "A person who uses the system",
+				PrimarySchema: "public",
+				PrimaryTable:  "users",
+				PrimaryColumn: "id",
+			},
+		},
+	}
+
+	// Execute
+	err := task.persistEntities(context.Background(), output)
+
+	// Verify: no error
+	require.NoError(t, err)
+	require.Len(t, entityRepo.createdEntities, 1)
+
+	// Verify: LLM-discovered entities should have confidence=0.7
+	entity := entityRepo.createdEntities[0]
+	assert.Equal(t, 0.7, entity.Confidence, "LLM-discovered entities (EntityDiscoveryTask) should have confidence=0.7")
+	assert.Equal(t, "user", entity.Name)
+	assert.Equal(t, "A person who uses the system", entity.Description)
+	assert.Equal(t, projectID, entity.ProjectID)
+	assert.Equal(t, ontologyID, entity.OntologyID)
 }
