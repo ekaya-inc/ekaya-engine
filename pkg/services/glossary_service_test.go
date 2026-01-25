@@ -86,9 +86,9 @@ func (m *mockGlossaryRepo) Delete(ctx context.Context, termID uuid.UUID) error {
 	return nil
 }
 
-func (m *mockGlossaryRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source string) error {
+func (m *mockGlossaryRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
 	for id, term := range m.terms {
-		if term.ProjectID == projectID && term.Source == source {
+		if term.ProjectID == projectID && term.Source == source.String() {
 			delete(m.terms, id)
 		}
 	}

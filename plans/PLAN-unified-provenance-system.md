@@ -12,7 +12,7 @@
 - [ ] Task 4: Update Repositories
   - [x] 4.1: Update Entity Repository with Provenance Support
   - [x] 4.2: Update Relationship Repository with Provenance Support
-  - [ ] 4.3: Update Glossary Repository with Provenance Support
+  - [x] 4.3: Update Glossary Repository with Provenance Support
   - [ ] 4.4: Update Project Knowledge Repository with Provenance Support
 - [ ] Task 5: Implement Audit Service
 - [ ] Task 6: Extract User ID from JWT
