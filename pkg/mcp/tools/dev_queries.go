@@ -47,6 +47,7 @@ func RegisterDevQueryTools(mcpServer *server.MCPServer, deps *DevQueryToolDeps) 
 	registerListQuerySuggestionsTool(mcpServer, deps)
 	registerApproveQuerySuggestionTool(mcpServer, deps)
 	registerRejectQuerySuggestionTool(mcpServer, deps)
+	registerCreateApprovedQueryTool(mcpServer, deps)
 }
 
 // querySuggestionInfo represents a single query suggestion in the response.
@@ -583,4 +584,253 @@ Use list_query_suggestions first to see pending suggestions.`),
 	}
 
 	mcpServer.AddTool(tool, handler)
+}
+
+// createApprovedQueryResponse is the response format for create_approved_query.
+type createApprovedQueryResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	QueryID string `json:"query_id"`
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+}
+
+// registerCreateApprovedQueryTool registers the create_approved_query tool.
+func registerCreateApprovedQueryTool(mcpServer *server.MCPServer, deps *DevQueryToolDeps) {
+	tool := mcp.NewTool(
+		"create_approved_query",
+		mcp.WithDescription(`Create a new pre-approved query directly (no review required).
+The query will be immediately available for execution with status='approved'.
+SQL syntax is validated before creation. Use this for admin-created queries that bypass the suggestion workflow.`),
+		mcp.WithString("name",
+			mcp.Required(),
+			mcp.Description("Human-readable name for the query")),
+		mcp.WithString("description",
+			mcp.Required(),
+			mcp.Description("What business question this query answers")),
+		mcp.WithString("sql",
+			mcp.Required(),
+			mcp.Description("SQL query with {{parameter}} placeholders")),
+		mcp.WithString("datasource_id",
+			mcp.Required(),
+			mcp.Description("UUID of the datasource")),
+		mcp.WithArray("parameters",
+			mcp.Description("Parameter definitions (array of objects with name, type, description, required, example)")),
+		mcp.WithObject("output_column_descriptions",
+			mcp.Description("Descriptions for output columns (e.g., {\"total\": \"Total amount in USD\"})")),
+		mcp.WithArray("tags",
+			mcp.Description("Tags for organizing queries (e.g., [\"billing\", \"reporting\"])")),
+	)
+
+	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Check tool access
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "create_approved_query")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Parse arguments
+		args, _ := request.Params.Arguments.(map[string]any)
+
+		// Parse required name
+		name, ok := args["name"].(string)
+		if !ok || name == "" {
+			return NewErrorResultWithDetails("invalid_parameters",
+				"name is required",
+				map[string]any{
+					"parameter": "name",
+				}), nil
+		}
+
+		// Parse required description
+		description, ok := args["description"].(string)
+		if !ok || description == "" {
+			return NewErrorResultWithDetails("invalid_parameters",
+				"description is required",
+				map[string]any{
+					"parameter": "description",
+				}), nil
+		}
+
+		// Parse required sql
+		sqlQuery, ok := args["sql"].(string)
+		if !ok || sqlQuery == "" {
+			return NewErrorResultWithDetails("invalid_parameters",
+				"sql is required",
+				map[string]any{
+					"parameter": "sql",
+				}), nil
+		}
+
+		// Parse required datasource_id
+		datasourceIDStr, ok := args["datasource_id"].(string)
+		if !ok || datasourceIDStr == "" {
+			return NewErrorResultWithDetails("invalid_parameters",
+				"datasource_id is required",
+				map[string]any{
+					"parameter": "datasource_id",
+				}), nil
+		}
+
+		datasourceID, err := uuid.Parse(datasourceIDStr)
+		if err != nil {
+			return NewErrorResultWithDetails("invalid_parameters",
+				"datasource_id is not a valid UUID",
+				map[string]any{
+					"parameter":    "datasource_id",
+					"actual_value": datasourceIDStr,
+				}), nil
+		}
+
+		// Validate SQL syntax before creation
+		validationRes, err := deps.QueryService.Validate(tenantCtx, projectID, datasourceID, sqlQuery)
+		if err != nil {
+			deps.Logger.Error("Failed to validate SQL",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			return NewErrorResultWithDetails("validation_error",
+				fmt.Sprintf("failed to validate SQL: %s", err.Error()),
+				map[string]any{
+					"sql": sqlQuery,
+				}), nil
+		}
+
+		if !validationRes.Valid {
+			return NewErrorResultWithDetails("invalid_sql",
+				fmt.Sprintf("invalid SQL: %s", validationRes.Message),
+				map[string]any{
+					"sql":   sqlQuery,
+					"error": validationRes.Message,
+				}), nil
+		}
+
+		// Parse optional parameters
+		var paramDefs []models.QueryParameter
+		if paramsArray, ok := args["parameters"].([]any); ok && len(paramsArray) > 0 {
+			paramDefs, err = parseDevQueryParameterDefinitions(paramsArray)
+			if err != nil {
+				return NewErrorResultWithDetails("invalid_parameters",
+					fmt.Sprintf("invalid parameters: %s", err.Error()),
+					map[string]any{
+						"parameter": "parameters",
+					}), nil
+			}
+		}
+
+		// Parse optional output column descriptions
+		var outputColumns []models.OutputColumn
+		if descs, ok := args["output_column_descriptions"].(map[string]any); ok && len(descs) > 0 {
+			for colName, colDesc := range descs {
+				if descStr, ok := colDesc.(string); ok {
+					outputColumns = append(outputColumns, models.OutputColumn{
+						Name:        colName,
+						Description: descStr,
+					})
+				}
+			}
+		}
+
+		// Parse optional tags
+		var tags []string
+		if tagsArray, ok := args["tags"].([]any); ok {
+			for _, tag := range tagsArray {
+				if str, ok := tag.(string); ok {
+					tags = append(tags, str)
+				}
+			}
+		}
+
+		// Detect if this is a modifying statement (INSERT/UPDATE/DELETE/CALL)
+		sqlType := services.DetectSQLType(sqlQuery)
+		isModifying := services.IsModifyingStatement(sqlType)
+
+		// Create the query via DirectCreate (status="approved", suggested_by="admin")
+		createReq := &services.CreateQueryRequest{
+			NaturalLanguagePrompt: name,
+			AdditionalContext:     description,
+			SQLQuery:              sqlQuery,
+			Parameters:            paramDefs,
+			OutputColumns:         outputColumns,
+			Tags:                  tags,
+			AllowsModification:    isModifying,
+		}
+
+		query, err := deps.QueryService.DirectCreate(tenantCtx, projectID, datasourceID, createReq)
+		if err != nil {
+			deps.Logger.Error("Failed to create approved query",
+				zap.String("project_id", projectID.String()),
+				zap.String("datasource_id", datasourceID.String()),
+				zap.Error(err))
+			return nil, fmt.Errorf("failed to create query: %w", err)
+		}
+
+		deps.Logger.Info("Created approved query",
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", query.ID.String()),
+			zap.String("name", name),
+		)
+
+		response := createApprovedQueryResponse{
+			Success: true,
+			Message: "Query created and approved. It is now available for execution.",
+			QueryID: query.ID.String(),
+			Name:    name,
+			Status:  query.Status,
+		}
+
+		responseJSON, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal response: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(responseJSON)), nil
+	}
+
+	mcpServer.AddTool(tool, handler)
+}
+
+// parseDevQueryParameterDefinitions converts MCP parameter array to QueryParameter slice.
+// This is a local version for dev_queries.go to avoid import cycles.
+func parseDevQueryParameterDefinitions(paramsArray []any) ([]models.QueryParameter, error) {
+	params := make([]models.QueryParameter, 0, len(paramsArray))
+
+	for i, p := range paramsArray {
+		paramMap, ok := p.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("parameter %d is not an object", i)
+		}
+
+		name, ok := paramMap["name"].(string)
+		if !ok || name == "" {
+			return nil, fmt.Errorf("parameter %d missing required 'name' field", i)
+		}
+
+		paramType, ok := paramMap["type"].(string)
+		if !ok || paramType == "" {
+			return nil, fmt.Errorf("parameter %d missing required 'type' field", i)
+		}
+
+		param := models.QueryParameter{
+			Name:     name,
+			Type:     paramType,
+			Required: true, // Default to required
+		}
+
+		if desc, ok := paramMap["description"].(string); ok {
+			param.Description = desc
+		}
+
+		if required, ok := paramMap["required"].(bool); ok {
+			param.Required = required
+		}
+
+		if example, ok := paramMap["example"]; ok {
+			param.Default = example
+		}
+
+		params = append(params, param)
+	}
+
+	return params, nil
 }
