@@ -152,6 +152,7 @@ func (tc *relationshipTestContext) createTestRelationship(ctx context.Context, s
 func TestEntityRelationshipRepository_MarkInferenceRelationshipsStale_Success(t *testing.T) {
 	tc := setupRelationshipTest(t)
 	tc.cleanup()
+	defer tc.cleanup() // Clean up at end to avoid affecting other tests
 
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
@@ -191,6 +192,7 @@ func TestEntityRelationshipRepository_MarkInferenceRelationshipsStale_Success(t 
 func TestEntityRelationshipRepository_ClearStaleFlag_Success(t *testing.T) {
 	tc := setupRelationshipTest(t)
 	tc.cleanup()
+	defer tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
@@ -224,6 +226,7 @@ func TestEntityRelationshipRepository_ClearStaleFlag_Success(t *testing.T) {
 func TestEntityRelationshipRepository_GetStaleRelationships_Empty(t *testing.T) {
 	tc := setupRelationshipTest(t)
 	tc.cleanup()
+	defer tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
@@ -244,6 +247,7 @@ func TestEntityRelationshipRepository_GetStaleRelationships_Empty(t *testing.T) 
 func TestEntityRelationshipRepository_Create_ClearsStaleOnRediscovery(t *testing.T) {
 	tc := setupRelationshipTest(t)
 	tc.cleanup()
+	defer tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
@@ -311,6 +315,7 @@ func TestEntityRelationshipRepository_Create_ClearsStaleOnRediscovery(t *testing
 func TestEntityRelationshipRepository_UpdateDescription_ClearsStaleFlag(t *testing.T) {
 	tc := setupRelationshipTest(t)
 	tc.cleanup()
+	defer tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
@@ -350,6 +355,7 @@ func TestEntityRelationshipRepository_UpdateDescription_ClearsStaleFlag(t *testi
 func TestEntityRelationshipRepository_UpdateDescriptionAndAssociation_ClearsStaleFlag(t *testing.T) {
 	tc := setupRelationshipTest(t)
 	tc.cleanup()
+	defer tc.cleanup()
 
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
