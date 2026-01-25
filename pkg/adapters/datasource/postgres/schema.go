@@ -311,10 +311,22 @@ func (d *SchemaDiscoverer) AnalyzeColumnStats(ctx context.Context, schemaName, t
 				s.RowCount = 0
 				s.NonNullCount = 0
 				s.DistinctCount = 0
+			} else {
+				d.logger.Debug("Column stats raw scan (retry)",
+					zap.String("column", colName),
+					zap.Int64("row_count", s.RowCount),
+					zap.Int64("non_null_count", s.NonNullCount),
+					zap.Int64("distinct_count", s.DistinctCount))
 			}
 			// Length stats are nil for retried columns (simplified query doesn't calculate them)
 			s.MinLength = nil
 			s.MaxLength = nil
+		} else {
+			d.logger.Debug("Column stats raw scan",
+				zap.String("column", colName),
+				zap.Int64("row_count", s.RowCount),
+				zap.Int64("non_null_count", s.NonNullCount),
+				zap.Int64("distinct_count", s.DistinctCount))
 		}
 
 		stats = append(stats, s)
