@@ -174,19 +174,15 @@ func (s *glossaryService) CreateTerm(ctx context.Context, projectID uuid.UUID, t
 		term.Source = models.GlossarySourceManual
 	}
 
-	// Set ontology_id from active ontology if not already set
-	// This enables proper unique constraint enforcement and CASCADE delete
-	if term.OntologyID == nil {
-		activeOntology, err := s.ontologyRepo.GetActive(ctx, projectID)
-		if err != nil {
-			s.logger.Warn("Failed to get active ontology for term creation",
-				zap.String("project_id", projectID.String()),
-				zap.Error(err))
-			// Continue without ontology_id - term will still be created
-		} else if activeOntology != nil {
-			term.OntologyID = &activeOntology.ID
-		}
+	// Get active ontology and set ontology_id for proper CASCADE delete and uniqueness
+	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("get active ontology: %w", err)
 	}
+	if ontology == nil {
+		return fmt.Errorf("no active ontology found for project")
+	}
+	term.OntologyID = &ontology.ID
 
 	// Validate SQL and capture output columns
 	testResult, err := s.TestSQL(ctx, projectID, term.DefiningSQL)

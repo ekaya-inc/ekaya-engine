@@ -95,6 +95,10 @@ func (m *mockQueryServiceForMCP) ExecuteWithParameters(ctx context.Context, proj
 	return nil, nil
 }
 
+func (m *mockQueryServiceForMCP) ExecuteModifyingWithParameters(ctx context.Context, projectID, queryID uuid.UUID, params map[string]any) (*datasource.ExecuteResult, error) {
+	return nil, nil
+}
+
 func (m *mockQueryServiceForMCP) Validate(ctx context.Context, projectID, datasourceID uuid.UUID, sqlQuery string) (*ValidationResult, error) {
 	return nil, nil
 }

@@ -163,7 +163,7 @@ func Test_031_GlossaryDefiningSql(t *testing.T) {
 	}
 
 	// Verify unique index on (project_id, ontology_id, term)
-	// Note: Migration 016 changed this from a constraint on (project_id, term) to an index on (project_id, ontology_id, term)
+	// Note: Migration 016 changed this from a constraint to a unique index that includes ontology_id
 	var uniqueExists bool
 	err = engineDB.DB.Pool.QueryRow(ctx, `
 		SELECT EXISTS (
