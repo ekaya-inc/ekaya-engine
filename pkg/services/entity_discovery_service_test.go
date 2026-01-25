@@ -2040,3 +2040,102 @@ func TestParseEntityEnrichmentResponse_NoQuestions(t *testing.T) {
 	require.Len(t, entities, 1)
 	assert.Empty(t, questions, "Questions should be empty when not present")
 }
+
+func TestEnrichEntitiesWithLLM_DeduplicatesAliases(t *testing.T) {
+	// Test that when LLM returns duplicate aliases, CreateAlias is only called once per unique alias.
+	// This prevents duplicate key constraint violations in the database.
+
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	datasourceID := uuid.New()
+	conversationID := uuid.New()
+	tableID := uuid.New()
+
+	entity := &models.OntologyEntity{
+		ID:            uuid.New(),
+		ProjectID:     projectID,
+		OntologyID:    ontologyID,
+		Name:          "billing_engagements",
+		Description:   "",
+		PrimarySchema: "public",
+		PrimaryTable:  "billing_engagements",
+		PrimaryColumn: "id",
+		Confidence:    0.5,
+	}
+
+	entityRepo := &trackingUpdateEntityRepo{
+		trackingEntityRepo: trackingEntityRepo{
+			mockEntityDiscoveryEntityRepo: mockEntityDiscoveryEntityRepo{
+				entities: []*models.OntologyEntity{entity},
+			},
+		},
+	}
+
+	// LLM response with duplicate aliases: "Payment Intent" appears twice
+	responseWithDuplicates := `{
+		"entities": [
+			{
+				"table_name": "billing_engagements",
+				"entity_name": "Engagement Payment",
+				"description": "A payment for an engagement session",
+				"domain": "billing",
+				"key_columns": [{"name": "amount", "synonyms": ["total"]}],
+				"alternative_names": ["Payment Intent", "Engagement Payment", "Payment Intent"]
+			}
+		]
+	}`
+
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		return &llm.GenerateResponseResult{
+			Content:        responseWithDuplicates,
+			ConversationID: conversationID,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.CreateForProjectFunc = func(ctx context.Context, projectID uuid.UUID) (llm.LLMClient, error) {
+		return mockClient, nil
+	}
+
+	mockTenantCtx := func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {
+		return ctx, func() {}, nil
+	}
+
+	svc := NewEntityDiscoveryService(
+		entityRepo,
+		&mockSchemaRepoForGrouping{},
+		nil,
+		nil,
+		nil, // questionService not needed for this test
+		mockFactory,
+		nil,
+		mockTenantCtx,
+		zap.NewNop(),
+	)
+
+	tables := []*models.SchemaTable{
+		{ID: tableID, SchemaName: "public", TableName: "billing_engagements"},
+	}
+	columns := []*models.SchemaColumn{
+		{SchemaTableID: tableID, ColumnName: "id"},
+		{SchemaTableID: tableID, ColumnName: "amount"},
+	}
+
+	// Execute
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+
+	// Verify: no error
+	require.NoError(t, err)
+
+	// Verify: CreateAlias should be called exactly 2 times (not 3), once for each unique alias
+	// "Payment Intent" and "Engagement Payment" are the 2 unique aliases
+	assert.Len(t, entityRepo.createdAliases, 2, "Expected 2 CreateAlias calls for 2 unique aliases, not 3")
+
+	// Verify the unique aliases were created
+	aliasNames := make([]string, len(entityRepo.createdAliases))
+	for i, alias := range entityRepo.createdAliases {
+		aliasNames[i] = alias.Alias
+	}
+	assert.ElementsMatch(t, []string{"Payment Intent", "Engagement Payment"}, aliasNames)
+}

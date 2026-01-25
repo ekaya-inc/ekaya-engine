@@ -569,9 +569,14 @@ func (s *entityDiscoveryService) enrichEntityBatch(
 			}
 		}
 
-		// Create aliases (alternative names)
+		// Create aliases (alternative names) - deduplicate first to prevent duplicate key violations
 		discoverySource := "discovery"
+		seenAliases := make(map[string]bool)
 		for _, altName := range enrichment.AlternativeNames {
+			if seenAliases[altName] {
+				continue
+			}
+			seenAliases[altName] = true
 			alias := &models.OntologyEntityAlias{
 				EntityID: entity.ID,
 				Alias:    altName,
