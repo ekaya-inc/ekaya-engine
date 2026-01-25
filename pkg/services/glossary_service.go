@@ -1107,6 +1107,15 @@ func (s *glossaryService) tryEnrichTerm(
 		return enrichmentResult{termName: term.Term}, fmt.Errorf("LLM returned empty SQL")
 	}
 
+	// Validate column references before executing SQL
+	// This catches LLM hallucinations (e.g., "started_at" instead of "created_at")
+	// and returns a descriptive error for retry with enhanced context
+	if len(schemaColumnsByTable) > 0 {
+		if columnErrors := validateColumnReferences(enrichment.DefiningSQL, schemaColumnsByTable); len(columnErrors) > 0 {
+			return enrichmentResult{termName: term.Term}, fmt.Errorf("%s", formatColumnValidationError(columnErrors))
+		}
+	}
+
 	// Validate SQL and capture output columns (uses tenantCtx for datasource lookup)
 	testResult, err := s.TestSQL(ctx, projectID, enrichment.DefiningSQL)
 	if err != nil {
@@ -2064,6 +2073,465 @@ func minInt(a, b, c int) int {
 		return b
 	}
 	return c
+}
+
+// ColumnValidationError represents a column reference that doesn't exist in the schema.
+type ColumnValidationError struct {
+	Column      string // The column name referenced in SQL
+	Table       string // The table name if qualified (e.g., t.column), or empty
+	Alias       string // The alias if used (e.g., t in t.column)
+	SuggestFrom string // Suggested table containing a similar column, if any
+}
+
+// validateColumnReferences extracts column references from SQL and validates they exist
+// in the provided schema columns. Returns a list of column references that don't exist.
+//
+// This is a best-effort heuristic check that:
+// 1. Extracts potential column references from SQL (identifiers after SELECT, in WHERE, etc.)
+// 2. Checks each reference against the schema columns
+// 3. Returns non-existent columns so the LLM can be retried with better context
+//
+// The function handles:
+//   - Qualified references: table.column or alias.column
+//   - Unqualified references: just column_name
+//   - Common SQL functions are excluded (COUNT, SUM, AVG, etc.)
+func validateColumnReferences(sql string, schemaColumnsByTable map[string][]*models.SchemaColumn) []ColumnValidationError {
+	if len(schemaColumnsByTable) == 0 {
+		return nil // No schema to validate against
+	}
+
+	// Build a set of all valid column names (lowercased for case-insensitive matching)
+	validColumns := make(map[string]bool)         // column_name -> exists
+	tableColumns := make(map[string]map[string]bool) // table -> column -> exists
+	for tableName, columns := range schemaColumnsByTable {
+		tableColumns[strings.ToLower(tableName)] = make(map[string]bool)
+		for _, col := range columns {
+			colLower := strings.ToLower(col.ColumnName)
+			validColumns[colLower] = true
+			tableColumns[strings.ToLower(tableName)][colLower] = true
+		}
+	}
+
+	// Extract column references from SQL
+	refs := extractColumnReferences(sql)
+	if len(refs) == 0 {
+		return nil
+	}
+
+	// Build table alias map from the SQL (e.g., FROM users u -> u maps to users)
+	aliases := extractTableAliases(sql, schemaColumnsByTable)
+
+	var errors []ColumnValidationError
+	seenErrors := make(map[string]bool) // Dedupe errors by column name
+
+	for _, ref := range refs {
+		colLower := strings.ToLower(ref.column)
+
+		// Skip if already reported this column
+		errorKey := ref.qualifier + "." + colLower
+		if seenErrors[errorKey] {
+			continue
+		}
+
+		if ref.qualifier != "" {
+			// Qualified reference (e.g., t.column or table.column)
+			qualLower := strings.ToLower(ref.qualifier)
+
+			// Try to resolve alias to table name
+			tableName := qualLower
+			if resolved, ok := aliases[qualLower]; ok {
+				tableName = resolved
+			}
+
+			// Check if the table exists and has the column
+			if tableCols, tableExists := tableColumns[tableName]; tableExists {
+				if !tableCols[colLower] {
+					// Column doesn't exist in this table
+					seenErrors[errorKey] = true
+					errors = append(errors, ColumnValidationError{
+						Column:      ref.column,
+						Table:       tableName,
+						Alias:       ref.qualifier,
+						SuggestFrom: findTableWithColumn(colLower, tableColumns),
+					})
+				}
+			} else if aliases[qualLower] == "" {
+				// Qualifier doesn't match any known table - could be a subquery alias
+				// Only report if the column doesn't exist anywhere
+				if !validColumns[colLower] {
+					seenErrors[errorKey] = true
+					errors = append(errors, ColumnValidationError{
+						Column:      ref.column,
+						Alias:       ref.qualifier,
+						SuggestFrom: findTableWithColumn(colLower, tableColumns),
+					})
+				}
+			}
+		} else {
+			// Unqualified reference - check if column exists in any table
+			if !validColumns[colLower] {
+				seenErrors[errorKey] = true
+				errors = append(errors, ColumnValidationError{
+					Column:      ref.column,
+					SuggestFrom: findSimilarColumn(colLower, validColumns),
+				})
+			}
+		}
+	}
+
+	return errors
+}
+
+// columnReference represents a parsed column reference from SQL.
+type columnReference struct {
+	qualifier string // Table name or alias (empty if unqualified)
+	column    string // Column name
+}
+
+// extractColumnReferences extracts potential column references from SQL.
+// This is a heuristic parser that looks for identifier patterns commonly used
+// for column references.
+func extractColumnReferences(sql string) []columnReference {
+	var refs []columnReference
+
+	// SQL keywords and functions to skip (not column names)
+	skipWords := map[string]bool{
+		// SQL keywords
+		"select": true, "from": true, "where": true, "and": true, "or": true,
+		"on": true, "join": true, "left": true, "right": true, "inner": true,
+		"outer": true, "full": true, "cross": true, "group": true, "by": true,
+		"order": true, "having": true, "limit": true, "offset": true, "as": true,
+		"case": true, "when": true, "then": true, "else": true, "end": true,
+		"null": true, "true": true, "false": true, "not": true, "in": true,
+		"is": true, "like": true, "between": true, "exists": true, "distinct": true,
+		"all": true, "any": true, "union": true, "except": true, "intersect": true,
+		"insert": true, "update": true, "delete": true, "into": true, "values": true,
+		"set": true, "create": true, "alter": true, "drop": true, "table": true,
+		"index": true, "view": true, "asc": true, "desc": true, "nulls": true,
+		"first": true, "last": true, "over": true, "partition": true, "rows": true,
+		"range": true, "preceding": true, "following": true, "current": true, "row": true,
+		"unbounded": true, "with": true, "recursive": true, "filter": true,
+		// SQL aggregate/scalar functions
+		"count": true, "sum": true, "avg": true, "min": true, "max": true,
+		"coalesce": true, "nullif": true, "cast": true, "extract": true,
+		"date_trunc": true, "now": true, "current_date": true, "current_timestamp": true,
+		"lower": true, "upper": true, "trim": true, "substring": true, "concat": true,
+		"length": true, "abs": true, "round": true, "floor": true, "ceil": true,
+		"array_agg": true, "string_agg": true, "jsonb_agg": true, "json_agg": true,
+		"row_number": true, "rank": true, "dense_rank": true, "ntile": true,
+		"lag": true, "lead": true, "first_value": true, "last_value": true,
+		// Common type names used in CAST
+		"int": true, "integer": true, "bigint": true, "smallint": true,
+		"text": true, "varchar": true, "char": true, "boolean": true, "bool": true,
+		"float": true, "double": true, "numeric": true, "decimal": true,
+		"date": true, "time": true, "timestamp": true, "interval": true,
+		"uuid": true, "json": true, "jsonb": true, "array": true,
+	}
+
+	// Regular expression to find identifiers (qualified or unqualified)
+	// Matches: word.word or just word (but not inside strings)
+	// We'll use a simple state machine approach instead of complex regex
+	tokens := tokenizeSQL(sql)
+
+	for i := 0; i < len(tokens); i++ {
+		token := tokens[i]
+
+		// Skip if it's a known keyword or function
+		if skipWords[strings.ToLower(token)] {
+			continue
+		}
+
+		// Skip if it looks like a number
+		if isNumeric(token) {
+			continue
+		}
+
+		// Skip if it's a quoted string (starts with ')
+		if strings.HasPrefix(token, "'") {
+			continue
+		}
+
+		// Skip if it's an operator or wildcard
+		if token == "*" || token == "+" || token == "-" || token == "/" {
+			continue
+		}
+
+		// Check if this is a qualified reference (next token is . followed by identifier)
+		if i+2 < len(tokens) && tokens[i+1] == "." {
+			nextToken := tokens[i+2]
+			if !skipWords[strings.ToLower(nextToken)] && !isNumeric(nextToken) {
+				refs = append(refs, columnReference{
+					qualifier: token,
+					column:    nextToken,
+				})
+				i += 2 // Skip the . and column name
+				continue
+			}
+		}
+
+		// Check if previous token was a comma, SELECT, WHERE, AND, OR, ON, =, <>, etc.
+		// These contexts usually indicate a column reference
+		if i > 0 {
+			prev := strings.ToLower(tokens[i-1])
+			if prev == "," || prev == "select" || prev == "where" || prev == "and" ||
+				prev == "or" || prev == "on" || prev == "=" || prev == "<>" ||
+				prev == "!=" || prev == "<" || prev == ">" || prev == "<=" ||
+				prev == ">=" || prev == "by" || prev == "having" || prev == "then" ||
+				prev == "when" || prev == "else" || prev == "(" {
+				refs = append(refs, columnReference{column: token})
+			}
+		}
+	}
+
+	return refs
+}
+
+// tokenizeSQL breaks SQL into tokens (identifiers, operators, punctuation).
+// This is a simple tokenizer that handles the common cases for column validation.
+func tokenizeSQL(sql string) []string {
+	var tokens []string
+	var current strings.Builder
+	inString := false
+	inIdentifier := false
+
+	for i := 0; i < len(sql); i++ {
+		c := sql[i]
+
+		if inString {
+			if c == '\'' {
+				if i+1 < len(sql) && sql[i+1] == '\'' {
+					i++ // Skip escaped quote
+				} else {
+					inString = false
+					if current.Len() > 0 {
+						tokens = append(tokens, "'"+current.String()+"'")
+						current.Reset()
+					}
+				}
+			} else {
+				current.WriteByte(c)
+			}
+			continue
+		}
+
+		if c == '\'' {
+			// Start of string literal
+			if current.Len() > 0 {
+				tokens = append(tokens, current.String())
+				current.Reset()
+			}
+			inString = true
+			continue
+		}
+
+		if c == '"' {
+			// Double-quoted identifier - read until closing quote
+			if current.Len() > 0 {
+				tokens = append(tokens, current.String())
+				current.Reset()
+			}
+			i++
+			for i < len(sql) && sql[i] != '"' {
+				current.WriteByte(sql[i])
+				i++
+			}
+			if current.Len() > 0 {
+				tokens = append(tokens, current.String())
+				current.Reset()
+			}
+			continue
+		}
+
+		// Check for identifier characters (letters, digits, underscore)
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || c == '_' {
+			current.WriteByte(c)
+			inIdentifier = true
+			continue
+		}
+
+		// End of identifier
+		if inIdentifier && current.Len() > 0 {
+			tokens = append(tokens, current.String())
+			current.Reset()
+			inIdentifier = false
+		}
+
+		// Handle operators and punctuation as separate tokens
+		switch c {
+		case '.', ',', '(', ')', '+', '-', '*', '/', '=', '<', '>', '!':
+			tokens = append(tokens, string(c))
+		}
+		// Whitespace and other characters are ignored
+	}
+
+	// Don't forget the last token
+	if current.Len() > 0 {
+		tokens = append(tokens, current.String())
+	}
+
+	return tokens
+}
+
+// isNumeric checks if a string represents a number.
+func isNumeric(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for i, c := range s {
+		if c == '.' && i > 0 {
+			continue // Allow decimal point
+		}
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// extractTableAliases extracts table aliases from the FROM clause.
+// Returns a map of alias -> table_name.
+func extractTableAliases(sql string, schemaColumnsByTable map[string][]*models.SchemaColumn) map[string]string {
+	aliases := make(map[string]string)
+
+	// Build a set of known table names
+	knownTables := make(map[string]bool)
+	for tableName := range schemaColumnsByTable {
+		knownTables[strings.ToLower(tableName)] = true
+	}
+
+	tokens := tokenizeSQL(sql)
+	inFrom := false
+	inJoin := false
+
+	for i := 0; i < len(tokens); i++ {
+		tokenLower := strings.ToLower(tokens[i])
+
+		// Track when we're in FROM or JOIN context
+		if tokenLower == "from" {
+			inFrom = true
+			continue
+		}
+		if tokenLower == "join" {
+			inJoin = true
+			continue
+		}
+		if tokenLower == "where" || tokenLower == "group" || tokenLower == "order" ||
+			tokenLower == "having" || tokenLower == "limit" || tokenLower == "union" {
+			inFrom = false
+			inJoin = false
+			continue
+		}
+
+		// Look for pattern: table_name alias (where alias is not a keyword)
+		if (inFrom || inJoin) && knownTables[tokenLower] {
+			// Check if next token is an alias (not AS, not a keyword, not punctuation)
+			if i+1 < len(tokens) {
+				next := tokens[i+1]
+				nextLower := strings.ToLower(next)
+
+				// Skip "AS" if present
+				if nextLower == "as" && i+2 < len(tokens) {
+					next = tokens[i+2]
+					nextLower = strings.ToLower(next)
+					i++
+				}
+
+				// If next token is an identifier (not keyword, not punctuation)
+				if !isKeywordOrPunctuation(nextLower) && len(next) > 0 {
+					aliases[nextLower] = tokenLower
+					i++ // Skip the alias
+				}
+			}
+			inFrom = false // Move on after finding table
+			inJoin = false
+		}
+	}
+
+	return aliases
+}
+
+// isKeywordOrPunctuation checks if a token is a SQL keyword or punctuation.
+func isKeywordOrPunctuation(token string) bool {
+	keywords := map[string]bool{
+		"select": true, "from": true, "where": true, "and": true, "or": true,
+		"on": true, "join": true, "left": true, "right": true, "inner": true,
+		"outer": true, "group": true, "by": true, "order": true, "having": true,
+		"limit": true, "as": true, "union": true, "cross": true, ",": true,
+		"(": true, ")": true, ".": true,
+	}
+	return keywords[token]
+}
+
+// findTableWithColumn finds a table that contains the given column.
+func findTableWithColumn(column string, tableColumns map[string]map[string]bool) string {
+	for table, cols := range tableColumns {
+		if cols[column] {
+			return table
+		}
+	}
+	return ""
+}
+
+// findSimilarColumn finds a similar column name that might be what the user meant.
+// Uses simple heuristics to detect common typos/variations.
+func findSimilarColumn(column string, validColumns map[string]bool) string {
+	// Common substitutions LLMs make
+	substitutions := map[string]string{
+		"started_at": "created_at",
+		"start_time": "created_at",
+		"begin_at":   "created_at",
+		"ended_at":   "updated_at", // or completed_at if exists
+		"finished_at": "completed_at",
+		"modified_at": "updated_at",
+		"changed_at":  "updated_at",
+	}
+
+	// Check if there's a known substitution
+	if suggestion, ok := substitutions[column]; ok {
+		if validColumns[suggestion] {
+			return suggestion
+		}
+	}
+
+	// Try removing common prefixes/suffixes
+	for validCol := range validColumns {
+		// Check if valid column ends with same suffix (e.g., "_at", "_id", "_count")
+		if strings.HasSuffix(column, "_at") && strings.HasSuffix(validCol, "_at") {
+			// Both are timestamp-like columns - might be a match
+			if levenshteinDistance(column, validCol) <= 3 {
+				return validCol
+			}
+		}
+	}
+
+	return ""
+}
+
+// formatColumnValidationError formats column validation errors into a human-readable message.
+func formatColumnValidationError(errors []ColumnValidationError) string {
+	if len(errors) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("SQL references non-existent columns: ")
+
+	for i, err := range errors {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		if err.Alias != "" {
+			sb.WriteString(fmt.Sprintf("%s.%s", err.Alias, err.Column))
+		} else {
+			sb.WriteString(err.Column)
+		}
+		if err.SuggestFrom != "" {
+			sb.WriteString(fmt.Sprintf(" (did you mean column in '%s'?)", err.SuggestFrom))
+		}
+	}
+
+	return sb.String()
 }
 
 // SemanticWarning represents a potential issue in the formula semantics.

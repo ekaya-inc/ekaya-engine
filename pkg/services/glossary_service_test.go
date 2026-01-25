@@ -4371,3 +4371,309 @@ func TestGlossaryService_EnrichPrompt_IncludesSchemaColumns(t *testing.T) {
 	assert.Contains(t, prompt, "Mistakes to Avoid", "Prompt should have mistakes to avoid section")
 	assert.Contains(t, prompt, "started_at", "Prompt should warn about started_at confusion")
 }
+
+// ============================================================================
+// Tests - validateColumnReferences
+// ============================================================================
+
+func TestValidateColumnReferences(t *testing.T) {
+	// Schema with two tables
+	schemaColumns := map[string][]*models.SchemaColumn{
+		"sessions": {
+			{ColumnName: "id", DataType: "uuid"},
+			{ColumnName: "created_at", DataType: "timestamp"},
+			{ColumnName: "ended_at", DataType: "timestamp"},
+			{ColumnName: "status", DataType: "text"},
+			{ColumnName: "user_id", DataType: "uuid"},
+		},
+		"users": {
+			{ColumnName: "id", DataType: "uuid"},
+			{ColumnName: "name", DataType: "text"},
+			{ColumnName: "created_at", DataType: "timestamp"},
+		},
+	}
+
+	t.Run("valid SQL with existing columns passes", func(t *testing.T) {
+		sql := "SELECT created_at, ended_at, status FROM sessions WHERE user_id IS NOT NULL"
+		errors := validateColumnReferences(sql, schemaColumns)
+		assert.Empty(t, errors, "Valid SQL should have no column errors")
+	})
+
+	t.Run("detects non-existent column", func(t *testing.T) {
+		sql := "SELECT started_at FROM sessions"
+		errors := validateColumnReferences(sql, schemaColumns)
+		require.Len(t, errors, 1, "Should detect one invalid column")
+		assert.Equal(t, "started_at", errors[0].Column)
+	})
+
+	t.Run("detects qualified column that doesn't exist in table", func(t *testing.T) {
+		sql := "SELECT s.nonexistent_column FROM sessions s"
+		errors := validateColumnReferences(sql, schemaColumns)
+		require.Len(t, errors, 1, "Should detect qualified invalid column")
+		assert.Equal(t, "nonexistent_column", errors[0].Column)
+		assert.Equal(t, "s", errors[0].Alias)
+	})
+
+	t.Run("handles table aliases correctly", func(t *testing.T) {
+		sql := "SELECT s.created_at, s.status FROM sessions s WHERE s.user_id IS NOT NULL"
+		errors := validateColumnReferences(sql, schemaColumns)
+		assert.Empty(t, errors, "Valid aliased columns should pass")
+	})
+
+	t.Run("detects wrong table alias usage", func(t *testing.T) {
+		// user_id exists in sessions but not in users
+		sql := "SELECT u.user_id FROM users u"
+		errors := validateColumnReferences(sql, schemaColumns)
+		require.Len(t, errors, 1, "Should detect column not in aliased table")
+		assert.Equal(t, "user_id", errors[0].Column)
+	})
+
+	t.Run("handles JOIN with multiple table aliases", func(t *testing.T) {
+		sql := `SELECT s.created_at, u.name
+				FROM sessions s
+				JOIN users u ON s.user_id = u.id`
+		errors := validateColumnReferences(sql, schemaColumns)
+		assert.Empty(t, errors, "Valid JOIN with aliases should pass")
+	})
+
+	t.Run("detects hallucinated column in JOIN", func(t *testing.T) {
+		sql := `SELECT s.start_time, u.name
+				FROM sessions s
+				JOIN users u ON s.user_id = u.id`
+		errors := validateColumnReferences(sql, schemaColumns)
+		require.Len(t, errors, 1, "Should detect hallucinated column in SELECT")
+		assert.Equal(t, "start_time", errors[0].Column)
+	})
+
+	t.Run("empty schema returns no errors", func(t *testing.T) {
+		sql := "SELECT anything FROM anywhere"
+		errors := validateColumnReferences(sql, nil)
+		assert.Empty(t, errors, "Empty schema should not validate")
+
+		errors = validateColumnReferences(sql, map[string][]*models.SchemaColumn{})
+		assert.Empty(t, errors, "Empty schema map should not validate")
+	})
+
+	t.Run("handles aggregate functions correctly", func(t *testing.T) {
+		sql := "SELECT COUNT(*), SUM(user_id), AVG(status) FROM sessions"
+		// COUNT, SUM, AVG are functions, not columns - should not be flagged
+		// user_id and status exist, so no errors
+		errors := validateColumnReferences(sql, schemaColumns)
+		assert.Empty(t, errors, "SQL with aggregate functions should work")
+	})
+
+	t.Run("handles FILTER clause with existing column", func(t *testing.T) {
+		sql := "SELECT COUNT(*) FILTER (WHERE status = 'active') FROM sessions"
+		errors := validateColumnReferences(sql, schemaColumns)
+		assert.Empty(t, errors, "FILTER clause with valid column should work")
+	})
+
+	t.Run("detects invalid column in FILTER clause", func(t *testing.T) {
+		sql := "SELECT COUNT(*) FILTER (WHERE state = 'active') FROM sessions"
+		errors := validateColumnReferences(sql, schemaColumns)
+		require.Len(t, errors, 1, "Should detect invalid column in FILTER")
+		assert.Equal(t, "state", errors[0].Column)
+	})
+
+	t.Run("suggests similar column when available", func(t *testing.T) {
+		sql := "SELECT started_at FROM sessions"
+		errors := validateColumnReferences(sql, schemaColumns)
+		require.Len(t, errors, 1)
+		assert.Equal(t, "started_at", errors[0].Column)
+		// The suggestion logic should suggest created_at
+		assert.Equal(t, "created_at", errors[0].SuggestFrom, "Should suggest similar column")
+	})
+}
+
+func TestTokenizeSQL(t *testing.T) {
+	t.Run("tokenizes simple SELECT", func(t *testing.T) {
+		sql := "SELECT id, name FROM users"
+		tokens := tokenizeSQL(sql)
+		assert.Contains(t, tokens, "SELECT")
+		assert.Contains(t, tokens, "id")
+		assert.Contains(t, tokens, "name")
+		assert.Contains(t, tokens, "FROM")
+		assert.Contains(t, tokens, "users")
+	})
+
+	t.Run("handles string literals", func(t *testing.T) {
+		sql := "SELECT * FROM users WHERE status = 'active'"
+		tokens := tokenizeSQL(sql)
+		assert.Contains(t, tokens, "'active'")
+	})
+
+	t.Run("handles qualified identifiers", func(t *testing.T) {
+		sql := "SELECT u.id FROM users u"
+		tokens := tokenizeSQL(sql)
+		assert.Contains(t, tokens, "u")
+		assert.Contains(t, tokens, ".")
+		assert.Contains(t, tokens, "id")
+	})
+
+	t.Run("handles escaped quotes in strings", func(t *testing.T) {
+		sql := "SELECT * FROM users WHERE name = 'O''Brien'"
+		tokens := tokenizeSQL(sql)
+		// Escaped quotes are preserved within the string content
+		// The tokenizer captures the string content without the outer quotes escape sequence
+		hasOBrien := false
+		for _, tok := range tokens {
+			if strings.Contains(tok, "Brien") {
+				hasOBrien = true
+				break
+			}
+		}
+		assert.True(t, hasOBrien, "Should find O'Brien in tokens")
+	})
+
+	t.Run("handles double-quoted identifiers", func(t *testing.T) {
+		sql := `SELECT "column-name" FROM "table-name"`
+		tokens := tokenizeSQL(sql)
+		assert.Contains(t, tokens, "column-name")
+		assert.Contains(t, tokens, "table-name")
+	})
+}
+
+func TestExtractTableAliases(t *testing.T) {
+	schemaColumns := map[string][]*models.SchemaColumn{
+		"sessions": {{ColumnName: "id"}},
+		"users":    {{ColumnName: "id"}},
+	}
+
+	t.Run("extracts simple alias", func(t *testing.T) {
+		sql := "SELECT * FROM sessions s"
+		aliases := extractTableAliases(sql, schemaColumns)
+		assert.Equal(t, "sessions", aliases["s"])
+	})
+
+	t.Run("extracts alias with AS keyword", func(t *testing.T) {
+		sql := "SELECT * FROM sessions AS s"
+		aliases := extractTableAliases(sql, schemaColumns)
+		assert.Equal(t, "sessions", aliases["s"])
+	})
+
+	t.Run("extracts multiple aliases from JOIN", func(t *testing.T) {
+		sql := "SELECT * FROM sessions s JOIN users u ON s.user_id = u.id"
+		aliases := extractTableAliases(sql, schemaColumns)
+		assert.Equal(t, "sessions", aliases["s"])
+		assert.Equal(t, "users", aliases["u"])
+	})
+
+	t.Run("handles LEFT JOIN", func(t *testing.T) {
+		sql := "SELECT * FROM sessions s LEFT JOIN users u ON s.user_id = u.id"
+		aliases := extractTableAliases(sql, schemaColumns)
+		assert.Equal(t, "sessions", aliases["s"])
+		assert.Equal(t, "users", aliases["u"])
+	})
+}
+
+func TestFormatColumnValidationError(t *testing.T) {
+	t.Run("formats single error", func(t *testing.T) {
+		errors := []ColumnValidationError{
+			{Column: "started_at", SuggestFrom: "sessions"},
+		}
+		msg := formatColumnValidationError(errors)
+		assert.Contains(t, msg, "started_at")
+		assert.Contains(t, msg, "did you mean")
+		assert.Contains(t, msg, "sessions")
+	})
+
+	t.Run("formats qualified column error", func(t *testing.T) {
+		errors := []ColumnValidationError{
+			{Column: "nonexistent", Alias: "s", Table: "sessions"},
+		}
+		msg := formatColumnValidationError(errors)
+		assert.Contains(t, msg, "s.nonexistent")
+	})
+
+	t.Run("formats multiple errors", func(t *testing.T) {
+		errors := []ColumnValidationError{
+			{Column: "started_at"},
+			{Column: "ended_time"},
+		}
+		msg := formatColumnValidationError(errors)
+		assert.Contains(t, msg, "started_at")
+		assert.Contains(t, msg, "ended_time")
+	})
+
+	t.Run("empty errors returns empty string", func(t *testing.T) {
+		msg := formatColumnValidationError(nil)
+		assert.Empty(t, msg)
+
+		msg = formatColumnValidationError([]ColumnValidationError{})
+		assert.Empty(t, msg)
+	})
+}
+
+func TestExtractColumnReferences(t *testing.T) {
+	t.Run("extracts columns from SELECT clause", func(t *testing.T) {
+		sql := "SELECT id, name, created_at FROM users"
+		refs := extractColumnReferences(sql)
+
+		// Should find the column names
+		hasID := false
+		hasName := false
+		hasCreatedAt := false
+		for _, ref := range refs {
+			switch ref.column {
+			case "id":
+				hasID = true
+			case "name":
+				hasName = true
+			case "created_at":
+				hasCreatedAt = true
+			}
+		}
+		assert.True(t, hasID, "Should find 'id' column")
+		assert.True(t, hasName, "Should find 'name' column")
+		assert.True(t, hasCreatedAt, "Should find 'created_at' column")
+	})
+
+	t.Run("extracts qualified columns", func(t *testing.T) {
+		sql := "SELECT u.id, u.name FROM users u"
+		refs := extractColumnReferences(sql)
+
+		hasQualifiedID := false
+		for _, ref := range refs {
+			if ref.qualifier == "u" && ref.column == "id" {
+				hasQualifiedID = true
+				break
+			}
+		}
+		assert.True(t, hasQualifiedID, "Should find qualified 'u.id' column")
+	})
+
+	t.Run("extracts columns from WHERE clause", func(t *testing.T) {
+		sql := "SELECT * FROM users WHERE status = 'active'"
+		refs := extractColumnReferences(sql)
+
+		hasStatus := false
+		for _, ref := range refs {
+			if ref.column == "status" {
+				hasStatus = true
+				break
+			}
+		}
+		assert.True(t, hasStatus, "Should find 'status' column in WHERE")
+	})
+
+	t.Run("skips SQL keywords", func(t *testing.T) {
+		sql := "SELECT FROM WHERE AND OR"
+		refs := extractColumnReferences(sql)
+		for _, ref := range refs {
+			// None of these should be captured as column names
+			assert.NotEqual(t, "SELECT", strings.ToUpper(ref.column))
+			assert.NotEqual(t, "FROM", strings.ToUpper(ref.column))
+			assert.NotEqual(t, "WHERE", strings.ToUpper(ref.column))
+		}
+	})
+
+	t.Run("skips aggregate functions", func(t *testing.T) {
+		sql := "SELECT COUNT(*), SUM(amount) FROM orders"
+		refs := extractColumnReferences(sql)
+
+		for _, ref := range refs {
+			assert.NotEqual(t, "COUNT", strings.ToUpper(ref.column))
+			assert.NotEqual(t, "SUM", strings.ToUpper(ref.column))
+		}
+	})
+}

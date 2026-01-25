@@ -40,7 +40,7 @@ AVAILABLE COLUMNS for table 'sessions':
 NOTE: There is NO column named 'started_at'. Use 'created_at' for session start time.
 ```
 
-### Step 2: Add Column Name Validation Before Storage
+### Step 2: Add Column Name Validation Before Storage [COMPLETE]
 
 Before storing the SQL, extract column references and validate they exist:
 ```go
