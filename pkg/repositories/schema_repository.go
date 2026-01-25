@@ -37,9 +37,13 @@ type SchemaRepository interface {
 	UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error
 
 	// Columns
-	ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error)
+	// ListColumnsByTable returns columns for a specific table.
+	// If selectedOnly is true, only columns with is_selected=true are returned.
+	ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error)
 	ListColumnsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaColumn, error)
-	GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error)
+	// GetColumnsByTables returns columns for multiple tables, grouped by table name.
+	// If selectedOnly is true, only columns with is_selected=true are returned.
+	GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error)
 	GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error)
 	GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error)
 	GetColumnByName(ctx context.Context, tableID uuid.UUID, columnName string) (*models.SchemaColumn, error)
@@ -390,7 +394,7 @@ func (r *schemaRepository) UpdateTableMetadata(ctx context.Context, projectID, t
 // Column Methods
 // ============================================================================
 
-func (r *schemaRepository) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+func (r *schemaRepository) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
@@ -403,8 +407,11 @@ func (r *schemaRepository) ListColumnsByTable(ctx context.Context, projectID, ta
 		       business_name, description, metadata,
 		       created_at, updated_at, sample_values
 		FROM engine_schema_columns
-		WHERE project_id = $1 AND schema_table_id = $2 AND deleted_at IS NULL
-		ORDER BY ordinal_position`
+		WHERE project_id = $1 AND schema_table_id = $2 AND deleted_at IS NULL`
+	if selectedOnly {
+		query += ` AND is_selected = true`
+	}
+	query += ` ORDER BY ordinal_position`
 
 	rows, err := scope.Conn.Query(ctx, query, projectID, tableID)
 	if err != nil {
@@ -469,7 +476,7 @@ func (r *schemaRepository) ListColumnsByDatasource(ctx context.Context, projectI
 	return columns, nil
 }
 
-func (r *schemaRepository) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
+func (r *schemaRepository) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, fmt.Errorf("no tenant scope in context")
@@ -491,8 +498,11 @@ func (r *schemaRepository) GetColumnsByTables(ctx context.Context, projectID uui
 		WHERE c.project_id = $1
 		  AND t.table_name = ANY($2)
 		  AND c.deleted_at IS NULL
-		  AND t.deleted_at IS NULL
-		ORDER BY t.table_name, c.ordinal_position`
+		  AND t.deleted_at IS NULL`
+	if selectedOnly {
+		query += ` AND c.is_selected = true`
+	}
+	query += ` ORDER BY t.table_name, c.ordinal_position`
 
 	rows, err := scope.Conn.Query(ctx, query, projectID, tableNames)
 	if err != nil {

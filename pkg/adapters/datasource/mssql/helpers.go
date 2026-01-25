@@ -170,3 +170,20 @@ func isDateTimeType(sqlType string) bool {
 	}
 	return false
 }
+
+// isTextCompatibleType returns true if the type can have LENGTH() calculated on it.
+// This includes string types and uniqueidentifier (UUID).
+func isTextCompatibleType(sqlType string) bool {
+	sqlType = strings.ToUpper(sqlType)
+	textTypes := []string{
+		"CHAR", "NCHAR", "VARCHAR", "NVARCHAR",
+		"TEXT", "NTEXT", "UNIQUEIDENTIFIER",
+	}
+
+	for _, t := range textTypes {
+		if sqlType == t {
+			return true
+		}
+	}
+	return false
+}

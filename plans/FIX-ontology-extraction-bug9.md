@@ -3,7 +3,7 @@
 **Bug Reference:** BUGS-ontology-extraction.md, BUG-9
 **Severity:** High
 **Type:** Data Collection Bug
-**Status:** Confirmed - Root cause of missing relationships
+**Status:** NOT FIXED - Code changes applied but issue persists (32.8% null stats)
 
 ## Problem Summary
 
@@ -188,27 +188,28 @@ s.logger.Info("Column stats collection complete",
 - Log warning for each failed column
 - Return partial results instead of failing entirely
 
-### Step 2: Fix Type Cast Issues
+### Step 2: Fix Type Cast Issues ✓
 - Use conditional casting for length stats
 - Skip length for non-text types (set to NULL)
 
-### Step 3: Improve Error Logging
+### Step 3: Improve Error Logging ✓
 - Change warning to error for table failures
 - Add failure counts to summary log
 - Consider metrics for monitoring
 
-### Step 4: Add Retry Logic (Optional)
+### Step 4: Add Retry Logic (Optional) ✓
 - Retry failed columns with simplified query (without length)
 - Track which columns needed retry
 
 ## Files to Modify
 
-| File | Change |
-|------|--------|
-| `pkg/adapters/datasource/postgres/schema.go` | Continue on per-column errors, fix type casting |
-| `pkg/adapters/datasource/mssql/schema.go` | Same fixes for MSSQL adapter |
-| `pkg/services/deterministic_relationship_service.go` | Better error logging |
-| `pkg/adapters/datasource/postgres/schema_test.go` | Test error handling |
+| File | Change | Status |
+|------|--------|--------|
+| `pkg/adapters/datasource/postgres/schema.go` | Continue on per-column errors, fix type casting | ✅ Done |
+| `pkg/adapters/datasource/mssql/schema.go` | Same fixes for MSSQL adapter (uses sys.columns metadata for type detection instead of SQL_VARIANT_PROPERTY) | ✅ Done |
+| `pkg/services/deterministic_relationship_service.go` | Better error logging | ✅ Done |
+| `pkg/adapters/datasource/postgres/schema_test.go` | Test error handling | ✅ Done |
+| `pkg/adapters/datasource/mssql/schema_test.go` | Test error handling (PartialFailure, NonTextTypes, RetryWithSimplifiedQuery) | ✅ Done |
 
 ## Testing
 
@@ -249,12 +250,28 @@ func TestStatsCollection_AllColumnsProcessed(t *testing.T) {
 
 ## Success Criteria
 
-- [ ] Per-column failures don't abort entire table stats collection
+- [x] Per-column failures don't abort entire table stats collection
 - [ ] All text-compatible columns have accurate distinct_count
 - [ ] Non-text columns have NULL length but valid distinct_count
-- [ ] Error logging shows which columns/tables had issues
+- [x] Error logging shows which columns/tables had issues
 - [ ] 90%+ of joinable columns have stats (up from 73%)
 - [ ] BUG-3, BUG-6, BUG-11 symptoms reduced after fix
+
+## Current Status (2026-01-25)
+
+**Issue persists despite code fixes.** Testing shows:
+- 134/409 (32.8%) joinable columns have NULL `distinct_count`
+- All affected columns have `row_count` and `non_null_count` populated
+- Pattern: primarily `text` columns (60% null) and `integer` columns (50% null)
+- `timestamp` and `numeric` columns work correctly (0% null)
+
+**SQL queries work correctly** when tested directly via MCP - the issue is in the Go code path between `AnalyzeColumnStats` returning results and `UpdateColumnJoinability` storing them.
+
+**Investigation needed:**
+1. Why does `distinct_count` get lost while `row_count` and `non_null_count` are preserved?
+2. Is there a column name mismatch in the statsMap lookup?
+3. Is there a type conversion issue with the pointer assignment?
+4. Runtime logging needed to trace exact values through the flow
 
 ## Connection to Other Bugs
 

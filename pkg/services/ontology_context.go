@@ -321,8 +321,8 @@ func (s *ontologyContextService) GetTablesContext(ctx context.Context, projectID
 		}
 	}
 
-	// Get columns for the requested tables
-	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tablesToInclude)
+	// Get columns for the requested tables (selectedOnly=true to exclude deselected columns)
+	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tablesToInclude, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}
@@ -451,8 +451,8 @@ func (s *ontologyContextService) GetColumnsContext(ctx context.Context, projectI
 		entityByTable[entity.PrimaryTable] = entity
 	}
 
-	// Get columns for the requested tables
-	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames)
+	// Get columns for the requested tables (selectedOnly=true to exclude deselected columns)
+	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}

@@ -5,8 +5,6 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
@@ -88,30 +86,6 @@ func (j *JSONBMap) Scan(value interface{}) error {
 type EnumFile struct {
 	// Enums is the list of enum definitions in the file.
 	Enums []EnumDefinition `yaml:"enums" json:"enums"`
-}
-
-// ParseEnumFile loads and parses an enum definitions file (YAML or JSON).
-// The expected file structure is:
-//
-//	enums:
-//	  - table: billing_transactions
-//	    column: transaction_state
-//	    values:
-//	      "0": "UNSPECIFIED - Not set"
-//	      "1": "STARTED - Transaction started"
-//	  - table: "*"
-//	    column: offer_type
-//	    values:
-//	      "1": "FREE - Free Engagement"
-//
-// Table can be "*" to apply to any table with the specified column name.
-func ParseEnumFile(path string) ([]EnumDefinition, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read enum file: %w", err)
-	}
-
-	return ParseEnumFileContent(data, filepath.Ext(path))
 }
 
 // ParseEnumFileContent parses enum definitions from raw content.

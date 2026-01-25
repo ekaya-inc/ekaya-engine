@@ -1173,10 +1173,10 @@ func (m *mockSchemaRepoForGrouping) UpdateTableSelection(ctx context.Context, pr
 func (m *mockSchemaRepoForGrouping) UpdateTableMetadata(ctx context.Context, projectID, tableID uuid.UUID, businessName, description *string) error {
 	return nil
 }
-func (m *mockSchemaRepoForGrouping) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+func (m *mockSchemaRepoForGrouping) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
-func (m *mockSchemaRepoForGrouping) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
+func (m *mockSchemaRepoForGrouping) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error) {
 	return nil, nil
 }
 func (m *mockSchemaRepoForGrouping) GetColumnCountByProject(ctx context.Context, projectID uuid.UUID) (int, error) {

@@ -2,8 +2,6 @@ package models
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -347,46 +345,6 @@ func TestParseEnumFileContent_AutoDetect(t *testing.T) {
 	}
 	if defs[0].Table != "test_table" {
 		t.Errorf("defs[0].Table = %q, want 'test_table'", defs[0].Table)
-	}
-}
-
-func TestParseEnumFile(t *testing.T) {
-	// Create a temporary file for testing
-	tmpDir := t.TempDir()
-	tmpFile := filepath.Join(tmpDir, "enums.yaml")
-
-	yamlContent := `enums:
-  - table: users
-    column: role
-    values:
-      "1": "ADMIN - System administrator"
-      "2": "USER - Regular user"
-`
-
-	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0644); err != nil {
-		t.Fatalf("Failed to write temp file: %v", err)
-	}
-
-	defs, err := ParseEnumFile(tmpFile)
-	if err != nil {
-		t.Fatalf("ParseEnumFile failed: %v", err)
-	}
-
-	if len(defs) != 1 {
-		t.Fatalf("Expected 1 enum definition, got %d", len(defs))
-	}
-	if defs[0].Table != "users" {
-		t.Errorf("defs[0].Table = %q, want 'users'", defs[0].Table)
-	}
-	if defs[0].Values["1"] != "ADMIN - System administrator" {
-		t.Errorf("defs[0].Values[\"1\"] = %q, want 'ADMIN - System administrator'", defs[0].Values["1"])
-	}
-}
-
-func TestParseEnumFile_NotFound(t *testing.T) {
-	_, err := ParseEnumFile("/nonexistent/path/enums.yaml")
-	if err == nil {
-		t.Fatal("Expected error for nonexistent file, got nil")
 	}
 }
 

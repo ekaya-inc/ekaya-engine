@@ -386,13 +386,22 @@ func (s *glossaryService) TestSQL(ctx context.Context, projectID uuid.UUID, sql 
 	}
 	defer executor.Close()
 
-	// Execute query with limit 1 to capture output columns
+	// Execute query with limit 5 to check for multi-row results
 	// The adapter handles dialect-specific limit wrapping (LIMIT for PostgreSQL, TOP for SQL Server)
-	result, err := executor.Query(ctx, sql, 1)
+	result, err := executor.Query(ctx, sql, 5)
 	if err != nil {
 		return &SQLTestResult{
 			Valid: false,
 			Error: err.Error(),
+		}, nil
+	}
+
+	// Check for single-row result (for aggregate metrics)
+	// Glossary terms should define aggregate metrics that return a single row
+	if len(result.Rows) > 1 {
+		return &SQLTestResult{
+			Valid: false,
+			Error: "Query returns multiple rows. Aggregate metrics should return a single row.",
 		}, nil
 	}
 
@@ -977,6 +986,7 @@ type enrichmentResult struct {
 
 // enrichSingleTerm generates SQL for a single term, validates it, and updates the database.
 // Each call acquires its own database connection from the pool to allow parallel execution.
+// On failure, it retries with enhanced context (more schema detail, examples) before giving up.
 func (s *glossaryService) enrichSingleTerm(
 	ctx context.Context,
 	term *models.BusinessGlossaryTerm,
@@ -994,39 +1004,103 @@ func (s *glossaryService) enrichSingleTerm(
 	}
 	defer cleanup()
 
-	prompt := s.buildEnrichTermPrompt(term, ontology, entities)
+	// First attempt: normal enrichment
+	result, firstErr := s.tryEnrichTerm(tenantCtx, term, ontology, entities, llmClient, projectID, false, "")
+	if firstErr == nil {
+		return result
+	}
+
+	// Retry with enhanced context (includes more schema detail, examples)
+	s.logger.Debug("Retrying enrichment with enhanced context",
+		zap.String("term", term.Term),
+		zap.Error(firstErr))
+
+	result, retryErr := s.tryEnrichTerm(tenantCtx, term, ontology, entities, llmClient, projectID, true, firstErr.Error())
+	if retryErr == nil {
+		s.logger.Info("Enrichment succeeded on retry with enhanced context",
+			zap.String("term", term.Term))
+		return result
+	}
+
+	// Both attempts failed - update term with failure status before returning error
+	term.EnrichmentStatus = models.GlossaryEnrichmentFailed
+	term.EnrichmentError = retryErr.Error()
+	if updateErr := s.glossaryRepo.Update(tenantCtx, term); updateErr != nil {
+		s.logger.Error("Failed to save enrichment failure status",
+			zap.String("term", term.Term),
+			zap.Error(updateErr))
+	}
+
+	return enrichmentResult{termName: term.Term, err: fmt.Errorf("enrichment failed after retry: %w", retryErr)}
+}
+
+// tryEnrichTerm attempts to enrich a single term with LLM-generated SQL.
+// When enhanced=true, the prompt includes ALL columns (not just measures/dimensions),
+// additional examples for complex metrics, and context from the previous failure.
+func (s *glossaryService) tryEnrichTerm(
+	ctx context.Context,
+	term *models.BusinessGlossaryTerm,
+	ontology *models.TieredOntology,
+	entities []*models.OntologyEntity,
+	llmClient llm.LLMClient,
+	projectID uuid.UUID,
+	enhanced bool,
+	previousError string,
+) (enrichmentResult, error) {
+	var prompt string
+	if enhanced {
+		prompt = s.buildEnhancedEnrichTermPrompt(term, ontology, entities, previousError)
+	} else {
+		prompt = s.buildEnrichTermPrompt(term, ontology, entities)
+	}
 	systemMessage := s.enrichTermSystemMessage()
 
 	// Call LLM to generate SQL (uses tenantCtx so SavePending has its own connection)
-	result, err := llmClient.GenerateResponse(tenantCtx, prompt, systemMessage, 0.3, false)
+	result, err := llmClient.GenerateResponse(ctx, prompt, systemMessage, 0.3, false)
 	if err != nil {
-		return enrichmentResult{termName: term.Term, err: fmt.Errorf("LLM generate: %w", err)}
+		return enrichmentResult{termName: term.Term}, fmt.Errorf("LLM generate: %w", err)
 	}
 
 	// Parse enrichment response
 	enrichment, err := s.parseEnrichTermResponse(result.Content)
 	if err != nil {
-		return enrichmentResult{termName: term.Term, err: fmt.Errorf("parse response: %w", err)}
+		return enrichmentResult{termName: term.Term}, fmt.Errorf("parse response: %w", err)
 	}
 
 	if enrichment.DefiningSQL == "" {
-		return enrichmentResult{termName: term.Term, err: fmt.Errorf("LLM returned empty SQL")}
+		return enrichmentResult{termName: term.Term}, fmt.Errorf("LLM returned empty SQL")
 	}
 
 	// Validate SQL and capture output columns (uses tenantCtx for datasource lookup)
-	testResult, err := s.TestSQL(tenantCtx, projectID, enrichment.DefiningSQL)
+	testResult, err := s.TestSQL(ctx, projectID, enrichment.DefiningSQL)
 	if err != nil {
-		return enrichmentResult{termName: term.Term, err: fmt.Errorf("test SQL: %w", err)}
+		return enrichmentResult{termName: term.Term}, fmt.Errorf("test SQL: %w", err)
 	}
 
 	if !testResult.Valid {
-		return enrichmentResult{termName: term.Term, err: fmt.Errorf("SQL validation failed: %s", testResult.Error)}
+		return enrichmentResult{termName: term.Term}, fmt.Errorf("SQL validation failed: %s", testResult.Error)
+	}
+
+	// Check for potential enum value mismatches (best-effort validation)
+	// This logs warnings but doesn't fail the enrichment
+	if mismatches := validateEnumValues(enrichment.DefiningSQL, ontology); len(mismatches) > 0 {
+		for _, mismatch := range mismatches {
+			s.logger.Warn("Potential enum value mismatch in generated SQL",
+				zap.String("term", term.Term),
+				zap.String("sql_value", mismatch.SQLValue),
+				zap.String("table", mismatch.Table),
+				zap.String("column", mismatch.Column),
+				zap.String("suggested_value", mismatch.BestMatch),
+				zap.Strings("actual_values", mismatch.ActualValues))
+		}
 	}
 
 	// Update term with enrichment and output columns
 	term.DefiningSQL = enrichment.DefiningSQL
 	term.BaseTable = enrichment.BaseTable
 	term.OutputColumns = testResult.OutputColumns
+	term.EnrichmentStatus = models.GlossaryEnrichmentSuccess
+	term.EnrichmentError = "" // Clear any previous error
 	// Merge aliases - keep existing ones and add new ones from enrichment
 	if len(enrichment.Aliases) > 0 {
 		aliasSet := make(map[string]bool)
@@ -1040,11 +1114,11 @@ func (s *glossaryService) enrichSingleTerm(
 		}
 	}
 
-	if err := s.glossaryRepo.Update(tenantCtx, term); err != nil {
-		return enrichmentResult{termName: term.Term, err: fmt.Errorf("update term: %w", err)}
+	if err := s.glossaryRepo.Update(ctx, term); err != nil {
+		return enrichmentResult{termName: term.Term}, fmt.Errorf("update term: %w", err)
 	}
 
-	return enrichmentResult{termName: term.Term, outputColumns: len(testResult.OutputColumns)}
+	return enrichmentResult{termName: term.Term, outputColumns: len(testResult.OutputColumns)}, nil
 }
 
 func (s *glossaryService) enrichTermSystemMessage() string {
@@ -1055,12 +1129,63 @@ For each business term, provide:
 - The primary table being queried (base_table)
 - Alternative names that business users might use (aliases)
 
+CRITICAL REQUIREMENTS:
+1. The SQL MUST return exactly ONE row (aggregate/summary metrics)
+2. Do NOT use UNION/UNION ALL unless combining results into a single row
+3. The formula must match the term name semantically:
+   - "Average X Per Y" → SUM(X) / COUNT(Y), not a percentage calculation
+   - "X Rate" → X per unit time (e.g., revenue per hour)
+   - "X Ratio" → X / Total, typically as a percentage
+   - "Total X" → SUM(X), a simple aggregate
+   - "X Utilization" → used / authorized, as a percentage (0-100)
+   - "X Count" → COUNT of items matching criteria
+
 IMPORTANT: The defining_sql must be a complete SELECT statement that can be executed as-is. It should:
 - Start with SELECT and include column aliases that represent the metric
 - Include all necessary FROM, JOIN, WHERE, GROUP BY, ORDER BY clauses
 - Be a definition/calculation of the metric, not just a fragment
 - Be ready to execute without modification
 - Return meaningful column names that business users will understand
+
+IMPORTANT: When filtering on enumeration columns, use the EXACT values provided in the schema context.
+Do NOT simplify or normalize enum values (e.g., use 'TRANSACTION_STATE_ENDED' not 'ended').
+
+EXAMPLES FOR COMPLEX METRICS:
+
+For utilization/conversion rates (percentage of items in a specific state):
+{
+  "defining_sql": "SELECT COUNT(*) FILTER (WHERE status = 'used') * 100.0 / NULLIF(COUNT(*), 0) AS utilization_rate FROM offers WHERE created_at >= NOW() - INTERVAL '30 days'",
+  "base_table": "offers",
+  "aliases": ["usage rate", "redemption rate"]
+}
+
+For participation rates (distinct participants vs total eligible):
+{
+  "defining_sql": "SELECT COUNT(DISTINCT r.referrer_id) * 100.0 / NULLIF((SELECT COUNT(*) FROM users WHERE is_eligible = true), 0) AS participation_rate FROM referrals r WHERE r.bonus_paid = true",
+  "base_table": "referrals",
+  "aliases": ["adoption rate", "enrollment rate"]
+}
+
+For completion rates (successful vs total attempts):
+{
+  "defining_sql": "SELECT COUNT(*) FILTER (WHERE state = 'COMPLETED') * 100.0 / NULLIF(COUNT(*), 0) AS completion_rate FROM transactions",
+  "base_table": "transactions",
+  "aliases": ["success rate", "fulfillment rate"]
+}
+
+For averages with conditional filtering:
+{
+  "defining_sql": "SELECT AVG(duration_seconds) FILTER (WHERE state = 'COMPLETED') AS avg_duration FROM sessions",
+  "base_table": "sessions",
+  "aliases": ["mean duration", "average session length"]
+}
+
+For metrics requiring multi-table joins:
+{
+  "defining_sql": "SELECT u.id AS user_id, COUNT(t.id) AS transaction_count, COALESCE(SUM(t.amount), 0) AS total_amount FROM users u LEFT JOIN transactions t ON u.id = t.user_id GROUP BY u.id",
+  "base_table": "users",
+  "aliases": ["user transaction summary"]
+}
 
 Be specific and use exact table/column names from the provided schema.`
 }
@@ -1134,6 +1259,15 @@ func (s *glossaryService) buildEnrichTermPrompt(
 						colInfo += fmt.Sprintf(" - %s", col.Description)
 					}
 					sb.WriteString(colInfo + "\n")
+
+					// Include enum values if present so LLM uses exact values in SQL
+					if len(col.EnumValues) > 0 {
+						values := make([]string, len(col.EnumValues))
+						for i, v := range col.EnumValues {
+							values[i] = fmt.Sprintf("'%s'", v.Value)
+						}
+						sb.WriteString(fmt.Sprintf("  Allowed values: %s\n", strings.Join(values, ", ")))
+					}
 				}
 				sb.WriteString("\n")
 			}
@@ -1156,6 +1290,154 @@ func (s *glossaryService) buildEnrichTermPrompt(
 }
 `)
 	sb.WriteString("```\n")
+
+	return sb.String()
+}
+
+// buildEnhancedEnrichTermPrompt builds a more detailed prompt for retry attempts.
+// It includes ALL columns (not just measures/dimensions), additional examples for
+// complex metrics like utilization rates and percentages, and context from the
+// previous failure to help the LLM avoid the same mistake.
+func (s *glossaryService) buildEnhancedEnrichTermPrompt(
+	term *models.BusinessGlossaryTerm,
+	ontology *models.TieredOntology,
+	entities []*models.OntologyEntity,
+	previousError string,
+) string {
+	var sb strings.Builder
+
+	sb.WriteString("# Schema Context (Enhanced Detail)\n\n")
+
+	// Include previous error context to help LLM avoid the same mistake
+	if previousError != "" {
+		sb.WriteString("## Previous Attempt Failed\n\n")
+		sb.WriteString("The first attempt to generate SQL for this term failed with the following error:\n")
+		sb.WriteString(fmt.Sprintf("```\n%s\n```\n\n", previousError))
+		sb.WriteString("Please analyze this error and generate valid SQL that avoids this issue.\n\n")
+	}
+
+	// Include domain summary
+	if ontology.DomainSummary != nil && ontology.DomainSummary.Description != "" {
+		sb.WriteString("## Domain Overview\n\n")
+		sb.WriteString(ontology.DomainSummary.Description)
+		sb.WriteString("\n\n")
+	}
+
+	// Include conventions
+	if ontology.DomainSummary != nil && ontology.DomainSummary.Conventions != nil {
+		conv := ontology.DomainSummary.Conventions
+		sb.WriteString("## Conventions\n\n")
+
+		if conv.SoftDelete != nil && conv.SoftDelete.Enabled {
+			sb.WriteString(fmt.Sprintf("- Soft delete: Filter with `%s`\n", conv.SoftDelete.Filter))
+		}
+		if conv.Currency != nil {
+			if conv.Currency.Format == "cents" {
+				sb.WriteString("- Currency: Stored in cents, divide by 100 for display\n")
+			} else {
+				sb.WriteString("- Currency: Stored as dollars/decimal\n")
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// List entities with descriptions
+	sb.WriteString("## Entities\n\n")
+	for _, e := range entities {
+		if e.IsDeleted {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("### %s\n", e.Name))
+		sb.WriteString(fmt.Sprintf("- Table: `%s`\n", e.PrimaryTable))
+		if e.Description != "" {
+			sb.WriteString(fmt.Sprintf("- Description: %s\n", e.Description))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Include ALL column details (not just measures/dimensions)
+	if len(ontology.ColumnDetails) > 0 {
+		sb.WriteString("## Complete Column Reference\n\n")
+		sb.WriteString("All available columns by table (use these exact names in your SQL):\n\n")
+		for tableName, columns := range ontology.ColumnDetails {
+			sb.WriteString(fmt.Sprintf("**%s:**\n", tableName))
+			for _, col := range columns {
+				colInfo := fmt.Sprintf("- `%s`", col.Name)
+				if col.Role != "" {
+					colInfo += fmt.Sprintf(" [%s]", col.Role)
+				}
+				if col.IsPrimaryKey {
+					colInfo += " (PK)"
+				}
+				if col.IsForeignKey {
+					colInfo += fmt.Sprintf(" (FK→%s)", col.ForeignTable)
+				}
+				if col.Description != "" {
+					colInfo += fmt.Sprintf(" - %s", col.Description)
+				}
+				sb.WriteString(colInfo + "\n")
+
+				// Include enum values if present so LLM uses exact values in SQL
+				if len(col.EnumValues) > 0 {
+					values := make([]string, len(col.EnumValues))
+					for i, v := range col.EnumValues {
+						if v.Description != "" {
+							values[i] = fmt.Sprintf("'%s' (%s)", v.Value, v.Description)
+						} else {
+							values[i] = fmt.Sprintf("'%s'", v.Value)
+						}
+					}
+					sb.WriteString(fmt.Sprintf("  Allowed values: %s\n", strings.Join(values, ", ")))
+				}
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// Add the term to enrich
+	sb.WriteString("## Term to Enrich\n\n")
+	sb.WriteString(fmt.Sprintf("**Term:** %s\n", term.Term))
+	sb.WriteString(fmt.Sprintf("**Definition:** %s\n\n", term.Definition))
+
+	// Add examples for complex metrics
+	sb.WriteString("## SQL Pattern Examples\n\n")
+	sb.WriteString("For complex metrics like rates, percentages, and multi-table calculations:\n\n")
+	sb.WriteString("**Utilization/Conversion Rate (percentage of items in a state):**\n")
+	sb.WriteString("```sql\n")
+	sb.WriteString("SELECT\n")
+	sb.WriteString("    COUNT(*) FILTER (WHERE status = 'used') * 100.0 / NULLIF(COUNT(*), 0) AS utilization_rate\n")
+	sb.WriteString("FROM offers\n")
+	sb.WriteString("WHERE created_at >= NOW() - INTERVAL '30 days'\n")
+	sb.WriteString("```\n\n")
+	sb.WriteString("**Participation Rate (distinct participants / total eligible):**\n")
+	sb.WriteString("```sql\n")
+	sb.WriteString("SELECT\n")
+	sb.WriteString("    COUNT(DISTINCT participant_id) * 100.0 / NULLIF((SELECT COUNT(*) FROM users WHERE eligible = true), 0) AS participation_rate\n")
+	sb.WriteString("FROM program_participants\n")
+	sb.WriteString("```\n\n")
+	sb.WriteString("**Multi-table Join for Related Metrics:**\n")
+	sb.WriteString("```sql\n")
+	sb.WriteString("SELECT\n")
+	sb.WriteString("    u.id AS user_id,\n")
+	sb.WriteString("    COUNT(t.id) AS transaction_count,\n")
+	sb.WriteString("    COALESCE(SUM(t.amount), 0) AS total_amount\n")
+	sb.WriteString("FROM users u\n")
+	sb.WriteString("LEFT JOIN transactions t ON u.id = t.user_id\n")
+	sb.WriteString("GROUP BY u.id\n")
+	sb.WriteString("```\n\n")
+
+	// Response format
+	sb.WriteString("## Response Format\n\n")
+	sb.WriteString("Respond with a JSON object containing the enrichment:\n")
+	sb.WriteString("```json\n")
+	sb.WriteString(`{
+  "defining_sql": "SELECT COUNT(*) FILTER (WHERE status = 'used') * 100.0 / NULLIF(COUNT(*), 0) AS utilization_rate\nFROM offers\nWHERE created_at >= NOW() - INTERVAL '30 days'",
+  "base_table": "offers",
+  "aliases": ["Usage Rate", "Redemption Rate"]
+}
+`)
+	sb.WriteString("```\n\n")
+	sb.WriteString("IMPORTANT: Use exact table and column names from the schema above. The SQL must execute successfully.\n")
 
 	return sb.String()
 }
@@ -1352,5 +1634,345 @@ func matchesAny(term string, patterns []string) bool {
 			return true
 		}
 	}
+	return false
+}
+
+// EnumMismatch represents a detected enum value issue in generated SQL.
+// It captures when the SQL uses a string literal that appears to be a simplified
+// or incorrect version of an actual enum value in the ontology.
+type EnumMismatch struct {
+	SQLValue      string   // The value found in the SQL
+	Column        string   // The column this likely refers to
+	Table         string   // The table containing the column
+	ActualValues  []string // The actual enum values for this column
+	BestMatch     string   // The best matching actual value (if found)
+	MatchDistance int      // How different the values are (lower is better match)
+}
+
+// enumInfo holds metadata about where an enum value comes from.
+type enumInfo struct {
+	table    string
+	column   string
+	original string
+}
+
+// validateEnumValues checks generated SQL for potential enum value mismatches.
+// It extracts string literals from the SQL and compares them against known enum
+// columns in the ontology. Returns a list of potential issues.
+//
+// This is a best-effort heuristic check - it may produce false positives for
+// string literals that aren't meant to be enum values. The caller should use
+// these results as warnings/logs rather than hard failures.
+func validateEnumValues(sql string, ontology *models.TieredOntology) []EnumMismatch {
+	if ontology == nil || len(ontology.ColumnDetails) == 0 {
+		return nil
+	}
+
+	// Extract string literals from SQL
+	literals := extractStringLiterals(sql)
+	if len(literals) == 0 {
+		return nil
+	}
+
+	// Build a map of all known enum values across the ontology
+	// key: lowercase enum value, value: struct with table, column, original value
+	knownEnums := make(map[string]enumInfo)
+	enumColumns := make(map[string][]string) // key: "table.column", values: all enum values
+
+	for tableName, columns := range ontology.ColumnDetails {
+		for _, col := range columns {
+			if len(col.EnumValues) > 0 {
+				key := tableName + "." + col.Name
+				for _, ev := range col.EnumValues {
+					knownEnums[strings.ToLower(ev.Value)] = enumInfo{
+						table:    tableName,
+						column:   col.Name,
+						original: ev.Value,
+					}
+					enumColumns[key] = append(enumColumns[key], ev.Value)
+				}
+			}
+		}
+	}
+
+	if len(knownEnums) == 0 {
+		return nil
+	}
+
+	var mismatches []EnumMismatch
+
+	for _, literal := range literals {
+		literalLower := strings.ToLower(literal)
+
+		// If the literal exactly matches a known enum, it's fine
+		if _, exists := knownEnums[literalLower]; exists {
+			continue
+		}
+
+		// Check if this literal is a simplified/shortened version of an enum value
+		bestMatch, matchInfo, distance := findBestEnumMatch(literalLower, knownEnums)
+		if bestMatch != "" && distance <= 3 {
+			// This literal is suspiciously close to an enum value but doesn't match
+			// Skip if it's too short (might just be a coincidental word)
+			if len(literal) < 3 {
+				continue
+			}
+
+			mismatches = append(mismatches, EnumMismatch{
+				SQLValue:      literal,
+				Column:        matchInfo.column,
+				Table:         matchInfo.table,
+				ActualValues:  enumColumns[matchInfo.table+"."+matchInfo.column],
+				BestMatch:     matchInfo.original,
+				MatchDistance: distance,
+			})
+		}
+	}
+
+	return mismatches
+}
+
+// extractStringLiterals extracts all single-quoted string literals from SQL.
+// It handles escaped quotes (”) within strings.
+// Examples:
+//   - SELECT * FROM t WHERE status = 'active' → ["active"]
+//   - WHERE name = 'O”Brien' → ["O'Brien"]
+func extractStringLiterals(sql string) []string {
+	var literals []string
+	var current strings.Builder
+	inString := false
+
+	for i := 0; i < len(sql); i++ {
+		if sql[i] == '\'' {
+			if inString {
+				// Check for escaped quote ('')
+				if i+1 < len(sql) && sql[i+1] == '\'' {
+					current.WriteByte('\'')
+					i++ // Skip the next quote
+				} else {
+					// End of string literal
+					if current.Len() > 0 {
+						literals = append(literals, current.String())
+					}
+					current.Reset()
+					inString = false
+				}
+			} else {
+				// Start of string literal
+				inString = true
+			}
+		} else if inString {
+			current.WriteByte(sql[i])
+		}
+	}
+
+	return literals
+}
+
+// findBestEnumMatch finds the best matching enum value for a given literal.
+// Uses Levenshtein-inspired suffix matching to detect when a literal like 'ended'
+// might be a simplified version of 'TRANSACTION_STATE_ENDED'.
+//
+// Returns the best match, its info, and a distance score (0 = perfect suffix match).
+func findBestEnumMatch(literalLower string, knownEnums map[string]enumInfo) (string, enumInfo, int) {
+	var bestMatch string
+	var bestInfo enumInfo
+	bestDistance := 999
+
+	for enumLower, info := range knownEnums {
+		// Check if the literal is a suffix of the enum (common pattern)
+		// e.g., "ended" matches "TRANSACTION_STATE_ENDED"
+		if strings.HasSuffix(enumLower, "_"+literalLower) || strings.HasSuffix(enumLower, literalLower) {
+			// Suffix match - very likely a simplified version
+			distance := 0
+			if distance < bestDistance {
+				bestDistance = distance
+				bestMatch = enumLower
+				bestInfo = info
+			}
+			continue
+		}
+
+		// Check if literal is a prefix stripped of underscores
+		// e.g., "waiting" vs "TRANSACTION_STATE_WAITING"
+		parts := strings.Split(enumLower, "_")
+		for _, part := range parts {
+			if part == literalLower {
+				distance := 1 // Partial match via part
+				if distance < bestDistance {
+					bestDistance = distance
+					bestMatch = enumLower
+					bestInfo = info
+				}
+				break
+			}
+		}
+
+		// Check Levenshtein distance for very similar values
+		// Only check if the literal and enum have similar lengths
+		if absInt(len(literalLower)-len(enumLower)) <= 5 {
+			distance := levenshteinDistance(literalLower, enumLower)
+			if distance <= 3 && distance < bestDistance {
+				bestDistance = distance
+				bestMatch = enumLower
+				bestInfo = info
+			}
+		}
+	}
+
+	return bestMatch, bestInfo, bestDistance
+}
+
+// absInt returns the absolute value of an integer.
+func absInt(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// levenshteinDistance calculates the edit distance between two strings.
+// This is used to detect near-misses in enum values.
+func levenshteinDistance(s1, s2 string) int {
+	if len(s1) == 0 {
+		return len(s2)
+	}
+	if len(s2) == 0 {
+		return len(s1)
+	}
+
+	// Use a single row of the DP table for space efficiency
+	prev := make([]int, len(s2)+1)
+	curr := make([]int, len(s2)+1)
+
+	for j := range prev {
+		prev[j] = j
+	}
+
+	for i := 1; i <= len(s1); i++ {
+		curr[0] = i
+		for j := 1; j <= len(s2); j++ {
+			cost := 0
+			if s1[i-1] != s2[j-1] {
+				cost = 1
+			}
+			curr[j] = minInt(
+				curr[j-1]+1,    // insertion
+				prev[j]+1,      // deletion
+				prev[j-1]+cost, // substitution
+			)
+		}
+		prev, curr = curr, prev
+	}
+
+	return prev[len(s2)]
+}
+
+// minInt returns the minimum of three integers.
+func minInt(a, b, c int) int {
+	if a <= b && a <= c {
+		return a
+	}
+	if b <= c {
+		return b
+	}
+	return c
+}
+
+// SemanticWarning represents a potential issue in the formula semantics.
+// These are advisory warnings, not hard errors - the SQL may still be valid
+// but might not match the term's intended meaning.
+type SemanticWarning struct {
+	Code    string // Short identifier (e.g., "MISSING_COUNT", "UNION_MULTI_ROW")
+	Message string // Human-readable description
+}
+
+// ValidateFormulaSemantics checks if the SQL formula matches the semantic
+// meaning implied by the term name. This is a best-effort heuristic check
+// that catches common mismatches between term names and their formulas.
+//
+// Returns a list of warnings (empty if no issues detected). These warnings
+// are advisory - the SQL may still be syntactically valid and executable.
+//
+// Patterns checked:
+//   - "Average X Per Y" should divide by COUNT (not by another SUM)
+//   - UNION/UNION ALL typically returns multiple rows (unless wrapped in subquery)
+func ValidateFormulaSemantics(termName string, sql string) []SemanticWarning {
+	var warnings []SemanticWarning
+
+	termLower := strings.ToLower(termName)
+	sqlUpper := strings.ToUpper(sql)
+
+	// Check "Average X Per Y" pattern
+	// Terms with "average" and "per" typically mean: SUM(X) / COUNT(Y)
+	// Not: SUM(X) / SUM(Y) (which would be a ratio/percentage)
+	if strings.Contains(termLower, "average") && strings.Contains(termLower, "per") {
+		// Check if SQL contains COUNT - it should for "per" calculations
+		if !strings.Contains(sqlUpper, "COUNT(") && !strings.Contains(sqlUpper, "COUNT (") {
+			warnings = append(warnings, SemanticWarning{
+				Code:    "MISSING_COUNT",
+				Message: "Term mentions 'average per' but SQL doesn't divide by COUNT. For 'Average X Per Y', the formula should typically be SUM(X) / COUNT(Y).",
+			})
+		}
+	}
+
+	// Check for UNION/UNION ALL which may return multiple rows
+	// This is a warning because UNIONs are sometimes wrapped in subqueries
+	// to produce a single row (e.g., SELECT AVG(*) FROM (... UNION ...))
+	if strings.Contains(sqlUpper, "UNION") {
+		// Check if the UNION is inside a subquery that aggregates the result
+		// Simple heuristic: if there's an outer SELECT with AVG/SUM/COUNT over the union
+		// This is imperfect but catches the obvious multi-row cases
+		if !isUnionInAggregatingSubquery(sql) {
+			warnings = append(warnings, SemanticWarning{
+				Code:    "UNION_MULTI_ROW",
+				Message: "SQL uses UNION which may return multiple rows. Consider wrapping in a subquery with aggregation if a single result is needed.",
+			})
+		}
+	}
+
+	return warnings
+}
+
+// isUnionInAggregatingSubquery checks if a UNION is wrapped in a subquery
+// that aggregates the results into a single row.
+//
+// This is a simple heuristic check - it looks for patterns like:
+//   - SELECT AVG(*) FROM (... UNION ...)
+//   - SELECT SUM(*) FROM (SELECT ... UNION SELECT ...)
+//
+// Returns true if the UNION appears to be properly aggregated.
+func isUnionInAggregatingSubquery(sql string) bool {
+	sqlUpper := strings.ToUpper(sql)
+
+	// Find the position of UNION
+	unionPos := strings.Index(sqlUpper, "UNION")
+	if unionPos == -1 {
+		return false
+	}
+
+	// Count opening and closing parentheses before UNION
+	// If UNION is inside parentheses, it's likely in a subquery
+	openCount := strings.Count(sqlUpper[:unionPos], "(")
+	closeCount := strings.Count(sqlUpper[:unionPos], ")")
+
+	// If more opens than closes, UNION is inside parentheses (subquery)
+	if openCount > closeCount {
+		// Check if there's an aggregate function in the outer SELECT
+		// Look at the SQL before the first opening paren that contains the UNION
+		outerSQL := strings.TrimSpace(sqlUpper[:strings.Index(sqlUpper, "(")])
+		aggregateFuncs := []string{"AVG(", "AVG ", "SUM(", "SUM ", "COUNT(", "COUNT ", "MAX(", "MAX ", "MIN(", "MIN "}
+		for _, agg := range aggregateFuncs {
+			// Check if aggregate appears after the outer SELECT
+			selectPos := strings.Index(outerSQL, "SELECT")
+			if selectPos != -1 {
+				afterSelect := sqlUpper[selectPos:]
+				if strings.Contains(afterSelect[:min(len(afterSelect), 100)], agg) {
+					return true
+				}
+			}
+		}
+	}
+
 	return false
 }

@@ -75,6 +75,14 @@ func (m *mockProjectServiceForDAG) SetAutoApproveSettings(ctx context.Context, p
 	return nil
 }
 
+func (m *mockProjectServiceForDAG) GetOntologySettings(ctx context.Context, projectID uuid.UUID) (*services.OntologySettings, error) {
+	return &services.OntologySettings{UseLegacyPatternMatching: true}, nil
+}
+
+func (m *mockProjectServiceForDAG) SetOntologySettings(ctx context.Context, projectID uuid.UUID, settings *services.OntologySettings) error {
+	return nil
+}
+
 func TestOntologyDAGHandler_StartExtraction_Success(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()

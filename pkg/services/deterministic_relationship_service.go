@@ -47,6 +47,7 @@ type DeterministicRelationshipService interface {
 
 type deterministicRelationshipService struct {
 	datasourceService DatasourceService
+	projectService    ProjectService
 	adapterFactory    datasource.DatasourceAdapterFactory
 	ontologyRepo      repositories.OntologyRepository
 	entityRepo        repositories.OntologyEntityRepository
@@ -58,6 +59,7 @@ type deterministicRelationshipService struct {
 // NewDeterministicRelationshipService creates a new DeterministicRelationshipService.
 func NewDeterministicRelationshipService(
 	datasourceService DatasourceService,
+	projectService ProjectService,
 	adapterFactory datasource.DatasourceAdapterFactory,
 	ontologyRepo repositories.OntologyRepository,
 	entityRepo repositories.OntologyEntityRepository,
@@ -67,6 +69,7 @@ func NewDeterministicRelationshipService(
 ) DeterministicRelationshipService {
 	return &deterministicRelationshipService{
 		datasourceService: datasourceService,
+		projectService:    projectService,
 		adapterFactory:    adapterFactory,
 		ontologyRepo:      ontologyRepo,
 		entityRepo:        entityRepo,
@@ -99,7 +102,8 @@ func (s *deterministicRelationshipService) createBidirectionalRelationship(ctx c
 		DetectionMethod:    rel.DetectionMethod,
 		Confidence:         rel.Confidence,
 		Status:             rel.Status,
-		Description:        nil, // reverse direction gets its own description during enrichment
+		Cardinality:        ReverseCardinality(rel.Cardinality), // swap: N:1 ↔ 1:N
+		Description:        nil,                                 // reverse direction gets its own description during enrichment
 	}
 
 	// Create reverse relationship
@@ -143,7 +147,7 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 	}
 
 	// Load tables and columns to resolve IDs to names
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
 	if err != nil {
 		return nil, fmt.Errorf("list tables: %w", err)
 	}
@@ -203,6 +207,8 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 		}
 
 		// Create bidirectional relationship (both forward and reverse)
+		// FK constraints are typically N:1 (many-to-one): the FK column (source)
+		// has many values pointing to one PK (target)
 		rel := &models.EntityRelationship{
 			OntologyID:         ontology.ID,
 			SourceEntityID:     sourceEntity.ID,
@@ -216,6 +222,7 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 			DetectionMethod:    detectionMethod,
 			Confidence:         1.0,
 			Status:             models.RelationshipStatusConfirmed,
+			Cardinality:        models.CardinalityNTo1,
 		}
 
 		err := s.createBidirectionalRelationship(ctx, rel)
@@ -276,6 +283,8 @@ func (s *deterministicRelationshipService) collectColumnStats(
 	// Process each table
 	tableCount := len(columnsByTable)
 	processedTables := 0
+	failedTables := 0
+	columnsWithStats := 0
 	for tableID, tableCols := range columnsByTable {
 		table := tableByID[tableID]
 		if table == nil {
@@ -300,9 +309,11 @@ func (s *deterministicRelationshipService) collectColumnStats(
 		// Analyze column stats from target database
 		stats, err := discoverer.AnalyzeColumnStats(ctx, table.SchemaName, table.TableName, columnNames)
 		if err != nil {
-			s.logger.Warn("Failed to analyze column stats",
+			s.logger.Error("Failed to analyze column stats - table skipped",
 				zap.String("table", fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)),
+				zap.Int("column_count", len(columnNames)),
 				zap.Error(err))
+			failedTables++
 			continue
 		}
 
@@ -337,6 +348,7 @@ func (s *deterministicRelationshipService) collectColumnStats(
 				rowCount = &st.RowCount
 				nonNullCount = &st.NonNullCount
 				distinctCount = &st.DistinctCount
+				columnsWithStats++
 			}
 
 			// Update column joinability in database
@@ -349,6 +361,8 @@ func (s *deterministicRelationshipService) collectColumnStats(
 
 	s.logger.Info("Column stats collection complete",
 		zap.Int("tables_processed", processedTables),
+		zap.Int("tables_failed", failedTables),
+		zap.Int("columns_with_stats", columnsWithStats),
 		zap.Duration("total_duration", time.Since(startTime)))
 
 	return nil
@@ -419,6 +433,13 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	startTime := time.Now()
 	s.logger.Info("Starting PK-match relationship discovery")
 
+	// Get ontology settings to determine if we should use legacy pattern matching
+	ontologySettings, err := s.projectService.GetOntologySettings(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("get ontology settings: %w", err)
+	}
+	useLegacyPatternMatching := ontologySettings.UseLegacyPatternMatching
+
 	// Get active ontology for the project
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
 	if err != nil {
@@ -445,7 +466,7 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	}
 
 	// Load tables and columns
-	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
 	if err != nil {
 		return nil, fmt.Errorf("list tables: %w", err)
 	}
@@ -507,7 +528,8 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			}
 
 			// Exclude names unlikely to be join keys (count, rating, score, etc.)
-			if isPKMatchExcludedName(col.ColumnName) {
+			// Only apply when legacy pattern matching is enabled
+			if useLegacyPatternMatching && isPKMatchExcludedName(col.ColumnName) {
 				continue
 			}
 
@@ -534,42 +556,52 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 		}
 
 		// Exclude names unlikely to be entity references
-		if isPKMatchExcludedName(col.ColumnName) {
+		// Only apply when legacy pattern matching is enabled
+		if useLegacyPatternMatching && isPKMatchExcludedName(col.ColumnName) {
 			continue
 		}
 
 		// Require explicit joinability determination
-		// Exception: For _id columns, assume joinable if stats are unknown (IsJoinable=nil)
-		// since text UUID columns may not have IsJoinable set before stats collection.
+		// When legacy pattern matching is enabled, _id/_uuid/_key columns are exempted
+		// from requiring explicit joinability (they're included even with IsJoinable=nil).
+		// When disabled, all columns must have explicit joinability determination.
 		if col.IsJoinable == nil {
-			if !isLikelyFKColumn(col.ColumnName) {
-				continue
+			if useLegacyPatternMatching && isLikelyFKColumn(col.ColumnName) {
+				// _id columns with nil IsJoinable are included for validation (legacy behavior)
+			} else {
+				continue // No joinability info = skip (new behavior)
 			}
-			// _id columns with nil IsJoinable are included for validation
 		} else if !*col.IsJoinable {
 			continue
 		}
 
-		// Require stats to exist (fail-fast on missing data)
-		// Note: While IsJoinable=true typically implies stats exist (from classifyJoinability),
-		// PK columns can be marked joinable without stats. This defensive check prevents
-		// nil pointer access during cardinality filtering.
-		if col.DistinctCount == nil {
-			continue // No stats = cannot evaluate = skip
-		}
-		// Check cardinality threshold
-		if *col.DistinctCount < 20 {
-			continue
-		}
-		// Check cardinality ratio if row count available
-		// Skip this check for likely FK columns (ending in _id, _uuid, _key) since they
-		// are often valid FK columns even with low cardinality (e.g., 500 unique visitors
-		// in 100,000 rows = 0.5%). Let the actual join validation decide.
-		if table.RowCount != nil && *table.RowCount > 0 && !isLikelyFKColumn(col.ColumnName) {
-			ratio := float64(*col.DistinctCount) / float64(*table.RowCount)
-			if ratio < 0.05 {
+		// Apply cardinality filters only if stats exist
+		// Columns with is_joinable=true but no stats proceed to join validation
+		// where CheckValueOverlap will determine actual FK validity.
+		if col.DistinctCount != nil {
+			// Check cardinality threshold
+			if *col.DistinctCount < 20 {
 				continue
 			}
+			// Check cardinality ratio if row count available
+			// When legacy pattern matching is enabled, _id/_uuid/_key columns skip this check
+			// since they are often valid FK columns even with low cardinality (e.g., 500 unique
+			// visitors in 100,000 rows = 0.5%).
+			// When disabled, all columns are subject to the cardinality ratio check.
+			skipCardinalityCheck := useLegacyPatternMatching && isLikelyFKColumn(col.ColumnName)
+			if table.RowCount != nil && *table.RowCount > 0 && !skipCardinalityCheck {
+				ratio := float64(*col.DistinctCount) / float64(*table.RowCount)
+				if ratio < 0.05 {
+					continue
+				}
+			}
+		} else {
+			// Columns without stats but with is_joinable=true proceed to validation
+			// Join validation will determine actual FK validity via CheckValueOverlap
+			s.logger.Debug("Including column with NULL stats for validation",
+				zap.String("table", table.TableName),
+				zap.String("column", col.ColumnName),
+				zap.Bool("is_joinable", col.IsJoinable != nil && *col.IsJoinable))
 		}
 
 		allCandidates = append(allCandidates, &pkMatchCandidate{
@@ -648,6 +680,9 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			status := models.RelationshipStatusConfirmed
 			confidence := 0.9
 
+			// Calculate cardinality from join analysis
+			cardinality := InferCardinality(joinResult)
+
 			// Create bidirectional relationship (both forward and reverse)
 			rel := &models.EntityRelationship{
 				OntologyID:         ontology.ID,
@@ -662,6 +697,7 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 				DetectionMethod:    models.DetectionMethodPKMatch,
 				Confidence:         confidence,
 				Status:             status,
+				Cardinality:        cardinality,
 			}
 
 			err = s.createBidirectionalRelationship(ctx, rel)

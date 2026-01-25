@@ -131,10 +131,6 @@ func (m *mockKnowledgeService) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (m *mockKnowledgeService) SeedKnowledgeFromFile(ctx context.Context, projectID uuid.UUID) (int, error) {
-	return 0, nil
-}
-
 // setupChatIntegrationTest creates a test context with mock services.
 func setupChatIntegrationTest(t *testing.T) *chatIntegrationTestContext {
 	t.Helper()

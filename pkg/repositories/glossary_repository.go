@@ -52,9 +52,9 @@ func (r *glossaryRepository) Create(ctx context.Context, term *models.BusinessGl
 	query := `
 		INSERT INTO engine_business_glossary (
 			project_id, ontology_id, term, definition, defining_sql, base_table,
-			output_columns, source, created_by, updated_by,
-			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			output_columns, source, enrichment_status, enrichment_error,
+			created_by, updated_by, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		RETURNING id, created_at, updated_at`
 
 	err := scope.Conn.QueryRow(ctx, query,
@@ -66,6 +66,8 @@ func (r *glossaryRepository) Create(ctx context.Context, term *models.BusinessGl
 		nullString(term.BaseTable),
 		jsonbValue(term.OutputColumns),
 		term.Source,
+		nullString(term.EnrichmentStatus),
+		nullString(term.EnrichmentError),
 		term.CreatedBy,
 		term.UpdatedBy,
 		now,
@@ -96,7 +98,8 @@ func (r *glossaryRepository) Update(ctx context.Context, term *models.BusinessGl
 	query := `
 		UPDATE engine_business_glossary
 		SET term = $2, definition = $3, defining_sql = $4, base_table = $5,
-		    output_columns = $6, source = $7, updated_by = $8
+		    output_columns = $6, source = $7, enrichment_status = $8,
+		    enrichment_error = $9, updated_by = $10
 		WHERE id = $1
 		RETURNING updated_at`
 
@@ -108,6 +111,8 @@ func (r *glossaryRepository) Update(ctx context.Context, term *models.BusinessGl
 		nullString(term.BaseTable),
 		jsonbValue(term.OutputColumns),
 		term.Source,
+		nullString(term.EnrichmentStatus),
+		nullString(term.EnrichmentError),
 		term.UpdatedBy,
 	).Scan(&term.UpdatedAt)
 	if err != nil {
@@ -192,8 +197,8 @@ func (r *glossaryRepository) GetByProject(ctx context.Context, projectID uuid.UU
 
 	query := `
 		SELECT g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
-		       g.output_columns, g.source, g.created_by, g.updated_by,
-		       g.created_at, g.updated_at,
+		       g.output_columns, g.source, g.enrichment_status, g.enrichment_error,
+		       g.created_by, g.updated_by, g.created_at, g.updated_at,
 		       COALESCE(
 		           jsonb_agg(a.alias ORDER BY a.alias) FILTER (WHERE a.alias IS NOT NULL),
 		           '[]'::jsonb
@@ -202,8 +207,8 @@ func (r *glossaryRepository) GetByProject(ctx context.Context, projectID uuid.UU
 		LEFT JOIN engine_glossary_aliases a ON g.id = a.glossary_id
 		WHERE g.project_id = $1
 		GROUP BY g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
-		         g.output_columns, g.source, g.created_by, g.updated_by,
-		         g.created_at, g.updated_at
+		         g.output_columns, g.source, g.enrichment_status, g.enrichment_error,
+		         g.created_by, g.updated_by, g.created_at, g.updated_at
 		ORDER BY g.term`
 
 	rows, err := scope.Conn.Query(ctx, query, projectID)
@@ -236,8 +241,8 @@ func (r *glossaryRepository) GetByTerm(ctx context.Context, projectID uuid.UUID,
 
 	query := `
 		SELECT g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
-		       g.output_columns, g.source, g.created_by, g.updated_by,
-		       g.created_at, g.updated_at,
+		       g.output_columns, g.source, g.enrichment_status, g.enrichment_error,
+		       g.created_by, g.updated_by, g.created_at, g.updated_at,
 		       COALESCE(
 		           jsonb_agg(a.alias ORDER BY a.alias) FILTER (WHERE a.alias IS NOT NULL),
 		           '[]'::jsonb
@@ -246,8 +251,8 @@ func (r *glossaryRepository) GetByTerm(ctx context.Context, projectID uuid.UUID,
 		LEFT JOIN engine_glossary_aliases a ON g.id = a.glossary_id
 		WHERE g.project_id = $1 AND g.term = $2
 		GROUP BY g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
-		         g.output_columns, g.source, g.created_by, g.updated_by,
-		         g.created_at, g.updated_at`
+		         g.output_columns, g.source, g.enrichment_status, g.enrichment_error,
+		         g.created_by, g.updated_by, g.created_at, g.updated_at`
 
 	row := scope.Conn.QueryRow(ctx, query, projectID, termName)
 	term, err := scanGlossaryTerm(row)
@@ -269,8 +274,8 @@ func (r *glossaryRepository) GetByAlias(ctx context.Context, projectID uuid.UUID
 
 	query := `
 		SELECT g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
-		       g.output_columns, g.source, g.created_by, g.updated_by,
-		       g.created_at, g.updated_at,
+		       g.output_columns, g.source, g.enrichment_status, g.enrichment_error,
+		       g.created_by, g.updated_by, g.created_at, g.updated_at,
 		       COALESCE(
 		           jsonb_agg(a2.alias ORDER BY a2.alias) FILTER (WHERE a2.alias IS NOT NULL),
 		           '[]'::jsonb
@@ -280,8 +285,8 @@ func (r *glossaryRepository) GetByAlias(ctx context.Context, projectID uuid.UUID
 		LEFT JOIN engine_glossary_aliases a2 ON g.id = a2.glossary_id
 		WHERE g.project_id = $1 AND a.alias = $2
 		GROUP BY g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
-		         g.output_columns, g.source, g.created_by, g.updated_by,
-		         g.created_at, g.updated_at`
+		         g.output_columns, g.source, g.enrichment_status, g.enrichment_error,
+		         g.created_by, g.updated_by, g.created_at, g.updated_at`
 
 	row := scope.Conn.QueryRow(ctx, query, projectID, alias)
 	term, err := scanGlossaryTerm(row)
@@ -303,8 +308,8 @@ func (r *glossaryRepository) GetByID(ctx context.Context, termID uuid.UUID) (*mo
 
 	query := `
 		SELECT g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
-		       g.output_columns, g.source, g.created_by, g.updated_by,
-		       g.created_at, g.updated_at,
+		       g.output_columns, g.source, g.enrichment_status, g.enrichment_error,
+		       g.created_by, g.updated_by, g.created_at, g.updated_at,
 		       COALESCE(
 		           jsonb_agg(a.alias ORDER BY a.alias) FILTER (WHERE a.alias IS NOT NULL),
 		           '[]'::jsonb
@@ -313,8 +318,8 @@ func (r *glossaryRepository) GetByID(ctx context.Context, termID uuid.UUID) (*mo
 		LEFT JOIN engine_glossary_aliases a ON g.id = a.glossary_id
 		WHERE g.id = $1
 		GROUP BY g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
-		         g.output_columns, g.source, g.created_by, g.updated_by,
-		         g.created_at, g.updated_at`
+		         g.output_columns, g.source, g.enrichment_status, g.enrichment_error,
+		         g.created_by, g.updated_by, g.created_at, g.updated_at`
 
 	row := scope.Conn.QueryRow(ctx, query, termID)
 	term, err := scanGlossaryTerm(row)
@@ -376,7 +381,7 @@ func (r *glossaryRepository) DeleteAlias(ctx context.Context, glossaryID uuid.UU
 
 func scanGlossaryTerm(row pgx.Row) (*models.BusinessGlossaryTerm, error) {
 	var t models.BusinessGlossaryTerm
-	var baseTable *string
+	var baseTable, enrichmentStatus, enrichmentError *string
 	var outputColumns, aliases []byte
 
 	err := row.Scan(
@@ -389,6 +394,8 @@ func scanGlossaryTerm(row pgx.Row) (*models.BusinessGlossaryTerm, error) {
 		&baseTable,
 		&outputColumns,
 		&t.Source,
+		&enrichmentStatus,
+		&enrichmentError,
 		&t.CreatedBy,
 		&t.UpdatedBy,
 		&t.CreatedAt,
@@ -405,6 +412,12 @@ func scanGlossaryTerm(row pgx.Row) (*models.BusinessGlossaryTerm, error) {
 	// Handle nullable string fields
 	if baseTable != nil {
 		t.BaseTable = *baseTable
+	}
+	if enrichmentStatus != nil {
+		t.EnrichmentStatus = *enrichmentStatus
+	}
+	if enrichmentError != nil {
+		t.EnrichmentError = *enrichmentError
 	}
 
 	// Unmarshal JSONB fields

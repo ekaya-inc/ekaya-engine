@@ -9,7 +9,8 @@ import (
 type contextKey string
 
 const (
-	llmContextKey contextKey = "llm_context"
+	llmContextKey     contextKey = "llm_context"
+	conversationIDKey contextKey = "conversation_id"
 )
 
 // WithContext returns a context with LLM recording context attached.
@@ -54,4 +55,18 @@ func WithTaskContext(ctx context.Context, workflowID uuid.UUID, taskID, taskName
 		values["entity_name"] = entityName
 	}
 	return WithContext(ctx, values)
+}
+
+// WithConversationID attaches a conversation ID to the context for HTTP request tracing.
+// The ID will be sent as X-Request-Id header to the model gateway.
+func WithConversationID(ctx context.Context, id uuid.UUID) context.Context {
+	return context.WithValue(ctx, conversationIDKey, id)
+}
+
+// GetConversationID retrieves the conversation ID from context, if present.
+func GetConversationID(ctx context.Context) (uuid.UUID, bool) {
+	if id, ok := ctx.Value(conversationIDKey).(uuid.UUID); ok {
+		return id, true
+	}
+	return uuid.Nil, false
 }

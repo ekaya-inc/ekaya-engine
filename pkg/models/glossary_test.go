@@ -74,6 +74,58 @@ func TestGlossarySourceConstants(t *testing.T) {
 	}
 }
 
+func TestGlossaryEnrichmentStatusConstants(t *testing.T) {
+	tests := []struct {
+		constant string
+		expected string
+	}{
+		{GlossaryEnrichmentPending, "pending"},
+		{GlossaryEnrichmentSuccess, "success"},
+		{GlossaryEnrichmentFailed, "failed"},
+	}
+
+	for _, tt := range tests {
+		if tt.constant != tt.expected {
+			t.Errorf("Constant mismatch: got %s, want %s", tt.constant, tt.expected)
+		}
+	}
+}
+
+func TestBusinessGlossaryTerm_EnrichmentStatusJSON(t *testing.T) {
+	// Test with enrichment status fields
+	term := BusinessGlossaryTerm{
+		ID:               uuid.New(),
+		ProjectID:        uuid.New(),
+		Term:             "Failed Metric",
+		Definition:       "A metric that failed enrichment",
+		DefiningSQL:      "",
+		Source:           GlossarySourceInferred,
+		EnrichmentStatus: GlossaryEnrichmentFailed,
+		EnrichmentError:  "LLM returned empty SQL after 3 retries",
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+
+	// Test JSON marshaling
+	jsonBytes, err := json.Marshal(term)
+	if err != nil {
+		t.Fatalf("Failed to marshal term with enrichment status: %v", err)
+	}
+
+	// Test JSON unmarshaling
+	var unmarshaled BusinessGlossaryTerm
+	if err := json.Unmarshal(jsonBytes, &unmarshaled); err != nil {
+		t.Fatalf("Failed to unmarshal term with enrichment status: %v", err)
+	}
+
+	if unmarshaled.EnrichmentStatus != GlossaryEnrichmentFailed {
+		t.Errorf("EnrichmentStatus mismatch: got %s, want %s", unmarshaled.EnrichmentStatus, GlossaryEnrichmentFailed)
+	}
+	if unmarshaled.EnrichmentError != "LLM returned empty SQL after 3 retries" {
+		t.Errorf("EnrichmentError mismatch: got %s", unmarshaled.EnrichmentError)
+	}
+}
+
 func TestBusinessGlossaryTerm_MinimalFields(t *testing.T) {
 	// Test with only required fields (simulating inferred term)
 	term := BusinessGlossaryTerm{

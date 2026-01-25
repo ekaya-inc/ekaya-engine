@@ -46,10 +46,6 @@ func TestNodeExecutorInterfaces_AreWellDefined(t *testing.T) {
 	// Verify that the interface methods are properly defined
 	// by creating implementations that satisfy them
 
-	// KnowledgeSeedingMethods
-	var ksm dag.KnowledgeSeedingMethods = &testKnowledgeSeeding{}
-	assert.NotNil(t, ksm)
-
 	// EntityDiscoveryMethods
 	var edm dag.EntityDiscoveryMethods = &testEntityDiscovery{}
 	assert.NotNil(t, edm)
@@ -165,12 +161,6 @@ func TestNewExecutionContext_NilOntologyID(t *testing.T) {
 }
 
 // Test implementations to verify interfaces compile correctly
-
-type testKnowledgeSeeding struct{}
-
-func (t *testKnowledgeSeeding) SeedKnowledgeFromFile(_ context.Context, _ uuid.UUID) (int, error) {
-	return 0, nil
-}
 
 type testEntityDiscovery struct{}
 

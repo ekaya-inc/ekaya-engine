@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
 )
@@ -352,6 +353,195 @@ func TestProjectService_Provision_CreatesEmptyOntology(t *testing.T) {
 	// Empty ontology should have empty entity summaries
 	if entitySummariesJSON != "{}" && entitySummariesJSON != "null" && entitySummariesJSON != "" {
 		t.Errorf("expected empty entity summaries, got %q", entitySummariesJSON)
+	}
+}
+
+func TestProjectService_GetOntologySettings_DefaultsToLegacyPatternMatching(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000220")
+
+	// Ensure test project exists without any ontology settings
+	ensureTestProject(t, engineDB, projectID, "Default Ontology Settings Test")
+
+	projectRepo := repositories.NewProjectRepository()
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, "", zap.NewNop())
+
+	// Set up tenant context
+	ctx := context.Background()
+	scope, err := engineDB.DB.WithTenant(ctx, projectID)
+	if err != nil {
+		t.Fatalf("Failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+	ctx = database.SetTenantScope(ctx, scope)
+
+	settings, err := service.GetOntologySettings(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetOntologySettings failed: %v", err)
+	}
+
+	// Should default to true for backward compatibility
+	if !settings.UseLegacyPatternMatching {
+		t.Error("expected UseLegacyPatternMatching to default to true")
+	}
+}
+
+func TestProjectService_SetOntologySettings_Success(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000221")
+
+	// Ensure test project exists
+	ensureTestProject(t, engineDB, projectID, "Set Ontology Settings Test")
+
+	projectRepo := repositories.NewProjectRepository()
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, "", zap.NewNop())
+
+	// Set up tenant context
+	ctx := context.Background()
+	scope, err := engineDB.DB.WithTenant(ctx, projectID)
+	if err != nil {
+		t.Fatalf("Failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+	ctx = database.SetTenantScope(ctx, scope)
+
+	// Disable legacy pattern matching
+	settings := &OntologySettings{UseLegacyPatternMatching: false}
+	err = service.SetOntologySettings(ctx, projectID, settings)
+	if err != nil {
+		t.Fatalf("SetOntologySettings failed: %v", err)
+	}
+
+	// Verify the setting was persisted
+	retrievedSettings, err := service.GetOntologySettings(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetOntologySettings failed: %v", err)
+	}
+
+	if retrievedSettings.UseLegacyPatternMatching {
+		t.Error("expected UseLegacyPatternMatching to be false after setting")
+	}
+}
+
+func TestProjectService_SetOntologySettings_RoundTrip(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000222")
+
+	// Ensure test project exists
+	ensureTestProject(t, engineDB, projectID, "Ontology Settings Round Trip Test")
+
+	projectRepo := repositories.NewProjectRepository()
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, "", zap.NewNop())
+
+	// Set up tenant context
+	ctx := context.Background()
+	scope, err := engineDB.DB.WithTenant(ctx, projectID)
+	if err != nil {
+		t.Fatalf("Failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+	ctx = database.SetTenantScope(ctx, scope)
+
+	// Disable legacy pattern matching
+	err = service.SetOntologySettings(ctx, projectID, &OntologySettings{
+		UseLegacyPatternMatching: false,
+	})
+	if err != nil {
+		t.Fatalf("SetOntologySettings (disable) failed: %v", err)
+	}
+
+	settings, err := service.GetOntologySettings(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetOntologySettings failed: %v", err)
+	}
+
+	if settings.UseLegacyPatternMatching {
+		t.Error("expected UseLegacyPatternMatching to be false")
+	}
+
+	// Re-enable legacy pattern matching
+	err = service.SetOntologySettings(ctx, projectID, &OntologySettings{
+		UseLegacyPatternMatching: true,
+	})
+	if err != nil {
+		t.Fatalf("SetOntologySettings (enable) failed: %v", err)
+	}
+
+	settings, err = service.GetOntologySettings(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetOntologySettings (after enable) failed: %v", err)
+	}
+
+	if !settings.UseLegacyPatternMatching {
+		t.Error("expected UseLegacyPatternMatching to be true after re-enabling")
+	}
+}
+
+func TestProjectService_SetOntologySettings_PreservesOtherParameters(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.MustParse("00000000-0000-0000-0000-000000000223")
+
+	// Create test project with existing parameters
+	ctx := context.Background()
+	scope, err := engineDB.DB.WithoutTenant(ctx)
+	if err != nil {
+		t.Fatalf("Failed to create scope: %v", err)
+	}
+	defer scope.Close()
+
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_projects (id, name, status, parameters)
+		VALUES ($1, $2, 'active', $3::jsonb)
+		ON CONFLICT (id) DO UPDATE SET parameters = $3::jsonb
+	`, projectID, "Preserve Other Params Test", `{"papi_url": "https://papi.example.com", "auto_approve": {"schema_changes": true}}`)
+	if err != nil {
+		t.Fatalf("Failed to create test project: %v", err)
+	}
+
+	projectRepo := repositories.NewProjectRepository()
+	service := NewProjectService(engineDB.DB, projectRepo, nil, nil, nil, "", zap.NewNop())
+
+	// Set up tenant context for the service call
+	tenantScope, err := engineDB.DB.WithTenant(ctx, projectID)
+	if err != nil {
+		t.Fatalf("Failed to create tenant scope: %v", err)
+	}
+	defer tenantScope.Close()
+	tenantCtx := database.SetTenantScope(ctx, tenantScope)
+
+	// Set ontology settings
+	err = service.SetOntologySettings(tenantCtx, projectID, &OntologySettings{
+		UseLegacyPatternMatching: false,
+	})
+	if err != nil {
+		t.Fatalf("SetOntologySettings failed: %v", err)
+	}
+
+	// Verify other parameters were preserved by reading directly from DB
+	scope2, err := engineDB.DB.WithoutTenant(ctx)
+	if err != nil {
+		t.Fatalf("Failed to create scope: %v", err)
+	}
+	defer scope2.Close()
+
+	var parametersJSON string
+	err = scope2.Conn.QueryRow(ctx, `SELECT parameters::text FROM engine_projects WHERE id = $1`, projectID).Scan(&parametersJSON)
+	if err != nil {
+		t.Fatalf("Failed to query project parameters: %v", err)
+	}
+
+	// Check that all parameters are present
+	if !strings.Contains(parametersJSON, "papi_url") {
+		t.Error("expected papi_url to be preserved in parameters")
+	}
+	if !strings.Contains(parametersJSON, "auto_approve") {
+		t.Error("expected auto_approve to be preserved in parameters")
+	}
+	if !strings.Contains(parametersJSON, "ontology") {
+		t.Error("expected ontology settings to be added to parameters")
+	}
+	if !strings.Contains(parametersJSON, "use_legacy_pattern_matching") {
+		t.Error("expected use_legacy_pattern_matching to be in ontology settings")
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
@@ -35,6 +36,7 @@ func TestCreateBidirectionalRelationship(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -248,9 +250,11 @@ func TestOldOccByTableBehaviorWasBroken(t *testing.T) {
 	}
 }
 
-// TestPKMatch_RequiresDistinctCount verifies that columns without DistinctCount
-// are skipped and do not create relationships.
-func TestPKMatch_RequiresDistinctCount(t *testing.T) {
+// TestPKMatch_NilStatsWithJoinableTrue verifies that columns with IsJoinable=true
+// but DistinctCount=nil proceed to join validation instead of being skipped.
+// This fixes BUG-3: columns like visitor_id, host_id with NULL stats but is_joinable=true
+// should create relationships when join validation succeeds.
+func TestPKMatch_NilStatsWithJoinableTrue(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 	ontologyID := uuid.New()
@@ -263,8 +267,7 @@ func TestPKMatch_RequiresDistinctCount(t *testing.T) {
 	// Create mocks with user entity
 	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
 
-	// Add order entity - we need both entities to test that the FILTER logic
-	// (not the entity lookup) is what prevents relationship creation
+	// Add order entity
 	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
 		ID:            orderEntityID,
 		OntologyID:    ontologyID,
@@ -273,16 +276,17 @@ func TestPKMatch_RequiresDistinctCount(t *testing.T) {
 		PrimaryTable:  "orders",
 	})
 
-	// Mock discoverer would return 0 orphans if called - but should NOT be called
+	// Track if AnalyzeJoin is called for the nil-stats column
+	analyzeJoinCalled := false
 	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
-		t.Errorf("AnalyzeJoin should not be called (column without DistinctCount): %s.%s.%s -> %s.%s.%s",
-			sourceSchema, sourceTable, sourceColumn,
-			targetSchema, targetTable, targetColumn)
-		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+		if sourceColumn == "buyer_id" {
+			analyzeJoinCalled = true
+		}
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil // Valid FK: all rows match
 	}
 
-	// Schema: orders.buyer has IsJoinable=true but no DistinctCount - should be skipped as candidate
-	// Using column name "buyer" (not "buyer_id") to ensure it's not treated as an entityRefColumn
+	// Schema: orders.buyer_id has IsJoinable=true but no DistinctCount
+	// With the fix, it should proceed to join validation
 	usersTableID := uuid.New()
 	ordersTableID := uuid.New()
 
@@ -299,7 +303,7 @@ func TestPKMatch_RequiresDistinctCount(t *testing.T) {
 					DataType:      "uuid",
 					IsPrimaryKey:  true,
 					IsJoinable:    &isJoinableTrue,
-					DistinctCount: &distinctCount, // Has stats
+					DistinctCount: &distinctCount,
 				},
 			},
 		},
@@ -312,18 +316,18 @@ func TestPKMatch_RequiresDistinctCount(t *testing.T) {
 				{
 					SchemaTableID: ordersTableID,
 					ColumnName:    "id",
-					DataType:      "uuid",
+					DataType:      "int8", // Different type prevents bidirectional matching
 					IsPrimaryKey:  true,
 					IsJoinable:    &isJoinableTrue,
-					DistinctCount: &distinctCount, // Orders PK
+					DistinctCount: &distinctCount,
 				},
 				{
 					SchemaTableID: ordersTableID,
-					ColumnName:    "buyer", // Not ending in _id, so won't be entityRefColumn
+					ColumnName:    "buyer_id",
 					DataType:      "uuid",
 					IsPrimaryKey:  false,
-					IsJoinable:    &isJoinableTrue, // Would be joinable...
-					DistinctCount: nil,             // ...but NO stats - should be skipped as candidate
+					IsJoinable:    &isJoinableTrue, // Marked as joinable
+					DistinctCount: nil,             // But NO stats (BUG-3 scenario)
 				},
 			},
 		},
@@ -332,6 +336,7 @@ func TestPKMatch_RequiresDistinctCount(t *testing.T) {
 	// Create service
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -346,14 +351,14 @@ func TestPKMatch_RequiresDistinctCount(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: NO relationships created because orders.user_id lacks stats
-	if result.InferredRelationships != 0 {
-		t.Errorf("expected 0 inferred relationships (column without stats should be skipped), got %d", result.InferredRelationships)
+	// Verify: AnalyzeJoin was called for the nil-stats column
+	if !analyzeJoinCalled {
+		t.Error("expected AnalyzeJoin to be called for buyer_id (nil stats with is_joinable=true)")
 	}
 
-	// Verify no relationships were persisted
-	if len(mocks.relationshipRepo.created) != 0 {
-		t.Errorf("expected 0 relationships to be created, got %d", len(mocks.relationshipRepo.created))
+	// Verify: relationship was created since join validation passed
+	if result.InferredRelationships == 0 {
+		t.Error("expected relationship to be created for nil-stats column with valid join")
 	}
 }
 
@@ -439,6 +444,7 @@ func TestPKMatch_WorksWithoutRowCount(t *testing.T) {
 	// Create service
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -645,6 +651,7 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 
 		service := NewDeterministicRelationshipService(
 			mocks.datasourceService,
+			mocks.projectService,
 			mocks.adapterFactory,
 			mocks.ontologyRepo,
 			mocks.entityRepo,
@@ -751,6 +758,7 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 
 		service := NewDeterministicRelationshipService(
 			mocks.datasourceService,
+			mocks.projectService,
 			mocks.adapterFactory,
 			mocks.ontologyRepo,
 			mocks.entityRepo,
@@ -853,6 +861,7 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 
 		service := NewDeterministicRelationshipService(
 			mocks.datasourceService,
+			mocks.projectService,
 			mocks.adapterFactory,
 			mocks.ontologyRepo,
 			mocks.entityRepo,
@@ -980,6 +989,7 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 
 		service := NewDeterministicRelationshipService(
 			mocks.datasourceService,
+			mocks.projectService,
 			mocks.adapterFactory,
 			mocks.ontologyRepo,
 			mocks.entityRepo,
@@ -1008,6 +1018,7 @@ func TestPKMatch_RequiresJoinableFlag(t *testing.T) {
 // mockTestServices holds all mock dependencies for testing
 type mockTestServices struct {
 	datasourceService *mockTestDatasourceService
+	projectService    *mockTestProjectService
 	adapterFactory    *mockTestAdapterFactory
 	discoverer        *mockTestSchemaDiscoverer
 	ontologyRepo      *mockTestOntologyRepo
@@ -1027,6 +1038,9 @@ func setupMocks(projectID, ontologyID, datasourceID, entityID uuid.UUID) *mockTe
 				DatasourceType: "postgres",
 				Config:         map[string]any{},
 			},
+		},
+		projectService: &mockTestProjectService{
+			ontologySettings: &OntologySettings{UseLegacyPatternMatching: true},
 		},
 		adapterFactory: &mockTestAdapterFactory{
 			discoverer: discoverer,
@@ -1093,6 +1107,68 @@ func (m *mockTestDatasourceService) TestConnection(ctx context.Context, dsType s
 }
 
 func (m *mockTestDatasourceService) SetDefault(ctx context.Context, projectID, datasourceID uuid.UUID) error {
+	return nil
+}
+
+type mockTestProjectService struct {
+	ontologySettings *OntologySettings
+}
+
+func (m *mockTestProjectService) Provision(ctx context.Context, projectID uuid.UUID, name string, params map[string]interface{}) (*ProvisionResult, error) {
+	return nil, nil
+}
+
+func (m *mockTestProjectService) ProvisionFromClaims(ctx context.Context, claims *auth.Claims) (*ProvisionResult, error) {
+	return nil, nil
+}
+
+func (m *mockTestProjectService) GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error) {
+	return nil, nil
+}
+
+func (m *mockTestProjectService) GetByIDWithoutTenant(ctx context.Context, id uuid.UUID) (*models.Project, error) {
+	return nil, nil
+}
+
+func (m *mockTestProjectService) Delete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (m *mockTestProjectService) GetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+
+func (m *mockTestProjectService) SetDefaultDatasourceID(ctx context.Context, projectID uuid.UUID, datasourceID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockTestProjectService) SyncFromCentralAsync(projectID uuid.UUID, papiURL, token string) {
+}
+
+func (m *mockTestProjectService) GetAuthServerURL(ctx context.Context, projectID uuid.UUID) (string, error) {
+	return "", nil
+}
+
+func (m *mockTestProjectService) UpdateAuthServerURL(ctx context.Context, projectID uuid.UUID, authServerURL string) error {
+	return nil
+}
+
+func (m *mockTestProjectService) GetAutoApproveSettings(ctx context.Context, projectID uuid.UUID) (*AutoApproveSettings, error) {
+	return nil, nil
+}
+
+func (m *mockTestProjectService) SetAutoApproveSettings(ctx context.Context, projectID uuid.UUID, settings *AutoApproveSettings) error {
+	return nil
+}
+
+func (m *mockTestProjectService) GetOntologySettings(ctx context.Context, projectID uuid.UUID) (*OntologySettings, error) {
+	if m.ontologySettings != nil {
+		return m.ontologySettings, nil
+	}
+	return &OntologySettings{UseLegacyPatternMatching: true}, nil
+}
+
+func (m *mockTestProjectService) SetOntologySettings(ctx context.Context, projectID uuid.UUID, settings *OntologySettings) error {
 	return nil
 }
 
@@ -1332,7 +1408,7 @@ func (m *mockTestSchemaRepo) ListColumnsByDatasource(ctx context.Context, projec
 	return result, nil
 }
 
-func (m *mockTestSchemaRepo) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) (map[string][]*models.SchemaColumn, error) {
+func (m *mockTestSchemaRepo) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error) {
 	return nil, nil
 }
 
@@ -1504,7 +1580,7 @@ func (m *mockTestSchemaRepo) UpdateTableMetadata(ctx context.Context, projectID,
 	return nil
 }
 
-func (m *mockTestSchemaRepo) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {
+func (m *mockTestSchemaRepo) ListColumnsByTable(ctx context.Context, projectID, tableID uuid.UUID, selectedOnly bool) ([]*models.SchemaColumn, error) {
 	return nil, nil
 }
 
@@ -1617,6 +1693,7 @@ func TestPKMatch_SmallIntegerValues(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -1729,6 +1806,7 @@ func TestPKMatch_SmallIntegerValues_LookupTable(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -1852,6 +1930,7 @@ func TestPKMatch_LowCardinality_Excluded(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -1974,6 +2053,7 @@ func TestPKMatch_CountColumns_NeverJoined(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -2098,6 +2178,7 @@ func TestPKMatch_RatingColumns_NeverJoined(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -2214,6 +2295,7 @@ func TestPKMatch_NoGarbageRelationships(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -2315,6 +2397,7 @@ func TestFKDiscovery_ManualRelationshipType(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -2424,6 +2507,7 @@ func TestFKDiscovery_ForeignKeyRelationshipType(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -2527,6 +2611,7 @@ func TestFKDiscovery_SelfReferentialRelationship(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -2658,6 +2743,7 @@ func TestPKMatch_LowCardinalityRatio(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -2802,6 +2888,7 @@ func TestFKDiscovery_LegitimateFK_EmailNotDiscovered(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -2966,6 +3053,7 @@ func TestPKMatch_EmailColumnsExcluded(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -3104,6 +3192,7 @@ func TestPKMatch_LowCardinalityRatio_IDColumn(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -3331,6 +3420,7 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -3524,6 +3614,7 @@ func TestPKMatch_NonIDColumn_StillFilteredByCardinality(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -3669,6 +3760,7 @@ func TestPKMatch_ReversedDirectionRejected(t *testing.T) {
 
 	service := NewDeterministicRelationshipService(
 		mocks.datasourceService,
+		mocks.projectService,
 		mocks.adapterFactory,
 		mocks.ontologyRepo,
 		mocks.entityRepo,
@@ -3822,5 +3914,868 @@ func TestAreTypesCompatibleForFK_CaseInsensitive(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("areTypesCompatibleForFK(%q, %q) = %v, want %v", tt.source, tt.target, got, tt.want)
 		}
+	}
+}
+
+// ============================================================================
+// Data-Based FK Detection Tests (UseLegacyPatternMatching=false)
+// ============================================================================
+
+// TestPKMatch_DataBased_ExcludedNamesNotFiltered verifies that when
+// UseLegacyPatternMatching=false, columns with "excluded" name patterns
+// (like num_users, rating, score) are still considered as FK candidates.
+// This is the new behavior where only data (joinability, cardinality) matters.
+func TestPKMatch_DataBased_ExcludedNamesNotFiltered(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	productEntityID := uuid.New()
+	categoryEntityID := uuid.New()
+
+	highDistinct := int64(100)
+	isJoinableTrue := true
+
+	// Create mocks with legacy pattern matching DISABLED
+	mocks := setupMocks(projectID, ontologyID, datasourceID, productEntityID)
+	mocks.projectService.ontologySettings = &OntologySettings{UseLegacyPatternMatching: false}
+
+	mocks.entityRepo.entities = []*models.OntologyEntity{
+		{
+			ID:            productEntityID,
+			OntologyID:    ontologyID,
+			Name:          "product",
+			PrimarySchema: "public",
+			PrimaryTable:  "products",
+		},
+		{
+			ID:            categoryEntityID,
+			OntologyID:    ontologyID,
+			Name:          "category",
+			PrimarySchema: "public",
+			PrimaryTable:  "categories",
+		},
+	}
+
+	// Track join analysis calls
+	joinAnalysisCalls := make(map[string]bool)
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		key := fmt.Sprintf("%s.%s→%s.%s", sourceTable, sourceColumn, targetTable, targetColumn)
+		joinAnalysisCalls[key] = true
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil // 0 orphans = valid FK
+	}
+
+	productsTableID := uuid.New()
+	categoriesTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         productsTableID,
+			SchemaName: "public",
+			TableName:  "products",
+			RowCount:   &highDistinct,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: productsTableID,
+					ColumnName:    "id",
+					DataType:      "integer",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+				// "num_products" would be excluded by legacy pattern matching but should
+				// be included when data-based detection is enabled
+				{
+					SchemaTableID: productsTableID,
+					ColumnName:    "num_products",
+					DataType:      "integer",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct, // High distinct = good FK candidate
+				},
+			},
+		},
+		{
+			ID:         categoriesTableID,
+			SchemaName: "public",
+			TableName:  "categories",
+			RowCount:   &highDistinct,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: categoriesTableID,
+					ColumnName:    "id",
+					DataType:      "integer",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	_, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// With data-based detection, "num_products" should have been evaluated
+	// (not filtered out by name pattern)
+	numProductsEvaluated := false
+	for key := range joinAnalysisCalls {
+		if strings.Contains(key, "num_products") {
+			numProductsEvaluated = true
+			break
+		}
+	}
+	if !numProductsEvaluated {
+		t.Error("expected 'num_products' to be evaluated as FK candidate when UseLegacyPatternMatching=false")
+	}
+}
+
+// TestPKMatch_DataBased_RequiresExplicitJoinability verifies that when
+// UseLegacyPatternMatching=false, ALL columns (even those with _id suffix)
+// must have explicit IsJoinable=true to be considered as SOURCE candidates.
+//
+// Note: This test verifies SOURCE candidate filtering via join analysis calls.
+// Columns with nil IsJoinable can still appear in relationships as TARGETS
+// (via entityRefColumns which don't check IsJoinable) and then as SOURCE
+// in the reverse relationship created for bidirectional navigation.
+//
+// The key constraint tested: join analysis should NOT be triggered with
+// a nil-IsJoinable column as the source.
+func TestPKMatch_DataBased_RequiresExplicitJoinability(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	highDistinct := int64(100)
+	isJoinableTrue := true
+
+	// Create mocks with legacy pattern matching DISABLED
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+	mocks.projectService.ontologySettings = &OntologySettings{UseLegacyPatternMatching: false}
+
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	// Track which columns are used as SOURCE in join analysis
+	// In data-based mode, user_id_nil should NOT be used as source in join analysis
+	// (This is the key constraint - nil IsJoinable columns are not candidates)
+	joinAnalysisSourceColumns := make(map[string]bool)
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		joinAnalysisSourceColumns[sourceColumn] = true
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+	}
+
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &highDistinct,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			RowCount:   &highDistinct,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: ordersTableID,
+					ColumnName:    "id",
+					DataType:      "int8",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+				// This _id column has nil IsJoinable - should NOT be used as SOURCE
+				// in join analysis calls (not added to candidates list)
+				{
+					SchemaTableID: ordersTableID,
+					ColumnName:    "user_id_nil",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					IsJoinable:    nil, // nil = no joinability info = NOT a candidate
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	_, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify user_id_nil was NOT used as SOURCE in any join analysis call
+	// This is the key constraint: nil IsJoinable columns should not be candidates
+	if joinAnalysisSourceColumns["user_id_nil"] {
+		t.Error("user_id_nil should NOT be used as source in join analysis (nil IsJoinable in data-based mode)")
+	}
+}
+
+// TestPKMatch_DataBased_CardinalityRatioAlwaysApplied verifies that when
+// UseLegacyPatternMatching=false, the cardinality ratio check applies to ALL columns,
+// including those with _id suffix.
+func TestPKMatch_DataBased_CardinalityRatioAlwaysApplied(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	eventEntityID := uuid.New()
+
+	highDistinct := int64(100)
+	lowDistinct := int64(50)     // Low distinct
+	highRowCount := int64(10000) // 50/10000 = 0.5% < 5% threshold
+	isJoinableTrue := true
+
+	// Create mocks with legacy pattern matching DISABLED
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+	mocks.projectService.ontologySettings = &OntologySettings{UseLegacyPatternMatching: false}
+
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            eventEntityID,
+		OntologyID:    ontologyID,
+		Name:          "event",
+		PrimarySchema: "public",
+		PrimaryTable:  "events",
+	})
+
+	// Join analysis should NOT be called for columns with low cardinality ratio
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		if sourceColumn == "user_id" && sourceTable == "events" {
+			t.Errorf("AnalyzeJoin should NOT be called for events.user_id (low cardinality ratio in non-legacy mode)")
+		}
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+	}
+
+	usersTableID := uuid.New()
+	eventsTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &highDistinct,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+		{
+			ID:         eventsTableID,
+			SchemaName: "public",
+			TableName:  "events",
+			RowCount:   &highRowCount, // 10,000 rows
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: eventsTableID,
+					ColumnName:    "id",
+					DataType:      "int8",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highRowCount,
+				},
+				// This _id column has low cardinality ratio (0.5% < 5%)
+				// In legacy mode, _id columns skip this check
+				// In data-based mode, this column would be filtered out
+				{
+					SchemaTableID: eventsTableID,
+					ColumnName:    "user_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &lowDistinct, // 50/10000 = 0.5% < 5%
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify no relationships involving events.user_id (filtered by cardinality ratio)
+	for _, rel := range mocks.relationshipRepo.created {
+		if rel.SourceColumnTable == "events" && rel.SourceColumnName == "user_id" {
+			t.Errorf("unexpected relationship from events.user_id: data-based mode should filter by cardinality ratio")
+		}
+	}
+	_ = result
+}
+
+// TestPKMatch_LegacyMode_IDColumnsExemptFromFilters verifies that when
+// UseLegacyPatternMatching=true (legacy mode), _id columns are exempt from
+// certain filters like cardinality ratio check.
+func TestPKMatch_LegacyMode_IDColumnsExemptFromFilters(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	eventEntityID := uuid.New()
+
+	highDistinct := int64(100)
+	lowDistinct := int64(50)     // Low distinct
+	highRowCount := int64(10000) // 50/10000 = 0.5% < 5% threshold
+	isJoinableTrue := true
+
+	// Create mocks with legacy pattern matching ENABLED (default)
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+	// UseLegacyPatternMatching defaults to true in setupMocks
+
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            eventEntityID,
+		OntologyID:    ontologyID,
+		Name:          "event",
+		PrimarySchema: "public",
+		PrimaryTable:  "events",
+	})
+
+	// In legacy mode, _id columns should be evaluated even with low cardinality ratio
+	joinAnalysisCalled := false
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		if sourceColumn == "user_id" && sourceTable == "events" {
+			joinAnalysisCalled = true
+		}
+		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
+	}
+
+	usersTableID := uuid.New()
+	eventsTableID := uuid.New()
+
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			RowCount:   &highDistinct,
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highDistinct,
+				},
+			},
+		},
+		{
+			ID:         eventsTableID,
+			SchemaName: "public",
+			TableName:  "events",
+			RowCount:   &highRowCount, // 10,000 rows
+			Columns: []models.SchemaColumn{
+				{
+					SchemaTableID: eventsTableID,
+					ColumnName:    "id",
+					DataType:      "int8",
+					IsPrimaryKey:  true,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &highRowCount,
+				},
+				// This _id column has low cardinality ratio (0.5% < 5%)
+				// In legacy mode, _id columns skip this check
+				{
+					SchemaTableID: eventsTableID,
+					ColumnName:    "user_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					IsJoinable:    &isJoinableTrue,
+					DistinctCount: &lowDistinct, // 50/10000 = 0.5% < 5%
+				},
+			},
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	_, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// In legacy mode, user_id should have been evaluated (exempt from cardinality ratio check)
+	if !joinAnalysisCalled {
+		t.Error("expected events.user_id to be evaluated in legacy mode (_id columns exempt from cardinality ratio check)")
+	}
+}
+
+// TestFKDiscovery_Cardinality verifies that FK relationships have N:1 cardinality
+// (many FK values point to one PK value) and reverse relationships have 1:N cardinality.
+func TestFKDiscovery_Cardinality(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Add order entity
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	userIDColumnID := uuid.New()
+	orderUserIDColumnID := uuid.New()
+
+	// Setup tables with columns
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            userIDColumnID,
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            orderUserIDColumnID,
+					SchemaTableID: ordersTableID,
+					ColumnName:    "user_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+				},
+			},
+		},
+	}
+
+	// Add FK relationship: orders.user_id → users.id
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
+		{
+			ID:               uuid.New(),
+			ProjectID:        projectID,
+			SourceTableID:    ordersTableID,
+			SourceColumnID:   orderUserIDColumnID,
+			TargetTableID:    usersTableID,
+			TargetColumnID:   userIDColumnID,
+			RelationshipType: models.RelationshipTypeFK,
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: 1 FK relationship discovered (creates 2 rows: forward + reverse)
+	if result.FKRelationships != 1 {
+		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
+	}
+
+	// Bidirectional: 2 relationships created (forward + reverse)
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	}
+
+	// Verify forward relationship: orders → users has cardinality N:1
+	// (many orders belong to one user)
+	forwardRel := mocks.relationshipRepo.created[0]
+	if forwardRel.Cardinality != models.CardinalityNTo1 {
+		t.Errorf("expected forward cardinality=%q, got %q", models.CardinalityNTo1, forwardRel.Cardinality)
+	}
+
+	// Verify reverse relationship: users → orders has cardinality 1:N
+	// (one user has many orders)
+	reverseRel := mocks.relationshipRepo.created[1]
+	if reverseRel.Cardinality != models.Cardinality1ToN {
+		t.Errorf("expected reverse cardinality=%q, got %q", models.Cardinality1ToN, reverseRel.Cardinality)
+	}
+}
+
+// TestCreateBidirectionalRelationship_Cardinality verifies that cardinality is
+// correctly swapped when creating bidirectional relationships.
+func TestCreateBidirectionalRelationship_Cardinality(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	testCases := []struct {
+		name             string
+		inputCardinality string
+		expectedForward  string
+		expectedReverse  string
+	}{
+		{
+			name:             "N:1 becomes 1:N for reverse",
+			inputCardinality: models.CardinalityNTo1,
+			expectedForward:  models.CardinalityNTo1,
+			expectedReverse:  models.Cardinality1ToN,
+		},
+		{
+			name:             "1:N becomes N:1 for reverse",
+			inputCardinality: models.Cardinality1ToN,
+			expectedForward:  models.Cardinality1ToN,
+			expectedReverse:  models.CardinalityNTo1,
+		},
+		{
+			name:             "1:1 stays 1:1",
+			inputCardinality: models.Cardinality1To1,
+			expectedForward:  models.Cardinality1To1,
+			expectedReverse:  models.Cardinality1To1,
+		},
+		{
+			name:             "N:M stays N:M",
+			inputCardinality: models.CardinalityNToM,
+			expectedForward:  models.CardinalityNToM,
+			expectedReverse:  models.CardinalityNToM,
+		},
+		{
+			name:             "unknown stays unknown",
+			inputCardinality: models.CardinalityUnknown,
+			expectedForward:  models.CardinalityUnknown,
+			expectedReverse:  models.CardinalityUnknown,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Clear previous created relationships
+			mocks.relationshipRepo.created = nil
+
+			// Create a test relationship with specified cardinality
+			rel := &models.EntityRelationship{
+				OntologyID:         ontologyID,
+				SourceEntityID:     orderEntityID,
+				TargetEntityID:     userEntityID,
+				SourceColumnSchema: "public",
+				SourceColumnTable:  "orders",
+				SourceColumnName:   "user_id",
+				TargetColumnSchema: "public",
+				TargetColumnTable:  "users",
+				TargetColumnName:   "id",
+				DetectionMethod:    models.DetectionMethodForeignKey,
+				Confidence:         1.0,
+				Status:             models.RelationshipStatusConfirmed,
+				Cardinality:        tc.inputCardinality,
+			}
+
+			// Call createBidirectionalRelationship
+			svc := service.(*deterministicRelationshipService)
+			err := svc.createBidirectionalRelationship(context.Background(), rel)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			// Verify: 2 relationships created (forward and reverse)
+			if len(mocks.relationshipRepo.created) != 2 {
+				t.Fatalf("expected 2 relationships (forward and reverse), got %d", len(mocks.relationshipRepo.created))
+			}
+
+			// Verify forward relationship cardinality
+			forward := mocks.relationshipRepo.created[0]
+			if forward.Cardinality != tc.expectedForward {
+				t.Errorf("forward cardinality: expected %q, got %q", tc.expectedForward, forward.Cardinality)
+			}
+
+			// Verify reverse relationship cardinality
+			reverse := mocks.relationshipRepo.created[1]
+			if reverse.Cardinality != tc.expectedReverse {
+				t.Errorf("reverse cardinality: expected %q, got %q", tc.expectedReverse, reverse.Cardinality)
+			}
+		})
+	}
+}
+
+// TestPKMatch_InfersCardinalityFromJoinAnalysis verifies that PK-Match relationships
+// correctly infer cardinality from join analysis data.
+func TestPKMatch_InfersCardinalityFromJoinAnalysis(t *testing.T) {
+	testCases := []struct {
+		name                string
+		joinCount           int64
+		sourceMatched       int64
+		targetMatched       int64
+		expectedCardinality string
+	}{
+		{
+			name:                "N:1 - many orders per user",
+			joinCount:           1000,
+			sourceMatched:       1000, // Each order matches exactly one user
+			targetMatched:       100,  // 100 users, each matched by ~10 orders
+			expectedCardinality: models.CardinalityNTo1,
+		},
+		{
+			name:                "1:1 - one-to-one relationship",
+			joinCount:           100,
+			sourceMatched:       100,
+			targetMatched:       100,
+			expectedCardinality: models.Cardinality1To1,
+		},
+		{
+			name:                "1:N - one source matches many targets",
+			joinCount:           1000,
+			sourceMatched:       100,  // 100 sources, each matched by ~10 targets
+			targetMatched:       1000, // Each target matches exactly one source
+			expectedCardinality: models.Cardinality1ToN,
+		},
+		{
+			name:                "N:M - many-to-many",
+			joinCount:           5000,
+			sourceMatched:       500,
+			targetMatched:       500,
+			expectedCardinality: models.CardinalityNToM,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			projectID := uuid.New()
+			datasourceID := uuid.New()
+			ontologyID := uuid.New()
+			userEntityID := uuid.New()
+			orderEntityID := uuid.New()
+
+			mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+			mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+				ID:            orderEntityID,
+				OntologyID:    ontologyID,
+				Name:          "order",
+				PrimarySchema: "public",
+				PrimaryTable:  "orders",
+			})
+
+			// Configure join analysis to return test-specific values
+			mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+				return &datasource.JoinAnalysis{
+					OrphanCount:   0, // Valid FK: no orphans
+					JoinCount:     tc.joinCount,
+					SourceMatched: tc.sourceMatched,
+					TargetMatched: tc.targetMatched,
+				}, nil
+			}
+
+			usersTableID := uuid.New()
+			ordersTableID := uuid.New()
+			distinctCount := int64(1000)
+			rowCount := int64(10000)
+			isJoinable := true
+
+			mocks.schemaRepo.tables = []*models.SchemaTable{
+				{
+					ID:         usersTableID,
+					SchemaName: "public",
+					TableName:  "users",
+					RowCount:   &rowCount,
+					Columns: []models.SchemaColumn{
+						{
+							ID:            uuid.New(),
+							SchemaTableID: usersTableID,
+							ColumnName:    "id",
+							DataType:      "uuid",
+							IsPrimaryKey:  true,
+							IsJoinable:    &isJoinable,
+							DistinctCount: &distinctCount,
+						},
+					},
+				},
+				{
+					ID:         ordersTableID,
+					SchemaName: "public",
+					TableName:  "orders",
+					RowCount:   &rowCount,
+					Columns: []models.SchemaColumn{
+						{
+							ID:            uuid.New(),
+							SchemaTableID: ordersTableID,
+							ColumnName:    "id",
+							DataType:      "int8", // Different type to prevent bidirectional matching
+							IsPrimaryKey:  true,
+							IsJoinable:    &isJoinable,
+							DistinctCount: &distinctCount,
+						},
+						{
+							ID:            uuid.New(),
+							SchemaTableID: ordersTableID,
+							ColumnName:    "user_id",
+							DataType:      "uuid", // Matches users.id type
+							IsPrimaryKey:  false,
+							IsJoinable:    &isJoinable,
+							DistinctCount: &distinctCount,
+						},
+					},
+				},
+			}
+
+			service := NewDeterministicRelationshipService(
+				mocks.datasourceService,
+				mocks.projectService,
+				mocks.adapterFactory,
+				mocks.ontologyRepo,
+				mocks.entityRepo,
+				mocks.relationshipRepo,
+				mocks.schemaRepo,
+				zap.NewNop(),
+			)
+
+			_, err := service.DiscoverPKMatchRelationships(context.Background(), projectID, datasourceID, nil)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			// Verify relationships were created (forward and reverse)
+			if len(mocks.relationshipRepo.created) < 2 {
+				t.Fatalf("expected at least 2 relationships (forward and reverse), got %d", len(mocks.relationshipRepo.created))
+			}
+
+			// Find the forward relationship (order -> user)
+			var forwardRel *models.EntityRelationship
+			for _, rel := range mocks.relationshipRepo.created {
+				if rel.SourceEntityID == orderEntityID && rel.TargetEntityID == userEntityID {
+					forwardRel = rel
+					break
+				}
+			}
+
+			if forwardRel == nil {
+				t.Fatal("forward relationship (order -> user) not found")
+			}
+
+			// Verify cardinality
+			if forwardRel.Cardinality != tc.expectedCardinality {
+				t.Errorf("forward cardinality: expected %q, got %q", tc.expectedCardinality, forwardRel.Cardinality)
+			}
+
+			// Find the reverse relationship (user -> order)
+			var reverseRel *models.EntityRelationship
+			for _, rel := range mocks.relationshipRepo.created {
+				if rel.SourceEntityID == userEntityID && rel.TargetEntityID == orderEntityID {
+					reverseRel = rel
+					break
+				}
+			}
+
+			if reverseRel == nil {
+				t.Fatal("reverse relationship (user -> order) not found")
+			}
+
+			// Verify reverse cardinality is swapped
+			expectedReverseCardinality := ReverseCardinality(tc.expectedCardinality)
+			if reverseRel.Cardinality != expectedReverseCardinality {
+				t.Errorf("reverse cardinality: expected %q, got %q", expectedReverseCardinality, reverseRel.Cardinality)
+			}
+		})
 	}
 }

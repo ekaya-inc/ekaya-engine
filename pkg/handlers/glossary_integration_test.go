@@ -526,6 +526,7 @@ func TestGlossaryIntegration_CreateWithInvalidSQL(t *testing.T) {
 func TestGlossaryIntegration_CreateDuplicate(t *testing.T) {
 	tc := setupGlossaryTest(t)
 	tc.cleanup()
+	tc.createTestOntology() // Create ontology so terms get ontology_id for unique constraint
 	tc.ensureTestDatasource()
 
 	createReq := CreateGlossaryTermRequest{

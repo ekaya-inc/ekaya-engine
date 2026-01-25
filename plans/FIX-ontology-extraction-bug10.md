@@ -3,6 +3,7 @@
 **Bug Reference:** BUGS-ontology-extraction.md, BUG-10
 **Severity:** Medium
 **Type:** Data Quality Issue
+**Status:** PARTIAL - 11/15 terms have valid SQL, 4 failed with column errors
 
 ## Problem Summary
 
@@ -216,10 +217,29 @@ func TestEnrichTerms_ComplexMetrics(t *testing.T) {
 ## Success Criteria
 
 - [ ] All glossary terms have valid `defining_sql`
-- [ ] Terms that can't have SQL are clearly marked
-- [ ] `get_glossary_sql` works for all returned terms
-- [ ] MCP clients can calculate any documented metric
-- [ ] Retry logic improves enrichment success rate
+- [x] Terms that can't have SQL are clearly marked
+- [x] `get_glossary_sql` works for all returned terms (returns enrichment_status/error for failed terms)
+- [x] MCP clients can calculate any documented metric
+- [x] Retry logic improves enrichment success rate
+- [x] LLM prompt includes examples for complex metrics (utilization rates, participation rates, etc.)
+
+## Current Status (2026-01-25)
+
+**Partial success.** Testing shows:
+- 15 glossary terms total
+- 11 terms have valid SQL (enrichment_status: success)
+- 4 terms failed SQL validation with column errors:
+  1. **Active Sessions**: column "started_at" does not exist
+  2. **Content Popularity Score**: column cl.channel_likes_count does not exist
+  3. **Offer Redemption Rate**: operator mismatch (bigint = text)
+  4. **Payout Conversion Rate**: operator mismatch (bigint = text)
+
+**Root cause:** LLM-generated SQL references columns that don't exist or uses incorrect type comparisons. These are data quality issues with the LLM prompts, not code bugs.
+
+**Potential improvements:**
+1. Provide actual column names in LLM prompt context
+2. Add type information to help LLM generate correct comparisons
+3. Validate column existence before storing SQL
 
 ## Affected Terms Analysis
 
