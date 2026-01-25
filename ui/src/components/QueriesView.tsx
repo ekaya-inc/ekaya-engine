@@ -64,7 +64,7 @@ interface EditingState {
   constraints: string;
 }
 
-type QueryFilterType = 'all' | 'read-only' | 'modifying';
+type QueryFilterType = 'all' | 'read-only' | 'modifying' | 'pending' | 'rejected';
 
 // Note: _onPendingCountChange will be used in Task 6.3/6.4 when approve/reject functionality is added
 const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange: _onPendingCountChange }: QueriesViewProps) => {
@@ -223,11 +223,25 @@ const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange: _
         .includes(searchTerm.toLowerCase()) ||
       query.sql_query.toLowerCase().includes(searchTerm.toLowerCase());
 
-    // Type filter
-    const matchesTypeFilter =
-      queryFilter === 'all' ||
-      (queryFilter === 'read-only' && !query.allows_modification) ||
-      (queryFilter === 'modifying' && query.allows_modification);
+    // Type/status filter
+    let matchesTypeFilter = false;
+    switch (queryFilter) {
+      case 'all':
+        matchesTypeFilter = true;
+        break;
+      case 'read-only':
+        matchesTypeFilter = !query.allows_modification;
+        break;
+      case 'modifying':
+        matchesTypeFilter = query.allows_modification;
+        break;
+      case 'pending':
+        matchesTypeFilter = query.status === 'pending';
+        break;
+      case 'rejected':
+        matchesTypeFilter = query.status === 'rejected';
+        break;
+    }
 
     return matchesSearch && matchesTypeFilter;
   });
@@ -686,6 +700,8 @@ const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange: _
                 <option value="all">All queries</option>
                 <option value="read-only">Read-only</option>
                 <option value="modifying">Modifies data</option>
+                <option value="pending">Pending review</option>
+                <option value="rejected">Rejected</option>
               </select>
             </CardHeader>
             <CardContent className="flex-1 overflow-y-auto p-2">

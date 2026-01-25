@@ -129,17 +129,17 @@ type TestQueryRequest struct {
 // SuggestUpdateRequest contains fields for suggesting an update to an existing query.
 // The original query remains active until the suggestion is approved.
 type SuggestUpdateRequest struct {
-	QueryID                   uuid.UUID                `json:"query_id"`                               // ID of the original query to update
-	NaturalLanguagePrompt     *string                  `json:"natural_language_prompt,omitempty"`      // Updated name/prompt
-	AdditionalContext         *string                  `json:"additional_context,omitempty"`           // Updated context
-	SQLQuery                  *string                  `json:"sql_query,omitempty"`                    // Updated SQL
-	Parameters                *[]models.QueryParameter `json:"parameters,omitempty"`                   // Updated parameters
-	OutputColumns             *[]models.OutputColumn   `json:"output_columns,omitempty"`               // Updated output columns
-	Constraints               *string                  `json:"constraints,omitempty"`                  // Updated constraints
-	Tags                      *[]string                `json:"tags,omitempty"`                         // Updated tags
-	AllowsModification        *bool                    `json:"allows_modification,omitempty"`          // Updated modification flag
-	SuggestionContext         map[string]any           `json:"suggestion_context,omitempty"`           // Why this update is needed
-	OutputColumnDescriptions  map[string]string        `json:"output_column_descriptions,omitempty"`   // For MCP tool compatibility
+	QueryID                  uuid.UUID                `json:"query_id"`                             // ID of the original query to update
+	NaturalLanguagePrompt    *string                  `json:"natural_language_prompt,omitempty"`    // Updated name/prompt
+	AdditionalContext        *string                  `json:"additional_context,omitempty"`         // Updated context
+	SQLQuery                 *string                  `json:"sql_query,omitempty"`                  // Updated SQL
+	Parameters               *[]models.QueryParameter `json:"parameters,omitempty"`                 // Updated parameters
+	OutputColumns            *[]models.OutputColumn   `json:"output_columns,omitempty"`             // Updated output columns
+	Constraints              *string                  `json:"constraints,omitempty"`                // Updated constraints
+	Tags                     *[]string                `json:"tags,omitempty"`                       // Updated tags
+	AllowsModification       *bool                    `json:"allows_modification,omitempty"`        // Updated modification flag
+	SuggestionContext        map[string]any           `json:"suggestion_context,omitempty"`         // Why this update is needed
+	OutputColumnDescriptions map[string]string        `json:"output_column_descriptions,omitempty"` // For MCP tool compatibility
 }
 
 type queryService struct {

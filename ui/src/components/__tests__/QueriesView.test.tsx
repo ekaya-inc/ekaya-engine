@@ -83,6 +83,7 @@ const mockQueries: Query[] = [
     created_at: '2024-01-15T00:00:00Z',
     updated_at: '2024-01-15T00:00:00Z',
     parameters: [],
+    status: 'approved',
   },
   {
     query_id: 'query-2',
@@ -99,6 +100,81 @@ const mockQueries: Query[] = [
     created_at: '2024-01-10T00:00:00Z',
     updated_at: '2024-01-10T00:00:00Z',
     parameters: [],
+    status: 'approved',
+  },
+];
+
+const mockQueriesWithStatuses: Query[] = [
+  {
+    query_id: 'query-approved',
+    project_id: 'proj-1',
+    datasource_id: 'ds-1',
+    natural_language_prompt: 'Approved query',
+    additional_context: null,
+    sql_query: 'SELECT * FROM approved',
+    dialect: 'postgres',
+    is_enabled: true,
+    allows_modification: false,
+    usage_count: 0,
+    last_used_at: null,
+    created_at: '2024-01-15T00:00:00Z',
+    updated_at: '2024-01-15T00:00:00Z',
+    parameters: [],
+    status: 'approved',
+  },
+  {
+    query_id: 'query-pending',
+    project_id: 'proj-1',
+    datasource_id: 'ds-1',
+    natural_language_prompt: 'Pending query',
+    additional_context: null,
+    sql_query: 'SELECT * FROM pending',
+    dialect: 'postgres',
+    is_enabled: false,
+    allows_modification: false,
+    usage_count: 0,
+    last_used_at: null,
+    created_at: '2024-01-10T00:00:00Z',
+    updated_at: '2024-01-10T00:00:00Z',
+    parameters: [],
+    status: 'pending',
+    suggested_by: 'agent',
+  },
+  {
+    query_id: 'query-rejected',
+    project_id: 'proj-1',
+    datasource_id: 'ds-1',
+    natural_language_prompt: 'Rejected query',
+    additional_context: null,
+    sql_query: 'SELECT * FROM rejected',
+    dialect: 'postgres',
+    is_enabled: false,
+    allows_modification: false,
+    usage_count: 0,
+    last_used_at: null,
+    created_at: '2024-01-05T00:00:00Z',
+    updated_at: '2024-01-05T00:00:00Z',
+    parameters: [],
+    status: 'rejected',
+    suggested_by: 'agent',
+    rejection_reason: 'SQL syntax invalid',
+  },
+  {
+    query_id: 'query-modifying',
+    project_id: 'proj-1',
+    datasource_id: 'ds-1',
+    natural_language_prompt: 'Modifying query',
+    additional_context: null,
+    sql_query: 'INSERT INTO users (name) VALUES ({{name}}) RETURNING id',
+    dialect: 'postgres',
+    is_enabled: true,
+    allows_modification: true,
+    usage_count: 0,
+    last_used_at: null,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-01-01T00:00:00Z',
+    parameters: [],
+    status: 'approved',
   },
 ];
 
@@ -319,5 +395,103 @@ describe('QueriesView', () => {
     // The disabled query should have reduced opacity (checked via class)
     const disabledQueryButton = screen.getByText('Daily sales report').closest('button');
     expect(disabledQueryButton).toHaveClass('opacity-50');
+  });
+
+  it('filters queries by pending status', async () => {
+    vi.mocked(engineApi.listQueries).mockResolvedValue({
+      success: true,
+      data: { queries: mockQueriesWithStatuses },
+    });
+
+    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Approved query')).toBeInTheDocument();
+      expect(screen.getByText('Pending query')).toBeInTheDocument();
+      expect(screen.getByText('Rejected query')).toBeInTheDocument();
+    });
+
+    // Select the Pending review filter
+    const filterSelect = screen.getByRole('combobox');
+    fireEvent.change(filterSelect, { target: { value: 'pending' } });
+
+    // Only pending query should be visible
+    expect(screen.queryByText('Approved query')).not.toBeInTheDocument();
+    expect(screen.getByText('Pending query')).toBeInTheDocument();
+    expect(screen.queryByText('Rejected query')).not.toBeInTheDocument();
+    expect(screen.queryByText('Modifying query')).not.toBeInTheDocument();
+  });
+
+  it('filters queries by rejected status', async () => {
+    vi.mocked(engineApi.listQueries).mockResolvedValue({
+      success: true,
+      data: { queries: mockQueriesWithStatuses },
+    });
+
+    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Approved query')).toBeInTheDocument();
+    });
+
+    // Select the Rejected filter
+    const filterSelect = screen.getByRole('combobox');
+    fireEvent.change(filterSelect, { target: { value: 'rejected' } });
+
+    // Only rejected query should be visible
+    expect(screen.queryByText('Approved query')).not.toBeInTheDocument();
+    expect(screen.queryByText('Pending query')).not.toBeInTheDocument();
+    expect(screen.getByText('Rejected query')).toBeInTheDocument();
+    expect(screen.queryByText('Modifying query')).not.toBeInTheDocument();
+  });
+
+  it('shows filter options for pending and rejected', async () => {
+    vi.mocked(engineApi.listQueries).mockResolvedValue({
+      success: true,
+      data: { queries: mockQueries },
+    });
+
+    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Show top customers')).toBeInTheDocument();
+    });
+
+    // Check that the filter dropdown has the new options
+    const filterSelect = screen.getByRole('combobox');
+    expect(filterSelect).toBeInTheDocument();
+
+    // Check for the option elements
+    const options = filterSelect.querySelectorAll('option');
+    const optionValues = Array.from(options).map(opt => opt.value);
+
+    expect(optionValues).toContain('all');
+    expect(optionValues).toContain('read-only');
+    expect(optionValues).toContain('modifying');
+    expect(optionValues).toContain('pending');
+    expect(optionValues).toContain('rejected');
+  });
+
+  it('filters queries by modifying type', async () => {
+    vi.mocked(engineApi.listQueries).mockResolvedValue({
+      success: true,
+      data: { queries: mockQueriesWithStatuses },
+    });
+
+    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Modifying query')).toBeInTheDocument();
+    });
+
+    // Select the Modifies data filter
+    const filterSelect = screen.getByRole('combobox');
+    fireEvent.change(filterSelect, { target: { value: 'modifying' } });
+
+    // Only modifying query should be visible
+    expect(screen.queryByText('Approved query')).not.toBeInTheDocument();
+    expect(screen.queryByText('Pending query')).not.toBeInTheDocument();
+    expect(screen.queryByText('Rejected query')).not.toBeInTheDocument();
+    expect(screen.getByText('Modifying query')).toBeInTheDocument();
   });
 });

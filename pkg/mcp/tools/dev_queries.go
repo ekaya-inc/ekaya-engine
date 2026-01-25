@@ -1059,10 +1059,10 @@ Use this for admin-initiated updates that bypass the suggestion workflow.`),
 
 // deleteApprovedQueryResponse is the response format for delete_approved_query.
 type deleteApprovedQueryResponse struct {
-	Success                bool   `json:"success"`
-	Message                string `json:"message"`
-	QueryID                string `json:"query_id"`
-	RejectedSuggestionsCount int  `json:"rejected_suggestions_count"`
+	Success                  bool   `json:"success"`
+	Message                  string `json:"message"`
+	QueryID                  string `json:"query_id"`
+	RejectedSuggestionsCount int    `json:"rejected_suggestions_count"`
 }
 
 // registerDeleteApprovedQueryTool registers the delete_approved_query tool.

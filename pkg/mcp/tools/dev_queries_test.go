@@ -347,9 +347,9 @@ func TestParametersEqual(t *testing.T) {
 			expected: true,
 		},
 		{
-			name: "different lengths",
-			a:    []models.QueryParameter{{Name: "id", Type: "uuid"}},
-			b:    []models.QueryParameter{},
+			name:     "different lengths",
+			a:        []models.QueryParameter{{Name: "id", Type: "uuid"}},
+			b:        []models.QueryParameter{},
 			expected: false,
 		},
 		{

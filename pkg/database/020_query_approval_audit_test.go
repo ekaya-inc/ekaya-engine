@@ -21,10 +21,10 @@ func Test_020_QueryApprovalAudit(t *testing.T) {
 
 	// Verify audit columns exist with correct types
 	auditColumns := map[string]string{
-		"reviewed_by":     "character varying",
-		"reviewed_at":     "timestamp with time zone",
+		"reviewed_by":      "character varying",
+		"reviewed_at":      "timestamp with time zone",
 		"rejection_reason": "text",
-		"parent_query_id": "uuid",
+		"parent_query_id":  "uuid",
 	}
 
 	for colName, expectedType := range auditColumns {
@@ -54,10 +54,10 @@ func Test_020_QueryApprovalAudit(t *testing.T) {
 
 	// Verify column comments exist
 	columnComments := map[string]string{
-		"reviewed_by":     "reviewed the pending query",
-		"reviewed_at":     "approved or rejected",
+		"reviewed_by":      "reviewed the pending query",
+		"reviewed_at":      "approved or rejected",
 		"rejection_reason": "rejected",
-		"parent_query_id": "original query",
+		"parent_query_id":  "original query",
 	}
 
 	for colName, expectedSubstring := range columnComments {

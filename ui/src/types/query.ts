@@ -60,6 +60,11 @@ export const datasourceTypeToDialect: Record<DatasourceType, SqlDialect> = {
 };
 
 /**
+ * Query status values
+ */
+export type QueryStatus = 'pending' | 'approved' | 'rejected';
+
+/**
  * Query model matching backend QueryResponse
  */
 export interface Query {
@@ -79,6 +84,13 @@ export interface Query {
   parameters: QueryParameter[];
   output_columns?: OutputColumn[];
   constraints?: string | null;
+  status: QueryStatus;
+  suggested_by?: 'user' | 'agent' | 'admin' | null;
+  suggestion_context?: Record<string, unknown> | null;
+  parent_query_id?: string | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  rejection_reason?: string | null;
 }
 
 /**
@@ -195,7 +207,7 @@ export interface PendingQuery {
   parameters: QueryParameter[];
   output_columns?: OutputColumn[];
   constraints?: string | null;
-  status: 'pending' | 'approved' | 'rejected';
+  status: QueryStatus;
   suggested_by: 'user' | 'agent' | 'admin';
   suggestion_context?: Record<string, unknown> | null;
   parent_query_id?: string | null;
