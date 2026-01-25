@@ -1,7 +1,7 @@
 # TASK: Question Generation During Extraction
 
 **Priority:** 3 (High)
-**Status:** In Progress
+**Status:** Complete
 **Parent:** PLAN-ontology-next.md
 **Design Reference:** PLAN-ontology-question-generation.md (archived)
 
