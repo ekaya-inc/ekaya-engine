@@ -71,11 +71,35 @@ Verified: No pointer bug exists.
 - Code uses `for i := range stats` with `&stats[i]` (not `for _, stat := range` with `&stat`)
 - This correctly takes address of slice element, not loop variable - slice elements persist
 
-### Step 4: Check Type Differences
+### Step 4: Check Type Differences ✓
 
-The pattern (text/integer fail, timestamp/numeric succeed) suggests possible type-related issues:
-- Check if there's different handling for different column types
-- Check if the SQL query returns different types for different columns
+Investigation complete. Key findings:
+
+1. **SQL queries treat all types identically for `distinct_count`**
+   - `COUNT(DISTINCT %s)` used for all column types
+   - Only `min_length`/`max_length` have type-specific logic (LENGTH for text-compatible types)
+   - File: `pkg/adapters/datasource/postgres/schema.go:260-283`
+
+2. **The failure pattern (60% text, 50% integer) suggests DATA-dependent issues, not TYPE-dependent**
+   - If type-specific handling was the cause, we'd expect uniform failure rates per type
+   - Different failure rates indicate individual column issues that correlate with type
+
+3. **timestamp columns are excluded from joinability analysis**
+   - `isExcludedJoinType()` returns true for timestamp, timestamptz, date, etc.
+   - File: `pkg/services/deterministic_relationship_service.go:431-446`
+   - Stats ARE still collected for excluded types, but `is_joinable=false`
+   - The verification query filters `WHERE is_joinable=true`, excluding timestamp from results
+
+4. **0% null for timestamp/numeric likely means they're filtered out, not "working"**
+   - timestamp: filtered out because `is_joinable=false` (type excluded)
+   - numeric: NOT in the excluded types list - needs separate verification
+
+5. **Root cause likely NOT in type handling** - need to check:
+   - Column name matching between query results and map lookups
+   - Whether specific columns fail the main query and fall back to retry
+   - Whether retry logic correctly handles all cases
+
+**Conclusion:** Type-based exclusion explains timestamp's 0%, but the text/integer pattern suggests a data-dependent issue. The logging added in Steps 1-2 should reveal the actual failure point.
 
 ## Files to Modify
 
