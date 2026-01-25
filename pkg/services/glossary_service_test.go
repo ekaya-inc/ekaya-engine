@@ -266,6 +266,18 @@ func (m *mockEntityRepoForGlossary) GetOccurrenceTablesByEntity(ctx context.Cont
 	return nil, nil
 }
 
+func (m *mockEntityRepoForGlossary) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepoForGlossary) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepoForGlossary) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 type mockLLMClientForGlossary struct {
 	responseContent string
 	generateErr     error

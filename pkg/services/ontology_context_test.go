@@ -163,6 +163,18 @@ func (m *mockOntologyEntityRepository) GetOccurrenceTablesByEntity(ctx context.C
 	return nil, nil
 }
 
+func (m *mockOntologyEntityRepository) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockOntologyEntityRepository) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockOntologyEntityRepository) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 // mockEntityRelationshipRepository is a mock for EntityRelationshipRepository.
 type mockEntityRelationshipRepository struct {
 	relationships         []*models.EntityRelationship
@@ -242,6 +254,18 @@ func (m *mockEntityRelationshipRepository) GetByID(ctx context.Context, id uuid.
 
 func (m *mockEntityRelationshipRepository) Update(ctx context.Context, rel *models.EntityRelationship) error {
 	return nil
+}
+
+func (m *mockEntityRelationshipRepository) MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRelationshipRepository) ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRelationshipRepository) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
 }
 
 // mockProjectServiceForOntology is a mock for ProjectService in ontology context tests.

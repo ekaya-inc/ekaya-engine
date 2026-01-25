@@ -171,10 +171,14 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 		return nil, fmt.Errorf("get or create ontology: %w", err)
 	}
 
-	// Delete only inference-created entities for fresh discovery
-	// Manual and MCP entities are preserved
-	if err := s.entityRepo.DeleteInferenceEntitiesByOntology(ctx, ontology.ID); err != nil {
-		return nil, fmt.Errorf("delete inference entities: %w", err)
+	// Mark inference-created entities and relationships as stale for re-evaluation
+	// Manual and MCP entities/relationships are preserved unchanged
+	// The stale flag will be cleared when items are re-discovered or re-enriched
+	if err := s.entityRepo.MarkInferenceEntitiesStale(ctx, ontology.ID); err != nil {
+		return nil, fmt.Errorf("mark inference entities stale: %w", err)
+	}
+	if err := s.relationshipRepo.MarkInferenceRelationshipsStale(ctx, ontology.ID); err != nil {
+		return nil, fmt.Errorf("mark inference relationships stale: %w", err)
 	}
 
 	// Create new DAG

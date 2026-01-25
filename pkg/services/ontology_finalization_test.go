@@ -153,6 +153,18 @@ func (m *mockEntityRepoForFinalization) GetOccurrenceTablesByEntity(ctx context.
 	return nil, nil
 }
 
+func (m *mockEntityRepoForFinalization) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepoForFinalization) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepoForFinalization) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 type mockRelationshipRepoForFinalization struct {
 	relationships   []*models.EntityRelationship
 	getByProjectErr error
@@ -219,6 +231,18 @@ func (m *mockRelationshipRepoForFinalization) GetByID(ctx context.Context, id uu
 
 func (m *mockRelationshipRepoForFinalization) Update(ctx context.Context, rel *models.EntityRelationship) error {
 	return nil
+}
+
+func (m *mockRelationshipRepoForFinalization) MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockRelationshipRepoForFinalization) ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockRelationshipRepoForFinalization) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
 }
 
 type mockSchemaRepoForFinalization struct {

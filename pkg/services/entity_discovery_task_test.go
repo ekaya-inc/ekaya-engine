@@ -352,6 +352,18 @@ func (m *mockEntityRepoForTask) GetOccurrenceTablesByEntity(ctx context.Context,
 	return nil, nil
 }
 
+func (m *mockEntityRepoForTask) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepoForTask) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepoForTask) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 var _ repositories.OntologyEntityRepository = (*mockEntityRepoForTask)(nil)
 
 func TestEntityDiscoveryTask_PersistEntities_SetsConfidence(t *testing.T) {

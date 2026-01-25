@@ -92,6 +92,18 @@ func (r *testRelEnrichmentRelRepo) Update(ctx context.Context, rel *models.Entit
 	return nil
 }
 
+func (r *testRelEnrichmentRelRepo) MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (r *testRelEnrichmentRelRepo) ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error {
+	return nil
+}
+
+func (r *testRelEnrichmentRelRepo) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
+}
+
 type testRelEnrichmentEntityRepo struct {
 	entities []*models.OntologyEntity
 }
@@ -181,6 +193,18 @@ func (r *testRelEnrichmentEntityRepo) CountOccurrencesByEntity(ctx context.Conte
 }
 
 func (r *testRelEnrichmentEntityRepo) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	return nil, nil
+}
+
+func (r *testRelEnrichmentEntityRepo) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (r *testRelEnrichmentEntityRepo) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+
+func (r *testRelEnrichmentEntityRepo) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
 	return nil, nil
 }
 

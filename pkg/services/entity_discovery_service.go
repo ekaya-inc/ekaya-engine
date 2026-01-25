@@ -500,6 +500,8 @@ func (s *entityDiscoveryService) enrichEntityBatch(
 		entity.Domain = enrichment.Domain
 		// Provenance: LLM enrichment increases confidence from DDL-based 0.5 to 0.8
 		entity.Confidence = 0.8
+		// Clear stale flag - entity was successfully re-enriched
+		entity.IsStale = false
 		if err := s.entityRepo.Update(ctx, entity); err != nil {
 			s.logger.Error("Failed to update entity with enrichment",
 				zap.String("entity_id", entity.ID.String()),

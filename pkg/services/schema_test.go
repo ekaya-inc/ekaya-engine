@@ -2437,6 +2437,18 @@ func (m *mockEntityRepository) GetOccurrenceTablesByEntity(ctx context.Context, 
 	return nil, nil
 }
 
+func (m *mockEntityRepository) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepository) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepository) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 // newTestSchemaServiceWithEntityRepo creates a test schema service with entity repo support.
 func newTestSchemaServiceWithEntityRepo(repo *mockSchemaRepository, entityRepo *mockEntityRepository, dsSvc *mockDatasourceService, factory *mockSchemaAdapterFactory) SchemaService {
 	return NewSchemaService(repo, entityRepo, nil, nil, dsSvc, factory, zap.NewNop())

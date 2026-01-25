@@ -87,7 +87,7 @@ Update SELECT queries to return new fields.
 **FK Discovery:** Set `source='ddl'`, `confidence=1.0` for FK-based relationships
 **PK Match Discovery:** Set `source='llm'`, `confidence` from match rate
 
-### Step 5: Update Re-extract Logic
+### Step 5: Update Re-extract Logic ✓
 
 Modify re-extract to:
 1. Check `verified_by_user` before deleting
@@ -120,5 +120,5 @@ Modify re-extract to:
 
 - [x] Provenance fields exist on entities and relationships
 - [x] New extractions populate source and confidence
-- [ ] User-verified items are preserved during re-extract
+- [x] User-verified items are preserved during re-extract
 - [ ] API returns provenance fields

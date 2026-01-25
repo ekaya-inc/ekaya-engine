@@ -28,6 +28,11 @@ type EntityRelationshipRepository interface {
 	UpdateDescriptionAndAssociation(ctx context.Context, id uuid.UUID, description string, association string) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error
+
+	// Stale marking for incremental refresh
+	MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error
+	ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error
+	GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error)
 }
 
 type entityRelationshipRepository struct{}
@@ -61,6 +66,12 @@ func (r *entityRelationshipRepository) Create(ctx context.Context, rel *models.E
 		rel.CreatedBy = models.ProvenanceInference
 	}
 
+	// Use ON CONFLICT DO UPDATE to handle re-discovery during ontology refresh.
+	// When an existing relationship is re-discovered:
+	// - Clear is_stale flag (relationship still exists in schema)
+	// - Update confidence and detection_method (may have changed)
+	// - Preserve description/association if already enriched (don't overwrite with NULL)
+	now := time.Now()
 	query := `
 		INSERT INTO engine_entity_relationships (
 			id, ontology_id, source_entity_id, target_entity_id,
@@ -72,7 +83,11 @@ func (r *entityRelationshipRepository) Create(ctx context.Context, rel *models.E
 		ON CONFLICT (ontology_id, source_entity_id, target_entity_id,
 			source_column_schema, source_column_table, source_column_name,
 			target_column_schema, target_column_table, target_column_name)
-		DO NOTHING`
+		DO UPDATE SET
+			is_stale = false,
+			confidence = EXCLUDED.confidence,
+			detection_method = EXCLUDED.detection_method,
+			updated_at = $20`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		rel.ID, rel.OntologyID, rel.SourceEntityID, rel.TargetEntityID,
@@ -80,6 +95,7 @@ func (r *entityRelationshipRepository) Create(ctx context.Context, rel *models.E
 		rel.TargetColumnSchema, rel.TargetColumnTable, rel.TargetColumnName,
 		rel.DetectionMethod, rel.Confidence, rel.Status, rel.Cardinality, rel.Description, rel.Association,
 		rel.IsStale, rel.CreatedBy, rel.CreatedAt,
+		now,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create entity relationship: %w", err)
@@ -346,9 +362,11 @@ func (r *entityRelationshipRepository) UpdateDescription(ctx context.Context, id
 		return fmt.Errorf("no tenant scope in context")
 	}
 
-	query := `UPDATE engine_entity_relationships SET description = $1 WHERE id = $2`
+	// Also clears is_stale since enrichment means the relationship was re-evaluated
+	now := time.Now()
+	query := `UPDATE engine_entity_relationships SET description = $1, is_stale = false, updated_at = $3 WHERE id = $2`
 
-	_, err := scope.Conn.Exec(ctx, query, description, id)
+	_, err := scope.Conn.Exec(ctx, query, description, id, now)
 	if err != nil {
 		return fmt.Errorf("failed to update entity relationship description: %w", err)
 	}
@@ -362,9 +380,11 @@ func (r *entityRelationshipRepository) UpdateDescriptionAndAssociation(ctx conte
 		return fmt.Errorf("no tenant scope in context")
 	}
 
-	query := `UPDATE engine_entity_relationships SET description = $1, association = $2 WHERE id = $3`
+	// Also clears is_stale since enrichment means the relationship was re-evaluated
+	now := time.Now()
+	query := `UPDATE engine_entity_relationships SET description = $1, association = $2, is_stale = false, updated_at = $4 WHERE id = $3`
 
-	_, err := scope.Conn.Exec(ctx, query, description, association, id)
+	_, err := scope.Conn.Exec(ctx, query, description, association, id, now)
 	if err != nil {
 		return fmt.Errorf("failed to update entity relationship description and association: %w", err)
 	}
@@ -386,6 +406,86 @@ func (r *entityRelationshipRepository) DeleteByOntology(ctx context.Context, ont
 	}
 
 	return nil
+}
+
+// MarkInferenceRelationshipsStale marks all inference-created relationships as stale for re-enrichment.
+// This is used during ontology refresh to preserve manual/MCP relationships while allowing
+// inference relationships to be re-evaluated.
+func (r *entityRelationshipRepository) MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	now := time.Now()
+	query := `
+		UPDATE engine_entity_relationships
+		SET is_stale = true, updated_at = $2
+		WHERE ontology_id = $1 AND created_by = 'inference'`
+
+	_, err := scope.Conn.Exec(ctx, query, ontologyID, now)
+	if err != nil {
+		return fmt.Errorf("failed to mark inference relationships as stale: %w", err)
+	}
+
+	return nil
+}
+
+// ClearStaleFlag clears the is_stale flag after re-enrichment.
+func (r *entityRelationshipRepository) ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	now := time.Now()
+	query := `UPDATE engine_entity_relationships SET is_stale = false, updated_at = $2 WHERE id = $1`
+
+	_, err := scope.Conn.Exec(ctx, query, relationshipID, now)
+	if err != nil {
+		return fmt.Errorf("failed to clear stale flag: %w", err)
+	}
+
+	return nil
+}
+
+// GetStaleRelationships returns all relationships marked as stale for the given ontology.
+func (r *entityRelationshipRepository) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT id, ontology_id, source_entity_id, target_entity_id,
+		       source_column_schema, source_column_table, source_column_name,
+		       target_column_schema, target_column_table, target_column_name,
+		       detection_method, confidence, status, cardinality, description, association,
+		       is_stale, created_by, updated_by, created_at, updated_at
+		FROM engine_entity_relationships
+		WHERE ontology_id = $1 AND is_stale = true
+		ORDER BY source_column_table, source_column_name`
+
+	rows, err := scope.Conn.Query(ctx, query, ontologyID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query stale relationships: %w", err)
+	}
+	defer rows.Close()
+
+	var relationships []*models.EntityRelationship
+	for rows.Next() {
+		rel, err := scanEntityRelationship(rows)
+		if err != nil {
+			return nil, err
+		}
+		relationships = append(relationships, rel)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating stale relationships: %w", err)
+	}
+
+	return relationships, nil
 }
 
 func (r *entityRelationshipRepository) GetByEntityPair(ctx context.Context, ontologyID uuid.UUID, fromEntityID uuid.UUID, toEntityID uuid.UUID) (*models.EntityRelationship, error) {

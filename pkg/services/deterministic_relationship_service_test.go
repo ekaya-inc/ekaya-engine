@@ -1466,6 +1466,18 @@ func (m *mockTestEntityRepo) DeleteInferenceEntitiesByOntology(ctx context.Conte
 	return nil
 }
 
+func (m *mockTestEntityRepo) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockTestEntityRepo) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockTestEntityRepo) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 func (m *mockTestRelationshipRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }
@@ -1518,6 +1530,18 @@ func (m *mockTestRelationshipRepo) GetByEntityPair(ctx context.Context, ontology
 
 func (m *mockTestRelationshipRepo) Upsert(ctx context.Context, rel *models.EntityRelationship) error {
 	return nil
+}
+
+func (m *mockTestRelationshipRepo) MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockTestRelationshipRepo) ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockTestRelationshipRepo) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
 }
 
 func (m *mockTestSchemaRepo) GetJoinableColumns(ctx context.Context, projectID, tableID uuid.UUID) ([]*models.SchemaColumn, error) {

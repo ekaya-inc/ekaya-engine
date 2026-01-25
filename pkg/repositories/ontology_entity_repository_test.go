@@ -1252,3 +1252,206 @@ func TestOntologyEntityRepository_DeleteAlias_CascadeOnEntityDelete(t *testing.T
 // NOTE: These tests were removed because the engine_ontology_entity_occurrences
 // table was dropped in migration 030. The repository methods now return empty
 // results for interface compatibility.
+
+// ============================================================================
+// Stale Marking Tests (for Incremental Ontology Refresh)
+// ============================================================================
+
+func TestOntologyEntityRepository_MarkInferenceEntitiesStale_Success(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create entities with different provenance
+	inferenceEntity1 := tc.createTestEntityWithProvenance(ctx, "inference1", models.ProvenanceInference)
+	inferenceEntity2 := tc.createTestEntityWithProvenance(ctx, "inference2", models.ProvenanceInference)
+	manualEntity := tc.createTestEntityWithProvenance(ctx, "manual", models.ProvenanceManual)
+	mcpEntity := tc.createTestEntityWithProvenance(ctx, "mcp", models.ProvenanceMCP)
+
+	// Mark inference entities as stale
+	err := tc.repo.MarkInferenceEntitiesStale(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("MarkInferenceEntitiesStale failed: %v", err)
+	}
+
+	// Verify inference entities are stale
+	staleEntities, err := tc.repo.GetStaleEntities(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("GetStaleEntities failed: %v", err)
+	}
+	if len(staleEntities) != 2 {
+		t.Errorf("expected 2 stale entities, got %d", len(staleEntities))
+	}
+
+	// Verify specific entities
+	staleIDs := make(map[uuid.UUID]bool)
+	for _, e := range staleEntities {
+		staleIDs[e.ID] = true
+	}
+	if !staleIDs[inferenceEntity1.ID] {
+		t.Error("expected inference1 to be stale")
+	}
+	if !staleIDs[inferenceEntity2.ID] {
+		t.Error("expected inference2 to be stale")
+	}
+
+	// Verify manual and MCP entities are NOT stale
+	retrievedManual, _ := tc.repo.GetByID(ctx, manualEntity.ID)
+	if retrievedManual.IsStale {
+		t.Error("manual entity should not be stale")
+	}
+	retrievedMCP, _ := tc.repo.GetByID(ctx, mcpEntity.ID)
+	if retrievedMCP.IsStale {
+		t.Error("MCP entity should not be stale")
+	}
+}
+
+func TestOntologyEntityRepository_MarkInferenceEntitiesStale_SkipsDeleted(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create an inference entity and soft-delete it
+	deletedEntity := tc.createTestEntityWithProvenance(ctx, "deleted_inference", models.ProvenanceInference)
+	err := tc.repo.SoftDelete(ctx, deletedEntity.ID, "test deletion")
+	if err != nil {
+		t.Fatalf("SoftDelete failed: %v", err)
+	}
+
+	// Create an active inference entity
+	tc.createTestEntityWithProvenance(ctx, "active_inference", models.ProvenanceInference)
+
+	// Mark inference entities as stale
+	err = tc.repo.MarkInferenceEntitiesStale(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("MarkInferenceEntitiesStale failed: %v", err)
+	}
+
+	// Only non-deleted entity should be stale
+	staleEntities, err := tc.repo.GetStaleEntities(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("GetStaleEntities failed: %v", err)
+	}
+	if len(staleEntities) != 1 {
+		t.Errorf("expected 1 stale entity, got %d", len(staleEntities))
+	}
+}
+
+func TestOntologyEntityRepository_ClearStaleFlag_Success(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create and mark an entity as stale
+	entity := tc.createTestEntityWithProvenance(ctx, "inference", models.ProvenanceInference)
+	err := tc.repo.MarkInferenceEntitiesStale(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("MarkInferenceEntitiesStale failed: %v", err)
+	}
+
+	// Verify it's stale
+	staleEntities, _ := tc.repo.GetStaleEntities(ctx, tc.ontologyID)
+	if len(staleEntities) != 1 {
+		t.Fatal("expected entity to be stale before clearing")
+	}
+
+	// Clear stale flag
+	err = tc.repo.ClearStaleFlag(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("ClearStaleFlag failed: %v", err)
+	}
+
+	// Verify it's no longer stale
+	staleEntities, _ = tc.repo.GetStaleEntities(ctx, tc.ontologyID)
+	if len(staleEntities) != 0 {
+		t.Errorf("expected 0 stale entities after clearing, got %d", len(staleEntities))
+	}
+}
+
+func TestOntologyEntityRepository_GetStaleEntities_Empty(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create entities but don't mark any as stale
+	tc.createTestEntityWithProvenance(ctx, "entity1", models.ProvenanceInference)
+	tc.createTestEntityWithProvenance(ctx, "entity2", models.ProvenanceManual)
+
+	staleEntities, err := tc.repo.GetStaleEntities(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("GetStaleEntities failed: %v", err)
+	}
+	if len(staleEntities) != 0 {
+		t.Errorf("expected 0 stale entities, got %d", len(staleEntities))
+	}
+}
+
+func TestOntologyEntityRepository_Create_ClearsStaleOnRediscovery(t *testing.T) {
+	tc := setupOntologyEntityTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create an inference entity
+	original := tc.createTestEntityWithProvenance(ctx, "user", models.ProvenanceInference)
+
+	// Mark it as stale (simulating start of ontology refresh)
+	err := tc.repo.MarkInferenceEntitiesStale(ctx, tc.ontologyID)
+	if err != nil {
+		t.Fatalf("MarkInferenceEntitiesStale failed: %v", err)
+	}
+
+	// Verify it's stale
+	staleEntities, _ := tc.repo.GetStaleEntities(ctx, tc.ontologyID)
+	if len(staleEntities) != 1 {
+		t.Fatal("expected entity to be stale")
+	}
+
+	// Re-create the entity (simulating re-discovery during refresh)
+	recreated := &models.OntologyEntity{
+		ProjectID:     tc.projectID,
+		OntologyID:    tc.ontologyID,
+		Name:          "user",
+		Description:   "", // Empty description simulates DDL discovery
+		PrimarySchema: "public",
+		PrimaryTable:  "users",
+		PrimaryColumn: "id",
+		IsStale:       false, // New entities are not stale
+	}
+	err = tc.repo.Create(ctx, recreated)
+	if err != nil {
+		t.Fatalf("Create (rediscovery) failed: %v", err)
+	}
+
+	// Verify the entity ID was preserved (upsert)
+	if recreated.ID != original.ID {
+		t.Errorf("expected ID to be preserved on upsert, got different IDs")
+	}
+
+	// Verify stale flag is cleared
+	staleEntities, _ = tc.repo.GetStaleEntities(ctx, tc.ontologyID)
+	if len(staleEntities) != 0 {
+		t.Errorf("expected stale flag to be cleared on rediscovery, got %d stale entities", len(staleEntities))
+	}
+
+	// Verify the entity is still accessible
+	retrieved, err := tc.repo.GetByName(ctx, tc.ontologyID, "user")
+	if err != nil {
+		t.Fatalf("GetByName failed: %v", err)
+	}
+	if retrieved == nil {
+		t.Fatal("expected entity to exist after rediscovery")
+	}
+	if retrieved.IsStale {
+		t.Error("expected IsStale to be false after rediscovery")
+	}
+}

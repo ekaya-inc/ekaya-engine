@@ -87,6 +87,18 @@ func (m *mockEntityDiscoveryEntityRepo) GetOccurrenceTablesByEntity(ctx context.
 	return nil, nil
 }
 
+func (m *mockEntityDiscoveryEntityRepo) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityDiscoveryEntityRepo) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityDiscoveryEntityRepo) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 var _ repositories.OntologyEntityRepository = (*mockEntityDiscoveryEntityRepo)(nil)
 
 type mockEntityDiscoveryConversationRepo struct {

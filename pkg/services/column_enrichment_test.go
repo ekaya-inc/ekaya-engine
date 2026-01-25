@@ -163,6 +163,18 @@ func (r *testColEnrichmentEntityRepo) GetOccurrenceTablesByEntity(ctx context.Co
 	return nil, nil
 }
 
+func (r *testColEnrichmentEntityRepo) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (r *testColEnrichmentEntityRepo) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+
+func (r *testColEnrichmentEntityRepo) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 type testColEnrichmentRelRepo struct{}
 
 func (r *testColEnrichmentRelRepo) GetByTables(ctx context.Context, projectID uuid.UUID, tableNames []string) ([]*models.EntityRelationship, error) {
@@ -220,6 +232,18 @@ func (r *testColEnrichmentRelRepo) GetByID(ctx context.Context, id uuid.UUID) (*
 
 func (r *testColEnrichmentRelRepo) Update(ctx context.Context, rel *models.EntityRelationship) error {
 	return nil
+}
+
+func (r *testColEnrichmentRelRepo) MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (r *testColEnrichmentRelRepo) ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error {
+	return nil
+}
+
+func (r *testColEnrichmentRelRepo) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
 }
 
 type testColEnrichmentSchemaRepo struct {
@@ -1742,6 +1766,18 @@ func (r *testSelfRefRelRepo) GetByID(ctx context.Context, id uuid.UUID) (*models
 
 func (r *testSelfRefRelRepo) Update(ctx context.Context, rel *models.EntityRelationship) error {
 	return nil
+}
+
+func (r *testSelfRefRelRepo) MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (r *testSelfRefRelRepo) ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error {
+	return nil
+}
+
+func (r *testSelfRefRelRepo) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
 }
 
 // TestColumnEnrichmentService_EnrichTable_IntegerEnumInference tests that integer enum

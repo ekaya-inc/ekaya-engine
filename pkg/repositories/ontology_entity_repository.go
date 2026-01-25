@@ -25,6 +25,11 @@ type OntologyEntityRepository interface {
 	DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error
 	Update(ctx context.Context, entity *models.OntologyEntity) error
 
+	// Stale marking for incremental refresh
+	MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error
+	ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error
+	GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error)
+
 	// Soft delete operations
 	SoftDelete(ctx context.Context, entityID uuid.UUID, reason string) error
 	Restore(ctx context.Context, entityID uuid.UUID) error
@@ -285,6 +290,84 @@ func (r *ontologyEntityRepository) DeleteInferenceEntitiesByOntology(ctx context
 	}
 
 	return nil
+}
+
+// MarkInferenceEntitiesStale marks all inference-created entities as stale for re-enrichment.
+// This is used during ontology refresh to preserve manual/MCP entities while allowing
+// inference entities to be re-evaluated.
+func (r *ontologyEntityRepository) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		UPDATE engine_ontology_entities
+		SET is_stale = true, updated_at = $2
+		WHERE ontology_id = $1 AND created_by = 'inference' AND NOT is_deleted`
+
+	_, err := scope.Conn.Exec(ctx, query, ontologyID, time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to mark inference entities as stale: %w", err)
+	}
+
+	return nil
+}
+
+// ClearStaleFlag clears the is_stale flag after re-enrichment.
+func (r *ontologyEntityRepository) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `UPDATE engine_ontology_entities SET is_stale = false, updated_at = $2 WHERE id = $1`
+
+	_, err := scope.Conn.Exec(ctx, query, entityID, time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to clear stale flag: %w", err)
+	}
+
+	return nil
+}
+
+// GetStaleEntities returns all entities marked as stale for the given ontology.
+func (r *ontologyEntityRepository) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT id, project_id, ontology_id, name, description, domain,
+		       primary_schema, primary_table, primary_column,
+		       is_deleted, deletion_reason,
+		       confidence, is_stale,
+		       created_by, updated_by, created_at, updated_at
+		FROM engine_ontology_entities
+		WHERE ontology_id = $1 AND is_stale = true AND NOT is_deleted
+		ORDER BY name`
+
+	rows, err := scope.Conn.Query(ctx, query, ontologyID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query stale entities: %w", err)
+	}
+	defer rows.Close()
+
+	var entities []*models.OntologyEntity
+	for rows.Next() {
+		entity, err := scanOntologyEntity(rows)
+		if err != nil {
+			return nil, err
+		}
+		entities = append(entities, entity)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating stale entities: %w", err)
+	}
+
+	return entities, nil
 }
 
 // ============================================================================
