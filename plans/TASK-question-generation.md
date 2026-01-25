@@ -74,7 +74,7 @@ if len(response.Questions) > 0 {
 }
 ```
 
-### Step 4: Add Deterministic Question Generation
+### Step 4: Add Deterministic Question Generation [x]
 
 Generate questions without LLM based on data patterns:
 
