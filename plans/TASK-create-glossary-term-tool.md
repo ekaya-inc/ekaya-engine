@@ -105,7 +105,7 @@ Ensure `create_glossary_term` is in the developer tools list so it requires the 
 
 ## Success Criteria
 
-- [ ] Tool registered and callable
+- [x] Tool registered and callable
 - [ ] SQL validation works (invalid SQL rejected)
 - [ ] Source set to 'client' for client-created terms
 - [ ] Integration tests pass

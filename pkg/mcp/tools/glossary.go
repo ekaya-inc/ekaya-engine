@@ -36,6 +36,7 @@ func (d *GlossaryToolDeps) GetLogger() *zap.Logger { return d.Logger }
 func RegisterGlossaryTools(s *server.MCPServer, deps *GlossaryToolDeps) {
 	registerListGlossaryTool(s, deps)
 	registerGetGlossarySQLTool(s, deps)
+	registerCreateGlossaryTermTool(s, deps)
 	registerUpdateGlossaryTermTool(s, deps)
 	registerDeleteGlossaryTermTool(s, deps)
 }
@@ -202,6 +203,101 @@ func toGetGlossarySQLResponse(term *models.BusinessGlossaryTerm) getGlossarySQLR
 		EnrichmentStatus: term.EnrichmentStatus,
 		EnrichmentError:  term.EnrichmentError,
 	}
+}
+
+// registerCreateGlossaryTermTool adds the create_glossary_term tool for creating new business terms.
+// Unlike update_glossary_term (which uses upsert semantics), this tool explicitly creates a new term
+// and will fail if a term with the same name already exists.
+func registerCreateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps) {
+	tool := mcp.NewTool(
+		"create_glossary_term",
+		mcp.WithDescription(
+			"Create a new business glossary term with its SQL definition. "+
+				"The SQL will be validated before saving. "+
+				"Use this to add new business metrics like 'Revenue', 'Active Users', etc.",
+		),
+		mcp.WithString("term", mcp.Required(),
+			mcp.Description("The business term name (e.g., 'Daily Active Users')")),
+		mcp.WithString("definition", mcp.Required(),
+			mcp.Description("Human-readable description of what this term means")),
+		mcp.WithString("defining_sql", mcp.Required(),
+			mcp.Description("SQL query that calculates this metric")),
+		mcp.WithString("base_table",
+			mcp.Description("Primary table this term is derived from (optional)")),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "create_glossary_term")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		term, _ := req.RequireString("term")
+		definition, _ := req.RequireString("definition")
+		definingSQL, _ := req.RequireString("defining_sql")
+		baseTable := getOptionalString(req, "base_table")
+
+		// Validate term is not empty after trimming whitespace
+		term = trimString(term)
+		if term == "" {
+			return NewErrorResult("invalid_parameters", "parameter 'term' cannot be empty"), nil
+		}
+
+		// Reject test-like term names to prevent test data in glossary
+		if services.IsTestTerm(term) {
+			return NewErrorResult("invalid_parameters",
+				"term name appears to be test data - use a real business term"), nil
+		}
+
+		glossaryTerm := &models.BusinessGlossaryTerm{
+			ProjectID:   projectID,
+			Term:        term,
+			Definition:  definition,
+			DefiningSQL: definingSQL,
+			BaseTable:   baseTable,
+			Source:      models.GlossarySourceMCP,
+		}
+
+		err = deps.GlossaryService.CreateTerm(tenantCtx, projectID, glossaryTerm)
+		if err != nil {
+			return NewErrorResult("create_failed", err.Error()), nil
+		}
+
+		deps.Logger.Info("Created glossary term via MCP",
+			zap.String("project_id", projectID.String()),
+			zap.String("term", term))
+
+		// Return the created term
+		response := struct {
+			Success bool `json:"success"`
+			Term    struct {
+				ID         string `json:"id"`
+				Term       string `json:"term"`
+				Definition string `json:"definition"`
+			} `json:"term"`
+		}{
+			Success: true,
+			Term: struct {
+				ID         string `json:"id"`
+				Term       string `json:"term"`
+				Definition string `json:"definition"`
+			}{
+				ID:         glossaryTerm.ID.String(),
+				Term:       glossaryTerm.Term,
+				Definition: glossaryTerm.Definition,
+			},
+		}
+
+		jsonResult, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
 }
 
 // registerUpdateGlossaryTermTool adds the update_glossary_term tool for creating/updating business terms.

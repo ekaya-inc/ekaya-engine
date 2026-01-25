@@ -57,6 +57,7 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "get_ontology", Description: "Get business ontology for query generation", ToolGroup: ToolGroupApprovedQueries},
 	{Name: "list_glossary", Description: "List all business glossary terms", ToolGroup: ToolGroupApprovedQueries},
 	{Name: "get_glossary_sql", Description: "Get SQL definition for a business term", ToolGroup: ToolGroupApprovedQueries},
+	{Name: "create_glossary_term", Description: "Create a new business glossary term with SQL definition", ToolGroup: ToolGroupDeveloper},
 	{Name: "update_glossary_term", Description: "Create or update a business glossary term with upsert semantics (definition, sql, aliases)", ToolGroup: ToolGroupDeveloper},
 	{Name: "delete_glossary_term", Description: "Delete a business glossary term that's no longer relevant", ToolGroup: ToolGroupDeveloper},
 	{Name: "list_approved_queries", Description: "List pre-approved SQL queries", ToolGroup: ToolGroupApprovedQueries},
