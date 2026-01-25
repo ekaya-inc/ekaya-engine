@@ -66,6 +66,9 @@ type QueryService interface {
 	DirectCreate(ctx context.Context, projectID, datasourceID uuid.UUID, req *CreateQueryRequest) (*models.Query, error)
 	// DirectUpdate updates an existing query directly (no pending record).
 	DirectUpdate(ctx context.Context, projectID, queryID uuid.UUID, req *UpdateQueryRequest) (*models.Query, error)
+	// DeleteWithPendingRejection soft-deletes a query and auto-rejects any pending update suggestions.
+	// Returns the count of pending suggestions that were auto-rejected.
+	DeleteWithPendingRejection(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string) (int, error)
 
 	// Approval Workflow - Review Operations
 	// ApproveQuery approves a pending query suggestion.
@@ -1348,4 +1351,55 @@ func (s *queryService) ListPending(ctx context.Context, projectID uuid.UUID) ([]
 		return nil, fmt.Errorf("failed to list pending queries: %w", err)
 	}
 	return queries, nil
+}
+
+// DeleteWithPendingRejection soft-deletes a query and auto-rejects any pending update suggestions.
+// Returns the count of pending suggestions that were auto-rejected.
+func (s *queryService) DeleteWithPendingRejection(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string) (int, error) {
+	// Verify query exists
+	_, err := s.queryRepo.GetByID(ctx, projectID, queryID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return 0, apperrors.ErrNotFound
+		}
+		return 0, fmt.Errorf("failed to get query: %w", err)
+	}
+
+	// Get pending update suggestions for this query
+	pendingSuggestions, err := s.queryRepo.GetPendingUpdatesForQuery(ctx, projectID, queryID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get pending updates: %w", err)
+	}
+
+	// Auto-reject all pending suggestions with reason "Original query was deleted"
+	reason := "Original query was deleted"
+	rejectedCount := 0
+	for _, suggestion := range pendingSuggestions {
+		if err := s.queryRepo.UpdateApprovalStatus(ctx, projectID, suggestion.ID, "rejected", reviewerID, &reason); err != nil {
+			s.logger.Error("Failed to auto-reject pending suggestion",
+				zap.String("suggestion_id", suggestion.ID.String()),
+				zap.String("query_id", queryID.String()),
+				zap.Error(err))
+			// Continue with other rejections even if one fails
+			continue
+		}
+		rejectedCount++
+		s.logger.Info("Auto-rejected pending suggestion due to query deletion",
+			zap.String("suggestion_id", suggestion.ID.String()),
+			zap.String("query_id", queryID.String()),
+		)
+	}
+
+	// Soft-delete the query
+	if err := s.queryRepo.SoftDelete(ctx, projectID, queryID); err != nil {
+		return rejectedCount, fmt.Errorf("failed to delete query: %w", err)
+	}
+
+	s.logger.Info("Deleted query with pending rejection",
+		zap.String("id", queryID.String()),
+		zap.String("project_id", projectID.String()),
+		zap.Int("rejected_count", rejectedCount),
+	)
+
+	return rejectedCount, nil
 }

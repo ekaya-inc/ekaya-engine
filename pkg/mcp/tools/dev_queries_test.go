@@ -1311,3 +1311,164 @@ func TestUpdateApprovedQueryResponse_AllFieldsUpdated(t *testing.T) {
 	require.True(t, ok)
 	assert.Len(t, updated, 7)
 }
+
+// Tests for delete_approved_query tool
+
+func TestDeleteApprovedQueryResponse_Structure(t *testing.T) {
+	// Test that the response structure is correct
+	response := deleteApprovedQueryResponse{
+		Success:                  true,
+		Message:                  "Query deleted successfully.",
+		QueryID:                  uuid.New().String(),
+		RejectedSuggestionsCount: 0,
+	}
+
+	// Verify JSON serialization works
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	// Verify all required fields
+	assert.Equal(t, true, parsed["success"])
+	assert.Equal(t, "Query deleted successfully.", parsed["message"])
+	assert.NotEmpty(t, parsed["query_id"])
+	assert.Equal(t, float64(0), parsed["rejected_suggestions_count"])
+}
+
+func TestDeleteApprovedQueryResponse_WithPendingSuggestions(t *testing.T) {
+	// Test response when pending suggestions were auto-rejected
+	queryID := uuid.New()
+	response := deleteApprovedQueryResponse{
+		Success:                  true,
+		Message:                  "Query deleted successfully. 3 pending update suggestion(s) were auto-rejected.",
+		QueryID:                  queryID.String(),
+		RejectedSuggestionsCount: 3,
+	}
+
+	// Verify JSON serialization works
+	jsonBytes, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &parsed))
+
+	// Verify all required fields
+	assert.Equal(t, true, parsed["success"])
+	assert.Contains(t, parsed["message"], "3 pending update suggestion(s)")
+	assert.Equal(t, queryID.String(), parsed["query_id"])
+	assert.Equal(t, float64(3), parsed["rejected_suggestions_count"])
+}
+
+func TestDeleteApprovedQuery_ToolRegistration(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &DevQueryToolDeps{
+		MCPConfigService: &mockMCPConfigService{
+			config: &models.ToolGroupConfig{Enabled: true},
+		},
+		ProjectService: &mockProjectService{},
+		QueryService:   &mockQueryService{},
+		Logger:         zap.NewNop(),
+	}
+
+	RegisterDevQueryTools(mcpServer, deps)
+
+	// Verify tools are registered
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	// Check all dev query tools are registered including delete_approved_query
+	toolNames := make(map[string]bool)
+	for _, tool := range response.Result.Tools {
+		toolNames[tool.Name] = true
+	}
+
+	assert.True(t, toolNames["list_query_suggestions"], "list_query_suggestions tool should be registered")
+	assert.True(t, toolNames["approve_query_suggestion"], "approve_query_suggestion tool should be registered")
+	assert.True(t, toolNames["reject_query_suggestion"], "reject_query_suggestion tool should be registered")
+	assert.True(t, toolNames["create_approved_query"], "create_approved_query tool should be registered")
+	assert.True(t, toolNames["update_approved_query"], "update_approved_query tool should be registered")
+	assert.True(t, toolNames["delete_approved_query"], "delete_approved_query tool should be registered")
+}
+
+func TestDeleteApprovedQuery_ToolDescription(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &DevQueryToolDeps{
+		MCPConfigService: &mockMCPConfigService{
+			config: &models.ToolGroupConfig{Enabled: true},
+		},
+		ProjectService: &mockProjectService{},
+		QueryService:   &mockQueryService{},
+		Logger:         zap.NewNop(),
+	}
+
+	RegisterDevQueryTools(mcpServer, deps)
+
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				InputSchema struct {
+					Required   []string       `json:"required"`
+					Properties map[string]any `json:"properties"`
+				} `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resultBytes, &response))
+
+	// Find delete_approved_query tool
+	var deleteTool *struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		InputSchema struct {
+			Required   []string       `json:"required"`
+			Properties map[string]any `json:"properties"`
+		} `json:"inputSchema"`
+	}
+	for i, tool := range response.Result.Tools {
+		if tool.Name == "delete_approved_query" {
+			deleteTool = &response.Result.Tools[i]
+			break
+		}
+	}
+
+	require.NotNil(t, deleteTool, "delete_approved_query tool should be found")
+
+	// Verify description mentions key points
+	assert.Contains(t, deleteTool.Description, "Delete")
+	assert.Contains(t, deleteTool.Description, "soft-deleted")
+	assert.Contains(t, deleteTool.Description, "pending update suggestions")
+	assert.Contains(t, deleteTool.Description, "auto")
+	assert.Contains(t, deleteTool.Description, "rejected")
+
+	// Verify required parameter exists
+	assert.Contains(t, deleteTool.InputSchema.Properties, "query_id")
+	assert.Contains(t, deleteTool.InputSchema.Required, "query_id")
+
+	// Only query_id should be required
+	assert.Len(t, deleteTool.InputSchema.Required, 1)
+}

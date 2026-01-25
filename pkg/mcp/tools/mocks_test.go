@@ -163,6 +163,10 @@ func (m *mockQueryService) ListPending(ctx context.Context, projectID uuid.UUID)
 	return nil, nil
 }
 
+func (m *mockQueryService) DeleteWithPendingRejection(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string) (int, error) {
+	return 0, nil
+}
+
 // mockProjectService implements services.ProjectService for testing.
 type mockProjectService struct {
 	defaultDatasourceID    uuid.UUID

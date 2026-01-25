@@ -71,7 +71,7 @@ This creates a governed workflow where Business Users (using ChatGPT, Claude Des
 | reject_query_suggestion | ✅ Done | Task 3.3 |
 | create_approved_query | ✅ Done | Task 3.4 |
 | update_approved_query | ✅ Done | Task 3.5 |
-| delete_approved_query | ❌ Pending | Task 3.6 |
+| delete_approved_query | ✅ Done | Task 3.6 |
 | **Tool Group Configuration** | | |
 | ToolGroupConfig.AllowClientSuggestions | ✅ Done | Field exists in model |
 | UI toggle for Allow Suggestions | ✅ Done | Toggle in MCP Server page |

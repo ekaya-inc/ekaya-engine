@@ -49,6 +49,7 @@ func RegisterDevQueryTools(mcpServer *server.MCPServer, deps *DevQueryToolDeps) 
 	registerRejectQuerySuggestionTool(mcpServer, deps)
 	registerCreateApprovedQueryTool(mcpServer, deps)
 	registerUpdateApprovedQueryTool(mcpServer, deps)
+	registerDeleteApprovedQueryTool(mcpServer, deps)
 }
 
 // querySuggestionInfo represents a single query suggestion in the response.
@@ -1043,6 +1044,107 @@ Use this for admin-initiated updates that bypass the suggestion workflow.`),
 			QueryID: queryID.String(),
 			Name:    updatedQuery.NaturalLanguagePrompt,
 			Updated: updatedFields,
+		}
+
+		responseJSON, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal response: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(responseJSON)), nil
+	}
+
+	mcpServer.AddTool(tool, handler)
+}
+
+// deleteApprovedQueryResponse is the response format for delete_approved_query.
+type deleteApprovedQueryResponse struct {
+	Success                bool   `json:"success"`
+	Message                string `json:"message"`
+	QueryID                string `json:"query_id"`
+	RejectedSuggestionsCount int  `json:"rejected_suggestions_count"`
+}
+
+// registerDeleteApprovedQueryTool registers the delete_approved_query tool.
+func registerDeleteApprovedQueryTool(mcpServer *server.MCPServer, deps *DevQueryToolDeps) {
+	tool := mcp.NewTool(
+		"delete_approved_query",
+		mcp.WithDescription(`Delete a pre-approved query.
+The query will be soft-deleted and no longer available for execution.
+Any pending update suggestions for this query will be automatically rejected with reason "Original query was deleted".`),
+		mcp.WithString("query_id",
+			mcp.Required(),
+			mcp.Description("UUID of the query to delete")),
+	)
+
+	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Check tool access
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "delete_approved_query")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Parse arguments
+		args, _ := request.Params.Arguments.(map[string]any)
+
+		// Parse required query_id
+		queryIDStr, ok := args["query_id"].(string)
+		if !ok || queryIDStr == "" {
+			return NewErrorResultWithDetails("invalid_parameters",
+				"query_id is required",
+				map[string]any{
+					"parameter": "query_id",
+				}), nil
+		}
+
+		queryID, err := uuid.Parse(queryIDStr)
+		if err != nil {
+			return NewErrorResultWithDetails("invalid_parameters",
+				"query_id is not a valid UUID",
+				map[string]any{
+					"parameter":    "query_id",
+					"actual_value": queryIDStr,
+				}), nil
+		}
+
+		// Get reviewer ID from context
+		reviewerID := auth.GetUserIDFromContext(ctx)
+		if reviewerID == "" {
+			reviewerID = "mcp-session" // Fallback for MCP sessions without user context
+		}
+
+		// Delete the query and auto-reject pending suggestions
+		rejectedCount, err := deps.QueryService.DeleteWithPendingRejection(tenantCtx, projectID, queryID, reviewerID)
+		if err != nil {
+			deps.Logger.Error("Failed to delete approved query",
+				zap.String("project_id", projectID.String()),
+				zap.String("query_id", queryID.String()),
+				zap.Error(err))
+			return NewErrorResultWithDetails("not_found",
+				"query not found",
+				map[string]any{
+					"query_id": queryIDStr,
+				}), nil
+		}
+
+		// Build response message
+		message := "Query deleted successfully."
+		if rejectedCount > 0 {
+			message = fmt.Sprintf("Query deleted successfully. %d pending update suggestion(s) were auto-rejected.", rejectedCount)
+		}
+
+		deps.Logger.Info("Deleted approved query",
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", queryID.String()),
+			zap.Int("rejected_suggestions", rejectedCount),
+		)
+
+		response := deleteApprovedQueryResponse{
+			Success:                  true,
+			Message:                  message,
+			QueryID:                  queryID.String(),
+			RejectedSuggestionsCount: rejectedCount,
 		}
 
 		responseJSON, err := json.Marshal(response)
