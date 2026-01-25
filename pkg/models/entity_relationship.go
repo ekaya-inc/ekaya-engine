@@ -45,8 +45,15 @@ type EntityRelationship struct {
 	Description        *string    `json:"description,omitempty"`        // Optional description of the relationship
 	Association        *string    `json:"association,omitempty"`        // Semantic association for this direction (e.g., "placed_by", "contains")
 	IsStale            bool       `json:"is_stale"`                     // True when schema changed and needs re-evaluation
-	CreatedBy          string     `json:"created_by"`                   // Provenance: 'manual', 'mcp', 'inference'
-	UpdatedBy          *string    `json:"updated_by,omitempty"`         // Who last updated (nil if never updated)
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          *time.Time `json:"updated_at,omitempty"`
+
+	// Provenance: source tracking (how it was created/modified)
+	Source         string  `json:"source"`                     // 'inference', 'mcp', 'manual'
+	LastEditSource *string `json:"last_edit_source,omitempty"` // How last modified (nil if never edited)
+
+	// Provenance: actor tracking (who created/modified)
+	CreatedBy *uuid.UUID `json:"created_by,omitempty"` // User who triggered creation (from JWT)
+	UpdatedBy *uuid.UUID `json:"updated_by,omitempty"` // User who last updated (nil if never updated)
+
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }

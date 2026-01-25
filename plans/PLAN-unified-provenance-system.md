@@ -7,7 +7,7 @@
 ## Tasks
 
 - [x] Task 1: Update Migration Files
-- [ ] Task 2: Update Models
+- [x] Task 2: Update Models
 - [ ] Task 3: Implement Provenance Context
 - [ ] Task 4: Update Repositories
 - [ ] Task 5: Implement Audit Service
