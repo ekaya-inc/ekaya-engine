@@ -84,9 +84,16 @@ func (r *ontologyEntityRepository) Create(ctx context.Context, entity *models.On
 		entity.ID = uuid.New()
 	}
 
-	// Set provenance fields from context
-	entity.Source = prov.Source.String()
-	entity.CreatedBy = &prov.UserID
+	// Set provenance fields from context (only if not already set explicitly)
+	if entity.Source == "" {
+		entity.Source = prov.Source.String()
+	}
+	// Only set CreatedBy if there's a valid user ID (not the nil UUID)
+	if prov.UserID != uuid.Nil {
+		entity.CreatedBy = &prov.UserID
+	} else {
+		entity.CreatedBy = nil
+	}
 
 	// Use ON CONFLICT to handle duplicate entity names within the same ontology.
 	// On conflict, merge descriptions by preferring the new description if it's non-empty,
@@ -290,7 +297,7 @@ func (r *ontologyEntityRepository) DeleteInferenceEntitiesByOntology(ctx context
 		return fmt.Errorf("no tenant scope in context")
 	}
 
-	query := `DELETE FROM engine_ontology_entities WHERE ontology_id = $1 AND source = 'inference'`
+	query := `DELETE FROM engine_ontology_entities WHERE ontology_id = $1 AND source = 'inferred'`
 
 	_, err := scope.Conn.Exec(ctx, query, ontologyID)
 	if err != nil {
@@ -330,7 +337,7 @@ func (r *ontologyEntityRepository) MarkInferenceEntitiesStale(ctx context.Contex
 	query := `
 		UPDATE engine_ontology_entities
 		SET is_stale = true, updated_at = $2
-		WHERE ontology_id = $1 AND source = 'inference' AND NOT is_deleted`
+		WHERE ontology_id = $1 AND source = 'inferred' AND NOT is_deleted`
 
 	_, err := scope.Conn.Exec(ctx, query, ontologyID, time.Now())
 	if err != nil {
@@ -444,7 +451,12 @@ func (r *ontologyEntityRepository) Update(ctx context.Context, entity *models.On
 	// Set provenance fields from context
 	lastEditSource := prov.Source.String()
 	entity.LastEditSource = &lastEditSource
-	entity.UpdatedBy = &prov.UserID
+	// Only set UpdatedBy if there's a valid user ID (not the nil UUID)
+	if prov.UserID != uuid.Nil {
+		entity.UpdatedBy = &prov.UserID
+	} else {
+		entity.UpdatedBy = nil
+	}
 
 	query := `
 		UPDATE engine_ontology_entities

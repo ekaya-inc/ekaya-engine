@@ -68,9 +68,16 @@ func (r *entityRelationshipRepository) Create(ctx context.Context, rel *models.E
 		rel.Cardinality = "unknown"
 	}
 
-	// Set provenance fields from context
-	rel.Source = prov.Source.String()
-	rel.CreatedBy = &prov.UserID
+	// Set provenance fields from context (only if not already set explicitly)
+	if rel.Source == "" {
+		rel.Source = prov.Source.String()
+	}
+	// Only set CreatedBy if there's a valid user ID (not the nil UUID)
+	if prov.UserID != uuid.Nil {
+		rel.CreatedBy = &prov.UserID
+	} else {
+		rel.CreatedBy = nil
+	}
 
 	// Use ON CONFLICT DO UPDATE to handle re-discovery during ontology refresh.
 	// When an existing relationship is re-discovered:
@@ -252,7 +259,7 @@ func (r *entityRelationshipRepository) GetByTables(ctx context.Context, projectI
 		       r.source_column_schema, r.source_column_table, r.source_column_name,
 		       r.target_column_schema, r.target_column_table, r.target_column_name,
 		       r.detection_method, r.confidence, r.status, r.cardinality, r.description, r.association,
-		       r.is_stale, r.created_by, r.updated_by, r.created_at, r.updated_at
+		       r.is_stale, r.source, r.last_edit_source, r.created_by, r.updated_by, r.created_at, r.updated_at
 		FROM engine_entity_relationships r
 		JOIN engine_ontologies o ON r.ontology_id = o.id
 		WHERE o.project_id = $1 AND o.is_active = true
@@ -364,7 +371,12 @@ func (r *entityRelationshipRepository) Update(ctx context.Context, rel *models.E
 	// Set provenance fields from context
 	lastEditSource := prov.Source.String()
 	rel.LastEditSource = &lastEditSource
-	rel.UpdatedBy = &prov.UserID
+	// Only set UpdatedBy if there's a valid user ID (not the nil UUID)
+	if prov.UserID != uuid.Nil {
+		rel.UpdatedBy = &prov.UserID
+	} else {
+		rel.UpdatedBy = nil
+	}
 
 	query := `
 		UPDATE engine_entity_relationships
@@ -474,7 +486,7 @@ func (r *entityRelationshipRepository) MarkInferenceRelationshipsStale(ctx conte
 	query := `
 		UPDATE engine_entity_relationships
 		SET is_stale = true, updated_at = $2
-		WHERE ontology_id = $1 AND source = 'inference'`
+		WHERE ontology_id = $1 AND source = 'inferred'`
 
 	_, err := scope.Conn.Exec(ctx, query, ontologyID, now)
 	if err != nil {
@@ -593,9 +605,15 @@ func (r *entityRelationshipRepository) Upsert(ctx context.Context, rel *models.E
 		rel.CreatedAt = time.Now()
 	}
 
-	// Set provenance fields from context
-	rel.Source = prov.Source.String()
-	rel.CreatedBy = &prov.UserID
+	// Set provenance fields from context (only if not already set explicitly)
+	if rel.Source == "" {
+		rel.Source = prov.Source.String()
+	}
+	if prov.UserID != uuid.Nil {
+		rel.CreatedBy = &prov.UserID
+	} else {
+		rel.CreatedBy = nil
+	}
 
 	now := time.Now()
 

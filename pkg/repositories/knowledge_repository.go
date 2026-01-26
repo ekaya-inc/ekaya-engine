@@ -53,7 +53,12 @@ func (r *knowledgeRepository) Upsert(ctx context.Context, fact *models.Knowledge
 		// Set provenance fields for update
 		lastEditSource := prov.Source.String()
 		fact.LastEditSource = &lastEditSource
-		fact.UpdatedBy = &prov.UserID
+		// Only set UpdatedBy if there's a valid user ID (not the nil UUID)
+		if prov.UserID != uuid.Nil {
+			fact.UpdatedBy = &prov.UserID
+		} else {
+			fact.UpdatedBy = nil
+		}
 
 		query := `
 			UPDATE engine_project_knowledge
@@ -81,7 +86,12 @@ func (r *knowledgeRepository) Upsert(ctx context.Context, fact *models.Knowledge
 
 	// Set provenance fields for create
 	fact.Source = prov.Source.String()
-	fact.CreatedBy = &prov.UserID
+	// Only set CreatedBy if there's a valid user ID (not the nil UUID)
+	if prov.UserID != uuid.Nil {
+		fact.CreatedBy = &prov.UserID
+	} else {
+		fact.CreatedBy = nil
+	}
 
 	query := `
 		INSERT INTO engine_project_knowledge (

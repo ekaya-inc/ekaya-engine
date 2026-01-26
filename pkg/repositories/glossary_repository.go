@@ -57,7 +57,12 @@ func (r *glossaryRepository) Create(ctx context.Context, term *models.BusinessGl
 
 	// Set provenance fields from context
 	term.Source = prov.Source.String()
-	term.CreatedBy = &prov.UserID
+	// Only set CreatedBy if there's a valid user ID (not the nil UUID)
+	if prov.UserID != uuid.Nil {
+		term.CreatedBy = &prov.UserID
+	} else {
+		term.CreatedBy = nil
+	}
 
 	query := `
 		INSERT INTO engine_business_glossary (
@@ -113,7 +118,12 @@ func (r *glossaryRepository) Update(ctx context.Context, term *models.BusinessGl
 	// Set provenance fields from context
 	lastEditSource := prov.Source.String()
 	term.LastEditSource = &lastEditSource
-	term.UpdatedBy = &prov.UserID
+	// Only set UpdatedBy if there's a valid user ID (not the nil UUID)
+	if prov.UserID != uuid.Nil {
+		term.UpdatedBy = &prov.UserID
+	} else {
+		term.UpdatedBy = nil
+	}
 
 	query := `
 		UPDATE engine_business_glossary
