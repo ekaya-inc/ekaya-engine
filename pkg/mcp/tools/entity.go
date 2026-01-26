@@ -367,10 +367,11 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 		// If entity exists, check precedence before allowing update
 		if !isNew {
 			// Check precedence: can MCP modify this entity?
-			if !canModifyEntity(existingEntity.CreatedBy, existingEntity.UpdatedBy, models.ProvenanceMCP) {
-				effectiveSource := existingEntity.CreatedBy
-				if existingEntity.UpdatedBy != nil && *existingEntity.UpdatedBy != "" {
-					effectiveSource = *existingEntity.UpdatedBy
+			// Use Source and LastEditSource (method tracking) not CreatedBy/UpdatedBy (user UUIDs)
+			if !canModifyEntity(existingEntity.Source, existingEntity.LastEditSource, models.ProvenanceMCP) {
+				effectiveSource := existingEntity.Source
+				if existingEntity.LastEditSource != nil && *existingEntity.LastEditSource != "" {
+					effectiveSource = *existingEntity.LastEditSource
 				}
 				return NewErrorResult("precedence_blocked",
 					fmt.Sprintf("Cannot modify entity: precedence blocked (existing: %s, modifier: %s). "+
@@ -386,13 +387,13 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 				return NewErrorResult("ontology_error", err.Error()), nil
 			}
 
-			// Create new entity with MCP provenance
+			// Create new entity
+			// Note: Source and CreatedBy are set by the repository from provenance context
 			newEntity := &models.OntologyEntity{
 				ProjectID:   projectID,
 				OntologyID:  ontology.ID,
 				Name:        name,
 				Description: description,
-				CreatedBy:   models.ProvenanceMCP,
 				// Note: PrimaryTable, PrimaryColumn, Domain, PrimarySchema are typically set during discovery
 				// For agent updates, we leave them empty or preserve existing values
 			}
@@ -401,12 +402,11 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			}
 			entityID = newEntity.ID
 		} else {
-			// Update existing entity with MCP provenance
+			// Update existing entity
+			// Note: LastEditSource and UpdatedBy are set by the repository from provenance context
 			entityID = existingEntity.ID
 			if description != "" {
 				existingEntity.Description = description
-				updatedBy := models.ProvenanceMCP
-				existingEntity.UpdatedBy = &updatedBy
 				if err := deps.OntologyEntityRepo.Update(tenantCtx, existingEntity); err != nil {
 					return nil, fmt.Errorf("failed to update entity: %w", err)
 				}
