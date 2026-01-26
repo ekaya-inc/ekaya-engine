@@ -512,6 +512,22 @@ class EngineApiService {
   }
 
   /**
+   * Move a rejected query back to pending status
+   * POST /api/projects/{projectId}/queries/{queryId}/move-to-pending
+   */
+  async moveToPending(
+    projectId: string,
+    queryId: string
+  ): Promise<ApiResponse<{ success: boolean; message: string }>> {
+    return this.makeRequest<{ success: boolean; message: string }>(
+      `/${projectId}/queries/${queryId}/move-to-pending`,
+      {
+        method: 'POST',
+      }
+    );
+  }
+
+  /**
    * Check Engine API health
    */
   async healthCheck(): Promise<ApiResponse<{ status: string }> | null> {

@@ -237,9 +237,9 @@ describe('QueriesPage - Pending Count Badge', () => {
     renderPage();
 
     await waitFor(() => {
-      // Badge now shows just the count next to "Queries Pending Approval" tab
+      // Badge now shows just the count next to "Pending Approval" tab
       expect(screen.getByText('3')).toBeInTheDocument();
-      expect(screen.getByText('Queries Pending Approval')).toBeInTheDocument();
+      expect(screen.getByText('Pending Approval')).toBeInTheDocument();
     });
   });
 
@@ -267,10 +267,10 @@ describe('QueriesPage - Pending Count Badge', () => {
     });
 
     // Badge count should not be shown when count is 0
-    // The "Queries Pending Approval" tab text is always shown, but the count badge is not
-    expect(screen.getByText('Queries Pending Approval')).toBeInTheDocument();
+    // The "Pending Approval" tab text is always shown, but the count badge is not
+    expect(screen.getByText('Pending Approval')).toBeInTheDocument();
     // No count badge should be visible
-    const pendingTab = screen.getByText('Queries Pending Approval').closest('button');
+    const pendingTab = screen.getByText('Pending Approval').closest('button');
     expect(pendingTab?.querySelector('.rounded-full')).toBeNull();
   });
 
@@ -295,9 +295,9 @@ describe('QueriesPage - Pending Count Badge', () => {
     });
 
     // Badge count should not be shown on error
-    // The "Queries Pending Approval" tab text is always shown, but the count badge is not
-    expect(screen.getByText('Queries Pending Approval')).toBeInTheDocument();
-    const pendingTab = screen.getByText('Queries Pending Approval').closest('button');
+    // The "Pending Approval" tab text is always shown, but the count badge is not
+    expect(screen.getByText('Pending Approval')).toBeInTheDocument();
+    const pendingTab = screen.getByText('Pending Approval').closest('button');
     expect(pendingTab?.querySelector('.rounded-full')).toBeNull();
   });
 
@@ -320,7 +320,7 @@ describe('QueriesPage - Pending Count Badge', () => {
     renderPage();
 
     await waitFor(() => {
-      // Badge now shows just the count next to "Queries Pending Approval" tab
+      // Badge now shows just the count next to "Pending Approval" tab
       expect(screen.getByText('1')).toBeInTheDocument();
     });
   });

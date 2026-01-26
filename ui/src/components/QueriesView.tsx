@@ -122,6 +122,7 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
   // Pending query review state
   const [parentQuery, setParentQuery] = useState<Query | null>(null);
   const [isApproving, setIsApproving] = useState(false);
+  const [isMovingToPending, setIsMovingToPending] = useState(false);
   const [rejectionDialogOpen, setRejectionDialogOpen] = useState(false);
 
   // SQL validation for create form
@@ -163,6 +164,15 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
   useEffect(() => {
     loadQueries();
   }, [loadQueries]);
+
+  // Clear selection when filter changes
+  useEffect(() => {
+    setSelectedQuery(null);
+    setIsCreating(false);
+    setEditingQueryId(null);
+    setEditingState(null);
+    setQueryResults(null);
+  }, [filter]);
 
   // Fetch schema for autocomplete (fire-and-forget, non-blocking)
   useEffect(() => {
@@ -616,6 +626,46 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
       onPendingCountChange?.();
     } else {
       throw new Error(response.error ?? 'Failed to reject query');
+    }
+  };
+
+  /**
+   * Move a rejected query back to pending for re-review
+   */
+  const handleMoveToPending = async (query: Query) => {
+    setIsMovingToPending(true);
+
+    try {
+      const response = await engineApi.moveToPending(projectId, query.query_id);
+
+      if (response.success) {
+        toast({
+          title: 'Query moved to pending',
+          description: 'Query is now pending approval',
+          variant: 'success',
+        });
+
+        // Reload queries to reflect the change
+        await loadQueries();
+        setSelectedQuery(null);
+
+        // Notify parent to update pending count
+        onPendingCountChange?.();
+      } else {
+        toast({
+          title: 'Failed to move query',
+          description: response.error ?? 'Unknown error',
+          variant: 'destructive',
+        });
+      }
+    } catch (err) {
+      toast({
+        title: 'Failed to move query',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsMovingToPending(false);
     }
   };
 
@@ -1702,7 +1752,7 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
                     </div>
                   )}
 
-                  {/* Approve/Reject buttons for pending queries */}
+                  {/* Approve/Reject/Execute buttons for pending queries */}
                   {selectedQuery.status === 'pending' && (
                     <div className="flex gap-3 pt-4 border-t border-border-light">
                       <Button
@@ -1725,6 +1775,18 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
                         <XCircle className="mr-2 h-4 w-4" />
                         Reject
                       </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => handleExecuteQuery(selectedQuery)}
+                        disabled={isTesting}
+                      >
+                        {isTesting ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Play className="mr-2 h-4 w-4" />
+                        )}
+                        Execute
+                      </Button>
                     </div>
                   )}
 
@@ -1741,6 +1803,24 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
                           <Play className="mr-2 h-4 w-4" />
                         )}
                         Execute Query
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Move to Pending button for rejected queries */}
+                  {selectedQuery.status === 'rejected' && (
+                    <div className="flex gap-2 pt-4 border-t border-border-light">
+                      <Button
+                        variant="outline"
+                        onClick={() => handleMoveToPending(selectedQuery)}
+                        disabled={isMovingToPending}
+                      >
+                        {isMovingToPending ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Clock className="mr-2 h-4 w-4" />
+                        )}
+                        Move to Pending
                       </Button>
                     </div>
                   )}
@@ -1764,20 +1844,24 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
                   <h3 className="text-lg font-medium text-text-primary mb-2">
                     No Query Selected
                   </h3>
-                  <p className="text-sm text-text-secondary mb-4">
-                    Select a query from the list or create a new one
-                  </p>
-                  <Button
-                    onClick={() => {
-                      setIsCreating(true);
-                      setSelectedQuery(null);
-                      setQueryResults(null);
-                      resetCreateForm();
-                    }}
-                  >
-                    <Plus className="mr-2 h-4 w-4" />
-                    Create New Query
-                  </Button>
+                  {filter !== 'rejected' && (
+                    <>
+                      <p className="text-sm text-text-secondary mb-4">
+                        Select a query from the list or create a new one
+                      </p>
+                      <Button
+                        onClick={() => {
+                          setIsCreating(true);
+                          setSelectedQuery(null);
+                          setQueryResults(null);
+                          resetCreateForm();
+                        }}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        Create New Query
+                      </Button>
+                    </>
+                  )}
                 </div>
               </CardContent>
             )}

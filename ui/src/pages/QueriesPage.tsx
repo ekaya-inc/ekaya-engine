@@ -153,7 +153,7 @@ const QueriesPage = () => {
                 : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border-medium'
             }`}
           >
-            Approved Queries
+            Approved
           </button>
           <button
             onClick={() => setActiveFilter('pending')}
@@ -163,7 +163,7 @@ const QueriesPage = () => {
                 : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border-medium'
             }`}
           >
-            Queries Pending Approval
+            Pending Approval
             {pendingCount > 0 && (
               <span className={`inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium rounded-full ${
                 activeFilter === 'pending'
@@ -182,7 +182,7 @@ const QueriesPage = () => {
                 : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border-medium'
             }`}
           >
-            Rejected Queries
+            Rejected
           </button>
         </nav>
       </div>
