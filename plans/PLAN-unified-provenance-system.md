@@ -17,7 +17,7 @@
 - [x] Task 5: Implement Audit Service
 - [ ] Task 6: Extract User ID from JWT
   - [x] 6.1: Update JWT Parsing to Extract User UUID
-  - [ ] 6.2: Add Provenance Middleware for HTTP Requests
+  - [x] 6.2: Add Provenance Middleware for HTTP Requests
   - [ ] 6.3: Add MCP Provenance Wrapper
   - [ ] 6.4: Add Inference Provenance Wrapper for DAG Steps
 
