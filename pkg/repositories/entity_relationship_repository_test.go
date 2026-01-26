@@ -23,6 +23,7 @@ type relationshipTestContext struct {
 	ontologyID     uuid.UUID
 	sourceEntityID uuid.UUID
 	targetEntityID uuid.UUID
+	testUserID     uuid.UUID
 }
 
 // setupRelationshipTest initializes the test context with shared testcontainer.
@@ -37,6 +38,7 @@ func setupRelationshipTest(t *testing.T) *relationshipTestContext {
 		ontologyID:     uuid.MustParse("00000000-0000-0000-0000-000000000061"),
 		sourceEntityID: uuid.MustParse("00000000-0000-0000-0000-000000000062"),
 		targetEntityID: uuid.MustParse("00000000-0000-0000-0000-000000000063"),
+		testUserID:     uuid.MustParse("00000000-0000-0000-0000-000000000064"),
 	}
 	tc.ensureTestProjectAndOntologyAndEntities()
 	return tc
@@ -62,6 +64,16 @@ func (tc *relationshipTestContext) ensureTestProjectAndOntologyAndEntities() {
 		tc.t.Fatalf("failed to ensure test project: %v", err)
 	}
 
+	// Create test user for provenance FK constraints
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_users (project_id, user_id, role)
+		VALUES ($1, $2, 'admin')
+		ON CONFLICT (project_id, user_id) DO NOTHING
+	`, tc.projectID, tc.testUserID)
+	if err != nil {
+		tc.t.Fatalf("failed to ensure test user: %v", err)
+	}
+
 	// Clear existing data
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontology_workflows WHERE project_id = $1`, tc.projectID)
 	_, _ = scope.Conn.Exec(ctx, `DELETE FROM engine_ontologies WHERE project_id = $1`, tc.projectID)
@@ -77,8 +89,8 @@ func (tc *relationshipTestContext) ensureTestProjectAndOntologyAndEntities() {
 
 	// Create source entity
 	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_ontology_entities (id, project_id, ontology_id, name, description, primary_schema, primary_table, primary_column, created_by)
-		VALUES ($1, $2, $3, 'Order', 'An order entity', 'public', 'orders', 'id', 'inference')
+		INSERT INTO engine_ontology_entities (id, project_id, ontology_id, name, description, primary_schema, primary_table, primary_column, source)
+		VALUES ($1, $2, $3, 'Order', 'An order entity', 'public', 'orders', 'id', 'inferred')
 	`, tc.sourceEntityID, tc.projectID, tc.ontologyID)
 	if err != nil {
 		tc.t.Fatalf("failed to create source entity: %v", err)
@@ -86,8 +98,8 @@ func (tc *relationshipTestContext) ensureTestProjectAndOntologyAndEntities() {
 
 	// Create target entity
 	_, err = scope.Conn.Exec(ctx, `
-		INSERT INTO engine_ontology_entities (id, project_id, ontology_id, name, description, primary_schema, primary_table, primary_column, created_by)
-		VALUES ($1, $2, $3, 'User', 'A user entity', 'public', 'users', 'id', 'inference')
+		INSERT INTO engine_ontology_entities (id, project_id, ontology_id, name, description, primary_schema, primary_table, primary_column, source)
+		VALUES ($1, $2, $3, 'User', 'A user entity', 'public', 'users', 'id', 'inferred')
 	`, tc.targetEntityID, tc.projectID, tc.ontologyID)
 	if err != nil {
 		tc.t.Fatalf("failed to create target entity: %v", err)
@@ -107,7 +119,7 @@ func (tc *relationshipTestContext) cleanup() {
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_entity_relationships WHERE ontology_id = $1", tc.ontologyID)
 }
 
-// createTestContext returns a context with tenant scope.
+// createTestContext returns a context with tenant scope and inferred provenance.
 func (tc *relationshipTestContext) createTestContext() (context.Context, func()) {
 	tc.t.Helper()
 	ctx := context.Background()
@@ -116,11 +128,16 @@ func (tc *relationshipTestContext) createTestContext() (context.Context, func())
 		tc.t.Fatalf("failed to create tenant scope: %v", err)
 	}
 	ctx = database.SetTenantScope(ctx, scope)
+	// Add provenance context for write operations
+	ctx = models.WithProvenance(ctx, models.ProvenanceContext{
+		Source: models.SourceInferred,
+		UserID: tc.testUserID,
+	})
 	return ctx, func() { scope.Close() }
 }
 
-// createTestRelationship creates a test relationship with the specified provenance.
-func (tc *relationshipTestContext) createTestRelationship(ctx context.Context, sourceCol, targetCol, createdBy string) *models.EntityRelationship {
+// createTestRelationship creates a test relationship with the specified provenance source.
+func (tc *relationshipTestContext) createTestRelationship(ctx context.Context, sourceCol, targetCol, source string) *models.EntityRelationship {
 	tc.t.Helper()
 	rel := &models.EntityRelationship{
 		OntologyID:         tc.ontologyID,
@@ -136,7 +153,7 @@ func (tc *relationshipTestContext) createTestRelationship(ctx context.Context, s
 		Confidence:         1.0,
 		Status:             models.RelationshipStatusConfirmed,
 		Cardinality:        models.CardinalityNTo1,
-		CreatedBy:          createdBy,
+		Source:             source,
 	}
 	err := tc.repo.Create(ctx, rel)
 	if err != nil {
@@ -181,9 +198,9 @@ func TestEntityRelationshipRepository_MarkInferenceRelationshipsStale_Success(t 
 	// Verify manual and MCP relationships are NOT stale
 	allRels, _ := tc.repo.GetByOntology(ctx, tc.ontologyID)
 	for _, rel := range allRels {
-		if rel.CreatedBy == models.ProvenanceManual || rel.CreatedBy == models.ProvenanceMCP {
+		if rel.Source == models.ProvenanceManual || rel.Source == models.ProvenanceMCP {
 			if rel.IsStale {
-				t.Errorf("%s relationship should not be stale", rel.CreatedBy)
+				t.Errorf("%s relationship should not be stale", rel.Source)
 			}
 		}
 	}
@@ -282,7 +299,7 @@ func TestEntityRelationshipRepository_Create_ClearsStaleOnRediscovery(t *testing
 		Confidence:         1.0,
 		Status:             models.RelationshipStatusConfirmed,
 		Cardinality:        models.CardinalityNTo1,
-		CreatedBy:          models.ProvenanceInferred,
+		Source:             models.ProvenanceInferred,
 		IsStale:            false,
 	}
 	err = tc.repo.Create(ctx, recreated)
@@ -498,7 +515,7 @@ func (ctc *columnTypesTestContext) createRelationshipWithColumnIDs(ctx context.C
 		Confidence:         1.0,
 		Status:             models.RelationshipStatusConfirmed,
 		Cardinality:        models.CardinalityNTo1,
-		CreatedBy:          models.ProvenanceInferred,
+		Source:             models.ProvenanceInferred,
 	}
 
 	// Create uses the repository method which now handles column IDs
@@ -587,7 +604,7 @@ func TestEntityRelationshipRepository_Create_PersistsColumnIDs(t *testing.T) {
 		Confidence:         1.0,
 		Status:             models.RelationshipStatusConfirmed,
 		Cardinality:        models.CardinalityNTo1,
-		CreatedBy:          models.ProvenanceInferred,
+		Source:             models.ProvenanceInferred,
 	}
 
 	// Use the Create method (not raw SQL)
@@ -663,7 +680,7 @@ func TestEntityRelationshipRepository_Upsert_PersistsColumnIDs(t *testing.T) {
 		Confidence:         1.0,
 		Status:             models.RelationshipStatusConfirmed,
 		Cardinality:        models.CardinalityNTo1,
-		CreatedBy:          models.ProvenanceInferred,
+		Source:             models.ProvenanceInferred,
 	}
 
 	// Use the Upsert method

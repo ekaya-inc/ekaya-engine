@@ -388,7 +388,7 @@ func TestProbeColumn_Integration_MetadataBothLocations(t *testing.T) {
 		TableName:  "users",
 		ColumnName: "status",
 		EnumValues: []string{"ACTIVE", "INACTIVE"}, // Different values
-		CreatedBy:  models.ProvenanceMCP,
+		Source:     models.ProvenanceMCP,
 	}
 	err = tc.columnMetadataRepo.Upsert(ctx, columnMeta)
 	require.NoError(t, err)
@@ -444,7 +444,7 @@ func TestProbeColumn_Integration_MetadataOnlyColumnMetadata(t *testing.T) {
 		Entity:      &entity,
 		Role:        &role,
 		EnumValues:  []string{"PENDING", "PROCESSING", "SHIPPED", "DELIVERED"},
-		CreatedBy:   models.ProvenanceMCP,
+		Source:      models.ProvenanceMCP,
 	}
 	err := tc.columnMetadataRepo.Upsert(ctx, columnMeta)
 	require.NoError(t, err)
@@ -658,7 +658,7 @@ func TestProbeColumn_Integration_PartialMerge(t *testing.T) {
 		TableName:  "invoices",
 		ColumnName: "invoice_state",
 		EnumValues: []string{"DRAFT", "SENT", "PAID", "OVERDUE"},
-		CreatedBy:  models.ProvenanceMCP,
+		Source:     models.ProvenanceMCP,
 	}
 	err = tc.columnMetadataRepo.Upsert(ctx, columnMeta)
 	require.NoError(t, err)

@@ -56,6 +56,16 @@ func (tc *auditTestContext) ensureTestProject() {
 	if err != nil {
 		tc.t.Fatalf("failed to ensure test project: %v", err)
 	}
+
+	// Create test user for audit log entries
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_users (project_id, user_id, role)
+		VALUES ($1, $2, 'admin')
+		ON CONFLICT (project_id, user_id) DO NOTHING
+	`, tc.projectID, tc.testUserID)
+	if err != nil {
+		tc.t.Fatalf("failed to ensure test user: %v", err)
+	}
 }
 
 // cleanup removes test audit log entries.

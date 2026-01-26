@@ -417,6 +417,9 @@ func (tc *ontologyPerformanceTestContext) createTestOntology() {
 		tc.t.Fatalf("Failed to create test ontology: %v", err)
 	}
 
+	// Add provenance context for entity creation (using nil UUID since we don't create a test user)
+	ctx = models.WithInferredProvenance(ctx, uuid.Nil)
+
 	// Create entities
 	entities := []*models.OntologyEntity{
 		{

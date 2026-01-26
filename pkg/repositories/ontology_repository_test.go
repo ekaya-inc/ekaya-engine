@@ -67,7 +67,7 @@ func (tc *ontologyTestContext) cleanup() {
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontologies WHERE project_id = $1", tc.projectID)
 }
 
-// createTestContext returns a context with tenant scope.
+// createTestContext returns a context with tenant scope and inferred provenance.
 func (tc *ontologyTestContext) createTestContext() (context.Context, func()) {
 	tc.t.Helper()
 	ctx := context.Background()
@@ -76,6 +76,8 @@ func (tc *ontologyTestContext) createTestContext() (context.Context, func()) {
 		tc.t.Fatalf("failed to create tenant scope: %v", err)
 	}
 	ctx = database.SetTenantScope(ctx, scope)
+	// Add provenance context for write operations (using nil UUID since ontology tests don't need user validation)
+	ctx = models.WithInferredProvenance(ctx, uuid.Nil)
 	return ctx, func() { scope.Close() }
 }
 
