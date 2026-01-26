@@ -115,12 +115,12 @@ export function SqlEditor({
   return (
     <div className="space-y-1 w-full max-w-full overflow-hidden">
       <div
-        className={`rounded-md border-2 overflow-x-auto overflow-y-hidden transition-colors ${borderClass} relative`}
+        className={`rounded-md border-2 overflow-auto transition-colors ${borderClass} relative`}
         style={{ minHeight }}
       >
         {readOnly && (
           <div
-            className="absolute inset-0 z-10 cursor-default bg-gray-500/5 dark:bg-gray-900/20"
+            className="absolute inset-0 z-10 pointer-events-none bg-gray-500/5 dark:bg-gray-900/20"
           />
         )}
         <CodeMirror

@@ -1,6 +1,11 @@
 /**
  * QueriesView Component
  * Manages saved queries for a datasource with full API integration
+ *
+ * Supports URL-driven navigation via props from parent:
+ * - initialQueryId: Query to display/edit on mount
+ * - initialMode: 'list' | 'view' | 'edit' | 'new'
+ * - Navigation callbacks update URL via parent
  */
 
 import {
@@ -28,7 +33,7 @@ import {
   User,
   Bot,
 } from 'lucide-react';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 import { useSqlValidation, type ValidationStatus } from '../hooks/useSqlValidation';
 import { useToast } from '../hooks/useToast';
@@ -54,13 +59,22 @@ import {
 import { Input } from './ui/Input';
 
 export type QueryFilterType = 'approved' | 'pending' | 'rejected';
+export type ViewMode = 'list' | 'view' | 'edit' | 'new';
 
 interface QueriesViewProps {
   projectId: string;
   datasourceId: string;
   dialect: SqlDialect;
   filter: QueryFilterType;
+  initialQueryId?: string | null;
+  initialMode?: ViewMode;
   onPendingCountChange?: () => void;
+  onQuerySelect?: (queryId: string) => void;
+  onEditQuery?: (queryId: string) => void;
+  onCreateQuery?: () => void;
+  onCancelEdit?: () => void;
+  onFilterChange?: (newStatus: QueryFilterType) => void;
+  onQueryStatusChangeComplete?: (newStatus: QueryFilterType) => void;
 }
 
 interface EditingState {
@@ -74,7 +88,21 @@ interface EditingState {
   constraints: string;
 }
 
-const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountChange }: QueriesViewProps) => {
+const QueriesView = ({
+  projectId,
+  datasourceId,
+  dialect,
+  filter,
+  initialQueryId,
+  initialMode = 'list',
+  onPendingCountChange,
+  onQuerySelect,
+  onEditQuery,
+  onCreateQuery,
+  onCancelEdit,
+  onFilterChange,
+  onQueryStatusChangeComplete,
+}: QueriesViewProps) => {
   const { toast } = useToast();
 
   // Data state
@@ -86,9 +114,12 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
 
   // UI state
   const [selectedQuery, setSelectedQuery] = useState<Query | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
+  const [isCreating, setIsCreating] = useState(initialMode === 'new');
   const [editingQueryId, setEditingQueryId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Track if we've processed the initial query ID
+  const processedInitialQueryRef = useRef<string | null>(null);
 
   // Form state for creating
   const [newQuery, setNewQuery] = useState<EditingState>({
@@ -165,14 +196,151 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
     loadQueries();
   }, [loadQueries]);
 
-  // Clear selection when filter changes
+  // Handle initial query ID from URL after queries are loaded
   useEffect(() => {
-    setSelectedQuery(null);
-    setIsCreating(false);
-    setEditingQueryId(null);
-    setEditingState(null);
-    setQueryResults(null);
-  }, [filter]);
+    if (isLoading || !initialQueryId || processedInitialQueryRef.current === initialQueryId) {
+      return;
+    }
+
+    // Find query in loaded list first
+    const foundQuery = queries.find(q => q.query_id === initialQueryId);
+
+    if (foundQuery) {
+      processedInitialQueryRef.current = initialQueryId;
+      setSelectedQuery(foundQuery);
+
+      // Auto-switch tab if query status doesn't match current filter
+      if (foundQuery.status !== filter) {
+        onFilterChange?.(foundQuery.status as QueryFilterType);
+      }
+
+      // If mode is 'edit', start editing
+      if (initialMode === 'edit') {
+        setEditingQueryId(foundQuery.query_id);
+        setEditingState({
+          natural_language_prompt: foundQuery.natural_language_prompt,
+          additional_context: foundQuery.additional_context ?? '',
+          sql_query: foundQuery.sql_query,
+          is_enabled: foundQuery.is_enabled,
+          allows_modification: foundQuery.allows_modification,
+          parameters: foundQuery.parameters ?? [],
+          output_columns: foundQuery.output_columns ?? [],
+          constraints: foundQuery.constraints ?? '',
+        });
+        setQueryResults(null);
+        editValidation.reset();
+        setEditTestPassed(false);
+        setTestParameterValues({});
+      }
+    } else {
+      // Query not in list, try to fetch it directly
+      const fetchQuery = async () => {
+        try {
+          const response = await engineApi.getQuery(projectId, datasourceId, initialQueryId);
+          if (response.success && response.data) {
+            processedInitialQueryRef.current = initialQueryId;
+            const query = response.data;
+            setSelectedQuery(query);
+
+            // Auto-switch tab if query status doesn't match current filter
+            if (query.status !== filter) {
+              onFilterChange?.(query.status as QueryFilterType);
+            }
+
+            // If mode is 'edit', start editing
+            if (initialMode === 'edit') {
+              setEditingQueryId(query.query_id);
+              setEditingState({
+                natural_language_prompt: query.natural_language_prompt,
+                additional_context: query.additional_context ?? '',
+                sql_query: query.sql_query,
+                is_enabled: query.is_enabled,
+                allows_modification: query.allows_modification,
+                parameters: query.parameters ?? [],
+                output_columns: query.output_columns ?? [],
+                constraints: query.constraints ?? '',
+              });
+              setQueryResults(null);
+              editValidation.reset();
+              setEditTestPassed(false);
+              setTestParameterValues({});
+            }
+          } else {
+            // Query not found - show error and redirect
+            processedInitialQueryRef.current = initialQueryId;
+            toast({
+              title: 'Query not found',
+              description: 'The requested query could not be found.',
+              variant: 'destructive',
+            });
+            onCancelEdit?.();
+          }
+        } catch (err) {
+          // API error - show error and redirect
+          processedInitialQueryRef.current = initialQueryId;
+          toast({
+            title: 'Query not found',
+            description: err instanceof Error ? err.message : 'Failed to load query.',
+            variant: 'destructive',
+          });
+          onCancelEdit?.();
+        }
+      };
+      fetchQuery();
+    }
+  }, [isLoading, initialQueryId, initialMode, queries, filter, projectId, datasourceId, editValidation, onFilterChange, onCancelEdit, toast]);
+
+  // Handle initial mode 'new'
+  useEffect(() => {
+    if (initialMode === 'new' && !isCreating) {
+      setIsCreating(true);
+      setSelectedQuery(null);
+      setEditingQueryId(null);
+      setEditingState(null);
+      setQueryResults(null);
+    }
+  }, [initialMode, isCreating]);
+
+  // Reset processed query when initialQueryId changes to a different value
+  useEffect(() => {
+    if (initialQueryId !== processedInitialQueryRef.current) {
+      // Don't reset if going from a query to null (returning to list)
+      if (initialQueryId === null) {
+        processedInitialQueryRef.current = null;
+        setSelectedQuery(null);
+        setEditingQueryId(null);
+        setEditingState(null);
+        setQueryResults(null);
+        setIsCreating(false);
+      }
+    }
+  }, [initialQueryId]);
+
+  // Handle mode changes (e.g., from 'view' to 'edit' for same query)
+  useEffect(() => {
+    if (selectedQuery && initialMode === 'edit' && !editingQueryId) {
+      setEditingQueryId(selectedQuery.query_id);
+      setEditingState({
+        natural_language_prompt: selectedQuery.natural_language_prompt,
+        additional_context: selectedQuery.additional_context ?? '',
+        sql_query: selectedQuery.sql_query,
+        is_enabled: selectedQuery.is_enabled,
+        allows_modification: selectedQuery.allows_modification,
+        parameters: selectedQuery.parameters ?? [],
+        output_columns: selectedQuery.output_columns ?? [],
+        constraints: selectedQuery.constraints ?? '',
+      });
+      setQueryResults(null);
+      editValidation.reset();
+      setEditTestPassed(false);
+      setTestParameterValues({});
+    } else if (initialMode === 'view' && editingQueryId) {
+      // Switching from edit to view mode
+      setEditingQueryId(null);
+      setEditingState(null);
+      editValidation.reset();
+    }
+  }, [selectedQuery, initialMode, editingQueryId, editValidation]);
 
   // Fetch schema for autocomplete (fire-and-forget, non-blocking)
   useEffect(() => {
@@ -426,6 +594,8 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
         if (isPendingCreate) {
           onPendingCountChange?.();
         }
+        // Navigate to view the new query
+        onQuerySelect?.(response.data.query_id);
       } else {
         toast({
           title: 'Failed to create query',
@@ -447,22 +617,28 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
   /**
    * Start editing a query
    */
-  const handleEditQuery = (query: Query) => {
-    setEditingQueryId(query.query_id);
-    setEditingState({
-      natural_language_prompt: query.natural_language_prompt,
-      additional_context: query.additional_context ?? '',
-      sql_query: query.sql_query,
-      is_enabled: query.is_enabled,
-      allows_modification: query.allows_modification,
-      parameters: query.parameters ?? [],
-      output_columns: query.output_columns ?? [],
-      constraints: query.constraints ?? '',
-    });
-    setQueryResults(null);
-    editValidation.reset();
-    setEditTestPassed(false);
-    setTestParameterValues({});
+  const handleEditQueryClick = (query: Query) => {
+    // Use navigation callback if provided
+    if (onEditQuery) {
+      onEditQuery(query.query_id);
+    } else {
+      // Fallback to internal state
+      setEditingQueryId(query.query_id);
+      setEditingState({
+        natural_language_prompt: query.natural_language_prompt,
+        additional_context: query.additional_context ?? '',
+        sql_query: query.sql_query,
+        is_enabled: query.is_enabled,
+        allows_modification: query.allows_modification,
+        parameters: query.parameters ?? [],
+        output_columns: query.output_columns ?? [],
+        constraints: query.constraints ?? '',
+      });
+      setQueryResults(null);
+      editValidation.reset();
+      setEditTestPassed(false);
+      setTestParameterValues({});
+    }
   };
 
   /**
@@ -523,6 +699,10 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
         setEditingQueryId(null);
         setEditingState(null);
         editValidation.reset();
+        // Navigate back to view mode
+        if (onQuerySelect) {
+          onQuerySelect(response.data.query_id);
+        }
       } else {
         toast({
           title: 'Failed to update query',
@@ -556,6 +736,7 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
     setQueries((prev) => prev.filter((q) => q.query_id !== queryId));
     if (selectedQuery?.query_id === queryId) {
       setSelectedQuery(null);
+      onCancelEdit?.();
     }
     setDeleteDialogOpen(false);
     setQueryToDelete(null);
@@ -586,8 +767,10 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
         setSelectedQuery(null);
         setParentQuery(null);
 
-        // Notify parent to update pending count
+        // Notify parent to update pending count and switch to approved tab
+        // onQueryStatusChangeComplete handles navigation
         onPendingCountChange?.();
+        onQueryStatusChangeComplete?.('approved');
       } else {
         toast({
           title: 'Failed to approve query',
@@ -630,8 +813,10 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
       setSelectedQuery(null);
       setParentQuery(null);
 
-      // Notify parent to update pending count
+      // Notify parent to update pending count and switch to rejected tab
+      // onQueryStatusChangeComplete handles navigation
       onPendingCountChange?.();
+      onQueryStatusChangeComplete?.('rejected');
     } else {
       throw new Error(response.error ?? 'Failed to reject query');
     }
@@ -657,8 +842,10 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
         await loadQueries();
         setSelectedQuery(null);
 
-        // Notify parent to update pending count
+        // Notify parent to update pending count and switch to pending tab
+        // onQueryStatusChangeComplete handles navigation
         onPendingCountChange?.();
+        onQueryStatusChangeComplete?.('pending');
       } else {
         toast({
           title: 'Failed to move query',
@@ -772,6 +959,55 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
   };
 
   /**
+   * Handle query selection from list
+   */
+  const handleQuerySelectClick = (query: Query) => {
+    if (onQuerySelect) {
+      onQuerySelect(query.query_id);
+    } else {
+      // Fallback to internal state
+      setSelectedQuery(query);
+      setIsCreating(false);
+      setEditingQueryId(null);
+      setEditingState(null);
+      setQueryResults(null);
+    }
+  };
+
+  /**
+   * Handle create button click
+   */
+  const handleCreateButtonClick = () => {
+    if (onCreateQuery) {
+      onCreateQuery();
+    } else {
+      // Fallback to internal state
+      setIsCreating(true);
+      setSelectedQuery(null);
+      setEditingQueryId(null);
+      setEditingState(null);
+      setQueryResults(null);
+      resetCreateForm();
+    }
+  };
+
+  /**
+   * Handle cancel create/edit
+   */
+  const handleCancel = () => {
+    if (onCancelEdit) {
+      onCancelEdit();
+    } else {
+      // Fallback to internal state
+      setIsCreating(false);
+      setEditingQueryId(null);
+      setEditingState(null);
+      resetCreateForm();
+      editValidation.reset();
+    }
+  };
+
+  /**
    * Get validation status for display
    */
   const getValidationStatus = (status: ValidationStatus): ValidationStatus => {
@@ -818,14 +1054,7 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
                 <CardTitle className="text-lg">Queries</CardTitle>
                 <Button
                   size="sm"
-                  onClick={() => {
-                    setIsCreating(true);
-                    setSelectedQuery(null);
-                    setEditingQueryId(null);
-                    setEditingState(null);
-                    setQueryResults(null);
-                    resetCreateForm();
-                  }}
+                  onClick={handleCreateButtonClick}
                   className="h-8 px-2"
                 >
                   <Plus className="h-4 w-4" />
@@ -860,13 +1089,7 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
                   {filteredQueries.map((query) => (
                     <button
                       key={query.query_id}
-                      onClick={() => {
-                        setSelectedQuery(query);
-                        setIsCreating(false);
-                        setEditingQueryId(null);
-                        setEditingState(null);
-                        setQueryResults(null);
-                      }}
+                      onClick={() => handleQuerySelectClick(query)}
                       className={`w-full text-left p-2 rounded-lg transition-colors ${selectedQuery?.query_id === query.query_id
                         ? 'bg-purple-500/10 border border-purple-500/30'
                         : 'hover:bg-surface-secondary/50'
@@ -936,10 +1159,7 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => {
-                        setIsCreating(false);
-                        resetCreateForm();
-                      }}
+                      onClick={handleCancel}
                     >
                       <X className="h-4 w-4" />
                     </Button>
@@ -1175,10 +1395,7 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
                     <div className="flex justify-end gap-2">
                       <Button
                         variant="outline"
-                        onClick={() => {
-                          setIsCreating(false);
-                          resetCreateForm();
-                        }}
+                        onClick={handleCancel}
                       >
                         Cancel
                       </Button>
@@ -1217,11 +1434,7 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => {
-                        setEditingQueryId(null);
-                        setEditingState(null);
-                        editValidation.reset();
-                      }}
+                      onClick={handleCancel}
                     >
                       <X className="h-4 w-4" />
                     </Button>
@@ -1456,11 +1669,7 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
                     <div className="flex justify-end gap-2">
                       <Button
                         variant="outline"
-                        onClick={() => {
-                          setEditingQueryId(null);
-                          setEditingState(null);
-                          editValidation.reset();
-                        }}
+                        onClick={handleCancel}
                       >
                         Cancel
                       </Button>
@@ -1583,7 +1792,7 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => handleEditQuery(selectedQuery)}
+                          onClick={() => handleEditQueryClick(selectedQuery)}
                         >
                           <Edit3 className="h-4 w-4" />
                         </Button>
@@ -1602,7 +1811,7 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => handleEditQuery(selectedQuery)}
+                          onClick={() => handleEditQueryClick(selectedQuery)}
                           title="Edit query"
                         >
                           <Edit3 className="h-4 w-4" />
@@ -1878,14 +2087,7 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
                       <p className="text-sm text-text-secondary mb-4">
                         Select a query from the list or create a new one
                       </p>
-                      <Button
-                        onClick={() => {
-                          setIsCreating(true);
-                          setSelectedQuery(null);
-                          setQueryResults(null);
-                          resetCreateForm();
-                        }}
-                      >
+                      <Button onClick={handleCreateButtonClick}>
                         <Plus className="mr-2 h-4 w-4" />
                         Create New Query
                       </Button>
