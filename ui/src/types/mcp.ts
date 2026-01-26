@@ -41,6 +41,10 @@ export interface EnabledToolInfo {
 export interface MCPConfigResponse {
   serverUrl: string;
   toolGroups: Record<string, ToolGroupState>;
+  userTools: EnabledToolInfo[];
+  developerTools: EnabledToolInfo[];
+  agentTools: EnabledToolInfo[];
+  /** @deprecated Use userTools, developerTools, or agentTools instead. Kept for backward compatibility. */
   enabledTools: EnabledToolInfo[];
 }
 

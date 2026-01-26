@@ -221,7 +221,7 @@ type ToolGroupConfig struct {
 }
 ```
 
-### Task 4: Frontend - Update Types
+### Task 4: Frontend - Update Types [x]
 
 **File: `ui/src/types/mcp.ts`**
 
