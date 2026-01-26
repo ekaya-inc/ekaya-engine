@@ -198,7 +198,7 @@ type MCPConfigResponse struct {
 
 Update `buildResponse()` to compute all three tool lists.
 
-### Task 3: Backend - Update Tool Group Config
+### Task 3: Backend - Update Tool Group Config [x]
 
 Since tool groups no longer have enable/disable toggles but retain sub-options:
 
