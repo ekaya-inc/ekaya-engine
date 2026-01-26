@@ -13,13 +13,13 @@ type ToolGroupConfig struct {
 	// User Tools options
 	// AllowOntologyMaintenance: When enabled, MCP clients with user role can update ontology
 	// (entities, relationships, etc.). Defaults to true.
-	AllowOntologyMaintenance bool `json:"allowOntologyMaintenance,omitempty"`
+	AllowOntologyMaintenance bool `json:"allowOntologyMaintenance"`
 
 	// Developer Tools options
 	// AddQueryTools: When enabled, adds Query loadout (schema exploration and querying)
-	AddQueryTools bool `json:"addQueryTools,omitempty"`
+	AddQueryTools bool `json:"addQueryTools"`
 	// AddOntologyMaintenance: When enabled, adds Ontology Maintenance + Ontology Questions tools
-	AddOntologyMaintenance bool `json:"addOntologyMaintenance,omitempty"`
+	AddOntologyMaintenance bool `json:"addOntologyMaintenance"`
 
 	// Custom Tools options
 	// CustomTools: List of individually selected tool names (only used when custom group is enabled)

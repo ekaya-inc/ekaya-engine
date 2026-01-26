@@ -83,12 +83,7 @@ const MCPServerPage = () => {
     try {
       setUpdating(true);
       const response = await engineApi.updateMCPConfig(pid, {
-        toolGroups: {
-          [TOOL_GROUP_IDS.USER]: {
-            enabled: true,
-            allowOntologyMaintenance: enabled,
-          },
-        },
+        allowOntologyMaintenance: enabled,
       });
 
       if (response.success && response.data) {
@@ -118,13 +113,7 @@ const MCPServerPage = () => {
     try {
       setUpdating(true);
       const response = await engineApi.updateMCPConfig(pid, {
-        toolGroups: {
-          [TOOL_GROUP_IDS.DEVELOPER]: {
-            enabled: true,
-            addQueryTools: enabled,
-            addOntologyMaintenance,
-          },
-        },
+        addQueryTools: enabled,
       });
 
       if (response.success && response.data) {
@@ -154,13 +143,7 @@ const MCPServerPage = () => {
     try {
       setUpdating(true);
       const response = await engineApi.updateMCPConfig(pid, {
-        toolGroups: {
-          [TOOL_GROUP_IDS.DEVELOPER]: {
-            enabled: true,
-            addQueryTools,
-            addOntologyMaintenance: enabled,
-          },
-        },
+        addOntologyMaintenance: enabled,
       });
 
       if (response.success && response.data) {

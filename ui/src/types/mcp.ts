@@ -69,8 +69,16 @@ export interface ToolGroupConfigUpdate {
   allowClientSuggestions?: boolean;
 }
 
+/**
+ * UpdateMCPConfigRequest uses flat fields to update MCP configuration.
+ * Only include fields you want to change - omitted fields are not modified.
+ */
 export interface UpdateMCPConfigRequest {
-  toolGroups: Record<string, ToolGroupConfigUpdate>;
+  // User Tools sub-option
+  allowOntologyMaintenance?: boolean;
+  // Developer Tools sub-options
+  addQueryTools?: boolean;
+  addOntologyMaintenance?: boolean;
 }
 
 // UI Rendering Types (state merged with frontend metadata)
