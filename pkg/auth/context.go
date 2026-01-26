@@ -66,6 +66,33 @@ func RequireUserIDFromContext(ctx context.Context) (string, error) {
 	return userID, nil
 }
 
+// GetUserUUIDFromContext extracts the user ID from JWT claims and parses it as UUID.
+// Returns the parsed UUID and true if successful, otherwise uuid.Nil and false.
+// Use this when you need the user ID as a UUID for provenance tracking or database operations.
+func GetUserUUIDFromContext(ctx context.Context) (uuid.UUID, bool) {
+	userIDStr := GetUserIDFromContext(ctx)
+	if userIDStr == "" {
+		return uuid.Nil, false
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return uuid.Nil, false
+	}
+
+	return userID, true
+}
+
+// RequireUserUUIDFromContext extracts the user ID from context as a UUID and returns an error if not found or invalid.
+// Use this when user UUID is required for the operation (e.g., provenance tracking).
+func RequireUserUUIDFromContext(ctx context.Context) (uuid.UUID, error) {
+	userID, ok := GetUserUUIDFromContext(ctx)
+	if !ok {
+		return uuid.Nil, fmt.Errorf("valid user UUID not found in context")
+	}
+	return userID, nil
+}
+
 // RequireProjectIDFromContext extracts the project ID from context and returns an error if not found.
 // Use this when project ID is required for the operation.
 func RequireProjectIDFromContext(ctx context.Context) (uuid.UUID, error) {

@@ -320,6 +320,137 @@ func TestRequireClaimsFromContext(t *testing.T) {
 	}
 }
 
+func TestGetUserUUIDFromContext(t *testing.T) {
+	validUserID := uuid.New()
+	tests := []struct {
+		name     string
+		ctx      context.Context
+		wantUUID uuid.UUID
+		wantOK   bool
+	}{
+		{
+			name: "valid UUID user ID in context",
+			ctx: context.WithValue(context.Background(), ClaimsKey, &Claims{
+				RegisteredClaims: jwt.RegisteredClaims{
+					Subject: validUserID.String(),
+				},
+			}),
+			wantUUID: validUserID,
+			wantOK:   true,
+		},
+		{
+			name:     "no claims in context",
+			ctx:      context.Background(),
+			wantUUID: uuid.Nil,
+			wantOK:   false,
+		},
+		{
+			name:     "nil claims in context",
+			ctx:      context.WithValue(context.Background(), ClaimsKey, (*Claims)(nil)),
+			wantUUID: uuid.Nil,
+			wantOK:   false,
+		},
+		{
+			name: "empty user ID in claims",
+			ctx: context.WithValue(context.Background(), ClaimsKey, &Claims{
+				RegisteredClaims: jwt.RegisteredClaims{
+					Subject: "",
+				},
+			}),
+			wantUUID: uuid.Nil,
+			wantOK:   false,
+		},
+		{
+			name: "non-UUID user ID in claims",
+			ctx: context.WithValue(context.Background(), ClaimsKey, &Claims{
+				RegisteredClaims: jwt.RegisteredClaims{
+					Subject: "not-a-valid-uuid",
+				},
+			}),
+			wantUUID: uuid.Nil,
+			wantOK:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotUUID, gotOK := GetUserUUIDFromContext(tt.ctx)
+			if gotOK != tt.wantOK {
+				t.Errorf("GetUserUUIDFromContext() ok = %v, want %v", gotOK, tt.wantOK)
+			}
+			if gotUUID != tt.wantUUID {
+				t.Errorf("GetUserUUIDFromContext() uuid = %v, want %v", gotUUID, tt.wantUUID)
+			}
+		})
+	}
+}
+
+func TestRequireUserUUIDFromContext(t *testing.T) {
+	validUserID := uuid.New()
+	tests := []struct {
+		name      string
+		ctx       context.Context
+		wantValue uuid.UUID
+		wantErr   bool
+	}{
+		{
+			name: "valid UUID user ID in context",
+			ctx: context.WithValue(context.Background(), ClaimsKey, &Claims{
+				RegisteredClaims: jwt.RegisteredClaims{
+					Subject: validUserID.String(),
+				},
+			}),
+			wantValue: validUserID,
+			wantErr:   false,
+		},
+		{
+			name:      "no claims in context",
+			ctx:       context.Background(),
+			wantValue: uuid.Nil,
+			wantErr:   true,
+		},
+		{
+			name:      "nil claims in context",
+			ctx:       context.WithValue(context.Background(), ClaimsKey, (*Claims)(nil)),
+			wantValue: uuid.Nil,
+			wantErr:   true,
+		},
+		{
+			name: "empty user ID in claims",
+			ctx: context.WithValue(context.Background(), ClaimsKey, &Claims{
+				RegisteredClaims: jwt.RegisteredClaims{
+					Subject: "",
+				},
+			}),
+			wantValue: uuid.Nil,
+			wantErr:   true,
+		},
+		{
+			name: "non-UUID user ID in claims",
+			ctx: context.WithValue(context.Background(), ClaimsKey, &Claims{
+				RegisteredClaims: jwt.RegisteredClaims{
+					Subject: "not-a-valid-uuid",
+				},
+			}),
+			wantValue: uuid.Nil,
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := RequireUserUUIDFromContext(tt.ctx)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("RequireUserUUIDFromContext() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.wantValue {
+				t.Errorf("RequireUserUUIDFromContext() = %v, want %v", got, tt.wantValue)
+			}
+		})
+	}
+}
+
 // contains checks if a string contains a substring
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||

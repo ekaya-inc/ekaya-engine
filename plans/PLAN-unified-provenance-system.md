@@ -16,6 +16,10 @@
   - [x] 4.4: Update Project Knowledge Repository with Provenance Support
 - [x] Task 5: Implement Audit Service
 - [ ] Task 6: Extract User ID from JWT
+  - [x] 6.1: Update JWT Parsing to Extract User UUID
+  - [ ] 6.2: Add Provenance Middleware for HTTP Requests
+  - [ ] 6.3: Add MCP Provenance Wrapper
+  - [ ] 6.4: Add Inference Provenance Wrapper for DAG Steps
 
 ## Overview
 
@@ -432,8 +436,135 @@ Update `pkg/repositories/project_knowledge_repository.go` to use provenance cont
 
 ### Step 6: Extract User ID from JWT
 
-- Update JWT parsing to include user UUID (not just email)
-- Ensure MCP requests carry user context
+#### 6.1 Update JWT Parsing to Extract User UUID
+
+The current JWT parsing extracts user email but not the user UUID. Update the JWT claims structure and parsing to include the user ID.
+
+**Files to modify:**
+- `pkg/auth/middleware.go` - Update JWT claims struct and parsing
+
+**Changes required:**
+
+1. Locate the JWT claims struct (likely named `Claims` or similar) and add a `UserID` field of type `uuid.UUID` or `string`
+
+2. Update the JWT parsing/validation logic to extract the user ID from the token claims. The user ID should be in the JWT as `sub` (subject) claim or a custom claim like `user_id`
+
+3. Ensure the user ID is stored in the request context alongside the existing user email. Look for existing context key patterns (e.g., `userEmailKey`) and add a similar `userIDKey`
+
+4. Add a helper function like `GetUserIDFromContext(ctx context.Context) (uuid.UUID, bool)` if one doesn't exist
+
+**Note:** The JWT is issued by `auth.ekaya.ai`. Check existing JWT handling to understand the token structure and which claims are available.
+
+---
+
+#### 6.2 Add Provenance Middleware for HTTP Requests
+
+Create HTTP middleware that extracts the user ID from JWT and sets up the provenance context for all API requests. This enables the `manual` source for UI-initiated operations.
+
+**Files to modify:**
+- `pkg/server/middleware.go` - Add new provenance middleware
+
+**Implementation:**
+
+1. Create a new middleware function `ProvenanceMiddleware`:
+```go
+func ProvenanceMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        userID, ok := GetUserIDFromContext(r.Context())
+        if !ok {
+            // Handle unauthenticated requests appropriately
+            // May need to skip for public endpoints
+            next.ServeHTTP(w, r)
+            return
+        }
+        ctx := models.WithProvenance(r.Context(), models.ProvenanceContext{
+            Source: models.SourceManual,
+            UserID: userID,
+        })
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}
+```
+
+2. Wire the middleware into the router chain, positioned AFTER authentication middleware (so JWT is already parsed) but BEFORE route handlers
+
+3. The middleware should use `models.SourceManual` since HTTP API requests are user-initiated manual actions
+
+**Dependencies:** Requires 6.1 (JWT user ID extraction) and Task 3 (provenance context implementation from `pkg/models/provenance.go`)
+
+---
+
+#### 6.3 Add MCP Provenance Wrapper
+
+Update MCP tool handlers to extract user ID from the MCP request context and set up provenance with `mcp` source.
+
+**Files to modify:**
+- `pkg/mcp/tools/*.go` - All tool files that perform write operations
+
+**Implementation:**
+
+1. Create a helper function in `pkg/mcp/tools/` (perhaps in a common file like `tools.go` or `common.go`):
+```go
+func WithMCPProvenance(ctx context.Context, userID uuid.UUID) context.Context {
+    return models.WithProvenance(ctx, models.ProvenanceContext{
+        Source: models.SourceMCP,
+        UserID: userID,
+    })
+}
+```
+
+2. Identify how MCP requests carry user context. Check:
+   - `pkg/mcp/server.go` - How the MCP server handles requests
+   - `pkg/handlers/mcp_handler.go` - How HTTP requests become MCP calls
+   - The user ID may already be in the context from the HTTP layer
+
+3. For each MCP tool that creates/updates ontology objects (entities, relationships, glossary, knowledge), wrap the context with MCP provenance before calling repository methods
+
+4. Tools to check and potentially update:
+   - `pkg/mcp/tools/entity.go`
+   - `pkg/mcp/tools/relationship.go`
+   - `pkg/mcp/tools/knowledge.go` (if exists)
+   - `pkg/mcp/tools/access.go`
+   - Any other tools that modify ontology objects
+
+**Note:** Read-only tools (like `get_schema`, `list_approved_queries`) don't need provenance since they don't create audit logs.
+
+---
+
+#### 6.4 Add Inference Provenance Wrapper for DAG Steps
+
+Update DAG task execution to set up provenance with `inference` source, using the user ID of whoever triggered the ontology extraction.
+
+**Files to modify:**
+- `pkg/services/*_task.go` - DAG step task files
+- Potentially `pkg/services/incremental_dag_service.go` or wherever DAG execution is coordinated
+
+**Implementation:**
+
+1. Create a helper function (possibly in `pkg/services/` or reuse from MCP):
+```go
+func WithInferenceProvenance(ctx context.Context, userID uuid.UUID) context.Context {
+    return models.WithProvenance(ctx, models.ProvenanceContext{
+        Source: models.SourceInference,
+        UserID: userID,
+    })
+}
+```
+
+2. Identify where DAG extraction is initiated:
+   - Look in `pkg/services/incremental_dag_service.go`
+   - Find the entry point where a user triggers extraction (likely an HTTP handler calling a service method)
+   - The user ID should be captured at this entry point
+
+3. Ensure the user ID flows through the DAG execution:
+   - Check how context is passed through DAG steps
+   - The user ID captured at extraction start should be available to all steps
+
+4. For each task file (`*_task.go`), ensure the context used for repository calls has inference provenance set. This might be done:
+   - At the DAG service level (once, before running steps)
+   - Or at each task level (if tasks have independent contexts)
+
+**Key insight:** The user who triggered extraction (via UI) should be recorded as `created_by` for all inference-created objects, even though the work happens asynchronously in DAG steps.
 
 ## Files to Modify/Create
 
