@@ -10,7 +10,8 @@ import (
 type User struct {
 	ProjectID uuid.UUID `json:"project_id"`
 	UserID    uuid.UUID `json:"user_id"`
-	Role      string    `json:"role"` // 'admin', 'data', 'user'
+	Email     *string   `json:"email,omitempty"` // User email from JWT claims
+	Role      string    `json:"role"`            // 'admin', 'data', 'user'
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

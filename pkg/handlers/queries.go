@@ -788,17 +788,17 @@ func (h *QueriesHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get reviewer ID from auth context
-	reviewerID := auth.GetUserIDFromContext(r.Context())
-	if reviewerID == "" {
-		if err := ErrorResponse(w, http.StatusUnauthorized, "unauthorized", "User ID not found in context"); err != nil {
+	// Get reviewer email from auth context for audit trail
+	reviewerEmail := auth.GetEmailFromContext(r.Context())
+	if reviewerEmail == "" {
+		if err := ErrorResponse(w, http.StatusUnauthorized, "unauthorized", "User email not found in context"); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))
 		}
 		return
 	}
 
 	// Approve the query
-	if err := h.queryService.ApproveQuery(r.Context(), projectID, queryID, reviewerID); err != nil {
+	if err := h.queryService.ApproveQuery(r.Context(), projectID, queryID, reviewerEmail); err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			if err := ErrorResponse(w, http.StatusNotFound, "not_found", "Query not found"); err != nil {
 				h.logger.Error("Failed to write error response", zap.Error(err))
@@ -875,10 +875,10 @@ func (h *QueriesHandler) Reject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get reviewer ID from auth context
-	reviewerID := auth.GetUserIDFromContext(r.Context())
-	if reviewerID == "" {
-		if err := ErrorResponse(w, http.StatusUnauthorized, "unauthorized", "User ID not found in context"); err != nil {
+	// Get reviewer email from auth context for audit trail
+	reviewerEmail := auth.GetEmailFromContext(r.Context())
+	if reviewerEmail == "" {
+		if err := ErrorResponse(w, http.StatusUnauthorized, "unauthorized", "User email not found in context"); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))
 		}
 		return
@@ -904,7 +904,7 @@ func (h *QueriesHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Reject the query
-	if err := h.queryService.RejectQuery(r.Context(), projectID, queryID, reviewerID, req.Reason); err != nil {
+	if err := h.queryService.RejectQuery(r.Context(), projectID, queryID, reviewerEmail, req.Reason); err != nil {
 		if errors.Is(err, apperrors.ErrNotFound) {
 			if err := ErrorResponse(w, http.StatusNotFound, "not_found", "Query not found"); err != nil {
 				h.logger.Error("Failed to write error response", zap.Error(err))
