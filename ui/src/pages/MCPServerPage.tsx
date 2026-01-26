@@ -25,7 +25,7 @@ const MCPServerPage = () => {
   const [copied, setCopied] = useState(false);
 
   // Read tool group configs from backend
-  const approvedQueriesState = config?.toolGroups[TOOL_GROUP_IDS.APPROVED_QUERIES];
+  const approvedQueriesState = config?.toolGroups[TOOL_GROUP_IDS.USER];
   const allowOntologyMaintenance = approvedQueriesState?.allowOntologyMaintenance ?? true;
 
   const developerState = config?.toolGroups[TOOL_GROUP_IDS.DEVELOPER];
@@ -84,7 +84,7 @@ const MCPServerPage = () => {
       setUpdating(true);
       const response = await engineApi.updateMCPConfig(pid, {
         toolGroups: {
-          [TOOL_GROUP_IDS.APPROVED_QUERIES]: {
+          [TOOL_GROUP_IDS.USER]: {
             enabled: true,
             allowOntologyMaintenance: enabled,
           },

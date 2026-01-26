@@ -479,7 +479,7 @@ export function AgentToolsSection({ serverUrl, apiKey, ... }: AgentToolsSectionP
 }
 ```
 
-### Task 9: Frontend - Update Metadata Constants
+### Task 9: Frontend - Update Metadata Constants [x]
 
 **File: `ui/src/constants/mcpToolMetadata.tsx`**
 
