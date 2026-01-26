@@ -449,10 +449,9 @@ func TestMCPConfigService_Get_NoDatasource_StillReturnsStoredState(t *testing.T)
 	assert.True(t, approvedQueries.Enabled, "response should reflect stored config state")
 }
 
-func TestMCPConfigService_Update_ShouldPersistEnabledState(t *testing.T) {
-	// This test verifies that when Update() saves enabled=true,
-	// the response should reflect enabled=true (when queries exist).
-	// This catches the bug where buildResponse was overriding saved state.
+func TestMCPConfigService_Update_ShouldPersistSubOptionState(t *testing.T) {
+	// This test verifies that when Update() saves a sub-option,
+	// the response should reflect that sub-option value.
 
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -479,33 +478,31 @@ func TestMCPConfigService_Update_ShouldPersistEnabledState(t *testing.T) {
 		zap.NewNop(),
 	)
 
-	// Update to enable approved_queries
+	// Update to set AllowOntologyMaintenance to false (default is true)
+	allowOntologyMaintenance := false
 	req := &UpdateMCPConfigRequest{
-		ToolGroups: map[string]*models.ToolGroupConfig{
-			ToolGroupApprovedQueries: {Enabled: true},
-		},
+		AllowOntologyMaintenance: &allowOntologyMaintenance,
 	}
 
 	resp, err := svc.Update(context.Background(), projectID, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// The response should show enabled=true
-	approvedQueries, ok := resp.ToolGroups[ToolGroupApprovedQueries]
-	require.True(t, ok, "approved_queries should be in response")
-	assert.True(t, approvedQueries.Enabled, "approved_queries should be enabled in response after Update")
+	// The response should show AllowOntologyMaintenance=false
+	userConfig, ok := resp.ToolGroups["user"]
+	require.True(t, ok, "user config should be in response")
+	assert.False(t, userConfig.AllowOntologyMaintenance, "AllowOntologyMaintenance should be false in response after Update")
 
-	// Also verify the config was actually saved with enabled=true
-	assert.True(t, configRepo.config.ToolGroups[ToolGroupApprovedQueries].Enabled,
-		"config should be persisted with enabled=true")
+	// Also verify the config was actually saved with AllowOntologyMaintenance=false
+	assert.False(t, configRepo.config.ToolGroups["user"].AllowOntologyMaintenance,
+		"config should be persisted with AllowOntologyMaintenance=false")
 }
 
-func TestMCPConfigService_Update_NoDefaultDatasource_ResponseReflectsSavedState(t *testing.T) {
-	// Even when GetDefaultDatasourceID returns nil, the response should
-	// reflect the saved state. This was previously a bug where buildResponse
-	// would override enabled=false when hasEnabledQueries returned false.
+func TestMCPConfigService_Update_DeveloperSubOptions(t *testing.T) {
+	// Test updating developer sub-options (AddQueryTools and AddOntologyMaintenance)
 
 	projectID := uuid.New()
+	datasourceID := uuid.New()
 
 	configRepo := &mockMCPConfigRepository{
 		config: models.DefaultMCPConfig(projectID),
@@ -515,9 +512,8 @@ func TestMCPConfigService_Update_NoDefaultDatasource_ResponseReflectsSavedState(
 		hasEnabledQueries: true,
 	}
 
-	// No default datasource configured
 	projectService := &mockProjectServiceForMCP{
-		defaultDatasourceID: uuid.Nil,
+		defaultDatasourceID: datasourceID,
 	}
 
 	svc := NewMCPConfigService(
@@ -529,26 +525,30 @@ func TestMCPConfigService_Update_NoDefaultDatasource_ResponseReflectsSavedState(
 		zap.NewNop(),
 	)
 
-	// Update to enable approved_queries
+	// Update to disable AddQueryTools but keep AddOntologyMaintenance
+	addQueryTools := false
+	addOntologyMaintenance := true
 	req := &UpdateMCPConfigRequest{
-		ToolGroups: map[string]*models.ToolGroupConfig{
-			ToolGroupApprovedQueries: {Enabled: true},
-		},
+		AddQueryTools:          &addQueryTools,
+		AddOntologyMaintenance: &addOntologyMaintenance,
 	}
 
 	resp, err := svc.Update(context.Background(), projectID, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// The config should be saved with enabled=true
-	require.NotNil(t, configRepo.config.ToolGroups[ToolGroupApprovedQueries])
-	assert.True(t, configRepo.config.ToolGroups[ToolGroupApprovedQueries].Enabled,
-		"config should be persisted with enabled=true")
+	// The config should be saved with the correct values
+	require.NotNil(t, configRepo.config.ToolGroups["developer"])
+	assert.False(t, configRepo.config.ToolGroups["developer"].AddQueryTools,
+		"config should be persisted with AddQueryTools=false")
+	assert.True(t, configRepo.config.ToolGroups["developer"].AddOntologyMaintenance,
+		"config should be persisted with AddOntologyMaintenance=true")
 
-	// Response should reflect saved state (enabled=true)
-	approvedQueries, ok := resp.ToolGroups[ToolGroupApprovedQueries]
+	// Response should reflect saved state
+	devConfig, ok := resp.ToolGroups["developer"]
 	require.True(t, ok)
-	assert.True(t, approvedQueries.Enabled, "response should reflect saved state")
+	assert.False(t, devConfig.AddQueryTools, "response should reflect AddQueryTools=false")
+	assert.True(t, devConfig.AddOntologyMaintenance, "response should reflect AddOntologyMaintenance=true")
 }
 
 func TestMCPConfigService_Get_SubOptionsResetWhenDisabled(t *testing.T) {
@@ -901,8 +901,8 @@ func TestMCPConfigService_Get_EnabledToolsWithAgentTools(t *testing.T) {
 	assert.Len(t, resp.EnabledTools, 3, "should have 3 tools (health + limited query) when agent_tools is enabled")
 }
 
-func TestMCPConfigService_Update_EnabledToolsReflectNewState(t *testing.T) {
-	// When Update() is called, the response EnabledTools should reflect the new state
+func TestMCPConfigService_Update_DeveloperToolsReflectNewState(t *testing.T) {
+	// When Update() is called with developer sub-options, DeveloperTools should reflect the new state
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -927,40 +927,43 @@ func TestMCPConfigService_Update_EnabledToolsReflectNewState(t *testing.T) {
 		zap.NewNop(),
 	)
 
-	// Update to enable developer tools with AddQueryTools option
+	// Update developer tools with AddQueryTools option (but not AddOntologyMaintenance)
+	addQueryTools := true
+	addOntologyMaintenance := false
 	req := &UpdateMCPConfigRequest{
-		ToolGroups: map[string]*models.ToolGroupConfig{
-			"developer": {Enabled: true, AddQueryTools: true},
-		},
+		AddQueryTools:          &addQueryTools,
+		AddOntologyMaintenance: &addOntologyMaintenance,
 	}
 
 	resp, err := svc.Update(context.Background(), projectID, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	toolNames := make([]string, len(resp.EnabledTools))
-	for i, tool := range resp.EnabledTools {
+	// Check DeveloperTools (the new per-role field) instead of EnabledTools (deprecated)
+	toolNames := make([]string, len(resp.DeveloperTools))
+	for i, tool := range resp.DeveloperTools {
 		toolNames[i] = tool.Name
 	}
 
 	// Developer Core + Query loadout (NO ontology maintenance - that requires AddOntologyMaintenance)
-	assert.Contains(t, toolNames, "echo", "should include echo after enabling developer")
-	assert.Contains(t, toolNames, "execute", "should include execute after enabling developer")
+	assert.Contains(t, toolNames, "echo", "should include echo in developer tools")
+	assert.Contains(t, toolNames, "execute", "should include execute in developer tools")
 	assert.Contains(t, toolNames, "get_schema", "should include get_schema with AddQueryTools")
 	assert.Contains(t, toolNames, "sample", "should include sample with AddQueryTools")
 	assert.NotContains(t, toolNames, "update_entity", "should NOT include update_entity with AddQueryTools (requires AddOntologyMaintenance)")
 }
 
 func TestMCPConfigService_Update_AllowOntologyMaintenance(t *testing.T) {
-	// Test that enabling AllowOntologyMaintenance for approved_queries adds ontology maintenance tools
+	// Test that enabling AllowOntologyMaintenance for User Tools adds ontology maintenance tools
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
+	// Start with AllowOntologyMaintenance disabled
 	configRepo := &mockMCPConfigRepository{
 		config: &models.MCPConfig{
 			ProjectID: projectID,
 			ToolGroups: map[string]*models.ToolGroupConfig{
-				ToolGroupApprovedQueries: {Enabled: true},
+				"user": {AllowOntologyMaintenance: false},
 			},
 		},
 	}
@@ -983,10 +986,9 @@ func TestMCPConfigService_Update_AllowOntologyMaintenance(t *testing.T) {
 	)
 
 	// Update to enable AllowOntologyMaintenance
+	allowOntologyMaintenance := true
 	req := &UpdateMCPConfigRequest{
-		ToolGroups: map[string]*models.ToolGroupConfig{
-			ToolGroupApprovedQueries: {Enabled: true, AllowOntologyMaintenance: true},
-		},
+		AllowOntologyMaintenance: &allowOntologyMaintenance,
 	}
 
 	resp, err := svc.Update(context.Background(), projectID, req)
@@ -994,17 +996,17 @@ func TestMCPConfigService_Update_AllowOntologyMaintenance(t *testing.T) {
 	require.NotNil(t, resp)
 
 	// Verify the state includes AllowOntologyMaintenance
-	aqConfig := resp.ToolGroups[ToolGroupApprovedQueries]
-	require.NotNil(t, aqConfig, "approved_queries config should exist")
-	assert.True(t, aqConfig.AllowOntologyMaintenance, "AllowOntologyMaintenance should be true")
+	userConfig := resp.ToolGroups["user"]
+	require.NotNil(t, userConfig, "user config should exist")
+	assert.True(t, userConfig.AllowOntologyMaintenance, "AllowOntologyMaintenance should be true")
 
-	toolNames := make([]string, len(resp.EnabledTools))
-	for i, tool := range resp.EnabledTools {
+	// User tools should now include ontology maintenance tools
+	toolNames := make([]string, len(resp.UserTools))
+	for i, tool := range resp.UserTools {
 		toolNames[i] = tool.Name
 	}
 
-	// Should have Query tools + Ontology Maintenance tools
-	assert.Contains(t, toolNames, "query", "should include query")
+	// Should have Query tools + Ontology Maintenance tools for users
 	assert.Contains(t, toolNames, "update_entity", "should include update_entity with AllowOntologyMaintenance")
 	assert.Contains(t, toolNames, "update_column", "should include update_column with AllowOntologyMaintenance")
 }
@@ -1196,4 +1198,339 @@ func TestMCPConfigService_Get_NilInstalledAppService_FiltersDataLiaisonTools(t *
 	// Data liaison tools should be filtered (fail closed)
 	assert.NotContains(t, toolNames, "suggest_approved_query", "should NOT include suggest_approved_query with nil service")
 	assert.NotContains(t, toolNames, "list_query_suggestions", "should NOT include list_query_suggestions with nil service")
+}
+
+func TestMCPConfigService_Get_IncludesPerRoleToolLists(t *testing.T) {
+	// Test that the response includes all three per-role tool lists
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	configRepo := &mockMCPConfigRepository{
+		config: &models.MCPConfig{
+			ProjectID: projectID,
+			ToolGroups: map[string]*models.ToolGroupConfig{
+				ToolGroupApprovedQueries: {Enabled: true, AllowOntologyMaintenance: true},
+				ToolGroupDeveloper:       {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
+			},
+		},
+	}
+
+	queryService := &mockQueryServiceForMCP{hasEnabledQueries: true}
+	projectService := &mockProjectServiceForMCP{defaultDatasourceID: datasourceID}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		nil, // installedAppService - not needed for this test
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// All three role tool lists should be populated
+	assert.NotEmpty(t, resp.UserTools, "UserTools should not be empty")
+	assert.NotEmpty(t, resp.DeveloperTools, "DeveloperTools should not be empty")
+	assert.NotEmpty(t, resp.AgentTools, "AgentTools should not be empty")
+
+	// EnabledTools (deprecated) should still be populated for backward compatibility
+	assert.NotEmpty(t, resp.EnabledTools, "EnabledTools should not be empty (backward compat)")
+}
+
+func TestMCPConfigService_Get_UserToolsContainsQueryTools(t *testing.T) {
+	// Test that UserTools includes query tools and optionally ontology maintenance
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	// Config with AllowOntologyMaintenance enabled for user tools
+	configRepo := &mockMCPConfigRepository{
+		config: &models.MCPConfig{
+			ProjectID: projectID,
+			ToolGroups: map[string]*models.ToolGroupConfig{
+				ToolGroupUser: {AllowOntologyMaintenance: true},
+			},
+		},
+	}
+
+	queryService := &mockQueryServiceForMCP{hasEnabledQueries: true}
+	projectService := &mockProjectServiceForMCP{defaultDatasourceID: datasourceID}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		nil,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	userToolNames := make([]string, len(resp.UserTools))
+	for i, tool := range resp.UserTools {
+		userToolNames[i] = tool.Name
+	}
+
+	// UserTools should include query tools
+	assert.Contains(t, userToolNames, "health", "UserTools should include health")
+	assert.Contains(t, userToolNames, "query", "UserTools should include query")
+	assert.Contains(t, userToolNames, "list_approved_queries", "UserTools should include list_approved_queries")
+
+	// With AllowOntologyMaintenance, should include ontology tools
+	assert.Contains(t, userToolNames, "update_entity", "UserTools should include update_entity with AllowOntologyMaintenance")
+
+	// UserTools should NOT include developer-specific tools
+	assert.NotContains(t, userToolNames, "echo", "UserTools should NOT include echo (developer only)")
+	assert.NotContains(t, userToolNames, "execute", "UserTools should NOT include execute (developer only)")
+}
+
+func TestMCPConfigService_Get_UserToolsWithoutOntologyMaintenance(t *testing.T) {
+	// Test that UserTools excludes ontology maintenance when option is disabled
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	configRepo := &mockMCPConfigRepository{
+		config: &models.MCPConfig{
+			ProjectID: projectID,
+			ToolGroups: map[string]*models.ToolGroupConfig{
+				ToolGroupApprovedQueries: {Enabled: true, AllowOntologyMaintenance: false},
+			},
+		},
+	}
+
+	queryService := &mockQueryServiceForMCP{hasEnabledQueries: true}
+	projectService := &mockProjectServiceForMCP{defaultDatasourceID: datasourceID}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		nil,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	userToolNames := make([]string, len(resp.UserTools))
+	for i, tool := range resp.UserTools {
+		userToolNames[i] = tool.Name
+	}
+
+	// UserTools should include query tools
+	assert.Contains(t, userToolNames, "query", "UserTools should include query")
+
+	// Without AllowOntologyMaintenance, should NOT include ontology maintenance tools
+	assert.NotContains(t, userToolNames, "update_entity", "UserTools should NOT include update_entity without AllowOntologyMaintenance")
+}
+
+func TestMCPConfigService_Get_DeveloperToolsContainsDevCore(t *testing.T) {
+	// Test that DeveloperTools includes developer core tools
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	configRepo := &mockMCPConfigRepository{
+		config: &models.MCPConfig{
+			ProjectID: projectID,
+			ToolGroups: map[string]*models.ToolGroupConfig{
+				ToolGroupDeveloper: {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
+			},
+		},
+	}
+
+	queryService := &mockQueryServiceForMCP{hasEnabledQueries: true}
+	projectService := &mockProjectServiceForMCP{defaultDatasourceID: datasourceID}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		nil,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	devToolNames := make([]string, len(resp.DeveloperTools))
+	for i, tool := range resp.DeveloperTools {
+		devToolNames[i] = tool.Name
+	}
+
+	// DeveloperTools should include developer core tools
+	assert.Contains(t, devToolNames, "health", "DeveloperTools should include health")
+	assert.Contains(t, devToolNames, "echo", "DeveloperTools should include echo")
+	assert.Contains(t, devToolNames, "execute", "DeveloperTools should include execute")
+
+	// With AddQueryTools, should include query tools
+	assert.Contains(t, devToolNames, "query", "DeveloperTools should include query with AddQueryTools")
+	assert.Contains(t, devToolNames, "get_schema", "DeveloperTools should include get_schema with AddQueryTools")
+
+	// With AddOntologyMaintenance, should include ontology tools
+	assert.Contains(t, devToolNames, "update_entity", "DeveloperTools should include update_entity with AddOntologyMaintenance")
+}
+
+func TestMCPConfigService_Get_DeveloperToolsWithoutSubOptions(t *testing.T) {
+	// Test that DeveloperTools only has core tools when sub-options are disabled
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	configRepo := &mockMCPConfigRepository{
+		config: &models.MCPConfig{
+			ProjectID: projectID,
+			ToolGroups: map[string]*models.ToolGroupConfig{
+				ToolGroupDeveloper: {Enabled: true, AddQueryTools: false, AddOntologyMaintenance: false},
+			},
+		},
+	}
+
+	queryService := &mockQueryServiceForMCP{hasEnabledQueries: true}
+	projectService := &mockProjectServiceForMCP{defaultDatasourceID: datasourceID}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		nil,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	devToolNames := make([]string, len(resp.DeveloperTools))
+	for i, tool := range resp.DeveloperTools {
+		devToolNames[i] = tool.Name
+	}
+
+	// DeveloperTools should include developer core tools
+	assert.Contains(t, devToolNames, "health", "DeveloperTools should include health")
+	assert.Contains(t, devToolNames, "echo", "DeveloperTools should include echo")
+	assert.Contains(t, devToolNames, "execute", "DeveloperTools should include execute")
+
+	// Without AddQueryTools, should NOT include query tools
+	assert.NotContains(t, devToolNames, "query", "DeveloperTools should NOT include query without AddQueryTools")
+
+	// Without AddOntologyMaintenance, should NOT include ontology tools
+	assert.NotContains(t, devToolNames, "update_entity", "DeveloperTools should NOT include update_entity without AddOntologyMaintenance")
+}
+
+func TestMCPConfigService_Get_AgentToolsIsLimited(t *testing.T) {
+	// Test that AgentTools is always a limited set regardless of config
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	// Even with all options enabled, agent tools should be limited
+	configRepo := &mockMCPConfigRepository{
+		config: &models.MCPConfig{
+			ProjectID: projectID,
+			ToolGroups: map[string]*models.ToolGroupConfig{
+				ToolGroupApprovedQueries: {Enabled: true, AllowOntologyMaintenance: true},
+				ToolGroupDeveloper:       {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
+				ToolGroupAgentTools:      {Enabled: true},
+			},
+		},
+	}
+
+	queryService := &mockQueryServiceForMCP{hasEnabledQueries: true}
+	projectService := &mockProjectServiceForMCP{defaultDatasourceID: datasourceID}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		nil,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	agentToolNames := make([]string, len(resp.AgentTools))
+	for i, tool := range resp.AgentTools {
+		agentToolNames[i] = tool.Name
+	}
+
+	// AgentTools should be limited to: health, list_approved_queries, execute_approved_query
+	assert.Contains(t, agentToolNames, "health", "AgentTools should include health")
+	assert.Contains(t, agentToolNames, "list_approved_queries", "AgentTools should include list_approved_queries")
+	assert.Contains(t, agentToolNames, "execute_approved_query", "AgentTools should include execute_approved_query")
+
+	// AgentTools should NOT include any other tools
+	assert.Len(t, resp.AgentTools, 3, "AgentTools should have exactly 3 tools")
+
+	// Specifically verify it excludes developer and full query tools
+	assert.NotContains(t, agentToolNames, "query", "AgentTools should NOT include query")
+	assert.NotContains(t, agentToolNames, "echo", "AgentTools should NOT include echo")
+	assert.NotContains(t, agentToolNames, "execute", "AgentTools should NOT include execute")
+	assert.NotContains(t, agentToolNames, "update_entity", "AgentTools should NOT include update_entity")
+}
+
+func TestMCPConfigService_Get_PerRoleToolsFilterDataLiaison(t *testing.T) {
+	// Test that per-role tool lists filter data liaison tools when app not installed
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	configRepo := &mockMCPConfigRepository{
+		config: &models.MCPConfig{
+			ProjectID: projectID,
+			ToolGroups: map[string]*models.ToolGroupConfig{
+				ToolGroupApprovedQueries: {Enabled: true, AllowOntologyMaintenance: true},
+				ToolGroupDeveloper:       {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
+			},
+		},
+	}
+
+	queryService := &mockQueryServiceForMCP{hasEnabledQueries: true}
+	projectService := &mockProjectServiceForMCP{defaultDatasourceID: datasourceID}
+
+	// AI Data Liaison app is NOT installed
+	installedAppService := &mockInstalledAppServiceForMCP{
+		installed: map[string]bool{
+			models.AppIDAIDataLiaison: false,
+		},
+	}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		installedAppService,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Collect all tool names from all role lists
+	allToolNames := make(map[string]bool)
+	for _, tool := range resp.UserTools {
+		allToolNames[tool.Name] = true
+	}
+	for _, tool := range resp.DeveloperTools {
+		allToolNames[tool.Name] = true
+	}
+	for _, tool := range resp.AgentTools {
+		allToolNames[tool.Name] = true
+	}
+
+	// Data liaison tools should NOT be in any role's tool list
+	assert.False(t, allToolNames["suggest_approved_query"], "suggest_approved_query should be filtered")
+	assert.False(t, allToolNames["suggest_query_update"], "suggest_query_update should be filtered")
+	assert.False(t, allToolNames["list_query_suggestions"], "list_query_suggestions should be filtered")
 }

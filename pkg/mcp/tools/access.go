@@ -4,12 +4,14 @@ package tools
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
@@ -28,8 +30,12 @@ type ToolAccessResult struct {
 	Cleanup   func()
 }
 
-// CheckToolAccess verifies that the specified tool is enabled for the current project.
+// CheckToolAccess verifies that the specified tool is enabled for the current project and user role.
 // This is the shared implementation that all tool-specific check functions should use.
+// Tool access is determined by the JWT role:
+// - Agents (API key auth) get ComputeAgentTools
+// - Admin/Data/Developer roles get ComputeDeveloperTools
+// - Regular users get ComputeUserTools
 // Returns project ID, tenant-scoped context, cleanup function, and any error.
 func CheckToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string) (*ToolAccessResult, error) {
 	db := deps.GetDB()
@@ -56,10 +62,7 @@ func CheckToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string) 
 	// Set tenant context for the query
 	tenantCtx := database.SetTenantScope(ctx, scope)
 
-	// Check if caller is an agent (API key authentication)
-	isAgent := claims.Subject == "agent"
-
-	// Get tool groups state and check access using the unified checker
+	// Get tool groups state for configuration options
 	state, err := mcpConfig.GetToolGroupsState(tenantCtx, projectID)
 	if err != nil {
 		scope.Close()
@@ -69,9 +72,11 @@ func CheckToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string) 
 		return nil, fmt.Errorf("failed to check tool configuration: %w", err)
 	}
 
-	// Use the unified ToolAccessChecker for consistent access decisions
-	checker := services.NewToolAccessChecker()
-	if checker.IsToolAccessible(toolName, state, isAgent) {
+	// Compute enabled tools based on JWT role
+	enabledTools := computeToolsForRole(claims, state)
+
+	// Check if the requested tool is in the enabled list
+	if isToolInList(toolName, enabledTools) {
 		return &ToolAccessResult{
 			ProjectID: projectID,
 			TenantCtx: tenantCtx,
@@ -81,6 +86,37 @@ func CheckToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string) 
 
 	scope.Close()
 	return nil, fmt.Errorf("%s tool is not enabled for this project", toolName)
+}
+
+// computeToolsForRole determines the tool set based on JWT claims.
+// - Agents (Subject == "agent") get limited agent tools
+// - Admin/Data/Developer roles get developer tools
+// - Regular users get user tools
+func computeToolsForRole(claims *auth.Claims, state map[string]*models.ToolGroupConfig) []services.ToolSpec {
+	// Check if caller is an agent (API key authentication)
+	if claims.Subject == "agent" {
+		return services.ComputeAgentTools(state)
+	}
+
+	// Check if caller has admin/data/developer role
+	if slices.Contains(claims.Roles, models.RoleAdmin) ||
+		slices.Contains(claims.Roles, models.RoleData) ||
+		slices.Contains(claims.Roles, "developer") {
+		return services.ComputeDeveloperTools(state)
+	}
+
+	// Regular user gets user tools
+	return services.ComputeUserTools(state)
+}
+
+// isToolInList checks if a tool name is in the enabled tools list.
+func isToolInList(toolName string, tools []services.ToolSpec) bool {
+	for _, tool := range tools {
+		if tool.Name == toolName {
+			return true
+		}
+	}
+	return false
 }
 
 // AcquireToolAccess verifies tool access and sets up tenant context for tool execution.

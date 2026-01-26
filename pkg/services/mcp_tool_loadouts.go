@@ -344,3 +344,51 @@ func IsToolInLoadout(toolName, loadoutName string) bool {
 	}
 	return false
 }
+
+// ComputeUserTools computes tools for business users (role: user).
+// Returns tools based on the User Tools configuration:
+// - Default loadout (health) always included
+// - Query loadout (read-only ad-hoc queries, approved queries, ontology access)
+// - Ontology Maintenance loadout if AllowOntologyMaintenance is true
+func ComputeUserTools(state map[string]*models.ToolGroupConfig) []ToolSpec {
+	loadouts := []string{LoadoutDefault, LoadoutQuery}
+
+	// Check for allowOntologyMaintenance option in user config
+	if userConfig := state[ToolGroupUser]; userConfig != nil && userConfig.AllowOntologyMaintenance {
+		loadouts = append(loadouts, LoadoutOntologyMaintenance)
+	}
+
+	return MergeLoadouts(loadouts...)
+}
+
+// ComputeDeveloperTools computes tools for admin/data/developer roles.
+// Returns the full tool set based on Developer Tools configuration:
+// - Default loadout (health) always included
+// - Developer Core loadout (echo, execute)
+// - Query loadout if AddQueryTools is true
+// - Ontology Maintenance + Questions loadouts if AddOntologyMaintenance is true
+//
+// Note: For developers, we use the developer config for sub-options.
+func ComputeDeveloperTools(state map[string]*models.ToolGroupConfig) []ToolSpec {
+	loadouts := []string{LoadoutDefault, LoadoutDeveloperCore}
+
+	devConfig := state[ToolGroupDeveloper]
+	if devConfig != nil {
+		if devConfig.AddQueryTools {
+			loadouts = append(loadouts, LoadoutQuery)
+		}
+		if devConfig.AddOntologyMaintenance {
+			loadouts = append(loadouts, LoadoutOntologyMaintenance, LoadoutOntologyQuestions)
+		}
+	}
+
+	return MergeLoadouts(loadouts...)
+}
+
+// ComputeAgentTools computes tools for AI agents (API key authentication).
+// Returns a limited set of tools:
+// - Default loadout (health)
+// - Limited Query loadout (list_approved_queries, execute_approved_query)
+func ComputeAgentTools(_ map[string]*models.ToolGroupConfig) []ToolSpec {
+	return MergeLoadouts(LoadoutDefault, LoadoutLimitedQuery)
+}

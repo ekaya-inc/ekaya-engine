@@ -41,6 +41,10 @@ export interface EnabledToolInfo {
 export interface MCPConfigResponse {
   serverUrl: string;
   toolGroups: Record<string, ToolGroupState>;
+  userTools: EnabledToolInfo[];
+  developerTools: EnabledToolInfo[];
+  agentTools: EnabledToolInfo[];
+  /** @deprecated Use userTools, developerTools, or agentTools instead. Kept for backward compatibility. */
   enabledTools: EnabledToolInfo[];
 }
 
@@ -65,8 +69,16 @@ export interface ToolGroupConfigUpdate {
   allowClientSuggestions?: boolean;
 }
 
+/**
+ * UpdateMCPConfigRequest uses flat fields to update MCP configuration.
+ * Only include fields you want to change - omitted fields are not modified.
+ */
 export interface UpdateMCPConfigRequest {
-  toolGroups: Record<string, ToolGroupConfigUpdate>;
+  // User Tools sub-option
+  allowOntologyMaintenance?: boolean;
+  // Developer Tools sub-options
+  addQueryTools?: boolean;
+  addOntologyMaintenance?: boolean;
 }
 
 // UI Rendering Types (state merged with frontend metadata)
