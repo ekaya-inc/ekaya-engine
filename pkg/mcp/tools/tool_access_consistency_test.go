@@ -83,6 +83,7 @@ func TestAgentToolsEnabled_ListAndCallConsistency(t *testing.T) {
 		repositories.NewMCPConfigRepository(),
 		&mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
 		&mockProjectService{defaultDatasourceID: uuid.New()},
+		nil, // installedAppService - not needed for this test
 		"http://localhost",
 		zap.NewNop(),
 	)
@@ -155,6 +156,7 @@ func TestApprovedQueriesEnabled_ListAndCallConsistency(t *testing.T) {
 		repositories.NewMCPConfigRepository(),
 		&mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
 		&mockProjectService{defaultDatasourceID: uuid.New()},
+		nil, // installedAppService - not needed for this test
 		"http://localhost",
 		zap.NewNop(),
 	)
@@ -221,6 +223,7 @@ func TestNeitherEnabled_NeitherListedNorCallable(t *testing.T) {
 		repositories.NewMCPConfigRepository(),
 		&mockQueryService{},
 		&mockProjectService{},
+		nil, // installedAppService - not needed for this test
 		"http://localhost",
 		zap.NewNop(),
 	)
@@ -290,6 +293,7 @@ func TestAgentAuth_AgentToolsDisabled(t *testing.T) {
 		repositories.NewMCPConfigRepository(),
 		&mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
 		&mockProjectService{defaultDatasourceID: uuid.New()},
+		nil, // installedAppService - not needed for this test
 		"http://localhost",
 		zap.NewNop(),
 	)
@@ -340,6 +344,7 @@ func TestBothEnabled_UserSeesApprovedQueries(t *testing.T) {
 		repositories.NewMCPConfigRepository(),
 		&mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
 		&mockProjectService{defaultDatasourceID: uuid.New()},
+		nil, // installedAppService - not needed for this test
 		"http://localhost",
 		zap.NewNop(),
 	)
@@ -408,6 +413,7 @@ func TestAgentToolsEnabled_LimitedQueryToolsConsistency(t *testing.T) {
 		repositories.NewMCPConfigRepository(),
 		&mockQueryService{enabledQueries: []*models.Query{{ID: uuid.New()}}},
 		&mockProjectService{defaultDatasourceID: uuid.New()},
+		nil, // installedAppService - not needed for this test
 		"http://localhost",
 		zap.NewNop(),
 	)
