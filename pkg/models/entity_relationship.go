@@ -47,7 +47,7 @@ type EntityRelationship struct {
 	IsStale            bool       `json:"is_stale"`                     // True when schema changed and needs re-evaluation
 
 	// Provenance: source tracking (how it was created/modified)
-	Source         string  `json:"source"`                     // 'inference', 'mcp', 'manual'
+	Source         string  `json:"source"`                     // 'inferred', 'mcp', 'manual'
 	LastEditSource *string `json:"last_edit_source,omitempty"` // How last modified (nil if never edited)
 
 	// Provenance: actor tracking (who created/modified)

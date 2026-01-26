@@ -38,7 +38,7 @@ type BusinessGlossaryTerm struct {
 	ReviewReason     string         `json:"review_reason,omitempty"`     // Why the term needs review (e.g., "Formula may not match term semantics")
 
 	// Provenance: source tracking (how it was created/modified)
-	Source         string  `json:"source"`                     // 'inference', 'mcp', 'manual'
+	Source         string  `json:"source"`                     // 'inferred', 'mcp', 'manual'
 	LastEditSource *string `json:"last_edit_source,omitempty"` // How last modified (nil if never edited)
 
 	// Provenance: actor tracking (who created/modified)
