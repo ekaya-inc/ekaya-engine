@@ -179,7 +179,7 @@ func ComputeAgentTools(state map[string]*models.ToolGroupConfig) []ToolSpec {
 }
 ```
 
-### Task 2: Backend - Update MCP Config Response
+### Task 2: Backend - Update MCP Config Response [x]
 
 **File: `pkg/services/mcp_config.go`**
 

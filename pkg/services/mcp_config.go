@@ -35,9 +35,12 @@ type EnabledToolInfo struct {
 // MCPConfigResponse is the API response format for MCP configuration.
 // Returns only configuration state; UI strings are defined in the frontend.
 type MCPConfigResponse struct {
-	ServerURL    string                             `json:"serverUrl"`
-	ToolGroups   map[string]*models.ToolGroupConfig `json:"toolGroups"`
-	EnabledTools []EnabledToolInfo                  `json:"enabledTools"`
+	ServerURL      string                             `json:"serverUrl"`
+	ToolGroups     map[string]*models.ToolGroupConfig `json:"toolGroups"`
+	UserTools      []EnabledToolInfo                  `json:"userTools"`      // Tools for business users (role: user)
+	DeveloperTools []EnabledToolInfo                  `json:"developerTools"` // Tools for admin/data/developer roles
+	AgentTools     []EnabledToolInfo                  `json:"agentTools"`     // Tools for AI agents (API key auth)
+	EnabledTools   []EnabledToolInfo                  `json:"enabledTools"`   // Deprecated: kept for backward compatibility
 }
 
 // UpdateMCPConfigRequest is the API request format for updating MCP configuration.
@@ -262,6 +265,7 @@ func (s *mcpConfigService) hasEnabledQueries(ctx context.Context, projectID uuid
 
 // buildResponse creates the API response format from the model.
 // Uses the state validator to ensure the response is normalized (sub-options reset when disabled).
+// Computes per-role tool lists (UserTools, DeveloperTools, AgentTools) based on configuration.
 // Filters out tools that require apps not installed (e.g., AI Data Liaison tools).
 func (s *mcpConfigService) buildResponse(ctx context.Context, projectID uuid.UUID, config *models.MCPConfig) *MCPConfigResponse {
 	// Use the state validator to normalize the state for response
@@ -309,25 +313,61 @@ func (s *mcpConfigService) buildResponse(ctx context.Context, projectID uuid.UUI
 		}
 	}
 
-	// Convert ToolDefinition to EnabledToolInfo for API response
-	// Filter out data liaison tools if the app is not installed
-	enabledTools := make([]EnabledToolInfo, 0, len(result.EnabledTools))
-	for _, tool := range result.EnabledTools {
+	// Compute per-role tool lists based on configuration
+	userToolSpecs := ComputeUserTools(result.State)
+	developerToolSpecs := ComputeDeveloperTools(result.State)
+	agentToolSpecs := ComputeAgentTools(result.State)
+
+	// Convert ToolSpec to EnabledToolInfo with data liaison filtering
+	userTools := s.filterAndConvertToolSpecs(userToolSpecs, dataLiaisonInstalled)
+	developerTools := s.filterAndConvertToolSpecs(developerToolSpecs, dataLiaisonInstalled)
+	agentTools := s.filterAndConvertToolSpecs(agentToolSpecs, dataLiaisonInstalled)
+
+	// EnabledTools (deprecated) - uses the old computation for backward compatibility
+	enabledTools := s.filterAndConvertToolDefs(result.EnabledTools, dataLiaisonInstalled)
+
+	return &MCPConfigResponse{
+		ServerURL:      serverURL,
+		ToolGroups:     toolGroups,
+		UserTools:      userTools,
+		DeveloperTools: developerTools,
+		AgentTools:     agentTools,
+		EnabledTools:   enabledTools,
+	}
+}
+
+// filterAndConvertToolSpecs converts ToolSpec slice to EnabledToolInfo slice,
+// filtering out data liaison tools if the app is not installed.
+func (s *mcpConfigService) filterAndConvertToolSpecs(tools []ToolSpec, dataLiaisonInstalled bool) []EnabledToolInfo {
+	result := make([]EnabledToolInfo, 0, len(tools))
+	for _, tool := range tools {
 		// Skip data liaison tools if app is not installed
 		if !dataLiaisonInstalled && DataLiaisonTools[tool.Name] {
 			continue
 		}
-		enabledTools = append(enabledTools, EnabledToolInfo{
+		result = append(result, EnabledToolInfo{
 			Name:        tool.Name,
 			Description: tool.Description,
 		})
 	}
+	return result
+}
 
-	return &MCPConfigResponse{
-		ServerURL:    serverURL,
-		ToolGroups:   toolGroups,
-		EnabledTools: enabledTools,
+// filterAndConvertToolDefs converts ToolDefinition slice to EnabledToolInfo slice,
+// filtering out data liaison tools if the app is not installed.
+func (s *mcpConfigService) filterAndConvertToolDefs(tools []ToolDefinition, dataLiaisonInstalled bool) []EnabledToolInfo {
+	result := make([]EnabledToolInfo, 0, len(tools))
+	for _, tool := range tools {
+		// Skip data liaison tools if app is not installed
+		if !dataLiaisonInstalled && DataLiaisonTools[tool.Name] {
+			continue
+		}
+		result = append(result, EnabledToolInfo{
+			Name:        tool.Name,
+			Description: tool.Description,
+		})
 	}
+	return result
 }
 
 // Ensure mcpConfigService implements MCPConfigService at compile time.
