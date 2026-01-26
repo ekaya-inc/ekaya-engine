@@ -350,14 +350,11 @@ func IsToolInLoadout(toolName, loadoutName string) bool {
 // - Default loadout (health) always included
 // - Query loadout (read-only ad-hoc queries, approved queries, ontology access)
 // - Ontology Maintenance loadout if AllowOntologyMaintenance is true
-//
-// Note: For business users, we use the approved_queries config as the source of truth
-// for the AllowOntologyMaintenance option.
 func ComputeUserTools(state map[string]*models.ToolGroupConfig) []ToolSpec {
 	loadouts := []string{LoadoutDefault, LoadoutQuery}
 
-	// Check for allowOntologyMaintenance option in approved_queries config
-	if aqConfig := state[ToolGroupApprovedQueries]; aqConfig != nil && aqConfig.AllowOntologyMaintenance {
+	// Check for allowOntologyMaintenance option in user config
+	if userConfig := state[ToolGroupUser]; userConfig != nil && userConfig.AllowOntologyMaintenance {
 		loadouts = append(loadouts, LoadoutOntologyMaintenance)
 	}
 

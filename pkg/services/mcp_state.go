@@ -170,19 +170,17 @@ func (v *mcpStateValidator) applyMutualExclusivity(state map[string]*models.Tool
 	}
 }
 
-// normalizeState ensures sub-options are false when their parent is disabled.
+// normalizeState ensures legacy sub-options are false when Enabled is false.
+// Note: New sub-options (AllowOntologyMaintenance, AddQueryTools, AddOntologyMaintenance)
+// are NOT reset based on Enabled, because tool groups no longer have enable/disable toggles
+// in the new role-based architecture.
 func (v *mcpStateValidator) normalizeState(state map[string]*models.ToolGroupConfig) {
 	for _, config := range state {
 		if config != nil && !config.Enabled {
-			// New sub-options
-			config.AllowOntologyMaintenance = false
-			config.AddQueryTools = false
-			config.AddOntologyMaintenance = false
-			config.CustomTools = nil
-
-			// Legacy sub-options
+			// Only reset legacy sub-options when Enabled is false
 			config.ForceMode = false
 			config.AllowClientSuggestions = false
+			config.CustomTools = nil
 		}
 	}
 }

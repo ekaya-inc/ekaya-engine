@@ -35,7 +35,7 @@ func TestComputeUserTools(t *testing.T) {
 
 	t.Run("includes Ontology Maintenance tools when AllowOntologyMaintenance is true", func(t *testing.T) {
 		state := map[string]*models.ToolGroupConfig{
-			ToolGroupApprovedQueries: {AllowOntologyMaintenance: true},
+			ToolGroupUser: {AllowOntologyMaintenance: true},
 		}
 
 		tools := ComputeUserTools(state)

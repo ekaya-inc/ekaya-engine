@@ -18,11 +18,15 @@ const ToolGroupApprovedQueries = "approved_queries"
 // ToolGroupAgentTools is the identifier for the agent tools group.
 const ToolGroupAgentTools = "agent_tools"
 
+// ToolGroupUser is the identifier for the user tools group.
+const ToolGroupUser = "user"
+
 // validToolGroups defines the known tool group identifiers for validation.
 // UI metadata (names, descriptions, warnings) is defined in the frontend.
 var validToolGroups = map[string]bool{
+	ToolGroupUser:            true,
 	"developer":              true,
-	ToolGroupApprovedQueries: true,
+	ToolGroupApprovedQueries: true, // Legacy - kept for backward compatibility
 	ToolGroupAgentTools:      true,
 }
 
@@ -44,8 +48,13 @@ type MCPConfigResponse struct {
 }
 
 // UpdateMCPConfigRequest is the API request format for updating MCP configuration.
+// Uses optional pointers to distinguish "not sent" from "sent as false".
 type UpdateMCPConfigRequest struct {
-	ToolGroups map[string]*models.ToolGroupConfig `json:"toolGroups"`
+	// User Tools sub-option: allow MCP clients with user role to update ontology
+	AllowOntologyMaintenance *bool `json:"allowOntologyMaintenance,omitempty"`
+	// Developer Tools sub-options
+	AddQueryTools          *bool `json:"addQueryTools,omitempty"`          // adds Query loadout
+	AddOntologyMaintenance *bool `json:"addOntologyMaintenance,omitempty"` // adds Ontology Maintenance tools
 }
 
 // MCPConfigService orchestrates MCP configuration management.
@@ -129,6 +138,47 @@ func (s *mcpConfigService) Update(ctx context.Context, projectID uuid.UUID, req 
 		config = models.DefaultMCPConfig(projectID)
 	}
 
+	// Convert flat request to ToolGroups map update
+	// Only include groups that have options being updated
+	toolGroupsUpdate := make(map[string]*models.ToolGroupConfig)
+
+	// Apply User Tools sub-option if provided
+	if req.AllowOntologyMaintenance != nil {
+		userConfig := config.ToolGroups["user"]
+		if userConfig == nil {
+			userConfig = &models.ToolGroupConfig{AllowOntologyMaintenance: true}
+		}
+		toolGroupsUpdate["user"] = &models.ToolGroupConfig{
+			AllowOntologyMaintenance: *req.AllowOntologyMaintenance,
+			// Preserve other fields from existing config
+			Enabled:     userConfig.Enabled,
+			CustomTools: userConfig.CustomTools,
+		}
+	}
+
+	// Apply Developer Tools sub-options if provided
+	devNeedsUpdate := req.AddQueryTools != nil || req.AddOntologyMaintenance != nil
+	if devNeedsUpdate {
+		devConfig := config.ToolGroups["developer"]
+		if devConfig == nil {
+			devConfig = &models.ToolGroupConfig{AddQueryTools: true, AddOntologyMaintenance: true}
+		}
+		newDevConfig := &models.ToolGroupConfig{
+			AddQueryTools:          devConfig.AddQueryTools,
+			AddOntologyMaintenance: devConfig.AddOntologyMaintenance,
+			// Preserve other fields from existing config
+			Enabled:     devConfig.Enabled,
+			CustomTools: devConfig.CustomTools,
+		}
+		if req.AddQueryTools != nil {
+			newDevConfig.AddQueryTools = *req.AddQueryTools
+		}
+		if req.AddOntologyMaintenance != nil {
+			newDevConfig.AddOntologyMaintenance = *req.AddOntologyMaintenance
+		}
+		toolGroupsUpdate["developer"] = newDevConfig
+	}
+
 	// Build state context for validation
 	hasQueries, err := s.hasEnabledQueries(ctx, projectID)
 	if err != nil {
@@ -143,7 +193,7 @@ func (s *mcpConfigService) Update(ctx context.Context, projectID uuid.UUID, req 
 	result := s.stateValidator.Apply(
 		MCPStateTransition{
 			Current: config.ToolGroups,
-			Update:  req.ToolGroups,
+			Update:  toolGroupsUpdate,
 		},
 		MCPStateContext{HasEnabledQueries: hasQueries},
 	)

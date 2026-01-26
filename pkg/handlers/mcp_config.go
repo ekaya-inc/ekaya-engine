@@ -7,13 +7,17 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
-	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 )
 
 // UpdateMCPConfigRequest is the request body for PATCH /api/projects/{pid}/mcp/config.
+// Uses optional pointers to distinguish "not sent" from "sent as false".
 type UpdateMCPConfigRequest struct {
-	ToolGroups map[string]*models.ToolGroupConfig `json:"toolGroups"`
+	// User Tools sub-option: allow MCP clients with user role to update ontology
+	AllowOntologyMaintenance *bool `json:"allowOntologyMaintenance,omitempty"`
+	// Developer Tools sub-options
+	AddQueryTools          *bool `json:"addQueryTools,omitempty"`          // adds Query loadout
+	AddOntologyMaintenance *bool `json:"addOntologyMaintenance,omitempty"` // adds Ontology Maintenance tools
 }
 
 // MCPConfigHandler handles MCP configuration HTTP requests.
@@ -79,15 +83,11 @@ func (h *MCPConfigHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.ToolGroups == nil {
-		if err := ErrorResponse(w, http.StatusBadRequest, "missing_tool_groups", "toolGroups is required"); err != nil {
-			h.logger.Error("Failed to write error response", zap.Error(err))
-		}
-		return
-	}
-
+	// Convert flat request to service request format
 	serviceReq := &services.UpdateMCPConfigRequest{
-		ToolGroups: req.ToolGroups,
+		AllowOntologyMaintenance: req.AllowOntologyMaintenance,
+		AddQueryTools:            req.AddQueryTools,
+		AddOntologyMaintenance:   req.AddOntologyMaintenance,
 	}
 
 	config, err := h.mcpConfigService.Update(r.Context(), projectID, serviceReq)
