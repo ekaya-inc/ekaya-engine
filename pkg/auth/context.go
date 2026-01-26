@@ -35,6 +35,17 @@ func GetUserIDFromContext(ctx context.Context) string {
 	return claims.Subject
 }
 
+// GetEmailFromContext extracts the user email from JWT claims in the context.
+// Returns empty string if not authenticated or claims are missing.
+// Use this when you need the user's email for display purposes (e.g., audit trails).
+func GetEmailFromContext(ctx context.Context) string {
+	claims, ok := GetClaims(ctx)
+	if !ok || claims == nil {
+		return ""
+	}
+	return claims.Email
+}
+
 // GetProjectIDFromContext extracts the project ID from JWT claims in the context.
 // Returns uuid.Nil if not authenticated or claims are missing.
 // Use this when you only need the project ID and can handle uuid.Nil gracefully.

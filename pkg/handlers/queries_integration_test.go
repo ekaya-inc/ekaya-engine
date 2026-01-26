@@ -112,11 +112,13 @@ func (tc *queriesIntegrationTestContext) makeRequest(method, path string, body a
 	ctx = database.SetTenantScope(ctx, scope)
 
 	// Set up auth claims with user ID (Subject) for connection pooling
+	// Email is required for approve/reject audit trail
 	claims := &auth.Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject: "test-user-integration",
 		},
 		ProjectID: tc.projectID.String(),
+		Email:     "test-user@example.com",
 	}
 	ctx = context.WithValue(ctx, auth.ClaimsKey, claims)
 
@@ -760,5 +762,503 @@ func TestQueriesIntegration_ListQueries(t *testing.T) {
 
 	if len(enabledQueries) != 2 {
 		t.Errorf("Expected 2 enabled queries, got %d", len(enabledQueries))
+	}
+}
+
+func TestQueriesIntegration_ListPending(t *testing.T) {
+	tc := setupQueriesIntegrationTest(t)
+	tc.ensureTestDatasource()
+	tc.cleanupQueries()
+
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	// Insert pending queries directly into the database
+	// (We need to set status='pending' which isn't possible via normal Create API)
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_queries (
+			id, project_id, datasource_id, natural_language_prompt, sql_query,
+			dialect, is_enabled, status, suggested_by, parameters, output_columns, tags
+		) VALUES
+		($1, $2, $3, 'Pending Query 1', 'SELECT 1', 'postgres', false, 'pending', 'agent', '[]'::jsonb, '[{"name":"col","type":"INT4","description":""}]'::jsonb, '{}'::text[]),
+		($4, $2, $3, 'Pending Query 2', 'SELECT 2', 'postgres', false, 'pending', 'user', '[]'::jsonb, '[{"name":"col","type":"INT4","description":""}]'::jsonb, '{}'::text[]),
+		($5, $2, $3, 'Approved Query', 'SELECT 3', 'postgres', true, 'approved', 'admin', '[]'::jsonb, '[{"name":"col","type":"INT4","description":""}]'::jsonb, '{}'::text[])
+	`, uuid.New(), tc.projectID, tc.createdDsID, uuid.New(), uuid.New())
+	if err != nil {
+		t.Fatalf("Failed to insert test queries: %v", err)
+	}
+
+	// List pending queries
+	listReq, listCleanup := tc.makeRequest(http.MethodGet,
+		"/api/projects/"+tc.projectID.String()+"/queries/pending",
+		nil)
+	listReq.SetPathValue("pid", tc.projectID.String())
+
+	listRec := httptest.NewRecorder()
+	tc.queriesHandler.ListPending(listRec, listReq)
+	listCleanup()
+
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("ListPending failed with status %d: %s", listRec.Code, listRec.Body.String())
+	}
+
+	var listResp ApiResponse
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("Failed to parse list response: %v", err)
+	}
+
+	if !listResp.Success {
+		t.Fatalf("Expected success, got error: %s", listResp.Error)
+	}
+
+	listData := listResp.Data.(map[string]any)
+
+	// Verify count field
+	count := int(listData["count"].(float64))
+	if count != 2 {
+		t.Errorf("Expected count=2, got %d", count)
+	}
+
+	// Verify queries array
+	pendingQueries := listData["queries"].([]any)
+	if len(pendingQueries) != 2 {
+		t.Errorf("Expected 2 pending queries, got %d", len(pendingQueries))
+	}
+
+	// Verify all queries have pending status
+	for _, q := range pendingQueries {
+		query := q.(map[string]any)
+		if query["status"] != "pending" {
+			t.Errorf("Expected status 'pending', got '%v'", query["status"])
+		}
+	}
+}
+
+func TestQueriesIntegration_ListPending_Empty(t *testing.T) {
+	tc := setupQueriesIntegrationTest(t)
+	tc.ensureTestDatasource()
+	tc.cleanupQueries()
+
+	// List pending queries (should be empty)
+	listReq, listCleanup := tc.makeRequest(http.MethodGet,
+		"/api/projects/"+tc.projectID.String()+"/queries/pending",
+		nil)
+	listReq.SetPathValue("pid", tc.projectID.String())
+
+	listRec := httptest.NewRecorder()
+	tc.queriesHandler.ListPending(listRec, listReq)
+	listCleanup()
+
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("ListPending failed with status %d: %s", listRec.Code, listRec.Body.String())
+	}
+
+	var listResp ApiResponse
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("Failed to parse list response: %v", err)
+	}
+
+	if !listResp.Success {
+		t.Fatalf("Expected success, got error: %s", listResp.Error)
+	}
+
+	listData := listResp.Data.(map[string]any)
+
+	// Verify count is 0
+	count := int(listData["count"].(float64))
+	if count != 0 {
+		t.Errorf("Expected count=0, got %d", count)
+	}
+
+	// Verify queries array is empty
+	pendingQueries := listData["queries"].([]any)
+	if len(pendingQueries) != 0 {
+		t.Errorf("Expected 0 pending queries, got %d", len(pendingQueries))
+	}
+}
+
+func TestQueriesIntegration_ApproveNewQuery(t *testing.T) {
+	tc := setupQueriesIntegrationTest(t)
+	tc.ensureTestDatasource()
+	tc.cleanupQueries()
+
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	// Insert a pending query directly into the database
+	queryID := uuid.New()
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_queries (
+			id, project_id, datasource_id, natural_language_prompt, sql_query,
+			dialect, is_enabled, status, suggested_by, parameters, output_columns, tags
+		) VALUES ($1, $2, $3, 'Pending Query', 'SELECT 1', 'postgres', false, 'pending', 'agent', '[]'::jsonb, '[{"name":"col","type":"INT4","description":""}]'::jsonb, '{}'::text[])
+	`, queryID, tc.projectID, tc.createdDsID)
+	if err != nil {
+		t.Fatalf("Failed to insert test query: %v", err)
+	}
+
+	// Approve the query
+	approveReq, approveCleanup := tc.makeRequest(http.MethodPost,
+		"/api/projects/"+tc.projectID.String()+"/queries/"+queryID.String()+"/approve",
+		nil)
+	approveReq.SetPathValue("pid", tc.projectID.String())
+	approveReq.SetPathValue("qid", queryID.String())
+
+	approveRec := httptest.NewRecorder()
+	tc.queriesHandler.Approve(approveRec, approveReq)
+	approveCleanup()
+
+	if approveRec.Code != http.StatusOK {
+		t.Fatalf("Approve failed with status %d: %s", approveRec.Code, approveRec.Body.String())
+	}
+
+	var approveResp ApiResponse
+	if err := json.Unmarshal(approveRec.Body.Bytes(), &approveResp); err != nil {
+		t.Fatalf("Failed to parse approve response: %v", err)
+	}
+
+	if !approveResp.Success {
+		t.Fatalf("Expected success, got error: %s", approveResp.Error)
+	}
+
+	approveData := approveResp.Data.(map[string]any)
+
+	// Verify success message
+	if approveData["success"] != true {
+		t.Errorf("Expected success=true, got %v", approveData["success"])
+	}
+
+	if approveData["message"] != "Query approved and enabled" {
+		t.Errorf("Expected message 'Query approved and enabled', got '%v'", approveData["message"])
+	}
+
+	// Verify query is returned
+	query := approveData["query"].(map[string]any)
+	if query["query_id"] != queryID.String() {
+		t.Errorf("Expected query_id=%s, got %v", queryID.String(), query["query_id"])
+	}
+
+	// Verify query is now enabled by checking the database
+	var isEnabled bool
+	var status string
+	err = scope.Conn.QueryRow(ctx, "SELECT is_enabled, status FROM engine_queries WHERE id = $1", queryID).Scan(&isEnabled, &status)
+	if err != nil {
+		t.Fatalf("Failed to query database: %v", err)
+	}
+	if !isEnabled {
+		t.Error("Expected query to be enabled after approval")
+	}
+	if status != "approved" {
+		t.Errorf("Expected status='approved', got '%s'", status)
+	}
+}
+
+func TestQueriesIntegration_ApproveNotFound(t *testing.T) {
+	tc := setupQueriesIntegrationTest(t)
+	tc.ensureTestDatasource()
+	tc.cleanupQueries()
+
+	// Try to approve a non-existent query
+	nonExistentID := uuid.New()
+	approveReq, approveCleanup := tc.makeRequest(http.MethodPost,
+		"/api/projects/"+tc.projectID.String()+"/queries/"+nonExistentID.String()+"/approve",
+		nil)
+	approveReq.SetPathValue("pid", tc.projectID.String())
+	approveReq.SetPathValue("qid", nonExistentID.String())
+
+	approveRec := httptest.NewRecorder()
+	tc.queriesHandler.Approve(approveRec, approveReq)
+	approveCleanup()
+
+	if approveRec.Code != http.StatusNotFound {
+		t.Fatalf("Expected status 404, got %d: %s", approveRec.Code, approveRec.Body.String())
+	}
+
+	var approveResp ApiResponse
+	if err := json.Unmarshal(approveRec.Body.Bytes(), &approveResp); err != nil {
+		t.Fatalf("Failed to parse approve response: %v", err)
+	}
+
+	if approveResp.Success {
+		t.Error("Expected success=false for non-existent query")
+	}
+}
+
+func TestQueriesIntegration_ApproveAlreadyApproved(t *testing.T) {
+	tc := setupQueriesIntegrationTest(t)
+	tc.ensureTestDatasource()
+	tc.cleanupQueries()
+
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	// Insert an already approved query
+	queryID := uuid.New()
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_queries (
+			id, project_id, datasource_id, natural_language_prompt, sql_query,
+			dialect, is_enabled, status, suggested_by, parameters, output_columns, tags
+		) VALUES ($1, $2, $3, 'Approved Query', 'SELECT 1', 'postgres', true, 'approved', 'admin', '[]'::jsonb, '[{"name":"col","type":"INT4","description":""}]'::jsonb, '{}'::text[])
+	`, queryID, tc.projectID, tc.createdDsID)
+	if err != nil {
+		t.Fatalf("Failed to insert test query: %v", err)
+	}
+
+	// Try to approve it again
+	approveReq, approveCleanup := tc.makeRequest(http.MethodPost,
+		"/api/projects/"+tc.projectID.String()+"/queries/"+queryID.String()+"/approve",
+		nil)
+	approveReq.SetPathValue("pid", tc.projectID.String())
+	approveReq.SetPathValue("qid", queryID.String())
+
+	approveRec := httptest.NewRecorder()
+	tc.queriesHandler.Approve(approveRec, approveReq)
+	approveCleanup()
+
+	// Should return 400 Bad Request since query is not pending
+	if approveRec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status 400, got %d: %s", approveRec.Code, approveRec.Body.String())
+	}
+
+	var approveResp ApiResponse
+	if err := json.Unmarshal(approveRec.Body.Bytes(), &approveResp); err != nil {
+		t.Fatalf("Failed to parse approve response: %v", err)
+	}
+
+	if approveResp.Success {
+		t.Error("Expected success=false for already approved query")
+	}
+}
+
+func TestQueriesIntegration_RejectQuery(t *testing.T) {
+	tc := setupQueriesIntegrationTest(t)
+	tc.ensureTestDatasource()
+	tc.cleanupQueries()
+
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	// Insert a pending query directly into the database
+	queryID := uuid.New()
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_queries (
+			id, project_id, datasource_id, natural_language_prompt, sql_query,
+			dialect, is_enabled, status, suggested_by, parameters, output_columns, tags
+		) VALUES ($1, $2, $3, 'Pending Query', 'SELECT 1', 'postgres', false, 'pending', 'agent', '[]'::jsonb, '[{"name":"col","type":"INT4","description":""}]'::jsonb, '{}'::text[])
+	`, queryID, tc.projectID, tc.createdDsID)
+	if err != nil {
+		t.Fatalf("Failed to insert test query: %v", err)
+	}
+
+	// Reject the query
+	rejectBody := map[string]string{"reason": "SQL is inefficient"}
+	rejectReq, rejectCleanup := tc.makeRequest(http.MethodPost,
+		"/api/projects/"+tc.projectID.String()+"/queries/"+queryID.String()+"/reject",
+		rejectBody)
+	rejectReq.SetPathValue("pid", tc.projectID.String())
+	rejectReq.SetPathValue("qid", queryID.String())
+
+	rejectRec := httptest.NewRecorder()
+	tc.queriesHandler.Reject(rejectRec, rejectReq)
+	rejectCleanup()
+
+	if rejectRec.Code != http.StatusOK {
+		t.Fatalf("Reject failed with status %d: %s", rejectRec.Code, rejectRec.Body.String())
+	}
+
+	var rejectResp ApiResponse
+	if err := json.Unmarshal(rejectRec.Body.Bytes(), &rejectResp); err != nil {
+		t.Fatalf("Failed to parse reject response: %v", err)
+	}
+
+	if !rejectResp.Success {
+		t.Fatalf("Expected success, got error: %s", rejectResp.Error)
+	}
+
+	rejectData := rejectResp.Data.(map[string]any)
+
+	// Verify success message
+	if rejectData["success"] != true {
+		t.Errorf("Expected success=true, got %v", rejectData["success"])
+	}
+
+	if rejectData["message"] != "Query rejected" {
+		t.Errorf("Expected message 'Query rejected', got '%v'", rejectData["message"])
+	}
+
+	// Verify query is returned with status=rejected
+	query := rejectData["query"].(map[string]any)
+	if query["query_id"] != queryID.String() {
+		t.Errorf("Expected query_id=%s, got %v", queryID.String(), query["query_id"])
+	}
+	if query["status"] != "rejected" {
+		t.Errorf("Expected status='rejected', got '%v'", query["status"])
+	}
+
+	// Verify database state
+	var status string
+	var rejectionReason *string
+	err = scope.Conn.QueryRow(ctx, "SELECT status, rejection_reason FROM engine_queries WHERE id = $1", queryID).Scan(&status, &rejectionReason)
+	if err != nil {
+		t.Fatalf("Failed to query database: %v", err)
+	}
+	if status != "rejected" {
+		t.Errorf("Expected status='rejected', got '%s'", status)
+	}
+	if rejectionReason == nil || *rejectionReason != "SQL is inefficient" {
+		t.Errorf("Expected rejection_reason='SQL is inefficient', got '%v'", rejectionReason)
+	}
+}
+
+func TestQueriesIntegration_RejectNotFound(t *testing.T) {
+	tc := setupQueriesIntegrationTest(t)
+	tc.ensureTestDatasource()
+	tc.cleanupQueries()
+
+	// Try to reject a non-existent query
+	nonExistentID := uuid.New()
+	rejectBody := map[string]string{"reason": "Some reason"}
+	rejectReq, rejectCleanup := tc.makeRequest(http.MethodPost,
+		"/api/projects/"+tc.projectID.String()+"/queries/"+nonExistentID.String()+"/reject",
+		rejectBody)
+	rejectReq.SetPathValue("pid", tc.projectID.String())
+	rejectReq.SetPathValue("qid", nonExistentID.String())
+
+	rejectRec := httptest.NewRecorder()
+	tc.queriesHandler.Reject(rejectRec, rejectReq)
+	rejectCleanup()
+
+	if rejectRec.Code != http.StatusNotFound {
+		t.Fatalf("Expected status 404, got %d: %s", rejectRec.Code, rejectRec.Body.String())
+	}
+
+	var rejectResp ApiResponse
+	if err := json.Unmarshal(rejectRec.Body.Bytes(), &rejectResp); err != nil {
+		t.Fatalf("Failed to parse reject response: %v", err)
+	}
+
+	if rejectResp.Success {
+		t.Error("Expected success=false for non-existent query")
+	}
+}
+
+func TestQueriesIntegration_RejectAlreadyApproved(t *testing.T) {
+	tc := setupQueriesIntegrationTest(t)
+	tc.ensureTestDatasource()
+	tc.cleanupQueries()
+
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	// Insert an already approved query
+	queryID := uuid.New()
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_queries (
+			id, project_id, datasource_id, natural_language_prompt, sql_query,
+			dialect, is_enabled, status, suggested_by, parameters, output_columns, tags
+		) VALUES ($1, $2, $3, 'Approved Query', 'SELECT 1', 'postgres', true, 'approved', 'admin', '[]'::jsonb, '[{"name":"col","type":"INT4","description":""}]'::jsonb, '{}'::text[])
+	`, queryID, tc.projectID, tc.createdDsID)
+	if err != nil {
+		t.Fatalf("Failed to insert test query: %v", err)
+	}
+
+	// Try to reject it
+	rejectBody := map[string]string{"reason": "Should not be rejected"}
+	rejectReq, rejectCleanup := tc.makeRequest(http.MethodPost,
+		"/api/projects/"+tc.projectID.String()+"/queries/"+queryID.String()+"/reject",
+		rejectBody)
+	rejectReq.SetPathValue("pid", tc.projectID.String())
+	rejectReq.SetPathValue("qid", queryID.String())
+
+	rejectRec := httptest.NewRecorder()
+	tc.queriesHandler.Reject(rejectRec, rejectReq)
+	rejectCleanup()
+
+	// Should return 400 Bad Request since query is not pending
+	if rejectRec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status 400, got %d: %s", rejectRec.Code, rejectRec.Body.String())
+	}
+
+	var rejectResp ApiResponse
+	if err := json.Unmarshal(rejectRec.Body.Bytes(), &rejectResp); err != nil {
+		t.Fatalf("Failed to parse reject response: %v", err)
+	}
+
+	if rejectResp.Success {
+		t.Error("Expected success=false for already approved query")
+	}
+}
+
+func TestQueriesIntegration_RejectMissingReason(t *testing.T) {
+	tc := setupQueriesIntegrationTest(t)
+	tc.ensureTestDatasource()
+	tc.cleanupQueries()
+
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	// Insert a pending query
+	queryID := uuid.New()
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_queries (
+			id, project_id, datasource_id, natural_language_prompt, sql_query,
+			dialect, is_enabled, status, suggested_by, parameters, output_columns, tags
+		) VALUES ($1, $2, $3, 'Pending Query', 'SELECT 1', 'postgres', false, 'pending', 'agent', '[]'::jsonb, '[{"name":"col","type":"INT4","description":""}]'::jsonb, '{}'::text[])
+	`, queryID, tc.projectID, tc.createdDsID)
+	if err != nil {
+		t.Fatalf("Failed to insert test query: %v", err)
+	}
+
+	// Try to reject with empty reason
+	rejectBody := map[string]string{"reason": ""}
+	rejectReq, rejectCleanup := tc.makeRequest(http.MethodPost,
+		"/api/projects/"+tc.projectID.String()+"/queries/"+queryID.String()+"/reject",
+		rejectBody)
+	rejectReq.SetPathValue("pid", tc.projectID.String())
+	rejectReq.SetPathValue("qid", queryID.String())
+
+	rejectRec := httptest.NewRecorder()
+	tc.queriesHandler.Reject(rejectRec, rejectReq)
+	rejectCleanup()
+
+	// Should return 400 Bad Request since reason is required
+	if rejectRec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status 400, got %d: %s", rejectRec.Code, rejectRec.Body.String())
+	}
+
+	var rejectResp ApiResponse
+	if err := json.Unmarshal(rejectRec.Body.Bytes(), &rejectResp); err != nil {
+		t.Fatalf("Failed to parse reject response: %v", err)
+	}
+
+	if rejectResp.Success {
+		t.Error("Expected success=false for missing reason")
+	}
+	if rejectResp.Error == "" {
+		t.Error("Expected non-empty error message for missing reason")
 	}
 }

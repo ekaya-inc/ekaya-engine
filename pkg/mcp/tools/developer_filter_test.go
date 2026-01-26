@@ -83,7 +83,7 @@ func TestNewToolFilter_DeveloperDisabled(t *testing.T) {
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, "http://localhost", zap.NewNop()),
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
 		Logger:           zap.NewNop(),
 	}
 
@@ -111,7 +111,7 @@ func TestNewToolFilter_DeveloperEnabled_AllToolsAvailable(t *testing.T) {
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, "http://localhost", zap.NewNop()),
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
 		Logger:           zap.NewNop(),
 	}
 
@@ -160,7 +160,7 @@ func TestNewToolFilter_DeveloperEnabled_VerifyAllTools(t *testing.T) {
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, "http://localhost", zap.NewNop()),
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
 		Logger:           zap.NewNop(),
 	}
 
@@ -192,7 +192,7 @@ func TestNewToolFilter_NilConfig(t *testing.T) {
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, "http://localhost", zap.NewNop()),
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
 		Logger:           zap.NewNop(),
 	}
 
@@ -354,7 +354,7 @@ func TestNewToolFilter_DeveloperEnabled_ApprovedQueriesOff(t *testing.T) {
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, "http://localhost", zap.NewNop()),
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
 		Logger:           zap.NewNop(),
 	}
 
@@ -392,7 +392,7 @@ func TestNewToolFilter_ApprovedQueriesOnly_NoQueriesExist(t *testing.T) {
 	// Mock with no queries - ShouldShowApprovedQueriesTools will return false
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: nil}, &mockProjectService{defaultDatasourceID: uuid.New()}, "http://localhost", zap.NewNop()),
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: nil}, &mockProjectService{defaultDatasourceID: uuid.New()}, nil, "http://localhost", zap.NewNop()),
 		Logger:           zap.NewNop(),
 	}
 
@@ -440,7 +440,7 @@ func TestNewToolFilter_ApprovedQueriesEnabledWithQueries(t *testing.T) {
 	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, &mockProjectService{defaultDatasourceID: uuid.New()}, "http://localhost", zap.NewNop()),
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, &mockProjectService{defaultDatasourceID: uuid.New()}, nil, "http://localhost", zap.NewNop()),
 		Logger:           zap.NewNop(),
 	}
 
@@ -563,7 +563,7 @@ func TestNewToolFilter_ForceModeOnlyShowsApprovedQueriesTools(t *testing.T) {
 	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, &mockProjectService{defaultDatasourceID: uuid.New()}, "http://localhost", zap.NewNop()),
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, &mockProjectService{defaultDatasourceID: uuid.New()}, nil, "http://localhost", zap.NewNop()),
 		Logger:           zap.NewNop(),
 	}
 
@@ -610,7 +610,7 @@ func TestNewToolFilter_ForceModeOffAllowsDeveloperTools(t *testing.T) {
 	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, &mockProjectService{defaultDatasourceID: uuid.New()}, "http://localhost", zap.NewNop()),
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, &mockProjectService{defaultDatasourceID: uuid.New()}, nil, "http://localhost", zap.NewNop()),
 		Logger:           zap.NewNop(),
 	}
 
@@ -650,7 +650,7 @@ func TestNewToolFilter_ApprovedQueriesOn_DeveloperOff(t *testing.T) {
 	mockQueries := []*models.Query{{ID: uuid.New(), NaturalLanguagePrompt: "Test query"}}
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, &mockProjectService{defaultDatasourceID: uuid.New()}, "http://localhost", zap.NewNop()),
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{enabledQueries: mockQueries}, &mockProjectService{defaultDatasourceID: uuid.New()}, nil, "http://localhost", zap.NewNop()),
 		Logger:           zap.NewNop(),
 	}
 
@@ -692,7 +692,7 @@ func TestNewToolFilter_DeveloperEnabled_ExecuteAlwaysAvailable(t *testing.T) {
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, "http://localhost", zap.NewNop()),
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
 		Logger:           zap.NewNop(),
 	}
 
@@ -732,7 +732,7 @@ func TestNewToolFilter_DeveloperOnly_CoreToolsOnly(t *testing.T) {
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, "http://localhost", zap.NewNop()),
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
 		Logger:           zap.NewNop(),
 	}
 
@@ -910,7 +910,7 @@ func TestNewToolFilter_AgentAuth_AgentToolsEnabled(t *testing.T) {
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, "http://localhost", zap.NewNop()),
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
 		Logger:           zap.NewNop(),
 	}
 
@@ -958,7 +958,7 @@ func TestNewToolFilter_AgentAuth_AgentToolsDisabled(t *testing.T) {
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, "http://localhost", zap.NewNop()),
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
 		Logger:           zap.NewNop(),
 	}
 
@@ -1013,7 +1013,7 @@ func TestNewToolFilter_AgentAuth_NoConfig(t *testing.T) {
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, "http://localhost", zap.NewNop()),
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
 		Logger:           zap.NewNop(),
 	}
 
@@ -1082,7 +1082,7 @@ func TestNewToolFilter_UserAuth_DeveloperMode_AllTools(t *testing.T) {
 
 	deps := &MCPToolDeps{
 		DB:               engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, "http://localhost", zap.NewNop()),
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
 		Logger:           zap.NewNop(),
 	}
 
@@ -1105,6 +1105,464 @@ func TestNewToolFilter_UserAuth_DeveloperMode_AllTools(t *testing.T) {
 	for _, name := range allTools {
 		if !containsTool(filtered, name) {
 			t.Errorf("expected tool %s to be present in developer mode", name)
+		}
+	}
+}
+
+// createTestToolsWithDataLiaison creates a list of tools including data liaison tools.
+func createTestToolsWithDataLiaison() []mcp.Tool {
+	return []mcp.Tool{
+		{Name: "health"},
+		{Name: "echo"},
+		{Name: "query"},
+		{Name: "sample"},
+		{Name: "execute"},
+		{Name: "validate"},
+		{Name: "get_schema"},
+		{Name: "list_approved_queries"},
+		{Name: "execute_approved_query"},
+		{Name: "get_ontology"},
+		{Name: "list_glossary"},
+		{Name: "get_glossary_sql"},
+		// Data Liaison tools - Business User
+		{Name: "suggest_approved_query"},
+		{Name: "suggest_query_update"},
+		// Data Liaison tools - Developer
+		{Name: "list_query_suggestions"},
+		{Name: "approve_query_suggestion"},
+		{Name: "reject_query_suggestion"},
+		{Name: "create_approved_query"},
+		{Name: "update_approved_query"},
+		{Name: "delete_approved_query"},
+	}
+}
+
+// mockInstalledAppService is a mock implementation for testing.
+type mockInstalledAppService struct {
+	installed map[string]bool
+}
+
+func newMockInstalledAppService(installedApps ...string) *mockInstalledAppService {
+	m := &mockInstalledAppService{installed: make(map[string]bool)}
+	for _, app := range installedApps {
+		m.installed[app] = true
+	}
+	// MCP Server is always installed
+	m.installed[models.AppIDMCPServer] = true
+	return m
+}
+
+func (m *mockInstalledAppService) ListInstalled(ctx context.Context, projectID uuid.UUID) ([]*models.InstalledApp, error) {
+	return nil, nil
+}
+
+func (m *mockInstalledAppService) IsInstalled(ctx context.Context, projectID uuid.UUID, appID string) (bool, error) {
+	return m.installed[appID], nil
+}
+
+func (m *mockInstalledAppService) Install(ctx context.Context, projectID uuid.UUID, appID string, userID string) (*models.InstalledApp, error) {
+	return nil, nil
+}
+
+func (m *mockInstalledAppService) Uninstall(ctx context.Context, projectID uuid.UUID, appID string) error {
+	return nil
+}
+
+func (m *mockInstalledAppService) GetSettings(ctx context.Context, projectID uuid.UUID, appID string) (map[string]any, error) {
+	return nil, nil
+}
+
+func (m *mockInstalledAppService) UpdateSettings(ctx context.Context, projectID uuid.UUID, appID string, settings map[string]any) error {
+	return nil
+}
+
+func (m *mockInstalledAppService) GetApp(ctx context.Context, projectID uuid.UUID, appID string) (*models.InstalledApp, error) {
+	return nil, nil
+}
+
+func TestNewToolFilter_DataLiaisonNotInstalled_BusinessTools(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Create config with approved_queries enabled
+	ctx := context.Background()
+	scope, err := engineDB.DB.WithTenant(ctx, projectID)
+	if err != nil {
+		t.Fatalf("failed to get tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	tenantCtx := database.SetTenantScope(ctx, scope)
+	_, err = scope.Conn.Exec(tenantCtx, `
+		INSERT INTO engine_projects (id, name, created_at, updated_at)
+		VALUES ($1, 'Test Project', NOW(), NOW())
+		ON CONFLICT (id) DO NOTHING`, projectID)
+	if err != nil {
+		t.Fatalf("failed to create test project: %v", err)
+	}
+
+	mcpConfig := &models.MCPConfig{
+		ProjectID: projectID,
+		ToolGroups: map[string]*models.ToolGroupConfig{
+			"approved_queries": {Enabled: true},
+		},
+	}
+
+	repo := repositories.NewMCPConfigRepository()
+	if err := repo.Upsert(tenantCtx, mcpConfig); err != nil {
+		t.Fatalf("failed to create test config: %v", err)
+	}
+
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		cleanupScope, err := engineDB.DB.WithTenant(cleanupCtx, projectID)
+		if err != nil {
+			return
+		}
+		defer cleanupScope.Close()
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_mcp_config WHERE project_id = $1", projectID)
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_projects WHERE id = $1", projectID)
+	})
+
+	// AI Data Liaison NOT installed
+	deps := &MCPToolDeps{
+		DB:                  engineDB.DB,
+		MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
+		InstalledAppService: newMockInstalledAppService(), // No AI Data Liaison
+		Logger:              zap.NewNop(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestToolsWithDataLiaison()
+
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	claims.Subject = "user-123"
+	ctx = context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	filtered := filter(ctx, tools)
+
+	// Data Liaison tools should NOT be present
+	dataLiaisonTools := []string{"suggest_approved_query", "suggest_query_update"}
+	for _, name := range dataLiaisonTools {
+		if containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be HIDDEN when AI Data Liaison is not installed", name)
+		}
+	}
+
+	// Other approved_queries tools should still be present
+	expectedTools := []string{"health", "query", "sample", "validate", "list_approved_queries", "execute_approved_query"}
+	for _, name := range expectedTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present", name)
+		}
+	}
+}
+
+func TestNewToolFilter_DataLiaisonInstalled_BusinessTools(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Create config with approved_queries enabled
+	ctx := context.Background()
+	scope, err := engineDB.DB.WithTenant(ctx, projectID)
+	if err != nil {
+		t.Fatalf("failed to get tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	tenantCtx := database.SetTenantScope(ctx, scope)
+	_, err = scope.Conn.Exec(tenantCtx, `
+		INSERT INTO engine_projects (id, name, created_at, updated_at)
+		VALUES ($1, 'Test Project', NOW(), NOW())
+		ON CONFLICT (id) DO NOTHING`, projectID)
+	if err != nil {
+		t.Fatalf("failed to create test project: %v", err)
+	}
+
+	mcpConfig := &models.MCPConfig{
+		ProjectID: projectID,
+		ToolGroups: map[string]*models.ToolGroupConfig{
+			"approved_queries": {Enabled: true},
+		},
+	}
+
+	repo := repositories.NewMCPConfigRepository()
+	if err := repo.Upsert(tenantCtx, mcpConfig); err != nil {
+		t.Fatalf("failed to create test config: %v", err)
+	}
+
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		cleanupScope, err := engineDB.DB.WithTenant(cleanupCtx, projectID)
+		if err != nil {
+			return
+		}
+		defer cleanupScope.Close()
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_mcp_config WHERE project_id = $1", projectID)
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_projects WHERE id = $1", projectID)
+	})
+
+	// AI Data Liaison IS installed
+	deps := &MCPToolDeps{
+		DB:                  engineDB.DB,
+		MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
+		InstalledAppService: newMockInstalledAppService(models.AppIDAIDataLiaison), // AI Data Liaison installed
+		Logger:              zap.NewNop(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestToolsWithDataLiaison()
+
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	claims.Subject = "user-123"
+	ctx = context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	filtered := filter(ctx, tools)
+
+	// Data Liaison business tools SHOULD be present when app is installed
+	dataLiaisonTools := []string{"suggest_approved_query", "suggest_query_update"}
+	for _, name := range dataLiaisonTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present when AI Data Liaison is installed", name)
+		}
+	}
+}
+
+func TestNewToolFilter_DataLiaisonNotInstalled_DeveloperTools(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Create config with developer tools enabled including ontology maintenance
+	// (data liaison dev tools are in the ontology maintenance loadout)
+	ctx := context.Background()
+	scope, err := engineDB.DB.WithTenant(ctx, projectID)
+	if err != nil {
+		t.Fatalf("failed to get tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	tenantCtx := database.SetTenantScope(ctx, scope)
+	_, err = scope.Conn.Exec(tenantCtx, `
+		INSERT INTO engine_projects (id, name, created_at, updated_at)
+		VALUES ($1, 'Test Project', NOW(), NOW())
+		ON CONFLICT (id) DO NOTHING`, projectID)
+	if err != nil {
+		t.Fatalf("failed to create test project: %v", err)
+	}
+
+	mcpConfig := &models.MCPConfig{
+		ProjectID: projectID,
+		ToolGroups: map[string]*models.ToolGroupConfig{
+			"developer": {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
+		},
+	}
+
+	repo := repositories.NewMCPConfigRepository()
+	if err := repo.Upsert(tenantCtx, mcpConfig); err != nil {
+		t.Fatalf("failed to create test config: %v", err)
+	}
+
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		cleanupScope, err := engineDB.DB.WithTenant(cleanupCtx, projectID)
+		if err != nil {
+			return
+		}
+		defer cleanupScope.Close()
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_mcp_config WHERE project_id = $1", projectID)
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_projects WHERE id = $1", projectID)
+	})
+
+	// AI Data Liaison NOT installed
+	deps := &MCPToolDeps{
+		DB:                  engineDB.DB,
+		MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
+		InstalledAppService: newMockInstalledAppService(), // No AI Data Liaison
+		Logger:              zap.NewNop(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestToolsWithDataLiaison()
+
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	claims.Subject = "user-123"
+	ctx = context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	filtered := filter(ctx, tools)
+
+	// Developer Data Liaison tools should NOT be present
+	devDataLiaisonTools := []string{
+		"list_query_suggestions",
+		"approve_query_suggestion",
+		"reject_query_suggestion",
+		"create_approved_query",
+		"update_approved_query",
+		"delete_approved_query",
+	}
+	for _, name := range devDataLiaisonTools {
+		if containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be HIDDEN when AI Data Liaison is not installed", name)
+		}
+	}
+
+	// Core developer tools should still be present
+	coreDevTools := []string{"health", "echo", "execute", "get_schema"}
+	for _, name := range coreDevTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present", name)
+		}
+	}
+}
+
+func TestNewToolFilter_DataLiaisonInstalled_DeveloperTools(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Create config with developer tools enabled including ontology maintenance
+	// (data liaison dev tools are in the ontology maintenance loadout)
+	ctx := context.Background()
+	scope, err := engineDB.DB.WithTenant(ctx, projectID)
+	if err != nil {
+		t.Fatalf("failed to get tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	tenantCtx := database.SetTenantScope(ctx, scope)
+	_, err = scope.Conn.Exec(tenantCtx, `
+		INSERT INTO engine_projects (id, name, created_at, updated_at)
+		VALUES ($1, 'Test Project', NOW(), NOW())
+		ON CONFLICT (id) DO NOTHING`, projectID)
+	if err != nil {
+		t.Fatalf("failed to create test project: %v", err)
+	}
+
+	mcpConfig := &models.MCPConfig{
+		ProjectID: projectID,
+		ToolGroups: map[string]*models.ToolGroupConfig{
+			"developer": {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
+		},
+	}
+
+	repo := repositories.NewMCPConfigRepository()
+	if err := repo.Upsert(tenantCtx, mcpConfig); err != nil {
+		t.Fatalf("failed to create test config: %v", err)
+	}
+
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		cleanupScope, err := engineDB.DB.WithTenant(cleanupCtx, projectID)
+		if err != nil {
+			return
+		}
+		defer cleanupScope.Close()
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_mcp_config WHERE project_id = $1", projectID)
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_projects WHERE id = $1", projectID)
+	})
+
+	// AI Data Liaison IS installed
+	deps := &MCPToolDeps{
+		DB:                  engineDB.DB,
+		MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
+		InstalledAppService: newMockInstalledAppService(models.AppIDAIDataLiaison), // AI Data Liaison installed
+		Logger:              zap.NewNop(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestToolsWithDataLiaison()
+
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	claims.Subject = "user-123"
+	ctx = context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	filtered := filter(ctx, tools)
+
+	// Developer Data Liaison tools SHOULD be present when app is installed
+	devDataLiaisonTools := []string{
+		"list_query_suggestions",
+		"approve_query_suggestion",
+		"reject_query_suggestion",
+		"create_approved_query",
+		"update_approved_query",
+		"delete_approved_query",
+	}
+	for _, name := range devDataLiaisonTools {
+		if !containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be present when AI Data Liaison is installed", name)
+		}
+	}
+}
+
+func TestNewToolFilter_DataLiaisonNotInstalled_NilService_FallbackToHidden(t *testing.T) {
+	engineDB := testhelpers.GetEngineDB(t)
+	projectID := uuid.New()
+
+	// Create config with developer tools enabled including ontology maintenance
+	// (data liaison dev tools are in the ontology maintenance loadout)
+	ctx := context.Background()
+	scope, err := engineDB.DB.WithTenant(ctx, projectID)
+	if err != nil {
+		t.Fatalf("failed to get tenant scope: %v", err)
+	}
+	defer scope.Close()
+
+	tenantCtx := database.SetTenantScope(ctx, scope)
+	_, err = scope.Conn.Exec(tenantCtx, `
+		INSERT INTO engine_projects (id, name, created_at, updated_at)
+		VALUES ($1, 'Test Project', NOW(), NOW())
+		ON CONFLICT (id) DO NOTHING`, projectID)
+	if err != nil {
+		t.Fatalf("failed to create test project: %v", err)
+	}
+
+	mcpConfig := &models.MCPConfig{
+		ProjectID: projectID,
+		ToolGroups: map[string]*models.ToolGroupConfig{
+			"developer": {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
+		},
+	}
+
+	repo := repositories.NewMCPConfigRepository()
+	if err := repo.Upsert(tenantCtx, mcpConfig); err != nil {
+		t.Fatalf("failed to create test config: %v", err)
+	}
+
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		cleanupScope, err := engineDB.DB.WithTenant(cleanupCtx, projectID)
+		if err != nil {
+			return
+		}
+		defer cleanupScope.Close()
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_mcp_config WHERE project_id = $1", projectID)
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_projects WHERE id = $1", projectID)
+	})
+
+	// InstalledAppService is nil - should default to hiding data liaison tools
+	deps := &MCPToolDeps{
+		DB:                  engineDB.DB,
+		MCPConfigService:    services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
+		InstalledAppService: nil, // Nil service - fallback to not installed
+		Logger:              zap.NewNop(),
+	}
+
+	filter := NewToolFilter(deps)
+	tools := createTestToolsWithDataLiaison()
+
+	claims := &auth.Claims{ProjectID: projectID.String()}
+	claims.Subject = "user-123"
+	ctx = context.WithValue(context.Background(), auth.ClaimsKey, claims)
+	filtered := filter(ctx, tools)
+
+	// All Data Liaison tools should be hidden when service is nil
+	allDataLiaisonTools := []string{
+		"suggest_approved_query",
+		"suggest_query_update",
+		"list_query_suggestions",
+		"approve_query_suggestion",
+		"reject_query_suggestion",
+		"create_approved_query",
+		"update_approved_query",
+		"delete_approved_query",
+	}
+	for _, name := range allDataLiaisonTools {
+		if containsTool(filtered, name) {
+			t.Errorf("expected tool %s to be HIDDEN when InstalledAppService is nil", name)
 		}
 	}
 }

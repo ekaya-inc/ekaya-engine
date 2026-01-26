@@ -10,7 +10,6 @@ import { Button } from '../components/ui/Button';
 import {
   TOOL_GROUP_IDS,
   TOOL_GROUP_METADATA,
-  getToolOrder,
 } from '../constants/mcpToolMetadata';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
@@ -65,10 +64,8 @@ const MCPServerPage = () => {
   const approvedQueriesMetadata = TOOL_GROUP_METADATA[TOOL_GROUP_IDS.APPROVED_QUERIES];
   const developerMetadata = TOOL_GROUP_METADATA[TOOL_GROUP_IDS.DEVELOPER];
 
-  // Sort enabled tools by canonical order
-  const sortedEnabledTools = config?.enabledTools
-    ? [...config.enabledTools].sort((a, b) => getToolOrder(a.name) - getToolOrder(b.name))
-    : [];
+  // Backend returns tools in canonical order
+  const enabledTools = config?.enabledTools ?? [];
 
   const fetchConfig = useCallback(async () => {
     if (!pid) return;
@@ -352,7 +349,7 @@ const MCPServerPage = () => {
               docsUrl={`https://us.ekaya.ai/mcp-setup?mcp_url=${encodeURIComponent(config.serverUrl)}`}
               agentMode={isAgentToolsEnabled}
               agentApiKey={agentApiKey}
-              enabledTools={sortedEnabledTools}
+              enabledTools={enabledTools}
             />
 
             {/* Tool Configuration Section */}

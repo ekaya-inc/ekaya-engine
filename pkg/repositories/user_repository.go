@@ -49,15 +49,17 @@ func (r *userRepository) Add(ctx context.Context, user *models.User) error {
 	user.UpdatedAt = now
 
 	query := `
-		INSERT INTO engine_users (project_id, user_id, role, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO engine_users (project_id, user_id, email, role, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (project_id, user_id) DO UPDATE
 		SET role = EXCLUDED.role,
+		    email = COALESCE(EXCLUDED.email, engine_users.email),
 		    updated_at = EXCLUDED.updated_at`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		user.ProjectID,
 		user.UserID,
+		user.Email,
 		user.Role,
 		user.CreatedAt,
 		user.UpdatedAt,
@@ -122,7 +124,7 @@ func (r *userRepository) GetByProject(ctx context.Context, projectID uuid.UUID) 
 	}
 
 	query := `
-		SELECT project_id, user_id, role, created_at, updated_at
+		SELECT project_id, user_id, email, role, created_at, updated_at
 		FROM engine_users
 		WHERE project_id = $1
 		ORDER BY created_at`
@@ -139,6 +141,7 @@ func (r *userRepository) GetByProject(ctx context.Context, projectID uuid.UUID) 
 		err := rows.Scan(
 			&user.ProjectID,
 			&user.UserID,
+			&user.Email,
 			&user.Role,
 			&user.CreatedAt,
 			&user.UpdatedAt,
@@ -164,7 +167,7 @@ func (r *userRepository) GetByID(ctx context.Context, projectID, userID uuid.UUI
 	}
 
 	query := `
-		SELECT project_id, user_id, role, created_at, updated_at
+		SELECT project_id, user_id, email, role, created_at, updated_at
 		FROM engine_users
 		WHERE project_id = $1 AND user_id = $2`
 
@@ -172,6 +175,7 @@ func (r *userRepository) GetByID(ctx context.Context, projectID, userID uuid.UUI
 	err := scope.Conn.QueryRow(ctx, query, projectID, userID).Scan(
 		&user.ProjectID,
 		&user.UserID,
+		&user.Email,
 		&user.Role,
 		&user.CreatedAt,
 		&user.UpdatedAt,

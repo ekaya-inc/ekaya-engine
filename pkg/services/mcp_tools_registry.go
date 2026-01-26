@@ -63,7 +63,16 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "list_approved_queries", Description: "List pre-approved SQL queries", ToolGroup: ToolGroupApprovedQueries},
 	{Name: "execute_approved_query", Description: "Execute a pre-approved query by ID", ToolGroup: ToolGroupApprovedQueries},
 	{Name: "suggest_approved_query", Description: "Suggest a reusable parameterized query for approval", ToolGroup: ToolGroupApprovedQueries},
+	{Name: "suggest_query_update", Description: "Suggest an update to an existing pre-approved query for review", ToolGroup: ToolGroupApprovedQueries},
 	{Name: "get_query_history", Description: "Get recent query execution history to avoid rewriting queries", ToolGroup: ToolGroupApprovedQueries},
+
+	// Dev query tools (developer group) - direct query management for administrators
+	{Name: "list_query_suggestions", Description: "List pending query suggestions awaiting review", ToolGroup: ToolGroupDeveloper},
+	{Name: "approve_query_suggestion", Description: "Approve a pending query suggestion", ToolGroup: ToolGroupDeveloper},
+	{Name: "reject_query_suggestion", Description: "Reject a pending query suggestion with reason", ToolGroup: ToolGroupDeveloper},
+	{Name: "create_approved_query", Description: "Create a new pre-approved query directly (no review required)", ToolGroup: ToolGroupDeveloper},
+	{Name: "update_approved_query", Description: "Update an existing pre-approved query directly (no review required)", ToolGroup: ToolGroupDeveloper},
+	{Name: "delete_approved_query", Description: "Delete a pre-approved query", ToolGroup: ToolGroupDeveloper},
 
 	// Health is always available
 	{Name: "health", Description: "Server health check", ToolGroup: "always"},
@@ -76,6 +85,22 @@ var agentAllowedTools = map[string]bool{
 	"list_approved_queries":  true,
 	"execute_approved_query": true,
 	"health":                 true,
+}
+
+// DataLiaisonTools lists tools that require the AI Data Liaison app to be installed.
+// These tools enable the suggest/approve query workflow between business users and developers.
+// Used by both MCP tool filtering and UI enabled tools display.
+var DataLiaisonTools = map[string]bool{
+	// Business User tools - suggest queries for approval
+	"suggest_approved_query": true,
+	"suggest_query_update":   true,
+	// Developer tools - manage query suggestions
+	"list_query_suggestions":   true,
+	"approve_query_suggestion": true,
+	"reject_query_suggestion":  true,
+	"create_approved_query":    true,
+	"update_approved_query":    true,
+	"delete_approved_query":    true,
 }
 
 // GetEnabledTools returns the list of tools enabled based on the current state.

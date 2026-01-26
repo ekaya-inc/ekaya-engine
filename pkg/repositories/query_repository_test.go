@@ -4,6 +4,7 @@ package repositories
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -139,6 +140,7 @@ func (tc *queryTestContext) createTestQuery(ctx context.Context, prompt, sqlQuer
 		SQLQuery:              sqlQuery,
 		Dialect:               "postgres",
 		IsEnabled:             true,
+		Status:                "approved", // Default to approved for test queries
 		UsageCount:            0,
 		Parameters:            []models.QueryParameter{}, // Initialize empty parameters
 		OutputColumns:         []models.OutputColumn{},   // Initialize empty output columns
@@ -1060,6 +1062,7 @@ func TestQueryRepository_ListEnabled_WithParameters(t *testing.T) {
 		SQLQuery:              "SELECT * FROM users WHERE id = {{user_id}}",
 		Dialect:               "postgres",
 		IsEnabled:             true,
+		Status:                "approved",
 		Parameters: []models.QueryParameter{
 			{
 				Name:        "user_id",
@@ -1425,5 +1428,552 @@ func TestQueryRepository_ListEnabledByTags(t *testing.T) {
 		if !expectedTags[tag] {
 			t.Errorf("unexpected tag: %s", tag)
 		}
+	}
+}
+
+// ============================================================================
+// Approval Workflow Tests
+// ============================================================================
+
+func TestQueryRepository_ListPending(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create queries with different statuses
+	pendingQuery1 := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Pending query 1",
+		SQLQuery:              "SELECT 1",
+		Dialect:               "postgres",
+		IsEnabled:             false,
+		Status:                "pending",
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
+	}
+	if err := tc.repo.Create(ctx, pendingQuery1); err != nil {
+		t.Fatalf("Create pending query 1 failed: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond) // Ensure different timestamps
+
+	pendingQuery2 := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Pending query 2",
+		SQLQuery:              "SELECT 2",
+		Dialect:               "postgres",
+		IsEnabled:             false,
+		Status:                "pending",
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
+	}
+	if err := tc.repo.Create(ctx, pendingQuery2); err != nil {
+		t.Fatalf("Create pending query 2 failed: %v", err)
+	}
+
+	approvedQuery := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Approved query",
+		SQLQuery:              "SELECT 3",
+		Dialect:               "postgres",
+		IsEnabled:             true,
+		Status:                "approved",
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
+	}
+	if err := tc.repo.Create(ctx, approvedQuery); err != nil {
+		t.Fatalf("Create approved query failed: %v", err)
+	}
+
+	// List pending queries
+	pending, err := tc.repo.ListPending(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("ListPending failed: %v", err)
+	}
+
+	if len(pending) != 2 {
+		t.Fatalf("expected 2 pending queries, got %d", len(pending))
+	}
+
+	// Verify ordering (newest first)
+	if pending[0].NaturalLanguagePrompt != "Pending query 2" {
+		t.Errorf("expected first pending query to be 'Pending query 2', got %q", pending[0].NaturalLanguagePrompt)
+	}
+
+	// Verify approved query is not in the list
+	for _, q := range pending {
+		if q.ID == approvedQuery.ID {
+			t.Error("approved query should not be in pending list")
+		}
+	}
+}
+
+func TestQueryRepository_ListPendingByDatasource(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create a second datasource
+	otherDsID := uuid.New()
+	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("Failed to create tenant scope: %v", err)
+	}
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_datasources (id, project_id, name, datasource_type, datasource_config)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (id) DO NOTHING
+	`, otherDsID, tc.projectID, "Other Datasource", "postgres", "{}")
+	scope.Close()
+	if err != nil {
+		t.Fatalf("Failed to create other datasource: %v", err)
+	}
+
+	// Create pending queries in both datasources
+	pendingQueryDs1 := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Pending in DS1",
+		SQLQuery:              "SELECT 1",
+		Dialect:               "postgres",
+		IsEnabled:             false,
+		Status:                "pending",
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
+	}
+	if err := tc.repo.Create(ctx, pendingQueryDs1); err != nil {
+		t.Fatalf("Create pending query in DS1 failed: %v", err)
+	}
+
+	pendingQueryDs2 := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          otherDsID,
+		NaturalLanguagePrompt: "Pending in DS2",
+		SQLQuery:              "SELECT 2",
+		Dialect:               "postgres",
+		IsEnabled:             false,
+		Status:                "pending",
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
+	}
+	if err := tc.repo.Create(ctx, pendingQueryDs2); err != nil {
+		t.Fatalf("Create pending query in DS2 failed: %v", err)
+	}
+
+	// List pending by first datasource
+	pending, err := tc.repo.ListPendingByDatasource(ctx, tc.projectID, tc.dsID)
+	if err != nil {
+		t.Fatalf("ListPendingByDatasource failed: %v", err)
+	}
+
+	if len(pending) != 1 {
+		t.Fatalf("expected 1 pending query for DS1, got %d", len(pending))
+	}
+
+	if pending[0].NaturalLanguagePrompt != "Pending in DS1" {
+		t.Errorf("expected 'Pending in DS1', got %q", pending[0].NaturalLanguagePrompt)
+	}
+}
+
+func TestQueryRepository_CountPending(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Initial count should be 0
+	count, err := tc.repo.CountPending(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("CountPending failed: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 pending queries, got %d", count)
+	}
+
+	// Create pending queries
+	for i := 0; i < 3; i++ {
+		query := &models.Query{
+			ProjectID:             tc.projectID,
+			DatasourceID:          tc.dsID,
+			NaturalLanguagePrompt: fmt.Sprintf("Pending query %d", i),
+			SQLQuery:              fmt.Sprintf("SELECT %d", i),
+			Dialect:               "postgres",
+			IsEnabled:             false,
+			Status:                "pending",
+			Parameters:            []models.QueryParameter{},
+			OutputColumns:         []models.OutputColumn{},
+		}
+		if err := tc.repo.Create(ctx, query); err != nil {
+			t.Fatalf("Create pending query %d failed: %v", i, err)
+		}
+	}
+
+	// Create approved query (should not be counted)
+	approvedQuery := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Approved query",
+		SQLQuery:              "SELECT 99",
+		Dialect:               "postgres",
+		IsEnabled:             true,
+		Status:                "approved",
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
+	}
+	if err := tc.repo.Create(ctx, approvedQuery); err != nil {
+		t.Fatalf("Create approved query failed: %v", err)
+	}
+
+	// Count should be 3
+	count, err = tc.repo.CountPending(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("CountPending failed: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("expected 3 pending queries, got %d", count)
+	}
+}
+
+func TestQueryRepository_GetPendingUpdatesForQuery(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create original approved query
+	originalQuery := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Original query",
+		SQLQuery:              "SELECT * FROM users",
+		Dialect:               "postgres",
+		IsEnabled:             true,
+		Status:                "approved",
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
+	}
+	if err := tc.repo.Create(ctx, originalQuery); err != nil {
+		t.Fatalf("Create original query failed: %v", err)
+	}
+
+	// Create pending update suggestions
+	pendingUpdate1 := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Original query",
+		SQLQuery:              "SELECT id, name FROM users",
+		Dialect:               "postgres",
+		IsEnabled:             false,
+		Status:                "pending",
+		ParentQueryID:         &originalQuery.ID,
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
+	}
+	if err := tc.repo.Create(ctx, pendingUpdate1); err != nil {
+		t.Fatalf("Create pending update 1 failed: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	pendingUpdate2 := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Original query",
+		SQLQuery:              "SELECT id, name, email FROM users",
+		Dialect:               "postgres",
+		IsEnabled:             false,
+		Status:                "pending",
+		ParentQueryID:         &originalQuery.ID,
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
+	}
+	if err := tc.repo.Create(ctx, pendingUpdate2); err != nil {
+		t.Fatalf("Create pending update 2 failed: %v", err)
+	}
+
+	// Create unrelated pending query (no parent)
+	unrelatedPending := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Unrelated pending",
+		SQLQuery:              "SELECT 1",
+		Dialect:               "postgres",
+		IsEnabled:             false,
+		Status:                "pending",
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
+	}
+	if err := tc.repo.Create(ctx, unrelatedPending); err != nil {
+		t.Fatalf("Create unrelated pending failed: %v", err)
+	}
+
+	// Get pending updates for original query
+	updates, err := tc.repo.GetPendingUpdatesForQuery(ctx, tc.projectID, originalQuery.ID)
+	if err != nil {
+		t.Fatalf("GetPendingUpdatesForQuery failed: %v", err)
+	}
+
+	if len(updates) != 2 {
+		t.Fatalf("expected 2 pending updates, got %d", len(updates))
+	}
+
+	// Verify ordering (newest first)
+	if updates[0].SQLQuery != "SELECT id, name, email FROM users" {
+		t.Errorf("expected first update to be newest, got %q", updates[0].SQLQuery)
+	}
+
+	// Verify unrelated pending query is not included
+	for _, u := range updates {
+		if u.ID == unrelatedPending.ID {
+			t.Error("unrelated pending query should not be in updates list")
+		}
+	}
+}
+
+func TestQueryRepository_UpdateApprovalStatus(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create pending query
+	query := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Pending query",
+		SQLQuery:              "SELECT 1",
+		Dialect:               "postgres",
+		IsEnabled:             false,
+		Status:                "pending",
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
+	}
+	if err := tc.repo.Create(ctx, query); err != nil {
+		t.Fatalf("Create pending query failed: %v", err)
+	}
+
+	// Verify initial state
+	retrieved, err := tc.repo.GetByID(ctx, tc.projectID, query.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if retrieved.Status != "pending" {
+		t.Errorf("expected status 'pending', got %q", retrieved.Status)
+	}
+	if retrieved.ReviewedBy != nil {
+		t.Error("expected ReviewedBy to be nil initially")
+	}
+	if retrieved.ReviewedAt != nil {
+		t.Error("expected ReviewedAt to be nil initially")
+	}
+
+	// Approve the query
+	err = tc.repo.UpdateApprovalStatus(ctx, tc.projectID, query.ID, "approved", "admin@example.com", nil)
+	if err != nil {
+		t.Fatalf("UpdateApprovalStatus failed: %v", err)
+	}
+
+	// Verify approved state
+	retrieved, err = tc.repo.GetByID(ctx, tc.projectID, query.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if retrieved.Status != "approved" {
+		t.Errorf("expected status 'approved', got %q", retrieved.Status)
+	}
+	if retrieved.ReviewedBy == nil || *retrieved.ReviewedBy != "admin@example.com" {
+		t.Errorf("expected ReviewedBy 'admin@example.com', got %v", retrieved.ReviewedBy)
+	}
+	if retrieved.ReviewedAt == nil {
+		t.Error("expected ReviewedAt to be set")
+	}
+	if retrieved.RejectionReason != nil {
+		t.Errorf("expected RejectionReason to be nil, got %v", retrieved.RejectionReason)
+	}
+}
+
+func TestQueryRepository_UpdateApprovalStatus_Rejection(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create pending query
+	query := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Pending query to reject",
+		SQLQuery:              "DROP TABLE users",
+		Dialect:               "postgres",
+		IsEnabled:             false,
+		Status:                "pending",
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
+	}
+	if err := tc.repo.Create(ctx, query); err != nil {
+		t.Fatalf("Create pending query failed: %v", err)
+	}
+
+	// Reject the query
+	reason := "Destructive query not allowed"
+	err := tc.repo.UpdateApprovalStatus(ctx, tc.projectID, query.ID, "rejected", "admin@example.com", &reason)
+	if err != nil {
+		t.Fatalf("UpdateApprovalStatus failed: %v", err)
+	}
+
+	// Verify rejected state
+	retrieved, err := tc.repo.GetByID(ctx, tc.projectID, query.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if retrieved.Status != "rejected" {
+		t.Errorf("expected status 'rejected', got %q", retrieved.Status)
+	}
+	if retrieved.ReviewedBy == nil || *retrieved.ReviewedBy != "admin@example.com" {
+		t.Errorf("expected ReviewedBy 'admin@example.com', got %v", retrieved.ReviewedBy)
+	}
+	if retrieved.ReviewedAt == nil {
+		t.Error("expected ReviewedAt to be set")
+	}
+	if retrieved.RejectionReason == nil || *retrieved.RejectionReason != reason {
+		t.Errorf("expected RejectionReason %q, got %v", reason, retrieved.RejectionReason)
+	}
+}
+
+func TestQueryRepository_UpdateApprovalStatus_NotFound(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	nonExistentID := uuid.New()
+	err := tc.repo.UpdateApprovalStatus(ctx, tc.projectID, nonExistentID, "approved", "admin@example.com", nil)
+	if err == nil {
+		t.Fatal("expected error for non-existent query")
+	}
+	if err.Error() != "query not found" {
+		t.Errorf("expected 'query not found' error, got %q", err.Error())
+	}
+}
+
+func TestQueryRepository_Create_WithAuditFields(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create query with parent_query_id (update suggestion)
+	originalQuery := tc.createTestQuery(ctx, "Original", "SELECT 1")
+
+	reviewedBy := "admin@example.com"
+	now := time.Now()
+	reason := "Initial rejection"
+
+	updateSuggestion := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Updated original",
+		SQLQuery:              "SELECT 2",
+		Dialect:               "postgres",
+		IsEnabled:             false,
+		Status:                "rejected",
+		ParentQueryID:         &originalQuery.ID,
+		ReviewedBy:            &reviewedBy,
+		ReviewedAt:            &now,
+		RejectionReason:       &reason,
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
+	}
+
+	if err := tc.repo.Create(ctx, updateSuggestion); err != nil {
+		t.Fatalf("Create update suggestion failed: %v", err)
+	}
+
+	// Verify audit fields were persisted
+	retrieved, err := tc.repo.GetByID(ctx, tc.projectID, updateSuggestion.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+
+	if retrieved.ParentQueryID == nil || *retrieved.ParentQueryID != originalQuery.ID {
+		t.Errorf("expected ParentQueryID %s, got %v", originalQuery.ID, retrieved.ParentQueryID)
+	}
+	if retrieved.ReviewedBy == nil || *retrieved.ReviewedBy != reviewedBy {
+		t.Errorf("expected ReviewedBy %q, got %v", reviewedBy, retrieved.ReviewedBy)
+	}
+	if retrieved.ReviewedAt == nil {
+		t.Error("expected ReviewedAt to be set")
+	}
+	if retrieved.RejectionReason == nil || *retrieved.RejectionReason != reason {
+		t.Errorf("expected RejectionReason %q, got %v", reason, retrieved.RejectionReason)
+	}
+}
+
+func TestQueryRepository_SoftDelete_ExcludesFromPending(t *testing.T) {
+	tc := setupQueryTest(t)
+	tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create pending query
+	query := &models.Query{
+		ProjectID:             tc.projectID,
+		DatasourceID:          tc.dsID,
+		NaturalLanguagePrompt: "Pending to be deleted",
+		SQLQuery:              "SELECT 1",
+		Dialect:               "postgres",
+		IsEnabled:             false,
+		Status:                "pending",
+		Parameters:            []models.QueryParameter{},
+		OutputColumns:         []models.OutputColumn{},
+	}
+	if err := tc.repo.Create(ctx, query); err != nil {
+		t.Fatalf("Create pending query failed: %v", err)
+	}
+
+	// Verify it appears in pending list
+	pending, err := tc.repo.ListPending(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("ListPending failed: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("expected 1 pending query, got %d", len(pending))
+	}
+
+	// Soft delete the query
+	if err := tc.repo.SoftDelete(ctx, tc.projectID, query.ID); err != nil {
+		t.Fatalf("SoftDelete failed: %v", err)
+	}
+
+	// Verify it no longer appears in pending list
+	pending, err = tc.repo.ListPending(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("ListPending failed: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Errorf("expected 0 pending queries after soft delete, got %d", len(pending))
+	}
+
+	// Verify count is 0
+	count, err := tc.repo.CountPending(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("CountPending failed: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 pending count after soft delete, got %d", count)
 	}
 }

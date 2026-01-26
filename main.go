@@ -168,8 +168,8 @@ func main() {
 	discoveryService := services.NewRelationshipDiscoveryService(schemaRepo, datasourceService, adapterFactory, logger)
 	queryService := services.NewQueryService(queryRepo, datasourceService, adapterFactory, securityAuditor, logger)
 	aiConfigService := services.NewAIConfigService(aiConfigRepo, &cfg.CommunityAI, &cfg.EmbeddedAI, logger)
-	mcpConfigService := services.NewMCPConfigService(mcpConfigRepo, queryService, projectService, cfg.BaseURL, logger)
 	installedAppService := services.NewInstalledAppService(installedAppRepo, logger)
+	mcpConfigService := services.NewMCPConfigService(mcpConfigRepo, queryService, projectService, installedAppService, cfg.BaseURL, logger)
 
 	// LLM factory for creating clients per project configuration
 	llmFactory := llm.NewClientFactory(aiConfigService, logger)
@@ -302,6 +302,7 @@ func main() {
 		DataChangeDetectionService:   dataChangeDetectionService,
 		ChangeReviewService:          changeReviewService,
 		PendingChangeRepo:            pendingChangeRepo,
+		InstalledAppService:          installedAppService,
 		Logger:                       logger,
 	}
 	mcpServer := mcp.NewServer("ekaya-engine", cfg.Version, logger,

@@ -46,4 +46,12 @@ type Query struct {
 	AllowsModification bool      `json:"allows_modification" db:"allows_modification"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
+
+	// Audit trail fields
+	ReviewedBy      *string    `json:"reviewed_by,omitempty" db:"reviewed_by"`
+	ReviewedAt      *time.Time `json:"reviewed_at,omitempty" db:"reviewed_at"`
+	RejectionReason *string    `json:"rejection_reason,omitempty" db:"rejection_reason"`
+
+	// Update suggestion tracking
+	ParentQueryID *uuid.UUID `json:"parent_query_id,omitempty" db:"parent_query_id"`
 }

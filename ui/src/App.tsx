@@ -47,7 +47,7 @@ const App = (): JSX.Element => {
                   <Route path="entities" element={<EntitiesPage />} />
                   <Route path="glossary" element={<GlossaryPage />} />
                   <Route path="ontology" element={<OntologyPage />} />
-                  <Route path="queries" element={<QueriesPage />} />
+                  <Route path="queries/*" element={<QueriesPage />} />
                   <Route path="mcp-server" element={<MCPServerPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                   <Route path="help" element={<HelpPage />} />

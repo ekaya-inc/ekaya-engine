@@ -139,6 +139,38 @@ func (m *mockQueryService) ValidateParameterizedQuery(sqlQuery string, params []
 	return nil
 }
 
+func (m *mockQueryService) SuggestUpdate(ctx context.Context, projectID uuid.UUID, req *services.SuggestUpdateRequest) (*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryService) DirectCreate(ctx context.Context, projectID, datasourceID uuid.UUID, req *services.CreateQueryRequest) (*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryService) DirectUpdate(ctx context.Context, projectID, queryID uuid.UUID, req *services.UpdateQueryRequest) (*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryService) ApproveQuery(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string) error {
+	return nil
+}
+
+func (m *mockQueryService) RejectQuery(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string, reason string) error {
+	return nil
+}
+
+func (m *mockQueryService) MoveToPending(ctx context.Context, projectID, queryID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockQueryService) ListPending(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryService) DeleteWithPendingRejection(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string) (int, error) {
+	return 0, nil
+}
+
 // mockProjectService implements services.ProjectService for testing.
 type mockProjectService struct {
 	defaultDatasourceID    uuid.UUID

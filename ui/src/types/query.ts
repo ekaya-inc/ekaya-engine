@@ -60,6 +60,11 @@ export const datasourceTypeToDialect: Record<DatasourceType, SqlDialect> = {
 };
 
 /**
+ * Query status values
+ */
+export type QueryStatus = 'pending' | 'approved' | 'rejected';
+
+/**
  * Query model matching backend QueryResponse
  */
 export interface Query {
@@ -79,6 +84,13 @@ export interface Query {
   parameters: QueryParameter[];
   output_columns?: OutputColumn[];
   constraints?: string | null;
+  status: QueryStatus;
+  suggested_by?: 'user' | 'agent' | 'admin' | null;
+  suggestion_context?: Record<string, unknown> | null;
+  parent_query_id?: string | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  rejection_reason?: string | null;
 }
 
 /**
@@ -94,6 +106,8 @@ export interface CreateQueryRequest {
   parameters?: QueryParameter[];
   output_columns?: OutputColumn[];
   constraints?: string;
+  status?: QueryStatus;
+  suggested_by?: 'user' | 'agent' | 'admin';
 }
 
 /**
@@ -176,4 +190,58 @@ export interface ListQueriesResponse {
 export interface DeleteQueryResponse {
   success: boolean;
   message: string;
+}
+
+/**
+ * Pending query for admin review
+ * Includes additional fields for suggestion tracking
+ */
+export interface PendingQuery {
+  query_id: string;
+  project_id: string;
+  datasource_id: string;
+  natural_language_prompt: string;
+  additional_context?: string | null;
+  sql_query: string;
+  dialect: string;
+  is_enabled: boolean;
+  allows_modification: boolean;
+  parameters: QueryParameter[];
+  output_columns?: OutputColumn[];
+  constraints?: string | null;
+  status: QueryStatus;
+  suggested_by: 'user' | 'agent' | 'admin';
+  suggestion_context?: Record<string, unknown> | null;
+  parent_query_id?: string | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  rejection_reason?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Response wrapper for list pending queries endpoint
+ */
+export interface ListPendingQueriesResponse {
+  queries: PendingQuery[];
+  count: number;
+}
+
+/**
+ * Response from query approval endpoint
+ */
+export interface ApproveQueryResponse {
+  success: boolean;
+  message: string;
+  query?: Query;
+}
+
+/**
+ * Response from query rejection endpoint
+ */
+export interface RejectQueryResponse {
+  success: boolean;
+  message: string;
+  query?: PendingQuery;
 }

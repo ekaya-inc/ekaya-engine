@@ -29,15 +29,53 @@ type QueryResponse struct {
 	Parameters            []models.QueryParameter `json:"parameters,omitempty"`
 	OutputColumns         []models.OutputColumn   `json:"output_columns,omitempty"`
 	Constraints           *string                 `json:"constraints,omitempty"`
+	Tags                  []string                `json:"tags,omitempty"`
 	UsageCount            int                     `json:"usage_count"`
 	LastUsedAt            *string                 `json:"last_used_at,omitempty"`
 	CreatedAt             string                  `json:"created_at"`
 	UpdatedAt             string                  `json:"updated_at"`
+	// Status and review fields for pending/rejected queries
+	Status            string         `json:"status"`
+	SuggestedBy       *string        `json:"suggested_by,omitempty"`
+	SuggestionContext map[string]any `json:"suggestion_context,omitempty"`
+	ParentQueryID     *string        `json:"parent_query_id,omitempty"`
+	ReviewedBy        *string        `json:"reviewed_by,omitempty"`
+	ReviewedAt        *string        `json:"reviewed_at,omitempty"`
+	RejectionReason   *string        `json:"rejection_reason,omitempty"`
 }
 
 // ListQueriesResponse wraps array for frontend compatibility.
 type ListQueriesResponse struct {
 	Queries []QueryResponse `json:"queries"`
+}
+
+// ListPendingQueriesResponse wraps pending queries for admin review.
+type ListPendingQueriesResponse struct {
+	Queries []PendingQueryResponse `json:"queries"`
+	Count   int                    `json:"count"`
+}
+
+// PendingQueryResponse represents a pending query for admin review.
+// Includes additional fields for suggestion tracking.
+type PendingQueryResponse struct {
+	QueryID               string                  `json:"query_id"`
+	ProjectID             string                  `json:"project_id"`
+	DatasourceID          string                  `json:"datasource_id"`
+	NaturalLanguagePrompt string                  `json:"natural_language_prompt"`
+	AdditionalContext     *string                 `json:"additional_context,omitempty"`
+	SQLQuery              string                  `json:"sql_query"`
+	Dialect               string                  `json:"dialect"`
+	Parameters            []models.QueryParameter `json:"parameters,omitempty"`
+	OutputColumns         []models.OutputColumn   `json:"output_columns,omitempty"`
+	Constraints           *string                 `json:"constraints,omitempty"`
+	Tags                  []string                `json:"tags,omitempty"`
+	Status                string                  `json:"status"`
+	SuggestedBy           *string                 `json:"suggested_by,omitempty"`
+	SuggestionContext     map[string]any          `json:"suggestion_context,omitempty"`
+	ParentQueryID         *string                 `json:"parent_query_id,omitempty"`
+	AllowsModification    bool                    `json:"allows_modification"`
+	CreatedAt             string                  `json:"created_at"`
+	UpdatedAt             string                  `json:"updated_at"`
 }
 
 // CreateQueryRequest for POST body.
@@ -50,6 +88,8 @@ type CreateQueryRequest struct {
 	Parameters            []models.QueryParameter `json:"parameters,omitempty"`
 	OutputColumns         []models.OutputColumn   `json:"output_columns,omitempty"`
 	Constraints           string                  `json:"constraints,omitempty"`
+	Status                string                  `json:"status,omitempty"`       // pending, approved, rejected
+	SuggestedBy           string                  `json:"suggested_by,omitempty"` // user, agent, admin
 }
 
 // UpdateQueryRequest for PUT body (all fields optional).
@@ -121,6 +161,25 @@ type DeleteQueryResponse struct {
 	Message string `json:"message"`
 }
 
+// ApproveQueryResponse for query approval result.
+type ApproveQueryResponse struct {
+	Success bool           `json:"success"`
+	Message string         `json:"message"`
+	Query   *QueryResponse `json:"query,omitempty"`
+}
+
+// RejectQueryRequest for POST reject body.
+type RejectQueryRequest struct {
+	Reason string `json:"reason"`
+}
+
+// RejectQueryResponse for query rejection result.
+type RejectQueryResponse struct {
+	Success bool                  `json:"success"`
+	Message string                `json:"message"`
+	Query   *PendingQueryResponse `json:"query,omitempty"`
+}
+
 // QueriesHandler handles query-related HTTP requests.
 type QueriesHandler struct {
 	queryService services.QueryService
@@ -165,6 +224,19 @@ func (h *QueriesHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth
 	// Filtering endpoints
 	mux.HandleFunc("GET "+base+"/enabled",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.ListEnabled)))
+
+	// Project-level query endpoints (not scoped to datasource)
+	projectBase := "/api/projects/{pid}/queries"
+
+	// Admin review endpoints for pending query suggestions
+	mux.HandleFunc("GET "+projectBase+"/pending",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.ListPending)))
+	mux.HandleFunc("POST "+projectBase+"/{qid}/approve",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Approve)))
+	mux.HandleFunc("POST "+projectBase+"/{qid}/reject",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Reject)))
+	mux.HandleFunc("POST "+projectBase+"/{qid}/move-to-pending",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.MoveToPending)))
 }
 
 // List handles GET /api/projects/{pid}/datasources/{dsid}/queries
@@ -236,6 +308,8 @@ func (h *QueriesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Parameters:            req.Parameters,
 		OutputColumns:         req.OutputColumns,
 		Constraints:           req.Constraints,
+		Status:                req.Status,
+		SuggestedBy:           req.SuggestedBy,
 	}
 
 	query, err := h.queryService.Create(r.Context(), projectID, datasourceID, serviceReq)
@@ -674,6 +748,259 @@ func (h *QueriesHandler) ListEnabled(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ListPending handles GET /api/projects/{pid}/queries/pending
+// Returns all pending query suggestions for admin review.
+func (h *QueriesHandler) ListPending(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	queries, err := h.queryService.ListPending(r.Context(), projectID)
+	if err != nil {
+		h.logger.Error("Failed to list pending queries",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "internal_error", "Failed to list pending queries"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	data := ListPendingQueriesResponse{
+		Queries: make([]PendingQueryResponse, len(queries)),
+		Count:   len(queries),
+	}
+	for i, q := range queries {
+		data.Queries[i] = h.toPendingQueryResponse(q)
+	}
+
+	response := ApiResponse{Success: true, Data: data}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// Approve handles POST /api/projects/{pid}/queries/{qid}/approve
+// Approves a pending query suggestion.
+func (h *QueriesHandler) Approve(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	queryID, ok := ParseQueryID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	// Get reviewer email from auth context for audit trail
+	reviewerEmail := auth.GetEmailFromContext(r.Context())
+	if reviewerEmail == "" {
+		if err := ErrorResponse(w, http.StatusUnauthorized, "unauthorized", "User email not found in context"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Approve the query
+	if err := h.queryService.ApproveQuery(r.Context(), projectID, queryID, reviewerEmail); err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			if err := ErrorResponse(w, http.StatusNotFound, "not_found", "Query not found"); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
+		h.logger.Error("Failed to approve query",
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", queryID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusBadRequest, "approve_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Fetch the approved query to return in response
+	query, err := h.queryService.Get(r.Context(), projectID, queryID)
+	if err != nil {
+		// Query was approved but we couldn't fetch it - this can happen for update suggestions
+		// where the pending record is soft-deleted after approval
+		h.logger.Info("Query approved (update suggestion applied to original)",
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", queryID.String()))
+		data := ApproveQueryResponse{
+			Success: true,
+			Message: "Query approved and changes applied to original",
+		}
+		response := ApiResponse{Success: true, Data: data}
+		if err := WriteJSON(w, http.StatusOK, response); err != nil {
+			h.logger.Error("Failed to write response", zap.Error(err))
+		}
+		return
+	}
+
+	queryResp := h.toQueryResponse(query)
+	data := ApproveQueryResponse{
+		Success: true,
+		Message: "Query approved and enabled",
+		Query:   &queryResp,
+	}
+
+	response := ApiResponse{Success: true, Data: data}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// Reject handles POST /api/projects/{pid}/queries/{qid}/reject
+// Rejects a pending query suggestion with a reason.
+func (h *QueriesHandler) Reject(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	queryID, ok := ParseQueryID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	var req RejectQueryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if req.Reason == "" {
+		if err := ErrorResponse(w, http.StatusBadRequest, "missing_reason", "Rejection reason is required"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Get reviewer email from auth context for audit trail
+	reviewerEmail := auth.GetEmailFromContext(r.Context())
+	if reviewerEmail == "" {
+		if err := ErrorResponse(w, http.StatusUnauthorized, "unauthorized", "User email not found in context"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// First get the query to return in response (before rejecting)
+	query, err := h.queryService.Get(r.Context(), projectID, queryID)
+	if err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			if err := ErrorResponse(w, http.StatusNotFound, "not_found", "Query not found"); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
+		h.logger.Error("Failed to get query",
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", queryID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "internal_error", "Failed to get query"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Reject the query
+	if err := h.queryService.RejectQuery(r.Context(), projectID, queryID, reviewerEmail, req.Reason); err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			if err := ErrorResponse(w, http.StatusNotFound, "not_found", "Query not found"); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
+		h.logger.Error("Failed to reject query",
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", queryID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusBadRequest, "reject_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Update the query status in response to reflect rejection
+	query.Status = "rejected"
+	query.RejectionReason = &req.Reason
+
+	queryResp := h.toPendingQueryResponse(query)
+	data := RejectQueryResponse{
+		Success: true,
+		Message: "Query rejected",
+		Query:   &queryResp,
+	}
+
+	response := ApiResponse{Success: true, Data: data}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// MoveToPending handles POST /api/projects/{pid}/queries/{qid}/move-to-pending
+// Moves a rejected query back to pending status for re-review.
+func (h *QueriesHandler) MoveToPending(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	queryID, ok := ParseQueryID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	// Move the query to pending
+	if err := h.queryService.MoveToPending(r.Context(), projectID, queryID); err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			if err := ErrorResponse(w, http.StatusNotFound, "not_found", "Query not found"); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
+		h.logger.Error("Failed to move query to pending",
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", queryID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusBadRequest, "move_to_pending_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Fetch the updated query to return in response
+	query, err := h.queryService.Get(r.Context(), projectID, queryID)
+	if err != nil {
+		h.logger.Error("Failed to get query after moving to pending",
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", queryID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "internal_error", "Query moved but failed to fetch"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	queryResp := h.toPendingQueryResponse(query)
+	data := map[string]any{
+		"success": true,
+		"message": "Query moved to pending",
+		"query":   queryResp,
+	}
+
+	response := ApiResponse{Success: true, Data: data}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
 func (h *QueriesHandler) toQueryResponse(q *models.Query) QueryResponse {
 	resp := QueryResponse{
 		QueryID:               q.ID.String(),
@@ -688,14 +1015,62 @@ func (h *QueriesHandler) toQueryResponse(q *models.Query) QueryResponse {
 		Parameters:            q.Parameters,
 		OutputColumns:         q.OutputColumns,
 		Constraints:           q.Constraints,
+		Tags:                  q.Tags,
 		UsageCount:            q.UsageCount,
 		CreatedAt:             q.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:             q.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		Status:                q.Status,
+		SuggestedBy:           q.SuggestedBy,
+		SuggestionContext:     q.SuggestionContext,
+		RejectionReason:       q.RejectionReason,
 	}
 
 	if q.LastUsedAt != nil {
 		lastUsed := q.LastUsedAt.Format("2006-01-02T15:04:05Z07:00")
 		resp.LastUsedAt = &lastUsed
+	}
+
+	if q.ParentQueryID != nil {
+		parentID := q.ParentQueryID.String()
+		resp.ParentQueryID = &parentID
+	}
+
+	if q.ReviewedBy != nil {
+		resp.ReviewedBy = q.ReviewedBy
+	}
+
+	if q.ReviewedAt != nil {
+		reviewedAt := q.ReviewedAt.Format("2006-01-02T15:04:05Z07:00")
+		resp.ReviewedAt = &reviewedAt
+	}
+
+	return resp
+}
+
+func (h *QueriesHandler) toPendingQueryResponse(q *models.Query) PendingQueryResponse {
+	resp := PendingQueryResponse{
+		QueryID:               q.ID.String(),
+		ProjectID:             q.ProjectID.String(),
+		DatasourceID:          q.DatasourceID.String(),
+		NaturalLanguagePrompt: q.NaturalLanguagePrompt,
+		AdditionalContext:     q.AdditionalContext,
+		SQLQuery:              q.SQLQuery,
+		Dialect:               q.Dialect,
+		Parameters:            q.Parameters,
+		OutputColumns:         q.OutputColumns,
+		Constraints:           q.Constraints,
+		Tags:                  q.Tags,
+		Status:                q.Status,
+		SuggestedBy:           q.SuggestedBy,
+		SuggestionContext:     q.SuggestionContext,
+		AllowsModification:    q.AllowsModification,
+		CreatedAt:             q.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		UpdatedAt:             q.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+
+	if q.ParentQueryID != nil {
+		parentID := q.ParentQueryID.String()
+		resp.ParentQueryID = &parentID
 	}
 
 	return resp
