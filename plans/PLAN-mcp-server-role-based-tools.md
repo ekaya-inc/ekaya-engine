@@ -339,7 +339,7 @@ export function UserToolsSection({ ... }: UserToolsSectionProps) {
 }
 ```
 
-### Task 7: Frontend - Create DeveloperToolsSection Component
+### Task 7: Frontend - Create DeveloperToolsSection Component [x]
 
 **File: `ui/src/components/mcp/DeveloperToolsSection.tsx`**
 
