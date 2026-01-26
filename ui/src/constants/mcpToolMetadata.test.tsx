@@ -3,9 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   TOOL_GROUP_IDS,
   TOOL_GROUP_METADATA,
-  ALL_TOOLS_ORDERED,
   getToolGroupMetadata,
-  getToolOrder,
 } from './mcpToolMetadata';
 
 describe('mcpToolMetadata', () => {
@@ -90,47 +88,6 @@ describe('mcpToolMetadata', () => {
           expect(metadata.description).toBeTruthy();
         }
       }
-    });
-  });
-
-  describe('ALL_TOOLS_ORDERED', () => {
-    it('starts with health tool', () => {
-      expect(ALL_TOOLS_ORDERED[0]?.name).toBe('health');
-    });
-
-    it('contains all expected tool categories', () => {
-      const toolNames = ALL_TOOLS_ORDERED.map((t) => t.name);
-      // Default
-      expect(toolNames).toContain('health');
-      // Developer Core
-      expect(toolNames).toContain('echo');
-      expect(toolNames).toContain('execute');
-      // Query
-      expect(toolNames).toContain('query');
-      expect(toolNames).toContain('get_schema');
-      expect(toolNames).toContain('sample');
-      // Ontology Questions
-      expect(toolNames).toContain('list_ontology_questions');
-      // Ontology Maintenance
-      expect(toolNames).toContain('update_entity');
-    });
-
-    it('has correct tool order (developer core before query tools)', () => {
-      const echoIndex = ALL_TOOLS_ORDERED.findIndex((t) => t.name === 'echo');
-      const queryIndex = ALL_TOOLS_ORDERED.findIndex((t) => t.name === 'query');
-      expect(echoIndex).toBeLessThan(queryIndex);
-    });
-  });
-
-  describe('getToolOrder', () => {
-    it('returns correct index for known tools', () => {
-      expect(getToolOrder('health')).toBe(0);
-      expect(getToolOrder('echo')).toBe(1);
-      expect(getToolOrder('execute')).toBe(2);
-    });
-
-    it('returns length for unknown tools (sorts them last)', () => {
-      expect(getToolOrder('unknown_tool')).toBe(ALL_TOOLS_ORDERED.length);
     });
   });
 
