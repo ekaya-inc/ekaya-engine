@@ -88,6 +88,8 @@ type CreateQueryRequest struct {
 	Parameters            []models.QueryParameter `json:"parameters,omitempty"`
 	OutputColumns         []models.OutputColumn   `json:"output_columns,omitempty"`
 	Constraints           string                  `json:"constraints,omitempty"`
+	Status                string                  `json:"status,omitempty"`       // pending, approved, rejected
+	SuggestedBy           string                  `json:"suggested_by,omitempty"` // user, agent, admin
 }
 
 // UpdateQueryRequest for PUT body (all fields optional).
@@ -306,6 +308,8 @@ func (h *QueriesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Parameters:            req.Parameters,
 		OutputColumns:         req.OutputColumns,
 		Constraints:           req.Constraints,
+		Status:                req.Status,
+		SuggestedBy:           req.SuggestedBy,
 	}
 
 	query, err := h.queryService.Create(r.Context(), projectID, datasourceID, serviceReq)

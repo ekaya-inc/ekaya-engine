@@ -106,6 +106,8 @@ export interface CreateQueryRequest {
   parameters?: QueryParameter[];
   output_columns?: OutputColumn[];
   constraints?: string;
+  status?: QueryStatus;
+  suggested_by?: 'user' | 'agent' | 'admin';
 }
 
 /**

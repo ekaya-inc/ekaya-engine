@@ -383,11 +383,15 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
     setIsSaving(true);
 
     try {
+      // When creating from Pending tab, create as pending for admin approval
+      const isPendingCreate = filter === 'pending';
+
       const request: CreateQueryRequest = {
         natural_language_prompt: newQuery.natural_language_prompt.trim(),
         sql_query: newQuery.sql_query.trim(),
-        is_enabled: newQuery.is_enabled,
+        is_enabled: isPendingCreate ? false : newQuery.is_enabled,
         allows_modification: newQuery.allows_modification,
+        ...(isPendingCreate && { status: 'pending', suggested_by: 'admin' }),
       };
 
       if (newQuery.additional_context.trim()) {
@@ -410,14 +414,18 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
 
       if (response.success && response.data) {
         toast({
-          title: 'Query created',
-          description: 'Your query has been saved',
+          title: isPendingCreate ? 'Query submitted for approval' : 'Query created',
+          description: isPendingCreate ? 'Query is pending admin approval' : 'Your query has been saved',
           variant: 'success',
         });
         setQueries((prev) => [...prev, response.data as Query]);
         setSelectedQuery(response.data as Query);
         setIsCreating(false);
         resetCreateForm();
+        // Notify parent to update pending count if we created a pending query
+        if (isPendingCreate) {
+          onPendingCountChange?.();
+        }
       } else {
         toast({
           title: 'Failed to create query',
@@ -1553,7 +1561,7 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
                         )}
                       </CardDescription>
                     </div>
-                    {/* Only show edit/delete buttons for approved queries */}
+                    {/* Edit/delete buttons for approved queries */}
                     {selectedQuery.status === 'approved' && (
                       <div className="flex gap-2">
                         <Button
@@ -1583,6 +1591,27 @@ const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountC
                           variant="ghost"
                           size="icon"
                           onClick={() => handleDeleteClick(selectedQuery)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
+                    {/* Edit/delete buttons for pending queries (no enable/disable toggle) */}
+                    {selectedQuery.status === 'pending' && (
+                      <div className="flex gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleEditQuery(selectedQuery)}
+                          title="Edit query"
+                        >
+                          <Edit3 className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteClick(selectedQuery)}
+                          title="Delete query"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
