@@ -88,7 +88,7 @@ func (tc *ontologyEntityTestContext) cleanup() {
 
 // createTestContext returns a context with tenant scope and inference provenance.
 func (tc *ontologyEntityTestContext) createTestContext() (context.Context, func()) {
-	return tc.createTestContextWithProvenance(models.SourceInference)
+	return tc.createTestContextWithProvenance(models.SourceInferred)
 }
 
 // createTestContextWithProvenance returns a context with tenant scope and the specified provenance source.
@@ -134,8 +134,8 @@ func (tc *ontologyEntityTestContext) createTestEntityWithProvenance(ctx context.
 	// Map string source to ProvenanceSource
 	var source models.ProvenanceSource
 	switch sourceStr {
-	case models.ProvenanceInference:
-		source = models.SourceInference
+	case models.ProvenanceInferred:
+		source = models.SourceInferred
 	case models.ProvenanceMCP:
 		source = models.SourceMCP
 	case models.ProvenanceManual:
@@ -619,8 +619,8 @@ func TestOntologyEntityRepository_DeleteInferenceEntitiesByOntology_PreservesMan
 	defer cleanup()
 
 	// Create entities with different provenance
-	tc.createTestEntityWithProvenance(ctx, "inference_entity1", models.ProvenanceInference)
-	tc.createTestEntityWithProvenance(ctx, "inference_entity2", models.ProvenanceInference)
+	tc.createTestEntityWithProvenance(ctx, "inference_entity1", models.ProvenanceInferred)
+	tc.createTestEntityWithProvenance(ctx, "inference_entity2", models.ProvenanceInferred)
 	tc.createTestEntityWithProvenance(ctx, "manual_entity", models.ProvenanceManual)
 	tc.createTestEntityWithProvenance(ctx, "mcp_entity", models.ProvenanceMCP)
 
@@ -704,7 +704,7 @@ func TestOntologyEntityRepository_DeleteInferenceEntitiesByOntology_CascadesAlia
 	defer cleanup()
 
 	// Create inference entity with alias
-	inferenceEntity := tc.createTestEntityWithProvenance(ctx, "inference_entity", models.ProvenanceInference)
+	inferenceEntity := tc.createTestEntityWithProvenance(ctx, "inference_entity", models.ProvenanceInferred)
 	err := tc.repo.CreateAlias(ctx, &models.OntologyEntityAlias{
 		EntityID: inferenceEntity.ID,
 		Alias:    "inference_alias",
@@ -1309,8 +1309,8 @@ func TestOntologyEntityRepository_MarkInferenceEntitiesStale_Success(t *testing.
 	defer cleanup()
 
 	// Create entities with different provenance
-	inferenceEntity1 := tc.createTestEntityWithProvenance(ctx, "inference1", models.ProvenanceInference)
-	inferenceEntity2 := tc.createTestEntityWithProvenance(ctx, "inference2", models.ProvenanceInference)
+	inferenceEntity1 := tc.createTestEntityWithProvenance(ctx, "inference1", models.ProvenanceInferred)
+	inferenceEntity2 := tc.createTestEntityWithProvenance(ctx, "inference2", models.ProvenanceInferred)
 	manualEntity := tc.createTestEntityWithProvenance(ctx, "manual", models.ProvenanceManual)
 	mcpEntity := tc.createTestEntityWithProvenance(ctx, "mcp", models.ProvenanceMCP)
 
@@ -1360,14 +1360,14 @@ func TestOntologyEntityRepository_MarkInferenceEntitiesStale_SkipsDeleted(t *tes
 	defer cleanup()
 
 	// Create an inference entity and soft-delete it
-	deletedEntity := tc.createTestEntityWithProvenance(ctx, "deleted_inference", models.ProvenanceInference)
+	deletedEntity := tc.createTestEntityWithProvenance(ctx, "deleted_inference", models.ProvenanceInferred)
 	err := tc.repo.SoftDelete(ctx, deletedEntity.ID, "test deletion")
 	if err != nil {
 		t.Fatalf("SoftDelete failed: %v", err)
 	}
 
 	// Create an active inference entity
-	tc.createTestEntityWithProvenance(ctx, "active_inference", models.ProvenanceInference)
+	tc.createTestEntityWithProvenance(ctx, "active_inference", models.ProvenanceInferred)
 
 	// Mark inference entities as stale
 	err = tc.repo.MarkInferenceEntitiesStale(ctx, tc.ontologyID)
@@ -1393,7 +1393,7 @@ func TestOntologyEntityRepository_ClearStaleFlag_Success(t *testing.T) {
 	defer cleanup()
 
 	// Create and mark an entity as stale
-	entity := tc.createTestEntityWithProvenance(ctx, "inference", models.ProvenanceInference)
+	entity := tc.createTestEntityWithProvenance(ctx, "inferred", models.ProvenanceInferred)
 	err := tc.repo.MarkInferenceEntitiesStale(ctx, tc.ontologyID)
 	if err != nil {
 		t.Fatalf("MarkInferenceEntitiesStale failed: %v", err)
@@ -1426,7 +1426,7 @@ func TestOntologyEntityRepository_GetStaleEntities_Empty(t *testing.T) {
 	defer cleanup()
 
 	// Create entities but don't mark any as stale
-	tc.createTestEntityWithProvenance(ctx, "entity1", models.ProvenanceInference)
+	tc.createTestEntityWithProvenance(ctx, "entity1", models.ProvenanceInferred)
 	tc.createTestEntityWithProvenance(ctx, "entity2", models.ProvenanceManual)
 
 	staleEntities, err := tc.repo.GetStaleEntities(ctx, tc.ontologyID)
@@ -1446,7 +1446,7 @@ func TestOntologyEntityRepository_Create_ClearsStaleOnRediscovery(t *testing.T) 
 	defer cleanup()
 
 	// Create an inference entity
-	original := tc.createTestEntityWithProvenance(ctx, "user", models.ProvenanceInference)
+	original := tc.createTestEntityWithProvenance(ctx, "user", models.ProvenanceInferred)
 
 	// Mark it as stale (simulating start of ontology refresh)
 	err := tc.repo.MarkInferenceEntitiesStale(ctx, tc.ontologyID)
@@ -1617,7 +1617,7 @@ func TestOntologyEntityRepository_Update_SetsProvenanceFields(t *testing.T) {
 	tc.cleanup()
 
 	// Create entity with inference provenance
-	ctx, cleanup := tc.createTestContextWithProvenance(models.SourceInference)
+	ctx, cleanup := tc.createTestContextWithProvenance(models.SourceInferred)
 	defer cleanup()
 
 	entity := tc.createTestEntity(ctx, "user")
@@ -1648,7 +1648,7 @@ func TestOntologyEntityRepository_Update_SetsProvenanceFields(t *testing.T) {
 		t.Fatalf("GetByID failed: %v", err)
 	}
 	// Source should still be inference (from creation)
-	if retrieved.Source != "inference" {
+	if retrieved.Source != "inferred" {
 		t.Errorf("expected Source to still be 'inference', got %q", retrieved.Source)
 	}
 	// LastEditSource should be manual
@@ -1668,13 +1668,13 @@ func TestOntologyEntityRepository_DeleteBySource_Success(t *testing.T) {
 	defer cleanup()
 
 	// Create entities with different sources
-	tc.createTestEntityWithProvenance(ctx, "inference_entity1", models.ProvenanceInference)
-	tc.createTestEntityWithProvenance(ctx, "inference_entity2", models.ProvenanceInference)
+	tc.createTestEntityWithProvenance(ctx, "inference_entity1", models.ProvenanceInferred)
+	tc.createTestEntityWithProvenance(ctx, "inference_entity2", models.ProvenanceInferred)
 	tc.createTestEntityWithProvenance(ctx, "manual_entity", models.ProvenanceManual)
 	tc.createTestEntityWithProvenance(ctx, "mcp_entity", models.ProvenanceMCP)
 
 	// Delete inference entities by source
-	err := tc.repo.DeleteBySource(ctx, tc.projectID, models.SourceInference)
+	err := tc.repo.DeleteBySource(ctx, tc.projectID, models.SourceInferred)
 	if err != nil {
 		t.Fatalf("DeleteBySource failed: %v", err)
 	}
@@ -1713,7 +1713,7 @@ func TestOntologyEntityRepository_DeleteBySource_NoMatchingEntities(t *testing.T
 	tc.createTestEntityWithProvenance(ctx, "manual_entity2", models.ProvenanceManual)
 
 	// Delete inference entities (none exist) - should not error
-	err := tc.repo.DeleteBySource(ctx, tc.projectID, models.SourceInference)
+	err := tc.repo.DeleteBySource(ctx, tc.projectID, models.SourceInferred)
 	if err != nil {
 		t.Fatalf("DeleteBySource failed: %v", err)
 	}
@@ -1734,7 +1734,7 @@ func TestOntologyEntityRepository_DeleteBySource_NoTenantScope(t *testing.T) {
 
 	ctx := context.Background() // No tenant scope
 
-	err := tc.repo.DeleteBySource(ctx, tc.projectID, models.SourceInference)
+	err := tc.repo.DeleteBySource(ctx, tc.projectID, models.SourceInferred)
 	if err == nil {
 		t.Error("expected error for DeleteBySource without tenant scope")
 	}
@@ -1745,7 +1745,7 @@ func TestOntologyEntityRepository_Create_UpsertSetsLastEditSourceOnConflict(t *t
 	tc.cleanup()
 
 	// Create entity with inference provenance
-	ctxInference, cleanup := tc.createTestContextWithProvenance(models.SourceInference)
+	ctxInference, cleanup := tc.createTestContextWithProvenance(models.SourceInferred)
 	defer cleanup()
 
 	original := tc.createTestEntity(ctxInference, "user")
@@ -1782,7 +1782,7 @@ func TestOntologyEntityRepository_Create_UpsertSetsLastEditSourceOnConflict(t *t
 		t.Fatalf("GetByID failed: %v", err)
 	}
 	// Source should still be inference (from original creation)
-	if retrieved.Source != "inference" {
+	if retrieved.Source != "inferred" {
 		t.Errorf("expected Source to still be 'inference', got %q", retrieved.Source)
 	}
 	// LastEditSource should be manual (from upsert)

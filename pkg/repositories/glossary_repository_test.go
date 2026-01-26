@@ -244,7 +244,7 @@ func TestGlossaryRepository_Create_MinimalFields(t *testing.T) {
 	tc.cleanup()
 
 	// Use inference provenance for this test
-	ctx, cleanup := tc.createTestContextWithSource(models.SourceInference)
+	ctx, cleanup := tc.createTestContextWithSource(models.SourceInferred)
 	defer cleanup()
 
 	term := &models.BusinessGlossaryTerm{
@@ -274,7 +274,7 @@ func TestGlossaryRepository_Create_MinimalFields(t *testing.T) {
 		t.Errorf("expected empty aliases, got %v", retrieved.Aliases)
 	}
 	// Verify provenance was set from context
-	if retrieved.Source != "inference" {
+	if retrieved.Source != "inferred" {
 		t.Errorf("expected Source 'inference', got %q", retrieved.Source)
 	}
 }
@@ -324,7 +324,7 @@ func TestGlossaryRepository_Create_DuplicateTerm_DifferentOntology(t *testing.T)
 	tc.cleanup()
 
 	// Use inference provenance for this test
-	ctx, cleanup := tc.createTestContextWithSource(models.SourceInference)
+	ctx, cleanup := tc.createTestContextWithSource(models.SourceInferred)
 	defer cleanup()
 
 	// Create two ontologies for testing
@@ -1186,7 +1186,7 @@ func TestGlossaryRepository_Create_Provenance_Inference(t *testing.T) {
 	tc.cleanup()
 
 	// Test with inference provenance
-	ctx, cleanup := tc.createTestContextWithSource(models.SourceInference)
+	ctx, cleanup := tc.createTestContextWithSource(models.SourceInferred)
 	defer cleanup()
 
 	term := &models.BusinessGlossaryTerm{
@@ -1202,7 +1202,7 @@ func TestGlossaryRepository_Create_Provenance_Inference(t *testing.T) {
 	}
 
 	// Verify Source was set from context
-	if term.Source != "inference" {
+	if term.Source != "inferred" {
 		t.Errorf("expected Source 'inference', got %q", term.Source)
 	}
 
@@ -1211,7 +1211,7 @@ func TestGlossaryRepository_Create_Provenance_Inference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID failed: %v", err)
 	}
-	if retrieved.Source != "inference" {
+	if retrieved.Source != "inferred" {
 		t.Errorf("expected persisted Source 'inference', got %q", retrieved.Source)
 	}
 }
@@ -1251,7 +1251,7 @@ func TestGlossaryRepository_Update_Provenance(t *testing.T) {
 	tc.cleanup()
 
 	// Create term with inference provenance
-	ctxInference, cleanupCreate := tc.createTestContextWithSource(models.SourceInference)
+	ctxInference, cleanupCreate := tc.createTestContextWithSource(models.SourceInferred)
 	defer cleanupCreate()
 
 	term := &models.BusinessGlossaryTerm{
@@ -1267,7 +1267,7 @@ func TestGlossaryRepository_Update_Provenance(t *testing.T) {
 	}
 
 	// Verify initial state
-	if term.Source != "inference" {
+	if term.Source != "inferred" {
 		t.Errorf("expected initial Source 'inference', got %q", term.Source)
 	}
 	if term.LastEditSource != nil {
@@ -1300,7 +1300,7 @@ func TestGlossaryRepository_Update_Provenance(t *testing.T) {
 		t.Fatalf("GetByID failed: %v", err)
 	}
 	// Source should remain unchanged (original creation source)
-	if retrieved.Source != "inference" {
+	if retrieved.Source != "inferred" {
 		t.Errorf("expected Source to remain 'inference', got %q", retrieved.Source)
 	}
 	// LastEditSource should be set to manual
@@ -1349,7 +1349,7 @@ func TestGlossaryRepository_DeleteBySource_ProvenanceType(t *testing.T) {
 	tc.cleanup()
 
 	// Create terms with inference provenance
-	ctxInference, cleanupInference := tc.createTestContextWithSource(models.SourceInference)
+	ctxInference, cleanupInference := tc.createTestContextWithSource(models.SourceInferred)
 	defer cleanupInference()
 
 	term1 := &models.BusinessGlossaryTerm{
@@ -1387,7 +1387,7 @@ func TestGlossaryRepository_DeleteBySource_ProvenanceType(t *testing.T) {
 	}
 
 	// Delete inference terms using ProvenanceSource type
-	err := tc.repo.DeleteBySource(ctxManual, tc.projectID, models.SourceInference)
+	err := tc.repo.DeleteBySource(ctxManual, tc.projectID, models.SourceInferred)
 	if err != nil {
 		t.Fatalf("DeleteBySource failed: %v", err)
 	}

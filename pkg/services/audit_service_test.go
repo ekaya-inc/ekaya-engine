@@ -130,7 +130,7 @@ func TestAuditService_LogDelete(t *testing.T) {
 	userID := uuid.New()
 
 	ctx := models.WithProvenance(context.Background(), models.ProvenanceContext{
-		Source: models.SourceInference,
+		Source: models.SourceInferred,
 		UserID: userID,
 	})
 
@@ -142,7 +142,7 @@ func TestAuditService_LogDelete(t *testing.T) {
 	require.Len(t, repo.entries, 1)
 	entry := repo.entries[0]
 	assert.Equal(t, models.AuditActionDelete, entry.Action)
-	assert.Equal(t, models.ProvenanceInference, entry.Source)
+	assert.Equal(t, models.ProvenanceInferred, entry.Source)
 }
 
 func TestAuditService_LogWithoutProvenance(t *testing.T) {

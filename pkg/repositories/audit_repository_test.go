@@ -167,7 +167,7 @@ func TestAuditRepository_GetByProject(t *testing.T) {
 			EntityType: models.AuditEntityTypeEntity,
 			EntityID:   uuid.New(),
 			Action:     models.AuditActionCreate,
-			Source:     models.ProvenanceInference,
+			Source:     models.ProvenanceInferred,
 			UserID:     &tc.testUserID,
 		}
 		err := tc.repo.Create(ctx, entry)

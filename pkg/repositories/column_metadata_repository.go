@@ -53,7 +53,7 @@ func (r *columnMetadataRepository) Upsert(ctx context.Context, meta *models.Colu
 
 	// Default created_by to 'inference' if not set
 	if meta.CreatedBy == "" {
-		meta.CreatedBy = models.ProvenanceInference
+		meta.CreatedBy = models.ProvenanceInferred
 	}
 
 	// Convert enum_values to JSON

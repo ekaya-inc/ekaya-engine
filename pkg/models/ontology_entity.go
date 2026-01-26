@@ -7,11 +7,11 @@ import (
 )
 
 // Provenance source constants for ontology elements.
-// Precedence: Manual (highest) > MCP (Claude) > Inference (Engine, lowest)
+// Precedence: Manual (highest) > MCP (Claude) > Inferred (Engine, lowest)
 const (
-	ProvenanceManual    = "manual"    // Direct manual edit via UI - highest precedence
-	ProvenanceMCP       = "mcp"       // Claude via MCP tools - wins over inference
-	ProvenanceInference = "inference" // Engine auto-detected or LLM-generated - lowest precedence
+	ProvenanceManual   = "manual"   // Direct manual edit via UI - highest precedence
+	ProvenanceMCP      = "mcp"      // Claude via MCP tools - wins over inferred
+	ProvenanceInferred = "inferred" // Engine auto-detected or LLM-generated - lowest precedence
 )
 
 // OntologyEntity represents a discovered domain entity (user, account, order, etc.)

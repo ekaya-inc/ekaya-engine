@@ -8,7 +8,7 @@ import (
 
 // Legacy source values for glossary terms (deprecated - use ProvenanceXxx constants)
 const (
-	GlossarySourceInferred = "inferred" // Deprecated: use ProvenanceInference
+	GlossarySourceInferred = "inferred" // Deprecated: use ProvenanceInferred
 	GlossarySourceManual   = "manual"   // Deprecated: use ProvenanceManual
 	GlossarySourceMCP      = "mcp"      // Deprecated: use ProvenanceMCP
 )

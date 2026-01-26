@@ -155,7 +155,7 @@ func TestProcessEnumUpdate_MergesValues(t *testing.T) {
 			TableName:  "orders",
 			ColumnName: "status",
 			EnumValues: []string{"pending", "shipped"},
-			CreatedBy:  models.ProvenanceInference,
+			CreatedBy:  models.ProvenanceInferred,
 		},
 	}
 
@@ -209,7 +209,7 @@ func TestProcessEnumUpdate_RespectsExistingValues(t *testing.T) {
 			TableName:  "orders",
 			ColumnName: "status",
 			EnumValues: []string{"pending", "shipped"},
-			CreatedBy:  models.ProvenanceInference,
+			CreatedBy:  models.ProvenanceInferred,
 		},
 	}
 

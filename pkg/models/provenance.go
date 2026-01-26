@@ -11,12 +11,12 @@ import (
 type ProvenanceSource string
 
 // Provenance source constants. These represent HOW an operation was performed.
-// Note: ProvenanceManual, ProvenanceMCP, ProvenanceInference string constants
+// Note: ProvenanceManual, ProvenanceMCP, ProvenanceInferred string constants
 // are defined in ontology_entity.go for backward compatibility.
 const (
-	SourceInference ProvenanceSource = "inference" // Engine auto-detected or LLM-generated
-	SourceMCP       ProvenanceSource = "mcp"       // Claude via MCP tools
-	SourceManual    ProvenanceSource = "manual"    // Direct manual edit via UI
+	SourceInferred ProvenanceSource = "inferred" // Engine auto-detected or LLM-generated
+	SourceMCP      ProvenanceSource = "mcp"      // Claude via MCP tools
+	SourceManual   ProvenanceSource = "manual"   // Direct manual edit via UI
 )
 
 // String returns the string representation of a ProvenanceSource.
@@ -27,7 +27,7 @@ func (s ProvenanceSource) String() string {
 // IsValid returns true if the source is a valid provenance source.
 func (s ProvenanceSource) IsValid() bool {
 	switch s {
-	case SourceInference, SourceMCP, SourceManual:
+	case SourceInferred, SourceMCP, SourceManual:
 		return true
 	default:
 		return false
@@ -89,12 +89,12 @@ func WithMCPProvenance(ctx context.Context, userID uuid.UUID) context.Context {
 	})
 }
 
-// WithInferenceProvenance returns a context with inference provenance set.
+// WithInferredProvenance returns a context with inferred provenance set.
 // Use this for DAG task handlers and automatic LLM-based operations.
 // The userID should be the user who triggered the extraction workflow.
-func WithInferenceProvenance(ctx context.Context, userID uuid.UUID) context.Context {
+func WithInferredProvenance(ctx context.Context, userID uuid.UUID) context.Context {
 	return WithProvenance(ctx, ProvenanceContext{
-		Source: SourceInference,
+		Source: SourceInferred,
 		UserID: userID,
 	})
 }

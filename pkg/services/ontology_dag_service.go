@@ -539,7 +539,7 @@ func (s *ontologyDAGService) executeDAG(projectID, dagID, userID uuid.UUID) {
 
 	// Get tenant context with inference provenance.
 	// All ontology objects created during DAG execution will record:
-	// - source = "inference" (auto-detected by LLM)
+	// - source = "inferred" (auto-detected by LLM)
 	// - created_by = userID (the user who triggered extraction)
 	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
 	if err != nil {
@@ -551,7 +551,7 @@ func (s *ontologyDAGService) executeDAG(projectID, dagID, userID uuid.UUID) {
 
 	// Wrap the tenant context with inference provenance.
 	// This ensures all repository operations during DAG execution have proper provenance.
-	tenantCtx = models.WithInferenceProvenance(tenantCtx, userID)
+	tenantCtx = models.WithInferredProvenance(tenantCtx, userID)
 
 	// Get DAG with nodes
 	dagRecord, err := s.dagRepo.GetByIDWithNodes(tenantCtx, dagID)

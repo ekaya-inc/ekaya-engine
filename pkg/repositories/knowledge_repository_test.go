@@ -734,7 +734,7 @@ func TestKnowledgeRepository_Upsert_Provenance_Inference(t *testing.T) {
 	tc.cleanup()
 
 	// Test with inference provenance
-	ctx, cleanup := tc.createTestContextWithSource(models.SourceInference)
+	ctx, cleanup := tc.createTestContextWithSource(models.SourceInferred)
 	defer cleanup()
 
 	fact := &models.KnowledgeFact{
@@ -751,7 +751,7 @@ func TestKnowledgeRepository_Upsert_Provenance_Inference(t *testing.T) {
 	}
 
 	// Verify Source was set from context
-	if fact.Source != "inference" {
+	if fact.Source != "inferred" {
 		t.Errorf("expected Source 'inference', got %q", fact.Source)
 	}
 
@@ -760,7 +760,7 @@ func TestKnowledgeRepository_Upsert_Provenance_Inference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByKey failed: %v", err)
 	}
-	if retrieved.Source != "inference" {
+	if retrieved.Source != "inferred" {
 		t.Errorf("expected persisted Source 'inference', got %q", retrieved.Source)
 	}
 }
@@ -801,7 +801,7 @@ func TestKnowledgeRepository_Upsert_Provenance_Update(t *testing.T) {
 	tc.cleanup()
 
 	// Create fact with inference provenance
-	ctxInference, cleanupCreate := tc.createTestContextWithSource(models.SourceInference)
+	ctxInference, cleanupCreate := tc.createTestContextWithSource(models.SourceInferred)
 	defer cleanupCreate()
 
 	fact := &models.KnowledgeFact{
@@ -818,7 +818,7 @@ func TestKnowledgeRepository_Upsert_Provenance_Update(t *testing.T) {
 	}
 
 	// Verify initial state
-	if fact.Source != "inference" {
+	if fact.Source != "inferred" {
 		t.Errorf("expected initial Source 'inference', got %q", fact.Source)
 	}
 	if fact.LastEditSource != nil {
@@ -880,7 +880,7 @@ func TestKnowledgeRepository_DeleteBySource(t *testing.T) {
 	tc.cleanup()
 
 	// Create facts with inference provenance
-	ctxInference, cleanupInference := tc.createTestContextWithSource(models.SourceInference)
+	ctxInference, cleanupInference := tc.createTestContextWithSource(models.SourceInferred)
 	defer cleanupInference()
 
 	fact1 := &models.KnowledgeFact{
@@ -921,7 +921,7 @@ func TestKnowledgeRepository_DeleteBySource(t *testing.T) {
 	}
 
 	// Delete inference facts
-	err := tc.repo.DeleteBySource(ctxManual, tc.projectID, models.SourceInference)
+	err := tc.repo.DeleteBySource(ctxManual, tc.projectID, models.SourceInferred)
 	if err != nil {
 		t.Fatalf("DeleteBySource failed: %v", err)
 	}
@@ -953,7 +953,7 @@ func TestKnowledgeRepository_DeleteBySource_NoTenantScope(t *testing.T) {
 
 	ctx := context.Background() // No tenant scope
 
-	err := tc.repo.DeleteBySource(ctx, tc.projectID, models.SourceInference)
+	err := tc.repo.DeleteBySource(ctx, tc.projectID, models.SourceInferred)
 	if err == nil {
 		t.Error("expected error for DeleteBySource without tenant scope")
 	}

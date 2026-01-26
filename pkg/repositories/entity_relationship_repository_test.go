@@ -158,8 +158,8 @@ func TestEntityRelationshipRepository_MarkInferenceRelationshipsStale_Success(t 
 	defer cleanup()
 
 	// Create relationships with different provenance
-	tc.createTestRelationship(ctx, "user_id", "id", models.ProvenanceInference)
-	tc.createTestRelationship(ctx, "created_by", "id", models.ProvenanceInference)
+	tc.createTestRelationship(ctx, "user_id", "id", models.ProvenanceInferred)
+	tc.createTestRelationship(ctx, "created_by", "id", models.ProvenanceInferred)
 	tc.createTestRelationship(ctx, "owner_id", "id", models.ProvenanceManual)
 	tc.createTestRelationship(ctx, "reviewer_id", "id", models.ProvenanceMCP)
 
@@ -198,7 +198,7 @@ func TestEntityRelationshipRepository_ClearStaleFlag_Success(t *testing.T) {
 	defer cleanup()
 
 	// Create and mark a relationship as stale
-	rel := tc.createTestRelationship(ctx, "user_id", "id", models.ProvenanceInference)
+	rel := tc.createTestRelationship(ctx, "user_id", "id", models.ProvenanceInferred)
 	err := tc.repo.MarkInferenceRelationshipsStale(ctx, tc.ontologyID)
 	if err != nil {
 		t.Fatalf("MarkInferenceRelationshipsStale failed: %v", err)
@@ -232,7 +232,7 @@ func TestEntityRelationshipRepository_GetStaleRelationships_Empty(t *testing.T) 
 	defer cleanup()
 
 	// Create relationships but don't mark any as stale
-	tc.createTestRelationship(ctx, "user_id", "id", models.ProvenanceInference)
+	tc.createTestRelationship(ctx, "user_id", "id", models.ProvenanceInferred)
 	tc.createTestRelationship(ctx, "owner_id", "id", models.ProvenanceManual)
 
 	staleRels, err := tc.repo.GetStaleRelationships(ctx, tc.ontologyID)
@@ -253,7 +253,7 @@ func TestEntityRelationshipRepository_Create_ClearsStaleOnRediscovery(t *testing
 	defer cleanup()
 
 	// Create an inference relationship
-	original := tc.createTestRelationship(ctx, "user_id", "id", models.ProvenanceInference)
+	original := tc.createTestRelationship(ctx, "user_id", "id", models.ProvenanceInferred)
 
 	// Mark it as stale (simulating start of ontology refresh)
 	err := tc.repo.MarkInferenceRelationshipsStale(ctx, tc.ontologyID)
@@ -282,7 +282,7 @@ func TestEntityRelationshipRepository_Create_ClearsStaleOnRediscovery(t *testing
 		Confidence:         1.0,
 		Status:             models.RelationshipStatusConfirmed,
 		Cardinality:        models.CardinalityNTo1,
-		CreatedBy:          models.ProvenanceInference,
+		CreatedBy:          models.ProvenanceInferred,
 		IsStale:            false,
 	}
 	err = tc.repo.Create(ctx, recreated)
@@ -321,7 +321,7 @@ func TestEntityRelationshipRepository_UpdateDescription_ClearsStaleFlag(t *testi
 	defer cleanup()
 
 	// Create a relationship and mark it stale
-	rel := tc.createTestRelationship(ctx, "user_id", "id", models.ProvenanceInference)
+	rel := tc.createTestRelationship(ctx, "user_id", "id", models.ProvenanceInferred)
 	err := tc.repo.MarkInferenceRelationshipsStale(ctx, tc.ontologyID)
 	if err != nil {
 		t.Fatalf("MarkInferenceRelationshipsStale failed: %v", err)
@@ -361,7 +361,7 @@ func TestEntityRelationshipRepository_UpdateDescriptionAndAssociation_ClearsStal
 	defer cleanup()
 
 	// Create a relationship and mark it stale
-	rel := tc.createTestRelationship(ctx, "user_id", "id", models.ProvenanceInference)
+	rel := tc.createTestRelationship(ctx, "user_id", "id", models.ProvenanceInferred)
 	err := tc.repo.MarkInferenceRelationshipsStale(ctx, tc.ontologyID)
 	if err != nil {
 		t.Fatalf("MarkInferenceRelationshipsStale failed: %v", err)
@@ -498,7 +498,7 @@ func (ctc *columnTypesTestContext) createRelationshipWithColumnIDs(ctx context.C
 		Confidence:         1.0,
 		Status:             models.RelationshipStatusConfirmed,
 		Cardinality:        models.CardinalityNTo1,
-		CreatedBy:          models.ProvenanceInference,
+		CreatedBy:          models.ProvenanceInferred,
 	}
 
 	// Create uses the repository method which now handles column IDs
@@ -587,7 +587,7 @@ func TestEntityRelationshipRepository_Create_PersistsColumnIDs(t *testing.T) {
 		Confidence:         1.0,
 		Status:             models.RelationshipStatusConfirmed,
 		Cardinality:        models.CardinalityNTo1,
-		CreatedBy:          models.ProvenanceInference,
+		CreatedBy:          models.ProvenanceInferred,
 	}
 
 	// Use the Create method (not raw SQL)
@@ -663,7 +663,7 @@ func TestEntityRelationshipRepository_Upsert_PersistsColumnIDs(t *testing.T) {
 		Confidence:         1.0,
 		Status:             models.RelationshipStatusConfirmed,
 		Cardinality:        models.CardinalityNTo1,
-		CreatedBy:          models.ProvenanceInference,
+		CreatedBy:          models.ProvenanceInferred,
 	}
 
 	// Use the Upsert method
@@ -723,7 +723,7 @@ func TestEntityRelationshipRepository_GetByProject_NilColumnIDs(t *testing.T) {
 	defer cleanup()
 
 	// Create a relationship WITHOUT column IDs (legacy data scenario)
-	rel := tc.createTestRelationship(ctx, "user_id", "id", models.ProvenanceInference)
+	rel := tc.createTestRelationship(ctx, "user_id", "id", models.ProvenanceInferred)
 
 	// Get by project
 	relationships, err := tc.repo.GetByProject(ctx, tc.projectID)

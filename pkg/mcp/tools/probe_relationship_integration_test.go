@@ -212,7 +212,7 @@ func (tc *probeRelationshipTestContext) createOntologyAndEntities(ctx context.Co
 			Description:   "Test entity: " + name,
 			PrimaryTable:  name + "_table",
 			PrimaryColumn: name + "_id",
-			CreatedBy:     models.ProvenanceInference, // Extraction creates with inference provenance
+			CreatedBy:     models.ProvenanceInferred, // Extraction creates with inference provenance
 		}
 		err = tc.ontologyEntityRepo.Create(ctx, entity)
 		require.NoError(tc.t, err)

@@ -12,7 +12,7 @@ func TestProvenanceSource_String(t *testing.T) {
 		source   ProvenanceSource
 		expected string
 	}{
-		{SourceInference, "inference"},
+		{SourceInferred, "inferred"},
 		{SourceMCP, "mcp"},
 		{SourceManual, "manual"},
 	}
@@ -31,7 +31,7 @@ func TestProvenanceSource_IsValid(t *testing.T) {
 		source   ProvenanceSource
 		expected bool
 	}{
-		{SourceInference, true},
+		{SourceInferred, true},
 		{SourceMCP, true},
 		{SourceManual, true},
 		{ProvenanceSource("invalid"), false},
@@ -88,12 +88,12 @@ func TestWithProvenance_And_GetProvenance(t *testing.T) {
 		{
 			name: "inference provenance",
 			ctx: WithProvenance(context.Background(), ProvenanceContext{
-				Source: SourceInference,
+				Source: SourceInferred,
 				UserID: userID,
 			}),
 			wantFound: true,
 			wantProv: ProvenanceContext{
-				Source: SourceInference,
+				Source: SourceInferred,
 				UserID: userID,
 			},
 		},
@@ -180,19 +180,19 @@ func TestWithMCPProvenance(t *testing.T) {
 	}
 }
 
-func TestWithInferenceProvenance(t *testing.T) {
+func TestWithInferredProvenance(t *testing.T) {
 	userID := uuid.New()
-	ctx := WithInferenceProvenance(context.Background(), userID)
+	ctx := WithInferredProvenance(context.Background(), userID)
 
 	got, found := GetProvenance(ctx)
 	if !found {
-		t.Fatal("WithInferenceProvenance() did not set provenance")
+		t.Fatal("WithInferredProvenance() did not set provenance")
 	}
-	if got.Source != SourceInference {
-		t.Errorf("WithInferenceProvenance() Source = %v, want %v", got.Source, SourceInference)
+	if got.Source != SourceInferred {
+		t.Errorf("WithInferredProvenance() Source = %v, want %v", got.Source, SourceInferred)
 	}
 	if got.UserID != userID {
-		t.Errorf("WithInferenceProvenance() UserID = %v, want %v", got.UserID, userID)
+		t.Errorf("WithInferredProvenance() UserID = %v, want %v", got.UserID, userID)
 	}
 }
 
@@ -227,7 +227,7 @@ func TestProvenanceConstants_MatchStringConstants(t *testing.T) {
 	if string(SourceMCP) != ProvenanceMCP {
 		t.Errorf("SourceMCP = %q, but ProvenanceMCP = %q", SourceMCP, ProvenanceMCP)
 	}
-	if string(SourceInference) != ProvenanceInference {
-		t.Errorf("SourceInference = %q, but ProvenanceInference = %q", SourceInference, ProvenanceInference)
+	if string(SourceInferred) != ProvenanceInferred {
+		t.Errorf("SourceInferred = %q, but ProvenanceInferred = %q", SourceInferred, ProvenanceInferred)
 	}
 }

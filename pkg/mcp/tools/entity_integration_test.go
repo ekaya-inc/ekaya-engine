@@ -186,7 +186,7 @@ func (tc *entityToolTestContext) createOntologyAndEntity(ctx context.Context, en
 		Name:         entityName,
 		Description:  "Test entity created during extraction",
 		PrimaryTable: entityName + "_table",
-		CreatedBy:    models.ProvenanceInference, // Extraction creates with inference provenance
+		CreatedBy:    models.ProvenanceInferred, // Extraction creates with inference provenance
 	}
 	err = tc.ontologyEntityRepo.Create(ctx, entity)
 	require.NoError(tc.t, err)

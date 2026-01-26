@@ -412,7 +412,7 @@ func precedenceLevelRelationship(source string) int {
 		return 3
 	case models.ProvenanceMCP:
 		return 2
-	case models.ProvenanceInference:
+	case models.ProvenanceInferred:
 		return 1
 	default:
 		return 0 // Unknown source has lowest precedence

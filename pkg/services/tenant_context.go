@@ -41,26 +41,26 @@ func NewTenantContextWithProvenanceFunc(db *database.DB) TenantContextWithProven
 		}
 		tenantCtx := database.SetTenantScope(ctx, scope)
 		// Add inference provenance for DAG tasks
-		tenantCtx = models.WithInferenceProvenance(tenantCtx, userID)
+		tenantCtx = models.WithInferredProvenance(tenantCtx, userID)
 		return tenantCtx, func() { scope.Close() }, nil
 	}
 }
 
-// WithInferenceProvenanceWrapper wraps a TenantContextFunc to add inference provenance.
+// WithInferredProvenanceWrapper wraps a TenantContextFunc to add inference provenance.
 // This allows existing DAG tasks to add provenance by wrapping their getTenantCtx function.
 //
 // Example usage in a DAG task:
 //
-//	wrappedGetTenantCtx := services.WithInferenceProvenanceWrapper(t.getTenantCtx, userID)
+//	wrappedGetTenantCtx := services.WithInferredProvenanceWrapper(t.getTenantCtx, userID)
 //	tenantCtx, cleanup, err := wrappedGetTenantCtx(ctx, t.projectID)
-func WithInferenceProvenanceWrapper(getTenantCtx TenantContextFunc, userID uuid.UUID) TenantContextFunc {
+func WithInferredProvenanceWrapper(getTenantCtx TenantContextFunc, userID uuid.UUID) TenantContextFunc {
 	return func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {
 		tenantCtx, cleanup, err := getTenantCtx(ctx, projectID)
 		if err != nil {
 			return nil, nil, err
 		}
 		// Add inference provenance
-		tenantCtx = models.WithInferenceProvenance(tenantCtx, userID)
+		tenantCtx = models.WithInferredProvenance(tenantCtx, userID)
 		return tenantCtx, cleanup, nil
 	}
 }
