@@ -34,8 +34,13 @@ type MCPToolDeps struct {
 	DataChangeDetectionService   services.DataChangeDetectionService
 	ChangeReviewService          services.ChangeReviewService
 	PendingChangeRepo            repositories.PendingChangeRepository
+	InstalledAppService          services.InstalledAppService
 	Logger                       *zap.Logger
 }
+
+// dataLiaisonTools is a reference to the shared list in services.DataLiaisonTools.
+// These tools require the AI Data Liaison app to be installed.
+var dataLiaisonTools = services.DataLiaisonTools
 
 // GetDB implements ToolAccessDeps.
 func (d *MCPToolDeps) GetDB() *database.DB { return d.DB }
@@ -234,9 +239,31 @@ func NewToolFilter(deps *MCPToolDeps) func(ctx context.Context, tools []mcp.Tool
 			enabledNames[td.Name] = true
 		}
 
+		// Check if AI Data Liaison app is installed - if not, remove data liaison tools
+		dataLiaisonInstalled := false
+		if deps.InstalledAppService != nil {
+			installed, err := deps.InstalledAppService.IsInstalled(tenantCtx, projectID, models.AppIDAIDataLiaison)
+			if err != nil {
+				deps.Logger.Warn("Tool filter: failed to check AI Data Liaison app installation",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+				// On error, default to not installed (safer)
+			} else {
+				dataLiaisonInstalled = installed
+			}
+		}
+
+		// Remove data liaison tools if app not installed
+		if !dataLiaisonInstalled {
+			for toolName := range dataLiaisonTools {
+				delete(enabledNames, toolName)
+			}
+		}
+
 		deps.Logger.Debug("Tool filter: filtering based on GetEnabledTools",
 			zap.String("project_id", projectID.String()),
-			zap.Int("enabled_tool_count", len(enabledNames)))
+			zap.Int("enabled_tool_count", len(enabledNames)),
+			zap.Bool("data_liaison_installed", dataLiaisonInstalled))
 
 		// Filter MCP tools to only include enabled ones
 		return filterByEnabledNames(tools, enabledNames)

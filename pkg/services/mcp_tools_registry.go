@@ -86,6 +86,22 @@ var agentAllowedTools = map[string]bool{
 	"health":                 true,
 }
 
+// DataLiaisonTools lists tools that require the AI Data Liaison app to be installed.
+// These tools enable the suggest/approve query workflow between business users and developers.
+// Used by both MCP tool filtering and UI enabled tools display.
+var DataLiaisonTools = map[string]bool{
+	// Business User tools - suggest queries for approval
+	"suggest_approved_query": true,
+	"suggest_query_update":   true,
+	// Developer tools - manage query suggestions
+	"list_query_suggestions":   true,
+	"approve_query_suggestion": true,
+	"reject_query_suggestion":  true,
+	"create_approved_query":    true,
+	"update_approved_query":    true,
+	"delete_approved_query":    true,
+}
+
 // GetEnabledTools returns the list of tools enabled based on the current state.
 // This computes which tools would be visible to a user (not an agent) based on
 // the tool group configurations.
