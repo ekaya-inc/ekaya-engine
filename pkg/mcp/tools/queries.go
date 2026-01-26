@@ -36,6 +36,7 @@ var approvedQueriesToolNames = map[string]bool{
 	"list_approved_queries":  true,
 	"execute_approved_query": true,
 	"suggest_approved_query": true,
+	"suggest_query_update":   true,
 	"get_query_history":      true,
 }
 
@@ -44,6 +45,7 @@ func RegisterApprovedQueriesTools(s *server.MCPServer, deps *QueryToolDeps) {
 	registerListApprovedQueriesTool(s, deps)
 	registerExecuteApprovedQueryTool(s, deps)
 	registerSuggestApprovedQueryTool(s, deps)
+	registerSuggestQueryUpdateTool(s, deps)
 	registerGetQueryHistoryTool(s, deps)
 }
 
@@ -718,6 +720,215 @@ func registerSuggestApprovedQueryTool(s *server.MCPServer, deps *QueryToolDeps) 
 
 		// If auto-approve is enabled, include the approved query
 		// For now, always return pending status (auto-approve can be implemented later)
+
+		jsonResult, _ := json.Marshal(response)
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// registerSuggestQueryUpdateTool - AI agents suggest updates to existing queries for approval.
+func registerSuggestQueryUpdateTool(s *server.MCPServer, deps *QueryToolDeps) {
+	tool := mcp.NewTool(
+		"suggest_query_update",
+		mcp.WithDescription(
+			"Suggest an update to an existing pre-approved query. "+
+				"The suggestion will be reviewed by an administrator before being applied. "+
+				"The original query remains active until the update is approved.",
+		),
+		mcp.WithString(
+			"query_id",
+			mcp.Required(),
+			mcp.Description("UUID of the existing query to update"),
+		),
+		mcp.WithString(
+			"sql",
+			mcp.Description("Updated SQL query"),
+		),
+		mcp.WithString(
+			"name",
+			mcp.Description("Updated name"),
+		),
+		mcp.WithString(
+			"description",
+			mcp.Description("Updated description"),
+		),
+		mcp.WithArray(
+			"parameters",
+			mcp.Description("Updated parameter definitions"),
+		),
+		mcp.WithObject(
+			"output_column_descriptions",
+			mcp.Description("Updated output column descriptions"),
+		),
+		mcp.WithArray(
+			"tags",
+			mcp.Description("Updated tags for organizing queries"),
+		),
+		mcp.WithString(
+			"context",
+			mcp.Required(),
+			mcp.Description("Explanation of why this update is needed"),
+		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(false),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := checkApprovedQueriesEnabled(ctx, deps, "suggest_query_update")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Extract required parameters
+		queryIDStr, err := req.RequireString("query_id")
+		if err != nil {
+			return NewErrorResult("invalid_parameters", "query_id parameter is required"), nil
+		}
+		queryID, err := uuid.Parse(queryIDStr)
+		if err != nil {
+			return NewErrorResult("invalid_parameters",
+				fmt.Sprintf("invalid query_id format: %q is not a valid UUID", queryIDStr)), nil
+		}
+
+		contextReason, err := req.RequireString("context")
+		if err != nil {
+			return NewErrorResult("invalid_parameters", "context parameter is required"), nil
+		}
+
+		// First, fetch the original query to validate it exists and get its datasource
+		originalQuery, err := deps.QueryService.Get(tenantCtx, projectID, queryID)
+		if err != nil {
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "no rows") {
+				return NewErrorResult("QUERY_NOT_FOUND",
+					fmt.Sprintf("query with ID %q not found. Use list_approved_queries to see available queries.", queryID)), nil
+			}
+			return nil, fmt.Errorf("failed to get original query: %w", err)
+		}
+
+		// Build the update request
+		updateReq := &services.SuggestUpdateRequest{
+			QueryID: queryID,
+			SuggestionContext: map[string]any{
+				"reason": contextReason,
+			},
+		}
+
+		// Parse optional fields from request
+		args, _ := req.Params.Arguments.(map[string]any)
+
+		// Track what fields are being updated for the response
+		var updatedFields []string
+
+		// Parse optional SQL update
+		if sqlVal, ok := args["sql"].(string); ok && sqlVal != "" {
+			updateReq.SQLQuery = &sqlVal
+			updatedFields = append(updatedFields, "sql")
+
+			// Validate the new SQL
+			validationRes, err := deps.QueryService.Validate(tenantCtx, projectID, originalQuery.DatasourceID, sqlVal)
+			if err != nil {
+				return NewErrorResult("validation_error",
+					fmt.Sprintf("failed to validate SQL: %s", err.Error())), nil
+			}
+			if !validationRes.Valid {
+				return NewErrorResult("invalid_sql",
+					fmt.Sprintf("invalid SQL: %s", validationRes.Message)), nil
+			}
+
+			// Add validation info to suggestion context
+			updateReq.SuggestionContext["sql_validated"] = true
+		}
+
+		// Parse optional name update
+		if nameVal, ok := args["name"].(string); ok && nameVal != "" {
+			updateReq.NaturalLanguagePrompt = &nameVal
+			updatedFields = append(updatedFields, "name")
+		}
+
+		// Parse optional description update
+		if descVal, ok := args["description"].(string); ok && descVal != "" {
+			updateReq.AdditionalContext = &descVal
+			updatedFields = append(updatedFields, "description")
+		}
+
+		// Parse optional parameters update
+		if paramsArray, ok := args["parameters"].([]any); ok && len(paramsArray) > 0 {
+			paramDefs, err := parseParameterDefinitions(paramsArray)
+			if err != nil {
+				return NewErrorResult("invalid_parameters",
+					fmt.Sprintf("invalid parameters: %s", err.Error())), nil
+			}
+			updateReq.Parameters = &paramDefs
+			updatedFields = append(updatedFields, "parameters")
+		}
+
+		// Parse optional output column descriptions
+		if descs, ok := args["output_column_descriptions"].(map[string]any); ok && len(descs) > 0 {
+			outputColDescs := make(map[string]string)
+			for k, v := range descs {
+				if str, ok := v.(string); ok {
+					outputColDescs[k] = str
+				}
+			}
+			updateReq.OutputColumnDescriptions = outputColDescs
+			updatedFields = append(updatedFields, "output_column_descriptions")
+		}
+
+		// Parse optional tags update
+		if tagsArray, ok := args["tags"].([]any); ok {
+			var tags []string
+			for _, tag := range tagsArray {
+				if str, ok := tag.(string); ok {
+					tags = append(tags, str)
+				}
+			}
+			updateReq.Tags = &tags
+			updatedFields = append(updatedFields, "tags")
+		}
+
+		// Require at least one field to update (besides context)
+		if len(updatedFields) == 0 {
+			return NewErrorResult("invalid_parameters",
+				"at least one update field (sql, name, description, parameters, output_column_descriptions, or tags) is required"), nil
+		}
+
+		// Add updated fields to context
+		updateReq.SuggestionContext["updated_fields"] = updatedFields
+
+		// Create the suggestion via the service
+		suggestion, err := deps.QueryService.SuggestUpdate(tenantCtx, projectID, updateReq)
+		if err != nil {
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "not found") {
+				return NewErrorResult("QUERY_NOT_FOUND",
+					fmt.Sprintf("query with ID %q not found", queryID)), nil
+			}
+			return nil, fmt.Errorf("failed to create update suggestion: %w", err)
+		}
+
+		// Format response
+		response := struct {
+			SuggestionID    string   `json:"suggestion_id"`
+			Status          string   `json:"status"`
+			ParentQueryID   string   `json:"parent_query_id"`
+			ParentQueryName string   `json:"parent_query_name"`
+			UpdatedFields   []string `json:"updated_fields"`
+			Message         string   `json:"message"`
+		}{
+			SuggestionID:    suggestion.ID.String(),
+			Status:          suggestion.Status,
+			ParentQueryID:   queryID.String(),
+			ParentQueryName: originalQuery.NaturalLanguagePrompt,
+			UpdatedFields:   updatedFields,
+			Message: fmt.Sprintf("Update suggestion created for query %q. "+
+				"An administrator will review and approve or reject this suggestion. "+
+				"The original query remains active until the update is approved.",
+				originalQuery.NaturalLanguagePrompt),
+		}
 
 		jsonResult, _ := json.Marshal(response)
 		return mcp.NewToolResultText(string(jsonResult)), nil

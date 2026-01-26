@@ -43,6 +43,7 @@ const mockQuery: Query = {
   created_at: '2024-01-15T00:00:00Z',
   updated_at: '2024-01-15T00:00:00Z',
   parameters: [],
+  status: 'approved',
 };
 
 const mockQueryNoUsage: Query = {

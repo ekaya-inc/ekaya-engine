@@ -6,6 +6,7 @@
 import { fetchWithAuth } from '../lib/api';
 import type {
   ApiResponse,
+  ApproveQueryResponse,
   ConnectionDetails,
   CreateDatasourceResponse,
   CreateGlossaryTermRequest,
@@ -27,9 +28,11 @@ import type {
   InstalledApp,
   InstalledAppsResponse,
   ListDatasourcesResponse,
+  ListPendingQueriesResponse,
   ListQueriesResponse,
   MCPConfigResponse,
   Query,
+  RejectQueryResponse,
   RelationshipDetail,
   RelationshipsResponse,
   SaveSelectionsResponse,
@@ -458,6 +461,68 @@ class EngineApiService {
       {
         method: 'POST',
         body: JSON.stringify(request),
+      }
+    );
+  }
+
+  /**
+   * List pending query suggestions for admin review
+   * GET /api/projects/{projectId}/queries/pending
+   */
+  async listPendingQueries(
+    projectId: string
+  ): Promise<ApiResponse<ListPendingQueriesResponse>> {
+    return this.makeRequest<ListPendingQueriesResponse>(
+      `/${projectId}/queries/pending`
+    );
+  }
+
+  /**
+   * Approve a pending query suggestion
+   * POST /api/projects/{projectId}/queries/{queryId}/approve
+   */
+  async approveQuery(
+    projectId: string,
+    queryId: string
+  ): Promise<ApiResponse<ApproveQueryResponse>> {
+    return this.makeRequest<ApproveQueryResponse>(
+      `/${projectId}/queries/${queryId}/approve`,
+      {
+        method: 'POST',
+      }
+    );
+  }
+
+  /**
+   * Reject a pending query suggestion
+   * POST /api/projects/{projectId}/queries/{queryId}/reject
+   */
+  async rejectQuery(
+    projectId: string,
+    queryId: string,
+    reason: string
+  ): Promise<ApiResponse<RejectQueryResponse>> {
+    return this.makeRequest<RejectQueryResponse>(
+      `/${projectId}/queries/${queryId}/reject`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      }
+    );
+  }
+
+  /**
+   * Move a rejected query back to pending status
+   * POST /api/projects/{projectId}/queries/{queryId}/move-to-pending
+   */
+  async moveToPending(
+    projectId: string,
+    queryId: string
+  ): Promise<ApiResponse<{ success: boolean; message: string }>> {
+    return this.makeRequest<{ success: boolean; message: string }>(
+      `/${projectId}/queries/${queryId}/move-to-pending`,
+      {
+        method: 'POST',
       }
     );
   }

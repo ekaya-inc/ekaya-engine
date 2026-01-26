@@ -111,6 +111,38 @@ func (m *mockQueryServiceForMCP) ValidateParameterizedQuery(sqlQuery string, par
 	return nil
 }
 
+func (m *mockQueryServiceForMCP) SuggestUpdate(ctx context.Context, projectID uuid.UUID, req *SuggestUpdateRequest) (*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryServiceForMCP) DirectCreate(ctx context.Context, projectID, datasourceID uuid.UUID, req *CreateQueryRequest) (*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryServiceForMCP) DirectUpdate(ctx context.Context, projectID, queryID uuid.UUID, req *UpdateQueryRequest) (*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryServiceForMCP) ApproveQuery(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string) error {
+	return nil
+}
+
+func (m *mockQueryServiceForMCP) RejectQuery(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string, reason string) error {
+	return nil
+}
+
+func (m *mockQueryServiceForMCP) MoveToPending(ctx context.Context, projectID, queryID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockQueryServiceForMCP) ListPending(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error) {
+	return nil, nil
+}
+
+func (m *mockQueryServiceForMCP) DeleteWithPendingRejection(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string) (int, error) {
+	return 0, nil
+}
+
 type mockProjectServiceForMCP struct {
 	defaultDatasourceID uuid.UUID
 	err                 error
@@ -205,6 +237,7 @@ func TestMCPConfigService_Get_ReturnsStoredConfigState(t *testing.T) {
 		configRepo,
 		queryService,
 		projectService,
+		nil, // installedAppService - not needed for this test
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -249,6 +282,7 @@ func TestMCPConfigService_Get_ApprovedQueriesEnabledWhenEnabledQueriesExist(t *t
 		configRepo,
 		queryService,
 		projectService,
+		nil, // installedAppService - not needed for this test
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -290,6 +324,7 @@ func TestMCPConfigService_ShouldShowApprovedQueriesTools_FalseWhenNoEnabledQueri
 		configRepo,
 		queryService,
 		projectService,
+		nil, // installedAppService - not needed for this test
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -326,6 +361,7 @@ func TestMCPConfigService_ShouldShowApprovedQueriesTools_TrueWhenEnabledQueriesE
 		configRepo,
 		queryService,
 		projectService,
+		nil, // installedAppService - not needed for this test
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -361,6 +397,7 @@ func TestMCPConfigService_ShouldShowApprovedQueriesTools_ErrorFromHasEnabledQuer
 		configRepo,
 		queryService,
 		projectService,
+		nil, // installedAppService - not needed for this test
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -397,6 +434,7 @@ func TestMCPConfigService_Get_NoDatasource_StillReturnsStoredState(t *testing.T)
 		configRepo,
 		queryService,
 		projectService,
+		nil, // installedAppService - not needed for this test
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -436,6 +474,7 @@ func TestMCPConfigService_Update_ShouldPersistEnabledState(t *testing.T) {
 		configRepo,
 		queryService,
 		projectService,
+		nil, // installedAppService - not needed for this test
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -485,6 +524,7 @@ func TestMCPConfigService_Update_NoDefaultDatasource_ResponseReflectsSavedState(
 		configRepo,
 		queryService,
 		projectService,
+		nil, // installedAppService - not needed for this test
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -538,6 +578,7 @@ func TestMCPConfigService_Get_SubOptionsResetWhenDisabled(t *testing.T) {
 		configRepo,
 		queryService,
 		projectService,
+		nil, // installedAppService - not needed for this test
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -601,6 +642,7 @@ func TestMCPConfigService_Get_ServerURLConstruction(t *testing.T) {
 				configRepo,
 				queryService,
 				projectService,
+				nil, // installedAppService - not needed for this test
 				tt.baseURL,
 				zap.NewNop(),
 			)
@@ -634,6 +676,7 @@ func TestMCPConfigService_Get_EnabledToolsIncluded(t *testing.T) {
 		configRepo,
 		queryService,
 		projectService,
+		nil, // installedAppService - not needed for this test
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -675,6 +718,7 @@ func TestMCPConfigService_Get_EnabledToolsWithDeveloperEnabled(t *testing.T) {
 		configRepo,
 		queryService,
 		projectService,
+		nil, // installedAppService - not needed for this test
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -728,6 +772,7 @@ func TestMCPConfigService_Get_EnabledToolsWithDeveloperCoreIncludesExecute(t *te
 		configRepo,
 		queryService,
 		projectService,
+		nil, // installedAppService - not needed for this test
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -770,6 +815,7 @@ func TestMCPConfigService_Get_EnabledToolsWithApprovedQueries(t *testing.T) {
 		configRepo,
 		queryService,
 		projectService,
+		nil, // installedAppService - not needed for this test
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -834,6 +880,7 @@ func TestMCPConfigService_Get_EnabledToolsWithAgentTools(t *testing.T) {
 		configRepo,
 		queryService,
 		projectService,
+		nil, // installedAppService - not needed for this test
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -875,6 +922,7 @@ func TestMCPConfigService_Update_EnabledToolsReflectNewState(t *testing.T) {
 		configRepo,
 		queryService,
 		projectService,
+		nil, // installedAppService - not needed for this test
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -929,6 +977,7 @@ func TestMCPConfigService_Update_AllowOntologyMaintenance(t *testing.T) {
 		configRepo,
 		queryService,
 		projectService,
+		nil, // installedAppService - not needed for this test
 		"http://localhost:3443",
 		zap.NewNop(),
 	)
@@ -958,4 +1007,193 @@ func TestMCPConfigService_Update_AllowOntologyMaintenance(t *testing.T) {
 	assert.Contains(t, toolNames, "query", "should include query")
 	assert.Contains(t, toolNames, "update_entity", "should include update_entity with AllowOntologyMaintenance")
 	assert.Contains(t, toolNames, "update_column", "should include update_column with AllowOntologyMaintenance")
+}
+
+// mockInstalledAppServiceForMCP is a mock implementation of InstalledAppService for testing.
+type mockInstalledAppServiceForMCP struct {
+	installed map[string]bool // appID -> installed
+	err       error
+}
+
+func (m *mockInstalledAppServiceForMCP) ListInstalled(ctx context.Context, projectID uuid.UUID) ([]*models.InstalledApp, error) {
+	return nil, nil
+}
+
+func (m *mockInstalledAppServiceForMCP) IsInstalled(ctx context.Context, projectID uuid.UUID, appID string) (bool, error) {
+	if m.err != nil {
+		return false, m.err
+	}
+	return m.installed[appID], nil
+}
+
+func (m *mockInstalledAppServiceForMCP) Install(ctx context.Context, projectID uuid.UUID, appID string, userID string) (*models.InstalledApp, error) {
+	return nil, nil
+}
+
+func (m *mockInstalledAppServiceForMCP) Uninstall(ctx context.Context, projectID uuid.UUID, appID string) error {
+	return nil
+}
+
+func (m *mockInstalledAppServiceForMCP) GetSettings(ctx context.Context, projectID uuid.UUID, appID string) (map[string]any, error) {
+	return nil, nil
+}
+
+func (m *mockInstalledAppServiceForMCP) UpdateSettings(ctx context.Context, projectID uuid.UUID, appID string, settings map[string]any) error {
+	return nil
+}
+
+func (m *mockInstalledAppServiceForMCP) GetApp(ctx context.Context, projectID uuid.UUID, appID string) (*models.InstalledApp, error) {
+	return nil, nil
+}
+
+func TestMCPConfigService_Get_FiltersDataLiaisonTools_WhenNotInstalled(t *testing.T) {
+	// When AI Data Liaison app is not installed, data liaison tools should not appear in EnabledTools
+
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	// Enable developer tools with query tools AND ontology maintenance (which includes data liaison tools)
+	configRepo := &mockMCPConfigRepository{
+		config: &models.MCPConfig{
+			ProjectID: projectID,
+			ToolGroups: map[string]*models.ToolGroupConfig{
+				ToolGroupDeveloper: {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
+			},
+		},
+	}
+
+	queryService := &mockQueryServiceForMCP{hasEnabledQueries: true}
+	projectService := &mockProjectServiceForMCP{defaultDatasourceID: datasourceID}
+
+	// AI Data Liaison app is NOT installed
+	installedAppService := &mockInstalledAppServiceForMCP{
+		installed: map[string]bool{
+			models.AppIDAIDataLiaison: false,
+		},
+	}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		installedAppService,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	toolNames := make([]string, len(resp.EnabledTools))
+	for i, tool := range resp.EnabledTools {
+		toolNames[i] = tool.Name
+	}
+
+	// Should have developer tools but NOT data liaison tools
+	assert.Contains(t, toolNames, "get_schema", "should include regular developer tools")
+	assert.Contains(t, toolNames, "update_entity", "should include ontology maintenance tools")
+
+	// Data liaison tools should be filtered out
+	assert.NotContains(t, toolNames, "suggest_approved_query", "should NOT include suggest_approved_query")
+	assert.NotContains(t, toolNames, "suggest_query_update", "should NOT include suggest_query_update")
+	assert.NotContains(t, toolNames, "list_query_suggestions", "should NOT include list_query_suggestions")
+	assert.NotContains(t, toolNames, "approve_query_suggestion", "should NOT include approve_query_suggestion")
+	assert.NotContains(t, toolNames, "reject_query_suggestion", "should NOT include reject_query_suggestion")
+	assert.NotContains(t, toolNames, "create_approved_query", "should NOT include create_approved_query")
+	assert.NotContains(t, toolNames, "update_approved_query", "should NOT include update_approved_query")
+	assert.NotContains(t, toolNames, "delete_approved_query", "should NOT include delete_approved_query")
+}
+
+func TestMCPConfigService_Get_IncludesDataLiaisonTools_WhenInstalled(t *testing.T) {
+	// When AI Data Liaison app IS installed, data liaison tools should appear in EnabledTools
+
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	// Enable developer tools with query tools AND ontology maintenance
+	configRepo := &mockMCPConfigRepository{
+		config: &models.MCPConfig{
+			ProjectID: projectID,
+			ToolGroups: map[string]*models.ToolGroupConfig{
+				ToolGroupDeveloper: {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
+			},
+		},
+	}
+
+	queryService := &mockQueryServiceForMCP{hasEnabledQueries: true}
+	projectService := &mockProjectServiceForMCP{defaultDatasourceID: datasourceID}
+
+	// AI Data Liaison app IS installed
+	installedAppService := &mockInstalledAppServiceForMCP{
+		installed: map[string]bool{
+			models.AppIDAIDataLiaison: true,
+		},
+	}
+
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		installedAppService,
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	toolNames := make([]string, len(resp.EnabledTools))
+	for i, tool := range resp.EnabledTools {
+		toolNames[i] = tool.Name
+	}
+
+	// Should have developer tools including data liaison tools
+	assert.Contains(t, toolNames, "get_schema", "should include regular developer tools")
+	assert.Contains(t, toolNames, "list_query_suggestions", "should include list_query_suggestions")
+	assert.Contains(t, toolNames, "approve_query_suggestion", "should include approve_query_suggestion")
+	assert.Contains(t, toolNames, "create_approved_query", "should include create_approved_query")
+}
+
+func TestMCPConfigService_Get_NilInstalledAppService_FiltersDataLiaisonTools(t *testing.T) {
+	// When installedAppService is nil, data liaison tools should be filtered (fail closed)
+
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	configRepo := &mockMCPConfigRepository{
+		config: &models.MCPConfig{
+			ProjectID: projectID,
+			ToolGroups: map[string]*models.ToolGroupConfig{
+				ToolGroupDeveloper: {Enabled: true, AddOntologyMaintenance: true},
+			},
+		},
+	}
+
+	queryService := &mockQueryServiceForMCP{hasEnabledQueries: true}
+	projectService := &mockProjectServiceForMCP{defaultDatasourceID: datasourceID}
+
+	// No installedAppService passed (nil)
+	svc := NewMCPConfigService(
+		configRepo,
+		queryService,
+		projectService,
+		nil, // No installed app service
+		"http://localhost:3443",
+		zap.NewNop(),
+	)
+
+	resp, err := svc.Get(context.Background(), projectID)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	toolNames := make([]string, len(resp.EnabledTools))
+	for i, tool := range resp.EnabledTools {
+		toolNames[i] = tool.Name
+	}
+
+	// Data liaison tools should be filtered (fail closed)
+	assert.NotContains(t, toolNames, "suggest_approved_query", "should NOT include suggest_approved_query with nil service")
+	assert.NotContains(t, toolNames, "list_query_suggestions", "should NOT include list_query_suggestions with nil service")
 }

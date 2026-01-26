@@ -70,29 +70,33 @@ type MCPConfigService interface {
 }
 
 type mcpConfigService struct {
-	configRepo     repositories.MCPConfigRepository
-	queryService   QueryService
-	projectService ProjectService
-	stateValidator MCPStateValidator
-	baseURL        string
-	logger         *zap.Logger
+	configRepo          repositories.MCPConfigRepository
+	queryService        QueryService
+	projectService      ProjectService
+	installedAppService InstalledAppService
+	stateValidator      MCPStateValidator
+	baseURL             string
+	logger              *zap.Logger
 }
 
 // NewMCPConfigService creates a new MCP config service with dependencies.
+// installedAppService can be nil for backwards compatibility (tools won't be filtered by app installation).
 func NewMCPConfigService(
 	configRepo repositories.MCPConfigRepository,
 	queryService QueryService,
 	projectService ProjectService,
+	installedAppService InstalledAppService,
 	baseURL string,
 	logger *zap.Logger,
 ) MCPConfigService {
 	return &mcpConfigService{
-		configRepo:     configRepo,
-		queryService:   queryService,
-		projectService: projectService,
-		stateValidator: NewMCPStateValidator(),
-		baseURL:        baseURL,
-		logger:         logger,
+		configRepo:          configRepo,
+		queryService:        queryService,
+		projectService:      projectService,
+		installedAppService: installedAppService,
+		stateValidator:      NewMCPStateValidator(),
+		baseURL:             baseURL,
+		logger:              logger,
 	}
 }
 
@@ -108,7 +112,7 @@ func (s *mcpConfigService) Get(ctx context.Context, projectID uuid.UUID) (*MCPCo
 		config = models.DefaultMCPConfig(projectID)
 	}
 
-	return s.buildResponse(projectID, config), nil
+	return s.buildResponse(ctx, projectID, config), nil
 }
 
 // Update updates the MCP configuration for a project.
@@ -163,7 +167,7 @@ func (s *mcpConfigService) Update(ctx context.Context, projectID uuid.UUID, req 
 		zap.String("project_id", projectID.String()),
 	)
 
-	return s.buildResponse(projectID, config), nil
+	return s.buildResponse(ctx, projectID, config), nil
 }
 
 // IsToolGroupEnabled checks if a specific tool group is enabled for a project.
@@ -258,7 +262,8 @@ func (s *mcpConfigService) hasEnabledQueries(ctx context.Context, projectID uuid
 
 // buildResponse creates the API response format from the model.
 // Uses the state validator to ensure the response is normalized (sub-options reset when disabled).
-func (s *mcpConfigService) buildResponse(projectID uuid.UUID, config *models.MCPConfig) *MCPConfigResponse {
+// Filters out tools that require apps not installed (e.g., AI Data Liaison tools).
+func (s *mcpConfigService) buildResponse(ctx context.Context, projectID uuid.UUID, config *models.MCPConfig) *MCPConfigResponse {
 	// Use the state validator to normalize the state for response
 	// Apply an empty update to get normalized state with all tool groups
 	result := s.stateValidator.Apply(
@@ -290,13 +295,32 @@ func (s *mcpConfigService) buildResponse(projectID uuid.UUID, config *models.MCP
 		serverURL = s.baseURL + "/mcp/" + projectID.String()
 	}
 
+	// Check if AI Data Liaison app is installed for filtering
+	dataLiaisonInstalled := false
+	if s.installedAppService != nil {
+		installed, err := s.installedAppService.IsInstalled(ctx, projectID, models.AppIDAIDataLiaison)
+		if err != nil {
+			s.logger.Warn("failed to check AI Data Liaison app installation, assuming not installed",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err),
+			)
+		} else {
+			dataLiaisonInstalled = installed
+		}
+	}
+
 	// Convert ToolDefinition to EnabledToolInfo for API response
-	enabledTools := make([]EnabledToolInfo, len(result.EnabledTools))
-	for i, tool := range result.EnabledTools {
-		enabledTools[i] = EnabledToolInfo{
+	// Filter out data liaison tools if the app is not installed
+	enabledTools := make([]EnabledToolInfo, 0, len(result.EnabledTools))
+	for _, tool := range result.EnabledTools {
+		// Skip data liaison tools if app is not installed
+		if !dataLiaisonInstalled && DataLiaisonTools[tool.Name] {
+			continue
+		}
+		enabledTools = append(enabledTools, EnabledToolInfo{
 			Name:        tool.Name,
 			Description: tool.Description,
-		}
+		})
 	}
 
 	return &MCPConfigResponse{

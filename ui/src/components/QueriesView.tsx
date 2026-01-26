@@ -1,6 +1,11 @@
 /**
  * QueriesView Component
  * Manages saved queries for a datasource with full API integration
+ *
+ * Supports URL-driven navigation via props from parent:
+ * - initialQueryId: Query to display/edit on mount
+ * - initialMode: 'list' | 'view' | 'edit' | 'new'
+ * - Navigation callbacks update URL via parent
  */
 
 import {
@@ -21,8 +26,14 @@ import {
   Loader2,
   RefreshCw,
   Zap,
+  Clock,
+  CheckCircle,
+  XCircle,
+  GitCompare,
+  User,
+  Bot,
 } from 'lucide-react';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 import { useSqlValidation, type ValidationStatus } from '../hooks/useSqlValidation';
 import { useToast } from '../hooks/useToast';
@@ -35,6 +46,7 @@ import { OutputColumnEditor } from './OutputColumnEditor';
 import { ParameterEditor } from './ParameterEditor';
 import { ParameterInputForm } from './ParameterInputForm';
 import { QueryResultsTable } from './QueryResultsTable';
+import { RejectionReasonDialog } from './RejectionReasonDialog';
 import { SqlEditor } from './SqlEditor';
 import { Button } from './ui/Button';
 import {
@@ -46,10 +58,23 @@ import {
 } from './ui/Card';
 import { Input } from './ui/Input';
 
+export type QueryFilterType = 'approved' | 'pending' | 'rejected';
+export type ViewMode = 'list' | 'view' | 'edit' | 'new';
+
 interface QueriesViewProps {
   projectId: string;
   datasourceId: string;
   dialect: SqlDialect;
+  filter: QueryFilterType;
+  initialQueryId?: string | null;
+  initialMode?: ViewMode;
+  onPendingCountChange?: () => void;
+  onQuerySelect?: (queryId: string) => void;
+  onEditQuery?: (queryId: string) => void;
+  onCreateQuery?: () => void;
+  onCancelEdit?: () => void;
+  onFilterChange?: (newStatus: QueryFilterType) => void;
+  onQueryStatusChangeComplete?: (newStatus: QueryFilterType) => void;
 }
 
 interface EditingState {
@@ -63,9 +88,21 @@ interface EditingState {
   constraints: string;
 }
 
-type QueryFilterType = 'all' | 'read-only' | 'modifying';
-
-const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => {
+const QueriesView = ({
+  projectId,
+  datasourceId,
+  dialect,
+  filter,
+  initialQueryId,
+  initialMode = 'list',
+  onPendingCountChange,
+  onQuerySelect,
+  onEditQuery,
+  onCreateQuery,
+  onCancelEdit,
+  onFilterChange,
+  onQueryStatusChangeComplete,
+}: QueriesViewProps) => {
   const { toast } = useToast();
 
   // Data state
@@ -77,10 +114,12 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
 
   // UI state
   const [selectedQuery, setSelectedQuery] = useState<Query | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
+  const [isCreating, setIsCreating] = useState(initialMode === 'new');
   const [editingQueryId, setEditingQueryId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [queryFilter, setQueryFilter] = useState<QueryFilterType>('all');
+
+  // Track if we've processed the initial query ID
+  const processedInitialQueryRef = useRef<string | null>(null);
 
   // Form state for creating
   const [newQuery, setNewQuery] = useState<EditingState>({
@@ -110,6 +149,12 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
   // Delete dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [queryToDelete, setQueryToDelete] = useState<Query | null>(null);
+
+  // Pending query review state
+  const [parentQuery, setParentQuery] = useState<Query | null>(null);
+  const [isApproving, setIsApproving] = useState(false);
+  const [isMovingToPending, setIsMovingToPending] = useState(false);
+  const [rejectionDialogOpen, setRejectionDialogOpen] = useState(false);
 
   // SQL validation for create form
   const createValidation = useSqlValidation({
@@ -151,6 +196,152 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
     loadQueries();
   }, [loadQueries]);
 
+  // Handle initial query ID from URL after queries are loaded
+  useEffect(() => {
+    if (isLoading || !initialQueryId || processedInitialQueryRef.current === initialQueryId) {
+      return;
+    }
+
+    // Find query in loaded list first
+    const foundQuery = queries.find(q => q.query_id === initialQueryId);
+
+    if (foundQuery) {
+      processedInitialQueryRef.current = initialQueryId;
+      setSelectedQuery(foundQuery);
+
+      // Auto-switch tab if query status doesn't match current filter
+      if (foundQuery.status !== filter) {
+        onFilterChange?.(foundQuery.status as QueryFilterType);
+      }
+
+      // If mode is 'edit', start editing
+      if (initialMode === 'edit') {
+        setEditingQueryId(foundQuery.query_id);
+        setEditingState({
+          natural_language_prompt: foundQuery.natural_language_prompt,
+          additional_context: foundQuery.additional_context ?? '',
+          sql_query: foundQuery.sql_query,
+          is_enabled: foundQuery.is_enabled,
+          allows_modification: foundQuery.allows_modification,
+          parameters: foundQuery.parameters ?? [],
+          output_columns: foundQuery.output_columns ?? [],
+          constraints: foundQuery.constraints ?? '',
+        });
+        setQueryResults(null);
+        editValidation.reset();
+        setEditTestPassed(false);
+        setTestParameterValues({});
+      }
+    } else {
+      // Query not in list, try to fetch it directly
+      const fetchQuery = async () => {
+        try {
+          const response = await engineApi.getQuery(projectId, datasourceId, initialQueryId);
+          if (response.success && response.data) {
+            processedInitialQueryRef.current = initialQueryId;
+            const query = response.data;
+            setSelectedQuery(query);
+
+            // Auto-switch tab if query status doesn't match current filter
+            if (query.status !== filter) {
+              onFilterChange?.(query.status as QueryFilterType);
+            }
+
+            // If mode is 'edit', start editing
+            if (initialMode === 'edit') {
+              setEditingQueryId(query.query_id);
+              setEditingState({
+                natural_language_prompt: query.natural_language_prompt,
+                additional_context: query.additional_context ?? '',
+                sql_query: query.sql_query,
+                is_enabled: query.is_enabled,
+                allows_modification: query.allows_modification,
+                parameters: query.parameters ?? [],
+                output_columns: query.output_columns ?? [],
+                constraints: query.constraints ?? '',
+              });
+              setQueryResults(null);
+              editValidation.reset();
+              setEditTestPassed(false);
+              setTestParameterValues({});
+            }
+          } else {
+            // Query not found - show error and redirect
+            processedInitialQueryRef.current = initialQueryId;
+            toast({
+              title: 'Query not found',
+              description: 'The requested query could not be found.',
+              variant: 'destructive',
+            });
+            onCancelEdit?.();
+          }
+        } catch (err) {
+          // API error - show error and redirect
+          processedInitialQueryRef.current = initialQueryId;
+          toast({
+            title: 'Query not found',
+            description: err instanceof Error ? err.message : 'Failed to load query.',
+            variant: 'destructive',
+          });
+          onCancelEdit?.();
+        }
+      };
+      fetchQuery();
+    }
+  }, [isLoading, initialQueryId, initialMode, queries, filter, projectId, datasourceId, editValidation, onFilterChange, onCancelEdit, toast]);
+
+  // Handle initial mode 'new'
+  useEffect(() => {
+    if (initialMode === 'new' && !isCreating) {
+      setIsCreating(true);
+      setSelectedQuery(null);
+      setEditingQueryId(null);
+      setEditingState(null);
+      setQueryResults(null);
+    }
+  }, [initialMode, isCreating]);
+
+  // Reset processed query when initialQueryId changes to a different value
+  useEffect(() => {
+    if (initialQueryId !== processedInitialQueryRef.current) {
+      // Don't reset if going from a query to null (returning to list)
+      if (initialQueryId === null) {
+        processedInitialQueryRef.current = null;
+        setSelectedQuery(null);
+        setEditingQueryId(null);
+        setEditingState(null);
+        setQueryResults(null);
+        setIsCreating(false);
+      }
+    }
+  }, [initialQueryId]);
+
+  // Handle mode changes (e.g., from 'view' to 'edit' for same query)
+  useEffect(() => {
+    if (selectedQuery && initialMode === 'edit' && !editingQueryId) {
+      setEditingQueryId(selectedQuery.query_id);
+      setEditingState({
+        natural_language_prompt: selectedQuery.natural_language_prompt,
+        additional_context: selectedQuery.additional_context ?? '',
+        sql_query: selectedQuery.sql_query,
+        is_enabled: selectedQuery.is_enabled,
+        allows_modification: selectedQuery.allows_modification,
+        parameters: selectedQuery.parameters ?? [],
+        output_columns: selectedQuery.output_columns ?? [],
+        constraints: selectedQuery.constraints ?? '',
+      });
+      setQueryResults(null);
+      editValidation.reset();
+      setEditTestPassed(false);
+      setTestParameterValues({});
+    } else if (initialMode === 'view' && editingQueryId) {
+      // Switching from edit to view mode
+      setEditingQueryId(null);
+      setEditingState(null);
+      editValidation.reset();
+    }
+  }, [selectedQuery, initialMode, editingQueryId, editValidation]);
+
   // Fetch schema for autocomplete (fire-and-forget, non-blocking)
   useEffect(() => {
     const fetchSchema = async () => {
@@ -161,6 +352,30 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
     };
     fetchSchema();
   }, [projectId, datasourceId]);
+
+  // Fetch parent query when viewing an update suggestion (pending query with parent_query_id)
+  useEffect(() => {
+    const fetchParentQuery = async () => {
+      if (
+        selectedQuery?.status === 'pending' &&
+        selectedQuery.parent_query_id
+      ) {
+        const response = await engineApi.getQuery(
+          projectId,
+          datasourceId,
+          selectedQuery.parent_query_id
+        );
+        if (response.success && response.data) {
+          setParentQuery(response.data);
+        } else {
+          setParentQuery(null);
+        }
+      } else {
+        setParentQuery(null);
+      }
+    };
+    fetchParentQuery();
+  }, [projectId, datasourceId, selectedQuery?.query_id, selectedQuery?.status, selectedQuery?.parent_query_id]);
 
   // Transform schema to CodeMirror format for autocomplete
   const codeMirrorSchema = useMemo(
@@ -212,7 +427,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
     []
   );
 
-  // Filter queries based on search and type filter
+  // Filter queries based on search and status filter (from parent)
   const filteredQueries = queries.filter((query) => {
     // Text search filter
     const matchesSearch =
@@ -221,13 +436,10 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         .includes(searchTerm.toLowerCase()) ||
       query.sql_query.toLowerCase().includes(searchTerm.toLowerCase());
 
-    // Type filter
-    const matchesTypeFilter =
-      queryFilter === 'all' ||
-      (queryFilter === 'read-only' && !query.allows_modification) ||
-      (queryFilter === 'modifying' && query.allows_modification);
+    // Status filter from parent tab menu
+    const matchesStatusFilter = query.status === filter;
 
-    return matchesSearch && matchesTypeFilter;
+    return matchesSearch && matchesStatusFilter;
   });
 
   /**
@@ -339,11 +551,15 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
     setIsSaving(true);
 
     try {
+      // When creating from Pending tab, create as pending for admin approval
+      const isPendingCreate = filter === 'pending';
+
       const request: CreateQueryRequest = {
         natural_language_prompt: newQuery.natural_language_prompt.trim(),
         sql_query: newQuery.sql_query.trim(),
-        is_enabled: newQuery.is_enabled,
+        is_enabled: isPendingCreate ? false : newQuery.is_enabled,
         allows_modification: newQuery.allows_modification,
+        ...(isPendingCreate && { status: 'pending', suggested_by: 'admin' }),
       };
 
       if (newQuery.additional_context.trim()) {
@@ -366,14 +582,20 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
 
       if (response.success && response.data) {
         toast({
-          title: 'Query created',
-          description: 'Your query has been saved',
+          title: isPendingCreate ? 'Query submitted for approval' : 'Query created',
+          description: isPendingCreate ? 'Query is pending admin approval' : 'Your query has been saved',
           variant: 'success',
         });
         setQueries((prev) => [...prev, response.data as Query]);
         setSelectedQuery(response.data as Query);
         setIsCreating(false);
         resetCreateForm();
+        // Notify parent to update pending count if we created a pending query
+        if (isPendingCreate) {
+          onPendingCountChange?.();
+        }
+        // Navigate to view the new query
+        onQuerySelect?.(response.data.query_id);
       } else {
         toast({
           title: 'Failed to create query',
@@ -395,22 +617,28 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
   /**
    * Start editing a query
    */
-  const handleEditQuery = (query: Query) => {
-    setEditingQueryId(query.query_id);
-    setEditingState({
-      natural_language_prompt: query.natural_language_prompt,
-      additional_context: query.additional_context ?? '',
-      sql_query: query.sql_query,
-      is_enabled: query.is_enabled,
-      allows_modification: query.allows_modification,
-      parameters: query.parameters ?? [],
-      output_columns: query.output_columns ?? [],
-      constraints: query.constraints ?? '',
-    });
-    setQueryResults(null);
-    editValidation.reset();
-    setEditTestPassed(false);
-    setTestParameterValues({});
+  const handleEditQueryClick = (query: Query) => {
+    // Use navigation callback if provided
+    if (onEditQuery) {
+      onEditQuery(query.query_id);
+    } else {
+      // Fallback to internal state
+      setEditingQueryId(query.query_id);
+      setEditingState({
+        natural_language_prompt: query.natural_language_prompt,
+        additional_context: query.additional_context ?? '',
+        sql_query: query.sql_query,
+        is_enabled: query.is_enabled,
+        allows_modification: query.allows_modification,
+        parameters: query.parameters ?? [],
+        output_columns: query.output_columns ?? [],
+        constraints: query.constraints ?? '',
+      });
+      setQueryResults(null);
+      editValidation.reset();
+      setEditTestPassed(false);
+      setTestParameterValues({});
+    }
   };
 
   /**
@@ -471,6 +699,10 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         setEditingQueryId(null);
         setEditingState(null);
         editValidation.reset();
+        // Navigate back to view mode
+        if (onQuerySelect) {
+          onQuerySelect(response.data.query_id);
+        }
       } else {
         toast({
           title: 'Failed to update query',
@@ -504,6 +736,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
     setQueries((prev) => prev.filter((q) => q.query_id !== queryId));
     if (selectedQuery?.query_id === queryId) {
       setSelectedQuery(null);
+      onCancelEdit?.();
     }
     setDeleteDialogOpen(false);
     setQueryToDelete(null);
@@ -511,6 +744,124 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
       title: 'Query deleted',
       variant: 'success',
     });
+  };
+
+  /**
+   * Approve a pending query suggestion
+   */
+  const handleApproveQuery = async (query: Query) => {
+    setIsApproving(true);
+
+    try {
+      const response = await engineApi.approveQuery(projectId, query.query_id);
+
+      if (response.success) {
+        toast({
+          title: 'Query approved',
+          description: response.data?.message ?? 'Query has been approved and enabled',
+          variant: 'success',
+        });
+
+        // Reload queries to reflect the change
+        await loadQueries();
+        setSelectedQuery(null);
+        setParentQuery(null);
+
+        // Notify parent to update pending count and switch to approved tab
+        // onQueryStatusChangeComplete handles navigation
+        onPendingCountChange?.();
+        onQueryStatusChangeComplete?.('approved');
+      } else {
+        toast({
+          title: 'Failed to approve query',
+          description: response.error ?? 'Unknown error',
+          variant: 'destructive',
+        });
+      }
+    } catch (err) {
+      toast({
+        title: 'Failed to approve query',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsApproving(false);
+    }
+  };
+
+  /**
+   * Reject a pending query suggestion
+   */
+  const handleRejectQuery = async (reason: string) => {
+    if (!selectedQuery) return;
+
+    const response = await engineApi.rejectQuery(
+      projectId,
+      selectedQuery.query_id,
+      reason
+    );
+
+    if (response.success) {
+      toast({
+        title: 'Query rejected',
+        description: 'Query has been rejected',
+        variant: 'success',
+      });
+
+      // Reload queries to reflect the change
+      await loadQueries();
+      setSelectedQuery(null);
+      setParentQuery(null);
+
+      // Notify parent to update pending count and switch to rejected tab
+      // onQueryStatusChangeComplete handles navigation
+      onPendingCountChange?.();
+      onQueryStatusChangeComplete?.('rejected');
+    } else {
+      throw new Error(response.error ?? 'Failed to reject query');
+    }
+  };
+
+  /**
+   * Move a rejected query back to pending for re-review
+   */
+  const handleMoveToPending = async (query: Query) => {
+    setIsMovingToPending(true);
+
+    try {
+      const response = await engineApi.moveToPending(projectId, query.query_id);
+
+      if (response.success) {
+        toast({
+          title: 'Query moved to pending',
+          description: 'Query is now pending approval',
+          variant: 'success',
+        });
+
+        // Reload queries to reflect the change
+        await loadQueries();
+        setSelectedQuery(null);
+
+        // Notify parent to update pending count and switch to pending tab
+        // onQueryStatusChangeComplete handles navigation
+        onPendingCountChange?.();
+        onQueryStatusChangeComplete?.('pending');
+      } else {
+        toast({
+          title: 'Failed to move query',
+          description: response.error ?? 'Unknown error',
+          variant: 'destructive',
+        });
+      }
+    } catch (err) {
+      toast({
+        title: 'Failed to move query',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsMovingToPending(false);
+    }
   };
 
   /**
@@ -608,6 +959,55 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
   };
 
   /**
+   * Handle query selection from list
+   */
+  const handleQuerySelectClick = (query: Query) => {
+    if (onQuerySelect) {
+      onQuerySelect(query.query_id);
+    } else {
+      // Fallback to internal state
+      setSelectedQuery(query);
+      setIsCreating(false);
+      setEditingQueryId(null);
+      setEditingState(null);
+      setQueryResults(null);
+    }
+  };
+
+  /**
+   * Handle create button click
+   */
+  const handleCreateButtonClick = () => {
+    if (onCreateQuery) {
+      onCreateQuery();
+    } else {
+      // Fallback to internal state
+      setIsCreating(true);
+      setSelectedQuery(null);
+      setEditingQueryId(null);
+      setEditingState(null);
+      setQueryResults(null);
+      resetCreateForm();
+    }
+  };
+
+  /**
+   * Handle cancel create/edit
+   */
+  const handleCancel = () => {
+    if (onCancelEdit) {
+      onCancelEdit();
+    } else {
+      // Fallback to internal state
+      setIsCreating(false);
+      setEditingQueryId(null);
+      setEditingState(null);
+      resetCreateForm();
+      editValidation.reset();
+    }
+  };
+
+  /**
    * Get validation status for display
    */
   const getValidationStatus = (status: ValidationStatus): ValidationStatus => {
@@ -654,14 +1054,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                 <CardTitle className="text-lg">Queries</CardTitle>
                 <Button
                   size="sm"
-                  onClick={() => {
-                    setIsCreating(true);
-                    setSelectedQuery(null);
-                    setEditingQueryId(null);
-                    setEditingState(null);
-                    setQueryResults(null);
-                    resetCreateForm();
-                  }}
+                  onClick={handleCreateButtonClick}
                   className="h-8 px-2"
                 >
                   <Plus className="h-4 w-4" />
@@ -676,22 +1069,19 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                   className="pl-8 h-9"
                 />
               </div>
-              <select
-                value={queryFilter}
-                onChange={(e) => setQueryFilter(e.target.value as QueryFilterType)}
-                className="mt-2 h-8 w-full px-2 text-xs border border-border-medium rounded-md bg-surface-primary text-text-primary focus:outline-none focus:ring-2 focus:ring-brand-purple"
-              >
-                <option value="all">All queries</option>
-                <option value="read-only">Read-only</option>
-                <option value="modifying">Modifies data</option>
-              </select>
             </CardHeader>
             <CardContent className="flex-1 overflow-y-auto p-2">
               {filteredQueries.length === 0 ? (
                 <div className="text-center py-8">
                   <Database className="h-8 w-8 text-text-tertiary mx-auto mb-2" />
                   <p className="text-sm text-text-secondary">
-                    {searchTerm ? 'No queries found' : 'No queries created yet'}
+                    {searchTerm
+                      ? 'No queries found'
+                      : filter === 'approved'
+                        ? 'No approved queries yet'
+                        : filter === 'pending'
+                          ? 'No queries pending approval'
+                          : 'No rejected queries'}
                   </p>
                 </div>
               ) : (
@@ -699,29 +1089,38 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                   {filteredQueries.map((query) => (
                     <button
                       key={query.query_id}
-                      onClick={() => {
-                        setSelectedQuery(query);
-                        setIsCreating(false);
-                        setEditingQueryId(null);
-                        setEditingState(null);
-                        setQueryResults(null);
-                      }}
+                      onClick={() => handleQuerySelectClick(query)}
                       className={`w-full text-left p-2 rounded-lg transition-colors ${selectedQuery?.query_id === query.query_id
                         ? 'bg-purple-500/10 border border-purple-500/30'
                         : 'hover:bg-surface-secondary/50'
-                        } ${!query.is_enabled ? 'opacity-50' : ''}`}
+                        } ${!query.is_enabled && query.status === 'approved' ? 'opacity-50' : ''}`}
                     >
                       <div className="flex items-center justify-between mb-0.5">
                         <div className="flex items-center gap-1.5">
-                          <div
-                            className={`h-1.5 w-1.5 rounded-full ${query.is_enabled ? 'bg-green-500' : 'bg-gray-500'
-                              }`}
-                          />
+                          {query.status === 'pending' ? (
+                            <Clock className="h-3 w-3 text-amber-500" />
+                          ) : query.status === 'rejected' ? (
+                            <XCircle className="h-3 w-3 text-red-500" />
+                          ) : (
+                            <div
+                              className={`h-1.5 w-1.5 rounded-full ${query.is_enabled ? 'bg-green-500' : 'bg-gray-500'}`}
+                            />
+                          )}
                           <span className="text-xs text-text-tertiary">
                             {query.dialect}
                           </span>
                         </div>
-                        {!query.is_enabled && (
+                        {query.status === 'pending' && (
+                          <span className="text-xs text-amber-500 font-medium">
+                            Pending
+                          </span>
+                        )}
+                        {query.status === 'rejected' && (
+                          <span className="text-xs text-red-500 font-medium">
+                            Rejected
+                          </span>
+                        )}
+                        {query.status === 'approved' && !query.is_enabled && (
                           <AlertCircle className="h-3 w-3 text-gray-500" />
                         )}
                       </div>
@@ -735,7 +1134,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                           </span>
                         )}
                       </div>
-                      {query.usage_count > 0 && (
+                      {query.status === 'approved' && query.usage_count > 0 && (
                         <div className="text-xs text-text-tertiary mt-0.5">
                           Used {query.usage_count} times
                         </div>
@@ -760,10 +1159,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => {
-                        setIsCreating(false);
-                        resetCreateForm();
-                      }}
+                      onClick={handleCancel}
                     >
                       <X className="h-4 w-4" />
                     </Button>
@@ -999,10 +1395,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     <div className="flex justify-end gap-2">
                       <Button
                         variant="outline"
-                        onClick={() => {
-                          setIsCreating(false);
-                          resetCreateForm();
-                        }}
+                        onClick={handleCancel}
                       >
                         Cancel
                       </Button>
@@ -1041,11 +1434,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => {
-                        setEditingQueryId(null);
-                        setEditingState(null);
-                        editValidation.reset();
-                      }}
+                      onClick={handleCancel}
                     >
                       <X className="h-4 w-4" />
                     </Button>
@@ -1280,11 +1669,7 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     <div className="flex justify-end gap-2">
                       <Button
                         variant="outline"
-                        onClick={() => {
-                          setEditingQueryId(null);
-                          setEditingState(null);
-                          editValidation.reset();
-                        }}
+                        onClick={handleCancel}
                       >
                         Cancel
                       </Button>
@@ -1330,54 +1715,172 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                             Modifies Data
                           </span>
                         )}
+                        {/* Status badges for pending/rejected queries */}
+                        {selectedQuery.status === 'pending' && (
+                          <span className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                            <Clock className="h-3 w-3" />
+                            Pending Review
+                          </span>
+                        )}
+                        {selectedQuery.status === 'rejected' && (
+                          <span className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded bg-red-500/10 text-red-600 dark:text-red-400">
+                            <XCircle className="h-3 w-3" />
+                            Rejected
+                          </span>
+                        )}
                       </div>
                       <CardDescription>
-                        Created{' '}
-                        {new Date(selectedQuery.created_at).toLocaleDateString()}{' '}
-                        {selectedQuery.usage_count > 0 && (
+                        {selectedQuery.status === 'pending' ? (
                           <>
-                            {' '}
-                            • Used {selectedQuery.usage_count} time
-                            {selectedQuery.usage_count !== 1 ? 's' : ''}
+                            Suggested{' '}
+                            {new Date(selectedQuery.created_at).toLocaleDateString()}{' '}
+                            by{' '}
+                            {selectedQuery.suggested_by === 'agent' ? (
+                              <span className="inline-flex items-center gap-1">
+                                <Bot className="h-3 w-3" /> AI Agent
+                              </span>
+                            ) : selectedQuery.suggested_by === 'admin' ? (
+                              <span className="inline-flex items-center gap-1">
+                                <User className="h-3 w-3" /> Admin
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1">
+                                <User className="h-3 w-3" /> User
+                              </span>
+                            )}
+                            {selectedQuery.parent_query_id && (
+                              <>
+                                {' '}
+                                • <GitCompare className="inline h-3 w-3" /> Update suggestion
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            Created{' '}
+                            {new Date(selectedQuery.created_at).toLocaleDateString()}{' '}
+                            {selectedQuery.usage_count > 0 && (
+                              <>
+                                {' '}
+                                • Used {selectedQuery.usage_count} time
+                                {selectedQuery.usage_count !== 1 ? 's' : ''}
+                              </>
+                            )}
                           </>
                         )}
                       </CardDescription>
                     </div>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleToggleEnabled(selectedQuery)}
-                        title={
-                          selectedQuery.is_enabled
-                            ? 'Disable query'
-                            : 'Enable query'
-                        }
-                      >
-                        {selectedQuery.is_enabled ? (
-                          <CheckCircle2 className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <AlertCircle className="h-4 w-4 text-gray-500" />
-                        )}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleEditQuery(selectedQuery)}
-                      >
-                        <Edit3 className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleDeleteClick(selectedQuery)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
+                    {/* Edit/delete buttons for approved queries */}
+                    {selectedQuery.status === 'approved' && (
+                      <div className="flex gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleToggleEnabled(selectedQuery)}
+                          title={
+                            selectedQuery.is_enabled
+                              ? 'Disable query'
+                              : 'Enable query'
+                          }
+                        >
+                          {selectedQuery.is_enabled ? (
+                            <CheckCircle2 className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <AlertCircle className="h-4 w-4 text-gray-500" />
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleEditQueryClick(selectedQuery)}
+                        >
+                          <Edit3 className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteClick(selectedQuery)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
+                    {/* Edit/delete buttons for pending queries (no enable/disable toggle) */}
+                    {selectedQuery.status === 'pending' && (
+                      <div className="flex gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleEditQueryClick(selectedQuery)}
+                          title="Edit query"
+                        >
+                          <Edit3 className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteClick(selectedQuery)}
+                          title="Delete query"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
+                    {/* Delete button for rejected queries */}
+                    {selectedQuery.status === 'rejected' && (
+                      <div className="flex gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteClick(selectedQuery)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-6">
+                  {/* Suggestion context for pending queries */}
+                  {selectedQuery.status === 'pending' && selectedQuery.suggestion_context && (
+                    <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <MessageSquare className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        <h3 className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                          Suggestion Context
+                        </h3>
+                      </div>
+                      <p className="text-sm text-blue-600 dark:text-blue-400">
+                        {typeof selectedQuery.suggestion_context === 'object' && 'reason' in selectedQuery.suggestion_context
+                          ? String(selectedQuery.suggestion_context.reason)
+                          : JSON.stringify(selectedQuery.suggestion_context)}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Rejection reason for rejected queries */}
+                  {selectedQuery.status === 'rejected' && selectedQuery.rejection_reason && (
+                    <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
+                        <h3 className="text-sm font-medium text-red-700 dark:text-red-300">
+                          Rejection Reason
+                        </h3>
+                      </div>
+                      <p className="text-sm text-red-600 dark:text-red-400">
+                        {selectedQuery.rejection_reason}
+                      </p>
+                      {selectedQuery.reviewed_by && (
+                        <p className="text-xs text-red-500 dark:text-red-500 mt-2">
+                          Rejected by {selectedQuery.reviewed_by}
+                          {selectedQuery.reviewed_at && (
+                            <> on {new Date(selectedQuery.reviewed_at).toLocaleDateString()}</>
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {selectedQuery.additional_context && (
                     <div>
                       <div className="flex items-center gap-2 mb-2">
@@ -1392,32 +1895,90 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     </div>
                   )}
 
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-text-tertiary" />
+                  {/* Side-by-side diff for update suggestions */}
+                  {selectedQuery.status === 'pending' && parentQuery ? (
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <GitCompare className="h-4 w-4 text-text-tertiary" />
                         <h3 className="text-sm font-medium text-text-primary">
-                          SQL Query
+                          SQL Changes
                         </h3>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleCopyQuery(selectedQuery.sql_query)}
-                      >
-                        <Copy className="h-3 w-3 mr-1" />
-                        Copy
-                      </Button>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-xs font-medium text-text-secondary bg-surface-secondary px-2 py-1 rounded">
+                              Original
+                            </span>
+                          </div>
+                          <div className="border border-border-light rounded-lg overflow-hidden">
+                            <SqlEditor
+                              value={parentQuery.sql_query}
+                              onChange={() => {}}
+                              dialect={dialect}
+                              schema={codeMirrorSchema}
+                              readOnly
+                              minHeight="150px"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-xs font-medium text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded">
+                              Suggested
+                            </span>
+                          </div>
+                          <div className="border border-green-300 dark:border-green-700 rounded-lg overflow-hidden">
+                            <SqlEditor
+                              value={selectedQuery.sql_query}
+                              onChange={() => {}}
+                              dialect={dialect}
+                              schema={codeMirrorSchema}
+                              readOnly
+                              minHeight="150px"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      {/* Show parameter changes if any */}
+                      {(parentQuery.parameters?.length !== selectedQuery.parameters?.length ||
+                        JSON.stringify(parentQuery.parameters) !== JSON.stringify(selectedQuery.parameters)) && (
+                        <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg">
+                          <p className="text-sm text-amber-700 dark:text-amber-300 flex items-center gap-2">
+                            <AlertTriangle className="h-4 w-4" />
+                            Parameter definitions have changed
+                          </p>
+                        </div>
+                      )}
                     </div>
-                    <SqlEditor
-                      value={selectedQuery.sql_query}
-                      onChange={() => { }}
-                      dialect={dialect}
-                      schema={codeMirrorSchema}
-                      readOnly
-                      minHeight="150px"
-                    />
-                  </div>
+                  ) : (
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-text-tertiary" />
+                          <h3 className="text-sm font-medium text-text-primary">
+                            SQL Query
+                          </h3>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleCopyQuery(selectedQuery.sql_query)}
+                        >
+                          <Copy className="h-3 w-3 mr-1" />
+                          Copy
+                        </Button>
+                      </div>
+                      <SqlEditor
+                        value={selectedQuery.sql_query}
+                        onChange={() => { }}
+                        dialect={dialect}
+                        schema={codeMirrorSchema}
+                        readOnly
+                        minHeight="150px"
+                      />
+                    </div>
+                  )}
 
                   {selectedQuery.parameters && selectedQuery.parameters.length > 0 && (
                     <div className="border-t border-border-light pt-4">
@@ -1429,19 +1990,78 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                     </div>
                   )}
 
-                  <div className="flex gap-2 pt-4 border-t border-border-light">
-                    <Button
-                      onClick={() => handleExecuteQuery(selectedQuery)}
-                      disabled={isTesting}
-                    >
-                      {isTesting ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Play className="mr-2 h-4 w-4" />
-                      )}
-                      Execute Query
-                    </Button>
-                  </div>
+                  {/* Approve/Reject/Execute buttons for pending queries */}
+                  {selectedQuery.status === 'pending' && (
+                    <div className="flex gap-3 pt-4 border-t border-border-light">
+                      <Button
+                        onClick={() => handleApproveQuery(selectedQuery)}
+                        disabled={isApproving}
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        {isApproving ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <CheckCircle className="mr-2 h-4 w-4" />
+                        )}
+                        Approve
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        onClick={() => setRejectionDialogOpen(true)}
+                        disabled={isApproving}
+                      >
+                        <XCircle className="mr-2 h-4 w-4" />
+                        Reject
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => handleExecuteQuery(selectedQuery)}
+                        disabled={isTesting}
+                      >
+                        {isTesting ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Play className="mr-2 h-4 w-4" />
+                        )}
+                        Execute
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Execute button only for approved queries */}
+                  {selectedQuery.status === 'approved' && (
+                    <div className="flex gap-2 pt-4 border-t border-border-light">
+                      <Button
+                        onClick={() => handleExecuteQuery(selectedQuery)}
+                        disabled={isTesting}
+                      >
+                        {isTesting ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Play className="mr-2 h-4 w-4" />
+                        )}
+                        Execute Query
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Move to Pending button for rejected queries */}
+                  {selectedQuery.status === 'rejected' && (
+                    <div className="flex gap-2 pt-4 border-t border-border-light">
+                      <Button
+                        variant="outline"
+                        onClick={() => handleMoveToPending(selectedQuery)}
+                        disabled={isMovingToPending}
+                      >
+                        {isMovingToPending ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Clock className="mr-2 h-4 w-4" />
+                        )}
+                        Move to Pending
+                      </Button>
+                    </div>
+                  )}
 
                   {queryResults && (
                     <QueryResultsTable
@@ -1462,20 +2082,17 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
                   <h3 className="text-lg font-medium text-text-primary mb-2">
                     No Query Selected
                   </h3>
-                  <p className="text-sm text-text-secondary mb-4">
-                    Select a query from the list or create a new one
-                  </p>
-                  <Button
-                    onClick={() => {
-                      setIsCreating(true);
-                      setSelectedQuery(null);
-                      setQueryResults(null);
-                      resetCreateForm();
-                    }}
-                  >
-                    <Plus className="mr-2 h-4 w-4" />
-                    Create New Query
-                  </Button>
+                  {filter !== 'rejected' && (
+                    <>
+                      <p className="text-sm text-text-secondary mb-4">
+                        Select a query from the list or create a new one
+                      </p>
+                      <Button onClick={handleCreateButtonClick}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Create New Query
+                      </Button>
+                    </>
+                  )}
                 </div>
               </CardContent>
             )}
@@ -1490,6 +2107,13 @@ const QueriesView = ({ projectId, datasourceId, dialect }: QueriesViewProps) => 
         datasourceId={datasourceId}
         query={queryToDelete}
         onQueryDeleted={handleQueryDeleted}
+      />
+
+      <RejectionReasonDialog
+        open={rejectionDialogOpen}
+        onOpenChange={setRejectionDialogOpen}
+        queryName={selectedQuery?.natural_language_prompt ?? ''}
+        onReject={handleRejectQuery}
       />
     </>
   );

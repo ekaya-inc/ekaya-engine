@@ -530,9 +530,16 @@ func (s *projectService) ProvisionFromClaims(ctx context.Context, claims *auth.C
 
 	ctxWithScope := database.SetTenantScope(ctx, scope)
 
+	// Store email for audit trail display
+	var email *string
+	if claims.Email != "" {
+		email = &claims.Email
+	}
+
 	user := &models.User{
 		ProjectID: projectID,
 		UserID:    userID,
+		Email:     email,
 		Role:      userRole,
 	}
 
