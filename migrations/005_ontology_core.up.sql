@@ -40,7 +40,7 @@ CREATE TABLE engine_ontology_entities (
     deletion_reason text,
 
     -- Provenance: source tracking (how it was created/modified)
-    source text NOT NULL DEFAULT 'inference',
+    source text NOT NULL DEFAULT 'inferred',
     last_edit_source text,
 
     -- Provenance: actor tracking (who created/modified)
@@ -53,8 +53,8 @@ CREATE TABLE engine_ontology_entities (
     CONSTRAINT engine_ontology_entities_ontology_id_name_key UNIQUE (ontology_id, name),
     CONSTRAINT engine_ontology_entities_project_id_fkey FOREIGN KEY (project_id) REFERENCES engine_projects(id) ON DELETE CASCADE,
     CONSTRAINT engine_ontology_entities_ontology_id_fkey FOREIGN KEY (ontology_id) REFERENCES engine_ontologies(id) ON DELETE CASCADE,
-    CONSTRAINT engine_ontology_entities_source_check CHECK (source IN ('inference', 'mcp', 'manual')),
-    CONSTRAINT engine_ontology_entities_last_edit_source_check CHECK (last_edit_source IS NULL OR last_edit_source IN ('inference', 'mcp', 'manual'))
+    CONSTRAINT engine_ontology_entities_source_check CHECK (source IN ('inferred', 'mcp', 'manual')),
+    CONSTRAINT engine_ontology_entities_last_edit_source_check CHECK (last_edit_source IS NULL OR last_edit_source IN ('inferred', 'mcp', 'manual'))
 );
 
 COMMENT ON TABLE engine_ontology_entities IS 'Domain entities discovered during relationship analysis (e.g., user, account, order)';
@@ -128,7 +128,7 @@ CREATE TABLE engine_entity_relationships (
     cardinality text DEFAULT 'unknown'::text NOT NULL,
 
     -- Provenance: source tracking (how it was created/modified)
-    source text NOT NULL DEFAULT 'inference',
+    source text NOT NULL DEFAULT 'inferred',
     last_edit_source text,
 
     -- Provenance: actor tracking (who created/modified)
@@ -144,8 +144,8 @@ CREATE TABLE engine_entity_relationships (
     CONSTRAINT engine_entity_relationships_ontology_id_fkey FOREIGN KEY (ontology_id) REFERENCES engine_ontologies(id) ON DELETE CASCADE,
     CONSTRAINT engine_entity_relationships_source_entity_id_fkey FOREIGN KEY (source_entity_id) REFERENCES engine_ontology_entities(id) ON DELETE CASCADE,
     CONSTRAINT engine_entity_relationships_target_entity_id_fkey FOREIGN KEY (target_entity_id) REFERENCES engine_ontology_entities(id) ON DELETE CASCADE,
-    CONSTRAINT engine_entity_relationships_source_check CHECK (source IN ('inference', 'mcp', 'manual')),
-    CONSTRAINT engine_entity_relationships_last_edit_source_check CHECK (last_edit_source IS NULL OR last_edit_source IN ('inference', 'mcp', 'manual'))
+    CONSTRAINT engine_entity_relationships_source_check CHECK (source IN ('inferred', 'mcp', 'manual')),
+    CONSTRAINT engine_entity_relationships_last_edit_source_check CHECK (last_edit_source IS NULL OR last_edit_source IN ('inferred', 'mcp', 'manual'))
 );
 
 CREATE TRIGGER update_engine_entity_relationships_updated_at

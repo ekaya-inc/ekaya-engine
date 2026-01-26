@@ -11,7 +11,7 @@ CREATE TABLE engine_audit_log (
     action text NOT NULL,       -- 'create', 'update', 'delete'
 
     -- Who/how
-    source text NOT NULL,       -- 'inference', 'mcp', 'manual'
+    source text NOT NULL,       -- 'inferred', 'mcp', 'manual'
     user_id uuid,               -- Who triggered the action (from JWT, may be null for system operations)
 
     -- What changed (for updates)
@@ -22,7 +22,7 @@ CREATE TABLE engine_audit_log (
 
     CONSTRAINT engine_audit_log_entity_type_check CHECK (entity_type IN ('entity', 'relationship', 'glossary_term', 'project_knowledge')),
     CONSTRAINT engine_audit_log_action_check CHECK (action IN ('create', 'update', 'delete')),
-    CONSTRAINT engine_audit_log_source_check CHECK (source IN ('inference', 'mcp', 'manual'))
+    CONSTRAINT engine_audit_log_source_check CHECK (source IN ('inferred', 'mcp', 'manual'))
 );
 
 COMMENT ON TABLE engine_audit_log IS 'Chronological audit trail of changes to ontology objects';

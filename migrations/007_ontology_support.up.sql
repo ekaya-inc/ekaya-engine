@@ -71,7 +71,7 @@ CREATE TABLE engine_project_knowledge (
     context text,
 
     -- Provenance: source tracking (how it was created/modified)
-    source text NOT NULL DEFAULT 'inference',
+    source text NOT NULL DEFAULT 'inferred',
     last_edit_source text,
 
     -- Provenance: actor tracking (who created/modified)
@@ -82,11 +82,11 @@ CREATE TABLE engine_project_knowledge (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     PRIMARY KEY (id),
     CONSTRAINT engine_project_knowledge_project_id_fkey FOREIGN KEY (project_id) REFERENCES engine_projects(id) ON DELETE CASCADE,
-    CONSTRAINT engine_project_knowledge_source_check CHECK (source IN ('inference', 'mcp', 'manual')),
-    CONSTRAINT engine_project_knowledge_last_edit_source_check CHECK (last_edit_source IS NULL OR last_edit_source IN ('inference', 'mcp', 'manual'))
+    CONSTRAINT engine_project_knowledge_source_check CHECK (source IN ('inferred', 'mcp', 'manual')),
+    CONSTRAINT engine_project_knowledge_last_edit_source_check CHECK (last_edit_source IS NULL OR last_edit_source IN ('inferred', 'mcp', 'manual'))
 );
 
-COMMENT ON COLUMN engine_project_knowledge.source IS 'How this fact was created: inference (Engine), mcp (Claude), manual (UI)';
+COMMENT ON COLUMN engine_project_knowledge.source IS 'How this fact was created: inferred (Engine), mcp (Claude), manual (UI)';
 COMMENT ON COLUMN engine_project_knowledge.last_edit_source IS 'How this fact was last modified (null if never edited after creation)';
 COMMENT ON COLUMN engine_project_knowledge.created_by IS 'UUID of user who triggered creation (from JWT)';
 COMMENT ON COLUMN engine_project_knowledge.updated_by IS 'UUID of user who last updated this fact';

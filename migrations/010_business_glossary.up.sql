@@ -11,7 +11,7 @@ CREATE TABLE engine_business_glossary (
     output_columns jsonb,
 
     -- Provenance: source tracking (how it was created/modified)
-    source text NOT NULL DEFAULT 'inference',
+    source text NOT NULL DEFAULT 'inferred',
     last_edit_source text,
 
     -- Provenance: actor tracking (who created/modified)
@@ -22,8 +22,8 @@ CREATE TABLE engine_business_glossary (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     PRIMARY KEY (id),
     CONSTRAINT engine_business_glossary_project_term_unique UNIQUE (project_id, term),
-    CONSTRAINT engine_business_glossary_source_check CHECK (source IN ('inference', 'mcp', 'manual')),
-    CONSTRAINT engine_business_glossary_last_edit_source_check CHECK (last_edit_source IS NULL OR last_edit_source IN ('inference', 'mcp', 'manual')),
+    CONSTRAINT engine_business_glossary_source_check CHECK (source IN ('inferred', 'mcp', 'manual')),
+    CONSTRAINT engine_business_glossary_last_edit_source_check CHECK (last_edit_source IS NULL OR last_edit_source IN ('inferred', 'mcp', 'manual')),
     CONSTRAINT engine_business_glossary_project_id_fkey FOREIGN KEY (project_id) REFERENCES engine_projects(id) ON DELETE CASCADE
 );
 

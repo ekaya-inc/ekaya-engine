@@ -17,7 +17,7 @@ CREATE TABLE engine_ontology_column_metadata (
     enum_values jsonb,     -- Array of enum values with descriptions
 
     -- Provenance: source tracking (how it was created/modified)
-    source text NOT NULL DEFAULT 'inference',
+    source text NOT NULL DEFAULT 'inferred',
     last_edit_source text,
 
     -- Provenance: actor tracking (who created/modified)
@@ -32,9 +32,9 @@ CREATE TABLE engine_ontology_column_metadata (
     CONSTRAINT engine_column_metadata_project_id_fkey FOREIGN KEY (project_id)
         REFERENCES engine_projects(id) ON DELETE CASCADE,
     CONSTRAINT engine_column_metadata_source_check
-        CHECK (source IN ('inference', 'mcp', 'manual')),
+        CHECK (source IN ('inferred', 'mcp', 'manual')),
     CONSTRAINT engine_column_metadata_last_edit_source_check
-        CHECK (last_edit_source IS NULL OR last_edit_source IN ('inference', 'mcp', 'manual')),
+        CHECK (last_edit_source IS NULL OR last_edit_source IN ('inferred', 'mcp', 'manual')),
     CONSTRAINT engine_column_metadata_role_check
         CHECK (role IS NULL OR role IN ('dimension', 'measure', 'identifier', 'attribute'))
 );
