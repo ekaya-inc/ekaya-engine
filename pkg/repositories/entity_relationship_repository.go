@@ -87,14 +87,15 @@ func (r *entityRelationshipRepository) Create(ctx context.Context, rel *models.E
 	// - Preserve description/association if already enriched (don't overwrite with NULL)
 	// - On conflict, also set last_edit_source and updated_by
 	now := time.Now()
+	// Use subquery to get project_id from source entity
 	query := `
 		INSERT INTO engine_entity_relationships (
-			id, ontology_id, source_entity_id, target_entity_id,
+			id, project_id, ontology_id, source_entity_id, target_entity_id,
 			source_column_schema, source_column_table, source_column_name, source_column_id,
 			target_column_schema, target_column_table, target_column_name, target_column_id,
 			detection_method, confidence, status, cardinality, description, association,
 			is_stale, source, created_by, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+		) VALUES ($1, (SELECT project_id FROM engine_ontology_entities WHERE id = $3), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
 		ON CONFLICT (ontology_id, source_entity_id, target_entity_id,
 			source_column_schema, source_column_table, source_column_name,
 			target_column_schema, target_column_table, target_column_name)
@@ -130,7 +131,7 @@ func (r *entityRelationshipRepository) GetByOntology(ctx context.Context, ontolo
 	}
 
 	query := `
-		SELECT id, ontology_id, source_entity_id, target_entity_id,
+		SELECT id, project_id, ontology_id, source_entity_id, target_entity_id,
 		       source_column_schema, source_column_table, source_column_name,
 		       target_column_schema, target_column_table, target_column_name,
 		       detection_method, confidence, status, cardinality, description, association,
@@ -168,7 +169,7 @@ func (r *entityRelationshipRepository) GetByOntologyGroupedByTarget(ctx context.
 	}
 
 	query := `
-		SELECT id, ontology_id, source_entity_id, target_entity_id,
+		SELECT id, project_id, ontology_id, source_entity_id, target_entity_id,
 		       source_column_schema, source_column_table, source_column_name,
 		       target_column_schema, target_column_table, target_column_name,
 		       detection_method, confidence, status, cardinality, description, association,
@@ -207,7 +208,7 @@ func (r *entityRelationshipRepository) GetByProject(ctx context.Context, project
 
 	// JOIN with engine_schema_columns to get column types for source and target columns
 	query := `
-		SELECT r.id, r.ontology_id, r.source_entity_id, r.target_entity_id,
+		SELECT r.id, r.project_id, r.ontology_id, r.source_entity_id, r.target_entity_id,
 		       r.source_column_schema, r.source_column_table, r.source_column_name,
 		       r.source_column_id, r.target_column_schema, r.target_column_table, r.target_column_name,
 		       r.target_column_id, r.detection_method, r.confidence, r.status, r.cardinality,
@@ -255,7 +256,7 @@ func (r *entityRelationshipRepository) GetByTables(ctx context.Context, projectI
 	}
 
 	query := `
-		SELECT r.id, r.ontology_id, r.source_entity_id, r.target_entity_id,
+		SELECT r.id, r.project_id, r.ontology_id, r.source_entity_id, r.target_entity_id,
 		       r.source_column_schema, r.source_column_table, r.source_column_name,
 		       r.target_column_schema, r.target_column_table, r.target_column_name,
 		       r.detection_method, r.confidence, r.status, r.cardinality, r.description, r.association,
@@ -295,7 +296,7 @@ func (r *entityRelationshipRepository) GetByTargetEntity(ctx context.Context, en
 	}
 
 	query := `
-		SELECT id, ontology_id, source_entity_id, target_entity_id,
+		SELECT id, project_id, ontology_id, source_entity_id, target_entity_id,
 		       source_column_schema, source_column_table, source_column_name,
 		       target_column_schema, target_column_table, target_column_name,
 		       detection_method, confidence, status, cardinality, description, association,
@@ -333,7 +334,7 @@ func (r *entityRelationshipRepository) GetByID(ctx context.Context, id uuid.UUID
 	}
 
 	query := `
-		SELECT id, ontology_id, source_entity_id, target_entity_id,
+		SELECT id, project_id, ontology_id, source_entity_id, target_entity_id,
 		       source_column_schema, source_column_table, source_column_name,
 		       target_column_schema, target_column_table, target_column_name,
 		       detection_method, confidence, status, cardinality, description, association,
@@ -522,7 +523,7 @@ func (r *entityRelationshipRepository) GetStaleRelationships(ctx context.Context
 	}
 
 	query := `
-		SELECT id, ontology_id, source_entity_id, target_entity_id,
+		SELECT id, project_id, ontology_id, source_entity_id, target_entity_id,
 		       source_column_schema, source_column_table, source_column_name,
 		       target_column_schema, target_column_table, target_column_name,
 		       detection_method, confidence, status, cardinality, description, association,
@@ -563,7 +564,7 @@ func (r *entityRelationshipRepository) GetByEntityPair(ctx context.Context, onto
 	// Note: There may be multiple relationships between the same entity pair (different columns)
 	// We return the first one found
 	query := `
-		SELECT id, ontology_id, source_entity_id, target_entity_id,
+		SELECT id, project_id, ontology_id, source_entity_id, target_entity_id,
 		       source_column_schema, source_column_table, source_column_name,
 		       target_column_schema, target_column_table, target_column_name,
 		       detection_method, confidence, status, cardinality, description, association,
@@ -621,14 +622,15 @@ func (r *entityRelationshipRepository) Upsert(ctx context.Context, rel *models.E
 	// The unique constraint is on (ontology_id, source_entity_id, target_entity_id, source/target column details)
 	// For MCP tools, we want to upsert based on entity pair, so we'll use ON CONFLICT DO UPDATE
 	// On conflict, also set last_edit_source and updated_by from provenance
+	// Use subquery to get project_id from source entity
 	query := `
 		INSERT INTO engine_entity_relationships (
-			id, ontology_id, source_entity_id, target_entity_id,
+			id, project_id, ontology_id, source_entity_id, target_entity_id,
 			source_column_schema, source_column_table, source_column_name, source_column_id,
 			target_column_schema, target_column_table, target_column_name, target_column_id,
 			detection_method, confidence, status, cardinality, description, association,
 			is_stale, source, created_by, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+		) VALUES ($1, (SELECT project_id FROM engine_ontology_entities WHERE id = $3), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
 		ON CONFLICT (ontology_id, source_entity_id, target_entity_id,
 			source_column_schema, source_column_table, source_column_name,
 			target_column_schema, target_column_table, target_column_name)
@@ -681,7 +683,7 @@ func scanEntityRelationship(row pgx.Row) (*models.EntityRelationship, error) {
 	var rel models.EntityRelationship
 
 	err := row.Scan(
-		&rel.ID, &rel.OntologyID, &rel.SourceEntityID, &rel.TargetEntityID,
+		&rel.ID, &rel.ProjectID, &rel.OntologyID, &rel.SourceEntityID, &rel.TargetEntityID,
 		&rel.SourceColumnSchema, &rel.SourceColumnTable, &rel.SourceColumnName,
 		&rel.TargetColumnSchema, &rel.TargetColumnTable, &rel.TargetColumnName,
 		&rel.DetectionMethod, &rel.Confidence, &rel.Status, &rel.Cardinality, &rel.Description, &rel.Association,
@@ -703,7 +705,7 @@ func scanEntityRelationshipWithColumnTypes(row pgx.Row) (*models.EntityRelations
 	var rel models.EntityRelationship
 
 	err := row.Scan(
-		&rel.ID, &rel.OntologyID, &rel.SourceEntityID, &rel.TargetEntityID,
+		&rel.ID, &rel.ProjectID, &rel.OntologyID, &rel.SourceEntityID, &rel.TargetEntityID,
 		&rel.SourceColumnSchema, &rel.SourceColumnTable, &rel.SourceColumnName,
 		&rel.SourceColumnID, &rel.TargetColumnSchema, &rel.TargetColumnTable, &rel.TargetColumnName,
 		&rel.TargetColumnID, &rel.DetectionMethod, &rel.Confidence, &rel.Status, &rel.Cardinality,

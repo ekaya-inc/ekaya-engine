@@ -19,6 +19,11 @@ CREATE TABLE engine_queries (
     suggested_by character varying,
     suggestion_context jsonb,
     tags text[] DEFAULT '{}'::text[],
+    allows_modification boolean NOT NULL DEFAULT false,
+    reviewed_by character varying(255),
+    reviewed_at timestamp with time zone,
+    rejection_reason text,
+    parent_query_id uuid REFERENCES engine_queries(id),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     deleted_at timestamp with time zone,
@@ -34,6 +39,11 @@ COMMENT ON COLUMN engine_queries.status IS 'Query lifecycle: pending, approved, 
 COMMENT ON COLUMN engine_queries.suggested_by IS 'Origin: user, agent, admin';
 COMMENT ON COLUMN engine_queries.suggestion_context IS 'Stores example usage, validation results, etc.';
 COMMENT ON COLUMN engine_queries.tags IS 'Tags for organizing queries (e.g., "billing", "reporting", "category:analytics")';
+COMMENT ON COLUMN engine_queries.allows_modification IS 'When true, this query can execute INSERT/UPDATE/DELETE/CALL statements. When false, only SELECT is allowed.';
+COMMENT ON COLUMN engine_queries.reviewed_by IS 'User/admin who reviewed the pending query';
+COMMENT ON COLUMN engine_queries.reviewed_at IS 'When the query was approved or rejected';
+COMMENT ON COLUMN engine_queries.rejection_reason IS 'Explanation provided when query was rejected';
+COMMENT ON COLUMN engine_queries.parent_query_id IS 'For update suggestions: references the original query being updated';
 
 CREATE INDEX idx_engine_queries_project ON engine_queries USING btree (project_id);
 CREATE INDEX idx_engine_queries_datasource ON engine_queries USING btree (project_id, datasource_id);
@@ -42,6 +52,8 @@ CREATE INDEX idx_engine_queries_status ON engine_queries USING btree (project_id
 CREATE INDEX idx_engine_queries_has_parameters ON engine_queries USING btree ((parameters <> '[]'::jsonb)) WHERE (deleted_at IS NULL);
 CREATE INDEX idx_engine_queries_has_output_columns ON engine_queries USING btree ((output_columns <> '[]'::jsonb)) WHERE (deleted_at IS NULL);
 CREATE INDEX idx_engine_queries_tags ON engine_queries USING gin (tags) WHERE (deleted_at IS NULL);
+CREATE INDEX idx_queries_pending_review ON engine_queries(project_id, datasource_id) WHERE status = 'pending' AND deleted_at IS NULL;
+CREATE INDEX idx_queries_parent ON engine_queries(parent_query_id) WHERE parent_query_id IS NOT NULL AND deleted_at IS NULL;
 
 CREATE TRIGGER update_engine_queries_updated_at
     BEFORE UPDATE ON engine_queries
@@ -59,6 +71,10 @@ CREATE TABLE engine_query_executions (
     parameters jsonb,
     user_id text,
     source text DEFAULT 'mcp'::text NOT NULL,
+    is_modifying boolean DEFAULT false NOT NULL,
+    rows_affected bigint DEFAULT NULL,
+    success boolean DEFAULT true NOT NULL,
+    error_message text,
     PRIMARY KEY (id),
     CONSTRAINT valid_row_count CHECK (row_count >= 0),
     CONSTRAINT valid_execution_time CHECK (execution_time_ms >= 0),
@@ -70,9 +86,14 @@ COMMENT ON TABLE engine_query_executions IS 'Execution history for approved quer
 COMMENT ON COLUMN engine_query_executions.sql IS 'Resolved SQL with actual parameter values (for debugging/reference)';
 COMMENT ON COLUMN engine_query_executions.parameters IS 'Parameter values used (key-value pairs)';
 COMMENT ON COLUMN engine_query_executions.source IS 'Execution source: mcp (MCP tools), api (direct API), ui (web interface)';
+COMMENT ON COLUMN engine_query_executions.is_modifying IS 'True if this was a data-modifying query (INSERT/UPDATE/DELETE/CALL)';
+COMMENT ON COLUMN engine_query_executions.rows_affected IS 'Number of rows affected by modifying queries (from database command tag, not RETURNING clause)';
+COMMENT ON COLUMN engine_query_executions.success IS 'True if query executed successfully, false if it failed';
+COMMENT ON COLUMN engine_query_executions.error_message IS 'Error message if the query execution failed';
 
 CREATE INDEX idx_query_executions_project_time ON engine_query_executions USING btree (project_id, executed_at DESC);
 CREATE INDEX idx_query_executions_query ON engine_query_executions USING btree (query_id, executed_at DESC);
+CREATE INDEX idx_query_executions_modifying ON engine_query_executions USING btree (project_id, is_modifying, executed_at DESC) WHERE is_modifying = TRUE;
 
 -- RLS
 ALTER TABLE engine_queries ENABLE ROW LEVEL SECURITY;

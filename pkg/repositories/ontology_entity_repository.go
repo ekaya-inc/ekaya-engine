@@ -537,9 +537,10 @@ func (r *ontologyEntityRepository) CreateAlias(ctx context.Context, alias *model
 		alias.ID = uuid.New()
 	}
 
+	// Use subquery to get project_id from the entity
 	query := `
-		INSERT INTO engine_ontology_entity_aliases (id, entity_id, alias, source, created_at)
-		VALUES ($1, $2, $3, $4, $5)`
+		INSERT INTO engine_ontology_entity_aliases (id, project_id, entity_id, alias, source, created_at)
+		VALUES ($1, (SELECT project_id FROM engine_ontology_entities WHERE id = $2), $2, $3, $4, $5)`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		alias.ID, alias.EntityID, alias.Alias, alias.Source, alias.CreatedAt,
@@ -558,7 +559,7 @@ func (r *ontologyEntityRepository) GetAliasesByEntity(ctx context.Context, entit
 	}
 
 	query := `
-		SELECT id, entity_id, alias, source, created_at
+		SELECT id, project_id, entity_id, alias, source, created_at
 		FROM engine_ontology_entity_aliases
 		WHERE entity_id = $1
 		ORDER BY alias`
@@ -608,7 +609,7 @@ func (r *ontologyEntityRepository) GetAllAliasesByProject(ctx context.Context, p
 	}
 
 	query := `
-		SELECT a.id, a.entity_id, a.alias, a.source, a.created_at
+		SELECT a.id, a.project_id, a.entity_id, a.alias, a.source, a.created_at
 		FROM engine_ontology_entity_aliases a
 		JOIN engine_ontology_entities e ON a.entity_id = e.id
 		JOIN engine_ontologies o ON e.ontology_id = o.id
@@ -670,7 +671,7 @@ func scanOntologyEntityAlias(row pgx.Row) (*models.OntologyEntityAlias, error) {
 	var a models.OntologyEntityAlias
 
 	err := row.Scan(
-		&a.ID, &a.EntityID, &a.Alias, &a.Source, &a.CreatedAt,
+		&a.ID, &a.ProjectID, &a.EntityID, &a.Alias, &a.Source, &a.CreatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {

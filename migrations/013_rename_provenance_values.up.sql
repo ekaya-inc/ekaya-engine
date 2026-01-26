@@ -1,3 +1,0 @@
--- 013_rename_provenance_values.up.sql
--- NO-OP: Provenance values are now standardized in base migrations (005, 007, 010, 012)
--- This migration is kept for migration version continuity

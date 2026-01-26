@@ -62,6 +62,7 @@ type OntologyEntityOccurrence struct {
 // Used for query matching (e.g., "customer" as alias for "user").
 type OntologyEntityAlias struct {
 	ID        uuid.UUID `json:"id"`
+	ProjectID uuid.UUID `json:"project_id"`
 	EntityID  uuid.UUID `json:"entity_id"`
 	Alias     string    `json:"alias"`
 	Source    *string   `json:"source,omitempty"` // 'discovery', 'user', 'query'

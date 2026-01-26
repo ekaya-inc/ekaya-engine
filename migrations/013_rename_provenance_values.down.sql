@@ -1,2 +1,0 @@
--- 013_rename_provenance_values.down.sql
--- NO-OP: This migration does nothing, so the down migration also does nothing

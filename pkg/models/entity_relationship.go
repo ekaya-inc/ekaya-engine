@@ -25,6 +25,7 @@ const (
 // Stored in engine_entity_relationships table.
 type EntityRelationship struct {
 	ID                 uuid.UUID  `json:"id"`
+	ProjectID          uuid.UUID  `json:"project_id"`
 	OntologyID         uuid.UUID  `json:"ontology_id"`
 	SourceEntityID     uuid.UUID  `json:"source_entity_id"`
 	TargetEntityID     uuid.UUID  `json:"target_entity_id"`
