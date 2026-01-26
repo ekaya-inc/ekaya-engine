@@ -410,7 +410,7 @@ export function DeveloperToolsSection({
 }
 ```
 
-### Task 8: Frontend - Update AgentToolsSection
+### Task 8: Frontend - Update AgentToolsSection [x]
 
 **File: `ui/src/components/mcp/AgentToolsSection.tsx`** (or update existing in MCPServerPage)
 
