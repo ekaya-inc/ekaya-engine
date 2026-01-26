@@ -289,7 +289,7 @@ Major restructure:
 </div>
 ```
 
-### Task 6: Frontend - Create UserToolsSection Component
+### Task 6: Frontend - Create UserToolsSection Component [x]
 
 **File: `ui/src/components/mcp/UserToolsSection.tsx`**
 
