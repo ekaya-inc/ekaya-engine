@@ -116,7 +116,7 @@ The current UI has:
 
 ## Implementation Tasks
 
-### Task 1: Backend - Add Role-Based Tool Filtering
+### Task 1: Backend - Add Role-Based Tool Filtering [x]
 
 **File: `pkg/mcp/tools/access.go`**
 
