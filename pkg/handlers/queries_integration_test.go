@@ -112,11 +112,13 @@ func (tc *queriesIntegrationTestContext) makeRequest(method, path string, body a
 	ctx = database.SetTenantScope(ctx, scope)
 
 	// Set up auth claims with user ID (Subject) for connection pooling
+	// Email is required for approve/reject audit trail
 	claims := &auth.Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject: "test-user-integration",
 		},
 		ProjectID: tc.projectID.String(),
+		Email:     "test-user@example.com",
 	}
 	ctx = context.WithValue(ctx, auth.ClaimsKey, claims)
 
