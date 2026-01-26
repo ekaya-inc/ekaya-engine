@@ -16,8 +16,8 @@ func TestComputeToolsForRole_Agent(t *testing.T) {
 	claims.Subject = "agent"
 
 	state := map[string]*models.ToolGroupConfig{
-		services.ToolGroupDeveloper:       {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
-		services.ToolGroupApprovedQueries: {Enabled: true, AllowOntologyMaintenance: true},
+		services.ToolGroupDeveloper: {Enabled: true, AddQueryTools: true, AddOntologyMaintenance: true},
+		services.ToolGroupUser:      {Enabled: true, AllowOntologyMaintenance: true},
 	}
 
 	tools := computeToolsForRole(claims, state)
@@ -114,7 +114,7 @@ func TestComputeToolsForRole_UserRole(t *testing.T) {
 	claims.Subject = "user-regular"
 
 	state := map[string]*models.ToolGroupConfig{
-		services.ToolGroupApprovedQueries: {AllowOntologyMaintenance: false},
+		services.ToolGroupUser: {AllowOntologyMaintenance: false},
 	}
 
 	tools := computeToolsForRole(claims, state)
@@ -143,7 +143,7 @@ func TestComputeToolsForRole_UserWithOntologyMaintenance(t *testing.T) {
 	claims.Subject = "user-regular"
 
 	state := map[string]*models.ToolGroupConfig{
-		services.ToolGroupApprovedQueries: {AllowOntologyMaintenance: true},
+		services.ToolGroupUser: {AllowOntologyMaintenance: true},
 	}
 
 	tools := computeToolsForRole(claims, state)

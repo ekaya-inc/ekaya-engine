@@ -515,7 +515,7 @@ func (h *MCPConfigHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) 
 }
 ```
 
-### Task 11: Update Tool Registry
+### Task 11: Update Tool Registry [x]
 
 **File: `pkg/services/mcp_tools_registry.go`**
 
