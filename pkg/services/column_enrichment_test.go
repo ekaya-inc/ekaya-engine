@@ -250,6 +250,10 @@ func (r *testColEnrichmentRelRepo) GetStaleRelationships(ctx context.Context, on
 	return nil, nil
 }
 
+func (r *testColEnrichmentRelRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
+
 type testColEnrichmentSchemaRepo struct {
 	columnsByTable map[string][]*models.SchemaColumn
 }
@@ -1782,6 +1786,10 @@ func (r *testSelfRefRelRepo) ClearStaleFlag(ctx context.Context, relationshipID 
 
 func (r *testSelfRefRelRepo) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
 	return nil, nil
+}
+
+func (r *testSelfRefRelRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
 }
 
 // TestColumnEnrichmentService_EnrichTable_IntegerEnumInference tests that integer enum

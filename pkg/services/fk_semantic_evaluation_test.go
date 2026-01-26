@@ -626,6 +626,10 @@ func (m *mockKnowledgeRepoForFKEval) DeleteByProject(ctx context.Context, projec
 	return nil
 }
 
+func (m *mockKnowledgeRepoForFKEval) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
+
 // ptr is a helper to get a pointer to a value
 func ptr[T any](v T) *T {
 	return &v

@@ -851,10 +851,10 @@ func TestGlossaryRepository_EnrichmentStatus_Create(t *testing.T) {
 	defer cleanup()
 
 	term := &models.BusinessGlossaryTerm{
-		ProjectID:        tc.projectID,
-		Term:             "Pending Metric",
-		Definition:       "A metric awaiting SQL enrichment",
-		DefiningSQL:      "",
+		ProjectID:   tc.projectID,
+		Term:        "Pending Metric",
+		Definition:  "A metric awaiting SQL enrichment",
+		DefiningSQL: "",
 		// Source is set from provenance context
 		EnrichmentStatus: models.GlossaryEnrichmentPending,
 	}
@@ -884,10 +884,10 @@ func TestGlossaryRepository_EnrichmentStatus_Failed(t *testing.T) {
 	defer cleanup()
 
 	term := &models.BusinessGlossaryTerm{
-		ProjectID:        tc.projectID,
-		Term:             "Failed Metric",
-		Definition:       "A metric that failed SQL enrichment",
-		DefiningSQL:      "",
+		ProjectID:   tc.projectID,
+		Term:        "Failed Metric",
+		Definition:  "A metric that failed SQL enrichment",
+		DefiningSQL: "",
 		// Source is set from provenance context
 		EnrichmentStatus: models.GlossaryEnrichmentFailed,
 		EnrichmentError:  "LLM returned empty SQL after 3 retries",
@@ -918,10 +918,10 @@ func TestGlossaryRepository_EnrichmentStatus_Success(t *testing.T) {
 	defer cleanup()
 
 	term := &models.BusinessGlossaryTerm{
-		ProjectID:        tc.projectID,
-		Term:             "Successful Metric",
-		Definition:       "A metric with successful SQL enrichment",
-		DefiningSQL:      "SELECT COUNT(*) FROM users",
+		ProjectID:   tc.projectID,
+		Term:        "Successful Metric",
+		Definition:  "A metric with successful SQL enrichment",
+		DefiningSQL: "SELECT COUNT(*) FROM users",
 		// Source is set from provenance context
 		EnrichmentStatus: models.GlossaryEnrichmentSuccess,
 	}
@@ -949,10 +949,10 @@ func TestGlossaryRepository_EnrichmentStatus_Update(t *testing.T) {
 
 	// Create with pending status
 	term := &models.BusinessGlossaryTerm{
-		ProjectID:        tc.projectID,
-		Term:             "Updating Metric",
-		Definition:       "A metric transitioning from pending to success",
-		DefiningSQL:      "",
+		ProjectID:   tc.projectID,
+		Term:        "Updating Metric",
+		Definition:  "A metric transitioning from pending to success",
+		DefiningSQL: "",
 		// Source is set from provenance context
 		EnrichmentStatus: models.GlossaryEnrichmentPending,
 	}
@@ -992,10 +992,10 @@ func TestGlossaryRepository_EnrichmentStatus_UpdateToFailed(t *testing.T) {
 
 	// Create with pending status
 	term := &models.BusinessGlossaryTerm{
-		ProjectID:        tc.projectID,
-		Term:             "Failing Metric",
-		Definition:       "A metric that will fail enrichment",
-		DefiningSQL:      "",
+		ProjectID:   tc.projectID,
+		Term:        "Failing Metric",
+		Definition:  "A metric that will fail enrichment",
+		DefiningSQL: "",
 		// Source is set from provenance context
 		EnrichmentStatus: models.GlossaryEnrichmentPending,
 	}

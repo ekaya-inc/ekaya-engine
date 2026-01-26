@@ -9,12 +9,12 @@ import (
 // ProjectKnowledge represents a project-level fact learned during refinement.
 // Stored in engine_project_knowledge table.
 type ProjectKnowledge struct {
-	ID        uuid.UUID  `json:"id"`
-	ProjectID uuid.UUID  `json:"project_id"`
-	FactType  string     `json:"fact_type"` // Type of fact (e.g., "business_rule", "convention")
-	Key       string     `json:"key"`       // Fact key (unique within project + fact_type)
-	Value     string     `json:"value"`     // Fact value
-	Context   *string    `json:"context,omitempty"`
+	ID         uuid.UUID  `json:"id"`
+	ProjectID  uuid.UUID  `json:"project_id"`
+	FactType   string     `json:"fact_type"` // Type of fact (e.g., "business_rule", "convention")
+	Key        string     `json:"key"`       // Fact key (unique within project + fact_type)
+	Value      string     `json:"value"`     // Fact value
+	Context    *string    `json:"context,omitempty"`
 	OntologyID *uuid.UUID `json:"ontology_id,omitempty"` // Links to ontology for CASCADE delete
 
 	// Provenance: source tracking (how it was created/modified)

@@ -1394,6 +1394,17 @@ func (m *mockKnowledgeRepoForGlossary) DeleteByProject(ctx context.Context, proj
 	return nil
 }
 
+func (m *mockKnowledgeRepoForGlossary) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	filtered := make([]*models.KnowledgeFact, 0)
+	for _, f := range m.facts {
+		if f.Source != source.String() {
+			filtered = append(filtered, f)
+		}
+	}
+	m.facts = filtered
+	return nil
+}
+
 // mockLLMClientCapturingPrompt captures the prompt for verification.
 type mockLLMClientCapturingPrompt struct {
 	capturedPrompt        string

@@ -81,20 +81,23 @@ func NewGlossaryHandler(
 func (h *GlossaryHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.Middleware, tenantMiddleware TenantMiddleware) {
 	base := "/api/projects/{pid}/glossary"
 
+	// Read-only endpoints - no provenance needed
 	mux.HandleFunc("GET "+base,
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.List)))
-	mux.HandleFunc("POST "+base,
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Create)))
 	mux.HandleFunc("GET "+base+"/{tid}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Get)))
-	mux.HandleFunc("PUT "+base+"/{tid}",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Update)))
-	mux.HandleFunc("DELETE "+base+"/{tid}",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Delete)))
-	mux.HandleFunc("POST "+base+"/suggest",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Suggest)))
 	mux.HandleFunc("POST "+base+"/test-sql",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.TestSQL)))
+
+	// Write endpoints - require provenance for audit tracking
+	mux.HandleFunc("POST "+base,
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Create)))
+	mux.HandleFunc("PUT "+base+"/{tid}",
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Update)))
+	mux.HandleFunc("DELETE "+base+"/{tid}",
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Delete)))
+	mux.HandleFunc("POST "+base+"/suggest",
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Suggest)))
 }
 
 // List handles GET /api/projects/{pid}/glossary

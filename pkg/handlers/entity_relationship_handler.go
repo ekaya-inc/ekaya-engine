@@ -76,11 +76,11 @@ func NewEntityRelationshipHandler(
 
 // RegisterRoutes registers the entity relationship handler's routes on the given mux.
 func (h *EntityRelationshipHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.Middleware, tenantMiddleware TenantMiddleware) {
-	// Discovery endpoint - per datasource
+	// Discovery endpoint - per datasource (write operation, requires provenance)
 	mux.HandleFunc("POST /api/projects/{pid}/datasources/{dsid}/relationships/discover",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Discover)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Discover)))
 
-	// List endpoint - per project
+	// List endpoint - per project (read-only, no provenance needed)
 	mux.HandleFunc("GET /api/projects/{pid}/relationships",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.List)))
 }
@@ -187,10 +187,10 @@ func (h *EntityRelationshipHandler) List(w http.ResponseWriter, r *http.Request)
 			IsApproved:       isApproved,
 			Status:           rel.Status,
 			Description:      deref(rel.Description),
-			// Provenance fields
+			// Provenance fields - map Source/LastEditSource (method tracking) to API fields
 			IsStale:   rel.IsStale,
-			CreatedBy: rel.CreatedBy,
-			UpdatedBy: rel.UpdatedBy,
+			CreatedBy: rel.Source,
+			UpdatedBy: rel.LastEditSource,
 		})
 	}
 

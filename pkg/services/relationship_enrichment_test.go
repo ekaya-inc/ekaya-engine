@@ -85,6 +85,10 @@ func (r *testRelEnrichmentRelRepo) Delete(ctx context.Context, id uuid.UUID) err
 	return nil
 }
 
+func (r *testRelEnrichmentRelRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
+
 func (r *testRelEnrichmentRelRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.EntityRelationship, error) {
 	return nil, nil
 }
@@ -704,6 +708,10 @@ func (m *mockKnowledgeRepoForRelEnrichment) Delete(ctx context.Context, id uuid.
 }
 
 func (m *mockKnowledgeRepoForRelEnrichment) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockKnowledgeRepoForRelEnrichment) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
 	return nil
 }
 

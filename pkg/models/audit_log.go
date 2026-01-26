@@ -8,9 +8,9 @@ import (
 
 // AuditEntityType represents the type of entity being audited.
 const (
-	AuditEntityTypeEntity          = "entity"
-	AuditEntityTypeRelationship    = "relationship"
-	AuditEntityTypeGlossaryTerm    = "glossary_term"
+	AuditEntityTypeEntity           = "entity"
+	AuditEntityTypeRelationship     = "relationship"
+	AuditEntityTypeGlossaryTerm     = "glossary_term"
 	AuditEntityTypeProjectKnowledge = "project_knowledge"
 )
 
@@ -31,7 +31,7 @@ type AuditLogEntry struct {
 	Action     string    `json:"action"`      // 'create', 'update', 'delete'
 
 	// Who/how
-	Source string     `json:"source"`              // 'inference', 'mcp', 'manual'
+	Source string     `json:"source"`            // 'inference', 'mcp', 'manual'
 	UserID *uuid.UUID `json:"user_id,omitempty"` // Who triggered the action (from JWT, may be null for system operations)
 
 	// What changed (for updates)
