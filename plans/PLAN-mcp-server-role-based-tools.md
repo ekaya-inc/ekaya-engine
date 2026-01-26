@@ -236,7 +236,7 @@ export interface MCPConfigResponse {
 }
 ```
 
-### Task 5: Frontend - Update MCPServerPage
+### Task 5: Frontend - Update MCPServerPage [x]
 
 **File: `ui/src/pages/MCPServerPage.tsx`**
 

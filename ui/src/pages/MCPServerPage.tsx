@@ -1,42 +1,17 @@
-import { AlertTriangle, ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Loader2, Check, Copy } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 
 import MCPLogo from '../components/icons/MCPLogo';
-import AgentAPIKeyDisplay from '../components/mcp/AgentAPIKeyDisplay';
-import MCPServerURL from '../components/mcp/MCPServerURL';
-import MCPToolGroup from '../components/mcp/MCPToolGroup';
+import AgentToolsSection from '../components/mcp/AgentToolsSection';
+import DeveloperToolsSection from '../components/mcp/DeveloperToolsSection';
+import UserToolsSection from '../components/mcp/UserToolsSection';
 import { Button } from '../components/ui/Button';
-import {
-  TOOL_GROUP_IDS,
-  TOOL_GROUP_METADATA,
-} from '../constants/mcpToolMetadata';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
+import { TOOL_GROUP_IDS } from '../constants/mcpToolMetadata';
 import { useToast } from '../hooks/useToast';
 import engineApi from '../services/engineApi';
-import type { MCPConfigResponse, SubOptionInfo, ToolGroupState } from '../types';
-
-// Helper to get sub-option enabled state from flat ToolGroupState
-const getSubOptionEnabled = (state: ToolGroupState | undefined, subOptionName: string): boolean => {
-  if (!state) return false;
-  switch (subOptionName) {
-    // New sub-options
-    case 'allowOntologyMaintenance':
-      return state.allowOntologyMaintenance ?? false;
-    case 'addQueryTools':
-      return state.addQueryTools ?? false;
-    case 'addOntologyMaintenance':
-      return state.addOntologyMaintenance ?? false;
-    // Legacy sub-options
-    case 'enableExecute':
-      return state.enableExecute ?? false;
-    case 'forceMode':
-      return state.forceMode ?? false;
-    case 'allowClientSuggestions':
-      return state.allowClientSuggestions ?? false;
-    default:
-      return false;
-  }
-};
+import type { MCPConfigResponse } from '../types';
 
 const MCPServerPage = () => {
   const navigate = useNavigate();
@@ -47,25 +22,15 @@ const MCPServerPage = () => {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [agentApiKey, setAgentApiKey] = useState<string>('');
+  const [copied, setCopied] = useState(false);
 
   // Read tool group configs from backend
   const approvedQueriesState = config?.toolGroups[TOOL_GROUP_IDS.APPROVED_QUERIES];
-  const isApprovedQueriesEnabled = approvedQueriesState?.enabled ?? false;
-  const allowOntologyMaintenance = approvedQueriesState?.allowOntologyMaintenance ?? false;
+  const allowOntologyMaintenance = approvedQueriesState?.allowOntologyMaintenance ?? true;
 
   const developerState = config?.toolGroups[TOOL_GROUP_IDS.DEVELOPER];
-  const isDeveloperEnabled = developerState?.enabled ?? false;
-  const addQueryTools = developerState?.addQueryTools ?? false;
-  const addOntologyMaintenance = developerState?.addOntologyMaintenance ?? false;
-
-  const isAgentToolsEnabled = config?.toolGroups[TOOL_GROUP_IDS.AGENT_TOOLS]?.enabled ?? false;
-
-  // Get metadata for tool groups
-  const approvedQueriesMetadata = TOOL_GROUP_METADATA[TOOL_GROUP_IDS.APPROVED_QUERIES];
-  const developerMetadata = TOOL_GROUP_METADATA[TOOL_GROUP_IDS.DEVELOPER];
-
-  // Backend returns tools in canonical order
-  const enabledTools = config?.enabledTools ?? [];
+  const addQueryTools = developerState?.addQueryTools ?? true;
+  const addOntologyMaintenance = developerState?.addOntologyMaintenance ?? true;
 
   const fetchConfig = useCallback(async () => {
     if (!pid) return;
@@ -94,10 +59,10 @@ const MCPServerPage = () => {
     fetchConfig();
   }, [fetchConfig]);
 
-  // Fetch agent API key when Agent Tools is enabled (for Agent Setup Example display)
+  // Fetch agent API key on mount
   useEffect(() => {
     const fetchAgentKey = async () => {
-      if (!pid || !isAgentToolsEnabled) return;
+      if (!pid) return;
 
       try {
         const response = await engineApi.getAgentAPIKey(pid, true);
@@ -110,9 +75,9 @@ const MCPServerPage = () => {
     };
 
     fetchAgentKey();
-  }, [pid, isAgentToolsEnabled]);
+  }, [pid]);
 
-  const handleToggleApprovedQueriesSubOption = async (subOptionName: string, enabled: boolean) => {
+  const handleAllowOntologyMaintenanceChange = async (enabled: boolean) => {
     if (!pid || !config) return;
 
     try {
@@ -120,18 +85,17 @@ const MCPServerPage = () => {
       const response = await engineApi.updateMCPConfig(pid, {
         toolGroups: {
           [TOOL_GROUP_IDS.APPROVED_QUERIES]: {
-            enabled: isApprovedQueriesEnabled,
-            ...(subOptionName === 'allowOntologyMaintenance' ? { allowOntologyMaintenance: enabled } : { allowOntologyMaintenance }),
+            enabled: true,
+            allowOntologyMaintenance: enabled,
           },
         },
       });
 
       if (response.success && response.data) {
         setConfig(response.data);
-        const subOptionMeta = approvedQueriesMetadata?.subOptions?.[subOptionName];
         toast({
           title: 'Success',
-          description: `${subOptionMeta?.name ?? subOptionName} ${enabled ? 'enabled' : 'disabled'}`,
+          description: `Allow Usage to Improve Ontology ${enabled ? 'enabled' : 'disabled'}`,
         });
       } else {
         throw new Error(response.error ?? 'Failed to update configuration');
@@ -148,7 +112,7 @@ const MCPServerPage = () => {
     }
   };
 
-  const handleToggleDeveloperSubOption = async (subOptionName: string, enabled: boolean) => {
+  const handleAddQueryToolsChange = async (enabled: boolean) => {
     if (!pid || !config) return;
 
     try {
@@ -156,19 +120,18 @@ const MCPServerPage = () => {
       const response = await engineApi.updateMCPConfig(pid, {
         toolGroups: {
           [TOOL_GROUP_IDS.DEVELOPER]: {
-            enabled: isDeveloperEnabled,
-            ...(subOptionName === 'addQueryTools' ? { addQueryTools: enabled } : { addQueryTools }),
-            ...(subOptionName === 'addOntologyMaintenance' ? { addOntologyMaintenance: enabled } : { addOntologyMaintenance }),
+            enabled: true,
+            addQueryTools: enabled,
+            addOntologyMaintenance,
           },
         },
       });
 
       if (response.success && response.data) {
         setConfig(response.data);
-        const subOptionMeta = developerMetadata?.subOptions?.[subOptionName];
         toast({
           title: 'Success',
-          description: `${subOptionMeta?.name ?? subOptionName} ${enabled ? 'enabled' : 'disabled'}`,
+          description: `Add Query Tools ${enabled ? 'enabled' : 'disabled'}`,
         });
       } else {
         throw new Error(response.error ?? 'Failed to update configuration');
@@ -185,27 +148,27 @@ const MCPServerPage = () => {
     }
   };
 
-  const handleToggleApprovedQueries = async (enabled: boolean) => {
+  const handleAddOntologyMaintenanceChange = async (enabled: boolean) => {
     if (!pid || !config) return;
 
     try {
       setUpdating(true);
       const response = await engineApi.updateMCPConfig(pid, {
         toolGroups: {
-          [TOOL_GROUP_IDS.APPROVED_QUERIES]: {
-            enabled,
-            allowOntologyMaintenance,
+          [TOOL_GROUP_IDS.DEVELOPER]: {
+            enabled: true,
+            addQueryTools,
+            addOntologyMaintenance: enabled,
           },
         },
       });
 
       if (response.success && response.data) {
         setConfig(response.data);
-        if (enabled) {
-          toast({
-            title: 'Business User Tools Selected',
-          });
-        }
+        toast({
+          title: 'Success',
+          description: `Add Ontology Maintenance ${enabled ? 'enabled' : 'disabled'}`,
+        });
       } else {
         throw new Error(response.error ?? 'Failed to update configuration');
       }
@@ -221,99 +184,15 @@ const MCPServerPage = () => {
     }
   };
 
-  const handleToggleDevTools = async (enabled: boolean) => {
-    await handleToggleToolGroup(TOOL_GROUP_IDS.DEVELOPER, enabled);
-  };
-
-  const handleToggleAgentTools = async (enabled: boolean) => {
-    if (!pid || !config) return;
-
-    if (enabled) {
-      // Fetch revealed API key for the setup example
-      try {
-        const response = await engineApi.getAgentAPIKey(pid, true);
-        if (response.success && response.data) {
-          setAgentApiKey(response.data.key);
-        }
-      } catch (error) {
-        console.error('Failed to fetch agent API key:', error);
-      }
-    }
-
-    await handleToggleToolGroup(TOOL_GROUP_IDS.AGENT_TOOLS, enabled);
-  };
-
-  const handleToggleToolGroup = async (groupName: string, enabled: boolean) => {
-    if (!pid || !config) return;
-
-    const metadata = TOOL_GROUP_METADATA[groupName];
-
+  const handleCopyUrl = async () => {
+    if (!config) return;
     try {
-      setUpdating(true);
-      const response = await engineApi.updateMCPConfig(pid, {
-        toolGroups: {
-          [groupName]: { enabled },
-        },
-      });
-
-      if (response.success && response.data) {
-        setConfig(response.data);
-        if (enabled) {
-          toast({
-            title: `${metadata?.name ?? groupName} Selected`,
-          });
-        }
-      } else {
-        throw new Error(response.error ?? 'Failed to update configuration');
-      }
-    } catch (error) {
-      console.error('Failed to update MCP config:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to update configuration',
-        variant: 'destructive',
-      });
-    } finally {
-      setUpdating(false);
+      await navigator.clipboard.writeText(config.serverUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy URL:', err);
     }
-  };
-
-  // Build sub-options for approved_queries by merging state with frontend metadata
-  const buildApprovedQueriesSubOptions = (): Record<string, SubOptionInfo> | undefined => {
-    if (!approvedQueriesMetadata?.subOptions) return undefined;
-
-    const subOptions: Record<string, SubOptionInfo> = {};
-
-    for (const [subName, subMeta] of Object.entries(approvedQueriesMetadata.subOptions)) {
-      subOptions[subName] = {
-        enabled: getSubOptionEnabled(approvedQueriesState, subName),
-        name: subMeta.name,
-        description: subMeta.description,
-        warning: subMeta.warning,
-        tip: subMeta.tip,
-      };
-    }
-
-    return subOptions;
-  };
-
-  // Build sub-options for developer tools by merging state with frontend metadata
-  const buildDeveloperSubOptions = (): Record<string, SubOptionInfo> | undefined => {
-    if (!developerMetadata?.subOptions) return undefined;
-
-    const subOptions: Record<string, SubOptionInfo> = {};
-
-    for (const [subName, subMeta] of Object.entries(developerMetadata.subOptions)) {
-      subOptions[subName] = {
-        enabled: getSubOptionEnabled(developerState, subName),
-        name: subMeta.name,
-        description: subMeta.description,
-        warning: subMeta.warning,
-        tip: subMeta.tip,
-      };
-    }
-
-    return subOptions;
   };
 
   if (loading) {
@@ -344,74 +223,74 @@ const MCPServerPage = () => {
       <div className="space-y-6">
         {config && (
           <>
-            <MCPServerURL
-              serverUrl={config.serverUrl}
-              docsUrl={`https://us.ekaya.ai/mcp-setup?mcp_url=${encodeURIComponent(config.serverUrl)}`}
-              agentMode={isAgentToolsEnabled}
-              agentApiKey={agentApiKey}
-              enabledTools={enabledTools}
+            {/* Simplified URL Section */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Your MCP Server URL</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 rounded-lg border border-border-light bg-surface-secondary px-4 py-3 font-mono text-sm text-text-primary">
+                    {config.serverUrl}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={handleCopyUrl}
+                    className="shrink-0"
+                    title={copied ? 'Copied!' : 'Copy to clipboard'}
+                  >
+                    {copied ? (
+                      <Check className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+
+                <a
+                  href={`https://us.ekaya.ai/mcp-setup?mcp_url=${encodeURIComponent(config.serverUrl)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-sm text-brand-purple hover:underline"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  MCP Setup Instructions
+                </a>
+
+                <p className="text-sm text-text-secondary font-medium">
+                  Note: Changes to configuration will take effect after restarting the MCP Client.
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* User Tools Section */}
+            <UserToolsSection
+              projectId={pid!}
+              allowOntologyMaintenance={allowOntologyMaintenance}
+              onAllowOntologyMaintenanceChange={handleAllowOntologyMaintenanceChange}
+              enabledTools={config.userTools}
+              disabled={updating}
             />
 
-            {/* Tool Configuration Section */}
-            <div className="border-t border-border-light pt-6">
-              <h2 className="mb-2 text-xl font-semibold text-text-primary">
-                Tool Configuration
-              </h2>
-              <p className="mb-4 text-sm text-text-secondary">
-                Configure the tools exposed to the MCP Client. If you need multiple configurations then create a separate project for each configuration. This ensures that only those project members and agents will have access to their intended tools. This is the safest way to isolate access to your datasource.
-              </p>
-              <div className="space-y-4">
-                {/* Business User Tools - Pre-Approved Queries */}
-                <MCPToolGroup
-                  name="Business User Tools"
-                  description={<>Enable pre-approved SQL queries and ad-hoc query capabilities. The MCP Client can use <Link to={`/projects/${pid}/queries`} className="text-brand-purple hover:underline">Pre-Approved Queries</Link> and the Ontology to craft SQL for ad-hoc requests.</>}
-                  enabled={isApprovedQueriesEnabled}
-                  onToggle={handleToggleApprovedQueries}
-                  disabled={updating}
-                  {...(isApprovedQueriesEnabled ? {
-                    subOptions: buildApprovedQueriesSubOptions(),
-                    onSubOptionToggle: handleToggleApprovedQueriesSubOption,
-                  } : {})}
-                />
+            {/* Developer Tools Section */}
+            <DeveloperToolsSection
+              addQueryTools={addQueryTools}
+              onAddQueryToolsChange={handleAddQueryToolsChange}
+              addOntologyMaintenance={addOntologyMaintenance}
+              onAddOntologyMaintenanceChange={handleAddOntologyMaintenanceChange}
+              enabledTools={config.developerTools}
+              disabled={updating}
+            />
 
-                {/* Agent Tools Section */}
-                {config.toolGroups[TOOL_GROUP_IDS.AGENT_TOOLS] && TOOL_GROUP_METADATA[TOOL_GROUP_IDS.AGENT_TOOLS] && (
-                  <MCPToolGroup
-                    name={TOOL_GROUP_METADATA[TOOL_GROUP_IDS.AGENT_TOOLS]!.name}
-                    description={<>Enable AI Agents to access the database safely and securely with logging and auditing capabilities. AI Agents can only use the enabled <Link to={`/projects/${pid}/queries`} className="text-brand-purple hover:underline">Pre-Approved Queries</Link> so that you have full control over access.</>}
-                    enabled={config.toolGroups[TOOL_GROUP_IDS.AGENT_TOOLS]!.enabled}
-                    onToggle={handleToggleAgentTools}
-                    disabled={updating}
-                  >
-                    {/* API Key section rendered inside the card */}
-                    <div className="mt-4 border-t border-border-light pt-4 pl-4">
-                      <AgentAPIKeyDisplay projectId={pid!} onKeyChange={setAgentApiKey} />
-                      {/* Warning at bottom */}
-                      <div className="mt-3 flex items-start gap-2 rounded-md bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
-                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                        <span>Distribute keys carefully and rotate them periodically.</span>
-                      </div>
-                    </div>
-                  </MCPToolGroup>
-                )}
-
-                {/* Developer Tools */}
-                {config.toolGroups[TOOL_GROUP_IDS.DEVELOPER] && developerMetadata && (
-                  <MCPToolGroup
-                    name={developerMetadata.name}
-                    description={developerMetadata.description}
-                    enabled={isDeveloperEnabled}
-                    onToggle={handleToggleDevTools}
-                    disabled={updating}
-                    {...(isDeveloperEnabled && developerMetadata.warning != null ? { warning: developerMetadata.warning } : {})}
-                    {...(isDeveloperEnabled ? {
-                      subOptions: buildDeveloperSubOptions(),
-                      onSubOptionToggle: handleToggleDeveloperSubOption,
-                    } : {})}
-                  />
-                )}
-              </div>
-            </div>
+            {/* Agent Tools Section */}
+            <AgentToolsSection
+              projectId={pid!}
+              serverUrl={config.serverUrl}
+              agentApiKey={agentApiKey}
+              onAgentApiKeyChange={setAgentApiKey}
+              enabledTools={config.agentTools}
+            />
           </>
         )}
       </div>
