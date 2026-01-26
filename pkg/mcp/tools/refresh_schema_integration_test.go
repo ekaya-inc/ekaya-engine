@@ -80,7 +80,11 @@ func (tc *refreshSchemaTestContext) createTestContext() (context.Context, func()
 	require.NoError(tc.t, err)
 
 	ctx = database.SetTenantScope(ctx, scope)
-	ctx = context.WithValue(ctx, auth.ClaimsKey, &auth.Claims{ProjectID: tc.projectID.String()})
+	// Include admin role to access developer tools (refresh_schema requires developer access)
+	ctx = context.WithValue(ctx, auth.ClaimsKey, &auth.Claims{
+		ProjectID: tc.projectID.String(),
+		Roles:     []string{models.RoleAdmin},
+	})
 
 	return ctx, func() { scope.Close() }
 }

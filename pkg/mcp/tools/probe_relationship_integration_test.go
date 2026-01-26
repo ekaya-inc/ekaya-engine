@@ -138,7 +138,11 @@ func (tc *probeRelationshipTestContext) createTestContext() (context.Context, fu
 	require.NoError(tc.t, err)
 
 	ctx = database.SetTenantScope(ctx, scope)
-	ctx = context.WithValue(ctx, auth.ClaimsKey, &auth.Claims{ProjectID: tc.projectID.String()})
+	// Include admin role to access developer tools (entity/relationship update tools require ontology maintenance)
+	ctx = context.WithValue(ctx, auth.ClaimsKey, &auth.Claims{
+		ProjectID: tc.projectID.String(),
+		Roles:     []string{models.RoleAdmin},
+	})
 
 	return ctx, func() { scope.Close() }
 }
