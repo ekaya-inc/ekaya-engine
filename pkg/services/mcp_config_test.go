@@ -131,6 +131,10 @@ func (m *mockQueryServiceForMCP) RejectQuery(ctx context.Context, projectID, que
 	return nil
 }
 
+func (m *mockQueryServiceForMCP) MoveToPending(ctx context.Context, projectID, queryID uuid.UUID) error {
+	return nil
+}
+
 func (m *mockQueryServiceForMCP) ListPending(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error) {
 	return nil, nil
 }

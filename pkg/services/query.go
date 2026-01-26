@@ -77,6 +77,8 @@ type QueryService interface {
 	ApproveQuery(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string) error
 	// RejectQuery rejects a pending query suggestion with a reason.
 	RejectQuery(ctx context.Context, projectID, queryID uuid.UUID, reviewerID string, reason string) error
+	// MoveToPending moves a rejected query back to pending status for re-review.
+	MoveToPending(ctx context.Context, projectID, queryID uuid.UUID) error
 	// ListPending returns all pending query suggestions for a project.
 	ListPending(ctx context.Context, projectID uuid.UUID) ([]*models.Query, error)
 }
@@ -1339,6 +1341,33 @@ func (s *queryService) RejectQuery(ctx context.Context, projectID, queryID uuid.
 		zap.String("id", queryID.String()),
 		zap.String("reviewer", reviewerID),
 		zap.String("reason", reason),
+	)
+
+	return nil
+}
+
+func (s *queryService) MoveToPending(ctx context.Context, projectID, queryID uuid.UUID) error {
+	// Get the rejected query
+	query, err := s.queryRepo.GetByID(ctx, projectID, queryID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return apperrors.ErrNotFound
+		}
+		return fmt.Errorf("failed to get query: %w", err)
+	}
+
+	// Verify it's rejected
+	if query.Status != "rejected" {
+		return fmt.Errorf("query is not rejected (status: %s)", query.Status)
+	}
+
+	// Update status to pending and clear review fields
+	if err := s.queryRepo.UpdateApprovalStatus(ctx, projectID, queryID, "pending", "", nil); err != nil {
+		return fmt.Errorf("failed to update approval status: %w", err)
+	}
+
+	s.logger.Info("Moved rejected query back to pending",
+		zap.String("id", queryID.String()),
 	)
 
 	return nil

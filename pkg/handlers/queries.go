@@ -233,6 +233,8 @@ func (h *QueriesHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Approve)))
 	mux.HandleFunc("POST "+projectBase+"/{qid}/reject",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Reject)))
+	mux.HandleFunc("POST "+projectBase+"/{qid}/move-to-pending",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.MoveToPending)))
 }
 
 // List handles GET /api/projects/{pid}/datasources/{dsid}/queries
@@ -930,6 +932,63 @@ func (h *QueriesHandler) Reject(w http.ResponseWriter, r *http.Request) {
 		Success: true,
 		Message: "Query rejected",
 		Query:   &queryResp,
+	}
+
+	response := ApiResponse{Success: true, Data: data}
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// MoveToPending handles POST /api/projects/{pid}/queries/{qid}/move-to-pending
+// Moves a rejected query back to pending status for re-review.
+func (h *QueriesHandler) MoveToPending(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	queryID, ok := ParseQueryID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	// Move the query to pending
+	if err := h.queryService.MoveToPending(r.Context(), projectID, queryID); err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			if err := ErrorResponse(w, http.StatusNotFound, "not_found", "Query not found"); err != nil {
+				h.logger.Error("Failed to write error response", zap.Error(err))
+			}
+			return
+		}
+		h.logger.Error("Failed to move query to pending",
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", queryID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusBadRequest, "move_to_pending_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Fetch the updated query to return in response
+	query, err := h.queryService.Get(r.Context(), projectID, queryID)
+	if err != nil {
+		h.logger.Error("Failed to get query after moving to pending",
+			zap.String("project_id", projectID.String()),
+			zap.String("query_id", queryID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "internal_error", "Query moved but failed to fetch"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	queryResp := h.toPendingQueryResponse(query)
+	data := map[string]any{
+		"success": true,
+		"message": "Query moved to pending",
+		"query":   queryResp,
 	}
 
 	response := ApiResponse{Success: true, Data: data}
