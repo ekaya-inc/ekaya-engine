@@ -140,6 +140,7 @@ func (tc *queryTestContext) createTestQuery(ctx context.Context, prompt, sqlQuer
 		SQLQuery:              sqlQuery,
 		Dialect:               "postgres",
 		IsEnabled:             true,
+		Status:                "approved", // Default to approved for test queries
 		UsageCount:            0,
 		Parameters:            []models.QueryParameter{}, // Initialize empty parameters
 		OutputColumns:         []models.OutputColumn{},   // Initialize empty output columns
@@ -1061,6 +1062,7 @@ func TestQueryRepository_ListEnabled_WithParameters(t *testing.T) {
 		SQLQuery:              "SELECT * FROM users WHERE id = {{user_id}}",
 		Dialect:               "postgres",
 		IsEnabled:             true,
+		Status:                "approved",
 		Parameters: []models.QueryParameter{
 			{
 				Name:        "user_id",

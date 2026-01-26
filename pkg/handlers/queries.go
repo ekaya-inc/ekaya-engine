@@ -29,10 +29,19 @@ type QueryResponse struct {
 	Parameters            []models.QueryParameter `json:"parameters,omitempty"`
 	OutputColumns         []models.OutputColumn   `json:"output_columns,omitempty"`
 	Constraints           *string                 `json:"constraints,omitempty"`
+	Tags                  []string                `json:"tags,omitempty"`
 	UsageCount            int                     `json:"usage_count"`
 	LastUsedAt            *string                 `json:"last_used_at,omitempty"`
 	CreatedAt             string                  `json:"created_at"`
 	UpdatedAt             string                  `json:"updated_at"`
+	// Status and review fields for pending/rejected queries
+	Status            string         `json:"status"`
+	SuggestedBy       *string        `json:"suggested_by,omitempty"`
+	SuggestionContext map[string]any `json:"suggestion_context,omitempty"`
+	ParentQueryID     *string        `json:"parent_query_id,omitempty"`
+	ReviewedBy        *string        `json:"reviewed_by,omitempty"`
+	ReviewedAt        *string        `json:"reviewed_at,omitempty"`
+	RejectionReason   *string        `json:"rejection_reason,omitempty"`
 }
 
 // ListQueriesResponse wraps array for frontend compatibility.
@@ -943,14 +952,33 @@ func (h *QueriesHandler) toQueryResponse(q *models.Query) QueryResponse {
 		Parameters:            q.Parameters,
 		OutputColumns:         q.OutputColumns,
 		Constraints:           q.Constraints,
+		Tags:                  q.Tags,
 		UsageCount:            q.UsageCount,
 		CreatedAt:             q.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:             q.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		Status:                q.Status,
+		SuggestedBy:           q.SuggestedBy,
+		SuggestionContext:     q.SuggestionContext,
+		RejectionReason:       q.RejectionReason,
 	}
 
 	if q.LastUsedAt != nil {
 		lastUsed := q.LastUsedAt.Format("2006-01-02T15:04:05Z07:00")
 		resp.LastUsedAt = &lastUsed
+	}
+
+	if q.ParentQueryID != nil {
+		parentID := q.ParentQueryID.String()
+		resp.ParentQueryID = &parentID
+	}
+
+	if q.ReviewedBy != nil {
+		resp.ReviewedBy = q.ReviewedBy
+	}
+
+	if q.ReviewedAt != nil {
+		reviewedAt := q.ReviewedAt.Format("2006-01-02T15:04:05Z07:00")
+		resp.ReviewedAt = &reviewedAt
 	}
 
 	return resp

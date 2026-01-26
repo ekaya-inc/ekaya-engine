@@ -214,7 +214,7 @@ func (r *queryRepository) ListEnabled(ctx context.Context, projectID, datasource
 
 	sql := `SELECT ` + querySelectColumns + `
 		FROM engine_queries
-		WHERE project_id = $1 AND datasource_id = $2 AND is_enabled = true AND deleted_at IS NULL
+		WHERE project_id = $1 AND datasource_id = $2 AND is_enabled = true AND status = 'approved' AND deleted_at IS NULL
 		ORDER BY created_at DESC`
 
 	rows, err := scope.Conn.Query(ctx, sql, projectID, datasourceID)
@@ -251,7 +251,7 @@ func (r *queryRepository) ListEnabledByTags(ctx context.Context, projectID, data
 
 	sql := `SELECT ` + querySelectColumns + `
 		FROM engine_queries
-		WHERE project_id = $1 AND datasource_id = $2 AND is_enabled = true
+		WHERE project_id = $1 AND datasource_id = $2 AND is_enabled = true AND status = 'approved'
 		  AND deleted_at IS NULL AND tags && $3
 		ORDER BY created_at DESC`
 
