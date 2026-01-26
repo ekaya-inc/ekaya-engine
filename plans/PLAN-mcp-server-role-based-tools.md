@@ -496,7 +496,7 @@ export const TOOL_GROUP_IDS = {
 // toggle descriptions, warnings, etc.
 ```
 
-### Task 10: Backend - Update API Handler
+### Task 10: Backend - Update API Handler [x]
 
 **File: `pkg/handlers/mcp_config.go`**
 
