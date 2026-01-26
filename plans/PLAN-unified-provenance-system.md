@@ -15,11 +15,11 @@
   - [x] 4.3: Update Glossary Repository with Provenance Support
   - [x] 4.4: Update Project Knowledge Repository with Provenance Support
 - [x] Task 5: Implement Audit Service
-- [ ] Task 6: Extract User ID from JWT
+- [x] Task 6: Extract User ID from JWT
   - [x] 6.1: Update JWT Parsing to Extract User UUID
   - [x] 6.2: Add Provenance Middleware for HTTP Requests
   - [x] 6.3: Add MCP Provenance Wrapper
-  - [ ] 6.4: Add Inference Provenance Wrapper for DAG Steps
+  - [x] 6.4: Add Inference Provenance Wrapper for DAG Steps
 
 ## Overview
 

@@ -233,10 +233,10 @@ func (s *incrementalDAGService) processNewTable(ctx context.Context, change *mod
 
 	if existingEntity != nil {
 		// Entity exists - check precedence before enriching
-		if !s.changeReviewSvc.CanModify(existingEntity.CreatedBy, existingEntity.UpdatedBy, models.ProvenanceInference) {
+		if !s.changeReviewSvc.CanModify(existingEntity.Source, existingEntity.LastEditSource, models.ProvenanceInference) {
 			s.logger.Info("Skipping entity enrichment due to precedence",
 				zap.String("entity", existingEntity.Name),
-				zap.String("created_by", existingEntity.CreatedBy))
+				zap.String("source", existingEntity.Source))
 			return nil
 		}
 	}
@@ -272,10 +272,10 @@ func (s *incrementalDAGService) processNewTable(ctx context.Context, change *mod
 
 	if existingEntity != nil {
 		// Update existing entity with enrichment
+		// Note: UpdatedBy and LastEditSource are set by the repository from provenance context
 		existingEntity.Name = enrichment.EntityName
 		existingEntity.Description = enrichment.Description
 		existingEntity.Domain = enrichment.Domain
-		existingEntity.UpdatedBy = ptrStr(models.ProvenanceInference)
 
 		if err := s.entityRepo.Update(ctx, existingEntity); err != nil {
 			return fmt.Errorf("update entity: %w", err)
@@ -303,6 +303,7 @@ func (s *incrementalDAGService) processNewTable(ctx context.Context, change *mod
 		}
 
 		// Create new entity
+		// Note: Source and CreatedBy are set by the repository from provenance context
 		entity := &models.OntologyEntity{
 			ProjectID:     change.ProjectID,
 			OntologyID:    ontology.ID,
@@ -312,7 +313,6 @@ func (s *incrementalDAGService) processNewTable(ctx context.Context, change *mod
 			PrimarySchema: "public",
 			PrimaryTable:  change.TableName,
 			PrimaryColumn: primaryColumn,
-			CreatedBy:     models.ProvenanceInference,
 		}
 
 		if err := s.entityRepo.Create(ctx, entity); err != nil {
@@ -488,11 +488,11 @@ func (s *incrementalDAGService) processNewRelationship(ctx context.Context, chan
 	}
 
 	if existingRel != nil {
-		if !s.changeReviewSvc.CanModify(existingRel.CreatedBy, existingRel.UpdatedBy, models.ProvenanceInference) {
+		if !s.changeReviewSvc.CanModify(existingRel.Source, existingRel.LastEditSource, models.ProvenanceInference) {
 			s.logger.Info("Skipping relationship enrichment due to precedence",
 				zap.String("from", sourceEntity.Name),
 				zap.String("to", targetEntity.Name),
-				zap.String("created_by", existingRel.CreatedBy))
+				zap.String("source", existingRel.Source))
 			return nil
 		}
 	}
@@ -526,9 +526,9 @@ func (s *incrementalDAGService) processNewRelationship(ctx context.Context, chan
 
 	if existingRel != nil {
 		// Update existing relationship
+		// Note: UpdatedBy and LastEditSource are set by the repository from provenance context
 		existingRel.Description = &enrichment.Description
 		existingRel.Association = &enrichment.Association
-		existingRel.UpdatedBy = ptrStr(models.ProvenanceInference)
 
 		if err := s.relationshipRepo.Update(ctx, existingRel); err != nil {
 			return fmt.Errorf("update relationship: %w", err)
@@ -545,6 +545,7 @@ func (s *incrementalDAGService) processNewRelationship(ctx context.Context, chan
 		}
 
 		// Create new relationship
+		// Note: Source and CreatedBy are set by the repository from provenance context
 		rel := &models.EntityRelationship{
 			OntologyID:        ontology.ID,
 			SourceEntityID:    sourceEntity.ID,
@@ -559,7 +560,6 @@ func (s *incrementalDAGService) processNewRelationship(ctx context.Context, chan
 			Cardinality:       cardinality,
 			Description:       &enrichment.Description,
 			Association:       &enrichment.Association,
-			CreatedBy:         models.ProvenanceInference,
 		}
 
 		if err := s.relationshipRepo.Create(ctx, rel); err != nil {
