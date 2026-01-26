@@ -365,11 +365,11 @@ func (s *incrementalDAGService) processNewColumn(ctx context.Context, change *mo
 	}
 
 	if existing != nil {
-		if !s.changeReviewSvc.CanModify(existing.CreatedBy, existing.UpdatedBy, models.ProvenanceInferred) {
+		if !s.changeReviewSvc.CanModify(existing.Source, existing.LastEditSource, models.ProvenanceInferred) {
 			s.logger.Info("Skipping column enrichment due to precedence",
 				zap.String("table", change.TableName),
 				zap.String("column", change.ColumnName),
-				zap.String("created_by", existing.CreatedBy))
+				zap.String("source", existing.Source))
 			return nil
 		}
 	}
@@ -413,14 +413,15 @@ func (s *incrementalDAGService) processNewColumn(ctx context.Context, change *mo
 		ColumnName:  change.ColumnName,
 		Description: &enrichment.Description,
 		Role:        &enrichment.Role,
-		CreatedBy:   models.ProvenanceInferred,
+		Source:      models.ProvenanceInferred,
 	}
 
 	if existing != nil {
 		metadata.ID = existing.ID
+		metadata.Source = existing.Source
 		metadata.CreatedBy = existing.CreatedBy
 		metadata.CreatedAt = existing.CreatedAt
-		metadata.UpdatedBy = ptrStr(models.ProvenanceInferred)
+		metadata.LastEditSource = ptrStr(models.ProvenanceInferred)
 	}
 
 	if len(enrichment.EnumValues) > 0 {
@@ -596,7 +597,7 @@ func (s *incrementalDAGService) processEnumUpdate(ctx context.Context, change *m
 
 	// Check precedence if metadata exists
 	if existing != nil {
-		if !s.changeReviewSvc.CanModify(existing.CreatedBy, existing.UpdatedBy, models.ProvenanceInferred) {
+		if !s.changeReviewSvc.CanModify(existing.Source, existing.LastEditSource, models.ProvenanceInferred) {
 			s.logger.Info("Skipping enum update due to precedence",
 				zap.String("table", change.TableName),
 				zap.String("column", change.ColumnName))
@@ -630,17 +631,18 @@ func (s *incrementalDAGService) processEnumUpdate(ctx context.Context, change *m
 		TableName:  change.TableName,
 		ColumnName: change.ColumnName,
 		EnumValues: mergedValues,
-		CreatedBy:  models.ProvenanceInferred,
+		Source:     models.ProvenanceInferred,
 	}
 
 	if existing != nil {
 		metadata.ID = existing.ID
+		metadata.Source = existing.Source
 		metadata.CreatedBy = existing.CreatedBy
 		metadata.CreatedAt = existing.CreatedAt
 		metadata.Description = existing.Description
 		metadata.Entity = existing.Entity
 		metadata.Role = existing.Role
-		metadata.UpdatedBy = ptrStr(models.ProvenanceInferred)
+		metadata.LastEditSource = ptrStr(models.ProvenanceInferred)
 	}
 
 	if err := s.columnMetadataRepo.Upsert(ctx, metadata); err != nil {

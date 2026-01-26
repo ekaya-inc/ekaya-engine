@@ -287,7 +287,7 @@ func (s *changeReviewService) applyCreateColumnMetadata(ctx context.Context, cha
 		ProjectID:  change.ProjectID,
 		TableName:  change.TableName,
 		ColumnName: change.ColumnName,
-		CreatedBy:  reviewerSource,
+		Source:     reviewerSource,
 	}
 
 	if desc, ok := payload["description"].(string); ok {
@@ -321,9 +321,9 @@ func (s *changeReviewService) applyUpdateColumnMetadata(ctx context.Context, cha
 
 	if existing != nil {
 		// Check precedence
-		if !s.CanModify(existing.CreatedBy, existing.UpdatedBy, reviewerSource) {
+		if !s.CanModify(existing.Source, existing.LastEditSource, reviewerSource) {
 			return fmt.Errorf("cannot modify column metadata: precedence blocked (existing: %s, reviewer: %s)",
-				s.precedenceChecker.GetEffectiveSource(existing.CreatedBy, existing.UpdatedBy), reviewerSource)
+				s.precedenceChecker.GetEffectiveSource(existing.Source, existing.LastEditSource), reviewerSource)
 		}
 	}
 
@@ -334,15 +334,16 @@ func (s *changeReviewService) applyUpdateColumnMetadata(ctx context.Context, cha
 	}
 
 	meta := &models.ColumnMetadata{
-		ProjectID:  change.ProjectID,
-		TableName:  change.TableName,
-		ColumnName: change.ColumnName,
-		CreatedBy:  reviewerSource,
-		UpdatedBy:  &reviewerSource,
+		ProjectID:      change.ProjectID,
+		TableName:      change.TableName,
+		ColumnName:     change.ColumnName,
+		Source:         reviewerSource,
+		LastEditSource: &reviewerSource,
 	}
 
 	if existing != nil {
 		meta.ID = existing.ID
+		meta.Source = existing.Source
 		meta.CreatedBy = existing.CreatedBy
 		meta.CreatedAt = existing.CreatedAt
 	}

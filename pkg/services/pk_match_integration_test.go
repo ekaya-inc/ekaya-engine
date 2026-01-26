@@ -102,6 +102,9 @@ func TestPKMatchDiscovery_ChannelsOwnerToUsersUserID(t *testing.T) {
 		t.Fatalf("Failed to create ontology: %v", err)
 	}
 
+	// Add provenance context for entity creation
+	ctx = models.WithInferredProvenance(ctx, uuid.Nil)
+
 	// Create user entity
 	userEntity := &models.OntologyEntity{
 		ProjectID:     projectID,

@@ -155,7 +155,7 @@ func TestProcessEnumUpdate_MergesValues(t *testing.T) {
 			TableName:  "orders",
 			ColumnName: "status",
 			EnumValues: []string{"pending", "shipped"},
-			CreatedBy:  models.ProvenanceInferred,
+			Source:     models.ProvenanceInferred,
 		},
 	}
 
@@ -209,7 +209,7 @@ func TestProcessEnumUpdate_RespectsExistingValues(t *testing.T) {
 			TableName:  "orders",
 			ColumnName: "status",
 			EnumValues: []string{"pending", "shipped"},
-			CreatedBy:  models.ProvenanceInferred,
+			Source:     models.ProvenanceInferred,
 		},
 	}
 
@@ -263,7 +263,7 @@ func TestProcessEnumUpdate_SkipsDueToPrecedence(t *testing.T) {
 			TableName:  "orders",
 			ColumnName: "status",
 			EnumValues: []string{"pending"},
-			CreatedBy:  models.ProvenanceManual, // Manual created - inference can't modify
+			Source:     models.ProvenanceManual, // Manual created - inference can't modify
 		},
 	}
 
