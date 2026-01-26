@@ -53,10 +53,13 @@ import {
 } from './ui/Card';
 import { Input } from './ui/Input';
 
+export type QueryFilterType = 'approved' | 'pending' | 'rejected';
+
 interface QueriesViewProps {
   projectId: string;
   datasourceId: string;
   dialect: SqlDialect;
+  filter: QueryFilterType;
   onPendingCountChange?: () => void;
 }
 
@@ -71,9 +74,7 @@ interface EditingState {
   constraints: string;
 }
 
-type QueryFilterType = 'all' | 'read-only' | 'modifying' | 'pending' | 'rejected';
-
-const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange }: QueriesViewProps) => {
+const QueriesView = ({ projectId, datasourceId, dialect, filter, onPendingCountChange }: QueriesViewProps) => {
   const { toast } = useToast();
 
   // Data state
@@ -88,7 +89,6 @@ const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange }:
   const [isCreating, setIsCreating] = useState(false);
   const [editingQueryId, setEditingQueryId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [queryFilter, setQueryFilter] = useState<QueryFilterType>('all');
 
   // Form state for creating
   const [newQuery, setNewQuery] = useState<EditingState>({
@@ -249,7 +249,7 @@ const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange }:
     []
   );
 
-  // Filter queries based on search and type filter
+  // Filter queries based on search and status filter (from parent)
   const filteredQueries = queries.filter((query) => {
     // Text search filter
     const matchesSearch =
@@ -258,27 +258,10 @@ const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange }:
         .includes(searchTerm.toLowerCase()) ||
       query.sql_query.toLowerCase().includes(searchTerm.toLowerCase());
 
-    // Type/status filter
-    let matchesTypeFilter = false;
-    switch (queryFilter) {
-      case 'all':
-        matchesTypeFilter = true;
-        break;
-      case 'read-only':
-        matchesTypeFilter = !query.allows_modification;
-        break;
-      case 'modifying':
-        matchesTypeFilter = query.allows_modification;
-        break;
-      case 'pending':
-        matchesTypeFilter = query.status === 'pending';
-        break;
-      case 'rejected':
-        matchesTypeFilter = query.status === 'rejected';
-        break;
-    }
+    // Status filter from parent tab menu
+    const matchesStatusFilter = query.status === filter;
 
-    return matchesSearch && matchesTypeFilter;
+    return matchesSearch && matchesStatusFilter;
   });
 
   /**
@@ -799,24 +782,19 @@ const QueriesView = ({ projectId, datasourceId, dialect, onPendingCountChange }:
                   className="pl-8 h-9"
                 />
               </div>
-              <select
-                value={queryFilter}
-                onChange={(e) => setQueryFilter(e.target.value as QueryFilterType)}
-                className="mt-2 h-8 w-full px-2 text-xs border border-border-medium rounded-md bg-surface-primary text-text-primary focus:outline-none focus:ring-2 focus:ring-brand-purple"
-              >
-                <option value="all">All queries</option>
-                <option value="read-only">Read-only</option>
-                <option value="modifying">Modifies data</option>
-                <option value="pending">Pending review</option>
-                <option value="rejected">Rejected</option>
-              </select>
             </CardHeader>
             <CardContent className="flex-1 overflow-y-auto p-2">
               {filteredQueries.length === 0 ? (
                 <div className="text-center py-8">
                   <Database className="h-8 w-8 text-text-tertiary mx-auto mb-2" />
                   <p className="text-sm text-text-secondary">
-                    {searchTerm ? 'No queries found' : 'No queries created yet'}
+                    {searchTerm
+                      ? 'No queries found'
+                      : filter === 'approved'
+                        ? 'No approved queries yet'
+                        : filter === 'pending'
+                          ? 'No queries pending approval'
+                          : 'No rejected queries'}
                   </p>
                 </div>
               ) : (

@@ -191,7 +191,7 @@ describe('QueriesView', () => {
   it('renders loading state initially', () => {
     vi.mocked(engineApi.listQueries).mockReturnValue(new Promise(() => {}));
 
-    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
+    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" filter="approved" />);
 
     expect(screen.getByText(/loading queries/i)).toBeInTheDocument();
   });
@@ -202,7 +202,7 @@ describe('QueriesView', () => {
       data: { queries: mockQueries },
     });
 
-    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
+    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" filter="approved" />);
 
     await waitFor(() => {
       expect(screen.getByText('Show top customers')).toBeInTheDocument();
@@ -216,10 +216,10 @@ describe('QueriesView', () => {
       data: { queries: [] },
     });
 
-    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
+    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" filter="approved" />);
 
     await waitFor(() => {
-      expect(screen.getByText(/no queries created yet/i)).toBeInTheDocument();
+      expect(screen.getByText(/no approved queries yet/i)).toBeInTheDocument();
     });
   });
 
@@ -229,7 +229,7 @@ describe('QueriesView', () => {
       error: 'Database connection failed',
     });
 
-    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
+    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" filter="approved" />);
 
     await waitFor(() => {
       expect(screen.getByText(/failed to load queries/i)).toBeInTheDocument();
@@ -243,7 +243,7 @@ describe('QueriesView', () => {
       data: { queries: mockQueries },
     });
 
-    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
+    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" filter="approved" />);
 
     await waitFor(() => {
       expect(screen.getByText('Show top customers')).toBeInTheDocument();
@@ -265,7 +265,7 @@ describe('QueriesView', () => {
       data: { queries: mockQueries },
     });
 
-    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
+    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" filter="approved" />);
 
     await waitFor(() => {
       expect(screen.getByText('Show top customers')).toBeInTheDocument();
@@ -284,7 +284,7 @@ describe('QueriesView', () => {
       data: { queries: mockQueries },
     });
 
-    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
+    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" filter="approved" />);
 
     await waitFor(() => {
       expect(screen.getByText('Show top customers')).toBeInTheDocument();
@@ -302,7 +302,7 @@ describe('QueriesView', () => {
       data: { queries: mockQueries },
     });
 
-    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
+    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" filter="approved" />);
 
     await waitFor(() => {
       expect(screen.getByText('Show top customers')).toBeInTheDocument();
@@ -324,7 +324,7 @@ describe('QueriesView', () => {
       data: { queries: mockQueries },
     });
 
-    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
+    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" filter="approved" />);
 
     await waitFor(() => {
       expect(screen.getByText('Show top customers')).toBeInTheDocument();
@@ -351,7 +351,7 @@ describe('QueriesView', () => {
       data: { queries: mockQueries },
     });
 
-    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
+    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" filter="approved" />);
 
     await waitFor(() => {
       expect(screen.getByText('Show top customers')).toBeInTheDocument();
@@ -369,7 +369,7 @@ describe('QueriesView', () => {
       data: { queries: mockQueries },
     });
 
-    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
+    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" filter="approved" />);
 
     await waitFor(() => {
       expect(screen.getByText('Show top customers')).toBeInTheDocument();
@@ -386,7 +386,7 @@ describe('QueriesView', () => {
       data: { queries: mockQueries },
     });
 
-    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
+    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" filter="approved" />);
 
     await waitFor(() => {
       expect(screen.getByText('Daily sales report')).toBeInTheDocument();
@@ -397,101 +397,35 @@ describe('QueriesView', () => {
     expect(disabledQueryButton).toHaveClass('opacity-50');
   });
 
-  it('filters queries by pending status', async () => {
+  it('filters queries based on filter prop', async () => {
     vi.mocked(engineApi.listQueries).mockResolvedValue({
       success: true,
       data: { queries: mockQueriesWithStatuses },
     });
 
-    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
+    // Render with pending filter
+    const { rerender } = render(
+      <QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" filter="pending" />
+    );
 
     await waitFor(() => {
-      expect(screen.getByText('Approved query')).toBeInTheDocument();
+      // Only pending query should be visible
       expect(screen.getByText('Pending query')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('Approved query')).not.toBeInTheDocument();
+    expect(screen.queryByText('Rejected query')).not.toBeInTheDocument();
+
+    // Rerender with rejected filter
+    rerender(
+      <QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" filter="rejected" />
+    );
+
+    await waitFor(() => {
       expect(screen.getByText('Rejected query')).toBeInTheDocument();
     });
 
-    // Select the Pending review filter
-    const filterSelect = screen.getByRole('combobox');
-    fireEvent.change(filterSelect, { target: { value: 'pending' } });
-
-    // Only pending query should be visible
-    expect(screen.queryByText('Approved query')).not.toBeInTheDocument();
-    expect(screen.getByText('Pending query')).toBeInTheDocument();
-    expect(screen.queryByText('Rejected query')).not.toBeInTheDocument();
-    expect(screen.queryByText('Modifying query')).not.toBeInTheDocument();
-  });
-
-  it('filters queries by rejected status', async () => {
-    vi.mocked(engineApi.listQueries).mockResolvedValue({
-      success: true,
-      data: { queries: mockQueriesWithStatuses },
-    });
-
-    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Approved query')).toBeInTheDocument();
-    });
-
-    // Select the Rejected filter
-    const filterSelect = screen.getByRole('combobox');
-    fireEvent.change(filterSelect, { target: { value: 'rejected' } });
-
-    // Only rejected query should be visible
     expect(screen.queryByText('Approved query')).not.toBeInTheDocument();
     expect(screen.queryByText('Pending query')).not.toBeInTheDocument();
-    expect(screen.getByText('Rejected query')).toBeInTheDocument();
-    expect(screen.queryByText('Modifying query')).not.toBeInTheDocument();
-  });
-
-  it('shows filter options for pending and rejected', async () => {
-    vi.mocked(engineApi.listQueries).mockResolvedValue({
-      success: true,
-      data: { queries: mockQueries },
-    });
-
-    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Show top customers')).toBeInTheDocument();
-    });
-
-    // Check that the filter dropdown has the new options
-    const filterSelect = screen.getByRole('combobox');
-    expect(filterSelect).toBeInTheDocument();
-
-    // Check for the option elements
-    const options = filterSelect.querySelectorAll('option');
-    const optionValues = Array.from(options).map(opt => opt.value);
-
-    expect(optionValues).toContain('all');
-    expect(optionValues).toContain('read-only');
-    expect(optionValues).toContain('modifying');
-    expect(optionValues).toContain('pending');
-    expect(optionValues).toContain('rejected');
-  });
-
-  it('filters queries by modifying type', async () => {
-    vi.mocked(engineApi.listQueries).mockResolvedValue({
-      success: true,
-      data: { queries: mockQueriesWithStatuses },
-    });
-
-    render(<QueriesView projectId="proj-1" datasourceId="ds-1" dialect="PostgreSQL" />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Modifying query')).toBeInTheDocument();
-    });
-
-    // Select the Modifies data filter
-    const filterSelect = screen.getByRole('combobox');
-    fireEvent.change(filterSelect, { target: { value: 'modifying' } });
-
-    // Only modifying query should be visible
-    expect(screen.queryByText('Approved query')).not.toBeInTheDocument();
-    expect(screen.queryByText('Pending query')).not.toBeInTheDocument();
-    expect(screen.queryByText('Rejected query')).not.toBeInTheDocument();
-    expect(screen.getByText('Modifying query')).toBeInTheDocument();
   });
 });

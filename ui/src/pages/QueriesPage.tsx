@@ -7,7 +7,7 @@ import { ArrowLeft, Database, AlertCircle } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
-import QueriesView from '../components/QueriesView';
+import QueriesView, { type QueryFilterType } from '../components/QueriesView';
 import { Button } from '../components/ui/Button';
 import { getProviderById, getAdapterInfo } from '../constants/adapters';
 import { useDatasourceConnection } from '../contexts/DatasourceConnectionContext';
@@ -19,6 +19,7 @@ const QueriesPage = () => {
   const { pid } = useParams<{ pid: string }>();
   const { selectedDatasource, isConnected } = useDatasourceConnection();
   const [pendingCount, setPendingCount] = useState<number>(0);
+  const [activeFilter, setActiveFilter] = useState<QueryFilterType>('approved');
 
   // Fetch pending query count
   const fetchPendingCount = useCallback(async () => {
@@ -111,17 +112,10 @@ const QueriesPage = () => {
         </Button>
         <div className="flex items-center justify-between">
           <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
-                <Database className="h-8 w-8 text-blue-500" />
-                Pre-Approved Queries
-              </h1>
-              {pendingCount > 0 && (
-                <span className="inline-flex items-center justify-center px-2.5 py-0.5 text-sm font-medium rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
-                  {pendingCount} pending
-                </span>
-              )}
-            </div>
+            <h1 className="text-3xl font-bold text-text-primary flex items-center gap-2">
+              <Database className="h-8 w-8 text-blue-500" />
+              Pre-Approved Queries
+            </h1>
             <p className="mt-2 text-text-secondary">
               Manage pre-approved natural language queries and their
               corresponding SQL
@@ -148,11 +142,57 @@ const QueriesPage = () => {
         </div>
       </div>
 
+      {/* Tab Menu */}
+      <div className="border-b border-border-light mb-6">
+        <nav className="flex gap-6" aria-label="Query filters">
+          <button
+            onClick={() => setActiveFilter('approved')}
+            className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+              activeFilter === 'approved'
+                ? 'border-brand-purple text-brand-purple'
+                : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border-medium'
+            }`}
+          >
+            Approved Queries
+          </button>
+          <button
+            onClick={() => setActiveFilter('pending')}
+            className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+              activeFilter === 'pending'
+                ? 'border-brand-purple text-brand-purple'
+                : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border-medium'
+            }`}
+          >
+            Queries Pending Approval
+            {pendingCount > 0 && (
+              <span className={`inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium rounded-full ${
+                activeFilter === 'pending'
+                  ? 'bg-brand-purple/10 text-brand-purple'
+                  : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+              }`}>
+                {pendingCount}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveFilter('rejected')}
+            className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+              activeFilter === 'rejected'
+                ? 'border-brand-purple text-brand-purple'
+                : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border-medium'
+            }`}
+          >
+            Rejected Queries
+          </button>
+        </nav>
+      </div>
+
       {/* Queries Management Interface */}
       <QueriesView
         projectId={pid}
         datasourceId={selectedDatasource.datasourceId}
         dialect={dialect}
+        filter={activeFilter}
         onPendingCountChange={fetchPendingCount}
       />
     </div>
