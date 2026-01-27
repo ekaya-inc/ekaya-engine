@@ -340,3 +340,67 @@ func TestHealthTool_InvalidProjectID(t *testing.T) {
 		t.Error("expected error message for invalid project ID")
 	}
 }
+
+func TestHealthTool_IncludesProjectID(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	deps := &HealthToolDeps{
+		ProjectService: &mockProjectService{
+			defaultDatasourceID: datasourceID,
+		},
+		DatasourceService: &mockDatasourceService{
+			datasource: &models.Datasource{
+				ID:             datasourceID,
+				Name:           "test-db",
+				DatasourceType: "postgres",
+				Config:         map[string]any{"host": "localhost"},
+			},
+			connectionError: nil,
+		},
+		Logger: zap.NewNop(),
+	}
+
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+	RegisterHealthTool(mcpServer, "1.0.0", deps)
+
+	// Create context with claims
+	ctx := withClaims(context.Background(), projectID.String())
+	request := `{"jsonrpc":"2.0","method":"tools/call","params":{"name":"health"},"id":1}`
+	result := mcpServer.HandleMessage(ctx, []byte(request))
+
+	resultBytes, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("failed to marshal result: %v", err)
+	}
+
+	var response struct {
+		Result struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(resultBytes, &response); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if len(response.Result.Content) == 0 {
+		t.Fatal("expected content in response")
+	}
+
+	// Parse the health result and verify project_id is present
+	var health struct {
+		Engine    string `json:"engine"`
+		Version   string `json:"version"`
+		ProjectID string `json:"project_id"`
+	}
+	if err := json.Unmarshal([]byte(response.Result.Content[0].Text), &health); err != nil {
+		t.Fatalf("failed to unmarshal health result: %v", err)
+	}
+
+	if health.ProjectID != projectID.String() {
+		t.Errorf("expected project_id '%s', got '%s'", projectID.String(), health.ProjectID)
+	}
+}

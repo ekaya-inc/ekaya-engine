@@ -26,6 +26,7 @@ type HealthToolDeps struct {
 type healthResult struct {
 	Engine     string            `json:"engine"`
 	Version    string            `json:"version"`
+	ProjectID  string            `json:"project_id,omitempty"`
 	Datasource *datasourceHealth `json:"datasource,omitempty"`
 }
 
@@ -52,6 +53,11 @@ func RegisterHealthTool(s *server.MCPServer, version string, deps *HealthToolDep
 		result := healthResult{
 			Engine:  "healthy",
 			Version: version,
+		}
+
+		// Include project ID from claims if available
+		if claims, ok := auth.GetClaims(ctx); ok {
+			result.ProjectID = claims.ProjectID
 		}
 
 		// Check datasource health if deps are available

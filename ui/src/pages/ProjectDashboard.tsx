@@ -224,6 +224,7 @@ const ProjectDashboard = () => {
     setIsSaving(true);
     setSaveError(null);
     setTestResult(null);
+    setIsProviderDropdownOpen(false);
 
     try {
       let body: Record<string, string>;
@@ -280,8 +281,7 @@ const ProjectDashboard = () => {
       }
 
       setActiveAIConfig(configType);
-      // Reload to get latest config
-      await loadAIConfig();
+      setSelectedAIOption(null); // Collapse the panel after successful save
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save configuration');
     } finally {

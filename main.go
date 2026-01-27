@@ -159,7 +159,7 @@ func main() {
 	centralClient := central.NewClient(logger)
 
 	// Create services
-	projectService := services.NewProjectService(db, projectRepo, userRepo, ontologyRepo, centralClient, cfg.BaseURL, logger)
+	projectService := services.NewProjectService(db, projectRepo, userRepo, ontologyRepo, mcpConfigRepo, agentAPIKeyService, centralClient, cfg.BaseURL, logger)
 	userService := services.NewUserService(userRepo, logger)
 	datasourceService := services.NewDatasourceService(datasourceRepo, ontologyRepo, credentialEncryptor, adapterFactory, projectService, logger)
 	schemaService := services.NewSchemaService(schemaRepo, ontologyEntityRepo, ontologyRepo, entityRelationshipRepo, datasourceService, adapterFactory, logger)
@@ -328,6 +328,17 @@ func main() {
 		Logger:           logger,
 	}
 	mcptools.RegisterApprovedQueriesTools(mcpServer.MCP(), queryToolDeps)
+
+	// Register dev query tools for administrators to manage query suggestions
+	// (approve/reject, create/update/delete queries directly)
+	devQueryToolDeps := &mcptools.DevQueryToolDeps{
+		DB:               db,
+		MCPConfigService: mcpConfigService,
+		ProjectService:   projectService,
+		QueryService:     queryService,
+		Logger:           logger,
+	}
+	mcptools.RegisterDevQueryTools(mcpServer.MCP(), devQueryToolDeps)
 
 	// Register schema tools for entity/role semantic context
 	schemaToolDeps := &mcptools.SchemaToolDeps{

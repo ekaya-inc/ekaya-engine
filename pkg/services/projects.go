@@ -68,13 +68,15 @@ type ProjectService interface {
 
 // projectService implements ProjectService.
 type projectService struct {
-	db            *database.DB
-	projectRepo   repositories.ProjectRepository
-	userRepo      repositories.UserRepository
-	ontologyRepo  repositories.OntologyRepository
-	centralClient *central.Client
-	baseURL       string
-	logger        *zap.Logger
+	db                 *database.DB
+	projectRepo        repositories.ProjectRepository
+	userRepo           repositories.UserRepository
+	ontologyRepo       repositories.OntologyRepository
+	mcpConfigRepo      repositories.MCPConfigRepository
+	agentAPIKeyService AgentAPIKeyService
+	centralClient      *central.Client
+	baseURL            string
+	logger             *zap.Logger
 }
 
 // NewProjectService creates a new project service with dependencies.
@@ -83,18 +85,22 @@ func NewProjectService(
 	projectRepo repositories.ProjectRepository,
 	userRepo repositories.UserRepository,
 	ontologyRepo repositories.OntologyRepository,
+	mcpConfigRepo repositories.MCPConfigRepository,
+	agentAPIKeyService AgentAPIKeyService,
 	centralClient *central.Client,
 	baseURL string,
 	logger *zap.Logger,
 ) ProjectService {
 	return &projectService{
-		db:            db,
-		projectRepo:   projectRepo,
-		userRepo:      userRepo,
-		ontologyRepo:  ontologyRepo,
-		centralClient: centralClient,
-		baseURL:       baseURL,
-		logger:        logger,
+		db:                 db,
+		projectRepo:        projectRepo,
+		userRepo:           userRepo,
+		ontologyRepo:       ontologyRepo,
+		mcpConfigRepo:      mcpConfigRepo,
+		agentAPIKeyService: agentAPIKeyService,
+		centralClient:      centralClient,
+		baseURL:            baseURL,
+		logger:             logger,
 	}
 }
 
@@ -163,6 +169,16 @@ func (s *projectService) Provision(ctx context.Context, projectID uuid.UUID, nam
 	// This is done within the existing scope since we don't have tenant context yet.
 	s.createEmptyOntology(ctx, projectID)
 
+	// Create MCP config with defaults.
+	// This ensures tools are configured correctly from the start and prevents
+	// other code paths (like SetAgentAPIKey) from creating config with wrong defaults.
+	s.createDefaultMCPConfig(ctx, projectID)
+
+	// Generate Agent API Key for MCP authentication.
+	// This creates the key immediately so it's available when the user first visits
+	// the MCP Server configuration page. Users can regenerate the key there if needed.
+	s.generateAgentAPIKey(ctx, projectID)
+
 	// Extract URLs from parameters
 	var papiURL, projectsPageURL, projectPageURL string
 	if params != nil {
@@ -202,6 +218,41 @@ func (s *projectService) createEmptyOntology(ctx context.Context, projectID uuid
 
 	if err := s.ontologyRepo.Create(ctx, emptyOntology); err != nil {
 		s.logger.Error("failed to create initial ontology",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err),
+		)
+	}
+}
+
+// createDefaultMCPConfig creates the MCP config with default settings for a new project.
+// This ensures tools are configured correctly from the start and prevents
+// other code paths (like SetAgentAPIKey) from creating config with wrong defaults.
+// Errors are logged but not propagated since this is best-effort.
+func (s *projectService) createDefaultMCPConfig(ctx context.Context, projectID uuid.UUID) {
+	if s.mcpConfigRepo == nil {
+		return
+	}
+
+	defaultConfig := models.DefaultMCPConfig(projectID)
+	if err := s.mcpConfigRepo.Upsert(ctx, defaultConfig); err != nil {
+		s.logger.Error("failed to create default MCP config",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err),
+		)
+	}
+}
+
+// generateAgentAPIKey generates an Agent API Key for MCP authentication.
+// This is called during project provisioning so the key is ready when the user
+// first visits the MCP Server configuration page. Users can regenerate the key there if needed.
+// Errors are logged but not propagated since this is best-effort.
+func (s *projectService) generateAgentAPIKey(ctx context.Context, projectID uuid.UUID) {
+	if s.agentAPIKeyService == nil {
+		return
+	}
+
+	if _, err := s.agentAPIKeyService.GenerateKey(ctx, projectID); err != nil {
+		s.logger.Error("failed to generate agent API key",
 			zap.String("project_id", projectID.String()),
 			zap.Error(err),
 		)

@@ -230,9 +230,9 @@ func (s *mcpConfigService) IsToolGroupEnabled(ctx context.Context, projectID uui
 		return false, fmt.Errorf("failed to get MCP config: %w", err)
 	}
 
-	// If no config exists, use defaults (all tool groups disabled)
+	// If no config exists, use defaults (all tool groups enabled)
 	if config == nil {
-		return false, nil
+		config = models.DefaultMCPConfig(projectID)
 	}
 
 	if groupConfig, ok := config.ToolGroups[toolGroup]; ok {
@@ -249,9 +249,9 @@ func (s *mcpConfigService) GetToolGroupConfig(ctx context.Context, projectID uui
 		return nil, fmt.Errorf("failed to get MCP config: %w", err)
 	}
 
-	// If no config exists, return nil (use defaults)
+	// If no config exists, use defaults
 	if config == nil {
-		return nil, nil
+		config = models.DefaultMCPConfig(projectID)
 	}
 
 	if groupConfig, ok := config.ToolGroups[toolGroup]; ok {

@@ -52,8 +52,8 @@ func DefaultMCPConfig(projectID uuid.UUID) *MCPConfig {
 			"user": {AllowOntologyMaintenance: true},
 			// Developer tools - both sub-options default to true
 			"developer": {AddQueryTools: true, AddOntologyMaintenance: true},
-			// Agent tools - no sub-options
-			"agent_tools": {},
+			// Agent tools - enabled by default (Enabled is legacy but still checked for agents)
+			"agent_tools": {Enabled: true},
 		},
 	}
 }
