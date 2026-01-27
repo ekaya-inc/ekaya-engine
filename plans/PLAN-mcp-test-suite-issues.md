@@ -33,7 +33,7 @@ This plan addresses issues discovered during the MCP tool test suite run on 2026
 
 ---
 
-## Task 2: Fix Question Status Transition Protection
+## Task 2: Fix Question Status Transition Protection ✅
 
 **Issue:** `./plans/ISSUE-question-status-transition-not-protected.md`
 

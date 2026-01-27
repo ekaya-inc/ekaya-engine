@@ -467,6 +467,12 @@ func registerResolveOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 			return NewErrorResult("QUESTION_NOT_FOUND", fmt.Sprintf("ontology question %q not found", questionID.String())), nil
 		}
 
+		// Check if transition is allowed (cannot resolve terminal states)
+		if !question.CanTransitionTo(models.QuestionStatusAnswered) {
+			return NewErrorResult("INVALID_STATUS_TRANSITION",
+				fmt.Sprintf("cannot resolve question with status %q - question is already in a terminal state", question.Status)), nil
+		}
+
 		// Mark question as answered with optional resolution notes
 		// Use nil for answered_by since this is an agent action (not a specific user)
 		if resolutionNotes != "" {
@@ -568,6 +574,12 @@ func registerSkipOntologyQuestionTool(s *server.MCPServer, deps *QuestionToolDep
 			return NewErrorResult("QUESTION_NOT_FOUND", fmt.Sprintf("ontology question %q not found", questionID.String())), nil
 		}
 
+		// Check if transition is allowed (cannot skip terminal states)
+		if !question.CanTransitionTo(models.QuestionStatusSkipped) {
+			return NewErrorResult("INVALID_STATUS_TRANSITION",
+				fmt.Sprintf("cannot skip question with status %q - question is already in a terminal state", question.Status)), nil
+		}
+
 		// Update question status to skipped with reason
 		err = deps.QuestionRepo.UpdateStatusWithReason(tenantCtx, questionID, models.QuestionStatusSkipped, reason)
 		if err != nil {
@@ -659,6 +671,12 @@ func registerEscalateOntologyQuestionTool(s *server.MCPServer, deps *QuestionToo
 			return NewErrorResult("QUESTION_NOT_FOUND", fmt.Sprintf("ontology question %q not found", questionID.String())), nil
 		}
 
+		// Check if transition is allowed (cannot escalate terminal states)
+		if !question.CanTransitionTo(models.QuestionStatusEscalated) {
+			return NewErrorResult("INVALID_STATUS_TRANSITION",
+				fmt.Sprintf("cannot escalate question with status %q - question is already in a terminal state", question.Status)), nil
+		}
+
 		// Update question status to escalated with reason
 		err = deps.QuestionRepo.UpdateStatusWithReason(tenantCtx, questionID, models.QuestionStatusEscalated, reason)
 		if err != nil {
@@ -748,6 +766,12 @@ func registerDismissOntologyQuestionTool(s *server.MCPServer, deps *QuestionTool
 
 		if question == nil {
 			return NewErrorResult("QUESTION_NOT_FOUND", fmt.Sprintf("ontology question %q not found", questionID.String())), nil
+		}
+
+		// Check if transition is allowed (cannot dismiss terminal states)
+		if !question.CanTransitionTo(models.QuestionStatusDismissed) {
+			return NewErrorResult("INVALID_STATUS_TRANSITION",
+				fmt.Sprintf("cannot dismiss question with status %q - question is already in a terminal state", question.Status)), nil
 		}
 
 		// Update question status to dismissed with reason
