@@ -60,7 +60,7 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 		mcp.WithString(
 			"fact",
 			mcp.Required(),
-			mcp.Description("The domain fact or knowledge to store (e.g., 'Platform fees are ~33% of total_amount')"),
+			mcp.Description("The domain fact or knowledge to store (e.g., 'Platform fees are ~33% of total_amount'). Maximum 255 characters."),
 		),
 		mcp.WithString(
 			"fact_id",
@@ -151,12 +151,20 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 			// Update existing fact
 			err = deps.KnowledgeRepository.Update(tenantCtx, knowledgeFact)
 			if err != nil {
+				// Check if this is a SQL user error (e.g., value too long for varchar(255))
+				if errResult := NewSQLErrorResult(err); errResult != nil {
+					return errResult, nil
+				}
 				return nil, fmt.Errorf("failed to update project knowledge: %w", err)
 			}
 		} else {
 			// Create new fact
 			err = deps.KnowledgeRepository.Create(tenantCtx, knowledgeFact)
 			if err != nil {
+				// Check if this is a SQL user error (e.g., value too long for varchar(255))
+				if errResult := NewSQLErrorResult(err); errResult != nil {
+					return errResult, nil
+				}
 				return nil, fmt.Errorf("failed to create project knowledge: %w", err)
 			}
 		}
