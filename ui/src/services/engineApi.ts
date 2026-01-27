@@ -10,6 +10,7 @@ import type {
   ConnectionDetails,
   CreateDatasourceResponse,
   CreateGlossaryTermRequest,
+  CreateProjectKnowledgeRequest,
   CreateQueryRequest,
   CreateRelationshipRequest,
   DAGStatusResponse,
@@ -31,6 +32,8 @@ import type {
   ListPendingQueriesResponse,
   ListQueriesResponse,
   MCPConfigResponse,
+  ProjectKnowledge,
+  ProjectKnowledgeListResponse,
   Query,
   RejectQueryResponse,
   RelationshipDetail,
@@ -43,6 +46,7 @@ import type {
   TestSQLResult,
   UpdateGlossaryTermRequest,
   UpdateMCPConfigRequest,
+  UpdateProjectKnowledgeRequest,
   UpdateQueryRequest,
   ValidateQueryRequest,
   ValidateQueryResponse,
@@ -619,6 +623,68 @@ class EngineApiService {
     });
   }
 
+  // --- Project Knowledge Methods ---
+
+  /**
+   * List all project knowledge facts for a project
+   * GET /api/projects/{projectId}/project-knowledge
+   */
+  async listProjectKnowledge(
+    projectId: string
+  ): Promise<ApiResponse<ProjectKnowledgeListResponse>> {
+    return this.makeRequest<ProjectKnowledgeListResponse>(
+      `/${projectId}/project-knowledge`
+    );
+  }
+
+  /**
+   * Create a new project knowledge fact
+   * POST /api/projects/{projectId}/project-knowledge
+   */
+  async createProjectKnowledge(
+    projectId: string,
+    data: CreateProjectKnowledgeRequest
+  ): Promise<ApiResponse<ProjectKnowledge>> {
+    return this.makeRequest<ProjectKnowledge>(
+      `/${projectId}/project-knowledge`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    );
+  }
+
+  /**
+   * Update an existing project knowledge fact
+   * PUT /api/projects/{projectId}/project-knowledge/{id}
+   */
+  async updateProjectKnowledge(
+    projectId: string,
+    id: string,
+    data: UpdateProjectKnowledgeRequest
+  ): Promise<ApiResponse<ProjectKnowledge>> {
+    return this.makeRequest<ProjectKnowledge>(
+      `/${projectId}/project-knowledge/${id}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }
+    );
+  }
+
+  /**
+   * Delete a project knowledge fact
+   * DELETE /api/projects/{projectId}/project-knowledge/{id}
+   */
+  async deleteProjectKnowledge(
+    projectId: string,
+    id: string
+  ): Promise<ApiResponse<void>> {
+    return this.makeRequest<void>(`/${projectId}/project-knowledge/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   // --- MCP Configuration Methods ---
 
   /**
@@ -826,16 +892,32 @@ class EngineApiService {
   // --- Ontology DAG Methods ---
 
   /**
+   * Get project overview (for repopulating textarea on re-extraction)
+   * GET /api/projects/{projectId}/project-knowledge/overview
+   */
+  async getProjectOverview(
+    projectId: string
+  ): Promise<ApiResponse<{ overview: string | null }>> {
+    return this.makeRequest<{ overview: string | null }>(
+      `/${projectId}/project-knowledge/overview`
+    );
+  }
+
+  /**
    * Start or refresh ontology extraction (DAG-based)
    * POST /api/projects/{projectId}/datasources/{datasourceId}/ontology/extract
    */
   async startOntologyExtraction(
     projectId: string,
-    datasourceId: string
+    datasourceId: string,
+    projectOverview?: string
   ): Promise<ApiResponse<DAGStatusResponse>> {
     return this.makeRequest<DAGStatusResponse>(
       `/${projectId}/datasources/${datasourceId}/ontology/extract`,
-      { method: 'POST' }
+      {
+        method: 'POST',
+        body: JSON.stringify({ project_overview: projectOverview }),
+      }
     );
   }
 

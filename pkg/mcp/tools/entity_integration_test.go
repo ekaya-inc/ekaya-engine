@@ -107,10 +107,34 @@ func (tc *entityToolTestContext) cleanup() {
 }
 
 // createTestContext returns a context with tenant scope and project ID.
+// Uses WithoutTenant which bypasses RLS (for test setup/cleanup).
 func (tc *entityToolTestContext) createTestContext() (context.Context, func()) {
 	tc.t.Helper()
 	ctx := context.Background()
 	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
+	require.NoError(tc.t, err)
+
+	ctx = database.SetTenantScope(ctx, scope)
+	// Include admin role to access developer tools (entity update/delete require ontology maintenance)
+	ctx = context.WithValue(ctx, auth.ClaimsKey, &auth.Claims{
+		ProjectID: tc.projectID.String(),
+		Roles:     []string{models.RoleAdmin},
+	})
+
+	// Add provenance context for MCP operations (simulates what MCP middleware does)
+	// Using uuid.Nil since we don't have a real user - the repository handles nil UUIDs
+	ctx = models.WithMCPProvenance(ctx, uuid.Nil)
+
+	return ctx, func() { scope.Close() }
+}
+
+// createTestContextWithTenant returns a context that mimics the real MCP server behavior.
+// Uses WithTenant which sets the RLS context via set_config('app.current_project_id', ...).
+// Each call gets a fresh connection from the pool, simulating separate HTTP requests.
+func (tc *entityToolTestContext) createTestContextWithTenant() (context.Context, func()) {
+	tc.t.Helper()
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
 	require.NoError(tc.t, err)
 
 	ctx = database.SetTenantScope(ctx, scope)
@@ -427,6 +451,65 @@ func TestDeleteEntityTool_Integration_EntityNotFound(t *testing.T) {
 // ============================================================================
 // Integration Tests: Complete Entity Lifecycle Workflow
 // ============================================================================
+
+// TestEntityTools_Integration_SeparateConnections tests the entity creation and retrieval
+// using separate database connections, which mimics the real MCP server behavior where
+// each HTTP request gets a new connection from the pool.
+//
+// This test specifically reproduces the scenario from ISSUE-entity-creation-not-persisted.md:
+// 1. Call update_entity with name="BasicEntity_MCP_TEST"
+// 2. Response returns {"created": true}
+// 3. Immediately call get_entity with the same name
+// 4. EXPECTED: Entity should be found
+// 5. ACTUAL (bug): Entity returns ENTITY_NOT_FOUND
+func TestEntityTools_Integration_SeparateConnections(t *testing.T) {
+	tc := setupEntityToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	// Step 1: Create an entity via update_entity with its own connection
+	// Use the exact same naming convention from the issue report
+	{
+		ctx, cleanup := tc.createTestContextWithTenant()
+		defer cleanup()
+
+		result, err := tc.callTool(ctx, "update_entity", map[string]any{
+			"name":        "BasicEntity_MCP_TEST",
+			"description": "Test entity for MCP test suite",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		assert.False(t, result.IsError, "should not return error")
+
+		var response updateEntityResponse
+		err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &response)
+		require.NoError(t, err)
+		assert.True(t, response.Created, "should create new entity")
+		assert.Equal(t, "BasicEntity_MCP_TEST", response.Name)
+	}
+
+	// Step 2: IMMEDIATELY read the entity via get_entity with a NEW separate connection
+	// This is the exact scenario that was failing according to the issue
+	{
+		ctx, cleanup := tc.createTestContextWithTenant()
+		defer cleanup()
+
+		result, err := tc.callTool(ctx, "get_entity", map[string]any{
+			"name": "BasicEntity_MCP_TEST",
+		})
+		require.NoError(t, err, "get_entity should not fail")
+		require.NotNil(t, result)
+
+		// This assertion directly tests the bug - entity should be found, not ENTITY_NOT_FOUND
+		assert.False(t, result.IsError, "entity should be found immediately after creation - this tests ISSUE-entity-creation-not-persisted")
+
+		var response getEntityResponse
+		err = json.Unmarshal([]byte(result.Content[0].(mcp.TextContent).Text), &response)
+		require.NoError(t, err)
+		assert.Equal(t, "BasicEntity_MCP_TEST", response.Name)
+		assert.Equal(t, "Test entity for MCP test suite", response.Description)
+	}
+}
 
 // TestEntityTools_Integration_FullWorkflow tests the complete lifecycle of
 // creating, reading, updating, and deleting an entity.

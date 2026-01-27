@@ -19,6 +19,7 @@ import MCPServerPage from './pages/MCPServerPage';
 import OAuthCallbackPage from './pages/OAuthCallbackPage';
 import OntologyPage from './pages/OntologyPage';
 import ProjectDashboard from './pages/ProjectDashboard';
+import ProjectKnowledgePage from './pages/ProjectKnowledgePage';
 import ProjectsRedirect from './pages/ProjectsRedirect';
 import QueriesPage from './pages/QueriesPage';
 import RelationshipsPage from './pages/RelationshipsPage';
@@ -46,6 +47,7 @@ const App = (): JSX.Element => {
                   <Route path="relationships" element={<RelationshipsPage />} />
                   <Route path="entities" element={<EntitiesPage />} />
                   <Route path="glossary" element={<GlossaryPage />} />
+                  <Route path="project-knowledge" element={<ProjectKnowledgePage />} />
                   <Route path="ontology" element={<OntologyPage />} />
                   <Route path="queries/*" element={<QueriesPage />} />
                   <Route path="mcp-server" element={<MCPServerPage />} />

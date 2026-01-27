@@ -413,10 +413,18 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 			}
 
 			if err := deps.GlossaryService.CreateTerm(tenantCtx, projectID, term); err != nil {
-				deps.Logger.Error("Failed to create glossary term",
-					zap.String("project_id", projectID.String()),
-					zap.String("term", termName),
-					zap.Error(err))
+				// Use DEBUG for input errors (SQL validation, etc.), ERROR for server errors
+				if IsInputError(err) {
+					deps.Logger.Debug("Failed to create glossary term (input error)",
+						zap.String("project_id", projectID.String()),
+						zap.String("term", termName),
+						zap.String("error", err.Error()))
+				} else {
+					deps.Logger.Error("Failed to create glossary term",
+						zap.String("project_id", projectID.String()),
+						zap.String("term", termName),
+						zap.Error(err))
+				}
 				return nil, fmt.Errorf("failed to create term: %w", err)
 			}
 
@@ -453,10 +461,18 @@ func registerUpdateGlossaryTermTool(s *server.MCPServer, deps *GlossaryToolDeps)
 			}
 
 			if err := deps.GlossaryService.UpdateTerm(tenantCtx, term); err != nil {
-				deps.Logger.Error("Failed to update glossary term",
-					zap.String("project_id", projectID.String()),
-					zap.String("term", termName),
-					zap.Error(err))
+				// Use DEBUG for input errors (SQL validation, etc.), ERROR for server errors
+				if IsInputError(err) {
+					deps.Logger.Debug("Failed to update glossary term (input error)",
+						zap.String("project_id", projectID.String()),
+						zap.String("term", termName),
+						zap.String("error", err.Error()))
+				} else {
+					deps.Logger.Error("Failed to update glossary term",
+						zap.String("project_id", projectID.String()),
+						zap.String("term", termName),
+						zap.Error(err))
+				}
 				return nil, fmt.Errorf("failed to update term: %w", err)
 			}
 

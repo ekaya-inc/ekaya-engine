@@ -227,6 +227,8 @@ func main() {
 		getTenantCtx, logger)
 
 	// Wire DAG adapters using setter pattern (avoids import cycles)
+	knowledgeSeedingService := services.NewKnowledgeSeedingService(knowledgeService, schemaService, llmFactory, logger)
+	ontologyDAGService.SetKnowledgeSeedingMethods(knowledgeSeedingService)
 	ontologyDAGService.SetEntityDiscoveryMethods(services.NewEntityDiscoveryAdapter(entityDiscoveryService))
 	ontologyDAGService.SetEntityEnrichmentMethods(services.NewEntityEnrichmentAdapter(entityDiscoveryService, schemaRepo, getTenantCtx))
 	ontologyDAGService.SetFKDiscoveryMethods(services.NewFKDiscoveryAdapter(deterministicRelationshipService))
@@ -430,6 +432,10 @@ func main() {
 	// Register glossary handler (protected) - business glossary for MCP clients
 	glossaryHandler := handlers.NewGlossaryHandler(glossaryService, logger)
 	glossaryHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register knowledge handler (protected) - project knowledge facts
+	knowledgeHandler := handlers.NewKnowledgeHandler(knowledgeService, logger)
+	knowledgeHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register installed apps handler (protected) - application installation tracking
 	installedAppHandler := handlers.NewInstalledAppHandler(installedAppService, logger)

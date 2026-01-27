@@ -110,6 +110,32 @@ func (m *mockKnowledgeService) Store(ctx context.Context, projectID uuid.UUID, f
 	}, nil
 }
 
+func (m *mockKnowledgeService) StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo, source string) (*models.KnowledgeFact, error) {
+	if m.storeFunc != nil {
+		return m.storeFunc(ctx, projectID, factType, key, value, contextInfo)
+	}
+	return &models.KnowledgeFact{
+		ID:        uuid.New(),
+		ProjectID: projectID,
+		FactType:  factType,
+		Key:       key,
+		Value:     value,
+		Context:   contextInfo,
+		Source:    source,
+	}, nil
+}
+
+func (m *mockKnowledgeService) Update(ctx context.Context, projectID, id uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
+	return &models.KnowledgeFact{
+		ID:        id,
+		ProjectID: projectID,
+		FactType:  factType,
+		Key:       key,
+		Value:     value,
+		Context:   contextInfo,
+	}, nil
+}
+
 func (m *mockKnowledgeService) GetAll(ctx context.Context, projectID uuid.UUID) ([]*models.KnowledgeFact, error) {
 	if m.getAllFunc != nil {
 		return m.getAllFunc(ctx, projectID)

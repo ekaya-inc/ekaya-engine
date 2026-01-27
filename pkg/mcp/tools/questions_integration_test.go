@@ -862,6 +862,258 @@ func TestListOntologyQuestionsTool_Integration_CombinedFilters(t *testing.T) {
 // Integration Tests: Complete Workflow
 // ============================================================================
 
+// ============================================================================
+// Integration Tests: Terminal State Transition Rejection
+// ============================================================================
+
+// TestSkipOntologyQuestionTool_Integration_RejectsTerminalState verifies that skip_ontology_question
+// returns INVALID_STATUS_TRANSITION error when attempting to skip an already answered question.
+func TestSkipOntologyQuestionTool_Integration_RejectsTerminalState(t *testing.T) {
+	tc := setupQuestionToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create a pending question
+	question := tc.createTestQuestion(ctx, "What does ACTIVE status mean?", models.QuestionCategoryEnumeration, 1, models.QuestionStatusPending)
+
+	// First, resolve the question (transition to terminal state)
+	resolveResult, err := tc.callTool(ctx, "resolve_ontology_question", map[string]any{
+		"question_id":      question.ID.String(),
+		"resolution_notes": "Found in user.go:45 - ACTIVE means user can log in",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resolveResult)
+	require.False(t, resolveResult.IsError, "resolve should succeed")
+
+	// Verify question is now answered
+	updatedQuestion, err := tc.questionRepo.GetByID(ctx, question.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.QuestionStatusAnswered, updatedQuestion.Status)
+
+	// Now try to skip the answered question - should fail
+	skipResult, err := tc.callTool(ctx, "skip_ontology_question", map[string]any{
+		"question_id": question.ID.String(),
+		"reason":      "Attempting to skip an already answered question",
+	})
+	require.NoError(t, err) // MCP call succeeds
+	require.NotNil(t, skipResult)
+	assert.True(t, skipResult.IsError, "skip should return error for terminal state")
+
+	// Parse error response and verify INVALID_STATUS_TRANSITION code
+	var errorResp ErrorResponse
+	require.Len(t, skipResult.Content, 1)
+	err = json.Unmarshal([]byte(skipResult.Content[0].(mcp.TextContent).Text), &errorResp)
+	require.NoError(t, err)
+
+	assert.True(t, errorResp.Error)
+	assert.Equal(t, "INVALID_STATUS_TRANSITION", errorResp.Code)
+	assert.Contains(t, errorResp.Message, "answered")
+	assert.Contains(t, errorResp.Message, "terminal state")
+
+	// Verify question status was NOT changed
+	unchangedQuestion, err := tc.questionRepo.GetByID(ctx, question.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.QuestionStatusAnswered, unchangedQuestion.Status)
+}
+
+// TestDismissOntologyQuestionTool_Integration_RejectsTerminalState verifies that dismiss_ontology_question
+// returns INVALID_STATUS_TRANSITION error when attempting to dismiss an already answered question.
+func TestDismissOntologyQuestionTool_Integration_RejectsTerminalState(t *testing.T) {
+	tc := setupQuestionToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create and resolve a question
+	question := tc.createTestQuestion(ctx, "What is the refund policy?", models.QuestionCategoryBusinessRules, 1, models.QuestionStatusPending)
+
+	_, err := tc.callTool(ctx, "resolve_ontology_question", map[string]any{
+		"question_id":      question.ID.String(),
+		"resolution_notes": "Found in refund_policy.go",
+	})
+	require.NoError(t, err)
+
+	// Verify question is now answered
+	updatedQuestion, err := tc.questionRepo.GetByID(ctx, question.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.QuestionStatusAnswered, updatedQuestion.Status)
+
+	// Try to dismiss the answered question - should fail
+	dismissResult, err := tc.callTool(ctx, "dismiss_ontology_question", map[string]any{
+		"question_id": question.ID.String(),
+		"reason":      "Attempting to dismiss an already answered question",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, dismissResult)
+	assert.True(t, dismissResult.IsError, "dismiss should return error for terminal state")
+
+	// Parse error response
+	var errorResp ErrorResponse
+	require.Len(t, dismissResult.Content, 1)
+	err = json.Unmarshal([]byte(dismissResult.Content[0].(mcp.TextContent).Text), &errorResp)
+	require.NoError(t, err)
+
+	assert.True(t, errorResp.Error)
+	assert.Equal(t, "INVALID_STATUS_TRANSITION", errorResp.Code)
+	assert.Contains(t, errorResp.Message, "answered")
+	assert.Contains(t, errorResp.Message, "terminal state")
+
+	// Verify question status was NOT changed
+	unchangedQuestion, err := tc.questionRepo.GetByID(ctx, question.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.QuestionStatusAnswered, unchangedQuestion.Status)
+}
+
+// TestEscalateOntologyQuestionTool_Integration_RejectsTerminalState verifies that escalate_ontology_question
+// returns INVALID_STATUS_TRANSITION error when attempting to escalate an already dismissed question.
+func TestEscalateOntologyQuestionTool_Integration_RejectsTerminalState(t *testing.T) {
+	tc := setupQuestionToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create and dismiss a question
+	question := tc.createTestQuestion(ctx, "What does legacy_field mean?", models.QuestionCategoryTerminology, 5, models.QuestionStatusPending)
+
+	_, err := tc.callTool(ctx, "dismiss_ontology_question", map[string]any{
+		"question_id": question.ID.String(),
+		"reason":      "Column unused since 2019 - legacy feature",
+	})
+	require.NoError(t, err)
+
+	// Verify question is now dismissed
+	updatedQuestion, err := tc.questionRepo.GetByID(ctx, question.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.QuestionStatusDismissed, updatedQuestion.Status)
+
+	// Try to escalate the dismissed question - should fail
+	escalateResult, err := tc.callTool(ctx, "escalate_ontology_question", map[string]any{
+		"question_id": question.ID.String(),
+		"reason":      "Attempting to escalate a dismissed question",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, escalateResult)
+	assert.True(t, escalateResult.IsError, "escalate should return error for terminal state")
+
+	// Parse error response
+	var errorResp ErrorResponse
+	require.Len(t, escalateResult.Content, 1)
+	err = json.Unmarshal([]byte(escalateResult.Content[0].(mcp.TextContent).Text), &errorResp)
+	require.NoError(t, err)
+
+	assert.True(t, errorResp.Error)
+	assert.Equal(t, "INVALID_STATUS_TRANSITION", errorResp.Code)
+	assert.Contains(t, errorResp.Message, "dismissed")
+	assert.Contains(t, errorResp.Message, "terminal state")
+
+	// Verify question status was NOT changed
+	unchangedQuestion, err := tc.questionRepo.GetByID(ctx, question.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.QuestionStatusDismissed, unchangedQuestion.Status)
+}
+
+// TestResolveOntologyQuestionTool_Integration_RejectsTerminalState verifies that resolve_ontology_question
+// returns INVALID_STATUS_TRANSITION error when attempting to resolve an already dismissed question.
+func TestResolveOntologyQuestionTool_Integration_RejectsTerminalState(t *testing.T) {
+	tc := setupQuestionToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create and dismiss a question
+	question := tc.createTestQuestion(ctx, "What does deprecated_column mean?", models.QuestionCategoryTerminology, 5, models.QuestionStatusPending)
+
+	_, err := tc.callTool(ctx, "dismiss_ontology_question", map[string]any{
+		"question_id": question.ID.String(),
+		"reason":      "Column deprecated and unused",
+	})
+	require.NoError(t, err)
+
+	// Verify question is now dismissed
+	updatedQuestion, err := tc.questionRepo.GetByID(ctx, question.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.QuestionStatusDismissed, updatedQuestion.Status)
+
+	// Try to resolve the dismissed question - should fail
+	resolveResult, err := tc.callTool(ctx, "resolve_ontology_question", map[string]any{
+		"question_id":      question.ID.String(),
+		"resolution_notes": "Attempting to resolve a dismissed question",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resolveResult)
+	assert.True(t, resolveResult.IsError, "resolve should return error for terminal state")
+
+	// Parse error response
+	var errorResp ErrorResponse
+	require.Len(t, resolveResult.Content, 1)
+	err = json.Unmarshal([]byte(resolveResult.Content[0].(mcp.TextContent).Text), &errorResp)
+	require.NoError(t, err)
+
+	assert.True(t, errorResp.Error)
+	assert.Equal(t, "INVALID_STATUS_TRANSITION", errorResp.Code)
+	assert.Contains(t, errorResp.Message, "dismissed")
+	assert.Contains(t, errorResp.Message, "terminal state")
+
+	// Verify question status was NOT changed
+	unchangedQuestion, err := tc.questionRepo.GetByID(ctx, question.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.QuestionStatusDismissed, unchangedQuestion.Status)
+}
+
+// TestQuestionTools_Integration_RejectsDoubleTransition verifies that attempting to apply the same
+// transition twice to a question (e.g., resolve twice) returns INVALID_STATUS_TRANSITION error.
+func TestQuestionTools_Integration_RejectsDoubleTransition(t *testing.T) {
+	tc := setupQuestionToolIntegrationTest(t)
+	tc.cleanup()
+	defer tc.cleanup()
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create and resolve a question
+	question := tc.createTestQuestion(ctx, "What is the order flow?", models.QuestionCategoryBusinessRules, 2, models.QuestionStatusPending)
+
+	// First resolve - should succeed
+	result1, err := tc.callTool(ctx, "resolve_ontology_question", map[string]any{
+		"question_id":      question.ID.String(),
+		"resolution_notes": "Found in order_flow.go",
+	})
+	require.NoError(t, err)
+	require.False(t, result1.IsError, "first resolve should succeed")
+
+	// Second resolve - should fail with INVALID_STATUS_TRANSITION
+	result2, err := tc.callTool(ctx, "resolve_ontology_question", map[string]any{
+		"question_id":      question.ID.String(),
+		"resolution_notes": "Attempting to resolve again",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result2)
+	assert.True(t, result2.IsError, "second resolve should return error")
+
+	// Parse error response
+	var errorResp ErrorResponse
+	require.Len(t, result2.Content, 1)
+	err = json.Unmarshal([]byte(result2.Content[0].(mcp.TextContent).Text), &errorResp)
+	require.NoError(t, err)
+
+	assert.True(t, errorResp.Error)
+	assert.Equal(t, "INVALID_STATUS_TRANSITION", errorResp.Code)
+	assert.Contains(t, errorResp.Message, "answered")
+}
+
+// ============================================================================
+// Integration Tests: Complete Workflow
+// ============================================================================
+
 func TestQuestionTools_Integration_CompleteWorkflow(t *testing.T) {
 	tc := setupQuestionToolIntegrationTest(t)
 	tc.cleanup()

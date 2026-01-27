@@ -2,6 +2,7 @@ package dag
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -80,6 +81,16 @@ func (m *mockKnowledgeDAGRepo) GetNextPendingNode(ctx context.Context, dagID uui
 	return nil, nil
 }
 
+// mockKnowledgeSeedingMethods implements KnowledgeSeedingMethods for testing.
+type mockKnowledgeSeedingMethods struct {
+	extractResult int
+	extractErr    error
+}
+
+func (m *mockKnowledgeSeedingMethods) ExtractKnowledgeFromOverview(ctx context.Context, projectID, datasourceID uuid.UUID) (int, error) {
+	return m.extractResult, m.extractErr
+}
+
 func TestKnowledgeSeedingNode_Execute_NoOp(t *testing.T) {
 	progressMessages := make([]string, 0)
 	mockRepo := &mockKnowledgeDAGRepo{
@@ -89,7 +100,8 @@ func TestKnowledgeSeedingNode_Execute_NoOp(t *testing.T) {
 		},
 	}
 
-	node := NewKnowledgeSeedingNode(mockRepo, zap.NewNop())
+	// Pass nil for knowledgeSeedingMethods to test no-op mode
+	node := NewKnowledgeSeedingNode(mockRepo, nil, zap.NewNop())
 	nodeID := uuid.New()
 	node.SetCurrentNodeID(nodeID)
 
@@ -105,7 +117,104 @@ func TestKnowledgeSeedingNode_Execute_NoOp(t *testing.T) {
 	assert.Contains(t, progressMessages, "Knowledge seeding complete (inference-based)")
 }
 
+func TestKnowledgeSeedingNode_Execute_WithExtraction(t *testing.T) {
+	progressMessages := make([]string, 0)
+	mockRepo := &mockKnowledgeDAGRepo{
+		updateProgressFunc: func(ctx context.Context, nodeID uuid.UUID, progress *models.DAGNodeProgress) error {
+			progressMessages = append(progressMessages, progress.Message)
+			return nil
+		},
+	}
+
+	// Mock that returns 3 facts extracted
+	mockMethods := &mockKnowledgeSeedingMethods{
+		extractResult: 3,
+		extractErr:    nil,
+	}
+
+	node := NewKnowledgeSeedingNode(mockRepo, mockMethods, zap.NewNop())
+	nodeID := uuid.New()
+	node.SetCurrentNodeID(nodeID)
+
+	dag := &models.OntologyDAG{
+		ID:           uuid.New(),
+		ProjectID:    uuid.New(),
+		DatasourceID: uuid.New(),
+	}
+
+	err := node.Execute(context.Background(), dag)
+	assert.NoError(t, err)
+
+	// Verify progress message indicates facts were extracted
+	assert.Contains(t, progressMessages, "Extracted 3 domain facts")
+}
+
+func TestKnowledgeSeedingNode_Execute_NoFactsExtracted(t *testing.T) {
+	progressMessages := make([]string, 0)
+	mockRepo := &mockKnowledgeDAGRepo{
+		updateProgressFunc: func(ctx context.Context, nodeID uuid.UUID, progress *models.DAGNodeProgress) error {
+			progressMessages = append(progressMessages, progress.Message)
+			return nil
+		},
+	}
+
+	// Mock that returns 0 facts (no overview provided)
+	mockMethods := &mockKnowledgeSeedingMethods{
+		extractResult: 0,
+		extractErr:    nil,
+	}
+
+	node := NewKnowledgeSeedingNode(mockRepo, mockMethods, zap.NewNop())
+	nodeID := uuid.New()
+	node.SetCurrentNodeID(nodeID)
+
+	dag := &models.OntologyDAG{
+		ID:           uuid.New(),
+		ProjectID:    uuid.New(),
+		DatasourceID: uuid.New(),
+	}
+
+	err := node.Execute(context.Background(), dag)
+	assert.NoError(t, err)
+
+	// Verify progress message indicates no facts
+	assert.Contains(t, progressMessages, "No knowledge facts extracted")
+}
+
+func TestKnowledgeSeedingNode_Execute_ExtractionError(t *testing.T) {
+	progressMessages := make([]string, 0)
+	mockRepo := &mockKnowledgeDAGRepo{
+		updateProgressFunc: func(ctx context.Context, nodeID uuid.UUID, progress *models.DAGNodeProgress) error {
+			progressMessages = append(progressMessages, progress.Message)
+			return nil
+		},
+	}
+
+	// Mock that returns an error - should log but not fail the node
+	mockMethods := &mockKnowledgeSeedingMethods{
+		extractResult: 0,
+		extractErr:    errors.New("LLM unavailable"),
+	}
+
+	node := NewKnowledgeSeedingNode(mockRepo, mockMethods, zap.NewNop())
+	nodeID := uuid.New()
+	node.SetCurrentNodeID(nodeID)
+
+	dag := &models.OntologyDAG{
+		ID:           uuid.New(),
+		ProjectID:    uuid.New(),
+		DatasourceID: uuid.New(),
+	}
+
+	// Should NOT fail - knowledge seeding errors are logged but don't block the pipeline
+	err := node.Execute(context.Background(), dag)
+	assert.NoError(t, err)
+
+	// Verify progress message indicates no facts (graceful degradation)
+	assert.Contains(t, progressMessages, "No knowledge facts extracted")
+}
+
 func TestKnowledgeSeedingNode_Name(t *testing.T) {
-	node := NewKnowledgeSeedingNode(&mockKnowledgeDAGRepo{}, zap.NewNop())
+	node := NewKnowledgeSeedingNode(&mockKnowledgeDAGRepo{}, nil, zap.NewNop())
 	assert.Equal(t, models.DAGNodeKnowledgeSeeding, node.Name())
 }

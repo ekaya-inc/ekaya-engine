@@ -711,15 +711,15 @@ func getSchemaRelationshipsWithMetrics(ctx context.Context, deps *ProbeToolDeps,
 		       r.cardinality, r.confidence, r.inference_method, r.is_validated,
 		       r.validation_results, r.is_approved, r.created_at, r.updated_at,
 		       r.match_rate, r.source_distinct, r.target_distinct, r.matched_count, r.rejection_reason,
-		       sc.table_id as source_table_id_fk, sc.column_name as source_column_name,
+		       sc.schema_table_id as source_table_id_fk, sc.column_name as source_column_name,
 		       st.table_name as source_table_name,
-		       tc.table_id as target_table_id_fk, tc.column_name as target_column_name,
+		       tc.schema_table_id as target_table_id_fk, tc.column_name as target_column_name,
 		       tt.table_name as target_table_name
 		FROM engine_schema_relationships r
 		JOIN engine_schema_columns sc ON r.source_column_id = sc.id
 		JOIN engine_schema_columns tc ON r.target_column_id = tc.id
-		JOIN engine_schema_tables st ON sc.table_id = st.id
-		JOIN engine_schema_tables tt ON tc.table_id = tt.id
+		JOIN engine_schema_tables st ON sc.schema_table_id = st.id
+		JOIN engine_schema_tables tt ON tc.schema_table_id = tt.id
 		WHERE r.project_id = $1 AND st.datasource_id = $2
 		  AND r.deleted_at IS NULL
 		ORDER BY r.created_at`

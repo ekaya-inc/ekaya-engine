@@ -1430,3 +1430,248 @@ func TestEscalateOntologyQuestionTool_ErrorResults(t *testing.T) {
 		assert.Contains(t, errorResp.Message, questionIDStr)
 	})
 }
+
+// TestQuestionStatusTransitionValidation tests the status transition validation in the models.
+func TestQuestionStatusTransitionValidation(t *testing.T) {
+	tests := []struct {
+		name          string
+		currentStatus models.QuestionStatus
+		targetStatus  models.QuestionStatus
+		shouldAllow   bool
+	}{
+		// From pending - all transitions allowed
+		{"pending -> answered", models.QuestionStatusPending, models.QuestionStatusAnswered, true},
+		{"pending -> skipped", models.QuestionStatusPending, models.QuestionStatusSkipped, true},
+		{"pending -> escalated", models.QuestionStatusPending, models.QuestionStatusEscalated, true},
+		{"pending -> dismissed", models.QuestionStatusPending, models.QuestionStatusDismissed, true},
+		{"pending -> pending (no-op)", models.QuestionStatusPending, models.QuestionStatusPending, false},
+
+		// From answered (terminal) - no transitions allowed
+		{"answered -> skipped", models.QuestionStatusAnswered, models.QuestionStatusSkipped, false},
+		{"answered -> escalated", models.QuestionStatusAnswered, models.QuestionStatusEscalated, false},
+		{"answered -> dismissed", models.QuestionStatusAnswered, models.QuestionStatusDismissed, false},
+		{"answered -> pending", models.QuestionStatusAnswered, models.QuestionStatusPending, false},
+
+		// From dismissed (terminal) - no transitions allowed
+		{"dismissed -> skipped", models.QuestionStatusDismissed, models.QuestionStatusSkipped, false},
+		{"dismissed -> answered", models.QuestionStatusDismissed, models.QuestionStatusAnswered, false},
+		{"dismissed -> escalated", models.QuestionStatusDismissed, models.QuestionStatusEscalated, false},
+		{"dismissed -> pending", models.QuestionStatusDismissed, models.QuestionStatusPending, false},
+
+		// From skipped (non-terminal) - transitions to other states allowed
+		{"skipped -> answered", models.QuestionStatusSkipped, models.QuestionStatusAnswered, true},
+		{"skipped -> escalated", models.QuestionStatusSkipped, models.QuestionStatusEscalated, true},
+		{"skipped -> dismissed", models.QuestionStatusSkipped, models.QuestionStatusDismissed, true},
+		{"skipped -> pending", models.QuestionStatusSkipped, models.QuestionStatusPending, true},
+		{"skipped -> skipped (no-op)", models.QuestionStatusSkipped, models.QuestionStatusSkipped, false},
+
+		// From escalated (non-terminal) - transitions to other states allowed
+		{"escalated -> answered", models.QuestionStatusEscalated, models.QuestionStatusAnswered, true},
+		{"escalated -> skipped", models.QuestionStatusEscalated, models.QuestionStatusSkipped, true},
+		{"escalated -> dismissed", models.QuestionStatusEscalated, models.QuestionStatusDismissed, true},
+		{"escalated -> pending", models.QuestionStatusEscalated, models.QuestionStatusPending, true},
+		{"escalated -> escalated (no-op)", models.QuestionStatusEscalated, models.QuestionStatusEscalated, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			question := &models.OntologyQuestion{
+				ID:        uuid.New(),
+				ProjectID: uuid.New(),
+				Status:    tt.currentStatus,
+			}
+
+			result := question.CanTransitionTo(tt.targetStatus)
+			assert.Equal(t, tt.shouldAllow, result,
+				"CanTransitionTo(%s -> %s) = %v, want %v",
+				tt.currentStatus, tt.targetStatus, result, tt.shouldAllow)
+		})
+	}
+}
+
+// TestIsTerminalStatus tests the terminal status detection function.
+func TestIsTerminalStatus(t *testing.T) {
+	tests := []struct {
+		status     models.QuestionStatus
+		isTerminal bool
+	}{
+		{models.QuestionStatusPending, false},
+		{models.QuestionStatusSkipped, false},
+		{models.QuestionStatusEscalated, false},
+		{models.QuestionStatusAnswered, true},
+		{models.QuestionStatusDismissed, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			result := models.IsTerminalStatus(tt.status)
+			assert.Equal(t, tt.isTerminal, result,
+				"IsTerminalStatus(%s) = %v, want %v",
+				tt.status, result, tt.isTerminal)
+		})
+	}
+}
+
+// TestSkipOntologyQuestion_TerminalStateRejection verifies that skip rejects terminal states.
+func TestSkipOntologyQuestion_TerminalStateRejection(t *testing.T) {
+	questionID := uuid.New()
+
+	t.Run("cannot skip answered question", func(t *testing.T) {
+		question := &models.OntologyQuestion{
+			ID:        questionID,
+			ProjectID: uuid.New(),
+			Status:    models.QuestionStatusAnswered,
+		}
+
+		// Verify the transition would be rejected
+		assert.False(t, question.CanTransitionTo(models.QuestionStatusSkipped),
+			"should not allow transition from answered to skipped")
+	})
+
+	t.Run("cannot skip dismissed question", func(t *testing.T) {
+		question := &models.OntologyQuestion{
+			ID:        questionID,
+			ProjectID: uuid.New(),
+			Status:    models.QuestionStatusDismissed,
+		}
+
+		// Verify the transition would be rejected
+		assert.False(t, question.CanTransitionTo(models.QuestionStatusSkipped),
+			"should not allow transition from dismissed to skipped")
+	})
+
+	t.Run("can skip pending question", func(t *testing.T) {
+		question := &models.OntologyQuestion{
+			ID:        questionID,
+			ProjectID: uuid.New(),
+			Status:    models.QuestionStatusPending,
+		}
+
+		// Verify the transition would be allowed
+		assert.True(t, question.CanTransitionTo(models.QuestionStatusSkipped),
+			"should allow transition from pending to skipped")
+	})
+}
+
+// TestDismissOntologyQuestion_TerminalStateRejection verifies that dismiss rejects terminal states.
+func TestDismissOntologyQuestion_TerminalStateRejection(t *testing.T) {
+	questionID := uuid.New()
+
+	t.Run("cannot dismiss answered question", func(t *testing.T) {
+		question := &models.OntologyQuestion{
+			ID:        questionID,
+			ProjectID: uuid.New(),
+			Status:    models.QuestionStatusAnswered,
+		}
+
+		// Verify the transition would be rejected
+		assert.False(t, question.CanTransitionTo(models.QuestionStatusDismissed),
+			"should not allow transition from answered to dismissed")
+	})
+
+	t.Run("can dismiss pending question", func(t *testing.T) {
+		question := &models.OntologyQuestion{
+			ID:        questionID,
+			ProjectID: uuid.New(),
+			Status:    models.QuestionStatusPending,
+		}
+
+		// Verify the transition would be allowed
+		assert.True(t, question.CanTransitionTo(models.QuestionStatusDismissed),
+			"should allow transition from pending to dismissed")
+	})
+}
+
+// TestEscalateOntologyQuestion_TerminalStateRejection verifies that escalate rejects terminal states.
+func TestEscalateOntologyQuestion_TerminalStateRejection(t *testing.T) {
+	questionID := uuid.New()
+
+	t.Run("cannot escalate answered question", func(t *testing.T) {
+		question := &models.OntologyQuestion{
+			ID:        questionID,
+			ProjectID: uuid.New(),
+			Status:    models.QuestionStatusAnswered,
+		}
+
+		// Verify the transition would be rejected
+		assert.False(t, question.CanTransitionTo(models.QuestionStatusEscalated),
+			"should not allow transition from answered to escalated")
+	})
+
+	t.Run("cannot escalate dismissed question", func(t *testing.T) {
+		question := &models.OntologyQuestion{
+			ID:        questionID,
+			ProjectID: uuid.New(),
+			Status:    models.QuestionStatusDismissed,
+		}
+
+		// Verify the transition would be rejected
+		assert.False(t, question.CanTransitionTo(models.QuestionStatusEscalated),
+			"should not allow transition from dismissed to escalated")
+	})
+
+	t.Run("can escalate pending question", func(t *testing.T) {
+		question := &models.OntologyQuestion{
+			ID:        questionID,
+			ProjectID: uuid.New(),
+			Status:    models.QuestionStatusPending,
+		}
+
+		// Verify the transition would be allowed
+		assert.True(t, question.CanTransitionTo(models.QuestionStatusEscalated),
+			"should allow transition from pending to escalated")
+	})
+}
+
+// TestResolveOntologyQuestion_TerminalStateRejection verifies that resolve rejects terminal states.
+func TestResolveOntologyQuestion_TerminalStateRejection(t *testing.T) {
+	questionID := uuid.New()
+
+	t.Run("cannot resolve dismissed question", func(t *testing.T) {
+		question := &models.OntologyQuestion{
+			ID:        questionID,
+			ProjectID: uuid.New(),
+			Status:    models.QuestionStatusDismissed,
+		}
+
+		// Verify the transition would be rejected
+		assert.False(t, question.CanTransitionTo(models.QuestionStatusAnswered),
+			"should not allow transition from dismissed to answered")
+	})
+
+	t.Run("cannot resolve already answered question", func(t *testing.T) {
+		question := &models.OntologyQuestion{
+			ID:        questionID,
+			ProjectID: uuid.New(),
+			Status:    models.QuestionStatusAnswered,
+		}
+
+		// Verify the transition would be rejected (no-op case)
+		assert.False(t, question.CanTransitionTo(models.QuestionStatusAnswered),
+			"should not allow transition from answered to answered")
+	})
+
+	t.Run("can resolve pending question", func(t *testing.T) {
+		question := &models.OntologyQuestion{
+			ID:        questionID,
+			ProjectID: uuid.New(),
+			Status:    models.QuestionStatusPending,
+		}
+
+		// Verify the transition would be allowed
+		assert.True(t, question.CanTransitionTo(models.QuestionStatusAnswered),
+			"should allow transition from pending to answered")
+	})
+
+	t.Run("can resolve skipped question", func(t *testing.T) {
+		question := &models.OntologyQuestion{
+			ID:        questionID,
+			ProjectID: uuid.New(),
+			Status:    models.QuestionStatusSkipped,
+		}
+
+		// Verify the transition would be allowed (skipped is non-terminal)
+		assert.True(t, question.CanTransitionTo(models.QuestionStatusAnswered),
+			"should allow transition from skipped to answered")
+	})
+}

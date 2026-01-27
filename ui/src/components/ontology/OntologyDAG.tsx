@@ -113,6 +113,8 @@ export const OntologyDAG = ({
   const [showReextractDialog, setShowReextractDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [projectOverview, setProjectOverview] = useState('');
+  const [isLoadingOverview, setIsLoadingOverview] = useState(true);
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isMountedRef = useRef(true);
@@ -182,7 +184,11 @@ export const OntologyDAG = ({
       setIsStarting(true);
       setError(null);
 
-      const response = await engineApi.startOntologyExtraction(projectId, datasourceId);
+      const response = await engineApi.startOntologyExtraction(
+        projectId,
+        datasourceId,
+        projectOverview || undefined
+      );
 
       if (!isMountedRef.current) return;
 
@@ -204,7 +210,7 @@ export const OntologyDAG = ({
         setIsStarting(false);
       }
     }
-  }, [projectId, datasourceId, startPolling, onError]);
+  }, [projectId, datasourceId, projectOverview, startPolling, onError]);
 
   // Cancel extraction
   const handleCancel = useCallback(async () => {
@@ -263,21 +269,32 @@ export const OntologyDAG = ({
       if (!projectId || !datasourceId) return;
 
       setIsLoading(true);
+      setIsLoadingOverview(true);
 
       try {
-        const response = await engineApi.getOntologyDAGStatus(projectId, datasourceId);
+        // Fetch DAG status and project overview in parallel
+        const [dagResponse, overviewResponse] = await Promise.all([
+          engineApi.getOntologyDAGStatus(projectId, datasourceId),
+          engineApi.getProjectOverview(projectId),
+        ]);
 
         if (!isMountedRef.current) return;
 
-        if (response.data) {
-          setDagStatus(response.data);
+        // Handle project overview
+        if (overviewResponse.data?.overview) {
+          setProjectOverview(overviewResponse.data.overview);
+        }
+
+        // Handle DAG status
+        if (dagResponse.data) {
+          setDagStatus(dagResponse.data);
 
           // Use response data directly instead of state to avoid stale closure
-          if (!isTerminalStatus(response.data.status)) {
+          if (!isTerminalStatus(dagResponse.data.status)) {
             startPolling();
           }
 
-          if (response.data.status === 'completed') {
+          if (dagResponse.data.status === 'completed') {
             onComplete?.();
           }
         } else {
@@ -295,6 +312,7 @@ export const OntologyDAG = ({
       } finally {
         if (isMountedRef.current) {
           setIsLoading(false);
+          setIsLoadingOverview(false);
         }
       }
     };
@@ -504,6 +522,7 @@ export const OntologyDAG = ({
 
   // Empty state (no DAG has been run yet)
   if (!dagStatus) {
+    const isOverviewValid = projectOverview.length >= 20;
     return (
       <div className="rounded-lg border border-border-light bg-surface-primary p-12 shadow-sm">
         <div className="text-center">
@@ -511,11 +530,52 @@ export const OntologyDAG = ({
           <h2 className="text-xl font-semibold text-text-primary mb-2">
             Ready to Extract Ontology
           </h2>
-          <p className="text-text-secondary max-w-md mx-auto mb-6">
-            Start the extraction process to analyze your database schema and build a comprehensive
-            business ontology.
+          <p className="text-text-secondary max-w-2xl mx-auto mb-6">
+            Before we analyze your schema, tell us about your application. Who uses it and what do
+            they do with this data? This context helps build a more accurate business ontology.
           </p>
-          {getActionButton()}
+
+          {/* Overview textarea */}
+          <div className="max-w-2xl mx-auto mb-6 text-left">
+            <label className="block text-sm font-medium text-text-primary mb-2">
+              Describe your application
+            </label>
+            <textarea
+              value={projectOverview}
+              onChange={(e) => setProjectOverview(e.target.value.slice(0, 500))}
+              placeholder="Example: This is our e-commerce platform for B2B wholesale. Customers are businesses that purchase products in bulk, while Users are employee accounts that manage orders..."
+              className="w-full h-32 p-3 border border-border-light rounded-lg bg-surface-secondary text-text-primary placeholder:text-text-tertiary resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              maxLength={500}
+              disabled={isLoadingOverview}
+            />
+            <div className="flex justify-between mt-1 text-sm text-text-tertiary">
+              <span>
+                {projectOverview.length < 20
+                  ? `${20 - projectOverview.length} more characters required`
+                  : 'Ready to start'}
+              </span>
+              <span>{projectOverview.length}/500</span>
+            </div>
+          </div>
+
+          {/* Button - disabled until 20 chars */}
+          <Button
+            onClick={() => void handleStart()}
+            disabled={isStarting || !isOverviewValid || isLoadingOverview}
+            className="bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50"
+          >
+            {isStarting ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Starting...
+              </>
+            ) : (
+              <>
+                <Brain className="h-4 w-4 mr-2" />
+                Start Extraction
+              </>
+            )}
+          </Button>
         </div>
       </div>
     );

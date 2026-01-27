@@ -137,6 +137,28 @@ func (q *OntologyQuestion) IsDeleted() bool {
 	return q.Status == QuestionStatusDeleted
 }
 
+// IsTerminalStatus returns true if the given status represents a terminal state
+// that should not be changed by subsequent operations.
+// Terminal states: answered, dismissed
+// Non-terminal states: pending, skipped, escalated (can be revisited)
+func IsTerminalStatus(s QuestionStatus) bool {
+	return s == QuestionStatusAnswered || s == QuestionStatusDismissed
+}
+
+// CanTransitionTo returns true if transitioning from the current status to the
+// target status is allowed. This prevents overwriting terminal states.
+func (q *OntologyQuestion) CanTransitionTo(target QuestionStatus) bool {
+	// Cannot transition from terminal states
+	if IsTerminalStatus(q.Status) {
+		return false
+	}
+	// Cannot transition to the same status (no-op)
+	if q.Status == target {
+		return false
+	}
+	return true
+}
+
 // AffectedTableNames returns the list of affected table names.
 func (q *OntologyQuestion) AffectedTableNames() []string {
 	if q.Affects == nil {

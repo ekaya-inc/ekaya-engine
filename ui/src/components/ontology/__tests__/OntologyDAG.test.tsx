@@ -10,6 +10,7 @@ import { OntologyDAG } from '../OntologyDAG';
 vi.mock('../../../services/engineApi', () => ({
   default: {
     getOntologyDAGStatus: vi.fn(),
+    getProjectOverview: vi.fn(),
     startOntologyExtraction: vi.fn(),
     cancelOntologyDAG: vi.fn(),
     deleteOntology: vi.fn(),
@@ -98,6 +99,11 @@ describe('OntologyDAG - Re-extraction Confirmation', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default mock for getProjectOverview - returns no overview
+    vi.mocked(engineApi.getProjectOverview).mockResolvedValue({
+      success: true,
+      data: { overview: null },
+    });
   });
 
   it('shows confirmation dialog when re-extract button is clicked after completion', async () => {
@@ -179,7 +185,7 @@ describe('OntologyDAG - Re-extraction Confirmation', () => {
     fireEvent.click(confirmButton);
 
     await waitFor(() => {
-      expect(engineApi.startOntologyExtraction).toHaveBeenCalledWith('proj-1', 'ds-1');
+      expect(engineApi.startOntologyExtraction).toHaveBeenCalledWith('proj-1', 'ds-1', undefined);
     });
   });
 
@@ -241,7 +247,7 @@ describe('OntologyDAG - Re-extraction Confirmation', () => {
 
     // Dialog should NOT appear
     await waitFor(() => {
-      expect(engineApi.startOntologyExtraction).toHaveBeenCalledWith('proj-1', 'ds-1');
+      expect(engineApi.startOntologyExtraction).toHaveBeenCalledWith('proj-1', 'ds-1', undefined);
     });
 
     // Verify dialog was never shown
@@ -299,6 +305,11 @@ describe('OntologyDAG - Delete Ontology Functionality', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default mock for getProjectOverview - returns no overview
+    vi.mocked(engineApi.getProjectOverview).mockResolvedValue({
+      success: true,
+      data: { overview: null },
+    });
   });
 
   it('shows Delete Ontology button when DAG is complete', async () => {
