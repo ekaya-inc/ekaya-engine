@@ -8,6 +8,7 @@ import {
   ChevronDown,
   Database,
   Layers,
+  Lightbulb,
   ListTree,
   Loader2,
   MessageCircleQuestion,
@@ -412,6 +413,13 @@ const ProjectDashboard = () => {
       path: `/projects/${pid}/ontology`,
       disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
       color: 'purple',
+    },
+    {
+      title: 'Project Knowledge',
+      icon: Lightbulb,
+      path: `/projects/${pid}/project-knowledge`,
+      disabled: !isConnected || !hasSelectedTables, // Disabled if no datasource or no tables (domain facts can be added manually)
+      color: 'indigo',
     },
     {
       title: 'Entities',

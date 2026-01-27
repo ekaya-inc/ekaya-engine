@@ -225,7 +225,7 @@ Add route after glossary (around line 48):
 
 ---
 
-### 7. Frontend: Add Tile to Dashboard
+### 7. Frontend: Add Tile to Dashboard ✓
 
 **File:** `ui/src/pages/ProjectDashboard.tsx`
 
