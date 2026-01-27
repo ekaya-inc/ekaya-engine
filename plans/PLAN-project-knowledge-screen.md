@@ -214,7 +214,7 @@ Modal form for creating/editing facts:
 
 ---
 
-### 6. Frontend: Add Route
+### 6. Frontend: Add Route ✓
 
 **File:** `ui/src/App.tsx`
 

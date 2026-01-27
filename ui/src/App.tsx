@@ -13,6 +13,7 @@ import ApplicationsPage from './pages/ApplicationsPage';
 import DatasourcePage from './pages/DatasourcePage';
 import EntitiesPage from './pages/EntitiesPage';
 import GlossaryPage from './pages/GlossaryPage';
+import ProjectKnowledgePage from './pages/ProjectKnowledgePage';
 import HelpPage from './pages/HelpPage';
 import HomePage from './pages/HomePage';
 import MCPServerPage from './pages/MCPServerPage';
@@ -46,6 +47,7 @@ const App = (): JSX.Element => {
                   <Route path="relationships" element={<RelationshipsPage />} />
                   <Route path="entities" element={<EntitiesPage />} />
                   <Route path="glossary" element={<GlossaryPage />} />
+                  <Route path="project-knowledge" element={<ProjectKnowledgePage />} />
                   <Route path="ontology" element={<OntologyPage />} />
                   <Route path="queries/*" element={<QueriesPage />} />
                   <Route path="mcp-server" element={<MCPServerPage />} />
