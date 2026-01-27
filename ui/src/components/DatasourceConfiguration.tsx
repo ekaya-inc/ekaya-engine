@@ -1172,14 +1172,14 @@ const DatasourceConfiguration = ({
             <label className="text-sm font-medium text-text-primary">
               Type{" "}
               <span className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">
-                disconnect
+                disconnect datasource
               </span>{" "}
               to confirm
             </label>
             <Input
               value={disconnectConfirmation}
               onChange={(e) => setDisconnectConfirmation(e.target.value)}
-              placeholder="disconnect"
+              placeholder="disconnect datasource"
               className="mt-2"
               disabled={isDisconnecting}
             />
@@ -1196,7 +1196,7 @@ const DatasourceConfiguration = ({
               variant="destructive"
               onClick={handleDisconnect}
               disabled={
-                disconnectConfirmation !== "disconnect" || isDisconnecting
+                disconnectConfirmation !== "disconnect datasource" || isDisconnecting
               }
             >
               {isDisconnecting ? (
