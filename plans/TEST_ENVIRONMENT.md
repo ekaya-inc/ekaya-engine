@@ -20,34 +20,41 @@ This document describes how to use Claude Code's MCP tools and Chrome browser au
 ## Project URL
 
 ```
-http://localhost:3443/projects/2bb984fc-a677-45e9-94ba-9f65712ade70/
+http://localhost:3443/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/
 ```
 
 Key pages:
-- Dashboard: `/projects/2bb984fc-a677-45e9-94ba-9f65712ade70/`
-- Entities: `/projects/2bb984fc-a677-45e9-94ba-9f65712ade70/entities`
-- Relationships: `/projects/2bb984fc-a677-45e9-94ba-9f65712ade70/relationships`
-- Glossary: `/projects/2bb984fc-a677-45e9-94ba-9f65712ade70/glossary`
-- Schema: `/projects/2bb984fc-a677-45e9-94ba-9f65712ade70/schema`
+- Dashboard: `/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/`
+- Entities: `/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/entities`
+- Relationships: `/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/relationships`
+- Glossary: `/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/glossary`
+- Schema: `/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/schema`
 
-## MCP Tools Available
+## MCP Tools Available (42 base, up to 50 with optional apps)
 
 ### Read Operations
 | Tool | Purpose |
 |------|---------|
 | `mcp__test_data__health` | Server health check |
+| `mcp__test_data__echo` | Echo back input (developer testing) |
 | `mcp__test_data__get_schema` | Database schema with semantic annotations |
+| `mcp__test_data__get_ontology` | Structured ontology at configurable depth levels |
 | `mcp__test_data__get_context` | Unified context at depth: domain, entities, tables, columns |
 | `mcp__test_data__get_entity` | Full entity details by name |
 | `mcp__test_data__probe_column` | Column statistics and semantic info |
-| `mcp__test_data__probe_relationship` | Relationship metrics |
+| `mcp__test_data__probe_columns` | Batch variant for multiple columns |
+| `mcp__test_data__probe_relationship` | Relationship metrics and data quality |
+| `mcp__test_data__search_schema` | Full-text search across tables, columns, entities |
 | `mcp__test_data__list_glossary` | List business glossary terms |
 | `mcp__test_data__get_glossary_sql` | Get SQL for a glossary term |
 | `mcp__test_data__list_pending_changes` | List pending ontology changes |
-| `mcp__test_data__list_ontology_questions` | List ontology questions |
+| `mcp__test_data__list_ontology_questions` | List ontology questions with filtering |
 | `mcp__test_data__list_approved_queries` | List pre-approved SQL queries |
-| `mcp__test_data__query` | Execute read-only SQL |
+| `mcp__test_data__get_query_history` | Recent query execution history |
+| `mcp__test_data__query` | Execute read-only SQL SELECT |
 | `mcp__test_data__sample` | Quick data preview from table |
+| `mcp__test_data__validate` | Check SQL syntax without executing |
+| `mcp__test_data__explain_query` | Analyze query performance with EXPLAIN ANALYZE |
 
 ### Write Operations
 | Tool | Purpose |
@@ -58,13 +65,43 @@ Key pages:
 | `mcp__test_data__delete_relationship` | Delete relationship |
 | `mcp__test_data__update_column` | Add/update column metadata |
 | `mcp__test_data__delete_column_metadata` | Remove column metadata |
-| `mcp__test_data__update_glossary_term` | Create/update glossary term |
+| `mcp__test_data__create_glossary_term` | Create new glossary term with SQL |
+| `mcp__test_data__update_glossary_term` | Update existing glossary term |
 | `mcp__test_data__delete_glossary_term` | Delete glossary term |
 | `mcp__test_data__update_project_knowledge` | Create/update domain fact |
 | `mcp__test_data__delete_project_knowledge` | Delete domain fact |
-| `mcp__test_data__approve_change` | Approve pending change |
-| `mcp__test_data__reject_change` | Reject pending change |
-| `mcp__test_data__suggest_approved_query` | Suggest a new approved query |
+| `mcp__test_data__approve_change` | Approve pending ontology change |
+| `mcp__test_data__approve_all_changes` | Approve all pending changes |
+| `mcp__test_data__reject_change` | Reject pending ontology change |
+| `mcp__test_data__refresh_schema` | Refresh schema from datasource |
+| `mcp__test_data__scan_data_changes` | Scan for new enum values and FK patterns |
+| `mcp__test_data__execute` | Execute DDL/DML statements |
+| `mcp__test_data__execute_approved_query` | Run pre-approved query by ID |
+
+### Ontology Question Management
+| Tool | Purpose |
+|------|---------|
+| `mcp__test_data__resolve_ontology_question` | Mark question as resolved |
+| `mcp__test_data__skip_ontology_question` | Skip question for later |
+| `mcp__test_data__dismiss_ontology_question` | Dismiss question as not worth pursuing |
+| `mcp__test_data__escalate_ontology_question` | Escalate to human domain expert |
+
+### Optional: AI Data Liaison Application (+8 tools)
+
+The **AI Data Liaison** application adds tools for AI agents to suggest and manage approved SQL queries. When installed, the total tool count increases from 42 to 50.
+
+To check if installed, verify these tools are available:
+
+| Tool | Purpose |
+|------|---------|
+| `mcp__test_data__suggest_approved_query` | Suggest a new parameterized query for approval |
+| `mcp__test_data__suggest_query_update` | Suggest an update to an existing approved query |
+| `mcp__test_data__list_query_suggestions` | List pending query suggestions awaiting review |
+| `mcp__test_data__approve_query_suggestion` | Approve a pending query suggestion |
+| `mcp__test_data__reject_query_suggestion` | Reject a pending query suggestion with reason |
+| `mcp__test_data__create_approved_query` | Create approved query directly (admin, no review) |
+| `mcp__test_data__update_approved_query` | Update approved query directly (admin, no review) |
+| `mcp__test_data__delete_approved_query` | Delete an approved query |
 
 ## Chrome Browser Automation
 
@@ -79,7 +116,7 @@ mcp__claude-in-chrome__tabs_create_mcp()
 
 // 3. Navigate to the project
 mcp__claude-in-chrome__navigate({
-  url: "http://localhost:3443/projects/2bb984fc-a677-45e9-94ba-9f65712ade70/",
+  url: "http://localhost:3443/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/",
   tabId: <tabId from step 1 or 2>
 })
 ```
@@ -133,7 +170,7 @@ mcp__test_data__update_entity({
 
 // 2. Navigate to entities page
 mcp__claude-in-chrome__navigate({
-  url: "http://localhost:3443/projects/2bb984fc-a677-45e9-94ba-9f65712ade70/entities",
+  url: "http://localhost:3443/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/entities",
   tabId: <tabId>
 })
 
@@ -157,7 +194,7 @@ Example:
 ```javascript
 // 1. Navigate to glossary page
 mcp__claude-in-chrome__navigate({
-  url: "http://localhost:3443/projects/2bb984fc-a677-45e9-94ba-9f65712ade70/glossary",
+  url: "http://localhost:3443/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/glossary",
   tabId: <tabId>
 })
 
@@ -258,7 +295,7 @@ There are **two separate databases** involved in testing:
 psql -d ekaya_engine -c "
   SELECT id, version, is_active, created_at
   FROM engine_ontologies
-  WHERE project_id = '2bb984fc-a677-45e9-94ba-9f65712ade70'
+  WHERE project_id = '2b5b014f-191a-41b4-b207-85f7d5c3b04b'
   ORDER BY created_at"
 ```
 
@@ -279,14 +316,14 @@ When a datasource is changed and the old ontology is deleted, some tables may re
 ```sql
 -- Check for stale project knowledge
 psql -d ekaya_engine -c "
-  SELECT set_config('app.current_project_id', '2bb984fc-a677-45e9-94ba-9f65712ade70', false);
+  SELECT set_config('app.current_project_id', '2b5b014f-191a-41b4-b207-85f7d5c3b04b', false);
   SELECT fact_type, key, created_at
   FROM engine_project_knowledge
   ORDER BY created_at"
 
 -- Check for stale glossary terms (compare created_at with ontology created_at)
 psql -d ekaya_engine -c "
-  SELECT set_config('app.current_project_id', '2bb984fc-a677-45e9-94ba-9f65712ade70', false);
+  SELECT set_config('app.current_project_id', '2b5b014f-191a-41b4-b207-85f7d5c3b04b', false);
   SELECT term, created_at
   FROM engine_business_glossary
   ORDER BY created_at"
@@ -305,13 +342,13 @@ If you find stale data from a prior datasource:
 -- Delete stale project knowledge (verify dates first!)
 psql -d ekaya_engine -c "
   DELETE FROM engine_project_knowledge
-  WHERE project_id = '2bb984fc-a677-45e9-94ba-9f65712ade70'
+  WHERE project_id = '2b5b014f-191a-41b4-b207-85f7d5c3b04b'
   AND created_at < '2026-01-21 21:26:50'"  -- before current ontology
 
 -- Delete stale glossary terms
 psql -d ekaya_engine -c "
   DELETE FROM engine_business_glossary
-  WHERE project_id = '2bb984fc-a677-45e9-94ba-9f65712ade70'
+  WHERE project_id = '2b5b014f-191a-41b4-b207-85f7d5c3b04b'
   AND created_at < '2026-01-21 21:26:50'"
 ```
 
