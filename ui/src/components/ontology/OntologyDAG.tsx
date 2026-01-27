@@ -530,13 +530,13 @@ export const OntologyDAG = ({
           <h2 className="text-xl font-semibold text-text-primary mb-2">
             Ready to Extract Ontology
           </h2>
-          <p className="text-text-secondary max-w-md mx-auto mb-6">
+          <p className="text-text-secondary max-w-2xl mx-auto mb-6">
             Before we analyze your schema, tell us about your application. Who uses it and what do
             they do with this data? This context helps build a more accurate business ontology.
           </p>
 
           {/* Overview textarea */}
-          <div className="max-w-xl mx-auto mb-6 text-left">
+          <div className="max-w-2xl mx-auto mb-6 text-left">
             <label className="block text-sm font-medium text-text-primary mb-2">
               Describe your application
             </label>
