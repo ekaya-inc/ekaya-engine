@@ -1,113 +1,107 @@
-# Test: DDL/DML Execution
+# Test: Execute Edge Cases
 
-Test executing DDL and DML statements.
+Test edge cases and error handling for DDL/DML execution.
 
 ## Tools Under Test
 
 - `execute`
 
-## Warning
+## Prerequisites
 
-This tool can modify data. Use test tables only.
-
-## Test Data Convention
-
-All test tables use the `_mcp_test` suffix.
+Run `020-test-fixtures.md` first - basic execute functionality is tested there.
 
 ## Test Cases
 
-### 1. Create Test Table
-Call `execute` with CREATE TABLE and verify:
-- Table is created
-- Appears in schema
-- Correct structure
-
-```sql
-CREATE TABLE IF NOT EXISTS mcp_test_table (
-  id SERIAL PRIMARY KEY,
-  name VARCHAR(100),
-  created_at TIMESTAMP DEFAULT NOW()
-)
-```
-
-### 2. Insert Data
-Call `execute` with INSERT and verify:
-- Row is inserted
-- Returns affected row count
-- Data is queryable
-
-```sql
-INSERT INTO mcp_test_table (name) VALUES ('Test Row 1')
-```
-
-### 3. Update Data
-Call `execute` with UPDATE and verify:
-- Row is updated
-- Returns affected row count
-- Change is persisted
-
-### 4. Delete Data
-Call `execute` with DELETE and verify:
-- Row is deleted
-- Returns affected row count
-- Data is removed
-
-### 5. Execute Invalid SQL
+### 1. Execute Invalid SQL - Syntax Error
 Call `execute` with malformed SQL and verify:
 - Returns syntax error
+- Error message indicates position/nature of error
 - No partial execution
 
-### 6. Execute with Transaction (if supported)
-Test transaction support:
-- BEGIN/COMMIT behavior
-- ROLLBACK behavior
+```sql
+SELEKT * FORM mcp_test_users
+```
 
-### 7. Drop Test Table
-Call `execute` with DROP TABLE and verify:
-- Table is removed
-- No longer in schema
+### 2. Execute Invalid SQL - Missing Table
+Call `execute` referencing non-existent table and verify:
+- Returns table not found error
+- Error specifies which table
 
 ```sql
-DROP TABLE IF EXISTS mcp_test_table
+INSERT INTO nonexistent_table_xyz (col) VALUES (1)
 ```
+
+### 3. Execute Invalid SQL - Constraint Violation
+Call `execute` violating a constraint and verify:
+- Returns constraint violation error
+- Specifies which constraint (unique, FK, etc.)
+
+```sql
+INSERT INTO mcp_test_users (name, email) VALUES ('Duplicate', 'alice@mcp-test.example')
+```
+
+### 4. Execute with Transaction - ROLLBACK
+Test rollback behavior:
+- Begin transaction
+- Make change
+- Rollback
+- Verify change not persisted
+
+### 5. Execute - Empty Statement
+Call `execute` with empty or whitespace-only SQL and verify:
+- Returns appropriate error
+- Does not crash
+
+### 6. Execute - Multiple Statements
+Call `execute` with multiple statements and verify:
+- Either executes all or rejects
+- Document actual behavior (some systems allow, some don't)
+
+```sql
+INSERT INTO mcp_test_users (name) VALUES ('Multi1');
+INSERT INTO mcp_test_users (name) VALUES ('Multi2');
+```
+
+### 7. Execute - SQL Injection Attempt
+Call `execute` with potentially dangerous input and verify:
+- Proper escaping/rejection
+- No unintended side effects
 
 ## Report Format
 
 ```
-=== 280-execute: DDL/DML Execution ===
+=== 280-execute: Execute Edge Cases ===
 
-Test 1: Create Test Table
-  Created: [yes/no]
-  In schema: [yes/no]
-  RESULT: [PASS/FAIL]
-
-Test 2: Insert Data
-  Rows affected: [count]
-  Data queryable: [yes/no]
-  RESULT: [PASS/FAIL]
-
-Test 3: Update Data
-  Rows affected: [count]
-  Change persisted: [yes/no]
-  RESULT: [PASS/FAIL]
-
-Test 4: Delete Data
-  Rows affected: [count]
-  Data removed: [yes/no]
-  RESULT: [PASS/FAIL]
-
-Test 5: Execute Invalid SQL
+Test 1: Execute Invalid SQL - Syntax Error
   Error returned: [yes/no]
-  No partial execution: [yes/no]
+  Error helpful: [yes/no]
   RESULT: [PASS/FAIL]
 
-Test 6: Execute with Transaction
-  Transaction support: [yes/no/partial]
+Test 2: Execute Invalid SQL - Missing Table
+  Error returned: [yes/no]
+  Table specified: [yes/no]
+  RESULT: [PASS/FAIL]
+
+Test 3: Execute Invalid SQL - Constraint Violation
+  Error returned: [yes/no]
+  Constraint identified: [yes/no]
+  RESULT: [PASS/FAIL]
+
+Test 4: Execute with Transaction - ROLLBACK
+  Transaction support: [yes/no]
+  Rollback works: [yes/no]
   RESULT: [PASS/FAIL/SKIP]
 
-Test 7: Drop Test Table
-  Dropped: [yes/no]
-  Removed from schema: [yes/no]
+Test 5: Execute - Empty Statement
+  Behavior: [error / no-op]
+  RESULT: [PASS/FAIL]
+
+Test 6: Execute - Multiple Statements
+  Behavior: [all executed / rejected / first only]
+  RESULT: [PASS/FAIL]
+
+Test 7: Execute - SQL Injection Attempt
+  Properly handled: [yes/no]
   RESULT: [PASS/FAIL]
 
 OVERALL: [PASS/FAIL]
