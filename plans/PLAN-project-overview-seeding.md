@@ -243,7 +243,7 @@ type OntologyDAGService interface {
 
 ---
 
-### 6. Backend: Knowledge Service - StoreWithSource Method
+### 6. Backend: Knowledge Service - StoreWithSource Method [x]
 
 **File:** `pkg/services/knowledge.go`
 
