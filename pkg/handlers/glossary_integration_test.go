@@ -74,7 +74,7 @@ func setupGlossaryTest(t *testing.T) *glossaryTestContext {
 	mockLLMFactory := &mockLLMClientFactory{}
 
 	// Create service with real dependencies
-	service := services.NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, datasourceSvc, adapterFactory, mockLLMFactory, nil, zap.NewNop(), "test")
+	service := services.NewGlossaryService(glossaryRepo, ontologyRepo, entityRepo, nil, nil, datasourceSvc, adapterFactory, mockLLMFactory, nil, zap.NewNop(), "test")
 
 	// Create handler
 	handler := NewGlossaryHandler(service, zap.NewNop())
@@ -187,6 +187,10 @@ func (tc *glossaryTestContext) doRequest(method, path string, body any, handler 
 		ProjectID: tc.projectID.String(),
 	}
 	ctx = context.WithValue(ctx, auth.ClaimsKey, claims)
+
+	// Add provenance context for write operations (simulates what auth middleware does)
+	// Using uuid.Nil since we don't have a real user - the repository handles nil UUIDs
+	ctx = models.WithManualProvenance(ctx, uuid.Nil)
 
 	req = req.WithContext(ctx)
 
@@ -333,6 +337,7 @@ func (tc *glossaryTestContext) createTestEntity() {
 	}
 	defer scope.Close()
 	ctx = database.SetTenantScope(ctx, scope)
+	ctx = models.WithInferredProvenance(ctx, uuid.Nil)
 
 	entity := &models.OntologyEntity{
 		ProjectID:     tc.projectID,

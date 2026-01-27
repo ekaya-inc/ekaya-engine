@@ -247,6 +247,7 @@ func (s *changeReviewService) applyCreateEntity(ctx context.Context, change *mod
 		name = change.TableName // Fall back to table name
 	}
 
+	// Note: Source and CreatedBy are set by the repository from provenance context
 	entity := &models.OntologyEntity{
 		ProjectID:     change.ProjectID,
 		OntologyID:    ontology.ID,
@@ -254,7 +255,6 @@ func (s *changeReviewService) applyCreateEntity(ctx context.Context, change *mod
 		PrimaryTable:  change.TableName,
 		PrimarySchema: "public",
 		PrimaryColumn: "id", // Default, can be overridden by payload
-		CreatedBy:     reviewerSource,
 	}
 
 	if desc, ok := payload["description"].(string); ok {
@@ -287,7 +287,7 @@ func (s *changeReviewService) applyCreateColumnMetadata(ctx context.Context, cha
 		ProjectID:  change.ProjectID,
 		TableName:  change.TableName,
 		ColumnName: change.ColumnName,
-		CreatedBy:  reviewerSource,
+		Source:     reviewerSource,
 	}
 
 	if desc, ok := payload["description"].(string); ok {
@@ -321,9 +321,9 @@ func (s *changeReviewService) applyUpdateColumnMetadata(ctx context.Context, cha
 
 	if existing != nil {
 		// Check precedence
-		if !s.CanModify(existing.CreatedBy, existing.UpdatedBy, reviewerSource) {
+		if !s.CanModify(existing.Source, existing.LastEditSource, reviewerSource) {
 			return fmt.Errorf("cannot modify column metadata: precedence blocked (existing: %s, reviewer: %s)",
-				s.precedenceChecker.GetEffectiveSource(existing.CreatedBy, existing.UpdatedBy), reviewerSource)
+				s.precedenceChecker.GetEffectiveSource(existing.Source, existing.LastEditSource), reviewerSource)
 		}
 	}
 
@@ -334,15 +334,16 @@ func (s *changeReviewService) applyUpdateColumnMetadata(ctx context.Context, cha
 	}
 
 	meta := &models.ColumnMetadata{
-		ProjectID:  change.ProjectID,
-		TableName:  change.TableName,
-		ColumnName: change.ColumnName,
-		CreatedBy:  reviewerSource,
-		UpdatedBy:  &reviewerSource,
+		ProjectID:      change.ProjectID,
+		TableName:      change.TableName,
+		ColumnName:     change.ColumnName,
+		Source:         reviewerSource,
+		LastEditSource: &reviewerSource,
 	}
 
 	if existing != nil {
 		meta.ID = existing.ID
+		meta.Source = existing.Source
 		meta.CreatedBy = existing.CreatedBy
 		meta.CreatedAt = existing.CreatedAt
 	}
@@ -401,6 +402,7 @@ func (s *changeReviewService) applyCreateRelationship(ctx context.Context, chang
 		return fmt.Errorf("invalid target_entity_id: %w", err)
 	}
 
+	// Note: Source and CreatedBy are set by the repository from provenance context
 	rel := &models.EntityRelationship{
 		OntologyID:        ontology.ID,
 		SourceEntityID:    sourceUUID,
@@ -411,7 +413,6 @@ func (s *changeReviewService) applyCreateRelationship(ctx context.Context, chang
 		Confidence:        0.8,
 		Status:            "confirmed",
 		Cardinality:       "unknown",
-		CreatedBy:         reviewerSource,
 	}
 
 	if desc, ok := payload["description"].(string); ok {
@@ -452,13 +453,14 @@ func (s *changeReviewService) applyUpdateRelationship(ctx context.Context, chang
 		return fmt.Errorf("relationship not found")
 	}
 
-	// Check precedence
-	if !s.CanModify(existing.CreatedBy, existing.UpdatedBy, reviewerSource) {
+	// Check precedence using Source and LastEditSource (the method strings)
+	if !s.CanModify(existing.Source, existing.LastEditSource, reviewerSource) {
 		return fmt.Errorf("cannot modify relationship: precedence blocked (existing: %s, reviewer: %s)",
-			s.precedenceChecker.GetEffectiveSource(existing.CreatedBy, existing.UpdatedBy), reviewerSource)
+			s.precedenceChecker.GetEffectiveSource(existing.Source, existing.LastEditSource), reviewerSource)
 	}
 
 	// Apply updates
+	// Note: UpdatedBy and LastEditSource are set by the repository from provenance context
 	if desc, ok := payload["description"].(string); ok {
 		existing.Description = &desc
 	}
@@ -468,8 +470,6 @@ func (s *changeReviewService) applyUpdateRelationship(ctx context.Context, chang
 	if card, ok := payload["cardinality"].(string); ok {
 		existing.Cardinality = card
 	}
-
-	existing.UpdatedBy = &reviewerSource
 
 	return s.relationshipRepo.Update(ctx, existing)
 }

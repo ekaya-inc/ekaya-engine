@@ -261,10 +261,10 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 
 			// If metadata exists, check precedence before updating
 			if existing != nil {
-				if !canModify(existing.CreatedBy, existing.UpdatedBy, models.ProvenanceMCP) {
-					effectiveSource := existing.CreatedBy
-					if existing.UpdatedBy != nil && *existing.UpdatedBy != "" {
-						effectiveSource = *existing.UpdatedBy
+				if !canModify(existing.Source, existing.LastEditSource, models.ProvenanceMCP) {
+					effectiveSource := existing.Source
+					if existing.LastEditSource != nil && *existing.LastEditSource != "" {
+						effectiveSource = *existing.LastEditSource
 					}
 					return NewErrorResult("precedence_blocked",
 						fmt.Sprintf("Cannot modify column metadata: precedence blocked (existing: %s, modifier: %s). "+
@@ -273,13 +273,13 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 				}
 			}
 
-			updatedBy := models.ProvenanceMCP
+			lastEditSource := models.ProvenanceMCP
 			colMeta := &models.ColumnMetadata{
-				ProjectID:  projectID,
-				TableName:  table,
-				ColumnName: column,
-				CreatedBy:  models.ProvenanceMCP,
-				UpdatedBy:  &updatedBy,
+				ProjectID:      projectID,
+				TableName:      table,
+				ColumnName:     column,
+				Source:         models.ProvenanceMCP,
+				LastEditSource: &lastEditSource,
 			}
 			if description != "" {
 				colMeta.Description = &description
@@ -522,7 +522,7 @@ func precedenceLevel(source string) int {
 		return 3
 	case models.ProvenanceMCP:
 		return 2
-	case models.ProvenanceInference:
+	case models.ProvenanceInferred:
 		return 1
 	default:
 		return 0 // Unknown source has lowest precedence

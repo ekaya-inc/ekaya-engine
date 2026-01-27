@@ -105,6 +105,10 @@ func (tc *knowledgeToolTestContext) createTestContext() (context.Context, func()
 		Roles:     []string{models.RoleAdmin},
 	})
 
+	// Add provenance context for MCP operations (simulates what MCP middleware does)
+	// Using uuid.Nil since we don't have a real user - the repository handles nil UUIDs
+	ctx = models.WithMCPProvenance(ctx, uuid.Nil)
+
 	return ctx, func() { scope.Close() }
 }
 

@@ -696,10 +696,12 @@ func TestExecuteDAG_PanicRecovery(t *testing.T) {
 	}
 
 	// Execute DAG in a goroutine (as it would be in production)
+	// Use a test user ID for provenance tracking
+	testUserID := uuid.New()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		service.executeDAG(projectID, dagID)
+		service.executeDAG(projectID, dagID, testUserID)
 	}()
 
 	// Wait for goroutine to complete with timeout
@@ -770,10 +772,12 @@ func TestExecuteDAG_HeartbeatCleanupOrder(t *testing.T) {
 	}
 
 	// Execute DAG in a goroutine
+	// Use a test user ID for provenance tracking
+	testUserID := uuid.New()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		service.executeDAG(projectID, dagID)
+		service.executeDAG(projectID, dagID, testUserID)
 	}()
 
 	// Wait for goroutine to complete with timeout
@@ -840,4 +844,90 @@ func TestSetGlossaryMethods(t *testing.T) {
 	discoveryMethods := &testGlossaryDiscovery{}
 	service.SetGlossaryDiscoveryMethods(discoveryMethods)
 	assert.Equal(t, discoveryMethods, service.glossaryDiscoveryMethods)
+}
+
+// ============================================================================
+// Start Method Provenance Tests
+// ============================================================================
+
+// TestStart_RequiresAuthenticatedUser verifies that Start requires a valid user ID
+// from JWT claims for provenance tracking.
+func TestStart_RequiresAuthenticatedUser(t *testing.T) {
+	service := &ontologyDAGService{
+		dagRepo: &mockDAGRepository{},
+		logger:  zap.NewNop(),
+	}
+
+	// Try to start without authentication (no claims in context)
+	ctx := context.Background()
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+
+	_, err := service.Start(ctx, projectID, datasourceID)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "user authentication required")
+}
+
+// TestExecuteDAG_SetsInferenceProvenance verifies that executeDAG properly sets
+// inference provenance on the tenant context with the triggering user's ID.
+func TestExecuteDAG_SetsInferenceProvenance(t *testing.T) {
+	projectID := uuid.New()
+	dagID := uuid.New()
+	ontologyID := uuid.New()
+	userID := uuid.New()
+
+	// Track what provenance was set on the context
+	var capturedProvenance models.ProvenanceContext
+	var provenanceFound bool
+
+	// Create mock repository that captures the context
+	mockRepo := &mockDAGRepository{
+		getByIDWithNodesFunc: func(ctx context.Context, id uuid.UUID) (*models.OntologyDAG, error) {
+			// Capture the provenance from the context
+			capturedProvenance, provenanceFound = models.GetProvenance(ctx)
+			return &models.OntologyDAG{
+				ID:           dagID,
+				ProjectID:    projectID,
+				DatasourceID: uuid.New(),
+				OntologyID:   &ontologyID,
+				Nodes:        []models.DAGNode{},
+			}, nil
+		},
+	}
+
+	// Create service
+	service := &ontologyDAGService{
+		dagRepo:          mockRepo,
+		logger:           zap.NewNop(),
+		serverInstanceID: uuid.New(),
+	}
+
+	// Set getTenantCtx to succeed (returns context as-is but with provenance wrapped by executeDAG)
+	service.getTenantCtx = func(ctx context.Context, pid uuid.UUID) (context.Context, func(), error) {
+		return ctx, func() {}, nil
+	}
+
+	// Execute DAG with a specific user ID
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		service.executeDAG(projectID, dagID, userID)
+	}()
+
+	// Wait for goroutine to complete
+	select {
+	case <-done:
+		// Good, execution completed
+	case <-time.After(2 * time.Second):
+		t.Fatal("Test timed out waiting for executeDAG to complete")
+	}
+
+	// Give a small amount of time for cleanup
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify provenance was set correctly
+	assert.True(t, provenanceFound, "Provenance should be set in context")
+	assert.Equal(t, models.SourceInferred, capturedProvenance.Source, "Source should be inference")
+	assert.Equal(t, userID, capturedProvenance.UserID, "UserID should match the triggering user")
 }

@@ -104,6 +104,9 @@ func (m *mockEntityRepo) DeleteByOntology(ctx context.Context, ontologyID uuid.U
 func (m *mockEntityRepo) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }
+func (m *mockEntityRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
 func (m *mockEntityRepo) GetAllAliasesByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityAlias, error) {
 	return nil, nil
 }
@@ -116,6 +119,18 @@ func (m *mockEntityRepo) CountOccurrencesByEntity(ctx context.Context, entityID 
 }
 
 func (m *mockEntityRepo) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockEntityRepo) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepo) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepo) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
 	return nil, nil
 }
 
@@ -175,6 +190,22 @@ func (m *mockRelationshipRepo) GetByID(ctx context.Context, id uuid.UUID) (*mode
 	return nil, nil
 }
 func (m *mockRelationshipRepo) Update(ctx context.Context, rel *models.EntityRelationship) error {
+	return nil
+}
+
+func (m *mockRelationshipRepo) MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockRelationshipRepo) ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockRelationshipRepo) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (m *mockRelationshipRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
 	return nil
 }
 

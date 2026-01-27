@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
@@ -153,6 +154,13 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 		zap.String("project_id", projectID.String()),
 		zap.String("datasource_id", datasourceID.String()))
 
+	// Extract user ID from JWT claims for provenance tracking.
+	// The user who triggered extraction will be recorded as created_by for all inference-created objects.
+	userID, err := auth.RequireUserUUIDFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("user authentication required to start extraction: %w", err)
+	}
+
 	// Check for existing active DAG
 	existing, err := s.dagRepo.GetActiveByDatasource(ctx, datasourceID)
 	if err != nil {
@@ -171,10 +179,14 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 		return nil, fmt.Errorf("get or create ontology: %w", err)
 	}
 
-	// Delete only inference-created entities for fresh discovery
-	// Manual and MCP entities are preserved
-	if err := s.entityRepo.DeleteInferenceEntitiesByOntology(ctx, ontology.ID); err != nil {
-		return nil, fmt.Errorf("delete inference entities: %w", err)
+	// Mark inference-created entities and relationships as stale for re-evaluation
+	// Manual and MCP entities/relationships are preserved unchanged
+	// The stale flag will be cleared when items are re-discovered or re-enriched
+	if err := s.entityRepo.MarkInferenceEntitiesStale(ctx, ontology.ID); err != nil {
+		return nil, fmt.Errorf("mark inference entities stale: %w", err)
+	}
+	if err := s.relationshipRepo.MarkInferenceRelationshipsStale(ctx, ontology.ID); err != nil {
+		return nil, fmt.Errorf("mark inference relationships stale: %w", err)
 	}
 
 	// Create new DAG
@@ -217,8 +229,9 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 	}
 
 	// Run DAG execution in background
+	// Pass userID for provenance tracking - all inference-created objects will record this user as created_by
 	// Note: heartbeat is started inside executeDAG after defer is established
-	go s.executeDAG(projectID, dagRecord.ID)
+	go s.executeDAG(projectID, dagRecord.ID, userID)
 
 	// Return DAG with nodes
 	dagRecord.Nodes = nodes
@@ -492,7 +505,8 @@ func (s *ontologyDAGService) createNodes(dagID uuid.UUID) []models.DAGNode {
 }
 
 // executeDAG runs the DAG execution in a background goroutine.
-func (s *ontologyDAGService) executeDAG(projectID, dagID uuid.UUID) {
+// userID is the user who triggered the extraction - used for provenance tracking on all created objects.
+func (s *ontologyDAGService) executeDAG(projectID, dagID, userID uuid.UUID) {
 	// Create cancellable context
 	ctx, cancel := context.WithCancel(context.Background())
 	s.activeDAGs.Store(dagID, cancel)
@@ -520,9 +534,13 @@ func (s *ontologyDAGService) executeDAG(projectID, dagID uuid.UUID) {
 
 	s.logger.Info("Starting DAG execution",
 		zap.String("dag_id", dagID.String()),
-		zap.String("project_id", projectID.String()))
+		zap.String("project_id", projectID.String()),
+		zap.String("triggered_by_user", userID.String()))
 
-	// Get tenant context
+	// Get tenant context with inference provenance.
+	// All ontology objects created during DAG execution will record:
+	// - source = "inferred" (auto-detected by LLM)
+	// - created_by = userID (the user who triggered extraction)
 	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
 	if err != nil {
 		s.logger.Error("Failed to get tenant context", zap.Error(err))
@@ -530,6 +548,10 @@ func (s *ontologyDAGService) executeDAG(projectID, dagID uuid.UUID) {
 		return
 	}
 	defer cleanup()
+
+	// Wrap the tenant context with inference provenance.
+	// This ensures all repository operations during DAG execution have proper provenance.
+	tenantCtx = models.WithInferredProvenance(tenantCtx, userID)
 
 	// Get DAG with nodes
 	dagRecord, err := s.dagRepo.GetByIDWithNodes(tenantCtx, dagID)

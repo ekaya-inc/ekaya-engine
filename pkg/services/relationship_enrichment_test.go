@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
@@ -84,12 +85,28 @@ func (r *testRelEnrichmentRelRepo) Delete(ctx context.Context, id uuid.UUID) err
 	return nil
 }
 
+func (r *testRelEnrichmentRelRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
+
 func (r *testRelEnrichmentRelRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.EntityRelationship, error) {
 	return nil, nil
 }
 
 func (r *testRelEnrichmentRelRepo) Update(ctx context.Context, rel *models.EntityRelationship) error {
 	return nil
+}
+
+func (r *testRelEnrichmentRelRepo) MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (r *testRelEnrichmentRelRepo) ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error {
+	return nil
+}
+
+func (r *testRelEnrichmentRelRepo) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
 }
 
 type testRelEnrichmentEntityRepo struct {
@@ -144,6 +161,10 @@ func (r *testRelEnrichmentEntityRepo) DeleteInferenceEntitiesByOntology(ctx cont
 	return nil
 }
 
+func (r *testRelEnrichmentEntityRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
+
 func (r *testRelEnrichmentEntityRepo) DeleteAlias(ctx context.Context, aliasID uuid.UUID) error {
 	return nil
 }
@@ -184,6 +205,18 @@ func (r *testRelEnrichmentEntityRepo) GetOccurrenceTablesByEntity(ctx context.Co
 	return nil, nil
 }
 
+func (r *testRelEnrichmentEntityRepo) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (r *testRelEnrichmentEntityRepo) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+
+func (r *testRelEnrichmentEntityRepo) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
+	return nil, nil
+}
+
 // Tests for task 2 changes: validation, retry logic, error handling
 
 func TestRelationshipEnrichmentService_ValidationFiltersInvalid(t *testing.T) {
@@ -220,7 +253,7 @@ func TestRelationshipEnrichmentService_ValidationFiltersInvalid(t *testing.T) {
 	mockFactory := llm.NewMockClientFactory()
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -274,7 +307,7 @@ func TestRelationshipEnrichmentService_RetryOnTransientError(t *testing.T) {
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -322,7 +355,7 @@ func TestRelationshipEnrichmentService_NonRetryableError(t *testing.T) {
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -371,7 +404,7 @@ func TestRelationshipEnrichmentService_InvalidJSONResponse(t *testing.T) {
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -427,7 +460,7 @@ func TestRelationshipEnrichmentService_SelfReferentialRelationship(t *testing.T)
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -503,7 +536,7 @@ func TestRelationshipEnrichmentService_MultipleSelfReferentialFK(t *testing.T) {
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, nil, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -610,7 +643,7 @@ func TestRelationshipEnrichmentService_HostVisitorRolesWithKnowledge(t *testing.
 
 	testPool := llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop())
 	circuitBreaker := llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig())
-	service := NewRelationshipEnrichmentService(relRepo, entityRepo, knowledgeRepo, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
+	service := NewRelationshipEnrichmentService(relRepo, entityRepo, knowledgeRepo, nil, nil, nil, mockFactory, testPool, circuitBreaker, nil, zap.NewNop())
 
 	// Execute
 	result, err := service.EnrichProject(context.Background(), projectID, nil)
@@ -676,4 +709,115 @@ func (m *mockKnowledgeRepoForRelEnrichment) Delete(ctx context.Context, id uuid.
 
 func (m *mockKnowledgeRepoForRelEnrichment) DeleteByProject(ctx context.Context, projectID uuid.UUID) error {
 	return nil
+}
+
+func (m *mockKnowledgeRepoForRelEnrichment) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
+
+func TestRelationshipEnrichmentResponse_QuestionsDeserialization(t *testing.T) {
+	// Direct test of relationshipEnrichmentResponse JSON parsing
+
+	responseJSON := `{
+		"relationships": [
+			{
+				"id": 1,
+				"description": "Links each order to the user who placed it.",
+				"association": "placed_by"
+			}
+		],
+		"questions": [
+			{
+				"category": "relationship",
+				"priority": 1,
+				"question": "Is users.referrer_id a self-reference to the same users table?",
+				"context": "Column appears to reference the same table."
+			}
+		]
+	}`
+
+	response, err := llm.ParseJSONResponse[relationshipEnrichmentResponse](responseJSON)
+
+	require.NoError(t, err)
+	require.Len(t, response.Relationships, 1)
+	require.Len(t, response.Questions, 1)
+
+	// Verify relationship
+	assert.Equal(t, 1, response.Relationships[0].ID)
+	assert.Equal(t, "placed_by", response.Relationships[0].Association)
+
+	// Verify question
+	assert.Equal(t, "relationship", response.Questions[0].Category)
+	assert.Equal(t, 1, response.Questions[0].Priority)
+	assert.Equal(t, "Is users.referrer_id a self-reference to the same users table?", response.Questions[0].Question)
+}
+
+func TestRelationshipEnrichmentResponse_NoQuestions(t *testing.T) {
+	// Test that parsing succeeds when no questions are present
+
+	responseJSON := `{
+		"relationships": [
+			{
+				"id": 1,
+				"description": "Links orders to users.",
+				"association": "belongs_to"
+			}
+		]
+	}`
+
+	response, err := llm.ParseJSONResponse[relationshipEnrichmentResponse](responseJSON)
+
+	require.NoError(t, err)
+	require.Len(t, response.Relationships, 1)
+	assert.Empty(t, response.Questions, "Questions should be empty when not present")
+}
+
+func TestRelationshipEnrichmentResponse_MultipleQuestions(t *testing.T) {
+	// Test that multiple questions of different categories are parsed correctly
+
+	responseJSON := `{
+		"relationships": [
+			{
+				"id": 1,
+				"description": "Links transactions to users as host.",
+				"association": "as_host"
+			},
+			{
+				"id": 2,
+				"description": "Links transactions to users as visitor.",
+				"association": "as_visitor"
+			}
+		],
+		"questions": [
+			{
+				"category": "business_rules",
+				"priority": 1,
+				"question": "Can a user be both host and visitor in the same transaction?",
+				"context": "Transaction has two FK columns to users: host_id and visitor_id."
+			},
+			{
+				"category": "relationship",
+				"priority": 2,
+				"question": "What distinguishes a host from a visitor in business terms?",
+				"context": "Both roles reference users but have different business meanings."
+			}
+		]
+	}`
+
+	response, err := llm.ParseJSONResponse[relationshipEnrichmentResponse](responseJSON)
+
+	require.NoError(t, err)
+	require.Len(t, response.Relationships, 2)
+	require.Len(t, response.Questions, 2)
+
+	// Verify relationships
+	assert.Equal(t, "as_host", response.Relationships[0].Association)
+	assert.Equal(t, "as_visitor", response.Relationships[1].Association)
+
+	// Verify questions
+	assert.Equal(t, "business_rules", response.Questions[0].Category)
+	assert.Equal(t, 1, response.Questions[0].Priority)
+
+	assert.Equal(t, "relationship", response.Questions[1].Category)
+	assert.Equal(t, 2, response.Questions[1].Priority)
 }

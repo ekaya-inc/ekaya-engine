@@ -7,11 +7,11 @@ import (
 )
 
 // Provenance source constants for ontology elements.
-// Precedence: Manual (highest) > MCP (Claude) > Inference (Engine, lowest)
+// Precedence: Manual (highest) > MCP (Claude) > Inferred (Engine, lowest)
 const (
-	ProvenanceManual    = "manual"    // Direct manual edit via UI - highest precedence
-	ProvenanceMCP       = "mcp"       // Claude via MCP tools - wins over inference
-	ProvenanceInference = "inference" // Engine auto-detected or LLM-generated - lowest precedence
+	ProvenanceManual   = "manual"   // Direct manual edit via UI - highest precedence
+	ProvenanceMCP      = "mcp"      // Claude via MCP tools - wins over inferred
+	ProvenanceInferred = "inferred" // Engine auto-detected or LLM-generated - lowest precedence
 )
 
 // OntologyEntity represents a discovered domain entity (user, account, order, etc.)
@@ -29,10 +29,19 @@ type OntologyEntity struct {
 	PrimaryColumn  string    `json:"primary_column"` // Column where entity is primarily defined
 	IsDeleted      bool      `json:"is_deleted"`     // Soft delete flag
 	DeletionReason *string   `json:"deletion_reason,omitempty"`
-	CreatedBy      string    `json:"created_by"`           // Provenance: 'manual', 'mcp', 'inference'
-	UpdatedBy      *string   `json:"updated_by,omitempty"` // Who last updated (nil if never updated)
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	Confidence     float64   `json:"confidence"` // 0.0-1.0: higher for FK-derived, lower for LLM-inferred
+	IsStale        bool      `json:"is_stale"`   // True when schema changed and needs re-evaluation
+
+	// Provenance: source tracking (how it was created/modified)
+	Source         string  `json:"source"`                     // 'inferred', 'mcp', 'manual'
+	LastEditSource *string `json:"last_edit_source,omitempty"` // How last modified (nil if never edited)
+
+	// Provenance: actor tracking (who created/modified)
+	CreatedBy *uuid.UUID `json:"created_by,omitempty"` // User who triggered creation (from JWT)
+	UpdatedBy *uuid.UUID `json:"updated_by,omitempty"` // User who last updated (nil if never updated)
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // OntologyEntityOccurrence represents a computed occurrence of an entity in a specific
@@ -53,6 +62,7 @@ type OntologyEntityOccurrence struct {
 // Used for query matching (e.g., "customer" as alias for "user").
 type OntologyEntityAlias struct {
 	ID        uuid.UUID `json:"id"`
+	ProjectID uuid.UUID `json:"project_id"`
 	EntityID  uuid.UUID `json:"entity_id"`
 	Alias     string    `json:"alias"`
 	Source    *string   `json:"source,omitempty"` // 'discovery', 'user', 'query'

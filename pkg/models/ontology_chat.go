@@ -213,8 +213,17 @@ type KnowledgeFact struct {
 	Key        string     `json:"key"`
 	Value      string     `json:"value"`
 	Context    string     `json:"context,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+
+	// Provenance: source tracking (how it was created/modified)
+	Source         string  `json:"source"`                     // 'inference', 'mcp', 'manual'
+	LastEditSource *string `json:"last_edit_source,omitempty"` // How last modified (nil if never edited)
+
+	// Provenance: actor tracking (who created/modified)
+	CreatedBy *uuid.UUID `json:"created_by,omitempty"` // User who triggered creation (from JWT)
+	UpdatedBy *uuid.UUID `json:"updated_by,omitempty"` // User who last updated (nil if never updated)
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // ============================================================================

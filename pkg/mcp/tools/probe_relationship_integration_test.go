@@ -208,6 +208,8 @@ func (tc *probeRelationshipTestContext) createOntologyAndEntities(ctx context.Co
 	require.NoError(tc.t, err)
 
 	// Create entities under this ontology (simulating extraction)
+	// Set provenance context for the repository
+	ctxWithProv := models.WithInferredProvenance(ctx, uuid.Nil)
 	for _, name := range entityNames {
 		entity := &models.OntologyEntity{
 			ProjectID:     tc.projectID,
@@ -216,9 +218,8 @@ func (tc *probeRelationshipTestContext) createOntologyAndEntities(ctx context.Co
 			Description:   "Test entity: " + name,
 			PrimaryTable:  name + "_table",
 			PrimaryColumn: name + "_id",
-			CreatedBy:     models.ProvenanceInference, // Extraction creates with inference provenance
 		}
-		err = tc.ontologyEntityRepo.Create(ctx, entity)
+		err = tc.ontologyEntityRepo.Create(ctxWithProv, entity)
 		require.NoError(tc.t, err)
 	}
 

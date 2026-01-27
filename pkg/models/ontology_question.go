@@ -1,6 +1,8 @@
 package models
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"time"
 
 	"github.com/google/uuid"
@@ -98,6 +100,7 @@ type OntologyQuestion struct {
 	OntologyID       uuid.UUID        `json:"ontology_id"`
 	WorkflowID       *uuid.UUID       `json:"workflow_id,omitempty"`
 	ParentQuestionID *uuid.UUID       `json:"parent_question_id,omitempty"` // For follow-up traceability
+	ContentHash      string           `json:"content_hash,omitempty"`       // SHA256 hash of category + text for deduplication
 	Text             string           `json:"text"`
 	Priority         int              `json:"priority"`    // 1=highest, 5=lowest
 	IsRequired       bool             `json:"is_required"` // Required = entity not complete until answered
@@ -148,6 +151,14 @@ func (q *OntologyQuestion) AffectedColumnNames() []string {
 		return nil
 	}
 	return q.Affects.Columns
+}
+
+// ComputeContentHash creates a SHA256 hash of category + text for deduplication.
+// Returns the first 16 characters of the hex-encoded hash.
+func (q *OntologyQuestion) ComputeContentHash() string {
+	h := sha256.New()
+	h.Write([]byte(q.Category + "|" + q.Text))
+	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // ============================================================================

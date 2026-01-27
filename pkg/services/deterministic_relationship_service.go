@@ -96,9 +96,11 @@ func (s *deterministicRelationshipService) createBidirectionalRelationship(ctx c
 		SourceColumnSchema: rel.TargetColumnSchema, // swap
 		SourceColumnTable:  rel.TargetColumnTable,  // swap
 		SourceColumnName:   rel.TargetColumnName,   // swap
+		SourceColumnID:     rel.TargetColumnID,     // swap
 		TargetColumnSchema: rel.SourceColumnSchema, // swap
 		TargetColumnTable:  rel.SourceColumnTable,  // swap
 		TargetColumnName:   rel.SourceColumnName,   // swap
+		TargetColumnID:     rel.SourceColumnID,     // swap
 		DetectionMethod:    rel.DetectionMethod,
 		Confidence:         rel.Confidence,
 		Status:             rel.Status,
@@ -216,9 +218,11 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 			SourceColumnSchema: sourceTable.SchemaName,
 			SourceColumnTable:  sourceTable.TableName,
 			SourceColumnName:   sourceCol.ColumnName,
+			SourceColumnID:     &sourceCol.ID,
 			TargetColumnSchema: targetTable.SchemaName,
 			TargetColumnTable:  targetTable.TableName,
 			TargetColumnName:   targetCol.ColumnName,
+			TargetColumnID:     &targetCol.ID,
 			DetectionMethod:    detectionMethod,
 			Confidence:         1.0,
 			Status:             models.RelationshipStatusConfirmed,
@@ -338,7 +342,23 @@ func (s *deterministicRelationshipService) collectColumnStats(
 
 		// Classify joinability and update columns
 		for _, col := range tableCols {
-			st := statsMap[col.ColumnName]
+			st, found := statsMap[col.ColumnName]
+			if found {
+				s.logger.Debug("Found stats for column",
+					zap.String("table", fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)),
+					zap.String("column", col.ColumnName),
+					zap.Int64("distinct_count", st.DistinctCount))
+			} else {
+				// Collect available keys for debugging
+				availableKeys := make([]string, 0, len(statsMap))
+				for k := range statsMap {
+					availableKeys = append(availableKeys, k)
+				}
+				s.logger.Warn("No stats found for column",
+					zap.String("table", fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)),
+					zap.String("column", col.ColumnName),
+					zap.Strings("available_keys", availableKeys))
+			}
 
 			isJoinable, reason := classifyJoinability(col, st, tableRowCount)
 
@@ -352,8 +372,22 @@ func (s *deterministicRelationshipService) collectColumnStats(
 			}
 
 			// Update column joinability in database
+			// Debug: log values being passed to update
+			var dcVal int64
+			if distinctCount != nil {
+				dcVal = *distinctCount
+			}
+			s.logger.Debug("Updating column joinability",
+				zap.String("table", fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)),
+				zap.String("column", col.ColumnName),
+				zap.Int64("distinct_count_value", dcVal),
+				zap.Bool("distinct_count_is_nil", distinctCount == nil))
+
 			if err := s.schemaRepo.UpdateColumnJoinability(ctx, col.ID, rowCount, nonNullCount, distinctCount, &isJoinable, &reason); err != nil {
-				// Log warning but continue
+				s.logger.Warn("Failed to update column joinability",
+					zap.String("table", fmt.Sprintf("%s.%s", table.SchemaName, table.TableName)),
+					zap.String("column", col.ColumnName),
+					zap.Error(err))
 				continue
 			}
 		}
@@ -691,9 +725,11 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 				SourceColumnSchema: candidate.schema,
 				SourceColumnTable:  candidate.table,
 				SourceColumnName:   candidate.column.ColumnName,
+				SourceColumnID:     &candidate.column.ID,
 				TargetColumnSchema: ref.schema,
 				TargetColumnTable:  ref.table,
 				TargetColumnName:   ref.column.ColumnName,
+				TargetColumnID:     &ref.column.ID,
 				DetectionMethod:    models.DetectionMethodPKMatch,
 				Confidence:         confidence,
 				Status:             status,

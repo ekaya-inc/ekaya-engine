@@ -17,20 +17,22 @@ import (
 
 // glossaryTestContext holds test dependencies for glossary repository tests.
 type glossaryTestContext struct {
-	t         *testing.T
-	engineDB  *testhelpers.EngineDB
-	repo      GlossaryRepository
-	projectID uuid.UUID
+	t          *testing.T
+	engineDB   *testhelpers.EngineDB
+	repo       GlossaryRepository
+	projectID  uuid.UUID
+	testUserID uuid.UUID // User ID for provenance context
 }
 
 // setupGlossaryTest initializes the test context with shared testcontainer.
 func setupGlossaryTest(t *testing.T) *glossaryTestContext {
 	engineDB := testhelpers.GetEngineDB(t)
 	tc := &glossaryTestContext{
-		t:         t,
-		engineDB:  engineDB,
-		repo:      NewGlossaryRepository(),
-		projectID: uuid.MustParse("00000000-0000-0000-0000-000000000044"),
+		t:          t,
+		engineDB:   engineDB,
+		repo:       NewGlossaryRepository(),
+		projectID:  uuid.MustParse("00000000-0000-0000-0000-000000000044"),
+		testUserID: uuid.MustParse("00000000-0000-0000-0000-000000000045"), // Test user for provenance
 	}
 	tc.ensureTestProject()
 	return tc
@@ -54,6 +56,16 @@ func (tc *glossaryTestContext) ensureTestProject() {
 	if err != nil {
 		tc.t.Fatalf("failed to ensure test project: %v", err)
 	}
+
+	// Create test user for provenance FK constraints
+	_, err = scope.Conn.Exec(ctx, `
+		INSERT INTO engine_users (project_id, user_id, role)
+		VALUES ($1, $2, 'admin')
+		ON CONFLICT (project_id, user_id) DO NOTHING
+	`, tc.projectID, tc.testUserID)
+	if err != nil {
+		tc.t.Fatalf("failed to ensure test user: %v", err)
+	}
 }
 
 // cleanup removes test glossary terms and ontologies.
@@ -72,8 +84,13 @@ func (tc *glossaryTestContext) cleanup() {
 	_, _ = scope.Conn.Exec(ctx, "DELETE FROM engine_ontologies WHERE project_id = $1", tc.projectID)
 }
 
-// createTestContext returns a context with tenant scope.
+// createTestContext returns a context with tenant scope and manual provenance.
 func (tc *glossaryTestContext) createTestContext() (context.Context, func()) {
+	return tc.createTestContextWithSource(models.SourceManual)
+}
+
+// createTestContextWithSource returns a context with tenant scope and specified provenance source.
+func (tc *glossaryTestContext) createTestContextWithSource(source models.ProvenanceSource) (context.Context, func()) {
 	tc.t.Helper()
 	ctx := context.Background()
 	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
@@ -81,10 +98,15 @@ func (tc *glossaryTestContext) createTestContext() (context.Context, func()) {
 		tc.t.Fatalf("failed to create tenant scope: %v", err)
 	}
 	ctx = database.SetTenantScope(ctx, scope)
+	ctx = models.WithProvenance(ctx, models.ProvenanceContext{
+		Source: source,
+		UserID: tc.testUserID,
+	})
 	return ctx, func() { scope.Close() }
 }
 
 // createTestTerm creates a glossary term for testing.
+// Source is set from the provenance context, not from the term struct.
 func (tc *glossaryTestContext) createTestTerm(ctx context.Context, termName, definition string) *models.BusinessGlossaryTerm {
 	tc.t.Helper()
 	term := &models.BusinessGlossaryTerm{
@@ -92,7 +114,7 @@ func (tc *glossaryTestContext) createTestTerm(ctx context.Context, termName, def
 		Term:        termName,
 		Definition:  definition,
 		DefiningSQL: "SELECT 1", // Minimal valid SQL
-		Source:      models.GlossarySourceManual,
+		// Source is set from provenance context, not here
 	}
 	err := tc.repo.Create(ctx, term)
 	if err != nil {
@@ -169,7 +191,7 @@ func TestGlossaryRepository_Create_Success(t *testing.T) {
 			{Name: "revenue", Type: "numeric", Description: "Total revenue"},
 		},
 		Aliases: []string{"Total Revenue", "Earned Revenue"},
-		Source:  models.GlossarySourceManual,
+		// Source is set from provenance context, not here
 	}
 
 	err := tc.repo.Create(ctx, term)
@@ -185,6 +207,14 @@ func TestGlossaryRepository_Create_Success(t *testing.T) {
 	}
 	if term.UpdatedAt.IsZero() {
 		t.Error("expected UpdatedAt to be set")
+	}
+	// Verify Source was set from provenance context
+	if term.Source != "manual" {
+		t.Errorf("expected Source to be 'manual' from provenance context, got %q", term.Source)
+	}
+	// Verify CreatedBy was set from provenance context
+	if term.CreatedBy == nil || *term.CreatedBy != tc.testUserID {
+		t.Errorf("expected CreatedBy to be %v, got %v", tc.testUserID, term.CreatedBy)
 	}
 
 	// Verify by fetching
@@ -210,13 +240,21 @@ func TestGlossaryRepository_Create_Success(t *testing.T) {
 	if retrieved.BaseTable != "billing_transactions" {
 		t.Errorf("expected base_table 'billing_transactions', got %q", retrieved.BaseTable)
 	}
+	// Verify provenance fields are persisted
+	if retrieved.Source != "manual" {
+		t.Errorf("expected Source 'manual', got %q", retrieved.Source)
+	}
+	if retrieved.CreatedBy == nil || *retrieved.CreatedBy != tc.testUserID {
+		t.Errorf("expected CreatedBy to be %v, got %v", tc.testUserID, retrieved.CreatedBy)
+	}
 }
 
 func TestGlossaryRepository_Create_MinimalFields(t *testing.T) {
 	tc := setupGlossaryTest(t)
 	tc.cleanup()
 
-	ctx, cleanup := tc.createTestContext()
+	// Use inference provenance for this test
+	ctx, cleanup := tc.createTestContextWithSource(models.SourceInferred)
 	defer cleanup()
 
 	term := &models.BusinessGlossaryTerm{
@@ -224,7 +262,7 @@ func TestGlossaryRepository_Create_MinimalFields(t *testing.T) {
 		Term:        "Active User",
 		Definition:  "User with recent activity in the last 30 days",
 		DefiningSQL: "SELECT COUNT(DISTINCT user_id) FROM users WHERE last_active >= NOW() - INTERVAL '30 days'",
-		Source:      models.GlossarySourceInferred,
+		// Source is set from provenance context
 	}
 
 	err := tc.repo.Create(ctx, term)
@@ -245,6 +283,10 @@ func TestGlossaryRepository_Create_MinimalFields(t *testing.T) {
 	if len(retrieved.Aliases) != 0 {
 		t.Errorf("expected empty aliases, got %v", retrieved.Aliases)
 	}
+	// Verify provenance was set from context
+	if retrieved.Source != "inferred" {
+		t.Errorf("expected Source 'inference', got %q", retrieved.Source)
+	}
 }
 
 func TestGlossaryRepository_Create_DuplicateTerm_SameOntology(t *testing.T) {
@@ -264,7 +306,7 @@ func TestGlossaryRepository_Create_DuplicateTerm_SameOntology(t *testing.T) {
 		Term:        "GMV",
 		Definition:  "Gross Merchandise Value",
 		DefiningSQL: "SELECT 1",
-		Source:      models.GlossarySourceManual,
+		// Source is set from provenance context
 	}
 	err := tc.repo.Create(ctx, term1)
 	if err != nil {
@@ -278,7 +320,7 @@ func TestGlossaryRepository_Create_DuplicateTerm_SameOntology(t *testing.T) {
 		Term:        "GMV",
 		Definition:  "Different definition",
 		DefiningSQL: "SELECT 1",
-		Source:      models.GlossarySourceManual,
+		// Source is set from provenance context
 	}
 
 	err = tc.repo.Create(ctx, term2)
@@ -291,7 +333,8 @@ func TestGlossaryRepository_Create_DuplicateTerm_DifferentOntology(t *testing.T)
 	tc := setupGlossaryTest(t)
 	tc.cleanup()
 
-	ctx, cleanup := tc.createTestContext()
+	// Use inference provenance for this test
+	ctx, cleanup := tc.createTestContextWithSource(models.SourceInferred)
 	defer cleanup()
 
 	// Create two ontologies for testing
@@ -305,7 +348,7 @@ func TestGlossaryRepository_Create_DuplicateTerm_DifferentOntology(t *testing.T)
 		Term:        "Revenue",
 		Definition:  "First ontology revenue",
 		DefiningSQL: "SELECT 1",
-		Source:      models.GlossarySourceInferred,
+		// Source is set from provenance context
 	}
 	err := tc.repo.Create(ctx, term1)
 	if err != nil {
@@ -320,7 +363,7 @@ func TestGlossaryRepository_Create_DuplicateTerm_DifferentOntology(t *testing.T)
 		Term:        "Revenue",
 		Definition:  "Second ontology revenue",
 		DefiningSQL: "SELECT 1",
-		Source:      models.GlossarySourceInferred,
+		// Source is set from provenance context
 	}
 
 	err = tc.repo.Create(ctx, term2)
@@ -397,7 +440,7 @@ func TestGlossaryRepository_Update_NotFound(t *testing.T) {
 		Term:        "NonExistent",
 		Definition:  "Does not exist",
 		DefiningSQL: "SELECT 1",
-		Source:      models.GlossarySourceManual,
+		// Source is set from provenance context
 	}
 
 	err := tc.repo.Update(ctx, term)
@@ -634,7 +677,7 @@ func TestGlossaryRepository_GetByAlias_Success(t *testing.T) {
 		Definition:  "Users who logged in during the last 30 days",
 		DefiningSQL: "SELECT COUNT(DISTINCT user_id) FROM users WHERE last_login >= NOW() - INTERVAL '30 days'",
 		Aliases:     []string{"MAU", "Active Users"},
-		Source:      models.GlossarySourceManual,
+		// Source is set from provenance context
 	}
 
 	err := tc.repo.Create(ctx, term)
@@ -715,7 +758,7 @@ func TestGlossaryRepository_DeleteAlias_Success(t *testing.T) {
 		Definition:  "Percentage of customers who cancel",
 		DefiningSQL: "SELECT COUNT(*) FROM cancellations",
 		Aliases:     []string{"Attrition", "Cancel Rate"},
-		Source:      models.GlossarySourceManual,
+		// Source is set from provenance context
 	}
 
 	err := tc.repo.Create(ctx, term)
@@ -783,7 +826,7 @@ func TestGlossaryRepository_OutputColumns(t *testing.T) {
 			{Name: "total", Type: "integer", Description: "Total users"},
 			{Name: "avg_age", Type: "numeric", Description: "Average age"},
 		},
-		Source: models.GlossarySourceManual,
+		// Source is set from provenance context
 	}
 
 	err := tc.repo.Create(ctx, term)
@@ -818,11 +861,11 @@ func TestGlossaryRepository_EnrichmentStatus_Create(t *testing.T) {
 	defer cleanup()
 
 	term := &models.BusinessGlossaryTerm{
-		ProjectID:        tc.projectID,
-		Term:             "Pending Metric",
-		Definition:       "A metric awaiting SQL enrichment",
-		DefiningSQL:      "",
-		Source:           models.GlossarySourceInferred,
+		ProjectID:   tc.projectID,
+		Term:        "Pending Metric",
+		Definition:  "A metric awaiting SQL enrichment",
+		DefiningSQL: "",
+		// Source is set from provenance context
 		EnrichmentStatus: models.GlossaryEnrichmentPending,
 	}
 
@@ -851,11 +894,11 @@ func TestGlossaryRepository_EnrichmentStatus_Failed(t *testing.T) {
 	defer cleanup()
 
 	term := &models.BusinessGlossaryTerm{
-		ProjectID:        tc.projectID,
-		Term:             "Failed Metric",
-		Definition:       "A metric that failed SQL enrichment",
-		DefiningSQL:      "",
-		Source:           models.GlossarySourceInferred,
+		ProjectID:   tc.projectID,
+		Term:        "Failed Metric",
+		Definition:  "A metric that failed SQL enrichment",
+		DefiningSQL: "",
+		// Source is set from provenance context
 		EnrichmentStatus: models.GlossaryEnrichmentFailed,
 		EnrichmentError:  "LLM returned empty SQL after 3 retries",
 	}
@@ -885,11 +928,11 @@ func TestGlossaryRepository_EnrichmentStatus_Success(t *testing.T) {
 	defer cleanup()
 
 	term := &models.BusinessGlossaryTerm{
-		ProjectID:        tc.projectID,
-		Term:             "Successful Metric",
-		Definition:       "A metric with successful SQL enrichment",
-		DefiningSQL:      "SELECT COUNT(*) FROM users",
-		Source:           models.GlossarySourceInferred,
+		ProjectID:   tc.projectID,
+		Term:        "Successful Metric",
+		Definition:  "A metric with successful SQL enrichment",
+		DefiningSQL: "SELECT COUNT(*) FROM users",
+		// Source is set from provenance context
 		EnrichmentStatus: models.GlossaryEnrichmentSuccess,
 	}
 
@@ -916,11 +959,11 @@ func TestGlossaryRepository_EnrichmentStatus_Update(t *testing.T) {
 
 	// Create with pending status
 	term := &models.BusinessGlossaryTerm{
-		ProjectID:        tc.projectID,
-		Term:             "Updating Metric",
-		Definition:       "A metric transitioning from pending to success",
-		DefiningSQL:      "",
-		Source:           models.GlossarySourceInferred,
+		ProjectID:   tc.projectID,
+		Term:        "Updating Metric",
+		Definition:  "A metric transitioning from pending to success",
+		DefiningSQL: "",
+		// Source is set from provenance context
 		EnrichmentStatus: models.GlossaryEnrichmentPending,
 	}
 
@@ -959,11 +1002,11 @@ func TestGlossaryRepository_EnrichmentStatus_UpdateToFailed(t *testing.T) {
 
 	// Create with pending status
 	term := &models.BusinessGlossaryTerm{
-		ProjectID:        tc.projectID,
-		Term:             "Failing Metric",
-		Definition:       "A metric that will fail enrichment",
-		DefiningSQL:      "",
-		Source:           models.GlossarySourceInferred,
+		ProjectID:   tc.projectID,
+		Term:        "Failing Metric",
+		Definition:  "A metric that will fail enrichment",
+		DefiningSQL: "",
+		// Source is set from provenance context
 		EnrichmentStatus: models.GlossaryEnrichmentPending,
 	}
 
@@ -1006,7 +1049,7 @@ func TestGlossaryRepository_EnrichmentStatus_NullByDefault(t *testing.T) {
 		Term:        "Legacy Metric",
 		Definition:  "A metric created without enrichment status",
 		DefiningSQL: "SELECT 1",
-		Source:      models.GlossarySourceManual,
+		// Source is set from provenance context
 	}
 
 	err := tc.repo.Create(ctx, term)
@@ -1041,7 +1084,7 @@ func TestGlossaryRepository_NoTenantScope(t *testing.T) {
 		Term:        "Test",
 		Definition:  "Test definition",
 		DefiningSQL: "SELECT 1",
-		Source:      models.GlossarySourceManual,
+		// Source is set from provenance context
 	}
 
 	// Create should fail
@@ -1096,5 +1139,286 @@ func TestGlossaryRepository_NoTenantScope(t *testing.T) {
 	err = tc.repo.DeleteAlias(ctx, uuid.New(), "Alias")
 	if err == nil {
 		t.Error("expected error for DeleteAlias without tenant scope")
+	}
+}
+
+// ============================================================================
+// Provenance Tests
+// ============================================================================
+
+func TestGlossaryRepository_Create_Provenance(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+
+	// Test with manual provenance
+	ctx, cleanup := tc.createTestContextWithSource(models.SourceManual)
+	defer cleanup()
+
+	term := &models.BusinessGlossaryTerm{
+		ProjectID:   tc.projectID,
+		Term:        "Manual Term",
+		Definition:  "Created manually",
+		DefiningSQL: "SELECT 1",
+	}
+
+	err := tc.repo.Create(ctx, term)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Verify Source was set from context
+	if term.Source != "manual" {
+		t.Errorf("expected Source 'manual', got %q", term.Source)
+	}
+	// Verify CreatedBy was set from context
+	if term.CreatedBy == nil {
+		t.Error("expected CreatedBy to be set")
+	}
+	if term.CreatedBy != nil && *term.CreatedBy != tc.testUserID {
+		t.Errorf("expected CreatedBy to be %v, got %v", tc.testUserID, *term.CreatedBy)
+	}
+
+	// Verify persisted correctly
+	retrieved, err := tc.repo.GetByID(ctx, term.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if retrieved.Source != "manual" {
+		t.Errorf("expected persisted Source 'manual', got %q", retrieved.Source)
+	}
+	if retrieved.CreatedBy == nil || *retrieved.CreatedBy != tc.testUserID {
+		t.Errorf("expected persisted CreatedBy %v, got %v", tc.testUserID, retrieved.CreatedBy)
+	}
+}
+
+func TestGlossaryRepository_Create_Provenance_Inference(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+
+	// Test with inference provenance
+	ctx, cleanup := tc.createTestContextWithSource(models.SourceInferred)
+	defer cleanup()
+
+	term := &models.BusinessGlossaryTerm{
+		ProjectID:   tc.projectID,
+		Term:        "Inferred Term",
+		Definition:  "Created by inference",
+		DefiningSQL: "SELECT 1",
+	}
+
+	err := tc.repo.Create(ctx, term)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Verify Source was set from context
+	if term.Source != "inferred" {
+		t.Errorf("expected Source 'inference', got %q", term.Source)
+	}
+
+	// Verify persisted correctly
+	retrieved, err := tc.repo.GetByID(ctx, term.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if retrieved.Source != "inferred" {
+		t.Errorf("expected persisted Source 'inference', got %q", retrieved.Source)
+	}
+}
+
+func TestGlossaryRepository_Create_NoProvenance(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+
+	// Create context with tenant scope but NO provenance
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
+	if err != nil {
+		t.Fatalf("failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+	ctx = database.SetTenantScope(ctx, scope)
+	// Note: no provenance set
+
+	term := &models.BusinessGlossaryTerm{
+		ProjectID:   tc.projectID,
+		Term:        "No Provenance Term",
+		Definition:  "Created without provenance",
+		DefiningSQL: "SELECT 1",
+	}
+
+	err = tc.repo.Create(ctx, term)
+	if err == nil {
+		t.Error("expected error when creating without provenance context")
+	}
+	if err != nil && err.Error() != "provenance context required" {
+		t.Errorf("expected 'provenance context required' error, got: %v", err)
+	}
+}
+
+func TestGlossaryRepository_Update_Provenance(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+
+	// Create term with inference provenance
+	ctxInference, cleanupCreate := tc.createTestContextWithSource(models.SourceInferred)
+	defer cleanupCreate()
+
+	term := &models.BusinessGlossaryTerm{
+		ProjectID:   tc.projectID,
+		Term:        "Updatable Term",
+		Definition:  "Original definition",
+		DefiningSQL: "SELECT 1",
+	}
+
+	err := tc.repo.Create(ctxInference, term)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Verify initial state
+	if term.Source != "inferred" {
+		t.Errorf("expected initial Source 'inference', got %q", term.Source)
+	}
+	if term.LastEditSource != nil {
+		t.Errorf("expected nil LastEditSource initially, got %v", term.LastEditSource)
+	}
+
+	// Update with manual provenance
+	ctxManual, cleanupUpdate := tc.createTestContextWithSource(models.SourceManual)
+	defer cleanupUpdate()
+
+	term.Definition = "Updated by user"
+
+	err = tc.repo.Update(ctxManual, term)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	// Verify LastEditSource was set
+	if term.LastEditSource == nil || *term.LastEditSource != "manual" {
+		t.Errorf("expected LastEditSource 'manual', got %v", term.LastEditSource)
+	}
+	// Verify UpdatedBy was set
+	if term.UpdatedBy == nil || *term.UpdatedBy != tc.testUserID {
+		t.Errorf("expected UpdatedBy %v, got %v", tc.testUserID, term.UpdatedBy)
+	}
+
+	// Verify persisted correctly
+	retrieved, err := tc.repo.GetByID(ctxManual, term.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	// Source should remain unchanged (original creation source)
+	if retrieved.Source != "inferred" {
+		t.Errorf("expected Source to remain 'inference', got %q", retrieved.Source)
+	}
+	// LastEditSource should be set to manual
+	if retrieved.LastEditSource == nil || *retrieved.LastEditSource != "manual" {
+		t.Errorf("expected persisted LastEditSource 'manual', got %v", retrieved.LastEditSource)
+	}
+	// UpdatedBy should be set
+	if retrieved.UpdatedBy == nil || *retrieved.UpdatedBy != tc.testUserID {
+		t.Errorf("expected persisted UpdatedBy %v, got %v", tc.testUserID, retrieved.UpdatedBy)
+	}
+}
+
+func TestGlossaryRepository_Update_NoProvenance(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+
+	// Create term first (with provenance)
+	ctxCreate, cleanupCreate := tc.createTestContext()
+	defer cleanupCreate()
+
+	term := tc.createTestTerm(ctxCreate, "TestTerm", "Test definition")
+
+	// Try to update without provenance
+	ctx := context.Background()
+	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
+	if err != nil {
+		t.Fatalf("failed to create tenant scope: %v", err)
+	}
+	defer scope.Close()
+	ctx = database.SetTenantScope(ctx, scope)
+	// Note: no provenance set
+
+	term.Definition = "Updated definition"
+
+	err = tc.repo.Update(ctx, term)
+	if err == nil {
+		t.Error("expected error when updating without provenance context")
+	}
+	if err != nil && err.Error() != "provenance context required" {
+		t.Errorf("expected 'provenance context required' error, got: %v", err)
+	}
+}
+
+func TestGlossaryRepository_DeleteBySource_ProvenanceType(t *testing.T) {
+	tc := setupGlossaryTest(t)
+	tc.cleanup()
+
+	// Create terms with inference provenance
+	ctxInference, cleanupInference := tc.createTestContextWithSource(models.SourceInferred)
+	defer cleanupInference()
+
+	term1 := &models.BusinessGlossaryTerm{
+		ProjectID:   tc.projectID,
+		Term:        "Inferred Term 1",
+		Definition:  "Created by inference",
+		DefiningSQL: "SELECT 1",
+	}
+	if err := tc.repo.Create(ctxInference, term1); err != nil {
+		t.Fatalf("Create term1 failed: %v", err)
+	}
+
+	term2 := &models.BusinessGlossaryTerm{
+		ProjectID:   tc.projectID,
+		Term:        "Inferred Term 2",
+		Definition:  "Also created by inference",
+		DefiningSQL: "SELECT 2",
+	}
+	if err := tc.repo.Create(ctxInference, term2); err != nil {
+		t.Fatalf("Create term2 failed: %v", err)
+	}
+
+	// Create term with manual provenance
+	ctxManual, cleanupManual := tc.createTestContextWithSource(models.SourceManual)
+	defer cleanupManual()
+
+	term3 := &models.BusinessGlossaryTerm{
+		ProjectID:   tc.projectID,
+		Term:        "Manual Term",
+		Definition:  "Created manually",
+		DefiningSQL: "SELECT 3",
+	}
+	if err := tc.repo.Create(ctxManual, term3); err != nil {
+		t.Fatalf("Create term3 failed: %v", err)
+	}
+
+	// Delete inference terms using ProvenanceSource type
+	err := tc.repo.DeleteBySource(ctxManual, tc.projectID, models.SourceInferred)
+	if err != nil {
+		t.Fatalf("DeleteBySource failed: %v", err)
+	}
+
+	// Verify inference terms are deleted
+	retrieved1, _ := tc.repo.GetByID(ctxManual, term1.ID)
+	if retrieved1 != nil {
+		t.Error("expected inferred term1 to be deleted")
+	}
+
+	retrieved2, _ := tc.repo.GetByID(ctxManual, term2.ID)
+	if retrieved2 != nil {
+		t.Error("expected inferred term2 to be deleted")
+	}
+
+	// Verify manual term still exists
+	retrieved3, err := tc.repo.GetByID(ctxManual, term3.ID)
+	if err != nil {
+		t.Fatalf("GetByID for manual term failed: %v", err)
+	}
+	if retrieved3 == nil {
+		t.Error("expected manual term to still exist")
 	}
 }

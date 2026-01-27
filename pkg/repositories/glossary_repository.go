@@ -19,7 +19,7 @@ type GlossaryRepository interface {
 	Create(ctx context.Context, term *models.BusinessGlossaryTerm) error
 	Update(ctx context.Context, term *models.BusinessGlossaryTerm) error
 	Delete(ctx context.Context, termID uuid.UUID) error
-	DeleteBySource(ctx context.Context, projectID uuid.UUID, source string) error
+	DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error
 	GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.BusinessGlossaryTerm, error)
 	GetByTerm(ctx context.Context, projectID uuid.UUID, term string) (*models.BusinessGlossaryTerm, error)
 	GetByAlias(ctx context.Context, projectID uuid.UUID, alias string) (*models.BusinessGlossaryTerm, error)
@@ -47,14 +47,29 @@ func (r *glossaryRepository) Create(ctx context.Context, term *models.BusinessGl
 		return fmt.Errorf("no tenant scope in context")
 	}
 
+	// Extract provenance from context
+	prov, ok := models.GetProvenance(ctx)
+	if !ok {
+		return fmt.Errorf("provenance context required")
+	}
+
 	now := time.Now()
+
+	// Set provenance fields from context
+	term.Source = prov.Source.String()
+	// Only set CreatedBy if there's a valid user ID (not the nil UUID)
+	if prov.UserID != uuid.Nil {
+		term.CreatedBy = &prov.UserID
+	} else {
+		term.CreatedBy = nil
+	}
 
 	query := `
 		INSERT INTO engine_business_glossary (
 			project_id, ontology_id, term, definition, defining_sql, base_table,
 			output_columns, source, enrichment_status, enrichment_error,
-			created_by, updated_by, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+			created_by, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id, created_at, updated_at`
 
 	err := scope.Conn.QueryRow(ctx, query,
@@ -69,7 +84,6 @@ func (r *glossaryRepository) Create(ctx context.Context, term *models.BusinessGl
 		nullString(term.EnrichmentStatus),
 		nullString(term.EnrichmentError),
 		term.CreatedBy,
-		term.UpdatedBy,
 		now,
 		now,
 	).Scan(&term.ID, &term.CreatedAt, &term.UpdatedAt)
@@ -95,11 +109,27 @@ func (r *glossaryRepository) Update(ctx context.Context, term *models.BusinessGl
 		return fmt.Errorf("no tenant scope in context")
 	}
 
+	// Extract provenance from context
+	prov, ok := models.GetProvenance(ctx)
+	if !ok {
+		return fmt.Errorf("provenance context required")
+	}
+
+	// Set provenance fields from context
+	lastEditSource := prov.Source.String()
+	term.LastEditSource = &lastEditSource
+	// Only set UpdatedBy if there's a valid user ID (not the nil UUID)
+	if prov.UserID != uuid.Nil {
+		term.UpdatedBy = &prov.UserID
+	} else {
+		term.UpdatedBy = nil
+	}
+
 	query := `
 		UPDATE engine_business_glossary
 		SET term = $2, definition = $3, defining_sql = $4, base_table = $5,
-		    output_columns = $6, source = $7, enrichment_status = $8,
-		    enrichment_error = $9, updated_by = $10
+		    output_columns = $6, enrichment_status = $7,
+		    enrichment_error = $8, last_edit_source = $9, updated_by = $10
 		WHERE id = $1
 		RETURNING updated_at`
 
@@ -110,9 +140,9 @@ func (r *glossaryRepository) Update(ctx context.Context, term *models.BusinessGl
 		term.DefiningSQL,
 		nullString(term.BaseTable),
 		jsonbValue(term.OutputColumns),
-		term.Source,
 		nullString(term.EnrichmentStatus),
 		nullString(term.EnrichmentError),
+		term.LastEditSource,
 		term.UpdatedBy,
 	).Scan(&term.UpdatedAt)
 	if err != nil {
@@ -161,9 +191,9 @@ func (r *glossaryRepository) Delete(ctx context.Context, termID uuid.UUID) error
 	return nil
 }
 
-// DeleteBySource deletes all glossary terms for a project with the specified source.
-// This is used to clear inferred terms when ontology is reset while preserving manual terms.
-func (r *glossaryRepository) DeleteBySource(ctx context.Context, projectID uuid.UUID, source string) error {
+// DeleteBySource deletes all glossary terms for a project where source matches the given value.
+// This supports re-extraction policy: delete inference items while preserving mcp/manual items.
+func (r *glossaryRepository) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return fmt.Errorf("no tenant scope in context")
@@ -176,13 +206,13 @@ func (r *glossaryRepository) DeleteBySource(ctx context.Context, projectID uuid.
 			SELECT id FROM engine_business_glossary
 			WHERE project_id = $1 AND source = $2
 		)`
-	if _, err := scope.Conn.Exec(ctx, aliasQuery, projectID, source); err != nil {
+	if _, err := scope.Conn.Exec(ctx, aliasQuery, projectID, source.String()); err != nil {
 		return fmt.Errorf("failed to delete glossary aliases: %w", err)
 	}
 
 	// Then delete the terms
 	query := `DELETE FROM engine_business_glossary WHERE project_id = $1 AND source = $2`
-	if _, err := scope.Conn.Exec(ctx, query, projectID, source); err != nil {
+	if _, err := scope.Conn.Exec(ctx, query, projectID, source.String()); err != nil {
 		return fmt.Errorf("failed to delete glossary terms by source: %w", err)
 	}
 
@@ -197,7 +227,7 @@ func (r *glossaryRepository) GetByProject(ctx context.Context, projectID uuid.UU
 
 	query := `
 		SELECT g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
-		       g.output_columns, g.source, g.enrichment_status, g.enrichment_error,
+		       g.output_columns, g.source, g.last_edit_source, g.enrichment_status, g.enrichment_error,
 		       g.created_by, g.updated_by, g.created_at, g.updated_at,
 		       COALESCE(
 		           jsonb_agg(a.alias ORDER BY a.alias) FILTER (WHERE a.alias IS NOT NULL),
@@ -207,7 +237,7 @@ func (r *glossaryRepository) GetByProject(ctx context.Context, projectID uuid.UU
 		LEFT JOIN engine_glossary_aliases a ON g.id = a.glossary_id
 		WHERE g.project_id = $1
 		GROUP BY g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
-		         g.output_columns, g.source, g.enrichment_status, g.enrichment_error,
+		         g.output_columns, g.source, g.last_edit_source, g.enrichment_status, g.enrichment_error,
 		         g.created_by, g.updated_by, g.created_at, g.updated_at
 		ORDER BY g.term`
 
@@ -241,7 +271,7 @@ func (r *glossaryRepository) GetByTerm(ctx context.Context, projectID uuid.UUID,
 
 	query := `
 		SELECT g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
-		       g.output_columns, g.source, g.enrichment_status, g.enrichment_error,
+		       g.output_columns, g.source, g.last_edit_source, g.enrichment_status, g.enrichment_error,
 		       g.created_by, g.updated_by, g.created_at, g.updated_at,
 		       COALESCE(
 		           jsonb_agg(a.alias ORDER BY a.alias) FILTER (WHERE a.alias IS NOT NULL),
@@ -251,7 +281,7 @@ func (r *glossaryRepository) GetByTerm(ctx context.Context, projectID uuid.UUID,
 		LEFT JOIN engine_glossary_aliases a ON g.id = a.glossary_id
 		WHERE g.project_id = $1 AND g.term = $2
 		GROUP BY g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
-		         g.output_columns, g.source, g.enrichment_status, g.enrichment_error,
+		         g.output_columns, g.source, g.last_edit_source, g.enrichment_status, g.enrichment_error,
 		         g.created_by, g.updated_by, g.created_at, g.updated_at`
 
 	row := scope.Conn.QueryRow(ctx, query, projectID, termName)
@@ -274,7 +304,7 @@ func (r *glossaryRepository) GetByAlias(ctx context.Context, projectID uuid.UUID
 
 	query := `
 		SELECT g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
-		       g.output_columns, g.source, g.enrichment_status, g.enrichment_error,
+		       g.output_columns, g.source, g.last_edit_source, g.enrichment_status, g.enrichment_error,
 		       g.created_by, g.updated_by, g.created_at, g.updated_at,
 		       COALESCE(
 		           jsonb_agg(a2.alias ORDER BY a2.alias) FILTER (WHERE a2.alias IS NOT NULL),
@@ -285,7 +315,7 @@ func (r *glossaryRepository) GetByAlias(ctx context.Context, projectID uuid.UUID
 		LEFT JOIN engine_glossary_aliases a2 ON g.id = a2.glossary_id
 		WHERE g.project_id = $1 AND a.alias = $2
 		GROUP BY g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
-		         g.output_columns, g.source, g.enrichment_status, g.enrichment_error,
+		         g.output_columns, g.source, g.last_edit_source, g.enrichment_status, g.enrichment_error,
 		         g.created_by, g.updated_by, g.created_at, g.updated_at`
 
 	row := scope.Conn.QueryRow(ctx, query, projectID, alias)
@@ -308,7 +338,7 @@ func (r *glossaryRepository) GetByID(ctx context.Context, termID uuid.UUID) (*mo
 
 	query := `
 		SELECT g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
-		       g.output_columns, g.source, g.enrichment_status, g.enrichment_error,
+		       g.output_columns, g.source, g.last_edit_source, g.enrichment_status, g.enrichment_error,
 		       g.created_by, g.updated_by, g.created_at, g.updated_at,
 		       COALESCE(
 		           jsonb_agg(a.alias ORDER BY a.alias) FILTER (WHERE a.alias IS NOT NULL),
@@ -318,7 +348,7 @@ func (r *glossaryRepository) GetByID(ctx context.Context, termID uuid.UUID) (*mo
 		LEFT JOIN engine_glossary_aliases a ON g.id = a.glossary_id
 		WHERE g.id = $1
 		GROUP BY g.id, g.project_id, g.ontology_id, g.term, g.definition, g.defining_sql, g.base_table,
-		         g.output_columns, g.source, g.enrichment_status, g.enrichment_error,
+		         g.output_columns, g.source, g.last_edit_source, g.enrichment_status, g.enrichment_error,
 		         g.created_by, g.updated_by, g.created_at, g.updated_at`
 
 	row := scope.Conn.QueryRow(ctx, query, termID)
@@ -394,6 +424,7 @@ func scanGlossaryTerm(row pgx.Row) (*models.BusinessGlossaryTerm, error) {
 		&baseTable,
 		&outputColumns,
 		&t.Source,
+		&t.LastEditSource,
 		&enrichmentStatus,
 		&enrichmentError,
 		&t.CreatedBy,

@@ -21,6 +21,7 @@ type KnowledgeRepository interface {
 	GetByKey(ctx context.Context, projectID uuid.UUID, factType, key string) (*models.KnowledgeFact, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 	DeleteByProject(ctx context.Context, projectID uuid.UUID) error
+	DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error
 }
 
 type knowledgeRepository struct{}
@@ -38,19 +39,37 @@ func (r *knowledgeRepository) Upsert(ctx context.Context, fact *models.Knowledge
 		return fmt.Errorf("no tenant scope in context")
 	}
 
+	// Extract provenance from context
+	prov, ok := models.GetProvenance(ctx)
+	if !ok {
+		return fmt.Errorf("provenance context required")
+	}
+
 	now := time.Now()
 	fact.UpdatedAt = now
 
 	// If ID is provided, update by ID (explicit update mode)
 	if fact.ID != uuid.Nil {
+		// Set provenance fields for update
+		lastEditSource := prov.Source.String()
+		fact.LastEditSource = &lastEditSource
+		// Only set UpdatedBy if there's a valid user ID (not the nil UUID)
+		if prov.UserID != uuid.Nil {
+			fact.UpdatedBy = &prov.UserID
+		} else {
+			fact.UpdatedBy = nil
+		}
+
 		query := `
 			UPDATE engine_project_knowledge
-			SET fact_type = $2, key = $3, value = $4, context = $5, updated_at = $6
+			SET fact_type = $2, key = $3, value = $4, context = $5,
+			    last_edit_source = $6, updated_by = $7, updated_at = $8
 			WHERE id = $1
 			RETURNING created_at`
 
 		err := scope.Conn.QueryRow(ctx, query,
-			fact.ID, fact.FactType, fact.Key, fact.Value, fact.Context, fact.UpdatedAt,
+			fact.ID, fact.FactType, fact.Key, fact.Value, fact.Context,
+			fact.LastEditSource, fact.UpdatedBy, fact.UpdatedAt,
 		).Scan(&fact.CreatedAt)
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -65,20 +84,32 @@ func (r *knowledgeRepository) Upsert(ctx context.Context, fact *models.Knowledge
 	fact.ID = uuid.New()
 	fact.CreatedAt = now
 
+	// Set provenance fields for create
+	fact.Source = prov.Source.String()
+	// Only set CreatedBy if there's a valid user ID (not the nil UUID)
+	if prov.UserID != uuid.Nil {
+		fact.CreatedBy = &prov.UserID
+	} else {
+		fact.CreatedBy = nil
+	}
+
 	query := `
 		INSERT INTO engine_project_knowledge (
-			id, project_id, ontology_id, fact_type, key, value, context, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			id, project_id, ontology_id, fact_type, key, value, context,
+			source, created_by, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (project_id, ontology_id, fact_type, key)
 		DO UPDATE SET
 			value = EXCLUDED.value,
 			context = EXCLUDED.context,
+			last_edit_source = EXCLUDED.source,
+			updated_by = EXCLUDED.created_by,
 			updated_at = EXCLUDED.updated_at
 		RETURNING id, created_at`
 
 	err := scope.Conn.QueryRow(ctx, query,
 		fact.ID, fact.ProjectID, fact.OntologyID, fact.FactType, fact.Key, fact.Value, fact.Context,
-		fact.CreatedAt, fact.UpdatedAt,
+		fact.Source, fact.CreatedBy, fact.CreatedAt, fact.UpdatedAt,
 	).Scan(&fact.ID, &fact.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to upsert knowledge fact: %w", err)
@@ -94,7 +125,8 @@ func (r *knowledgeRepository) GetByProject(ctx context.Context, projectID uuid.U
 	}
 
 	query := `
-		SELECT id, project_id, ontology_id, fact_type, key, value, context, created_at, updated_at
+		SELECT id, project_id, ontology_id, fact_type, key, value, context,
+		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_project_knowledge
 		WHERE project_id = $1
 		ORDER BY fact_type, key`
@@ -127,7 +159,8 @@ func (r *knowledgeRepository) GetByType(ctx context.Context, projectID uuid.UUID
 	}
 
 	query := `
-		SELECT id, project_id, ontology_id, fact_type, key, value, context, created_at, updated_at
+		SELECT id, project_id, ontology_id, fact_type, key, value, context,
+		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_project_knowledge
 		WHERE project_id = $1 AND fact_type = $2
 		ORDER BY key`
@@ -160,7 +193,8 @@ func (r *knowledgeRepository) GetByKey(ctx context.Context, projectID uuid.UUID,
 	}
 
 	query := `
-		SELECT id, project_id, ontology_id, fact_type, key, value, context, created_at, updated_at
+		SELECT id, project_id, ontology_id, fact_type, key, value, context,
+		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_project_knowledge
 		WHERE project_id = $1 AND fact_type = $2 AND key = $3`
 
@@ -211,6 +245,24 @@ func (r *knowledgeRepository) DeleteByProject(ctx context.Context, projectID uui
 	return nil
 }
 
+// DeleteBySource deletes all knowledge facts for a project where source matches the given value.
+// This supports re-extraction policy: delete inference items while preserving mcp/manual items.
+func (r *knowledgeRepository) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `DELETE FROM engine_project_knowledge WHERE project_id = $1 AND source = $2`
+
+	_, err := scope.Conn.Exec(ctx, query, projectID, source.String())
+	if err != nil {
+		return fmt.Errorf("failed to delete knowledge facts by source: %w", err)
+	}
+
+	return nil
+}
+
 // ============================================================================
 // Helper Functions - Scan
 // ============================================================================
@@ -221,7 +273,7 @@ func scanKnowledgeFactRow(row pgx.Row) (*models.KnowledgeFact, error) {
 
 	err := row.Scan(
 		&f.ID, &f.ProjectID, &f.OntologyID, &f.FactType, &f.Key, &f.Value, &context,
-		&f.CreatedAt, &f.UpdatedAt,
+		&f.Source, &f.LastEditSource, &f.CreatedBy, &f.UpdatedBy, &f.CreatedAt, &f.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -243,7 +295,7 @@ func scanKnowledgeFactRows(rows pgx.Rows) (*models.KnowledgeFact, error) {
 
 	err := rows.Scan(
 		&f.ID, &f.ProjectID, &f.OntologyID, &f.FactType, &f.Key, &f.Value, &context,
-		&f.CreatedAt, &f.UpdatedAt,
+		&f.Source, &f.LastEditSource, &f.CreatedBy, &f.UpdatedBy, &f.CreatedAt, &f.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan knowledge fact: %w", err)

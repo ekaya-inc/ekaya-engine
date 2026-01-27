@@ -118,6 +118,10 @@ func (r *testColEnrichmentEntityRepo) DeleteInferenceEntitiesByOntology(ctx cont
 	return nil
 }
 
+func (r *testColEnrichmentEntityRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
+
 func (r *testColEnrichmentEntityRepo) DeleteAlias(ctx context.Context, aliasID uuid.UUID) error {
 	return nil
 }
@@ -160,6 +164,18 @@ func (r *testColEnrichmentEntityRepo) CountOccurrencesByEntity(ctx context.Conte
 }
 
 func (r *testColEnrichmentEntityRepo) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	return nil, nil
+}
+
+func (r *testColEnrichmentEntityRepo) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (r *testColEnrichmentEntityRepo) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+
+func (r *testColEnrichmentEntityRepo) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
 	return nil, nil
 }
 
@@ -219,6 +235,22 @@ func (r *testColEnrichmentRelRepo) GetByID(ctx context.Context, id uuid.UUID) (*
 }
 
 func (r *testColEnrichmentRelRepo) Update(ctx context.Context, rel *models.EntityRelationship) error {
+	return nil
+}
+
+func (r *testColEnrichmentRelRepo) MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (r *testColEnrichmentRelRepo) ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error {
+	return nil
+}
+
+func (r *testColEnrichmentRelRepo) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (r *testColEnrichmentRelRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
 	return nil
 }
 
@@ -1744,6 +1776,22 @@ func (r *testSelfRefRelRepo) Update(ctx context.Context, rel *models.EntityRelat
 	return nil
 }
 
+func (r *testSelfRefRelRepo) MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (r *testSelfRefRelRepo) ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error {
+	return nil
+}
+
+func (r *testSelfRefRelRepo) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (r *testSelfRefRelRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
+
 // TestColumnEnrichmentService_EnrichTable_IntegerEnumInference tests that integer enum
 // columns like transaction_state get meaningful labels inferred from column context.
 func TestColumnEnrichmentService_EnrichTable_IntegerEnumInference(t *testing.T) {
@@ -2240,4 +2288,115 @@ func TestColumnEnrichmentService_convertToColumnDetails_WithEnumDefinitions(t *t
 	require.Equal(t, 1, len(statusCol.EnumValues))
 	assert.Equal(t, "active", statusCol.EnumValues[0].Value)
 	assert.Equal(t, "Active", statusCol.EnumValues[0].Label)
+}
+
+func TestColumnEnrichmentResponse_QuestionsDeserialization(t *testing.T) {
+	// Direct test of columnEnrichmentResponse JSON parsing
+
+	responseJSON := `{
+		"columns": [
+			{
+				"name": "email",
+				"description": "User email address",
+				"semantic_type": "email",
+				"role": "identifier"
+			}
+		],
+		"questions": [
+			{
+				"category": "terminology",
+				"priority": 2,
+				"question": "What does 'tik' mean in tiks_count?",
+				"context": "Column name is unclear."
+			}
+		]
+	}`
+
+	response, err := llm.ParseJSONResponse[columnEnrichmentResponse](responseJSON)
+
+	require.NoError(t, err)
+	require.Len(t, response.Columns, 1)
+	require.Len(t, response.Questions, 1)
+
+	// Verify column
+	assert.Equal(t, "email", response.Columns[0].Name)
+	assert.Equal(t, "email", response.Columns[0].SemanticType)
+
+	// Verify question
+	assert.Equal(t, "terminology", response.Questions[0].Category)
+	assert.Equal(t, 2, response.Questions[0].Priority)
+	assert.Equal(t, "What does 'tik' mean in tiks_count?", response.Questions[0].Question)
+	assert.Equal(t, "Column name is unclear.", response.Questions[0].Context)
+}
+
+func TestColumnEnrichmentResponse_NoQuestions(t *testing.T) {
+	// Test that parsing succeeds when no questions are present
+
+	responseJSON := `{
+		"columns": [
+			{
+				"name": "id",
+				"description": "Primary key",
+				"semantic_type": "identifier",
+				"role": "identifier"
+			}
+		]
+	}`
+
+	response, err := llm.ParseJSONResponse[columnEnrichmentResponse](responseJSON)
+
+	require.NoError(t, err)
+	require.Len(t, response.Columns, 1)
+	assert.Empty(t, response.Questions, "Questions should be empty when not present")
+}
+
+func TestColumnEnrichmentResponse_MultipleQuestions(t *testing.T) {
+	// Test that multiple questions of different categories are parsed correctly
+
+	responseJSON := `{
+		"columns": [
+			{
+				"name": "status",
+				"description": "Status field",
+				"semantic_type": "status",
+				"role": "dimension"
+			}
+		],
+		"questions": [
+			{
+				"category": "enumeration",
+				"priority": 1,
+				"question": "What do status values 'A', 'P', 'C' represent?",
+				"context": "Column status has cryptic single-letter values."
+			},
+			{
+				"category": "data_quality",
+				"priority": 3,
+				"question": "Is 85% NULL in phone column expected?",
+				"context": "Column phone has very high null rate."
+			},
+			{
+				"category": "temporal",
+				"priority": 2,
+				"question": "Does deleted_at=NULL mean active records?",
+				"context": "Soft delete pattern detected."
+			}
+		]
+	}`
+
+	response, err := llm.ParseJSONResponse[columnEnrichmentResponse](responseJSON)
+
+	require.NoError(t, err)
+	require.Len(t, response.Columns, 1)
+	require.Len(t, response.Questions, 3)
+
+	// Verify question categories
+	assert.Equal(t, "enumeration", response.Questions[0].Category)
+	assert.Equal(t, 1, response.Questions[0].Priority)
+
+	assert.Equal(t, "data_quality", response.Questions[1].Category)
+	assert.Equal(t, 3, response.Questions[1].Priority)
+
+	assert.Equal(t, "temporal", response.Questions[2].Category)
+	assert.Equal(t, 2, response.Questions[2].Priority)
 }

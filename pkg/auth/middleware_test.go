@@ -8,7 +8,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
+
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
 // mockAuthService is a mock implementation of AuthService for testing.
@@ -249,5 +252,195 @@ func TestMiddleware_ContextValues_NotSet(t *testing.T) {
 	_, ok = GetToken(ctx)
 	if ok {
 		t.Error("expected GetToken to return false for empty context")
+	}
+}
+
+func TestMiddleware_RequireAuthWithProvenance_Success(t *testing.T) {
+	userID := uuid.New()
+	claims := &Claims{ProjectID: "project-123"}
+	claims.Subject = userID.String()
+
+	authService := &mockAuthService{claims: claims, token: "test-token"}
+	middleware := NewMiddleware(authService, zap.NewNop())
+
+	var handlerCalled bool
+	var ctxProvenance models.ProvenanceContext
+	var provenanceOK bool
+
+	handler := middleware.RequireAuthWithProvenance(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		ctxProvenance, provenanceOK = models.GetProvenance(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/test", nil)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if !handlerCalled {
+		t.Error("expected handler to be called")
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+
+	if !provenanceOK {
+		t.Error("expected provenance to be set in context")
+	}
+
+	if ctxProvenance.Source != models.SourceManual {
+		t.Errorf("expected source 'manual', got %q", ctxProvenance.Source)
+	}
+
+	if ctxProvenance.UserID != userID {
+		t.Errorf("expected user ID %s, got %s", userID, ctxProvenance.UserID)
+	}
+}
+
+func TestMiddleware_RequireAuthWithProvenance_InvalidUserID(t *testing.T) {
+	claims := &Claims{ProjectID: "project-123"}
+	claims.Subject = "not-a-uuid" // Invalid UUID format
+
+	authService := &mockAuthService{claims: claims, token: "test-token"}
+	middleware := NewMiddleware(authService, zap.NewNop())
+
+	handler := middleware.RequireAuthWithProvenance(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/test", nil)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", rec.Code)
+	}
+
+	var response map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if response["error"] != "bad_request" {
+		t.Errorf("expected error 'bad_request', got %q", response["error"])
+	}
+
+	if response["message"] != "Invalid user ID format in token" {
+		t.Errorf("expected message 'Invalid user ID format in token', got %q", response["message"])
+	}
+}
+
+func TestMiddleware_RequireAuthWithPathValidationAndProvenance_Success(t *testing.T) {
+	userID := uuid.New()
+	claims := &Claims{ProjectID: "project-123"}
+	claims.Subject = userID.String()
+
+	authService := &mockAuthService{claims: claims, token: "test-token"}
+	middleware := NewMiddleware(authService, zap.NewNop())
+
+	var handlerCalled bool
+	var ctxProvenance models.ProvenanceContext
+	var provenanceOK bool
+
+	handler := middleware.RequireAuthWithPathValidationAndProvenance("pid")(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		ctxProvenance, provenanceOK = models.GetProvenance(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/projects/project-123/entities/123", nil)
+	req.SetPathValue("pid", "project-123")
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if !handlerCalled {
+		t.Error("expected handler to be called")
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+
+	if !provenanceOK {
+		t.Error("expected provenance to be set in context")
+	}
+
+	if ctxProvenance.Source != models.SourceManual {
+		t.Errorf("expected source 'manual', got %q", ctxProvenance.Source)
+	}
+
+	if ctxProvenance.UserID != userID {
+		t.Errorf("expected user ID %s, got %s", userID, ctxProvenance.UserID)
+	}
+}
+
+func TestMiddleware_RequireAuthWithPathValidationAndProvenance_InvalidUserID(t *testing.T) {
+	claims := &Claims{ProjectID: "project-123"}
+	claims.Subject = "invalid-user-id" // Invalid UUID format
+
+	authService := &mockAuthService{claims: claims, token: "test-token"}
+	middleware := NewMiddleware(authService, zap.NewNop())
+
+	handler := middleware.RequireAuthWithPathValidationAndProvenance("pid")(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/projects/project-123/entities/123", nil)
+	req.SetPathValue("pid", "project-123")
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", rec.Code)
+	}
+
+	var response map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if response["error"] != "bad_request" {
+		t.Errorf("expected error 'bad_request', got %q", response["error"])
+	}
+}
+
+func TestMiddleware_RequireAuthWithPathValidationAndProvenance_ProjectMismatch(t *testing.T) {
+	userID := uuid.New()
+	claims := &Claims{ProjectID: "project-123"}
+	claims.Subject = userID.String()
+
+	authService := &mockAuthService{
+		claims:           claims,
+		token:            "test-token",
+		validateMatchErr: ErrProjectIDMismatch,
+	}
+	middleware := NewMiddleware(authService, zap.NewNop())
+
+	handler := middleware.RequireAuthWithPathValidationAndProvenance("pid")(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called")
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/projects/project-456/entities/123", nil)
+	req.SetPathValue("pid", "project-456")
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected status 403, got %d", rec.Code)
+	}
+
+	var response map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if response["error"] != "forbidden" {
+		t.Errorf("expected error 'forbidden', got %q", response["error"])
 	}
 }

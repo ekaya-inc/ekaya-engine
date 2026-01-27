@@ -372,6 +372,9 @@ func (t *EntityDiscoveryTask) persistEntities(ctx context.Context, output *Entit
 			PrimarySchema: discoveredEntity.PrimarySchema,
 			PrimaryTable:  discoveredEntity.PrimaryTable,
 			PrimaryColumn: discoveredEntity.PrimaryColumn,
+			// Provenance: LLM-discovered entities have moderate confidence (0.7)
+			// This is lower than FK-derived (1.0) but higher than DDL-only (0.5)
+			Confidence: 0.7,
 		}
 
 		if err := t.entityRepo.Create(ctx, entity); err != nil {

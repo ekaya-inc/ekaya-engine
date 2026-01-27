@@ -33,6 +33,11 @@ type EntityDetailResponse struct {
 	OccurrenceCount int                        `json:"occurrence_count"`
 	IsDeleted       bool                       `json:"is_deleted"`
 	DeletionReason  *string                    `json:"deletion_reason,omitempty"`
+	// Provenance fields
+	Confidence float64 `json:"confidence"`
+	IsStale    bool    `json:"is_stale"`
+	CreatedBy  string  `json:"created_by"`           // 'manual', 'mcp', 'inference'
+	UpdatedBy  *string `json:"updated_by,omitempty"` // nil if never updated
 }
 
 // EntityOccurrenceResponse represents an occurrence of an entity in the schema.
@@ -93,20 +98,23 @@ func NewEntityHandler(
 func (h *EntityHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.Middleware, tenantMiddleware TenantMiddleware) {
 	base := "/api/projects/{pid}/entities"
 
+	// Read-only endpoints - no provenance needed
 	mux.HandleFunc("GET "+base,
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.List)))
 	mux.HandleFunc("GET "+base+"/{eid}",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Get)))
+
+	// Write endpoints - require provenance for audit tracking
 	mux.HandleFunc("PUT "+base+"/{eid}",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Update)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Update)))
 	mux.HandleFunc("DELETE "+base+"/{eid}",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Delete)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Delete)))
 	mux.HandleFunc("POST "+base+"/{eid}/restore",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Restore)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Restore)))
 	mux.HandleFunc("POST "+base+"/{eid}/aliases",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.AddAlias)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.AddAlias)))
 	mux.HandleFunc("DELETE "+base+"/{eid}/aliases/{aid}",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.RemoveAlias)))
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.RemoveAlias)))
 }
 
 // List handles GET /api/projects/{pid}/entities
@@ -424,5 +432,10 @@ func (h *EntityHandler) toEntityDetailResponse(e *services.EntityWithDetails) En
 		OccurrenceCount: e.OccurrenceCount,
 		IsDeleted:       e.Entity.IsDeleted,
 		DeletionReason:  e.Entity.DeletionReason,
+		// Provenance fields - map Source/LastEditSource (method tracking) to API fields
+		Confidence: e.Entity.Confidence,
+		IsStale:    e.Entity.IsStale,
+		CreatedBy:  e.Entity.Source,
+		UpdatedBy:  e.Entity.LastEditSource,
 	}
 }

@@ -315,6 +315,9 @@ func (tc *ontologyContextTestContext) createTestOntology(ctx context.Context) uu
 	err := tc.ontologyRepo.Create(ctx, ontology)
 	require.NoError(tc.t, err, "Failed to create test ontology")
 
+	// Add provenance context for entity and relationship creation
+	ctx = models.WithInferredProvenance(ctx, uuid.Nil)
+
 	// Create entities
 	userEntityID := uuid.New()
 	orderEntityID := uuid.New()

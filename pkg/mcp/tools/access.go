@@ -120,8 +120,35 @@ func isToolInList(toolName string, tools []services.ToolSpec) bool {
 }
 
 // AcquireToolAccess verifies tool access and sets up tenant context for tool execution.
+// Also injects MCP provenance context for tracking who performed the operation.
 // Returns project ID, tenant-scoped context, cleanup function, and any error.
 func AcquireToolAccess(ctx context.Context, deps ToolAccessDeps, toolName string) (uuid.UUID, context.Context, func(), error) {
+	result, err := CheckToolAccess(ctx, deps, toolName)
+	if err != nil {
+		return uuid.Nil, nil, nil, err
+	}
+
+	// Inject MCP provenance context
+	// Get user ID from claims (may be "agent" for API key auth)
+	claims, _ := auth.GetClaims(ctx)
+	userID := uuid.Nil
+	if claims != nil && claims.Subject != "agent" {
+		// Parse user ID for JWT-authenticated requests
+		if parsed, err := uuid.Parse(claims.Subject); err == nil {
+			userID = parsed
+		}
+	}
+
+	// Add MCP provenance to the tenant context
+	tenantCtxWithProvenance := models.WithMCPProvenance(result.TenantCtx, userID)
+
+	return result.ProjectID, tenantCtxWithProvenance, result.Cleanup, nil
+}
+
+// AcquireToolAccessWithoutProvenance verifies tool access without injecting provenance context.
+// Use this for read-only tools that don't modify ontology objects.
+// Returns project ID, tenant-scoped context, cleanup function, and any error.
+func AcquireToolAccessWithoutProvenance(ctx context.Context, deps ToolAccessDeps, toolName string) (uuid.UUID, context.Context, func(), error) {
 	result, err := CheckToolAccess(ctx, deps, toolName)
 	if err != nil {
 		return uuid.Nil, nil, nil, err

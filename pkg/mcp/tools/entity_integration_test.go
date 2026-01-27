@@ -120,6 +120,10 @@ func (tc *entityToolTestContext) createTestContext() (context.Context, func()) {
 		Roles:     []string{models.RoleAdmin},
 	})
 
+	// Add provenance context for MCP operations (simulates what MCP middleware does)
+	// Using uuid.Nil since we don't have a real user - the repository handles nil UUIDs
+	ctx = models.WithMCPProvenance(ctx, uuid.Nil)
+
 	return ctx, func() { scope.Close() }
 }
 
@@ -184,15 +188,16 @@ func (tc *entityToolTestContext) createOntologyAndEntity(ctx context.Context, en
 	require.NoError(tc.t, err)
 
 	// Create an entity under this ontology (simulating extraction)
+	// Set provenance context for the repository
+	ctxWithProv := models.WithInferredProvenance(ctx, uuid.Nil)
 	entity := &models.OntologyEntity{
 		ProjectID:    tc.projectID,
 		OntologyID:   ontology.ID,
 		Name:         entityName,
 		Description:  "Test entity created during extraction",
 		PrimaryTable: entityName + "_table",
-		CreatedBy:    models.ProvenanceInference, // Extraction creates with inference provenance
 	}
-	err = tc.ontologyEntityRepo.Create(ctx, entity)
+	err = tc.ontologyEntityRepo.Create(ctxWithProv, entity)
 	require.NoError(tc.t, err)
 
 	return ontology.ID, entity.ID

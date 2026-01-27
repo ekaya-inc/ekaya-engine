@@ -28,6 +28,12 @@ type EntityRelationshipRepository interface {
 	UpdateDescriptionAndAssociation(ctx context.Context, id uuid.UUID, description string, association string) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	DeleteByOntology(ctx context.Context, ontologyID uuid.UUID) error
+	DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error
+
+	// Stale marking for incremental refresh
+	MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error
+	ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error
+	GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error)
 }
 
 type entityRelationshipRepository struct{}
@@ -45,6 +51,12 @@ func (r *entityRelationshipRepository) Create(ctx context.Context, rel *models.E
 		return fmt.Errorf("no tenant scope in context")
 	}
 
+	// Extract provenance from context
+	prov, ok := models.GetProvenance(ctx)
+	if !ok {
+		return fmt.Errorf("provenance context required")
+	}
+
 	rel.CreatedAt = time.Now()
 
 	if rel.ID == uuid.Nil {
@@ -56,30 +68,54 @@ func (r *entityRelationshipRepository) Create(ctx context.Context, rel *models.E
 		rel.Cardinality = "unknown"
 	}
 
-	// Default created_by to 'inference' if not set
-	if rel.CreatedBy == "" {
-		rel.CreatedBy = models.ProvenanceInference
+	// Set provenance fields from context (only if not already set explicitly)
+	if rel.Source == "" {
+		rel.Source = prov.Source.String()
+	}
+	// Only set CreatedBy if there's a valid user ID (not the nil UUID)
+	if prov.UserID != uuid.Nil {
+		rel.CreatedBy = &prov.UserID
+	} else {
+		rel.CreatedBy = nil
 	}
 
+	// Use ON CONFLICT DO UPDATE to handle re-discovery during ontology refresh.
+	// When an existing relationship is re-discovered:
+	// - Clear is_stale flag (relationship still exists in schema)
+	// - Update confidence and detection_method (may have changed)
+	// - Update column IDs (may have changed if schema was refreshed)
+	// - Preserve description/association if already enriched (don't overwrite with NULL)
+	// - On conflict, also set last_edit_source and updated_by
+	now := time.Now()
+	// Use subquery to get project_id from source entity
 	query := `
 		INSERT INTO engine_entity_relationships (
-			id, ontology_id, source_entity_id, target_entity_id,
-			source_column_schema, source_column_table, source_column_name,
-			target_column_schema, target_column_table, target_column_name,
+			id, project_id, ontology_id, source_entity_id, target_entity_id,
+			source_column_schema, source_column_table, source_column_name, source_column_id,
+			target_column_schema, target_column_table, target_column_name, target_column_id,
 			detection_method, confidence, status, cardinality, description, association,
-			created_by, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+			is_stale, source, created_by, created_at
+		) VALUES ($1, (SELECT project_id FROM engine_ontology_entities WHERE id = $3), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
 		ON CONFLICT (ontology_id, source_entity_id, target_entity_id,
 			source_column_schema, source_column_table, source_column_name,
 			target_column_schema, target_column_table, target_column_name)
-		DO NOTHING`
+		DO UPDATE SET
+			is_stale = false,
+			confidence = EXCLUDED.confidence,
+			detection_method = EXCLUDED.detection_method,
+			source_column_id = EXCLUDED.source_column_id,
+			target_column_id = EXCLUDED.target_column_id,
+			last_edit_source = EXCLUDED.source,
+			updated_by = EXCLUDED.created_by,
+			updated_at = $23`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		rel.ID, rel.OntologyID, rel.SourceEntityID, rel.TargetEntityID,
-		rel.SourceColumnSchema, rel.SourceColumnTable, rel.SourceColumnName,
-		rel.TargetColumnSchema, rel.TargetColumnTable, rel.TargetColumnName,
+		rel.SourceColumnSchema, rel.SourceColumnTable, rel.SourceColumnName, rel.SourceColumnID,
+		rel.TargetColumnSchema, rel.TargetColumnTable, rel.TargetColumnName, rel.TargetColumnID,
 		rel.DetectionMethod, rel.Confidence, rel.Status, rel.Cardinality, rel.Description, rel.Association,
-		rel.CreatedBy, rel.CreatedAt,
+		rel.IsStale, rel.Source, rel.CreatedBy, rel.CreatedAt,
+		now,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create entity relationship: %w", err)
@@ -95,11 +131,11 @@ func (r *entityRelationshipRepository) GetByOntology(ctx context.Context, ontolo
 	}
 
 	query := `
-		SELECT id, ontology_id, source_entity_id, target_entity_id,
+		SELECT id, project_id, ontology_id, source_entity_id, target_entity_id,
 		       source_column_schema, source_column_table, source_column_name,
 		       target_column_schema, target_column_table, target_column_name,
 		       detection_method, confidence, status, cardinality, description, association,
-		       created_by, updated_by, created_at, updated_at
+		       is_stale, source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_entity_relationships
 		WHERE ontology_id = $1
 		ORDER BY source_column_table, source_column_name`
@@ -133,11 +169,11 @@ func (r *entityRelationshipRepository) GetByOntologyGroupedByTarget(ctx context.
 	}
 
 	query := `
-		SELECT id, ontology_id, source_entity_id, target_entity_id,
+		SELECT id, project_id, ontology_id, source_entity_id, target_entity_id,
 		       source_column_schema, source_column_table, source_column_name,
 		       target_column_schema, target_column_table, target_column_name,
 		       detection_method, confidence, status, cardinality, description, association,
-		       created_by, updated_by, created_at, updated_at
+		       is_stale, source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_entity_relationships
 		WHERE ontology_id = $1
 		ORDER BY target_entity_id, source_column_table, source_column_name`
@@ -170,14 +206,20 @@ func (r *entityRelationshipRepository) GetByProject(ctx context.Context, project
 		return nil, fmt.Errorf("no tenant scope in context")
 	}
 
+	// JOIN with engine_schema_columns to get column types for source and target columns
 	query := `
-		SELECT r.id, r.ontology_id, r.source_entity_id, r.target_entity_id,
+		SELECT r.id, r.project_id, r.ontology_id, r.source_entity_id, r.target_entity_id,
 		       r.source_column_schema, r.source_column_table, r.source_column_name,
-		       r.target_column_schema, r.target_column_table, r.target_column_name,
-		       r.detection_method, r.confidence, r.status, r.cardinality, r.description, r.association,
-		       r.created_by, r.updated_by, r.created_at, r.updated_at
+		       r.source_column_id, r.target_column_schema, r.target_column_table, r.target_column_name,
+		       r.target_column_id, r.detection_method, r.confidence, r.status, r.cardinality,
+		       r.description, r.association, r.is_stale, r.source, r.last_edit_source,
+		       r.created_by, r.updated_by, r.created_at, r.updated_at,
+		       COALESCE(sc.data_type, '') as source_column_type,
+		       COALESCE(tc.data_type, '') as target_column_type
 		FROM engine_entity_relationships r
 		JOIN engine_ontologies o ON r.ontology_id = o.id
+		LEFT JOIN engine_schema_columns sc ON r.source_column_id = sc.id
+		LEFT JOIN engine_schema_columns tc ON r.target_column_id = tc.id
 		WHERE o.project_id = $1 AND o.is_active = true
 		ORDER BY r.source_column_table, r.source_column_name`
 
@@ -189,7 +231,7 @@ func (r *entityRelationshipRepository) GetByProject(ctx context.Context, project
 
 	var relationships []*models.EntityRelationship
 	for rows.Next() {
-		rel, err := scanEntityRelationship(rows)
+		rel, err := scanEntityRelationshipWithColumnTypes(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -214,11 +256,11 @@ func (r *entityRelationshipRepository) GetByTables(ctx context.Context, projectI
 	}
 
 	query := `
-		SELECT r.id, r.ontology_id, r.source_entity_id, r.target_entity_id,
+		SELECT r.id, r.project_id, r.ontology_id, r.source_entity_id, r.target_entity_id,
 		       r.source_column_schema, r.source_column_table, r.source_column_name,
 		       r.target_column_schema, r.target_column_table, r.target_column_name,
 		       r.detection_method, r.confidence, r.status, r.cardinality, r.description, r.association,
-		       r.created_by, r.updated_by, r.created_at, r.updated_at
+		       r.is_stale, r.source, r.last_edit_source, r.created_by, r.updated_by, r.created_at, r.updated_at
 		FROM engine_entity_relationships r
 		JOIN engine_ontologies o ON r.ontology_id = o.id
 		WHERE o.project_id = $1 AND o.is_active = true
@@ -254,11 +296,11 @@ func (r *entityRelationshipRepository) GetByTargetEntity(ctx context.Context, en
 	}
 
 	query := `
-		SELECT id, ontology_id, source_entity_id, target_entity_id,
+		SELECT id, project_id, ontology_id, source_entity_id, target_entity_id,
 		       source_column_schema, source_column_table, source_column_name,
 		       target_column_schema, target_column_table, target_column_name,
 		       detection_method, confidence, status, cardinality, description, association,
-		       created_by, updated_by, created_at, updated_at
+		       is_stale, source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_entity_relationships
 		WHERE target_entity_id = $1
 		ORDER BY source_column_table, source_column_name`
@@ -292,11 +334,11 @@ func (r *entityRelationshipRepository) GetByID(ctx context.Context, id uuid.UUID
 	}
 
 	query := `
-		SELECT id, ontology_id, source_entity_id, target_entity_id,
+		SELECT id, project_id, ontology_id, source_entity_id, target_entity_id,
 		       source_column_schema, source_column_table, source_column_name,
 		       target_column_schema, target_column_table, target_column_name,
 		       detection_method, confidence, status, cardinality, description, association,
-		       created_by, updated_by, created_at, updated_at
+		       is_stale, source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_entity_relationships
 		WHERE id = $1`
 
@@ -318,20 +360,36 @@ func (r *entityRelationshipRepository) Update(ctx context.Context, rel *models.E
 		return fmt.Errorf("no tenant scope in context")
 	}
 
+	// Extract provenance from context
+	prov, ok := models.GetProvenance(ctx)
+	if !ok {
+		return fmt.Errorf("provenance context required")
+	}
+
 	now := time.Now()
 	rel.UpdatedAt = &now
+
+	// Set provenance fields from context
+	lastEditSource := prov.Source.String()
+	rel.LastEditSource = &lastEditSource
+	// Only set UpdatedBy if there's a valid user ID (not the nil UUID)
+	if prov.UserID != uuid.Nil {
+		rel.UpdatedBy = &prov.UserID
+	} else {
+		rel.UpdatedBy = nil
+	}
 
 	query := `
 		UPDATE engine_entity_relationships
 		SET cardinality = $2, description = $3, association = $4,
-		    status = $5, confidence = $6,
-		    updated_by = $7, updated_at = $8
+		    status = $5, confidence = $6, is_stale = $7,
+		    last_edit_source = $8, updated_by = $9, updated_at = $10
 		WHERE id = $1`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		rel.ID, rel.Cardinality, rel.Description, rel.Association,
-		rel.Status, rel.Confidence,
-		rel.UpdatedBy, rel.UpdatedAt,
+		rel.Status, rel.Confidence, rel.IsStale,
+		rel.LastEditSource, rel.UpdatedBy, rel.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update entity relationship: %w", err)
@@ -346,9 +404,11 @@ func (r *entityRelationshipRepository) UpdateDescription(ctx context.Context, id
 		return fmt.Errorf("no tenant scope in context")
 	}
 
-	query := `UPDATE engine_entity_relationships SET description = $1 WHERE id = $2`
+	// Also clears is_stale since enrichment means the relationship was re-evaluated
+	now := time.Now()
+	query := `UPDATE engine_entity_relationships SET description = $1, is_stale = false, updated_at = $3 WHERE id = $2`
 
-	_, err := scope.Conn.Exec(ctx, query, description, id)
+	_, err := scope.Conn.Exec(ctx, query, description, id, now)
 	if err != nil {
 		return fmt.Errorf("failed to update entity relationship description: %w", err)
 	}
@@ -362,9 +422,11 @@ func (r *entityRelationshipRepository) UpdateDescriptionAndAssociation(ctx conte
 		return fmt.Errorf("no tenant scope in context")
 	}
 
-	query := `UPDATE engine_entity_relationships SET description = $1, association = $2 WHERE id = $3`
+	// Also clears is_stale since enrichment means the relationship was re-evaluated
+	now := time.Now()
+	query := `UPDATE engine_entity_relationships SET description = $1, association = $2, is_stale = false, updated_at = $4 WHERE id = $3`
 
-	_, err := scope.Conn.Exec(ctx, query, description, association, id)
+	_, err := scope.Conn.Exec(ctx, query, description, association, id, now)
 	if err != nil {
 		return fmt.Errorf("failed to update entity relationship description and association: %w", err)
 	}
@@ -388,6 +450,110 @@ func (r *entityRelationshipRepository) DeleteByOntology(ctx context.Context, ont
 	return nil
 }
 
+// DeleteBySource deletes all relationships for a project where source matches the given value.
+// This supports re-extraction policy: delete inference items while preserving mcp/manual items.
+func (r *entityRelationshipRepository) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	// Join with ontologies to filter by project_id since relationships don't have project_id directly
+	query := `
+		DELETE FROM engine_entity_relationships r
+		USING engine_ontologies o
+		WHERE r.ontology_id = o.id
+		  AND o.project_id = $1
+		  AND r.source = $2`
+
+	_, err := scope.Conn.Exec(ctx, query, projectID, source.String())
+	if err != nil {
+		return fmt.Errorf("failed to delete relationships by source: %w", err)
+	}
+
+	return nil
+}
+
+// MarkInferenceRelationshipsStale marks all inference-created relationships as stale for re-enrichment.
+// This is used during ontology refresh to preserve manual/MCP relationships while allowing
+// inference relationships to be re-evaluated.
+func (r *entityRelationshipRepository) MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	now := time.Now()
+	query := `
+		UPDATE engine_entity_relationships
+		SET is_stale = true, updated_at = $2
+		WHERE ontology_id = $1 AND source = 'inferred'`
+
+	_, err := scope.Conn.Exec(ctx, query, ontologyID, now)
+	if err != nil {
+		return fmt.Errorf("failed to mark inference relationships as stale: %w", err)
+	}
+
+	return nil
+}
+
+// ClearStaleFlag clears the is_stale flag after re-enrichment.
+func (r *entityRelationshipRepository) ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	now := time.Now()
+	query := `UPDATE engine_entity_relationships SET is_stale = false, updated_at = $2 WHERE id = $1`
+
+	_, err := scope.Conn.Exec(ctx, query, relationshipID, now)
+	if err != nil {
+		return fmt.Errorf("failed to clear stale flag: %w", err)
+	}
+
+	return nil
+}
+
+// GetStaleRelationships returns all relationships marked as stale for the given ontology.
+func (r *entityRelationshipRepository) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return nil, fmt.Errorf("no tenant scope in context")
+	}
+
+	query := `
+		SELECT id, project_id, ontology_id, source_entity_id, target_entity_id,
+		       source_column_schema, source_column_table, source_column_name,
+		       target_column_schema, target_column_table, target_column_name,
+		       detection_method, confidence, status, cardinality, description, association,
+		       is_stale, source, last_edit_source, created_by, updated_by, created_at, updated_at
+		FROM engine_entity_relationships
+		WHERE ontology_id = $1 AND is_stale = true
+		ORDER BY source_column_table, source_column_name`
+
+	rows, err := scope.Conn.Query(ctx, query, ontologyID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query stale relationships: %w", err)
+	}
+	defer rows.Close()
+
+	var relationships []*models.EntityRelationship
+	for rows.Next() {
+		rel, err := scanEntityRelationship(rows)
+		if err != nil {
+			return nil, err
+		}
+		relationships = append(relationships, rel)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating stale relationships: %w", err)
+	}
+
+	return relationships, nil
+}
+
 func (r *entityRelationshipRepository) GetByEntityPair(ctx context.Context, ontologyID uuid.UUID, fromEntityID uuid.UUID, toEntityID uuid.UUID) (*models.EntityRelationship, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
@@ -398,11 +564,11 @@ func (r *entityRelationshipRepository) GetByEntityPair(ctx context.Context, onto
 	// Note: There may be multiple relationships between the same entity pair (different columns)
 	// We return the first one found
 	query := `
-		SELECT id, ontology_id, source_entity_id, target_entity_id,
+		SELECT id, project_id, ontology_id, source_entity_id, target_entity_id,
 		       source_column_schema, source_column_table, source_column_name,
 		       target_column_schema, target_column_table, target_column_name,
 		       detection_method, confidence, status, cardinality, description, association,
-		       created_by, updated_by, created_at, updated_at
+		       is_stale, source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_entity_relationships
 		WHERE ontology_id = $1 AND source_entity_id = $2 AND target_entity_id = $3
 		ORDER BY created_at DESC
@@ -426,6 +592,12 @@ func (r *entityRelationshipRepository) Upsert(ctx context.Context, rel *models.E
 		return fmt.Errorf("no tenant scope in context")
 	}
 
+	// Extract provenance from context
+	prov, ok := models.GetProvenance(ctx)
+	if !ok {
+		return fmt.Errorf("provenance context required")
+	}
+
 	if rel.ID == uuid.Nil {
 		rel.ID = uuid.New()
 	}
@@ -434,9 +606,14 @@ func (r *entityRelationshipRepository) Upsert(ctx context.Context, rel *models.E
 		rel.CreatedAt = time.Now()
 	}
 
-	// Default created_by to 'inference' if not set
-	if rel.CreatedBy == "" {
-		rel.CreatedBy = models.ProvenanceInference
+	// Set provenance fields from context (only if not already set explicitly)
+	if rel.Source == "" {
+		rel.Source = prov.Source.String()
+	}
+	if prov.UserID != uuid.Nil {
+		rel.CreatedBy = &prov.UserID
+	} else {
+		rel.CreatedBy = nil
 	}
 
 	now := time.Now()
@@ -444,14 +621,16 @@ func (r *entityRelationshipRepository) Upsert(ctx context.Context, rel *models.E
 	// Upsert: Insert or update on conflict
 	// The unique constraint is on (ontology_id, source_entity_id, target_entity_id, source/target column details)
 	// For MCP tools, we want to upsert based on entity pair, so we'll use ON CONFLICT DO UPDATE
+	// On conflict, also set last_edit_source and updated_by from provenance
+	// Use subquery to get project_id from source entity
 	query := `
 		INSERT INTO engine_entity_relationships (
-			id, ontology_id, source_entity_id, target_entity_id,
-			source_column_schema, source_column_table, source_column_name,
-			target_column_schema, target_column_table, target_column_name,
+			id, project_id, ontology_id, source_entity_id, target_entity_id,
+			source_column_schema, source_column_table, source_column_name, source_column_id,
+			target_column_schema, target_column_table, target_column_name, target_column_id,
 			detection_method, confidence, status, cardinality, description, association,
-			created_by, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+			is_stale, source, created_by, created_at
+		) VALUES ($1, (SELECT project_id FROM engine_ontology_entities WHERE id = $3), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
 		ON CONFLICT (ontology_id, source_entity_id, target_entity_id,
 			source_column_schema, source_column_table, source_column_name,
 			target_column_schema, target_column_table, target_column_name)
@@ -462,16 +641,20 @@ func (r *entityRelationshipRepository) Upsert(ctx context.Context, rel *models.E
 			status = EXCLUDED.status,
 			confidence = EXCLUDED.confidence,
 			detection_method = EXCLUDED.detection_method,
-			updated_by = $19,
-			updated_at = $20`
+			source_column_id = EXCLUDED.source_column_id,
+			target_column_id = EXCLUDED.target_column_id,
+			is_stale = EXCLUDED.is_stale,
+			last_edit_source = EXCLUDED.source,
+			updated_by = EXCLUDED.created_by,
+			updated_at = $23`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		rel.ID, rel.OntologyID, rel.SourceEntityID, rel.TargetEntityID,
-		rel.SourceColumnSchema, rel.SourceColumnTable, rel.SourceColumnName,
-		rel.TargetColumnSchema, rel.TargetColumnTable, rel.TargetColumnName,
+		rel.SourceColumnSchema, rel.SourceColumnTable, rel.SourceColumnName, rel.SourceColumnID,
+		rel.TargetColumnSchema, rel.TargetColumnTable, rel.TargetColumnName, rel.TargetColumnID,
 		rel.DetectionMethod, rel.Confidence, rel.Status, rel.Cardinality, rel.Description, rel.Association,
-		rel.CreatedBy, rel.CreatedAt,
-		rel.UpdatedBy, now,
+		rel.IsStale, rel.Source, rel.CreatedBy, rel.CreatedAt,
+		now,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to upsert entity relationship: %w", err)
@@ -500,17 +683,41 @@ func scanEntityRelationship(row pgx.Row) (*models.EntityRelationship, error) {
 	var rel models.EntityRelationship
 
 	err := row.Scan(
-		&rel.ID, &rel.OntologyID, &rel.SourceEntityID, &rel.TargetEntityID,
+		&rel.ID, &rel.ProjectID, &rel.OntologyID, &rel.SourceEntityID, &rel.TargetEntityID,
 		&rel.SourceColumnSchema, &rel.SourceColumnTable, &rel.SourceColumnName,
 		&rel.TargetColumnSchema, &rel.TargetColumnTable, &rel.TargetColumnName,
 		&rel.DetectionMethod, &rel.Confidence, &rel.Status, &rel.Cardinality, &rel.Description, &rel.Association,
-		&rel.CreatedBy, &rel.UpdatedBy, &rel.CreatedAt, &rel.UpdatedAt,
+		&rel.IsStale, &rel.Source, &rel.LastEditSource, &rel.CreatedBy, &rel.UpdatedBy, &rel.CreatedAt, &rel.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, err
 		}
 		return nil, fmt.Errorf("failed to scan entity relationship: %w", err)
+	}
+
+	return &rel, nil
+}
+
+// scanEntityRelationshipWithColumnTypes scans a row that includes source_column_id, target_column_id,
+// and the joined column types from engine_schema_columns.
+func scanEntityRelationshipWithColumnTypes(row pgx.Row) (*models.EntityRelationship, error) {
+	var rel models.EntityRelationship
+
+	err := row.Scan(
+		&rel.ID, &rel.ProjectID, &rel.OntologyID, &rel.SourceEntityID, &rel.TargetEntityID,
+		&rel.SourceColumnSchema, &rel.SourceColumnTable, &rel.SourceColumnName,
+		&rel.SourceColumnID, &rel.TargetColumnSchema, &rel.TargetColumnTable, &rel.TargetColumnName,
+		&rel.TargetColumnID, &rel.DetectionMethod, &rel.Confidence, &rel.Status, &rel.Cardinality,
+		&rel.Description, &rel.Association, &rel.IsStale, &rel.Source, &rel.LastEditSource,
+		&rel.CreatedBy, &rel.UpdatedBy, &rel.CreatedAt, &rel.UpdatedAt,
+		&rel.SourceColumnType, &rel.TargetColumnType,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, err
+		}
+		return nil, fmt.Errorf("failed to scan entity relationship with column types: %w", err)
 	}
 
 	return &rel, nil

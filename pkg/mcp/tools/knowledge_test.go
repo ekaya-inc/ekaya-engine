@@ -87,6 +87,20 @@ func (m *mockKnowledgeRepository) DeleteByProject(ctx context.Context, projectID
 	return nil
 }
 
+func (m *mockKnowledgeRepository) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	if m.err != nil {
+		return m.err
+	}
+	filtered := make([]*models.KnowledgeFact, 0)
+	for _, f := range m.facts {
+		if f.Source != source.String() {
+			filtered = append(filtered, f)
+		}
+	}
+	m.facts = filtered
+	return nil
+}
+
 // setupKnowledgeTest creates a test setup with mock dependencies for knowledge tools.
 func setupKnowledgeTest(t *testing.T) (*mockKnowledgeRepository, *KnowledgeToolDeps) {
 	t.Helper()

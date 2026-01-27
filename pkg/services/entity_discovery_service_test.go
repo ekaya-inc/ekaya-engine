@@ -50,6 +50,9 @@ func (m *mockEntityDiscoveryEntityRepo) DeleteByOntology(ctx context.Context, on
 func (m *mockEntityDiscoveryEntityRepo) DeleteInferenceEntitiesByOntology(ctx context.Context, ontologyID uuid.UUID) error {
 	return nil
 }
+func (m *mockEntityDiscoveryEntityRepo) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
 func (m *mockEntityDiscoveryEntityRepo) Update(ctx context.Context, entity *models.OntologyEntity) error {
 	return nil
 }
@@ -84,6 +87,18 @@ func (m *mockEntityDiscoveryEntityRepo) CountOccurrencesByEntity(ctx context.Con
 	return 0, nil
 }
 func (m *mockEntityDiscoveryEntityRepo) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockEntityDiscoveryEntityRepo) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityDiscoveryEntityRepo) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityDiscoveryEntityRepo) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
 	return nil, nil
 }
 
@@ -177,6 +192,7 @@ func TestEnrichEntitiesWithLLM_ParseFailure_ReturnsError(t *testing.T) {
 		nil, // schemaRepo not needed for this test
 		nil, // ontologyRepo not needed for this test
 		conversationRepo,
+		nil, // questionService not needed for this test
 		mockFactory,
 		nil, // workerPool not needed for this test
 		mockTenantCtx,
@@ -275,6 +291,7 @@ func TestEnrichEntitiesWithLLM_ValidResponse_Success(t *testing.T) {
 		nil,
 		nil,
 		conversationRepo,
+		nil, // questionService not needed for this test
 		mockFactory,
 		nil, // workerPool not needed for this test
 		mockTenantCtx,
@@ -328,6 +345,7 @@ func TestEnrichEntitiesWithLLM_EmptyEntities_ReturnsNil(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, // questionService not needed for this test
 		llm.NewMockClientFactory(),
 		nil, // workerPool not needed for this test
 		mockTenantCtx,
@@ -427,6 +445,7 @@ func TestEnrichEntitiesWithLLM_IncompleteResponse_ReturnsError(t *testing.T) {
 		nil,
 		nil,
 		conversationRepo,
+		nil, // questionService not needed for this test
 		mockFactory,
 		nil, // workerPool not needed for this test
 		mockTenantCtx,
@@ -487,6 +506,7 @@ func TestValidateEnrichment_AllEntitiesHaveDescriptions_ReturnsNil(t *testing.T)
 		nil,
 		nil,
 		nil,
+		nil, // questionService not needed for this test
 		llm.NewMockClientFactory(),
 		nil, // workerPool not needed for this test
 		mockTenantCtx,
@@ -531,6 +551,7 @@ func TestValidateEnrichment_SomeEntitiesLackDescriptions_ReturnsError(t *testing
 		nil,
 		nil,
 		nil,
+		nil, // questionService not needed for this test
 		llm.NewMockClientFactory(),
 		nil, // workerPool not needed for this test
 		mockTenantCtx,
@@ -562,6 +583,7 @@ func TestValidateEnrichment_NoEntities_ReturnsNil(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil, // questionService not needed for this test
 		llm.NewMockClientFactory(),
 		nil, // workerPool not needed for this test
 		mockTenantCtx,
@@ -668,6 +690,7 @@ func TestEnrichEntitiesWithLLM_BatchedEnrichment_Success(t *testing.T) {
 		nil, // schemaRepo not needed
 		nil, // ontologyRepo not needed
 		conversationRepo,
+		nil, // questionService not needed for this test
 		mockFactory,
 		workerPool,
 		mockTenantCtx,
@@ -781,6 +804,7 @@ func TestEnrichEntitiesWithLLM_BatchedEnrichment_BatchFailure(t *testing.T) {
 		nil,
 		nil,
 		conversationRepo,
+		nil, // questionService not needed for this test
 		mockFactory,
 		workerPool,
 		mockTenantCtx,
@@ -1094,6 +1118,7 @@ func TestEnrichEntitiesWithLLM_SmallEntitySet_NoBatching(t *testing.T) {
 		nil,
 		nil,
 		conversationRepo,
+		nil, // questionService not needed for this test
 		mockFactory,
 		workerPool,
 		mockTenantCtx,
@@ -1300,6 +1325,7 @@ func TestIdentifyEntitiesFromDDL_GroupsSimilarTables(t *testing.T) {
 		schemaRepo,
 		nil,
 		nil,
+		nil, // questionService not needed for this test
 		llm.NewMockClientFactory(),
 		nil,
 		mockTenantCtx,
@@ -1383,6 +1409,7 @@ func TestIdentifyEntitiesFromDDL_AllTestTables_UsesFirstAsPrimary(t *testing.T) 
 		schemaRepo,
 		nil,
 		nil,
+		nil, // questionService not needed for this test
 		llm.NewMockClientFactory(),
 		nil,
 		mockTenantCtx,
@@ -1446,6 +1473,7 @@ func TestIdentifyEntitiesFromDDL_NoGrouping_UniqueTables(t *testing.T) {
 		schemaRepo,
 		nil,
 		nil,
+		nil, // questionService not needed for this test
 		llm.NewMockClientFactory(),
 		nil,
 		mockTenantCtx,
@@ -1551,6 +1579,7 @@ func TestEnrichEntitiesWithLLM_IncludesExistingNamesInPrompt(t *testing.T) {
 		nil,
 		nil,
 		&mockEntityDiscoveryConversationRepo{},
+		nil, // questionService not needed for this test
 		mockFactory,
 		nil,
 		mockTenantCtx,
@@ -1643,6 +1672,7 @@ func TestEnrichEntitiesWithLLM_NoExistingNames_NoExistingNamesSection(t *testing
 		nil,
 		nil,
 		&mockEntityDiscoveryConversationRepo{},
+		nil, // questionService not needed for this test
 		mockFactory,
 		nil,
 		mockTenantCtx,
@@ -1664,4 +1694,451 @@ func TestEnrichEntitiesWithLLM_NoExistingNames_NoExistingNamesSection(t *testing
 
 	// Verify: the prompt does NOT include existing entity names section
 	assert.NotContains(t, capturedPrompt, "EXISTING ENTITY NAMES (DO NOT REUSE)")
+}
+
+// ============================================================================
+// Tests for Provenance Fields
+// ============================================================================
+
+func TestIdentifyEntitiesFromDDL_SetsConfidence(t *testing.T) {
+	// Test that DDL-based entity discovery sets confidence=0.5
+	// (DDL-derived entities have lower confidence until LLM enrichment)
+
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	datasourceID := uuid.New()
+
+	tableID := uuid.New()
+	tables := []*models.SchemaTable{
+		{ID: tableID, SchemaName: "public", TableName: "users"},
+	}
+
+	columns := []*models.SchemaColumn{
+		{SchemaTableID: tableID, ColumnName: "id", IsPrimaryKey: true},
+	}
+
+	entityRepo := &trackingEntityRepo{}
+	schemaRepo := &mockSchemaRepoForGrouping{
+		tables:  tables,
+		columns: columns,
+	}
+
+	mockTenantCtx := func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {
+		return ctx, func() {}, nil
+	}
+
+	svc := NewEntityDiscoveryService(
+		entityRepo,
+		schemaRepo,
+		nil,
+		nil,
+		nil, // questionService not needed for this test
+		llm.NewMockClientFactory(),
+		nil,
+		mockTenantCtx,
+		zap.NewNop(),
+	)
+
+	// Execute
+	entityCount, _, _, err := svc.IdentifyEntitiesFromDDL(context.Background(), projectID, ontologyID, datasourceID)
+
+	// Verify: no error
+	require.NoError(t, err)
+	assert.Equal(t, 1, entityCount)
+	require.Len(t, entityRepo.createdEntities, 1)
+
+	// Verify: DDL-based entities should have confidence=0.5
+	entity := entityRepo.createdEntities[0]
+	assert.Equal(t, 0.5, entity.Confidence, "DDL-based entities should have confidence=0.5")
+}
+
+// trackingUpdateEntityRepo extends trackingEntityRepo to also track Update calls
+type trackingUpdateEntityRepo struct {
+	trackingEntityRepo
+	updatedEntities []*models.OntologyEntity
+}
+
+func (m *trackingUpdateEntityRepo) Update(ctx context.Context, entity *models.OntologyEntity) error {
+	m.updatedEntities = append(m.updatedEntities, entity)
+	return nil
+}
+
+func TestEnrichEntitiesWithLLM_SetsConfidence(t *testing.T) {
+	// Test that LLM enrichment increases confidence to 0.8
+
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	datasourceID := uuid.New()
+	conversationID := uuid.New()
+	tableID := uuid.New()
+
+	// Create an entity with initial DDL-based confidence of 0.5
+	entity := &models.OntologyEntity{
+		ID:            uuid.New(),
+		ProjectID:     projectID,
+		OntologyID:    ontologyID,
+		Name:          "users",
+		Description:   "",
+		PrimarySchema: "public",
+		PrimaryTable:  "users",
+		PrimaryColumn: "id",
+		Confidence:    0.5, // DDL-based confidence
+	}
+
+	entityRepo := &trackingUpdateEntityRepo{
+		trackingEntityRepo: trackingEntityRepo{
+			mockEntityDiscoveryEntityRepo: mockEntityDiscoveryEntityRepo{
+				entities: []*models.OntologyEntity{entity},
+			},
+		},
+	}
+
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		return &llm.GenerateResponseResult{
+			Content: `{
+				"entities": [
+					{
+						"table_name": "users",
+						"entity_name": "User",
+						"description": "A platform user account",
+						"domain": "customer",
+						"key_columns": [],
+						"alternative_names": []
+					}
+				]
+			}`,
+			ConversationID: conversationID,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.CreateForProjectFunc = func(ctx context.Context, projectID uuid.UUID) (llm.LLMClient, error) {
+		return mockClient, nil
+	}
+
+	mockTenantCtx := func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {
+		return ctx, func() {}, nil
+	}
+
+	svc := NewEntityDiscoveryService(
+		entityRepo,
+		&mockSchemaRepoForGrouping{},
+		nil,
+		nil,
+		nil, // questionService not needed for this test
+		mockFactory,
+		nil,
+		mockTenantCtx,
+		zap.NewNop(),
+	)
+
+	tables := []*models.SchemaTable{
+		{ID: tableID, SchemaName: "public", TableName: "users"},
+	}
+	columns := []*models.SchemaColumn{
+		{SchemaTableID: tableID, ColumnName: "id"},
+	}
+
+	// Execute
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+
+	// Verify: no error
+	require.NoError(t, err)
+	require.Len(t, entityRepo.updatedEntities, 1)
+
+	// Verify: LLM-enriched entities should have confidence=0.8
+	updatedEntity := entityRepo.updatedEntities[0]
+	assert.Equal(t, 0.8, updatedEntity.Confidence, "LLM-enriched entities should have confidence=0.8")
+	assert.Equal(t, "User", updatedEntity.Name, "Entity name should be updated by LLM")
+	assert.Equal(t, "A platform user account", updatedEntity.Description, "Entity description should be updated by LLM")
+}
+
+func TestEnrichEntitiesWithLLM_QuestionsInResponse_Parsed(t *testing.T) {
+	// Test that questions in the LLM response are parsed correctly.
+	// Questions are logged but not yet stored (wiring happens in a later task).
+
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	datasourceID := uuid.New()
+	conversationID := uuid.New()
+	tableID := uuid.New()
+
+	entity := &models.OntologyEntity{
+		ID:            uuid.New(),
+		ProjectID:     projectID,
+		OntologyID:    ontologyID,
+		Name:          "users",
+		Description:   "",
+		PrimarySchema: "public",
+		PrimaryTable:  "users",
+		PrimaryColumn: "id",
+		Confidence:    0.5,
+	}
+
+	entityRepo := &trackingUpdateEntityRepo{
+		trackingEntityRepo: trackingEntityRepo{
+			mockEntityDiscoveryEntityRepo: mockEntityDiscoveryEntityRepo{
+				entities: []*models.OntologyEntity{entity},
+			},
+		},
+	}
+
+	// LLM response includes both entities and questions
+	responseWithQuestions := `{
+		"entities": [
+			{
+				"table_name": "users",
+				"entity_name": "User",
+				"description": "A platform user account",
+				"domain": "customer",
+				"key_columns": [{"name": "email", "synonyms": ["e-mail"]}],
+				"alternative_names": ["member"]
+			}
+		],
+		"questions": [
+			{
+				"category": "terminology",
+				"priority": 2,
+				"question": "What does 'tik' mean in tiks_count?",
+				"context": "Column users.tiks_count appears to track some kind of count but 'tik' is not a standard term."
+			},
+			{
+				"category": "business_rules",
+				"priority": 1,
+				"question": "Can a user have multiple email addresses?",
+				"context": "The email column has a unique constraint."
+			}
+		]
+	}`
+
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		return &llm.GenerateResponseResult{
+			Content:        responseWithQuestions,
+			ConversationID: conversationID,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.CreateForProjectFunc = func(ctx context.Context, projectID uuid.UUID) (llm.LLMClient, error) {
+		return mockClient, nil
+	}
+
+	mockTenantCtx := func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {
+		return ctx, func() {}, nil
+	}
+
+	svc := NewEntityDiscoveryService(
+		entityRepo,
+		&mockSchemaRepoForGrouping{},
+		nil,
+		nil,
+		nil, // questionService not needed for this test
+		mockFactory,
+		nil,
+		mockTenantCtx,
+		zap.NewNop(),
+	)
+
+	tables := []*models.SchemaTable{
+		{ID: tableID, SchemaName: "public", TableName: "users"},
+	}
+	columns := []*models.SchemaColumn{
+		{SchemaTableID: tableID, ColumnName: "id"},
+		{SchemaTableID: tableID, ColumnName: "email"},
+		{SchemaTableID: tableID, ColumnName: "tiks_count"},
+	}
+
+	// Execute
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+
+	// Verify: no error - questions in response should not cause failure
+	require.NoError(t, err)
+
+	// Verify: entity was still enriched correctly
+	require.Len(t, entityRepo.updatedEntities, 1)
+	updatedEntity := entityRepo.updatedEntities[0]
+	assert.Equal(t, "User", updatedEntity.Name)
+	assert.Equal(t, "A platform user account", updatedEntity.Description)
+}
+
+func TestParseEntityEnrichmentResponse_QuestionsExtracted(t *testing.T) {
+	// Direct test of parseEntityEnrichmentResponse to verify question extraction
+
+	svc := &entityDiscoveryService{
+		logger: zap.NewNop(),
+	}
+
+	responseJSON := `{
+		"entities": [
+			{
+				"table_name": "accounts",
+				"entity_name": "Account",
+				"description": "User account",
+				"domain": "auth",
+				"key_columns": [],
+				"alternative_names": []
+			}
+		],
+		"questions": [
+			{
+				"category": "enumeration",
+				"priority": 1,
+				"question": "What do status values 'A', 'P' mean?",
+				"context": "Status column has cryptic values."
+			},
+			{
+				"category": "relationship",
+				"priority": 2,
+				"question": "Is referrer_id a self-reference?",
+				"context": "Column appears to reference the same table."
+			}
+		]
+	}`
+
+	entities, questions, err := svc.parseEntityEnrichmentResponse(responseJSON)
+
+	require.NoError(t, err)
+	require.Len(t, entities, 1)
+	require.Len(t, questions, 2)
+
+	// Verify entity
+	assert.Equal(t, "accounts", entities[0].TableName)
+	assert.Equal(t, "Account", entities[0].EntityName)
+
+	// Verify questions
+	assert.Equal(t, "enumeration", questions[0].Category)
+	assert.Equal(t, 1, questions[0].Priority)
+	assert.Equal(t, "What do status values 'A', 'P' mean?", questions[0].Question)
+	assert.Equal(t, "Status column has cryptic values.", questions[0].Context)
+
+	assert.Equal(t, "relationship", questions[1].Category)
+	assert.Equal(t, 2, questions[1].Priority)
+}
+
+func TestParseEntityEnrichmentResponse_NoQuestions(t *testing.T) {
+	// Test that parsing succeeds when no questions are present
+
+	svc := &entityDiscoveryService{
+		logger: zap.NewNop(),
+	}
+
+	responseJSON := `{
+		"entities": [
+			{
+				"table_name": "users",
+				"entity_name": "User",
+				"description": "Platform user",
+				"domain": "customer",
+				"key_columns": [],
+				"alternative_names": []
+			}
+		]
+	}`
+
+	entities, questions, err := svc.parseEntityEnrichmentResponse(responseJSON)
+
+	require.NoError(t, err)
+	require.Len(t, entities, 1)
+	assert.Empty(t, questions, "Questions should be empty when not present")
+}
+
+func TestEnrichEntitiesWithLLM_DeduplicatesAliases(t *testing.T) {
+	// Test that when LLM returns duplicate aliases, CreateAlias is only called once per unique alias.
+	// This prevents duplicate key constraint violations in the database.
+
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	datasourceID := uuid.New()
+	conversationID := uuid.New()
+	tableID := uuid.New()
+
+	entity := &models.OntologyEntity{
+		ID:            uuid.New(),
+		ProjectID:     projectID,
+		OntologyID:    ontologyID,
+		Name:          "billing_engagements",
+		Description:   "",
+		PrimarySchema: "public",
+		PrimaryTable:  "billing_engagements",
+		PrimaryColumn: "id",
+		Confidence:    0.5,
+	}
+
+	entityRepo := &trackingUpdateEntityRepo{
+		trackingEntityRepo: trackingEntityRepo{
+			mockEntityDiscoveryEntityRepo: mockEntityDiscoveryEntityRepo{
+				entities: []*models.OntologyEntity{entity},
+			},
+		},
+	}
+
+	// LLM response with duplicate aliases: "Payment Intent" appears twice
+	responseWithDuplicates := `{
+		"entities": [
+			{
+				"table_name": "billing_engagements",
+				"entity_name": "Engagement Payment",
+				"description": "A payment for an engagement session",
+				"domain": "billing",
+				"key_columns": [{"name": "amount", "synonyms": ["total"]}],
+				"alternative_names": ["Payment Intent", "Engagement Payment", "Payment Intent"]
+			}
+		]
+	}`
+
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		return &llm.GenerateResponseResult{
+			Content:        responseWithDuplicates,
+			ConversationID: conversationID,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.CreateForProjectFunc = func(ctx context.Context, projectID uuid.UUID) (llm.LLMClient, error) {
+		return mockClient, nil
+	}
+
+	mockTenantCtx := func(ctx context.Context, projectID uuid.UUID) (context.Context, func(), error) {
+		return ctx, func() {}, nil
+	}
+
+	svc := NewEntityDiscoveryService(
+		entityRepo,
+		&mockSchemaRepoForGrouping{},
+		nil,
+		nil,
+		nil, // questionService not needed for this test
+		mockFactory,
+		nil,
+		mockTenantCtx,
+		zap.NewNop(),
+	)
+
+	tables := []*models.SchemaTable{
+		{ID: tableID, SchemaName: "public", TableName: "billing_engagements"},
+	}
+	columns := []*models.SchemaColumn{
+		{SchemaTableID: tableID, ColumnName: "id"},
+		{SchemaTableID: tableID, ColumnName: "amount"},
+	}
+
+	// Execute
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+
+	// Verify: no error
+	require.NoError(t, err)
+
+	// Verify: CreateAlias should be called exactly 2 times (not 3), once for each unique alias
+	// "Payment Intent" and "Engagement Payment" are the 2 unique aliases
+	assert.Len(t, entityRepo.createdAliases, 2, "Expected 2 CreateAlias calls for 2 unique aliases, not 3")
+
+	// Verify the unique aliases were created
+	aliasNames := make([]string, len(entityRepo.createdAliases))
+	for i, alias := range entityRepo.createdAliases {
+		aliasNames[i] = alias.Alias
+	}
+	assert.ElementsMatch(t, []string{"Payment Intent", "Engagement Payment"}, aliasNames)
 }

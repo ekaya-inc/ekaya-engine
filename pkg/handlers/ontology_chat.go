@@ -90,16 +90,19 @@ func NewOntologyChatHandler(
 func (h *OntologyChatHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *auth.Middleware, tenantMiddleware TenantMiddleware) {
 	chatBase := "/api/projects/{pid}/ontology/chat"
 
-	mux.HandleFunc("POST "+chatBase+"/initialize",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.Initialize)))
-	mux.HandleFunc("POST "+chatBase+"/message",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.SendMessage)))
+	// Read-only endpoints - no provenance needed
 	mux.HandleFunc("GET "+chatBase+"/history",
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetHistory)))
-	mux.HandleFunc("DELETE "+chatBase+"/history",
-		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.ClearHistory)))
 
-	// Knowledge endpoints
+	// Write endpoints - require provenance for audit tracking
+	mux.HandleFunc("POST "+chatBase+"/initialize",
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Initialize)))
+	mux.HandleFunc("POST "+chatBase+"/message",
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.SendMessage)))
+	mux.HandleFunc("DELETE "+chatBase+"/history",
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.ClearHistory)))
+
+	// Knowledge endpoints - read-only
 	knowledgeBase := "/api/projects/{pid}/ontology/knowledge"
 	mux.HandleFunc("GET "+knowledgeBase,
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetKnowledge)))

@@ -51,9 +51,9 @@ func (r *columnMetadataRepository) Upsert(ctx context.Context, meta *models.Colu
 
 	now := time.Now()
 
-	// Default created_by to 'inference' if not set
-	if meta.CreatedBy == "" {
-		meta.CreatedBy = models.ProvenanceInference
+	// Default source to 'inferred' if not set
+	if meta.Source == "" {
+		meta.Source = models.ProvenanceInferred
 	}
 
 	// Convert enum_values to JSON
@@ -70,16 +70,17 @@ func (r *columnMetadataRepository) Upsert(ctx context.Context, meta *models.Colu
 		INSERT INTO engine_ontology_column_metadata (
 			project_id, table_name, column_name,
 			description, entity, role, enum_values,
-			created_by, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			source, created_by, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (project_id, table_name, column_name)
 		DO UPDATE SET
 			description = COALESCE(EXCLUDED.description, engine_ontology_column_metadata.description),
 			entity = COALESCE(EXCLUDED.entity, engine_ontology_column_metadata.entity),
 			role = COALESCE(EXCLUDED.role, engine_ontology_column_metadata.role),
 			enum_values = COALESCE(EXCLUDED.enum_values, engine_ontology_column_metadata.enum_values),
-			updated_by = $10,
-			updated_at = $11
+			last_edit_source = $11,
+			updated_by = $12,
+			updated_at = $13
 		RETURNING id, created_at, updated_at`
 
 	err = scope.Conn.QueryRow(ctx, query,
@@ -90,8 +91,10 @@ func (r *columnMetadataRepository) Upsert(ctx context.Context, meta *models.Colu
 		meta.Entity,
 		meta.Role,
 		enumValuesJSON,
+		meta.Source,
 		meta.CreatedBy,
 		now,
+		meta.LastEditSource,
 		meta.UpdatedBy,
 		now,
 	).Scan(&meta.ID, &meta.CreatedAt, &meta.UpdatedAt)
@@ -112,7 +115,7 @@ func (r *columnMetadataRepository) GetByTableColumn(ctx context.Context, project
 	query := `
 		SELECT id, project_id, table_name, column_name,
 		       description, entity, role, enum_values,
-		       created_by, updated_by, created_at, updated_at
+		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_column_metadata
 		WHERE project_id = $1 AND table_name = $2 AND column_name = $3`
 
@@ -129,7 +132,7 @@ func (r *columnMetadataRepository) GetByTable(ctx context.Context, projectID uui
 	query := `
 		SELECT id, project_id, table_name, column_name,
 		       description, entity, role, enum_values,
-		       created_by, updated_by, created_at, updated_at
+		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_column_metadata
 		WHERE project_id = $1 AND table_name = $2
 		ORDER BY column_name`
@@ -152,7 +155,7 @@ func (r *columnMetadataRepository) GetByProject(ctx context.Context, projectID u
 	query := `
 		SELECT id, project_id, table_name, column_name,
 		       description, entity, role, enum_values,
-		       created_by, updated_by, created_at, updated_at
+		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_column_metadata
 		WHERE project_id = $1
 		ORDER BY table_name, column_name`
@@ -203,7 +206,7 @@ func scanColumnMetadata(row pgx.Row) (*models.ColumnMetadata, error) {
 	err := row.Scan(
 		&m.ID, &m.ProjectID, &m.TableName, &m.ColumnName,
 		&m.Description, &m.Entity, &m.Role, &enumValues,
-		&m.CreatedBy, &m.UpdatedBy, &m.CreatedAt, &m.UpdatedAt,
+		&m.Source, &m.LastEditSource, &m.CreatedBy, &m.UpdatedBy, &m.CreatedAt, &m.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -231,7 +234,7 @@ func scanColumnMetadataRows(rows pgx.Rows) ([]*models.ColumnMetadata, error) {
 		err := rows.Scan(
 			&m.ID, &m.ProjectID, &m.TableName, &m.ColumnName,
 			&m.Description, &m.Entity, &m.Role, &enumValues,
-			&m.CreatedBy, &m.UpdatedBy, &m.CreatedAt, &m.UpdatedAt,
+			&m.Source, &m.LastEditSource, &m.CreatedBy, &m.UpdatedBy, &m.CreatedAt, &m.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan column metadata: %w", err)

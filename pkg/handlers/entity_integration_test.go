@@ -236,6 +236,8 @@ func TestEntityIntegration_CreateAndList(t *testing.T) {
 		t.Fatalf("Failed to create tenant scope: %v", err)
 	}
 	ctx = database.SetTenantScope(ctx, scope)
+	// Set provenance context (required by repository)
+	ctx = models.WithInferredProvenance(ctx, uuid.Nil)
 
 	entity := &models.OntologyEntity{
 		ProjectID:     tc.projectID,
@@ -322,6 +324,7 @@ func TestEntityIntegration_GetByID(t *testing.T) {
 		t.Fatalf("Failed to create tenant scope: %v", err)
 	}
 	ctx = database.SetTenantScope(ctx, scope)
+	ctx = models.WithInferredProvenance(ctx, uuid.Nil)
 
 	entity := &models.OntologyEntity{
 		ProjectID:     tc.projectID,
@@ -368,6 +371,7 @@ func TestEntityIntegration_SoftDeleteAndRestore(t *testing.T) {
 		t.Fatalf("Failed to create tenant scope: %v", err)
 	}
 	ctx = database.SetTenantScope(ctx, scope)
+	ctx = models.WithInferredProvenance(ctx, uuid.Nil)
 
 	entity := &models.OntologyEntity{
 		ProjectID:     tc.projectID,
@@ -454,6 +458,7 @@ func TestEntityIntegration_AddAndRemoveAlias(t *testing.T) {
 		t.Fatalf("Failed to create tenant scope: %v", err)
 	}
 	ctx = database.SetTenantScope(ctx, scope)
+	ctx = models.WithInferredProvenance(ctx, uuid.Nil)
 
 	entity := &models.OntologyEntity{
 		ProjectID:     tc.projectID,

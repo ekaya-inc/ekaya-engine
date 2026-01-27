@@ -175,10 +175,11 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 		// If relationship exists, check precedence before allowing update
 		if !isNew {
 			// Check precedence: can MCP modify this relationship?
-			if !canModifyRelationship(existingRel.CreatedBy, existingRel.UpdatedBy, models.ProvenanceMCP) {
-				effectiveSource := existingRel.CreatedBy
-				if existingRel.UpdatedBy != nil && *existingRel.UpdatedBy != "" {
-					effectiveSource = *existingRel.UpdatedBy
+			// Use Source and LastEditSource (method tracking) not CreatedBy/UpdatedBy (user UUIDs)
+			if !canModifyRelationship(existingRel.Source, existingRel.LastEditSource, models.ProvenanceMCP) {
+				effectiveSource := existingRel.Source
+				if existingRel.LastEditSource != nil && *existingRel.LastEditSource != "" {
+					effectiveSource = *existingRel.LastEditSource
 				}
 				return NewErrorResult("precedence_blocked",
 					fmt.Sprintf("Cannot modify relationship: precedence blocked (existing: %s, modifier: %s). "+
@@ -188,7 +189,8 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 		}
 
 		if isNew {
-			// Create new relationship with MCP provenance
+			// Create new relationship
+			// Note: Source and CreatedBy are set by the repository from provenance context
 			// We need column details for the unique constraint, but for agent-created relationships,
 			// we'll use placeholder values since the actual column details aren't known
 			rel = &models.EntityRelationship{
@@ -205,7 +207,6 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 				Confidence:         1.0,
 				Status:             models.RelationshipStatusConfirmed,
 				Cardinality:        "unknown",
-				CreatedBy:          models.ProvenanceMCP,
 			}
 			if cardinality != "" {
 				rel.Cardinality = cardinality
@@ -217,10 +218,9 @@ func registerUpdateRelationshipTool(s *server.MCPServer, deps *RelationshipToolD
 				rel.Association = &label
 			}
 		} else {
-			// Update existing relationship with MCP provenance
+			// Update existing relationship
+			// Note: LastEditSource and UpdatedBy are set by the repository from provenance context
 			rel = existingRel
-			updatedBy := models.ProvenanceMCP
-			rel.UpdatedBy = &updatedBy
 			if description != "" {
 				rel.Description = &description
 			}
@@ -412,7 +412,7 @@ func precedenceLevelRelationship(source string) int {
 		return 3
 	case models.ProvenanceMCP:
 		return 2
-	case models.ProvenanceInference:
+	case models.ProvenanceInferred:
 		return 1
 	default:
 		return 0 // Unknown source has lowest precedence

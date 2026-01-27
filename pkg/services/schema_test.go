@@ -2389,6 +2389,10 @@ func (m *mockEntityRepository) DeleteInferenceEntitiesByOntology(ctx context.Con
 	return nil
 }
 
+func (m *mockEntityRepository) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
+
 func (m *mockEntityRepository) Update(ctx context.Context, entity *models.OntologyEntity) error {
 	return nil
 }
@@ -2434,6 +2438,18 @@ func (m *mockEntityRepository) CountOccurrencesByEntity(ctx context.Context, ent
 }
 
 func (m *mockEntityRepository) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockEntityRepository) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepository) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepository) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
 	return nil, nil
 }
 

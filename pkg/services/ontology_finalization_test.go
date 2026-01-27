@@ -105,6 +105,10 @@ func (m *mockEntityRepoForFinalization) DeleteInferenceEntitiesByOntology(ctx co
 	return nil
 }
 
+func (m *mockEntityRepoForFinalization) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
+	return nil
+}
+
 func (m *mockEntityRepoForFinalization) Update(ctx context.Context, entity *models.OntologyEntity) error {
 	return nil
 }
@@ -150,6 +154,18 @@ func (m *mockEntityRepoForFinalization) CountOccurrencesByEntity(ctx context.Con
 }
 
 func (m *mockEntityRepoForFinalization) GetOccurrenceTablesByEntity(ctx context.Context, entityID uuid.UUID, limit int) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockEntityRepoForFinalization) MarkInferenceEntitiesStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepoForFinalization) ClearStaleFlag(ctx context.Context, entityID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockEntityRepoForFinalization) GetStaleEntities(ctx context.Context, ontologyID uuid.UUID) ([]*models.OntologyEntity, error) {
 	return nil, nil
 }
 
@@ -218,6 +234,22 @@ func (m *mockRelationshipRepoForFinalization) GetByID(ctx context.Context, id uu
 }
 
 func (m *mockRelationshipRepoForFinalization) Update(ctx context.Context, rel *models.EntityRelationship) error {
+	return nil
+}
+
+func (m *mockRelationshipRepoForFinalization) MarkInferenceRelationshipsStale(ctx context.Context, ontologyID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockRelationshipRepoForFinalization) ClearStaleFlag(ctx context.Context, relationshipID uuid.UUID) error {
+	return nil
+}
+
+func (m *mockRelationshipRepoForFinalization) GetStaleRelationships(ctx context.Context, ontologyID uuid.UUID) ([]*models.EntityRelationship, error) {
+	return nil, nil
+}
+
+func (m *mockRelationshipRepoForFinalization) DeleteBySource(ctx context.Context, projectID uuid.UUID, source models.ProvenanceSource) error {
 	return nil
 }
 

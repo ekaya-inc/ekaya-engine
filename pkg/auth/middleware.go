@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
+
+	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 )
 
 // Middleware provides HTTP authentication middleware.
@@ -117,4 +120,96 @@ func (m *Middleware) forbidden(w http.ResponseWriter, message string) {
 		"error":   "forbidden",
 		"message": message,
 	})
+}
+
+// RequireAuthWithProvenance combines authentication and provenance context injection.
+// It validates JWT, requires a valid project ID, and sets manual provenance context.
+// Use this for UI API endpoints that modify ontology objects.
+func (m *Middleware) RequireAuthWithProvenance(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, token, err := m.authService.ValidateRequest(r)
+		if err != nil {
+			m.unauthorized(w, "Authentication required")
+			return
+		}
+
+		if err := m.authService.RequireProjectID(claims); err != nil {
+			m.badRequest(w, "Missing project ID in token")
+			return
+		}
+
+		// Parse user ID from claims.Subject as UUID
+		userID, err := uuid.Parse(claims.Subject)
+		if err != nil {
+			m.logger.Warn("Failed to parse user ID as UUID",
+				zap.String("subject", claims.Subject),
+				zap.Error(err))
+			m.badRequest(w, "Invalid user ID format in token")
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), ClaimsKey, claims)
+		ctx = context.WithValue(ctx, TokenKey, token)
+
+		// Inject Azure token reference ID into context if present
+		if claims.AzureTokenRefID != "" {
+			ctx = context.WithValue(ctx, AzureTokenRefIDKey, claims.AzureTokenRefID)
+		}
+
+		// Inject manual provenance context for UI operations
+		ctx = models.WithManualProvenance(ctx, userID)
+
+		next(w, r.WithContext(ctx))
+	}
+}
+
+// RequireAuthWithPathValidationAndProvenance combines path validation and provenance context.
+// Use for endpoints like /api/projects/{pid}/entities where URL contains project scope
+// and operations modify ontology objects.
+func (m *Middleware) RequireAuthWithPathValidationAndProvenance(pathParamName string) func(http.HandlerFunc) http.HandlerFunc {
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			claims, token, err := m.authService.ValidateRequest(r)
+			if err != nil {
+				m.unauthorized(w, "Authentication required")
+				return
+			}
+
+			if err := m.authService.RequireProjectID(claims); err != nil {
+				m.badRequest(w, "Missing project ID in token")
+				return
+			}
+
+			// Get path parameter using Go 1.22+ http.ServeMux
+			urlProjectID := r.PathValue(pathParamName)
+
+			if err := m.authService.ValidateProjectIDMatch(claims, urlProjectID); err != nil {
+				m.forbidden(w, "Project ID mismatch between token and URL")
+				return
+			}
+
+			// Parse user ID from claims.Subject as UUID
+			userID, err := uuid.Parse(claims.Subject)
+			if err != nil {
+				m.logger.Warn("Failed to parse user ID as UUID",
+					zap.String("subject", claims.Subject),
+					zap.Error(err))
+				m.badRequest(w, "Invalid user ID format in token")
+				return
+			}
+
+			ctx := context.WithValue(r.Context(), ClaimsKey, claims)
+			ctx = context.WithValue(ctx, TokenKey, token)
+
+			// Inject Azure token reference ID into context if present
+			if claims.AzureTokenRefID != "" {
+				ctx = context.WithValue(ctx, AzureTokenRefIDKey, claims.AzureTokenRefID)
+			}
+
+			// Inject manual provenance context for UI operations
+			ctx = models.WithManualProvenance(ctx, userID)
+
+			next(w, r.WithContext(ctx))
+		}
+	}
 }

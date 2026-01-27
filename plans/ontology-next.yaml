@@ -1,0 +1,15 @@
+# DVX Queue: Ontology Next Phase
+# Run with: dvx run plans/ontology-next.yaml
+
+plans:
+  # Priority 1: High priority bugs and foundation work
+  - plans/FIX-stats-collection-debug.md
+  - plans/TASK-ontology-refresh-phase1.md
+  - plans/TASK-question-generation.md
+
+  # Priority 2: Medium priority fixes
+  - plans/FIX-glossary-sql-validation.md
+
+  # Priority 3: Lower priority tasks
+  - plans/TASK-create-glossary-term-tool.md
+  - plans/FIX-relationship-column-types.md
