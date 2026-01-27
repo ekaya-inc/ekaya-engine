@@ -383,7 +383,7 @@ func searchEntities(ctx context.Context, deps *SearchToolDeps, projectID uuid.UU
 			COALESCE(
 				(SELECT array_agg(a.alias)
 				 FROM engine_ontology_entity_aliases a
-				 WHERE a.entity_id = e.id AND a.deleted_at IS NULL),
+				 WHERE a.entity_id = e.id),
 				ARRAY[]::text[]
 			) as aliases,
 			CASE

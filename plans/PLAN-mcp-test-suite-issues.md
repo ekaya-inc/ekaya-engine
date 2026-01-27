@@ -135,7 +135,7 @@ This plan addresses issues discovered during the MCP tool test suite run on 2026
 
 ---
 
-## Task 6: Fix search_schema Entity Search Column Reference
+## Task 6: Fix search_schema Entity Search Column Reference ✅
 
 **Issue:** `./plans/ISSUE-search-schema-deleted-at-column-missing.md`
 
