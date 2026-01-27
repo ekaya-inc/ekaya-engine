@@ -19,12 +19,14 @@ import (
 
 // mockKnowledgeService is a mock for testing knowledge handler.
 type mockKnowledgeService struct {
-	facts     []*models.KnowledgeFact
-	storeFact *models.KnowledgeFact
-	storeErr  error
-	updateErr error
-	getAllErr error
-	deleteErr error
+	facts        []*models.KnowledgeFact
+	factsByType  []*models.KnowledgeFact
+	storeFact    *models.KnowledgeFact
+	storeErr     error
+	updateErr    error
+	getAllErr    error
+	getByTypeErr error
+	deleteErr    error
 }
 
 func (m *mockKnowledgeService) Store(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
@@ -72,7 +74,10 @@ func (m *mockKnowledgeService) GetAll(ctx context.Context, projectID uuid.UUID) 
 }
 
 func (m *mockKnowledgeService) GetByType(ctx context.Context, projectID uuid.UUID, factType string) ([]*models.KnowledgeFact, error) {
-	return []*models.KnowledgeFact{}, nil
+	if m.getByTypeErr != nil {
+		return nil, m.getByTypeErr
+	}
+	return m.factsByType, nil
 }
 
 func (m *mockKnowledgeService) Delete(ctx context.Context, id uuid.UUID) error {
@@ -486,6 +491,187 @@ func TestKnowledgeHandler_Delete(t *testing.T) {
 
 		rec := httptest.NewRecorder()
 		handler.Delete(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+}
+
+func TestKnowledgeHandler_GetOverview(t *testing.T) {
+	projectID := uuid.New()
+
+	t.Run("returns null overview when no overview exists", func(t *testing.T) {
+		mockService := &mockKnowledgeService{factsByType: []*models.KnowledgeFact{}}
+		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+
+		req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/project-knowledge/overview", nil)
+		req.SetPathValue("pid", projectID.String())
+
+		rec := httptest.NewRecorder()
+		handler.GetOverview(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var response ApiResponse
+		if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if !response.Success {
+			t.Fatal("expected success=true")
+		}
+
+		dataBytes, err := json.Marshal(response.Data)
+		if err != nil {
+			t.Fatalf("failed to marshal data: %v", err)
+		}
+
+		var overviewResponse ProjectOverviewResponse
+		if err := json.Unmarshal(dataBytes, &overviewResponse); err != nil {
+			t.Fatalf("failed to unmarshal overview response: %v", err)
+		}
+
+		if overviewResponse.Overview != nil {
+			t.Fatalf("expected overview=nil, got %v", *overviewResponse.Overview)
+		}
+	})
+
+	t.Run("returns overview when project_overview fact exists", func(t *testing.T) {
+		overviewText := "This is our e-commerce platform for B2B wholesale."
+		mockService := &mockKnowledgeService{
+			factsByType: []*models.KnowledgeFact{
+				{
+					ID:        uuid.New(),
+					ProjectID: projectID,
+					FactType:  "overview",
+					Key:       "project_overview",
+					Value:     overviewText,
+					Source:    "manual",
+					CreatedAt: time.Now(),
+					UpdatedAt: time.Now(),
+				},
+			},
+		}
+		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+
+		req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/project-knowledge/overview", nil)
+		req.SetPathValue("pid", projectID.String())
+
+		rec := httptest.NewRecorder()
+		handler.GetOverview(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var response ApiResponse
+		if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if !response.Success {
+			t.Fatal("expected success=true")
+		}
+
+		dataBytes, err := json.Marshal(response.Data)
+		if err != nil {
+			t.Fatalf("failed to marshal data: %v", err)
+		}
+
+		var overviewResponse ProjectOverviewResponse
+		if err := json.Unmarshal(dataBytes, &overviewResponse); err != nil {
+			t.Fatalf("failed to unmarshal overview response: %v", err)
+		}
+
+		if overviewResponse.Overview == nil {
+			t.Fatal("expected overview to be non-nil")
+		}
+		if *overviewResponse.Overview != overviewText {
+			t.Fatalf("expected overview=%q, got %q", overviewText, *overviewResponse.Overview)
+		}
+	})
+
+	t.Run("finds project_overview among multiple facts", func(t *testing.T) {
+		overviewText := "This is our e-commerce platform."
+		mockService := &mockKnowledgeService{
+			factsByType: []*models.KnowledgeFact{
+				{
+					ID:        uuid.New(),
+					ProjectID: projectID,
+					FactType:  "overview",
+					Key:       "other_key",
+					Value:     "some other value",
+					Source:    "manual",
+				},
+				{
+					ID:        uuid.New(),
+					ProjectID: projectID,
+					FactType:  "overview",
+					Key:       "project_overview",
+					Value:     overviewText,
+					Source:    "manual",
+				},
+			},
+		}
+		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+
+		req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/project-knowledge/overview", nil)
+		req.SetPathValue("pid", projectID.String())
+
+		rec := httptest.NewRecorder()
+		handler.GetOverview(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+		}
+
+		var response ApiResponse
+		if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		dataBytes, err := json.Marshal(response.Data)
+		if err != nil {
+			t.Fatalf("failed to marshal data: %v", err)
+		}
+
+		var overviewResponse ProjectOverviewResponse
+		if err := json.Unmarshal(dataBytes, &overviewResponse); err != nil {
+			t.Fatalf("failed to unmarshal overview response: %v", err)
+		}
+
+		if overviewResponse.Overview == nil || *overviewResponse.Overview != overviewText {
+			t.Fatalf("expected overview=%q, got %v", overviewText, overviewResponse.Overview)
+		}
+	})
+
+	t.Run("returns error on service failure", func(t *testing.T) {
+		mockService := &mockKnowledgeService{getByTypeErr: errors.New("database error")}
+		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+
+		req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/project-knowledge/overview", nil)
+		req.SetPathValue("pid", projectID.String())
+
+		rec := httptest.NewRecorder()
+		handler.GetOverview(rec, req)
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+	})
+
+	t.Run("returns error for invalid project ID", func(t *testing.T) {
+		mockService := &mockKnowledgeService{}
+		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+
+		req := httptest.NewRequest(http.MethodGet, "/api/projects/invalid/project-knowledge/overview", nil)
+		req.SetPathValue("pid", "invalid")
+
+		rec := httptest.NewRecorder()
+		handler.GetOverview(rec, req)
 
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)

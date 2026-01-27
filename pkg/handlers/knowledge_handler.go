@@ -39,6 +39,11 @@ type UpdateKnowledgeRequest struct {
 	Context  string `json:"context,omitempty"`
 }
 
+// ProjectOverviewResponse for GET /project-knowledge/overview
+type ProjectOverviewResponse struct {
+	Overview *string `json:"overview"`
+}
+
 // ============================================================================
 // Handler
 // ============================================================================
@@ -67,6 +72,8 @@ func (h *KnowledgeHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *au
 	// Read-only endpoints - no provenance needed
 	mux.HandleFunc("GET "+base,
 		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.List)))
+	mux.HandleFunc("GET "+base+"/overview",
+		authMiddleware.RequireAuthWithPathValidation("pid")(tenantMiddleware(h.GetOverview)))
 
 	// Write endpoints - require provenance for audit tracking
 	mux.HandleFunc("POST "+base,
@@ -256,6 +263,41 @@ func (h *KnowledgeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: map[string]string{"status": "deleted"}}); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// GetOverview handles GET /api/projects/{pid}/project-knowledge/overview
+func (h *KnowledgeHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	facts, err := h.knowledgeService.GetByType(r.Context(), projectID, "overview")
+	if err != nil {
+		h.logger.Error("Failed to get project overview",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "get_overview_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	var overview *string
+	for _, fact := range facts {
+		if fact.Key == "project_overview" {
+			overview = &fact.Value
+			break
+		}
+	}
+
+	response := ProjectOverviewResponse{
+		Overview: overview,
+	}
+
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }

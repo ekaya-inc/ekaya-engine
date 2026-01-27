@@ -173,7 +173,7 @@ func (h *OntologyDAGHandler) StartExtraction(w http.ResponseWriter, r *http.Requ
 
 ---
 
-### 4. Backend: Handler - Get Overview Endpoint
+### 4. Backend: Handler - Get Overview Endpoint [x]
 
 **File:** `pkg/handlers/knowledge_handler.go`
 
