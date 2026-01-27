@@ -99,7 +99,11 @@ func (tc *knowledgeToolTestContext) createTestContext() (context.Context, func()
 	require.NoError(tc.t, err)
 
 	ctx = database.SetTenantScope(ctx, scope)
-	ctx = context.WithValue(ctx, auth.ClaimsKey, &auth.Claims{ProjectID: tc.projectID.String()})
+	// Include admin role to access developer tools (knowledge update/delete require ontology maintenance)
+	ctx = context.WithValue(ctx, auth.ClaimsKey, &auth.Claims{
+		ProjectID: tc.projectID.String(),
+		Roles:     []string{models.RoleAdmin},
+	})
 
 	// Add provenance context for MCP operations (simulates what MCP middleware does)
 	// Using uuid.Nil since we don't have a real user - the repository handles nil UUIDs

@@ -6,12 +6,18 @@ import "github.com/ekaya-inc/ekaya-engine/pkg/models"
 type ToolDefinition struct {
 	Name        string // Tool name as exposed via MCP (e.g., "get_schema")
 	Description string // One-line description for UI display
-	ToolGroup   string // "developer", "approved_queries", "agent_tools", or "always"
+	ToolGroup   string // "user", "developer", "agent", or "always"
 	SubOption   string // Optional sub-option requirement (e.g., "enableExecute")
 }
 
 // ToolGroupDeveloper is the developer tools group identifier.
 const ToolGroupDeveloper = "developer"
+
+// ToolGroupAlways is the identifier for tools that are always available.
+const ToolGroupAlways = "always"
+
+// ToolGroupAgent is the identifier for agent-only tools.
+const ToolGroupAgent = "agent"
 
 // ToolRegistry contains all MCP tool definitions.
 // This is the single source of truth for tool metadata, used by both
@@ -47,24 +53,23 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "reject_change", Description: "Reject a pending ontology change without applying it", ToolGroup: ToolGroupDeveloper},
 	{Name: "approve_all_changes", Description: "Approve all pending changes that can be applied (respects precedence)", ToolGroup: ToolGroupDeveloper},
 
-	// Business user tools (approved_queries group)
+	// Business user tools (user group)
 	// These read-only query tools enable business users to answer ad-hoc questions
 	// when pre-approved queries don't match their request.
-	{Name: "query", Description: "Execute read-only SQL SELECT statements", ToolGroup: ToolGroupApprovedQueries},
-	{Name: "sample", Description: "Quick data preview from a table", ToolGroup: ToolGroupApprovedQueries},
-	{Name: "validate", Description: "Check SQL syntax without executing", ToolGroup: ToolGroupApprovedQueries},
-	{Name: "get_context", Description: "Get unified database context with progressive depth (consolidates ontology, schema, glossary)", ToolGroup: ToolGroupApprovedQueries},
-	{Name: "get_ontology", Description: "Get business ontology for query generation", ToolGroup: ToolGroupApprovedQueries},
-	{Name: "list_glossary", Description: "List all business glossary terms", ToolGroup: ToolGroupApprovedQueries},
-	{Name: "get_glossary_sql", Description: "Get SQL definition for a business term", ToolGroup: ToolGroupApprovedQueries},
-	{Name: "create_glossary_term", Description: "Create a new business glossary term with SQL definition", ToolGroup: ToolGroupDeveloper},
+	{Name: "query", Description: "Execute read-only SQL SELECT statements", ToolGroup: ToolGroupUser},
+	{Name: "sample", Description: "Quick data preview from a table", ToolGroup: ToolGroupUser},
+	{Name: "validate", Description: "Check SQL syntax without executing", ToolGroup: ToolGroupUser},
+	{Name: "get_context", Description: "Get unified database context with progressive depth (consolidates ontology, schema, glossary)", ToolGroup: ToolGroupUser},
+	{Name: "get_ontology", Description: "Get business ontology for query generation", ToolGroup: ToolGroupUser},
+	{Name: "list_glossary", Description: "List all business glossary terms", ToolGroup: ToolGroupUser},
+	{Name: "get_glossary_sql", Description: "Get SQL definition for a business term", ToolGroup: ToolGroupUser},
 	{Name: "update_glossary_term", Description: "Create or update a business glossary term with upsert semantics (definition, sql, aliases)", ToolGroup: ToolGroupDeveloper},
 	{Name: "delete_glossary_term", Description: "Delete a business glossary term that's no longer relevant", ToolGroup: ToolGroupDeveloper},
-	{Name: "list_approved_queries", Description: "List pre-approved SQL queries", ToolGroup: ToolGroupApprovedQueries},
-	{Name: "execute_approved_query", Description: "Execute a pre-approved query by ID", ToolGroup: ToolGroupApprovedQueries},
-	{Name: "suggest_approved_query", Description: "Suggest a reusable parameterized query for approval", ToolGroup: ToolGroupApprovedQueries},
-	{Name: "suggest_query_update", Description: "Suggest an update to an existing pre-approved query for review", ToolGroup: ToolGroupApprovedQueries},
-	{Name: "get_query_history", Description: "Get recent query execution history to avoid rewriting queries", ToolGroup: ToolGroupApprovedQueries},
+	{Name: "list_approved_queries", Description: "List pre-approved SQL queries", ToolGroup: ToolGroupUser},
+	{Name: "execute_approved_query", Description: "Execute a pre-approved query by ID", ToolGroup: ToolGroupUser},
+	{Name: "suggest_approved_query", Description: "Suggest a reusable parameterized query for approval", ToolGroup: ToolGroupUser},
+	{Name: "suggest_query_update", Description: "Suggest an update to an existing pre-approved query for review", ToolGroup: ToolGroupUser},
+	{Name: "get_query_history", Description: "Get recent query execution history to avoid rewriting queries", ToolGroup: ToolGroupUser},
 
 	// Dev query tools (developer group) - direct query management for administrators
 	{Name: "list_query_suggestions", Description: "List pending query suggestions awaiting review", ToolGroup: ToolGroupDeveloper},
@@ -75,16 +80,7 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "delete_approved_query", Description: "Delete a pre-approved query", ToolGroup: ToolGroupDeveloper},
 
 	// Health is always available
-	{Name: "health", Description: "Server health check", ToolGroup: "always"},
-}
-
-// agentAllowedTools defines which tools are available when agent_tools is enabled.
-// When agent_tools mode is active, only these specific tools are exposed.
-var agentAllowedTools = map[string]bool{
-	"echo":                   true,
-	"list_approved_queries":  true,
-	"execute_approved_query": true,
-	"health":                 true,
+	{Name: "health", Description: "Server health check", ToolGroup: ToolGroupAlways},
 }
 
 // DataLiaisonTools lists tools that require the AI Data Liaison app to be installed.
