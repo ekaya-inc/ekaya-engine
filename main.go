@@ -327,6 +327,17 @@ func main() {
 	}
 	mcptools.RegisterApprovedQueriesTools(mcpServer.MCP(), queryToolDeps)
 
+	// Register dev query tools for administrators to manage query suggestions
+	// (approve/reject, create/update/delete queries directly)
+	devQueryToolDeps := &mcptools.DevQueryToolDeps{
+		DB:               db,
+		MCPConfigService: mcpConfigService,
+		ProjectService:   projectService,
+		QueryService:     queryService,
+		Logger:           logger,
+	}
+	mcptools.RegisterDevQueryTools(mcpServer.MCP(), devQueryToolDeps)
+
 	// Register schema tools for entity/role semantic context
 	schemaToolDeps := &mcptools.SchemaToolDeps{
 		DB:               db,

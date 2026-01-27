@@ -56,3 +56,30 @@ The issue may be in one of:
 - `pkg/services/mcp_tool_loadouts.go` - LoadoutOntologyMaintenance includes query management tools
 - `pkg/services/mcp_config.go` - buildResponse, filterAndConvertToolSpecs
 - `pkg/services/mcp_tools_registry.go` - Tool registration
+
+## Root Cause Analysis
+
+The root cause was **#4: Tool registration** - the dev query tools were never registered with the MCP server.
+
+The tools (`approve_query_suggestion`, `reject_query_suggestion`, `list_query_suggestions`, `create_approved_query`, `update_approved_query`, `delete_approved_query`) were:
+1. Defined in `ToolRegistry` (pkg/services/mcp_tools_registry.go) - so UI showed them
+2. Listed in `DataLiaisonTools` map - so filtering logic was correct
+3. Implemented in `pkg/mcp/tools/dev_queries.go` via `RegisterDevQueryTools`
+
+BUT `RegisterDevQueryTools` was never called in `main.go`. This meant the tools appeared in the UI's tool list (derived from ToolRegistry) but were never actually added to the MCP server.
+
+## Fix
+
+Added the missing `RegisterDevQueryTools` call in `main.go` after `RegisterApprovedQueriesTools`:
+
+```go
+// Register dev query tools for administrators to manage query suggestions
+devQueryToolDeps := &mcptools.DevQueryToolDeps{
+    DB:               db,
+    MCPConfigService: mcpConfigService,
+    ProjectService:   projectService,
+    QueryService:     queryService,
+    Logger:           logger,
+}
+mcptools.RegisterDevQueryTools(mcpServer.MCP(), devQueryToolDeps)
+```
