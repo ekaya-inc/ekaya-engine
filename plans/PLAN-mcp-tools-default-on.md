@@ -167,8 +167,8 @@ make check
 
 ## Success Criteria
 
-1. [ ] Integration tests exist for Admin, User, and Agent MCP access
-2. [ ] Tests initially fail (RED) showing current broken behavior
+1. [x] Integration tests exist for Admin, User, and Agent MCP access
+2. [x] Tests initially fail (RED) showing current broken behavior
 3. [ ] New projects automatically have MCP config with tools ON
 4. [ ] Tests pass (GREEN) after fix
 5. [ ] Manual verification: fresh project → admin gets 40+ tools via MCP
