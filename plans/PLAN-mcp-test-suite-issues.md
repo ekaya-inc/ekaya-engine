@@ -58,7 +58,7 @@ This plan addresses issues discovered during the MCP tool test suite run on 2026
 
 ---
 
-## Task 3: Wrap MCP Errors in JSON Responses
+## Task 3: Wrap MCP Errors in JSON Responses ✅
 
 **Issue:** `./plans/ISSUE-mcp-errors-not-wrapped-in-json.md`
 

@@ -2,7 +2,11 @@ package tools
 
 import (
 	"encoding/json"
+	"errors"
+	"regexp"
+	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -66,4 +70,187 @@ func NewErrorResultWithDetails(code, message string, details any) *mcp.CallToolR
 	result := mcp.NewToolResultText(string(jsonBytes))
 	result.IsError = true
 	return result
+}
+
+// sqlStateRegex matches PostgreSQL SQLSTATE codes in error messages like "(SQLSTATE 42601)"
+var sqlStateRegex = regexp.MustCompile(`\(SQLSTATE ([0-9A-Z]{5})\)`)
+
+// IsSQLUserError returns true if the error is a SQL user error (bad SQL, constraint
+// violation, missing table, etc.) rather than a server error (connection failure,
+// internal error, etc.).
+//
+// These errors should be returned as JSON error results, not MCP protocol errors,
+// because they are actionable by the user/AI - they can fix their SQL and retry.
+//
+// PostgreSQL SQLSTATE class codes that indicate user errors:
+//   - 22xxx: Data Exception (invalid input, division by zero)
+//   - 23xxx: Integrity Constraint Violation (unique, FK, check)
+//   - 42xxx: Syntax Error or Access Rule Violation
+//   - 44xxx: WITH CHECK OPTION Violation
+func IsSQLUserError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Check for pgconn.PgError (structured PostgreSQL error)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return isSQLStateUserError(pgErr.Code)
+	}
+
+	// Check for SQLSTATE pattern in error message (for wrapped errors)
+	errStr := err.Error()
+	if matches := sqlStateRegex.FindStringSubmatch(errStr); len(matches) >= 2 {
+		return isSQLStateUserError(matches[1])
+	}
+
+	return false
+}
+
+// isSQLStateUserError returns true if the SQLSTATE code indicates a user error.
+func isSQLStateUserError(code string) bool {
+	if len(code) < 2 {
+		return false
+	}
+	class := code[:2]
+	switch class {
+	case "22", // Data Exception
+		"23", // Integrity Constraint Violation
+		"42", // Syntax Error or Access Rule Violation
+		"44": // WITH CHECK OPTION Violation
+		return true
+	}
+	return false
+}
+
+// SQLUserErrorCode returns an appropriate error code for a SQL user error.
+// Returns empty string if the error is not a SQL user error.
+func SQLUserErrorCode(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	// Check for pgconn.PgError (structured PostgreSQL error)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return mapSQLStateToCode(pgErr.Code)
+	}
+
+	// Check for SQLSTATE pattern in error message
+	errStr := err.Error()
+	if matches := sqlStateRegex.FindStringSubmatch(errStr); len(matches) >= 2 {
+		return mapSQLStateToCode(matches[1])
+	}
+
+	return ""
+}
+
+// mapSQLStateToCode maps a SQLSTATE code to a human-readable error code.
+func mapSQLStateToCode(sqlState string) string {
+	if len(sqlState) < 2 {
+		return "sql_error"
+	}
+
+	// Map specific SQLSTATE codes to meaningful error codes
+	switch sqlState {
+	case "42601": // syntax_error
+		return "syntax_error"
+	case "42703": // undefined_column
+		return "undefined_column"
+	case "42P01": // undefined_table
+		return "undefined_table"
+	case "42P02": // undefined_parameter
+		return "undefined_parameter"
+	case "23505": // unique_violation
+		return "unique_violation"
+	case "23503": // foreign_key_violation
+		return "foreign_key_violation"
+	case "23502": // not_null_violation
+		return "not_null_violation"
+	case "23514": // check_violation
+		return "check_violation"
+	case "22001": // string_data_right_truncation (value too long)
+		return "value_too_long"
+	case "22003": // numeric_value_out_of_range
+		return "numeric_out_of_range"
+	case "22007": // invalid_datetime_format
+		return "invalid_datetime"
+	case "22012": // division_by_zero
+		return "division_by_zero"
+	case "22P02": // invalid_text_representation (invalid input syntax)
+		return "invalid_input"
+	}
+
+	// Fall back to class-based codes
+	class := sqlState[:2]
+	switch class {
+	case "22":
+		return "data_exception"
+	case "23":
+		return "constraint_violation"
+	case "42":
+		return "sql_error"
+	case "44":
+		return "check_option_violation"
+	}
+
+	return "sql_error"
+}
+
+// ExtractSQLErrorMessage extracts a clean error message from a SQL error.
+// Removes the "SQLSTATE XXXXX" suffix and any "ERROR: " prefix for cleaner display.
+func ExtractSQLErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	// Check for pgconn.PgError (structured PostgreSQL error)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Message
+	}
+
+	// Clean up error message string
+	msg := err.Error()
+
+	// Remove SQLSTATE suffix
+	if idx := strings.Index(msg, " (SQLSTATE"); idx != -1 {
+		msg = msg[:idx]
+	}
+
+	// Remove common prefixes from wrapped errors
+	prefixes := []string{
+		"execution failed: ",
+		"query execution failed: ",
+		"failed to execute statement: ",
+		"error during execution: ",
+		"failed to execute query: ",
+		"ERROR: ",
+	}
+	for _, prefix := range prefixes {
+		msg = strings.TrimPrefix(msg, prefix)
+	}
+
+	return msg
+}
+
+// NewSQLErrorResult creates an error result from a SQL error if it's a user error.
+// Returns nil if the error is not a SQL user error (caller should return Go error instead).
+//
+// Example usage:
+//
+//	result, err := executor.Execute(ctx, sql)
+//	if err != nil {
+//	    if errResult := NewSQLErrorResult(err); errResult != nil {
+//	        return errResult, nil
+//	    }
+//	    return nil, fmt.Errorf("execution failed: %w", err)
+//	}
+func NewSQLErrorResult(err error) *mcp.CallToolResult {
+	if !IsSQLUserError(err) {
+		return nil
+	}
+	code := SQLUserErrorCode(err)
+	message := ExtractSQLErrorMessage(err)
+	return NewErrorResult(code, message)
 }

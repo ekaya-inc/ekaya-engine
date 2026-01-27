@@ -518,6 +518,10 @@ func registerQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Execute with limit + 1 to detect truncation
 		queryResult, err := executor.Query(tenantCtx, sql, limit+1)
 		if err != nil {
+			// Check if this is a SQL user error (syntax, missing table, etc.)
+			if errResult := NewSQLErrorResult(err); errResult != nil {
+				return errResult, nil
+			}
 			return nil, fmt.Errorf("query execution failed: %w", err)
 		}
 
@@ -630,6 +634,10 @@ func registerSampleTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Execute query - adapter handles dialect-specific limit (LIMIT for PostgreSQL, TOP for SQL Server)
 		queryResult, err := executor.Query(tenantCtx, sql, limit)
 		if err != nil {
+			// Check if this is a SQL user error (table not found, etc.)
+			if errResult := NewSQLErrorResult(err); errResult != nil {
+				return errResult, nil
+			}
 			return nil, fmt.Errorf("sample query failed: %w", err)
 		}
 
@@ -715,6 +723,18 @@ func registerExecuteTool(s *server.MCPServer, deps *MCPToolDeps) {
 
 		execResult, err := executor.Execute(execCtx, sql)
 		if err != nil {
+			// Check if this is a SQL user error (syntax, constraint, missing table, etc.)
+			// These should be returned as JSON errors, not MCP protocol errors
+			if errResult := NewSQLErrorResult(err); errResult != nil {
+				deps.Logger.Debug("DDL/DML execution failed (user error)",
+					zap.String("project_id", projectID.String()),
+					zap.String("sql_preview", truncateSQL(sql, 200)),
+					zap.Error(err),
+				)
+				return errResult, nil
+			}
+
+			// Server error - return as MCP protocol error
 			deps.Logger.Error("DDL/DML execution failed",
 				zap.String("project_id", projectID.String()),
 				zap.Error(err),
@@ -881,6 +901,10 @@ func registerExplainQueryTool(s *server.MCPServer, deps *MCPToolDeps) {
 		// Execute EXPLAIN ANALYZE
 		explainResult, err := executor.ExplainQuery(tenantCtx, sql)
 		if err != nil {
+			// Check if this is a SQL user error (syntax, missing table, etc.)
+			if errResult := NewSQLErrorResult(err); errResult != nil {
+				return errResult, nil
+			}
 			return nil, fmt.Errorf("EXPLAIN ANALYZE failed: %w", err)
 		}
 
