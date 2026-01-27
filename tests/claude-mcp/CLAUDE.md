@@ -2,6 +2,12 @@
 
 This directory contains repeatable tests for the ekaya-engine MCP server tools.
 
+## Quick Start
+
+1. Start a new Claude Code session in this directory
+2. Run `/mcp` to connect to the `mcp_test_suite` server
+3. Run test prompts in numeric order: `000-setup.md`, `010-read-health.md`, `020-test-fixtures.md`, etc.
+
 ## Prerequisites
 
 Before running tests:
@@ -9,16 +15,19 @@ Before running tests:
 1. **Dev server running**: `make dev-server` from project root (port 3443)
 2. **Test database ready**: Docker container with test_data database
 3. **Ontology extracted**: Schema saved and ontology extraction completed for project `2b5b014f-191a-41b4-b207-85f7d5c3b04b`
+4. **MCP connected**: Run `/mcp` in Claude Code to connect (configured in `.mcp.json`)
 
 ## Test Conventions
 
 ### Prompt File Naming
 
-- `000-099`: Setup and verification
+- `000-099`: Setup and verification (run first!)
 - `100-199`: Read operations (non-destructive)
 - `200-299`: Write operations (create/update)
 - `300-399`: Delete operations
 - `900-999`: Cleanup and teardown
+
+**Important**: Run tests in numeric order. `020-test-fixtures.md` creates tables that later tests depend on.
 
 ### Test Data Naming
 
@@ -26,8 +35,17 @@ All test-created data uses the `_MCP_TEST` suffix:
 - Entities: `TestEntity_MCP_TEST`
 - Glossary terms: `Test Term_MCP_TEST`
 - Relationships: Between `*_MCP_TEST` entities only
+- Tables: `mcp_test_*` (e.g., `mcp_test_users`, `mcp_test_orders`)
 
 This allows easy identification and cleanup.
+
+### Test Fixture Tables
+
+`020-test-fixtures.md` creates these tables with known data:
+- `mcp_test_users` - 4 rows (Alice, Bob, Carol, Dave)
+- `mcp_test_orders` - 4 rows with FK to users
+
+These tables are used by 100-series tests for predictable query/probe/sample results.
 
 ### Running Tests
 
@@ -50,6 +68,21 @@ When running a test prompt:
 3. Report results clearly (PASS/FAIL with details)
 4. Do NOT create files or make changes outside of MCP tool calls
 
+### When Tests Fail
+
+Create an issue file in `../../plans/ISSUE-<descriptive-name>.md` with:
+- What was observed (actual behavior)
+- What was expected
+- Steps to reproduce (tool calls, parameters, responses)
+- Any relevant state or context
+
+**Do NOT**:
+- Investigate root cause
+- Propose fixes
+- Create FIX files
+
+This test suite is an "issue generator" only. A separate process reviews issues and creates FIX files.
+
 ## Project Details
 
 - **Project ID**: `2b5b014f-191a-41b4-b207-85f7d5c3b04b`
@@ -58,6 +91,13 @@ When running a test prompt:
 - **UI URL**: `http://localhost:5173/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/`
 
 ## MCP Tools Reference
+
+Tools are accessed as `mcp__mcp_test_suite__<tool_name>`. For example:
+- `mcp__mcp_test_suite__health`
+- `mcp__mcp_test_suite__query`
+- `mcp__mcp_test_suite__execute`
+
+Use `ToolSearch` to load tools before calling them.
 
 ### Read Operations
 | Tool | Purpose |
