@@ -137,7 +137,7 @@ async startOntologyExtraction(
 
 ---
 
-### 3. Backend: Handler - Accept Overview in Start Request
+### 3. Backend: Handler - Accept Overview in Start Request [x]
 
 **File:** `pkg/handlers/ontology_dag_handler.go`
 

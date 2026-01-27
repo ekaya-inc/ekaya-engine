@@ -23,7 +23,8 @@ import (
 // status updates for UI visibility.
 type OntologyDAGService interface {
 	// Start initiates a new DAG execution or returns an existing active DAG.
-	Start(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.OntologyDAG, error)
+	// projectOverview is optional user-provided context about the application domain.
+	Start(ctx context.Context, projectID, datasourceID uuid.UUID, projectOverview string) (*models.OntologyDAG, error)
 
 	// GetStatus returns the current DAG status with all node states.
 	GetStatus(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyDAG, error)
@@ -149,10 +150,14 @@ func (s *ontologyDAGService) SetGlossaryEnrichmentMethods(methods dag.GlossaryEn
 }
 
 // Start initiates a new DAG execution or returns an existing active DAG.
-func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.OntologyDAG, error) {
+// projectOverview is optional user-provided context about the application domain.
+// TODO(PLAN-project-overview-seeding Task 5): Store projectOverview as project knowledge
+// before DAG execution begins. Currently the parameter is accepted but not persisted.
+func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID uuid.UUID, projectOverview string) (*models.OntologyDAG, error) {
 	s.logger.Info("Starting ontology DAG",
 		zap.String("project_id", projectID.String()),
-		zap.String("datasource_id", datasourceID.String()))
+		zap.String("datasource_id", datasourceID.String()),
+		zap.Bool("has_overview", projectOverview != ""))
 
 	// Extract user ID from JWT claims for provenance tracking.
 	// The user who triggered extraction will be recorded as created_by for all inference-created objects.

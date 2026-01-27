@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -39,6 +41,11 @@ type DAGProgressResponse struct {
 	Current int    `json:"current"`
 	Total   int    `json:"total"`
 	Message string `json:"message,omitempty"`
+}
+
+// StartExtractionRequest is the request body for starting ontology extraction.
+type StartExtractionRequest struct {
+	ProjectOverview string `json:"project_overview"`
 }
 
 // ============================================================================
@@ -94,7 +101,16 @@ func (h *OntologyDAGHandler) StartExtraction(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	dag, err := h.dagService.Start(r.Context(), projectID, datasourceID)
+	// Parse request body for project overview
+	var req StartExtractionRequest
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			h.logger.Warn("Failed to parse request body, continuing without overview",
+				zap.Error(err))
+		}
+	}
+
+	dag, err := h.dagService.Start(r.Context(), projectID, datasourceID, req.ProjectOverview)
 	if err != nil {
 		h.logger.Error("Failed to start ontology DAG",
 			zap.String("project_id", projectID.String()),

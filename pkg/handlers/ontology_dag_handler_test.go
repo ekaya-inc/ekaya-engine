@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,15 +19,15 @@ import (
 
 // mockOntologyDAGService is a mock implementation for testing
 type mockOntologyDAGService struct {
-	startFunc     func(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.OntologyDAG, error)
+	startFunc     func(ctx context.Context, projectID, datasourceID uuid.UUID, projectOverview string) (*models.OntologyDAG, error)
 	getStatusFunc func(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyDAG, error)
 	cancelFunc    func(ctx context.Context, dagID uuid.UUID) error
 	deleteFunc    func(ctx context.Context, projectID uuid.UUID) error
 }
 
-func (m *mockOntologyDAGService) Start(ctx context.Context, projectID, datasourceID uuid.UUID) (*models.OntologyDAG, error) {
+func (m *mockOntologyDAGService) Start(ctx context.Context, projectID, datasourceID uuid.UUID, projectOverview string) (*models.OntologyDAG, error) {
 	if m.startFunc != nil {
-		return m.startFunc(ctx, projectID, datasourceID)
+		return m.startFunc(ctx, projectID, datasourceID, projectOverview)
 	}
 	return nil, nil
 }
@@ -92,7 +93,7 @@ func TestOntologyDAGHandler_StartExtraction_Success(t *testing.T) {
 	currentNode := "EntityDiscovery"
 
 	mockService := &mockOntologyDAGService{
-		startFunc: func(ctx context.Context, pID, dsID uuid.UUID) (*models.OntologyDAG, error) {
+		startFunc: func(ctx context.Context, pID, dsID uuid.UUID, overview string) (*models.OntologyDAG, error) {
 			if pID != projectID {
 				return nil, fmt.Errorf("unexpected project ID")
 			}
@@ -166,7 +167,7 @@ func TestOntologyDAGHandler_StartExtraction_ServiceError(t *testing.T) {
 	datasourceID := uuid.New()
 
 	mockService := &mockOntologyDAGService{
-		startFunc: func(ctx context.Context, pID, dsID uuid.UUID) (*models.OntologyDAG, error) {
+		startFunc: func(ctx context.Context, pID, dsID uuid.UUID, overview string) (*models.OntologyDAG, error) {
 			return nil, fmt.Errorf("database error")
 		},
 	}
@@ -183,6 +184,147 @@ func TestOntologyDAGHandler_StartExtraction_ServiceError(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+	}
+}
+
+func TestOntologyDAGHandler_StartExtraction_WithProjectOverview(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	dagID := uuid.New()
+	now := time.Now()
+	currentNode := "KnowledgeSeeding"
+	expectedOverview := "This is our e-commerce platform for B2B wholesale."
+
+	var receivedOverview string
+	mockService := &mockOntologyDAGService{
+		startFunc: func(ctx context.Context, pID, dsID uuid.UUID, overview string) (*models.OntologyDAG, error) {
+			receivedOverview = overview
+			return &models.OntologyDAG{
+				ID:           dagID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				Status:       models.DAGStatusRunning,
+				CurrentNode:  &currentNode,
+				StartedAt:    &now,
+				CreatedAt:    now,
+				UpdatedAt:    now,
+				Nodes:        []models.DAGNode{},
+			}, nil
+		},
+	}
+
+	handler := NewOntologyDAGHandler(mockService, nil, zap.NewNop())
+
+	url := fmt.Sprintf("/api/projects/%s/datasources/%s/ontology/extract", projectID, datasourceID)
+	body := strings.NewReader(fmt.Sprintf(`{"project_overview": "%s"}`, expectedOverview))
+	req := httptest.NewRequest(http.MethodPost, url, body)
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+	rec := httptest.NewRecorder()
+
+	handler.StartExtraction(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	if receivedOverview != expectedOverview {
+		t.Errorf("expected overview %q, got %q", expectedOverview, receivedOverview)
+	}
+}
+
+func TestOntologyDAGHandler_StartExtraction_EmptyBody(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	dagID := uuid.New()
+	now := time.Now()
+	currentNode := "KnowledgeSeeding"
+
+	var receivedOverview string
+	mockService := &mockOntologyDAGService{
+		startFunc: func(ctx context.Context, pID, dsID uuid.UUID, overview string) (*models.OntologyDAG, error) {
+			receivedOverview = overview
+			return &models.OntologyDAG{
+				ID:           dagID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				Status:       models.DAGStatusRunning,
+				CurrentNode:  &currentNode,
+				StartedAt:    &now,
+				CreatedAt:    now,
+				UpdatedAt:    now,
+				Nodes:        []models.DAGNode{},
+			}, nil
+		},
+	}
+
+	handler := NewOntologyDAGHandler(mockService, nil, zap.NewNop())
+
+	url := fmt.Sprintf("/api/projects/%s/datasources/%s/ontology/extract", projectID, datasourceID)
+	// Send request with nil body (empty POST)
+	req := httptest.NewRequest(http.MethodPost, url, nil)
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+	rec := httptest.NewRecorder()
+
+	handler.StartExtraction(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	// Verify that extraction started with empty overview (backward compatible)
+	if receivedOverview != "" {
+		t.Errorf("expected empty overview for nil body, got %q", receivedOverview)
+	}
+}
+
+func TestOntologyDAGHandler_StartExtraction_MalformedJSON(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	dagID := uuid.New()
+	now := time.Now()
+	currentNode := "KnowledgeSeeding"
+
+	var receivedOverview string
+	mockService := &mockOntologyDAGService{
+		startFunc: func(ctx context.Context, pID, dsID uuid.UUID, overview string) (*models.OntologyDAG, error) {
+			receivedOverview = overview
+			return &models.OntologyDAG{
+				ID:           dagID,
+				ProjectID:    projectID,
+				DatasourceID: datasourceID,
+				Status:       models.DAGStatusRunning,
+				CurrentNode:  &currentNode,
+				StartedAt:    &now,
+				CreatedAt:    now,
+				UpdatedAt:    now,
+				Nodes:        []models.DAGNode{},
+			}, nil
+		},
+	}
+
+	handler := NewOntologyDAGHandler(mockService, nil, zap.NewNop())
+
+	url := fmt.Sprintf("/api/projects/%s/datasources/%s/ontology/extract", projectID, datasourceID)
+	// Send malformed JSON - extraction should still proceed without overview
+	body := strings.NewReader(`{"project_overview": invalid json`)
+	req := httptest.NewRequest(http.MethodPost, url, body)
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("pid", projectID.String())
+	req.SetPathValue("dsid", datasourceID.String())
+	rec := httptest.NewRecorder()
+
+	handler.StartExtraction(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	// Verify that extraction started with empty overview despite malformed JSON
+	if receivedOverview != "" {
+		t.Errorf("expected empty overview for malformed JSON, got %q", receivedOverview)
 	}
 }
 

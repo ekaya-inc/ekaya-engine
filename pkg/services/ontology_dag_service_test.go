@@ -863,7 +863,7 @@ func TestStart_RequiresAuthenticatedUser(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
-	_, err := service.Start(ctx, projectID, datasourceID)
+	_, err := service.Start(ctx, projectID, datasourceID, "")
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "user authentication required")
