@@ -212,7 +212,7 @@ func (h *KnowledgeHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 
 ---
 
-### 5. Backend: DAG Service - Pass Overview to KnowledgeSeeding
+### 5. Backend: DAG Service - Pass Overview to KnowledgeSeeding [x]
 
 **File:** `pkg/services/ontology_dag_service.go`
 

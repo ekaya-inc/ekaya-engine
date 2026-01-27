@@ -151,8 +151,8 @@ func (s *ontologyDAGService) SetGlossaryEnrichmentMethods(methods dag.GlossaryEn
 
 // Start initiates a new DAG execution or returns an existing active DAG.
 // projectOverview is optional user-provided context about the application domain.
-// TODO(PLAN-project-overview-seeding Task 5): Store projectOverview as project knowledge
-// before DAG execution begins. Currently the parameter is accepted but not persisted.
+// If provided, the overview is stored as project knowledge with source='manual' and
+// ontology_id=NULL so it survives ontology deletion and can be used on re-extraction.
 func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID uuid.UUID, projectOverview string) (*models.OntologyDAG, error) {
 	s.logger.Info("Starting ontology DAG",
 		zap.String("project_id", projectID.String()),
@@ -164,6 +164,30 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 	userID, err := auth.RequireUserUUIDFromContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("user authentication required to start extraction: %w", err)
+	}
+
+	// Store project overview as knowledge if provided.
+	// Uses manual provenance since this is user-provided context.
+	// Sets ontology_id=nil so the overview survives ontology deletion.
+	if projectOverview != "" {
+		manualCtx := models.WithManualProvenance(ctx, userID)
+		overviewFact := &models.KnowledgeFact{
+			ProjectID:  projectID,
+			OntologyID: nil, // nil so it survives ontology deletion
+			FactType:   "overview",
+			Key:        "project_overview",
+			Value:      projectOverview,
+		}
+		if err := s.knowledgeRepo.Upsert(manualCtx, overviewFact); err != nil {
+			s.logger.Warn("Failed to store project overview, continuing with extraction",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			// Non-fatal - continue with extraction
+		} else {
+			s.logger.Info("Stored project overview",
+				zap.String("project_id", projectID.String()),
+				zap.Int("overview_length", len(projectOverview)))
+		}
 	}
 
 	// Check for existing active DAG

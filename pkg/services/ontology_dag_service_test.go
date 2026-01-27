@@ -7,10 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/auth"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/services/dag"
 )
@@ -226,10 +228,11 @@ func (t *testGlossaryDiscovery) DiscoverGlossaryTerms(_ context.Context, _, _ uu
 
 // mockDAGRepository is a mock implementation for testing Cancel
 type mockDAGRepository struct {
-	getNodesByDAGFunc    func(ctx context.Context, dagID uuid.UUID) ([]models.DAGNode, error)
-	updateNodeStatusFunc func(ctx context.Context, nodeID uuid.UUID, status models.DAGNodeStatus, errorMessage *string) error
-	updateStatusFunc     func(ctx context.Context, dagID uuid.UUID, status models.DAGStatus, currentNode *string) error
-	getByIDWithNodesFunc func(ctx context.Context, id uuid.UUID) (*models.OntologyDAG, error)
+	getNodesByDAGFunc         func(ctx context.Context, dagID uuid.UUID) ([]models.DAGNode, error)
+	updateNodeStatusFunc      func(ctx context.Context, nodeID uuid.UUID, status models.DAGNodeStatus, errorMessage *string) error
+	updateStatusFunc          func(ctx context.Context, dagID uuid.UUID, status models.DAGStatus, currentNode *string) error
+	getByIDWithNodesFunc      func(ctx context.Context, id uuid.UUID) (*models.OntologyDAG, error)
+	getActiveByDatasourceFunc func(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyDAG, error)
 }
 
 func (m *mockDAGRepository) GetNodesByDAG(ctx context.Context, dagID uuid.UUID) ([]models.DAGNode, error) {
@@ -271,6 +274,9 @@ func (m *mockDAGRepository) GetLatestByProject(ctx context.Context, projectID uu
 	return nil, nil
 }
 func (m *mockDAGRepository) GetActiveByDatasource(ctx context.Context, datasourceID uuid.UUID) (*models.OntologyDAG, error) {
+	if m.getActiveByDatasourceFunc != nil {
+		return m.getActiveByDatasourceFunc(ctx, datasourceID)
+	}
 	return nil, nil
 }
 func (m *mockDAGRepository) GetActiveByProject(ctx context.Context, projectID uuid.UUID) (*models.OntologyDAG, error) {
@@ -299,6 +305,285 @@ func (m *mockDAGRepository) IncrementNodeRetryCount(ctx context.Context, nodeID 
 }
 func (m *mockDAGRepository) GetNextPendingNode(ctx context.Context, dagID uuid.UUID) (*models.DAGNode, error) {
 	return nil, nil
+}
+
+// mockKnowledgeRepository is a mock implementation of KnowledgeRepository for testing Start.
+type mockKnowledgeRepository struct {
+	upsertFunc func(ctx context.Context, fact *models.KnowledgeFact) error
+}
+
+func (m *mockKnowledgeRepository) Upsert(ctx context.Context, fact *models.KnowledgeFact) error {
+	if m.upsertFunc != nil {
+		return m.upsertFunc(ctx, fact)
+	}
+	return nil
+}
+
+func (m *mockKnowledgeRepository) GetByProject(_ context.Context, _ uuid.UUID) ([]*models.KnowledgeFact, error) {
+	return nil, nil
+}
+
+func (m *mockKnowledgeRepository) GetByType(_ context.Context, _ uuid.UUID, _ string) ([]*models.KnowledgeFact, error) {
+	return nil, nil
+}
+
+func (m *mockKnowledgeRepository) GetByKey(_ context.Context, _ uuid.UUID, _, _ string) (*models.KnowledgeFact, error) {
+	return nil, nil
+}
+
+func (m *mockKnowledgeRepository) Delete(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *mockKnowledgeRepository) DeleteByProject(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *mockKnowledgeRepository) DeleteBySource(_ context.Context, _ uuid.UUID, _ models.ProvenanceSource) error {
+	return nil
+}
+
+// ============================================================================
+// Start Method - Project Overview Storage Tests
+// ============================================================================
+
+// createAuthenticatedContext creates a context with JWT claims for the given user ID.
+func createAuthenticatedContext(userID uuid.UUID) context.Context {
+	claims := &auth.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject: userID.String(),
+		},
+	}
+	return context.WithValue(context.Background(), auth.ClaimsKey, claims)
+}
+
+// TestStart_StoresProjectOverview verifies that when a non-empty project overview
+// is provided, it is stored as project knowledge with the correct attributes.
+func TestStart_StoresProjectOverview(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userID := uuid.New()
+	projectOverview := "This is a CRM application for managing customer relationships"
+
+	// Track Upsert calls
+	var capturedFact *models.KnowledgeFact
+	var upsertCalled bool
+
+	mockKnowledgeRepo := &mockKnowledgeRepository{
+		upsertFunc: func(ctx context.Context, fact *models.KnowledgeFact) error {
+			upsertCalled = true
+			capturedFact = fact
+
+			// Verify provenance was set correctly (manual provenance)
+			prov, ok := models.GetProvenance(ctx)
+			assert.True(t, ok, "Provenance should be set in context")
+			assert.Equal(t, models.SourceManual, prov.Source, "Source should be manual")
+			assert.Equal(t, userID, prov.UserID, "UserID should match the authenticated user")
+
+			return nil
+		},
+	}
+
+	dagID := uuid.New()
+	mockDAGRepo := &mockDAGRepository{
+		// Return no existing active DAG
+		getActiveByDatasourceFunc: func(_ context.Context, _ uuid.UUID) (*models.OntologyDAG, error) {
+			return nil, nil
+		},
+		// Provide a valid DAG record for background goroutine cleanup
+		getByIDWithNodesFunc: func(_ context.Context, _ uuid.UUID) (*models.OntologyDAG, error) {
+			return &models.OntologyDAG{
+				ID:        dagID,
+				ProjectID: projectID,
+				Nodes:     []models.DAGNode{},
+			}, nil
+		},
+	}
+
+	// Create ontology repository mock that returns an existing ontology
+	mockOntologyRepo := &mockOntologyRepository{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+		},
+	}
+
+	// Create entity and relationship repository mocks (use existing mocks from same package)
+	mockEntityRepo := &mockOntologyEntityRepository{}
+	mockRelationshipRepo := &mockEntityRelationshipRepository{}
+
+	logger := zap.NewNop()
+	service := &ontologyDAGService{
+		dagRepo:          mockDAGRepo,
+		knowledgeRepo:    mockKnowledgeRepo,
+		ontologyRepo:     mockOntologyRepo,
+		entityRepo:       mockEntityRepo,
+		relationshipRepo: mockRelationshipRepo,
+		logger:           logger,
+		// Provide getTenantCtx to prevent panic in background goroutine
+		getTenantCtx: func(ctx context.Context, _ uuid.UUID) (context.Context, func(), error) {
+			return ctx, func() {}, nil
+		},
+	}
+
+	// Create authenticated context
+	ctx := createAuthenticatedContext(userID)
+
+	// Call Start - it will proceed through overview storage and continue to DAG creation
+	// We ignore the result as we're only testing overview storage
+	_, _ = service.Start(ctx, projectID, datasourceID, projectOverview)
+
+	// Verify Upsert was called with correct fact structure
+	assert.True(t, upsertCalled, "Upsert should be called when overview is provided")
+	assert.NotNil(t, capturedFact, "Fact should be captured")
+	assert.Equal(t, projectID, capturedFact.ProjectID, "ProjectID should match")
+	assert.Nil(t, capturedFact.OntologyID, "OntologyID should be nil (survives ontology deletion)")
+	assert.Equal(t, "overview", capturedFact.FactType, "FactType should be 'overview'")
+	assert.Equal(t, "project_overview", capturedFact.Key, "Key should be 'project_overview'")
+	assert.Equal(t, projectOverview, capturedFact.Value, "Value should match the overview text")
+}
+
+// TestStart_SkipsOverviewStorageWhenEmpty verifies that when an empty project
+// overview is provided, Upsert is NOT called.
+func TestStart_SkipsOverviewStorageWhenEmpty(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userID := uuid.New()
+	emptyOverview := ""
+
+	// Track Upsert calls
+	upsertCalled := false
+
+	mockKnowledgeRepo := &mockKnowledgeRepository{
+		upsertFunc: func(_ context.Context, _ *models.KnowledgeFact) error {
+			upsertCalled = true
+			return nil
+		},
+	}
+
+	dagID := uuid.New()
+	mockDAGRepo := &mockDAGRepository{
+		getActiveByDatasourceFunc: func(_ context.Context, _ uuid.UUID) (*models.OntologyDAG, error) {
+			return nil, nil
+		},
+		// Provide a valid DAG record for background goroutine cleanup
+		getByIDWithNodesFunc: func(_ context.Context, _ uuid.UUID) (*models.OntologyDAG, error) {
+			return &models.OntologyDAG{
+				ID:        dagID,
+				ProjectID: projectID,
+				Nodes:     []models.DAGNode{},
+			}, nil
+		},
+	}
+
+	mockOntologyRepo := &mockOntologyRepository{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+		},
+	}
+
+	mockEntityRepo := &mockOntologyEntityRepository{}
+	mockRelationshipRepo := &mockEntityRelationshipRepository{}
+
+	logger := zap.NewNop()
+	service := &ontologyDAGService{
+		dagRepo:          mockDAGRepo,
+		knowledgeRepo:    mockKnowledgeRepo,
+		ontologyRepo:     mockOntologyRepo,
+		entityRepo:       mockEntityRepo,
+		relationshipRepo: mockRelationshipRepo,
+		logger:           logger,
+		// Provide getTenantCtx to prevent panic in background goroutine
+		getTenantCtx: func(ctx context.Context, _ uuid.UUID) (context.Context, func(), error) {
+			return ctx, func() {}, nil
+		},
+	}
+
+	// Create authenticated context
+	ctx := createAuthenticatedContext(userID)
+
+	// Call Start with empty overview
+	_, _ = service.Start(ctx, projectID, datasourceID, emptyOverview)
+
+	// Verify Upsert was NOT called
+	assert.False(t, upsertCalled, "Upsert should NOT be called when overview is empty")
+}
+
+// TestStart_ContinuesOnOverviewStorageError verifies that when Upsert fails,
+// the extraction still continues (non-fatal error handling).
+func TestStart_ContinuesOnOverviewStorageError(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userID := uuid.New()
+	projectOverview := "A valid project overview"
+
+	// Track the flow of execution
+	var upsertCalled bool
+	var getActiveByDatasourceCalled bool
+
+	mockKnowledgeRepo := &mockKnowledgeRepository{
+		upsertFunc: func(_ context.Context, _ *models.KnowledgeFact) error {
+			upsertCalled = true
+			// Return an error to simulate storage failure
+			return fmt.Errorf("database connection failed")
+		},
+	}
+
+	dagID := uuid.New()
+	mockDAGRepo := &mockDAGRepository{
+		getActiveByDatasourceFunc: func(_ context.Context, _ uuid.UUID) (*models.OntologyDAG, error) {
+			getActiveByDatasourceCalled = true
+			return nil, nil // No existing DAG, continue with creation
+		},
+		// Provide a valid DAG record for background goroutine cleanup
+		getByIDWithNodesFunc: func(_ context.Context, _ uuid.UUID) (*models.OntologyDAG, error) {
+			return &models.OntologyDAG{
+				ID:        dagID,
+				ProjectID: projectID,
+				Nodes:     []models.DAGNode{},
+			}, nil
+		},
+	}
+
+	mockOntologyRepo := &mockOntologyRepository{
+		activeOntology: &models.TieredOntology{
+			ID:        ontologyID,
+			ProjectID: projectID,
+		},
+	}
+
+	mockEntityRepo := &mockOntologyEntityRepository{}
+	mockRelationshipRepo := &mockEntityRelationshipRepository{}
+
+	logger := zap.NewNop()
+	service := &ontologyDAGService{
+		dagRepo:          mockDAGRepo,
+		knowledgeRepo:    mockKnowledgeRepo,
+		ontologyRepo:     mockOntologyRepo,
+		entityRepo:       mockEntityRepo,
+		relationshipRepo: mockRelationshipRepo,
+		logger:           logger,
+		// Provide getTenantCtx to prevent panic in background goroutine
+		getTenantCtx: func(ctx context.Context, _ uuid.UUID) (context.Context, func(), error) {
+			return ctx, func() {}, nil
+		},
+	}
+
+	// Create authenticated context
+	ctx := createAuthenticatedContext(userID)
+
+	// Call Start with overview that will fail to store
+	_, _ = service.Start(ctx, projectID, datasourceID, projectOverview)
+
+	// Verify both steps were attempted:
+	// 1. Upsert was called (and failed)
+	assert.True(t, upsertCalled, "Upsert should be called")
+	// 2. Extraction continued after Upsert failure (getActiveByDatasource was called)
+	assert.True(t, getActiveByDatasourceCalled, "Extraction should continue after Upsert failure")
 }
 
 // TestCancel_MarksNonCompletedNodesAsSkipped verifies that canceling a DAG
