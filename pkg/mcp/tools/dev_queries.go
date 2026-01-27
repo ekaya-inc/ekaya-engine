@@ -688,9 +688,16 @@ SQL syntax is validated before creation. Use this for admin-created queries that
 		// Validate SQL syntax before creation
 		validationRes, err := deps.QueryService.Validate(tenantCtx, projectID, datasourceID, sqlQuery)
 		if err != nil {
-			deps.Logger.Error("Failed to validate SQL",
-				zap.String("project_id", projectID.String()),
-				zap.Error(err))
+			// Use DEBUG for input errors (SQL validation, etc.), ERROR for server errors
+			if IsInputError(err) {
+				deps.Logger.Debug("Failed to validate SQL (input error)",
+					zap.String("project_id", projectID.String()),
+					zap.String("error", err.Error()))
+			} else {
+				deps.Logger.Error("Failed to validate SQL",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+			}
 			return NewErrorResultWithDetails("validation_error",
 				fmt.Sprintf("failed to validate SQL: %s", err.Error()),
 				map[string]any{
@@ -760,10 +767,18 @@ SQL syntax is validated before creation. Use this for admin-created queries that
 
 		query, err := deps.QueryService.DirectCreate(tenantCtx, projectID, datasourceID, createReq)
 		if err != nil {
-			deps.Logger.Error("Failed to create approved query",
-				zap.String("project_id", projectID.String()),
-				zap.String("datasource_id", datasourceID.String()),
-				zap.Error(err))
+			// Use DEBUG for input errors (validation failures, etc.), ERROR for server errors
+			if IsInputError(err) {
+				deps.Logger.Debug("Failed to create approved query (input error)",
+					zap.String("project_id", projectID.String()),
+					zap.String("datasource_id", datasourceID.String()),
+					zap.String("error", err.Error()))
+			} else {
+				deps.Logger.Error("Failed to create approved query",
+					zap.String("project_id", projectID.String()),
+					zap.String("datasource_id", datasourceID.String()),
+					zap.Error(err))
+			}
 			return nil, fmt.Errorf("failed to create query: %w", err)
 		}
 
@@ -1117,10 +1132,18 @@ Any pending update suggestions for this query will be automatically rejected wit
 		// Delete the query and auto-reject pending suggestions
 		rejectedCount, err := deps.QueryService.DeleteWithPendingRejection(tenantCtx, projectID, queryID, reviewerID)
 		if err != nil {
-			deps.Logger.Error("Failed to delete approved query",
-				zap.String("project_id", projectID.String()),
-				zap.String("query_id", queryID.String()),
-				zap.Error(err))
+			// Use DEBUG for input errors (not found, etc.), ERROR for server errors
+			if IsInputError(err) {
+				deps.Logger.Debug("Failed to delete approved query (input error)",
+					zap.String("project_id", projectID.String()),
+					zap.String("query_id", queryID.String()),
+					zap.String("error", err.Error()))
+			} else {
+				deps.Logger.Error("Failed to delete approved query",
+					zap.String("project_id", projectID.String()),
+					zap.String("query_id", queryID.String()),
+					zap.Error(err))
+			}
 			return NewErrorResultWithDetails("not_found",
 				"query not found",
 				map[string]any{

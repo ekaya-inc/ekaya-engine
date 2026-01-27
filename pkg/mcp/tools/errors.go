@@ -254,3 +254,45 @@ func NewSQLErrorResult(err error) *mcp.CallToolResult {
 	message := ExtractSQLErrorMessage(err)
 	return NewErrorResult(code, message)
 }
+
+// inputErrorPatterns are substrings that indicate an error is due to user input
+// rather than a server failure. These errors should be logged at DEBUG/INFO level,
+// not ERROR level, because they are expected when users provide invalid input.
+var inputErrorPatterns = []string{
+	"not found",
+	"validation failed",
+	"SQL validation failed",
+	"output_columns required",
+	"already exists",
+	"invalid input",
+	"missing required",
+	"cannot be empty",
+}
+
+// IsInputError returns true if the error appears to be caused by user input
+// rather than a server failure. Input errors include:
+//   - SQL user errors (syntax, constraint, missing table)
+//   - Validation failures
+//   - Resource not found (user provided invalid ID)
+//
+// These errors should be logged at DEBUG level, not ERROR level.
+func IsInputError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// SQL user errors are input errors
+	if IsSQLUserError(err) {
+		return true
+	}
+
+	// Check for common input error patterns in the error message
+	errStr := strings.ToLower(err.Error())
+	for _, pattern := range inputErrorPatterns {
+		if strings.Contains(errStr, pattern) {
+			return true
+		}
+	}
+
+	return false
+}

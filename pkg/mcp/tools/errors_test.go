@@ -574,3 +574,79 @@ func TestNewSQLErrorResult_RealWorldExamples(t *testing.T) {
 		assert.Contains(t, errResp.Message, "multiple commands")
 	})
 }
+
+func TestIsInputError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: false,
+		},
+		{
+			name:     "generic error (not input error)",
+			err:      errors.New("connection failed"),
+			expected: false,
+		},
+		{
+			name:     "SQL syntax error",
+			err:      errors.New(`ERROR: syntax error at or near "SELEKT" (SQLSTATE 42601)`),
+			expected: true,
+		},
+		{
+			name:     "SQL constraint violation",
+			err:      errors.New(`ERROR: duplicate key value violates unique constraint (SQLSTATE 23505)`),
+			expected: true,
+		},
+		{
+			name:     "not found error",
+			err:      errors.New("entity not found"),
+			expected: true,
+		},
+		{
+			name:     "validation failed error",
+			err:      errors.New("SQL validation failed: invalid syntax"),
+			expected: true,
+		},
+		{
+			name:     "output_columns required error",
+			err:      errors.New("output_columns required: test query before saving"),
+			expected: true,
+		},
+		{
+			name:     "already exists error",
+			err:      errors.New("resource already exists"),
+			expected: true,
+		},
+		{
+			name:     "cannot be empty error",
+			err:      errors.New("name cannot be empty"),
+			expected: true,
+		},
+		{
+			name:     "missing required error",
+			err:      errors.New("missing required parameter"),
+			expected: true,
+		},
+		{
+			name:     "server error (connection timeout)",
+			err:      errors.New("connection timeout"),
+			expected: false,
+		},
+		{
+			name:     "server error (internal)",
+			err:      errors.New("internal server error"),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := IsInputError(tt.err)
+			assert.Equal(t, tt.expected, result, "IsInputError(%v) = %v, want %v", tt.err, result, tt.expected)
+		})
+	}
+}
