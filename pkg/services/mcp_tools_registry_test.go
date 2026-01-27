@@ -20,9 +20,11 @@ func TestGetEnabledTools_EmptyState(t *testing.T) {
 	state := map[string]*models.ToolGroupConfig{}
 	tools := GetEnabledTools(state)
 
-	// Only health should be available with empty state
-	require.Len(t, tools, 1)
-	assert.Equal(t, "health", tools[0].Name)
+	// For user auth, Developer Core is always included
+	toolNames := extractToolNames(tools)
+	assert.Contains(t, toolNames, "health")
+	assert.Contains(t, toolNames, "echo")
+	assert.Contains(t, toolNames, "execute")
 }
 
 func TestGetEnabledTools_DeveloperEnabled(t *testing.T) {
@@ -100,6 +102,8 @@ func TestGetEnabledTools_DeveloperWithOntologyMaintenance(t *testing.T) {
 }
 
 func TestGetEnabledTools_ApprovedQueriesEnabled(t *testing.T) {
+	// NOTE: For user auth, approved_queries.Enabled is ignored.
+	// Developer Core is always included. Use developer.AddQueryTools for Query loadout.
 	state := map[string]*models.ToolGroupConfig{
 		ToolGroupApprovedQueries: {Enabled: true},
 	}
@@ -107,27 +111,20 @@ func TestGetEnabledTools_ApprovedQueriesEnabled(t *testing.T) {
 
 	toolNames := extractToolNames(tools)
 
-	// Business User tools (Query loadout) - includes get_schema per spec
+	// Developer Core is always included for user auth
 	assert.Contains(t, toolNames, "health")
-	assert.Contains(t, toolNames, "query")
-	assert.Contains(t, toolNames, "sample")
-	assert.Contains(t, toolNames, "validate")
-	assert.Contains(t, toolNames, "list_approved_queries")
-	assert.Contains(t, toolNames, "execute_approved_query")
-	assert.Contains(t, toolNames, "get_ontology")
-	assert.Contains(t, toolNames, "get_schema") // Now in Query loadout
-	assert.Contains(t, toolNames, "get_context")
+	assert.Contains(t, toolNames, "echo")
+	assert.Contains(t, toolNames, "execute")
 
-	// Developer-only tools should NOT be included
-	assert.NotContains(t, toolNames, "echo")
-	assert.NotContains(t, toolNames, "execute")
-
-	// Ontology maintenance should NOT be included without option
-	assert.NotContains(t, toolNames, "update_entity")
-	assert.NotContains(t, toolNames, "update_column")
+	// Query tools require developer.AddQueryTools=true, not approved_queries.Enabled
+	assert.NotContains(t, toolNames, "query")
+	assert.NotContains(t, toolNames, "sample")
+	assert.NotContains(t, toolNames, "validate")
 }
 
 func TestGetEnabledTools_ApprovedQueriesWithOntologyMaintenance(t *testing.T) {
+	// NOTE: For user auth, approved_queries flags are ignored.
+	// Use developer.AddOntologyMaintenance for Ontology Maintenance loadout.
 	state := map[string]*models.ToolGroupConfig{
 		ToolGroupApprovedQueries: {Enabled: true, AllowOntologyMaintenance: true},
 	}
@@ -135,29 +132,33 @@ func TestGetEnabledTools_ApprovedQueriesWithOntologyMaintenance(t *testing.T) {
 
 	toolNames := extractToolNames(tools)
 
-	// Query + Ontology Maintenance
-	assert.Contains(t, toolNames, "query")
-	assert.Contains(t, toolNames, "get_ontology")
-	assert.Contains(t, toolNames, "update_entity")
-	assert.Contains(t, toolNames, "update_column")
-	assert.Contains(t, toolNames, "update_relationship")
-	assert.Contains(t, toolNames, "delete_entity")
+	// Developer Core is always included for user auth
+	assert.Contains(t, toolNames, "health")
+	assert.Contains(t, toolNames, "echo")
+	assert.Contains(t, toolNames, "execute")
 
-	// Developer-only tools should NOT be included
-	assert.NotContains(t, toolNames, "echo")
-	assert.NotContains(t, toolNames, "execute")
+	// Ontology Maintenance requires developer.AddOntologyMaintenance, not approved_queries flags
+	assert.NotContains(t, toolNames, "update_entity")
+	assert.NotContains(t, toolNames, "update_column")
 }
 
 func TestGetEnabledTools_AgentToolsEnabled_UserPerspective(t *testing.T) {
-	// From USER perspective, enabling agent_tools doesn't add any tools
+	// From USER perspective, enabling agent_tools doesn't add any tools beyond Developer Core
+	// Developer Core is always included for user auth
 	state := map[string]*models.ToolGroupConfig{
 		ToolGroupAgentTools: {Enabled: true},
 	}
 	tools := GetEnabledTools(state) // GetEnabledTools uses isAgent=false
 
-	// Only health - agent_tools setting doesn't affect user perspective
-	require.Len(t, tools, 1)
-	assert.Equal(t, "health", tools[0].Name)
+	toolNames := extractToolNames(tools)
+
+	// Developer Core is always included for user auth
+	assert.Contains(t, toolNames, "health")
+	assert.Contains(t, toolNames, "echo")
+	assert.Contains(t, toolNames, "execute")
+
+	// Agent-specific tools should NOT be included in user perspective
+	// (Limited Query loadout is only for agents)
 }
 
 func TestGetEnabledToolsForAgent_AgentToolsEnabled(t *testing.T) {
@@ -204,8 +205,9 @@ func TestGetEnabledTools_CustomToolsEnabled(t *testing.T) {
 }
 
 func TestGetEnabledTools_ToolsInCanonicalOrder(t *testing.T) {
+	// Use developer.AddQueryTools to get Query loadout for more tools to verify order
 	state := map[string]*models.ToolGroupConfig{
-		ToolGroupApprovedQueries: {Enabled: true},
+		ToolGroupDeveloper: {AddQueryTools: true},
 	}
 	tools := GetEnabledTools(state)
 

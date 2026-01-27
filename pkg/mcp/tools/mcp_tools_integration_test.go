@@ -142,16 +142,16 @@ func TestMCPTools_NewProject_AdminGetsDevTools(t *testing.T) {
 
 	// Verify essential developer tools are present
 	essentialTools := []string{
-		"health",          // Always available
-		"echo",            // Developer Core
-		"execute",         // Developer Core
-		"query",           // Query loadout
-		"sample",          // Query loadout
-		"validate",        // Query loadout
-		"get_schema",      // Query loadout
-		"get_context",     // Query loadout
-		"update_entity",   // Ontology Maintenance
-		"refresh_schema",  // Ontology Maintenance
+		"health",                  // Always available
+		"echo",                    // Developer Core
+		"execute",                 // Developer Core
+		"query",                   // Query loadout
+		"sample",                  // Query loadout
+		"validate",                // Query loadout
+		"get_schema",              // Query loadout
+		"get_context",             // Query loadout
+		"update_entity",           // Ontology Maintenance
+		"refresh_schema",          // Ontology Maintenance
 		"list_ontology_questions", // Ontology Questions
 	}
 
@@ -196,14 +196,14 @@ func TestMCPTools_NewProject_UserGetsBusinessTools(t *testing.T) {
 
 	// Verify essential business user tools are present
 	essentialTools := []string{
-		"health",                  // Always available
-		"query",                   // Query loadout - ad-hoc queries
-		"sample",                  // Query loadout - data preview
-		"validate",                // Query loadout - SQL validation
-		"get_schema",              // Query loadout - schema access
-		"get_ontology",            // Query loadout - semantic context
-		"list_approved_queries",   // Query loadout - pre-approved queries
-		"execute_approved_query",  // Query loadout - run approved queries
+		"health",                 // Always available
+		"query",                  // Query loadout - ad-hoc queries
+		"sample",                 // Query loadout - data preview
+		"validate",               // Query loadout - SQL validation
+		"get_schema",             // Query loadout - schema access
+		"get_ontology",           // Query loadout - semantic context
+		"list_approved_queries",  // Query loadout - pre-approved queries
+		"execute_approved_query", // Query loadout - run approved queries
 	}
 
 	for _, tool := range essentialTools {

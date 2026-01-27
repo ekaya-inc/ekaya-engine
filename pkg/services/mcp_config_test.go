@@ -656,7 +656,8 @@ func TestMCPConfigService_Get_ServerURLConstruction(t *testing.T) {
 }
 
 func TestMCPConfigService_Get_EnabledToolsIncluded(t *testing.T) {
-	// When no tool groups are enabled, only the health tool should be in EnabledTools
+	// DefaultMCPConfig has AddQueryTools=true and AddOntologyMaintenance=true
+	// So it includes all tools (Developer Core + Query + Ontology Maintenance + Ontology Questions)
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -685,10 +686,18 @@ func TestMCPConfigService_Get_EnabledToolsIncluded(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// With no tool groups enabled, only health should be available
-	require.Len(t, resp.EnabledTools, 1, "should have exactly one tool enabled (health)")
-	assert.Equal(t, "health", resp.EnabledTools[0].Name)
-	assert.Equal(t, "Server health check", resp.EnabledTools[0].Description)
+	// DefaultMCPConfig enables all loadouts, so many tools should be available
+	toolNames := make([]string, len(resp.EnabledTools))
+	for i, tool := range resp.EnabledTools {
+		toolNames[i] = tool.Name
+	}
+
+	// Should include health (always), Developer Core, Query loadout, and Ontology tools
+	assert.Contains(t, toolNames, "health", "should include health tool (always available)")
+	assert.Contains(t, toolNames, "echo", "should include echo tool (Developer Core)")
+	assert.Contains(t, toolNames, "execute", "should include execute tool (Developer Core)")
+	assert.Contains(t, toolNames, "query", "should include query tool (Query loadout)")
+	assert.Contains(t, toolNames, "list_approved_queries", "should include list_approved_queries (Query loadout)")
 }
 
 func TestMCPConfigService_Get_EnabledToolsWithDeveloperEnabled(t *testing.T) {
@@ -790,7 +799,9 @@ func TestMCPConfigService_Get_EnabledToolsWithDeveloperCoreIncludesExecute(t *te
 }
 
 func TestMCPConfigService_Get_EnabledToolsWithApprovedQueries(t *testing.T) {
-	// When approved_queries is enabled, Query loadout tools are available
+	// Note: For user auth, approved_queries.Enabled is now IGNORED.
+	// This test now verifies behavior with only approved_queries config (no developer sub-options).
+	// Users get Developer Core tools by default.
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -798,7 +809,7 @@ func TestMCPConfigService_Get_EnabledToolsWithApprovedQueries(t *testing.T) {
 		config: &models.MCPConfig{
 			ProjectID: projectID,
 			ToolGroups: map[string]*models.ToolGroupConfig{
-				ToolGroupApprovedQueries: {Enabled: true},
+				ToolGroupApprovedQueries: {Enabled: true}, // Enabled is ignored for user auth
 			},
 		},
 	}
@@ -829,33 +840,23 @@ func TestMCPConfigService_Get_EnabledToolsWithApprovedQueries(t *testing.T) {
 		toolNames[i] = tool.Name
 	}
 
-	// Query loadout tools (includes get_schema per spec)
-	assert.Contains(t, toolNames, "query", "should include query tool")
-	assert.Contains(t, toolNames, "sample", "should include sample tool")
-	assert.Contains(t, toolNames, "validate", "should include validate tool")
-	assert.Contains(t, toolNames, "get_ontology", "should include get_ontology tool")
-	assert.Contains(t, toolNames, "list_glossary", "should include list_glossary tool")
-	assert.Contains(t, toolNames, "get_glossary_sql", "should include get_glossary_sql tool")
-	assert.Contains(t, toolNames, "list_approved_queries", "should include list_approved_queries tool")
-	assert.Contains(t, toolNames, "execute_approved_query", "should include execute_approved_query tool")
+	// For user auth, Developer Core is always included (Enabled is ignored)
 	assert.Contains(t, toolNames, "health", "should include health tool")
-	assert.Contains(t, toolNames, "get_schema", "get_schema IS in Query loadout per spec")
-	assert.Contains(t, toolNames, "get_context", "should include get_context tool")
+	assert.Contains(t, toolNames, "echo", "should include echo tool (Developer Core)")
+	assert.Contains(t, toolNames, "execute", "should include execute tool (Developer Core)")
 
-	// Developer-only tools should NOT be present
-	assert.NotContains(t, toolNames, "echo", "should NOT include developer tool echo")
-	assert.NotContains(t, toolNames, "execute", "should NOT include developer tool execute")
-
-	// Ontology maintenance should NOT be present without AllowOntologyMaintenance
-	assert.NotContains(t, toolNames, "update_entity", "should NOT include update_entity without option")
+	// Query loadout tools NOT included without AddQueryTools
+	assert.NotContains(t, toolNames, "query", "query requires AddQueryTools")
+	assert.NotContains(t, toolNames, "sample", "sample requires AddQueryTools")
+	assert.NotContains(t, toolNames, "validate", "validate requires AddQueryTools")
+	assert.NotContains(t, toolNames, "get_ontology", "get_ontology requires AddQueryTools")
+	assert.NotContains(t, toolNames, "list_approved_queries", "list_approved_queries requires AddQueryTools")
 }
 
 func TestMCPConfigService_Get_EnabledToolsWithAgentTools(t *testing.T) {
-	// When only agent_tools is enabled (no developer or approved_queries),
-	// the UI shows tools from the USER perspective, not agent perspective.
-	// Since neither developer nor approved_queries is enabled for users,
-	// only health should be available.
-	// Agent-specific filtering only happens at MCP connection time.
+	// When only agent_tools is enabled (no developer sub-options),
+	// the UI shows tools from the USER perspective (Developer Core).
+	// agent_tools.Enabled only affects agent authentication at MCP connection time.
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 
@@ -864,6 +865,7 @@ func TestMCPConfigService_Get_EnabledToolsWithAgentTools(t *testing.T) {
 			ProjectID: projectID,
 			ToolGroups: map[string]*models.ToolGroupConfig{
 				ToolGroupAgentTools: {Enabled: true},
+				// No developer sub-options, so Developer Core only
 			},
 		},
 	}
@@ -894,11 +896,12 @@ func TestMCPConfigService_Get_EnabledToolsWithAgentTools(t *testing.T) {
 		toolNames[i] = tool.Name
 	}
 
-	// When agent_tools is enabled, UI shows what agents would see (limited query tools)
+	// EnabledTools shows USER perspective (Developer Core)
+	// agent_tools.Enabled doesn't affect user tools in the UI
 	assert.Contains(t, toolNames, "health", "should include health tool")
-	assert.Contains(t, toolNames, "list_approved_queries", "should include list_approved_queries for agents")
-	assert.Contains(t, toolNames, "execute_approved_query", "should include execute_approved_query for agents")
-	assert.Len(t, resp.EnabledTools, 3, "should have 3 tools (health + limited query) when agent_tools is enabled")
+	assert.Contains(t, toolNames, "echo", "should include echo tool (Developer Core)")
+	assert.Contains(t, toolNames, "execute", "should include execute tool (Developer Core)")
+	assert.Len(t, resp.EnabledTools, 3, "should have 3 tools (Developer Core)")
 }
 
 func TestMCPConfigService_Update_DeveloperToolsReflectNewState(t *testing.T) {

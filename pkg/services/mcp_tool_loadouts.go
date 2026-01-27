@@ -255,6 +255,14 @@ func GetAllTools() []ToolSpec {
 // ComputeEnabledToolsFromConfig computes the list of enabled tools based on config state.
 // This is the main entry point for determining which tools to expose.
 // The isAgent parameter indicates if the caller is using agent authentication.
+//
+// For user authentication (isAgent=false), tools are determined by role-based sub-options:
+// - Developer tools: Default + DeveloperCore + optional Query + optional OntologyMaintenance
+// - The Enabled flag is NOT checked for user auth (deprecated).
+//
+// For agent authentication (isAgent=true), tools are gated by agent_tools.Enabled:
+// - When enabled: Default + LimitedQuery
+// - When disabled: Default only
 func ComputeEnabledToolsFromConfig(state map[string]*models.ToolGroupConfig, isAgent bool) []ToolSpec {
 	if state == nil {
 		// Only default loadout (health) when no state
@@ -272,6 +280,8 @@ func ComputeEnabledToolsFromConfig(state map[string]*models.ToolGroupConfig, isA
 	}
 
 	// User authentication from here on
+	// For users, tools are always enabled - sub-options control loadout selection.
+	// The Enabled flag is deprecated and not checked.
 
 	// Custom tools mode: use individually selected tools
 	customConfig := state[ToolGroupCustom]
@@ -279,25 +289,12 @@ func ComputeEnabledToolsFromConfig(state map[string]*models.ToolGroupConfig, isA
 		return computeCustomTools(customConfig.CustomTools)
 	}
 
-	// Build loadout list based on enabled groups
-	loadouts := []string{LoadoutDefault}
+	// Build loadout list based on config sub-options
+	loadouts := []string{LoadoutDefault, LoadoutDeveloperCore}
 
-	// Business Tools (approved_queries)
-	aqConfig := state[ToolGroupApprovedQueries]
-	if aqConfig != nil && aqConfig.Enabled {
-		loadouts = append(loadouts, LoadoutQuery)
-		if aqConfig.AllowOntologyMaintenance {
-			loadouts = append(loadouts, LoadoutOntologyMaintenance)
-		}
-	}
-
-	// Note: Agent Tools setting only affects agent authentication (handled above).
-	// From user perspective, enabling agent_tools doesn't add any tools.
-
-	// Developer Tools
+	// Developer Tools sub-options control which loadouts are included
 	devConfig := state[ToolGroupDeveloper]
-	if devConfig != nil && devConfig.Enabled {
-		loadouts = append(loadouts, LoadoutDeveloperCore)
+	if devConfig != nil {
 		if devConfig.AddQueryTools {
 			loadouts = append(loadouts, LoadoutQuery)
 		}

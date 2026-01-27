@@ -141,15 +141,16 @@ func TestAgentToolsEnabled_ListAndCallConsistency(t *testing.T) {
 	t.Log("CALLING: approved queries tools are correctly callable for agent auth with agent_tools enabled")
 }
 
-// TestApprovedQueriesEnabled_ListAndCallConsistency tests that when approved_queries
-// is enabled for regular user auth, tools are both listed and callable.
+// TestApprovedQueriesEnabled_ListAndCallConsistency tests that when AddQueryTools
+// is enabled for regular user auth, Query loadout tools are both listed and callable.
 func TestApprovedQueriesEnabled_ListAndCallConsistency(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Setup: approved_queries enabled (normal user flow)
+	// Setup: AddQueryTools enabled to get Query loadout
+	// Note: approved_queries.Enabled is now ignored for user auth
 	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"approved_queries": {Enabled: true},
+		"developer": {AddQueryTools: true}, // Need AddQueryTools for Query loadout
 	})
 
 	mcpConfigService := services.NewMCPConfigService(
@@ -182,7 +183,7 @@ func TestApprovedQueriesEnabled_ListAndCallConsistency(t *testing.T) {
 		t.Fatal("LISTING: list_approved_queries should be visible when approved_queries is enabled")
 	}
 
-	t.Log("LISTING: approved queries tools are correctly visible for user auth with approved_queries enabled")
+	t.Log("LISTING: approved queries tools are correctly visible for user auth with AddQueryTools enabled")
 
 	// Part 2: Verify tool CALLING works
 	queryDeps := &QueryToolDeps{
@@ -205,18 +206,18 @@ func TestApprovedQueriesEnabled_ListAndCallConsistency(t *testing.T) {
 		t.Fatal("CALLING: expected tenant context to be set")
 	}
 
-	t.Log("CALLING: approved queries tools are correctly callable for user auth with approved_queries enabled")
+	t.Log("CALLING: approved queries tools are correctly callable for user auth with AddQueryTools enabled")
 }
 
-// TestNeitherEnabled_NeitherListedNorCallable tests that when neither agent_tools
-// nor approved_queries is enabled, the tools are neither listed nor callable.
-func TestNeitherEnabled_NeitherListedNorCallable(t *testing.T) {
+// TestNeitherEnabled_QueryToolsNotListed tests that when AddQueryTools is not enabled,
+// Query loadout tools are not listed (but Developer Core tools are always included for users).
+func TestNeitherEnabled_QueryToolsNotListed(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Setup: nothing enabled
+	// Setup: no AddQueryTools enabled
 	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		// Empty - nothing enabled
+		// Empty - no sub-options enabled
 	})
 
 	mcpConfigService := services.NewMCPConfigService(
@@ -228,7 +229,7 @@ func TestNeitherEnabled_NeitherListedNorCallable(t *testing.T) {
 		zap.NewNop(),
 	)
 
-	// Part 1: Verify tool LISTING does NOT show approved queries tools
+	// Part 1: Verify tool LISTING does NOT show Query loadout tools
 	filterDeps := &MCPToolDeps{
 		DB:               engineDB.DB,
 		MCPConfigService: mcpConfigService,
@@ -245,16 +246,31 @@ func TestNeitherEnabled_NeitherListedNorCallable(t *testing.T) {
 
 	filteredTools := filter(ctx, allTools)
 
+	// Query loadout tools should NOT be present without AddQueryTools
 	if containsTool(filteredTools, "list_approved_queries") {
-		t.Error("LISTING: list_approved_queries should NOT be visible when nothing is enabled")
+		t.Error("LISTING: list_approved_queries should NOT be visible without AddQueryTools")
 	}
 	if containsTool(filteredTools, "execute_approved_query") {
-		t.Error("LISTING: execute_approved_query should NOT be visible when nothing is enabled")
+		t.Error("LISTING: execute_approved_query should NOT be visible without AddQueryTools")
+	}
+	if containsTool(filteredTools, "query") {
+		t.Error("LISTING: query should NOT be visible without AddQueryTools")
 	}
 
-	t.Log("LISTING: approved queries tools are correctly hidden when nothing is enabled")
+	// Developer Core tools should still be present (for user auth)
+	if !containsTool(filteredTools, "health") {
+		t.Error("LISTING: health should be visible")
+	}
+	if !containsTool(filteredTools, "echo") {
+		t.Error("LISTING: echo should be visible (Developer Core)")
+	}
+	if !containsTool(filteredTools, "execute") {
+		t.Error("LISTING: execute should be visible (Developer Core)")
+	}
 
-	// Part 2: Verify tool CALLING fails
+	t.Log("LISTING: Query tools are correctly hidden when AddQueryTools is not enabled")
+
+	// Part 2: Verify Query tool CALLING fails (since not in loadout)
 	queryDeps := &QueryToolDeps{
 		DB:               engineDB.DB,
 		MCPConfigService: mcpConfigService,
@@ -269,7 +285,7 @@ func TestNeitherEnabled_NeitherListedNorCallable(t *testing.T) {
 	}
 
 	if err == nil {
-		t.Fatal("CALLING: checkApprovedQueriesEnabled should fail when nothing is enabled")
+		t.Fatal("CALLING: checkApprovedQueriesEnabled should fail when AddQueryTools is not enabled")
 	}
 
 	t.Logf("CALLING: correctly rejected with error: %v", err)
@@ -281,12 +297,11 @@ func TestAgentAuth_AgentToolsDisabled(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
-	// Setup: agent_tools disabled, approved_queries enabled
-	// Agent should NOT be able to use tools even though approved_queries is enabled
-	// (approved_queries is for users, agent_tools is for agents)
+	// Setup: agent_tools disabled (agent auth still checks agent_tools.Enabled)
+	// AddQueryTools is for users, agent_tools.Enabled is for agents
 	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"agent_tools":      {Enabled: false},
-		"approved_queries": {Enabled: true},
+		"agent_tools": {Enabled: false},
+		"developer":   {AddQueryTools: true}, // User has Query loadout, but agent doesn't
 	})
 
 	mcpConfigService := services.NewMCPConfigService(
@@ -328,16 +343,16 @@ func TestAgentAuth_AgentToolsDisabled(t *testing.T) {
 }
 
 // TestBothEnabled_UserSeesApprovedQueries tests that when both agent_tools and
-// approved_queries are enabled, a regular user sees approved queries via the
-// approved_queries path (not agent_tools).
+// AddQueryTools are enabled, a regular user sees Query loadout tools.
 func TestBothEnabled_UserSeesApprovedQueries(t *testing.T) {
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
 
 	// Setup: both enabled
+	// Note: approved_queries.Enabled is now ignored for user auth
 	setupTestProject(t, engineDB.DB, projectID, map[string]*models.ToolGroupConfig{
-		"agent_tools":      {Enabled: true},
-		"approved_queries": {Enabled: true},
+		"agent_tools": {Enabled: true},
+		"developer":   {AddQueryTools: true}, // Need AddQueryTools for Query loadout
 	})
 
 	mcpConfigService := services.NewMCPConfigService(

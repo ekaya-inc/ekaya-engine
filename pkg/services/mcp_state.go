@@ -117,14 +117,9 @@ func (v *mcpStateValidator) Apply(transition MCPStateTransition, ctx MCPStateCon
 	v.normalizeState(newState)
 
 	// Compute enabled tools based on the final state
-	// When agent_tools is enabled, show what agents would see (limited query tools)
-	var enabledTools []ToolDefinition
-	agentConfig := newState[ToolGroupAgentTools]
-	if agentConfig != nil && agentConfig.Enabled {
-		enabledTools = GetEnabledToolsForAgent(newState)
-	} else {
-		enabledTools = GetEnabledTools(newState)
-	}
+	// This is for the UI (user perspective) - always compute USER tools
+	// Agent tool filtering happens at MCP connection time, not here
+	enabledTools := GetEnabledTools(newState)
 
 	return MCPStateResult{
 		State:        newState,
