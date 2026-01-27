@@ -230,6 +230,26 @@ There are **two separate databases** involved in testing:
 
 ---
 
+## Ontology Tables (ekaya_engine database)
+
+| Table | Purpose |
+|-------|---------|
+| `engine_ontology_dag` | DAG workflow state, status, current_node |
+| `engine_dag_nodes` | Individual DAG node states (one per step) |
+| `engine_ontologies` | Tiered ontology storage (domain_summary, entity_summaries, column_details) |
+| `engine_ontology_entities` | Discovered domain entities (user, account, order, etc.) with descriptions |
+| `engine_ontology_entity_occurrences` | Where entities appear across schema with role semantics |
+| `engine_ontology_entity_aliases` | Alternative names for entities (for query matching) |
+| `engine_ontology_entity_key_columns` | Important business columns per entity with synonyms |
+| `engine_entity_relationships` | Entity-to-entity relationships from FK constraints or inference |
+| `engine_ontology_questions` | Questions generated during analysis for user clarification |
+| `engine_ontology_chat_messages` | Ontology refinement chat history |
+| `engine_llm_conversations` | Verbatim LLM request/response logs for debugging and analytics |
+| `engine_project_knowledge` | Project-level facts learned during refinement |
+| `engine_business_glossary` | Business glossary terms with SQL definitions |
+
+---
+
 ## Investigating Ontology Issues
 
 ### Check Current Ontology
