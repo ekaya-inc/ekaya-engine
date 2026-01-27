@@ -138,6 +138,8 @@ func (r *mcpConfigRepository) GetAgentAPIKey(ctx context.Context, projectID uuid
 }
 
 // SetAgentAPIKey updates the encrypted agent API key for a project.
+// If no MCP config exists (legacy projects provisioned before MCP config was created during provisioning),
+// creates one with correct defaults matching models.DefaultMCPConfig().
 func (r *mcpConfigRepository) SetAgentAPIKey(ctx context.Context, projectID uuid.UUID, encryptedKey string) error {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
@@ -145,13 +147,22 @@ func (r *mcpConfigRepository) SetAgentAPIKey(ctx context.Context, projectID uuid
 	}
 
 	now := time.Now()
+	// Default tool_groups matches models.DefaultMCPConfig():
+	// - user: allowOntologyMaintenance=true
+	// - developer: addQueryTools=true, addOntologyMaintenance=true
+	// - agent_tools: enabled=true
+	defaultToolGroups := `{
+		"user": {"allowOntologyMaintenance": true},
+		"developer": {"addQueryTools": true, "addOntologyMaintenance": true},
+		"agent_tools": {"enabled": true}
+	}`
 	query := `
 		INSERT INTO engine_mcp_config (project_id, tool_groups, agent_api_key_encrypted, created_at, updated_at)
-		VALUES ($1, '{"developer": {"enabled": false}}'::jsonb, $2, $3, $3)
+		VALUES ($1, $2::jsonb, $3, $4, $4)
 		ON CONFLICT (project_id)
-		DO UPDATE SET agent_api_key_encrypted = $2, updated_at = $3`
+		DO UPDATE SET agent_api_key_encrypted = $3, updated_at = $4`
 
-	_, err := scope.Conn.Exec(ctx, query, projectID, encryptedKey, now)
+	_, err := scope.Conn.Exec(ctx, query, projectID, defaultToolGroups, encryptedKey, now)
 	if err != nil {
 		return fmt.Errorf("failed to set agent API key: %w", err)
 	}
