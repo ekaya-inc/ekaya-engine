@@ -229,13 +229,17 @@ make check
 
 ## Validation Checklist
 
-- [ ] All base migrations have zero ALTER TABLE (except ENABLE RLS)
-- [ ] All provenance columns use 'inferred' (not 'inference')
-- [ ] All composite FK constraints present in base migrations
-- [ ] All down migrations are clean DROP TABLE statements
-- [ ] Migration numbers are consecutive (001-014)
-- [ ] `make check` passes
+- [x] All base migrations have zero ALTER TABLE (except ENABLE RLS)
+- [x] All provenance columns use 'inferred' (not 'inference')
+- [x] All composite FK constraints present in base migrations
+- [x] All down migrations are clean DROP TABLE statements
+- [x] Migration numbers are consecutive (001-014)
+- [x] `make check` passes
 - [ ] Manual smoke test of ontology extraction workflow
+
+## Status: COMPLETE
+
+Completed 2025-01-27. All migrations consolidated, tests passing. Awaiting manual smoke test after database DROP/CREATE.
 
 ## Files to Modify
 
