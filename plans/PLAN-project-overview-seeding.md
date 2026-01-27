@@ -278,7 +278,7 @@ func (s *knowledgeService) StoreWithSource(ctx context.Context, projectID uuid.U
 
 ---
 
-### 7. Backend: KnowledgeSeeding Node - Extract Facts from Overview
+### 7. Backend: KnowledgeSeeding Node - Extract Facts from Overview [x]
 
 **File:** `pkg/services/dag/knowledge_seeding_node.go`
 
