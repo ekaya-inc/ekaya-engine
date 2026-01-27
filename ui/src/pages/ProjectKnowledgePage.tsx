@@ -323,9 +323,7 @@ const ProjectKnowledgePage = () => {
   // Group facts by fact_type for display
   const factsByType = facts.reduce((acc, fact) => {
     const type = fact.fact_type ?? 'other';
-    if (!acc[type]) {
-      acc[type] = [];
-    }
+    acc[type] ??= [];
     acc[type].push(fact);
     return acc;
   }, {} as Record<string, ProjectKnowledge[]>);
