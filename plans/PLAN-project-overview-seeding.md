@@ -382,7 +382,7 @@ func (n *KnowledgeSeedingNode) extractKnowledgeFacts(
 
 ---
 
-### 8. Backend: Wire Dependencies for KnowledgeSeeding Node
+### 8. Backend: Wire Dependencies for KnowledgeSeeding Node [x]
 
 **File:** `pkg/services/ontology_dag_service.go`
 
