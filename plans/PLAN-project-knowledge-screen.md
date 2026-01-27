@@ -191,7 +191,7 @@ Use `GlossaryPage.tsx` as template with these differences:
 
 ---
 
-### 5. Frontend: Project Knowledge Editor Component
+### 5. Frontend: Project Knowledge Editor Component ✓
 
 **File:** `ui/src/components/ProjectKnowledgeEditor.tsx` (new)
 
