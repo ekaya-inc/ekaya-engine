@@ -235,11 +235,11 @@ make check
 - [x] All down migrations are clean DROP TABLE statements
 - [x] Migration numbers are consecutive (001-014)
 - [x] `make check` passes
-- [ ] Manual smoke test of ontology extraction workflow
+- [x] Manual smoke test of ontology extraction workflow
 
 ## Status: COMPLETE
 
-Completed 2025-01-27. All migrations consolidated, tests passing. Awaiting manual smoke test after database DROP/CREATE.
+Completed 2025-01-27. All migrations consolidated, tests passing, smoke test verified.
 
 ## Files to Modify
 
