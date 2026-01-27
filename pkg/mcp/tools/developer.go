@@ -201,6 +201,28 @@ func NewToolFilter(deps *MCPToolDeps) func(ctx context.Context, tools []mcp.Tool
 		// Set tenant context for the config query
 		tenantCtx := database.SetTenantScope(ctx, scope)
 
+		// Check if project has a datasource configured
+		// Without a datasource, tools like query, execute, sample are useless
+		hasDatasource := false
+		if deps.ProjectService != nil {
+			datasourceID, err := deps.ProjectService.GetDefaultDatasourceID(tenantCtx, projectID)
+			if err != nil {
+				deps.Logger.Debug("Tool filter: failed to check default datasource",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+				// On error, assume no datasource (safer)
+			} else if datasourceID != uuid.Nil {
+				hasDatasource = true
+			}
+		}
+
+		// If no datasource is configured, only expose health tool
+		if !hasDatasource {
+			deps.Logger.Debug("Tool filter: no datasource configured, returning only health",
+				zap.String("project_id", projectID.String()))
+			return filterToHealthOnly(tools)
+		}
+
 		// Check if this is agent authentication (Subject = "agent" set by MCP auth middleware)
 		isAgent := claims.Subject == "agent"
 
