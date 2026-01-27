@@ -15,26 +15,21 @@ This plan addresses issues discovered during the MCP tool test suite run on 2026
 
 ---
 
-## Task 1: Fix Entity Creation Not Persisted
+## Task 1: Fix Entity Creation Not Persisted [NOT REPRODUCIBLE] ✅
 
 **Issue:** `./plans/ISSUE-entity-creation-not-persisted.md`
 
 **Summary:** `update_entity` MCP tool returns `{"created": true}` but the entity is not actually persisted. Immediately calling `get_entity` returns `ENTITY_NOT_FOUND`.
 
-**Investigation:**
-- Start at `pkg/mcp/tools/` - find the `update_entity` tool implementation
-- Trace the code path from tool handler → service → repository
-- Check if transaction is being committed
-- Check if entity is being written to correct project
-- Check if there's a pending/approval state
+**Status:** Investigation found no code bug. All integration tests pass, including a test that specifically reproduces the reported scenario with separate database connections.
 
-**Verification:**
-```bash
-# After fix, test via MCP:
-# 1. Call update_entity with name="FixTest_Entity"
-# 2. Call get_entity with name="FixTest_Entity"
-# 3. Should return the entity, not ENTITY_NOT_FOUND
-```
+**Findings:**
+- Code correctly commits entity to database without requiring a transaction
+- RLS policies are correctly configured
+- Manual MCP testing confirms entity creation and retrieval works
+- New integration test `TestEntityTools_Integration_SeparateConnections` verifies the exact scenario
+
+**Likely cause:** Test environment issue (stale data, server restart, or configuration mismatch)
 
 ---
 
