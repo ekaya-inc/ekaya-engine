@@ -148,7 +148,7 @@ async deleteProjectKnowledge(projectId: string, id: string): Promise<ApiResponse
 
 ---
 
-### 4. Frontend: Project Knowledge Page
+### 4. Frontend: Project Knowledge Page ✓
 
 **File:** `ui/src/pages/ProjectKnowledgePage.tsx` (new)
 
