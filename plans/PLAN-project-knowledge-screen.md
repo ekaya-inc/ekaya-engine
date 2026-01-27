@@ -30,7 +30,7 @@ Add a "Project Knowledge" tile and screen to manage domain facts learned during 
 
 ## Implementation Tasks
 
-### 1. Backend: Knowledge Handler
+### 1. Backend: Knowledge Handler ✓
 
 **File:** `pkg/handlers/knowledge_handler.go` (new)
 

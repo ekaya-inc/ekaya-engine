@@ -420,6 +420,10 @@ func main() {
 	glossaryHandler := handlers.NewGlossaryHandler(glossaryService, logger)
 	glossaryHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
+	// Register knowledge handler (protected) - project knowledge facts
+	knowledgeHandler := handlers.NewKnowledgeHandler(knowledgeService, logger)
+	knowledgeHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
 	// Register installed apps handler (protected) - application installation tracking
 	installedAppHandler := handlers.NewInstalledAppHandler(installedAppService, logger)
 	installedAppHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)

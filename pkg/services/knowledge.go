@@ -15,6 +15,9 @@ type KnowledgeService interface {
 	// Store creates or updates a knowledge fact.
 	Store(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error)
 
+	// Update modifies an existing knowledge fact by ID.
+	Update(ctx context.Context, projectID, id uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error)
+
 	// GetAll retrieves all knowledge facts for a project.
 	GetAll(ctx context.Context, projectID uuid.UUID) ([]*models.KnowledgeFact, error)
 
@@ -77,6 +80,33 @@ func (s *knowledgeService) Store(ctx context.Context, projectID uuid.UUID, factT
 	}
 
 	s.logger.Info("Knowledge fact stored",
+		zap.String("project_id", projectID.String()),
+		zap.String("fact_type", factType),
+		zap.String("key", key))
+
+	return fact, nil
+}
+
+func (s *knowledgeService) Update(ctx context.Context, projectID, id uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
+	fact := &models.KnowledgeFact{
+		ID:        id,
+		ProjectID: projectID,
+		FactType:  factType,
+		Key:       key,
+		Value:     value,
+		Context:   contextInfo,
+	}
+
+	if err := s.repo.Upsert(ctx, fact); err != nil {
+		s.logger.Error("Failed to update knowledge fact",
+			zap.String("id", id.String()),
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return nil, err
+	}
+
+	s.logger.Info("Knowledge fact updated",
+		zap.String("id", id.String()),
 		zap.String("project_id", projectID.String()),
 		zap.String("fact_type", factType),
 		zap.String("key", key))

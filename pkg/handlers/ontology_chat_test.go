@@ -113,6 +113,16 @@ func (m *mockKnowledgeServiceUnit) GetByType(ctx context.Context, projectID uuid
 	return []*models.KnowledgeFact{}, nil
 }
 
+func (m *mockKnowledgeServiceUnit) Update(ctx context.Context, projectID, id uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
+	return &models.KnowledgeFact{
+		ID:        id,
+		ProjectID: projectID,
+		FactType:  factType,
+		Key:       key,
+		Value:     value,
+	}, nil
+}
+
 func (m *mockKnowledgeServiceUnit) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
