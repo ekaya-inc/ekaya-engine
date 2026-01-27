@@ -31,7 +31,9 @@ Create a new standalone page at route `/projects/{pid}/delete`:
 - Explain what will be deleted (both ekaya-engine and ekaya-central data)
 - Require typing "delete project" to confirm (consistent with ontology deletion)
 - Show progress states: confirming → deleting from central → deleting from engine → redirecting
-- Handle errors gracefully with retry option
+- Handle errors gracefully:
+  - If central API fails: show error with "Retry" and "Delete Local Only" buttons
+  - "Delete Local Only" shows warning that ekaya-central project will be orphaned, then calls API with `force=true`
 - Back button returns to settings page
 
 ### Task 2: Add Route for Delete Page
@@ -53,12 +55,15 @@ Add route: `<Route path="/projects/:pid/delete" element={<DeleteProjectPage />} 
 
 Modify `Delete` handler or create new endpoint `DELETE /api/projects/{pid}/full-delete`:
 - Accept optional `central_delete_token` in request body or header
+- Accept optional `force` boolean parameter to proceed despite central API errors
 - If ekaya-central PAPI URL is configured for the project:
   1. Call ekaya-central's `DELETE /projects/{projectId}` with admin JWT
-  2. If ekaya-central deletion fails, return error (do not proceed)
+  2. If ekaya-central deletion fails:
+     - If `force=false` (default): return error with option to force
+     - If `force=true`: log warning, proceed to delete from ekaya-engine anyway
   3. If ekaya-central deletion succeeds, proceed to delete from ekaya-engine
 - If no PAPI URL (standalone mode), just delete from ekaya-engine
-- Return 204 on success
+- Return 204 on success, include `central_deleted: bool` in response
 
 ### Task 5: Create ekaya-central API Client
 
@@ -107,13 +112,20 @@ Success?           │
   ┌─┴─┐            │
   │   │            │
   ▼   ▼            │
- Yes  No──────────►Return error
-  │
-  ▼
+ Yes  No           │
+  │   │            │
+  │   ▼            │
+  │  force=true? ──┼──► No: Return error (show "Delete Local Only" option)
+  │   │            │
+  │   ▼ Yes        │
+  │   │            │
+  └───┼────────────┘
+      │
+      ▼
 Delete from ekaya-engine
          │
          ▼
-Return 204 + redirect info
+Return 204 + redirect info (+ central_deleted: bool)
          │
          ▼
 Frontend redirects to ekaya-central projects page
@@ -121,10 +133,12 @@ Frontend redirects to ekaya-central projects page
 
 ## Error Handling
 
-- **ekaya-central unreachable:** Show error, suggest retry later
-- **ekaya-central returns 403:** Show "unauthorized" error
-- **ekaya-central returns 404:** Project already deleted there, proceed with engine deletion
-- **ekaya-engine deletion fails:** Show error (central already deleted - mention this)
+- **ekaya-central unreachable:** Show error with two options:
+  1. "Retry" - try again
+  2. "Delete Local Only" - proceeds with `force=true`, deletes from ekaya-engine only (warns user that ekaya-central project will remain orphaned)
+- **ekaya-central returns 403:** Show "unauthorized" error with "Delete Local Only" option
+- **ekaya-central returns 404:** Project already deleted there, proceed with engine deletion automatically
+- **ekaya-engine deletion fails:** Show error (if central already deleted, mention this)
 
 ## Dependencies
 
@@ -137,3 +151,4 @@ Frontend redirects to ekaya-central projects page
 - Integration test for full deletion flow
 - Test standalone mode (no PAPI URL)
 - Test error scenarios (central unreachable, 403, 404)
+- Test force=true bypasses central API errors and deletes locally
