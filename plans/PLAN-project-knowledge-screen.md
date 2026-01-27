@@ -108,7 +108,7 @@ export interface UpdateProjectKnowledgeRequest {
 
 ---
 
-### 3. Frontend: API Service Methods
+### 3. Frontend: API Service Methods ✓
 
 **File:** `ui/src/services/engineApi.ts`
 
