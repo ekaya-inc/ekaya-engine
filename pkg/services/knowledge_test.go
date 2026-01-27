@@ -17,14 +17,14 @@ import (
 
 // knowledgeServiceTestContext holds test dependencies for knowledge service tests.
 type knowledgeServiceTestContext struct {
-	t            *testing.T
-	engineDB     *testhelpers.EngineDB
-	service      KnowledgeService
+	t             *testing.T
+	engineDB      *testhelpers.EngineDB
+	service       KnowledgeService
 	knowledgeRepo repositories.KnowledgeRepository
 	ontologyRepo  repositories.OntologyRepository
-	projectID    uuid.UUID
-	ontologyID   uuid.UUID
-	testUserID   uuid.UUID
+	projectID     uuid.UUID
+	ontologyID    uuid.UUID
+	testUserID    uuid.UUID
 }
 
 // setupKnowledgeServiceTest initializes the test context with shared testcontainer.

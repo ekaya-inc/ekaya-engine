@@ -49,6 +49,26 @@ func (m *mockKnowledgeService) Store(ctx context.Context, projectID uuid.UUID, f
 	}, nil
 }
 
+func (m *mockKnowledgeService) StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo, source string) (*models.KnowledgeFact, error) {
+	if m.storeErr != nil {
+		return nil, m.storeErr
+	}
+	if m.storeFact != nil {
+		return m.storeFact, nil
+	}
+	return &models.KnowledgeFact{
+		ID:        uuid.New(),
+		ProjectID: projectID,
+		FactType:  factType,
+		Key:       key,
+		Value:     value,
+		Context:   contextInfo,
+		Source:    source,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}, nil
+}
+
 func (m *mockKnowledgeService) Update(ctx context.Context, projectID, id uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
 	if m.updateErr != nil {
 		return nil, m.updateErr
