@@ -892,16 +892,32 @@ class EngineApiService {
   // --- Ontology DAG Methods ---
 
   /**
+   * Get project overview (for repopulating textarea on re-extraction)
+   * GET /api/projects/{projectId}/project-knowledge/overview
+   */
+  async getProjectOverview(
+    projectId: string
+  ): Promise<ApiResponse<{ overview: string | null }>> {
+    return this.makeRequest<{ overview: string | null }>(
+      `/${projectId}/project-knowledge/overview`
+    );
+  }
+
+  /**
    * Start or refresh ontology extraction (DAG-based)
    * POST /api/projects/{projectId}/datasources/{datasourceId}/ontology/extract
    */
   async startOntologyExtraction(
     projectId: string,
-    datasourceId: string
+    datasourceId: string,
+    projectOverview?: string
   ): Promise<ApiResponse<DAGStatusResponse>> {
     return this.makeRequest<DAGStatusResponse>(
       `/${projectId}/datasources/${datasourceId}/ontology/extract`,
-      { method: 'POST' }
+      {
+        method: 'POST',
+        body: JSON.stringify({ project_overview: projectOverview }),
+      }
     );
   }
 
