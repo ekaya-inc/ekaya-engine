@@ -115,7 +115,7 @@ This plan addresses issues discovered during the MCP tool test suite run on 2026
 
 ---
 
-## Task 5: Fix probe_relationship Schema Column Reference
+## Task 5: Fix probe_relationship Schema Column Reference ✅
 
 **Issue:** `./plans/ISSUE-probe-relationship-schema-column-missing.md`
 
