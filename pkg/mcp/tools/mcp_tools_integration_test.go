@@ -25,30 +25,41 @@ import (
 
 // mcpToolsTestContext holds test dependencies for MCP tools integration tests.
 type mcpToolsTestContext struct {
-	t         *testing.T
-	engineDB  *testhelpers.EngineDB
-	projectID uuid.UUID
+	t            *testing.T
+	engineDB     *testhelpers.EngineDB
+	projectID    uuid.UUID
+	datasourceID uuid.UUID
 }
 
-// setupMCPToolsTest creates a new project WITHOUT any explicit MCP config.
-// This simulates a newly created project where tools should default to ON.
+// setupMCPToolsTest creates a new project with a datasource configured.
+// This simulates a project that is ready to use tools (datasource is required).
 func setupMCPToolsTest(t *testing.T) *mcpToolsTestContext {
 	t.Helper()
 
 	engineDB := testhelpers.GetEngineDB(t)
 	projectID := uuid.New()
+	datasourceID := uuid.New()
 
-	// Create project but NO MCP config - this is the key to testing defaults
+	// Create project with a datasource configured
 	ctx := context.Background()
 	scope, err := engineDB.DB.WithTenant(ctx, projectID)
 	require.NoError(t, err)
 	defer scope.Close()
 
 	tenantCtx := database.SetTenantScope(ctx, scope)
+
+	// Create project with default_datasource_id set
 	_, err = scope.Conn.Exec(tenantCtx, `
-		INSERT INTO engine_projects (id, name, created_at, updated_at)
-		VALUES ($1, 'MCP Tools Default Test', NOW(), NOW())
-		ON CONFLICT (id) DO NOTHING`, projectID)
+		INSERT INTO engine_projects (id, name, parameters, created_at, updated_at)
+		VALUES ($1, 'MCP Tools Default Test', $2::jsonb, NOW(), NOW())
+		ON CONFLICT (id) DO NOTHING`, projectID, `{"default_datasource_id": "`+datasourceID.String()+`"}`)
+	require.NoError(t, err)
+
+	// Create a minimal datasource record
+	_, err = scope.Conn.Exec(tenantCtx, `
+		INSERT INTO engine_datasources (id, project_id, name, datasource_type, datasource_config, created_at, updated_at)
+		VALUES ($1, $2, 'Test Datasource', 'postgres', '{}', NOW(), NOW())
+		ON CONFLICT (id) DO NOTHING`, datasourceID, projectID)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
@@ -58,15 +69,17 @@ func setupMCPToolsTest(t *testing.T) *mcpToolsTestContext {
 			return
 		}
 		defer cleanupScope.Close()
-		// Clean up MCP config if any was created
+		// Clean up test data
 		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_mcp_config WHERE project_id = $1", projectID)
+		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_datasources WHERE project_id = $1", projectID)
 		_, _ = cleanupScope.Conn.Exec(cleanupCtx, "DELETE FROM engine_projects WHERE id = $1", projectID)
 	})
 
 	return &mcpToolsTestContext{
-		t:         t,
-		engineDB:  engineDB,
-		projectID: projectID,
+		t:            t,
+		engineDB:     engineDB,
+		projectID:    projectID,
+		datasourceID: datasourceID,
 	}
 }
 
@@ -83,9 +96,12 @@ func createAllMCPTools() []mcp.Tool {
 
 // filterToolsForTest applies the tool filter and returns filtered tool names.
 func (tc *mcpToolsTestContext) filterToolsForTest(claims *auth.Claims) []string {
+	// Create a mock project service that returns the datasource ID
+	projectService := &mockProjectService{defaultDatasourceID: tc.datasourceID}
 	deps := &MCPToolDeps{
 		DB:               tc.engineDB.DB,
-		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, &mockProjectService{}, nil, "http://localhost", zap.NewNop()),
+		MCPConfigService: services.NewMCPConfigService(repositories.NewMCPConfigRepository(), &mockQueryService{}, projectService, nil, "http://localhost", zap.NewNop()),
+		ProjectService:   projectService,
 		Logger:           zap.NewNop(),
 	}
 

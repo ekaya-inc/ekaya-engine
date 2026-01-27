@@ -19,6 +19,14 @@ import (
 // it can also be called via checkApprovedQueriesEnabled. This ensures no mismatch
 // between what tools are visible and what tools are executable.
 
+// consistencyTestDatasourceID is a fixed UUID used in tests to simulate a configured datasource.
+var consistencyTestDatasourceID = uuid.MustParse("22222222-2222-2222-2222-222222222222")
+
+// consistencyMockProjectService returns a mock project service with a datasource configured.
+func consistencyMockProjectService() *mockProjectService {
+	return &mockProjectService{defaultDatasourceID: consistencyTestDatasourceID}
+}
+
 // setupTestProject creates a project and MCP config for testing.
 func setupTestProject(t *testing.T, db *database.DB, projectID uuid.UUID, toolGroups map[string]*models.ToolGroupConfig) {
 	t.Helper()
@@ -90,6 +98,7 @@ func TestAgentToolsEnabled_ListAndCallConsistency(t *testing.T) {
 
 	// Part 1: Verify tool LISTING shows approved queries tools for agent auth
 	filterDeps := &MCPToolDeps{
+		ProjectService:   consistencyMockProjectService(),
 		DB:               engineDB.DB,
 		MCPConfigService: mcpConfigService,
 		Logger:           zap.NewNop(),
@@ -164,6 +173,7 @@ func TestApprovedQueriesEnabled_ListAndCallConsistency(t *testing.T) {
 
 	// Part 1: Verify tool LISTING shows approved queries tools
 	filterDeps := &MCPToolDeps{
+		ProjectService:   consistencyMockProjectService(),
 		DB:               engineDB.DB,
 		MCPConfigService: mcpConfigService,
 		Logger:           zap.NewNop(),
@@ -231,6 +241,7 @@ func TestNeitherEnabled_QueryToolsNotListed(t *testing.T) {
 
 	// Part 1: Verify tool LISTING does NOT show Query loadout tools
 	filterDeps := &MCPToolDeps{
+		ProjectService:   consistencyMockProjectService(),
 		DB:               engineDB.DB,
 		MCPConfigService: mcpConfigService,
 		Logger:           zap.NewNop(),
@@ -315,6 +326,7 @@ func TestAgentAuth_AgentToolsDisabled(t *testing.T) {
 
 	// Part 1: Verify tool LISTING does NOT show tools for agent
 	filterDeps := &MCPToolDeps{
+		ProjectService:   consistencyMockProjectService(),
 		DB:               engineDB.DB,
 		MCPConfigService: mcpConfigService,
 		Logger:           zap.NewNop(),
@@ -366,6 +378,7 @@ func TestBothEnabled_UserSeesApprovedQueries(t *testing.T) {
 
 	// Part 1: Verify user sees approved queries tools
 	filterDeps := &MCPToolDeps{
+		ProjectService:   consistencyMockProjectService(),
 		DB:               engineDB.DB,
 		MCPConfigService: mcpConfigService,
 		Logger:           zap.NewNop(),
@@ -434,6 +447,7 @@ func TestAgentToolsEnabled_LimitedQueryToolsConsistency(t *testing.T) {
 	)
 
 	filterDeps := &MCPToolDeps{
+		ProjectService:   consistencyMockProjectService(),
 		DB:               engineDB.DB,
 		MCPConfigService: mcpConfigService,
 		Logger:           zap.NewNop(),
