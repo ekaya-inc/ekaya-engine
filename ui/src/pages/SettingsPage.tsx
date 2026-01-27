@@ -35,7 +35,7 @@ const SettingsPage = () => {
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleDeleteProject = async () => {
-    if (!pid || deleteConfirmation !== "DELETE") return;
+    if (!pid || deleteConfirmation !== "delete project") return;
 
     setIsDeleting(true);
     setDeleteError(null);
@@ -243,12 +243,12 @@ const SettingsPage = () => {
           </DialogHeader>
           <div className="py-4">
             <label className="text-sm font-medium text-text-primary">
-              Type <span className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">DELETE</span> to confirm
+              Type <span className="font-mono bg-gray-100 dark:bg-gray-800 px-1 rounded">delete project</span> to confirm
             </label>
             <Input
               value={deleteConfirmation}
               onChange={(e) => setDeleteConfirmation(e.target.value)}
-              placeholder="DELETE"
+              placeholder="delete project"
               className="mt-2"
               disabled={isDeleting}
             />
@@ -267,7 +267,7 @@ const SettingsPage = () => {
             <Button
               variant="destructive"
               onClick={handleDeleteProject}
-              disabled={deleteConfirmation !== "DELETE" || isDeleting}
+              disabled={deleteConfirmation !== "delete project" || isDeleting}
             >
               {isDeleting ? (
                 <>
