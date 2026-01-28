@@ -1157,6 +1157,238 @@ func generateBooleanDescription(prefixDesc, humanizedFeature string) string {
 }
 
 // ============================================================================
+// External ID Pattern Detection
+// ============================================================================
+
+// ExternalIDPatternDescription contains the auto-generated description for a column
+// containing external service identifiers (e.g., AWS SES Message-ID, Stripe IDs).
+type ExternalIDPatternDescription struct {
+	Description  string  // Auto-generated description with pattern info
+	SemanticType string  // Semantic type: "external_id_aws_ses", "external_id_stripe", etc.
+	Role         string  // Column role: "identifier"
+	PatternName  string  // Name of the detected pattern (e.g., "AWS SES Message-ID")
+	MatchRate    float64 // Percentage of sample values matching the pattern (0.0-100.0)
+}
+
+// ExternalIDPattern represents a known external ID format with its regex and metadata.
+type ExternalIDPattern struct {
+	Name         string         // Human-readable name (e.g., "AWS SES Message-ID")
+	Pattern      *regexp.Regexp // Regex pattern to match
+	SemanticType string         // Semantic type for this pattern
+	Description  string         // Description template with format info
+}
+
+// externalIDPatterns defines known external ID formats and their patterns.
+// Patterns are checked in order - more specific patterns should come first.
+var externalIDPatterns = []ExternalIDPattern{
+	{
+		Name:         "AWS SES Message-ID",
+		Pattern:      regexp.MustCompile(`^[0-9a-f-]+@email\.amazonses\.com$`),
+		SemanticType: "external_id_aws_ses",
+		Description:  "AWS SES Message-ID format. External reference to sent email in AWS SES.",
+	},
+	{
+		Name:         "Stripe Payment Intent",
+		Pattern:      regexp.MustCompile(`^pi_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_payment_intent",
+		Description:  "Stripe Payment Intent ID. External reference to a payment in Stripe.",
+	},
+	{
+		Name:         "Stripe Payment Method",
+		Pattern:      regexp.MustCompile(`^pm_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_payment_method",
+		Description:  "Stripe Payment Method ID. External reference to a stored payment method in Stripe.",
+	},
+	{
+		Name:         "Stripe Charge",
+		Pattern:      regexp.MustCompile(`^ch_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_charge",
+		Description:  "Stripe Charge ID. External reference to a charge in Stripe.",
+	},
+	{
+		Name:         "Stripe Customer",
+		Pattern:      regexp.MustCompile(`^cus_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_customer",
+		Description:  "Stripe Customer ID. External reference to a customer in Stripe.",
+	},
+	{
+		Name:         "Stripe Subscription",
+		Pattern:      regexp.MustCompile(`^sub_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_subscription",
+		Description:  "Stripe Subscription ID. External reference to a subscription in Stripe.",
+	},
+	{
+		Name:         "Stripe Invoice",
+		Pattern:      regexp.MustCompile(`^in_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_invoice",
+		Description:  "Stripe Invoice ID. External reference to an invoice in Stripe.",
+	},
+	{
+		Name:         "Stripe Refund",
+		Pattern:      regexp.MustCompile(`^re_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_refund",
+		Description:  "Stripe Refund ID. External reference to a refund in Stripe.",
+	},
+	{
+		Name:         "Stripe Price",
+		Pattern:      regexp.MustCompile(`^price_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_price",
+		Description:  "Stripe Price ID. External reference to a price object in Stripe.",
+	},
+	{
+		Name:         "Stripe Product",
+		Pattern:      regexp.MustCompile(`^prod_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_product",
+		Description:  "Stripe Product ID. External reference to a product in Stripe.",
+	},
+	{
+		Name:         "Stripe Transfer",
+		Pattern:      regexp.MustCompile(`^tr_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_transfer",
+		Description:  "Stripe Transfer ID. External reference to a transfer in Stripe.",
+	},
+	{
+		Name:         "Stripe Payout",
+		Pattern:      regexp.MustCompile(`^po_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_payout",
+		Description:  "Stripe Payout ID. External reference to a payout in Stripe.",
+	},
+	{
+		Name:         "Stripe Balance Transaction",
+		Pattern:      regexp.MustCompile(`^txn_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_balance_txn",
+		Description:  "Stripe Balance Transaction ID. External reference to a balance transaction in Stripe.",
+	},
+	{
+		Name:         "Stripe Setup Intent",
+		Pattern:      regexp.MustCompile(`^seti_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_setup_intent",
+		Description:  "Stripe Setup Intent ID. External reference to a setup intent in Stripe.",
+	},
+	{
+		Name:         "Stripe Event",
+		Pattern:      regexp.MustCompile(`^evt_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_event",
+		Description:  "Stripe Event ID. External reference to a webhook event in Stripe.",
+	},
+	{
+		Name:         "Stripe Account",
+		Pattern:      regexp.MustCompile(`^acct_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_account",
+		Description:  "Stripe Connect Account ID. External reference to a connected account in Stripe.",
+	},
+	{
+		Name:         "Twilio Message SID",
+		Pattern:      regexp.MustCompile(`^(SM|MM)[a-f0-9]{32}$`),
+		SemanticType: "external_id_twilio_message",
+		Description:  "Twilio Message SID. External reference to an SMS/MMS message in Twilio.",
+	},
+	{
+		Name:         "Twilio Call SID",
+		Pattern:      regexp.MustCompile(`^CA[a-f0-9]{32}$`),
+		SemanticType: "external_id_twilio_call",
+		Description:  "Twilio Call SID. External reference to a phone call in Twilio.",
+	},
+	{
+		Name:         "Twilio Account SID",
+		Pattern:      regexp.MustCompile(`^AC[a-f0-9]{32}$`),
+		SemanticType: "external_id_twilio_account",
+		Description:  "Twilio Account SID. External reference to a Twilio account.",
+	},
+	{
+		Name:         "PayPal Transaction ID",
+		Pattern:      regexp.MustCompile(`^[A-Z0-9]{17}$`),
+		SemanticType: "external_id_paypal_transaction",
+		Description:  "PayPal Transaction ID format. External reference to a transaction in PayPal.",
+	},
+	{
+		Name:         "MongoDB ObjectId",
+		Pattern:      regexp.MustCompile(`^[a-f0-9]{24}$`),
+		SemanticType: "external_id_mongodb_objectid",
+		Description:  "MongoDB ObjectId format. External reference to a document in MongoDB.",
+	},
+	{
+		Name:         "Sendgrid Message ID",
+		Pattern:      regexp.MustCompile(`^[a-zA-Z0-9-_.]+\.sendgrid\.net$`),
+		SemanticType: "external_id_sendgrid",
+		Description:  "SendGrid Message ID format. External reference to an email in SendGrid.",
+	},
+	{
+		Name:         "Firebase UID",
+		Pattern:      regexp.MustCompile(`^[a-zA-Z0-9]{28}$`),
+		SemanticType: "external_id_firebase_uid",
+		Description:  "Firebase UID format. External reference to a user in Firebase Auth.",
+	},
+	{
+		Name:         "Plaid ID",
+		Pattern:      regexp.MustCompile(`^[a-zA-Z0-9]{30,40}$`),
+		SemanticType: "external_id_plaid",
+		Description:  "Plaid ID format. External reference to an item/account in Plaid.",
+	},
+	// Note: UUID detection is handled by detectUUIDTextColumnPattern
+	// We skip UUID here to avoid duplicate detection
+}
+
+// detectExternalIDPattern checks if a text column contains external service identifiers
+// and returns an auto-generated description if detected.
+//
+// Pattern detection rules:
+// - Column type is text/varchar/char
+// - Has sample values available
+// - >95% of non-empty sample values match a known external ID pattern
+//
+// Returns nil if no external ID pattern is detected.
+func detectExternalIDPattern(col *models.SchemaColumn) *ExternalIDPatternDescription {
+	// Check column type is text-based
+	if !isTextType(col.DataType) {
+		return nil
+	}
+
+	// Need sample values to analyze
+	if len(col.SampleValues) == 0 {
+		return nil
+	}
+
+	// Filter out empty values
+	nonEmptyValues := make([]string, 0, len(col.SampleValues))
+	for _, val := range col.SampleValues {
+		if val != "" {
+			nonEmptyValues = append(nonEmptyValues, val)
+		}
+	}
+
+	if len(nonEmptyValues) == 0 {
+		return nil
+	}
+
+	// Check each pattern against sample values
+	for _, extPattern := range externalIDPatterns {
+		matchCount := 0
+		for _, val := range nonEmptyValues {
+			if extPattern.Pattern.MatchString(val) {
+				matchCount++
+			}
+		}
+
+		// Calculate match rate
+		matchRate := float64(matchCount) / float64(len(nonEmptyValues)) * 100.0
+
+		// Require >95% match rate for high confidence
+		if matchRate > 95.0 {
+			return &ExternalIDPatternDescription{
+				Description:  extPattern.Description,
+				SemanticType: extPattern.SemanticType,
+				Role:         models.ColumnRoleIdentifier,
+				PatternName:  extPattern.Name,
+				MatchRate:    matchRate,
+			}
+		}
+	}
+
+	return nil
+}
+
+// ============================================================================
 // Role Detection from Column Naming Patterns
 // ============================================================================
 
@@ -1957,10 +2189,23 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 		}
 
 		// Apply UUID text column pattern detection (overrides LLM description with data-driven description)
+		// If UUID pattern is detected, skip external ID detection since UUID is a specific type
+		uuidDetected := false
 		if uuidText := detectUUIDTextColumnPattern(col); uuidText != nil {
 			detail.Description = uuidText.Description
 			detail.SemanticType = uuidText.SemanticType
 			detail.Role = uuidText.Role
+			uuidDetected = true
+		}
+
+		// Apply external ID pattern detection (only if UUID was not detected)
+		// This detects patterns like AWS SES Message-ID, Stripe IDs, Twilio SIDs, etc.
+		if !uuidDetected {
+			if externalID := detectExternalIDPattern(col); externalID != nil {
+				detail.Description = externalID.Description
+				detail.SemanticType = externalID.SemanticType
+				detail.Role = externalID.Role
+			}
 		}
 
 		// Apply timestamp scale pattern detection (overrides LLM description with data-driven description)

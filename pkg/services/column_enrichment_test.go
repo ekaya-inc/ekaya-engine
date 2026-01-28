@@ -5369,3 +5369,605 @@ func TestGenerateBooleanDescription(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// External ID Pattern Detection Tests
+// =============================================================================
+
+func TestDetectExternalIDPattern_AWSSESMessageID(t *testing.T) {
+	// AWS SES Message-ID format: hexadecimal-uuid@email.amazonses.com
+	col := &models.SchemaColumn{
+		ColumnName: "linked_email_id",
+		DataType:   "varchar(100)",
+		SampleValues: []string{
+			"0102018d1234abcd-12345678-1234-1234-1234-123456789012@email.amazonses.com",
+			"0102018d5678efab-abcd1234-5678-abcd-5678-abcdef123456@email.amazonses.com",
+			"0102018d9012abcd-98765432-1098-7654-3210-fedcba987654@email.amazonses.com",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect AWS SES Message-ID pattern")
+	assert.Equal(t, "AWS SES Message-ID", result.PatternName)
+	assert.Equal(t, "external_id_aws_ses", result.SemanticType)
+	assert.Contains(t, result.Description, "AWS SES")
+	assert.Contains(t, result.Description, "email")
+	assert.Equal(t, models.ColumnRoleIdentifier, result.Role)
+	assert.InDelta(t, 100.0, result.MatchRate, 0.1)
+}
+
+func TestDetectExternalIDPattern_StripePaymentIntent(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "payment_intent_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"pi_1234567890abcdef",
+			"pi_abcdefghijklmnop",
+			"pi_ABCD1234efgh5678",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Payment Intent pattern")
+	assert.Equal(t, "Stripe Payment Intent", result.PatternName)
+	assert.Equal(t, "external_id_stripe_payment_intent", result.SemanticType)
+	assert.Contains(t, result.Description, "Stripe")
+	assert.Contains(t, result.Description, "Payment Intent")
+}
+
+func TestDetectExternalIDPattern_StripePaymentMethod(t *testing.T) {
+	// Stripe Payment Method IDs are in the format: pm_<alphanumeric>
+	col := &models.SchemaColumn{
+		ColumnName: "payment_method",
+		DataType:   "varchar(30)",
+		SampleValues: []string{
+			"pm_1234567890abcdef",
+			"pm_ABCDEFghij123456",
+			"pm_XYZ789abc789XYZ7",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Payment Method pattern")
+	assert.Equal(t, "Stripe Payment Method", result.PatternName)
+	assert.Equal(t, "external_id_stripe_payment_method", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeCharge(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "charge_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"ch_1234567890abcdef",
+			"ch_abcdefghijklmnop",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Charge pattern")
+	assert.Equal(t, "Stripe Charge", result.PatternName)
+	assert.Equal(t, "external_id_stripe_charge", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeCustomer(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "stripe_customer_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"cus_1234567890abcdef",
+			"cus_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Customer pattern")
+	assert.Equal(t, "Stripe Customer", result.PatternName)
+	assert.Equal(t, "external_id_stripe_customer", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeSubscription(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "subscription_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"sub_1234567890abcdef",
+			"sub_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Subscription pattern")
+	assert.Equal(t, "Stripe Subscription", result.PatternName)
+	assert.Equal(t, "external_id_stripe_subscription", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeInvoice(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "invoice_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"in_1234567890abcdef",
+			"in_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Invoice pattern")
+	assert.Equal(t, "Stripe Invoice", result.PatternName)
+	assert.Equal(t, "external_id_stripe_invoice", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeRefund(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "refund_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"re_1234567890abcdef",
+			"re_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Refund pattern")
+	assert.Equal(t, "Stripe Refund", result.PatternName)
+	assert.Equal(t, "external_id_stripe_refund", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripePrice(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "price_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"price_1234567890abcdef",
+			"price_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Price pattern")
+	assert.Equal(t, "Stripe Price", result.PatternName)
+	assert.Equal(t, "external_id_stripe_price", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeProduct(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "product_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"prod_1234567890abcdef",
+			"prod_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Product pattern")
+	assert.Equal(t, "Stripe Product", result.PatternName)
+	assert.Equal(t, "external_id_stripe_product", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeTransfer(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "transfer_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"tr_1234567890abcdef",
+			"tr_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Transfer pattern")
+	assert.Equal(t, "Stripe Transfer", result.PatternName)
+	assert.Equal(t, "external_id_stripe_transfer", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripePayout(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "payout_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"po_1234567890abcdef",
+			"po_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Payout pattern")
+	assert.Equal(t, "Stripe Payout", result.PatternName)
+	assert.Equal(t, "external_id_stripe_payout", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeBalanceTransaction(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "txn_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"txn_1234567890abcdef",
+			"txn_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Balance Transaction pattern")
+	assert.Equal(t, "Stripe Balance Transaction", result.PatternName)
+	assert.Equal(t, "external_id_stripe_balance_txn", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeSetupIntent(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "setup_intent_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"seti_1234567890abcdef",
+			"seti_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Setup Intent pattern")
+	assert.Equal(t, "Stripe Setup Intent", result.PatternName)
+	assert.Equal(t, "external_id_stripe_setup_intent", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeEvent(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "event_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"evt_1234567890abcdef",
+			"evt_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Event pattern")
+	assert.Equal(t, "Stripe Event", result.PatternName)
+	assert.Equal(t, "external_id_stripe_event", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeAccount(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "connect_account_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"acct_1234567890abcdef",
+			"acct_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Account pattern")
+	assert.Equal(t, "Stripe Account", result.PatternName)
+	assert.Equal(t, "external_id_stripe_account", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_TwilioSMSMessage(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "sms_sid",
+		DataType:   "text",
+		SampleValues: []string{
+			"SM1234567890abcdef1234567890abcdef",
+			"SM0987654321fedcba0987654321fedcba",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Twilio SMS Message SID pattern")
+	assert.Equal(t, "Twilio Message SID", result.PatternName)
+	assert.Equal(t, "external_id_twilio_message", result.SemanticType)
+	assert.Contains(t, result.Description, "Twilio")
+}
+
+func TestDetectExternalIDPattern_TwilioMMSMessage(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "mms_sid",
+		DataType:   "text",
+		SampleValues: []string{
+			"MM1234567890abcdef1234567890abcdef",
+			"MM0987654321fedcba0987654321fedcba",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Twilio MMS Message SID pattern")
+	assert.Equal(t, "Twilio Message SID", result.PatternName)
+}
+
+func TestDetectExternalIDPattern_TwilioCallSID(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "call_sid",
+		DataType:   "text",
+		SampleValues: []string{
+			"CA1234567890abcdef1234567890abcdef",
+			"CA0987654321fedcba0987654321fedcba",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Twilio Call SID pattern")
+	assert.Equal(t, "Twilio Call SID", result.PatternName)
+	assert.Equal(t, "external_id_twilio_call", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_TwilioAccountSID(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "twilio_account",
+		DataType:   "text",
+		SampleValues: []string{
+			"AC1234567890abcdef1234567890abcdef",
+			"AC0987654321fedcba0987654321fedcba",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Twilio Account SID pattern")
+	assert.Equal(t, "Twilio Account SID", result.PatternName)
+	assert.Equal(t, "external_id_twilio_account", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_MongoDBObjectId(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "mongo_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"507f1f77bcf86cd799439011",
+			"507f191e810c19729de860ea",
+			"5c8f8f8f8f8f8f8f8f8f8f8f",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect MongoDB ObjectId pattern")
+	assert.Equal(t, "MongoDB ObjectId", result.PatternName)
+	assert.Equal(t, "external_id_mongodb_objectid", result.SemanticType)
+	assert.Contains(t, result.Description, "MongoDB")
+}
+
+func TestDetectExternalIDPattern_NonTextColumn(t *testing.T) {
+	// Should not detect patterns in non-text columns
+	col := &models.SchemaColumn{
+		ColumnName: "external_id",
+		DataType:   "integer",
+		SampleValues: []string{
+			"12345",
+			"67890",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	assert.Nil(t, result, "Should not detect pattern in non-text column")
+}
+
+func TestDetectExternalIDPattern_NoSampleValues(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName:   "external_id",
+		DataType:     "text",
+		SampleValues: []string{},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	assert.Nil(t, result, "Should not detect pattern without sample values")
+}
+
+func TestDetectExternalIDPattern_AllEmptyValues(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName:   "external_id",
+		DataType:     "text",
+		SampleValues: []string{"", "", ""},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	assert.Nil(t, result, "Should not detect pattern with all empty values")
+}
+
+func TestDetectExternalIDPattern_LowMatchRate(t *testing.T) {
+	// Only 50% match rate (2 out of 4 values match)
+	col := &models.SchemaColumn{
+		ColumnName: "mixed_ids",
+		DataType:   "text",
+		SampleValues: []string{
+			"pi_1234567890abcdef",
+			"pi_abcdefghijklmnop",
+			"some_other_value_123",
+			"another_random_string",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	assert.Nil(t, result, "Should not detect pattern with <95% match rate")
+}
+
+func TestDetectExternalIDPattern_ExactThreshold(t *testing.T) {
+	// 95% match rate (19 out of 20 values match) - should NOT detect (needs >95%)
+	sampleValues := make([]string, 20)
+	for i := 0; i < 19; i++ {
+		sampleValues[i] = fmt.Sprintf("pi_%016d", i)
+	}
+	sampleValues[19] = "not_a_stripe_id"
+
+	col := &models.SchemaColumn{
+		ColumnName:   "payment_ids",
+		DataType:     "text",
+		SampleValues: sampleValues,
+	}
+
+	result := detectExternalIDPattern(col)
+
+	assert.Nil(t, result, "Should not detect pattern with exactly 95% match rate (needs >95%)")
+}
+
+func TestDetectExternalIDPattern_Above95Percent(t *testing.T) {
+	// 96% match rate (48 out of 50 values match) - should detect
+	sampleValues := make([]string, 50)
+	for i := 0; i < 48; i++ {
+		sampleValues[i] = fmt.Sprintf("pi_%016d", i)
+	}
+	sampleValues[48] = "not_a_stripe_id"
+	sampleValues[49] = "also_not_stripe"
+
+	col := &models.SchemaColumn{
+		ColumnName:   "payment_ids",
+		DataType:     "text",
+		SampleValues: sampleValues,
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect pattern with >95% match rate")
+	assert.Equal(t, "Stripe Payment Intent", result.PatternName)
+	assert.InDelta(t, 96.0, result.MatchRate, 0.1)
+}
+
+func TestDetectExternalIDPattern_RandomText(t *testing.T) {
+	// Random text that doesn't match any pattern
+	col := &models.SchemaColumn{
+		ColumnName: "description",
+		DataType:   "text",
+		SampleValues: []string{
+			"Hello world",
+			"This is a test",
+			"Random description text",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	assert.Nil(t, result, "Should not detect pattern in random text")
+}
+
+func TestDetectExternalIDPattern_TextTypeVariants(t *testing.T) {
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"varchar", "varchar(100)"},
+		{"VARCHAR uppercase", "VARCHAR(100)"},
+		{"text", "text"},
+		{"TEXT uppercase", "TEXT"},
+		{"char", "char(50)"},
+		{"CHAR uppercase", "CHAR(50)"},
+		{"character varying", "character varying(100)"},
+		{"nvarchar", "nvarchar(100)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "stripe_id",
+				DataType:   tt.dataType,
+				SampleValues: []string{
+					"pi_1234567890abcdef",
+					"pi_abcdefghijklmnop",
+				},
+			}
+
+			result := detectExternalIDPattern(col)
+			require.NotNil(t, result, "Should detect pattern with data type: %s", tt.dataType)
+		})
+	}
+}
+
+func TestDetectExternalIDPattern_IgnoresEmptyValuesInMatchRate(t *testing.T) {
+	// 3 out of 3 non-empty values match, 2 empty values should be ignored
+	col := &models.SchemaColumn{
+		ColumnName: "stripe_customer_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"cus_1234567890abcdef",
+			"",
+			"cus_ABCDefghIJKL1234",
+			"",
+			"cus_XYZ789xyz789XYZ7",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect pattern ignoring empty values")
+	assert.Equal(t, "Stripe Customer", result.PatternName)
+	assert.InDelta(t, 100.0, result.MatchRate, 0.1)
+}
+
+func TestDetectExternalIDPattern_AllPatternDescriptions(t *testing.T) {
+	// Verify all patterns have meaningful descriptions
+	for _, pattern := range externalIDPatterns {
+		assert.NotEmpty(t, pattern.Name, "Pattern must have a name")
+		assert.NotEmpty(t, pattern.SemanticType, "Pattern must have a semantic type")
+		assert.NotEmpty(t, pattern.Description, "Pattern must have a description")
+		assert.NotNil(t, pattern.Pattern, "Pattern must have a regex")
+
+		// Verify description contains useful context
+		t.Run(pattern.Name, func(t *testing.T) {
+			// Description should mention the service name
+			hasServiceContext := false
+			serviceKeywords := []string{"AWS", "Stripe", "Twilio", "PayPal", "MongoDB", "SendGrid", "Firebase", "Plaid"}
+			for _, keyword := range serviceKeywords {
+				if strings.Contains(pattern.Description, keyword) {
+					hasServiceContext = true
+					break
+				}
+			}
+			assert.True(t, hasServiceContext, "Description should mention the service: %s", pattern.Description)
+		})
+	}
+}
+
+func TestDetectExternalIDPattern_SendgridMessageID(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "sendgrid_message_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"message-id-12345.sendgrid.net",
+			"another_message.test.sendgrid.net",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect SendGrid Message ID pattern")
+	assert.Equal(t, "Sendgrid Message ID", result.PatternName)
+	assert.Equal(t, "external_id_sendgrid", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_MixedStripeIDs(t *testing.T) {
+	// Column contains different Stripe ID types - first matching pattern wins
+	col := &models.SchemaColumn{
+		ColumnName: "stripe_ids",
+		DataType:   "text",
+		SampleValues: []string{
+			"pi_1234567890abcdef", // Payment Intent
+			"pi_abcdefghijklmnop", // Payment Intent
+			"pi_XYZ789xyz789XYZ7", // Payment Intent
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect consistent Stripe IDs")
+	assert.Equal(t, "Stripe Payment Intent", result.PatternName)
+}

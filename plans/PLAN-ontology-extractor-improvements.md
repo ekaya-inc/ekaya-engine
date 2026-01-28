@@ -475,4 +475,4 @@ After implementation, re-run ontology extraction on tikr_production:
 - [x] **7. Cardinality Inference from Data**
 - [x] **8. Role Detection from Column Naming**
 - [x] **9. Boolean Naming Pattern Detection**
-- [ ] **10. Email/External ID Pattern Detection**
+- [x] **10. Email/External ID Pattern Detection**
