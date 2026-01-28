@@ -4487,8 +4487,8 @@ func TestPKMatch_LegacyMode_IDColumnsExemptFromFilters(t *testing.T) {
 	}
 }
 
-// TestFKDiscovery_Cardinality verifies that FK relationships have N:1 cardinality
-// (many FK values point to one PK value) and reverse relationships have 1:N cardinality.
+// TestFKDiscovery_Cardinality verifies that FK relationships compute cardinality
+// from actual data (via AnalyzeJoin) and reverse relationships get inverted cardinality.
 func TestFKDiscovery_Cardinality(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
@@ -4498,6 +4498,20 @@ func TestFKDiscovery_Cardinality(t *testing.T) {
 
 	// Create mocks
 	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Configure AnalyzeJoin to return N:1 cardinality pattern
+	// (100 orders with 100 unique user_ids, joining to 10 distinct users)
+	// sourceRatio = 100/100 = 1.0 (unique on source side)
+	// targetRatio = 100/10 = 10.0 (multiple source rows per target)
+	// This gives N:1 cardinality
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		return &datasource.JoinAnalysis{
+			JoinCount:     100, // 100 matching rows
+			SourceMatched: 100, // 100 distinct FK values
+			TargetMatched: 10,  // 10 distinct PK values
+			OrphanCount:   0,   // All FK values have matching PKs
+		}, nil
+	}
 
 	// Add order entity
 	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
@@ -4585,17 +4599,253 @@ func TestFKDiscovery_Cardinality(t *testing.T) {
 	}
 
 	// Verify forward relationship: orders → users has cardinality N:1
-	// (many orders belong to one user)
+	// (many orders belong to one user, computed from AnalyzeJoin data)
 	forwardRel := mocks.relationshipRepo.created[0]
 	if forwardRel.Cardinality != models.CardinalityNTo1 {
 		t.Errorf("expected forward cardinality=%q, got %q", models.CardinalityNTo1, forwardRel.Cardinality)
 	}
 
 	// Verify reverse relationship: users → orders has cardinality 1:N
-	// (one user has many orders)
+	// (one user has many orders, inverse of forward cardinality)
 	reverseRel := mocks.relationshipRepo.created[1]
 	if reverseRel.Cardinality != models.Cardinality1ToN {
 		t.Errorf("expected reverse cardinality=%q, got %q", models.Cardinality1ToN, reverseRel.Cardinality)
+	}
+}
+
+// TestFKDiscovery_Cardinality_1to1 verifies that 1:1 cardinality is correctly
+// detected from data when both sides have unique values.
+func TestFKDiscovery_Cardinality_1to1(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	profileEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Configure AnalyzeJoin to return 1:1 cardinality pattern
+	// (50 profiles with 50 unique user_ids, joining to 50 distinct users)
+	// sourceRatio = 50/50 = 1.0 (unique on source side)
+	// targetRatio = 50/50 = 1.0 (unique on target side)
+	// This gives 1:1 cardinality
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		return &datasource.JoinAnalysis{
+			JoinCount:     50, // 50 matching rows
+			SourceMatched: 50, // 50 distinct FK values
+			TargetMatched: 50, // 50 distinct PK values (1:1)
+			OrphanCount:   0,  // All FK values have matching PKs
+		}, nil
+	}
+
+	// Add profile entity
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            profileEntityID,
+		OntologyID:    ontologyID,
+		Name:          "profile",
+		PrimarySchema: "public",
+		PrimaryTable:  "profiles",
+	})
+
+	usersTableID := uuid.New()
+	profilesTableID := uuid.New()
+	userIDColumnID := uuid.New()
+	profileUserIDColumnID := uuid.New()
+
+	// Setup tables with columns
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            userIDColumnID,
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+				},
+			},
+		},
+		{
+			ID:         profilesTableID,
+			SchemaName: "public",
+			TableName:  "profiles",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            profileUserIDColumnID,
+					SchemaTableID: profilesTableID,
+					ColumnName:    "user_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+				},
+			},
+		},
+	}
+
+	// Add FK relationship: profiles.user_id → users.id
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
+		{
+			ID:               uuid.New(),
+			ProjectID:        projectID,
+			SourceTableID:    profilesTableID,
+			SourceColumnID:   profileUserIDColumnID,
+			TargetTableID:    usersTableID,
+			TargetColumnID:   userIDColumnID,
+			RelationshipType: models.RelationshipTypeFK,
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.FKRelationships != 1 {
+		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
+	}
+
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	}
+
+	// Verify forward relationship: profiles → users has cardinality 1:1
+	forwardRel := mocks.relationshipRepo.created[0]
+	if forwardRel.Cardinality != models.Cardinality1To1 {
+		t.Errorf("expected forward cardinality=%q, got %q", models.Cardinality1To1, forwardRel.Cardinality)
+	}
+
+	// Verify reverse relationship: users → profiles has cardinality 1:1 (symmetric)
+	reverseRel := mocks.relationshipRepo.created[1]
+	if reverseRel.Cardinality != models.Cardinality1To1 {
+		t.Errorf("expected reverse cardinality=%q, got %q", models.Cardinality1To1, reverseRel.Cardinality)
+	}
+}
+
+// TestFKDiscovery_Cardinality_FallbackOnError verifies that when AnalyzeJoin fails,
+// the FK relationship still gets created with the default N:1 cardinality.
+func TestFKDiscovery_Cardinality_FallbackOnError(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Configure AnalyzeJoin to return an error (e.g., table doesn't exist, permission denied)
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		return nil, fmt.Errorf("permission denied on table")
+	}
+
+	// Add order entity
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	userIDColumnID := uuid.New()
+	orderUserIDColumnID := uuid.New()
+
+	// Setup tables with columns
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            userIDColumnID,
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            orderUserIDColumnID,
+					SchemaTableID: ordersTableID,
+					ColumnName:    "user_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+				},
+			},
+		},
+	}
+
+	// Add FK relationship: orders.user_id → users.id
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
+		{
+			ID:               uuid.New(),
+			ProjectID:        projectID,
+			SourceTableID:    ordersTableID,
+			SourceColumnID:   orderUserIDColumnID,
+			TargetTableID:    usersTableID,
+			TargetColumnID:   userIDColumnID,
+			RelationshipType: models.RelationshipTypeFK,
+		},
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	// Should still succeed even though AnalyzeJoin failed
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.FKRelationships != 1 {
+		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
+	}
+
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	}
+
+	// Verify forward relationship: falls back to N:1 when AnalyzeJoin fails
+	forwardRel := mocks.relationshipRepo.created[0]
+	if forwardRel.Cardinality != models.CardinalityNTo1 {
+		t.Errorf("expected forward cardinality=%q (fallback), got %q", models.CardinalityNTo1, forwardRel.Cardinality)
+	}
+
+	// Verify reverse relationship: falls back to 1:N (inverse of N:1)
+	reverseRel := mocks.relationshipRepo.created[1]
+	if reverseRel.Cardinality != models.Cardinality1ToN {
+		t.Errorf("expected reverse cardinality=%q (fallback), got %q", models.Cardinality1ToN, reverseRel.Cardinality)
 	}
 }
 
