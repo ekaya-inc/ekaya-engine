@@ -498,6 +498,76 @@ func isTimestampType(dataType string) bool {
 		strings.Contains(dataTypeLower, "date")
 }
 
+// SoftDeleteDescription contains the auto-generated description for a soft delete column.
+type SoftDeleteDescription struct {
+	Description  string  // Auto-generated description with active record percentage
+	SemanticType string  // Semantic type: "soft_delete_timestamp"
+	Role         string  // Column role: "attribute"
+	ActiveRate   float64 // Percentage of active records (0.0-100.0)
+}
+
+// detectSoftDeletePattern checks if a column matches the soft delete pattern and returns
+// an auto-generated description if detected.
+//
+// Pattern detection rules:
+// - Column named 'deleted_at'
+// - Type is timestamp or timestamptz
+// - 90%+ values are NULL (indicating active records)
+// - Non-NULL values represent soft-deleted records
+//
+// Returns nil if the column doesn't match the soft delete pattern.
+func detectSoftDeletePattern(col *models.SchemaColumn) *SoftDeleteDescription {
+	colNameLower := strings.ToLower(col.ColumnName)
+
+	// Check column name matches soft delete pattern
+	if colNameLower != "deleted_at" {
+		return nil
+	}
+
+	// Check column type is timestamp
+	if !isTimestampType(col.DataType) {
+		return nil
+	}
+
+	// Column must be nullable (soft delete columns are NULL for active records)
+	if !col.IsNullable {
+		return nil
+	}
+
+	// Calculate null rate if stats are available
+	var nullRate float64 = 1.0 // Assume high null rate if no stats
+	var activeRate float64 = 100.0
+
+	if col.RowCount != nil && *col.RowCount > 0 {
+		if col.NullCount != nil {
+			nullRate = float64(*col.NullCount) / float64(*col.RowCount)
+			activeRate = nullRate * 100.0
+		} else if col.NonNullCount != nil {
+			// NonNullCount = deleted records, so null rate = 1 - (non_null / total)
+			nullRate = 1.0 - (float64(*col.NonNullCount) / float64(*col.RowCount))
+			activeRate = nullRate * 100.0
+		}
+	}
+
+	// Soft delete pattern requires 90%+ NULL values (i.e., 90%+ active records)
+	if nullRate < 0.90 {
+		return nil
+	}
+
+	// Generate description with active record percentage
+	description := fmt.Sprintf(
+		"Soft delete timestamp (GORM pattern). NULL = active record, timestamp = soft-deleted at that time. %.1f%% of records are active.",
+		activeRate,
+	)
+
+	return &SoftDeleteDescription{
+		Description:  description,
+		SemanticType: "soft_delete_timestamp",
+		Role:         models.ColumnRoleAttribute,
+		ActiveRate:   activeRate,
+	}
+}
+
 // applyEnumDistributions merges distribution data into EnumValue structs.
 func applyEnumDistributions(enumValues []models.EnumValue, dist *datasource.EnumDistributionResult) []models.EnumValue {
 	if dist == nil || len(dist.Distributions) == 0 {
@@ -1035,6 +1105,13 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 			if enrichment.FKAssociation != nil {
 				detail.FKAssociation = *enrichment.FKAssociation
 			}
+		}
+
+		// Apply soft delete pattern detection (overrides LLM description with data-driven description)
+		if softDelete := detectSoftDeletePattern(col); softDelete != nil {
+			detail.Description = softDelete.Description
+			detail.SemanticType = softDelete.SemanticType
+			detail.Role = softDelete.Role
 		}
 
 		// Merge project-level enum definitions if available

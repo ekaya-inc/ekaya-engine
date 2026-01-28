@@ -2623,3 +2623,291 @@ func findEnumValue(values []models.EnumValue, target string) *models.EnumValue {
 	}
 	return nil
 }
+
+// ============================================================================
+// Soft Delete Pattern Recognition Tests
+// ============================================================================
+
+func TestDetectSoftDeletePattern_TypicalSoftDelete(t *testing.T) {
+	// Typical GORM soft delete: deleted_at, timestamp, nullable, 97% NULL
+	rowCount := int64(1000)
+	nullCount := int64(970) // 97% NULL = 97% active
+
+	col := &models.SchemaColumn{
+		ColumnName: "deleted_at",
+		DataType:   "timestamp with time zone",
+		IsNullable: true,
+		RowCount:   &rowCount,
+		NullCount:  &nullCount,
+	}
+
+	result := detectSoftDeletePattern(col)
+
+	require.NotNil(t, result, "Should detect soft delete pattern")
+	assert.Contains(t, result.Description, "Soft delete timestamp")
+	assert.Contains(t, result.Description, "NULL = active record")
+	assert.Contains(t, result.Description, "97.0% of records are active")
+	assert.Equal(t, "soft_delete_timestamp", result.SemanticType)
+	assert.Equal(t, models.ColumnRoleAttribute, result.Role)
+	assert.InDelta(t, 97.0, result.ActiveRate, 0.1)
+}
+
+func TestDetectSoftDeletePattern_AllActiveRecords(t *testing.T) {
+	// Edge case: all records are active (100% NULL)
+	rowCount := int64(500)
+	nullCount := int64(500) // 100% NULL
+
+	col := &models.SchemaColumn{
+		ColumnName: "deleted_at",
+		DataType:   "timestamp",
+		IsNullable: true,
+		RowCount:   &rowCount,
+		NullCount:  &nullCount,
+	}
+
+	result := detectSoftDeletePattern(col)
+
+	require.NotNil(t, result)
+	assert.Contains(t, result.Description, "100.0% of records are active")
+	assert.InDelta(t, 100.0, result.ActiveRate, 0.1)
+}
+
+func TestDetectSoftDeletePattern_MinimumThreshold(t *testing.T) {
+	// Boundary case: exactly 90% NULL (should match)
+	rowCount := int64(1000)
+	nullCount := int64(900) // 90% NULL
+
+	col := &models.SchemaColumn{
+		ColumnName: "deleted_at",
+		DataType:   "timestamp",
+		IsNullable: true,
+		RowCount:   &rowCount,
+		NullCount:  &nullCount,
+	}
+
+	result := detectSoftDeletePattern(col)
+
+	require.NotNil(t, result, "Should detect at exactly 90% threshold")
+	assert.InDelta(t, 90.0, result.ActiveRate, 0.1)
+}
+
+func TestDetectSoftDeletePattern_BelowThreshold(t *testing.T) {
+	// Below threshold: 89% NULL (should NOT match)
+	rowCount := int64(1000)
+	nullCount := int64(890) // 89% NULL
+
+	col := &models.SchemaColumn{
+		ColumnName: "deleted_at",
+		DataType:   "timestamp",
+		IsNullable: true,
+		RowCount:   &rowCount,
+		NullCount:  &nullCount,
+	}
+
+	result := detectSoftDeletePattern(col)
+
+	assert.Nil(t, result, "Should not detect when below 90% threshold")
+}
+
+func TestDetectSoftDeletePattern_WrongColumnName(t *testing.T) {
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"created_at column", "created_at"},
+		{"updated_at column", "updated_at"},
+		{"is_deleted column", "is_deleted"},
+		{"deleted column", "deleted"},
+		{"deletion_timestamp column", "deletion_timestamp"},
+		{"removed_at column", "removed_at"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rowCount := int64(1000)
+			nullCount := int64(970)
+
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "timestamp",
+				IsNullable: true,
+				RowCount:   &rowCount,
+				NullCount:  &nullCount,
+			}
+
+			result := detectSoftDeletePattern(col)
+			assert.Nil(t, result, "Should not detect for column name: %s", tt.columnName)
+		})
+	}
+}
+
+func TestDetectSoftDeletePattern_WrongDataType(t *testing.T) {
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"boolean type", "boolean"},
+		{"integer type", "integer"},
+		{"varchar type", "varchar(255)"},
+		{"text type", "text"},
+		{"bigint type", "bigint"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rowCount := int64(1000)
+			nullCount := int64(970)
+
+			col := &models.SchemaColumn{
+				ColumnName: "deleted_at",
+				DataType:   tt.dataType,
+				IsNullable: true,
+				RowCount:   &rowCount,
+				NullCount:  &nullCount,
+			}
+
+			result := detectSoftDeletePattern(col)
+			assert.Nil(t, result, "Should not detect for data type: %s", tt.dataType)
+		})
+	}
+}
+
+func TestDetectSoftDeletePattern_NotNullable(t *testing.T) {
+	// deleted_at that is NOT NULL is not a soft delete pattern
+	rowCount := int64(1000)
+	nullCount := int64(970)
+
+	col := &models.SchemaColumn{
+		ColumnName: "deleted_at",
+		DataType:   "timestamp",
+		IsNullable: false, // NOT NULL constraint
+		RowCount:   &rowCount,
+		NullCount:  &nullCount,
+	}
+
+	result := detectSoftDeletePattern(col)
+	assert.Nil(t, result, "Should not detect when column is NOT NULL")
+}
+
+func TestDetectSoftDeletePattern_NoStats(t *testing.T) {
+	// No statistics available - should assume high null rate
+	col := &models.SchemaColumn{
+		ColumnName: "deleted_at",
+		DataType:   "timestamp with time zone",
+		IsNullable: true,
+		RowCount:   nil, // No stats
+		NullCount:  nil,
+	}
+
+	result := detectSoftDeletePattern(col)
+
+	require.NotNil(t, result, "Should detect with no stats (assumes 100% active)")
+	assert.Contains(t, result.Description, "100.0% of records are active")
+}
+
+func TestDetectSoftDeletePattern_ZeroRows(t *testing.T) {
+	// Edge case: empty table
+	rowCount := int64(0)
+	nullCount := int64(0)
+
+	col := &models.SchemaColumn{
+		ColumnName: "deleted_at",
+		DataType:   "timestamp",
+		IsNullable: true,
+		RowCount:   &rowCount,
+		NullCount:  &nullCount,
+	}
+
+	result := detectSoftDeletePattern(col)
+
+	// Should still detect pattern based on schema, assume 100% active
+	require.NotNil(t, result)
+	assert.Contains(t, result.Description, "100.0% of records are active")
+}
+
+func TestDetectSoftDeletePattern_WithNonNullCount(t *testing.T) {
+	// Some systems track NonNullCount instead of NullCount
+	rowCount := int64(1000)
+	nonNullCount := int64(30) // 30 deleted records = 97% active
+
+	col := &models.SchemaColumn{
+		ColumnName:   "deleted_at",
+		DataType:     "timestamptz",
+		IsNullable:   true,
+		RowCount:     &rowCount,
+		NonNullCount: &nonNullCount,
+		NullCount:    nil, // Only NonNullCount available
+	}
+
+	result := detectSoftDeletePattern(col)
+
+	require.NotNil(t, result)
+	assert.InDelta(t, 97.0, result.ActiveRate, 0.1)
+}
+
+func TestDetectSoftDeletePattern_TimestampVariants(t *testing.T) {
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"plain timestamp", "timestamp"},
+		{"timestamp with tz", "timestamp with time zone"},
+		{"timestamptz", "timestamptz"},
+		{"datetime", "datetime"},
+		{"datetime2", "datetime2"},
+		{"TIMESTAMP uppercase", "TIMESTAMP"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rowCount := int64(1000)
+			nullCount := int64(950)
+
+			col := &models.SchemaColumn{
+				ColumnName: "deleted_at",
+				DataType:   tt.dataType,
+				IsNullable: true,
+				RowCount:   &rowCount,
+				NullCount:  &nullCount,
+			}
+
+			result := detectSoftDeletePattern(col)
+			require.NotNil(t, result, "Should detect for timestamp variant: %s", tt.dataType)
+		})
+	}
+}
+
+func TestDetectSoftDeletePattern_CaseInsensitiveColumnName(t *testing.T) {
+	tests := []struct {
+		name       string
+		columnName string
+		shouldFind bool
+	}{
+		{"lowercase", "deleted_at", true},
+		{"UPPERCASE", "DELETED_AT", true},
+		{"MixedCase", "Deleted_At", true},
+		{"partial match", "deleted_at_timestamp", false}, // Exact match required
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rowCount := int64(1000)
+			nullCount := int64(950)
+
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "timestamp",
+				IsNullable: true,
+				RowCount:   &rowCount,
+				NullCount:  &nullCount,
+			}
+
+			result := detectSoftDeletePattern(col)
+			if tt.shouldFind {
+				assert.NotNil(t, result, "Should detect for column name: %s", tt.columnName)
+			} else {
+				assert.Nil(t, result, "Should not detect for column name: %s", tt.columnName)
+			}
+		})
+	}
+}
