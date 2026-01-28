@@ -473,6 +473,6 @@ After implementation, re-run ontology extraction on tikr_production:
 - [x] **5. Timestamp Scale Detection**
 - [x] **6. FK Target Resolution via Data Overlap**
 - [x] **7. Cardinality Inference from Data**
-- [ ] **8. Role Detection from Column Naming**
+- [x] **8. Role Detection from Column Naming**
 - [ ] **9. Boolean Naming Pattern Detection**
 - [ ] **10. Email/External ID Pattern Detection**

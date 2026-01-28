@@ -4422,3 +4422,477 @@ func TestColumnEnrichmentService_convertToColumnDetails_WithFKPatternDetection(t
 	assert.Equal(t, "Status field", statusCol.Description)
 	assert.Equal(t, "status", statusCol.SemanticType)
 }
+
+// ============================================================================
+// Role Detection Tests
+// ============================================================================
+
+func Test_detectRoleFromColumnName(t *testing.T) {
+	tests := []struct {
+		name         string
+		columnName   string
+		expectedRole string
+		expectedDesc string
+		expectNil    bool
+	}{
+		// User roles - content/marketplace platforms
+		{
+			name:         "host_id detects host role",
+			columnName:   "host_id",
+			expectedRole: "host",
+			expectedDesc: "content provider",
+		},
+		{
+			name:         "visitor_id detects visitor role",
+			columnName:   "visitor_id",
+			expectedRole: "visitor",
+			expectedDesc: "content consumer",
+		},
+		{
+			name:         "host_user_id detects host role",
+			columnName:   "host_user_id",
+			expectedRole: "host",
+			expectedDesc: "content provider",
+		},
+
+		// User roles - ownership
+		{
+			name:         "creator_id detects creator role",
+			columnName:   "creator_id",
+			expectedRole: "creator",
+			expectedDesc: "entity creator",
+		},
+		{
+			name:         "owner_id detects owner role",
+			columnName:   "owner_id",
+			expectedRole: "owner",
+			expectedDesc: "entity owner",
+		},
+
+		// User roles - messaging/transfers
+		{
+			name:         "sender_id detects sender role",
+			columnName:   "sender_id",
+			expectedRole: "sender",
+			expectedDesc: "message sender",
+		},
+		{
+			name:         "recipient_id detects recipient role",
+			columnName:   "recipient_id",
+			expectedRole: "recipient",
+			expectedDesc: "message recipient",
+		},
+
+		// User roles - financial transactions
+		{
+			name:         "payer_id detects payer role",
+			columnName:   "payer_id",
+			expectedRole: "payer",
+			expectedDesc: "payment source",
+		},
+		{
+			name:         "payee_id detects payee role",
+			columnName:   "payee_id",
+			expectedRole: "payee",
+			expectedDesc: "payment recipient",
+		},
+		{
+			name:         "payer_user_id detects payer role",
+			columnName:   "payer_user_id",
+			expectedRole: "payer",
+			expectedDesc: "payment source",
+		},
+
+		// User roles - e-commerce
+		{
+			name:         "buyer_id detects buyer role",
+			columnName:   "buyer_id",
+			expectedRole: "buyer",
+			expectedDesc: "purchasing party",
+		},
+		{
+			name:         "seller_id detects seller role",
+			columnName:   "seller_id",
+			expectedRole: "seller",
+			expectedDesc: "selling party",
+		},
+
+		// Account roles
+		{
+			name:         "source_account_id detects source role",
+			columnName:   "source_account_id",
+			expectedRole: "source",
+			expectedDesc: "source account",
+		},
+		{
+			name:         "destination_account_id detects destination role",
+			columnName:   "destination_account_id",
+			expectedRole: "destination",
+			expectedDesc: "destination account",
+		},
+		{
+			name:         "from_account_id detects from role",
+			columnName:   "from_account_id",
+			expectedRole: "from",
+			expectedDesc: "originating account",
+		},
+		{
+			name:         "to_account_id detects to role",
+			columnName:   "to_account_id",
+			expectedRole: "to",
+			expectedDesc: "receiving account",
+		},
+
+		// Generic references (no role)
+		{
+			name:       "user_id has no role",
+			columnName: "user_id",
+			expectNil:  true,
+		},
+		{
+			name:       "account_id has no role",
+			columnName: "account_id",
+			expectNil:  true,
+		},
+		{
+			name:       "order_id has no role",
+			columnName: "order_id",
+			expectNil:  true,
+		},
+
+		// Other columns
+		{
+			name:       "status has no role",
+			columnName: "status",
+			expectNil:  true,
+		},
+		{
+			name:       "created_at has no role",
+			columnName: "created_at",
+			expectNil:  true,
+		},
+		{
+			name:       "amount has no role",
+			columnName: "amount",
+			expectNil:  true,
+		},
+
+		// Edge cases - partial matches should NOT detect roles
+		{
+			name:       "ghost_id does not match host",
+			columnName: "ghost_id",
+			expectNil:  true,
+		},
+
+		// Case insensitivity
+		{
+			name:         "HOST_ID uppercase detects host role",
+			columnName:   "HOST_ID",
+			expectedRole: "host",
+			expectedDesc: "content provider",
+		},
+		{
+			name:         "Host_User_Id mixed case detects host role",
+			columnName:   "Host_User_Id",
+			expectedRole: "host",
+			expectedDesc: "content provider",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := detectRoleFromColumnName(tt.columnName)
+
+			if tt.expectNil {
+				assert.Nil(t, result, "expected nil for column %s", tt.columnName)
+				return
+			}
+
+			require.NotNil(t, result, "expected role detection for column %s", tt.columnName)
+			assert.Equal(t, tt.expectedRole, result.Role, "role mismatch for column %s", tt.columnName)
+			assert.Equal(t, tt.expectedDesc, result.Description, "description mismatch for column %s", tt.columnName)
+		})
+	}
+}
+
+func Test_detectRolesInTable(t *testing.T) {
+	tests := []struct {
+		name          string
+		fkInfo        map[string]string
+		expectedRoles map[string]string
+	}{
+		{
+			name: "detects multiple roles to same table",
+			fkInfo: map[string]string{
+				"host_id":    "users",
+				"visitor_id": "users",
+				"order_id":   "orders",
+			},
+			expectedRoles: map[string]string{
+				"host_id":    "host",
+				"visitor_id": "visitor",
+			},
+		},
+		{
+			name: "detects account roles",
+			fkInfo: map[string]string{
+				"source_account_id": "accounts",
+				"dest_account_id":   "accounts",
+			},
+			expectedRoles: map[string]string{
+				"source_account_id": "source",
+			},
+		},
+		{
+			name: "no roles detected for generic FKs",
+			fkInfo: map[string]string{
+				"user_id":    "users",
+				"account_id": "accounts",
+				"order_id":   "orders",
+			},
+			expectedRoles: map[string]string{},
+		},
+		{
+			name:          "empty FK info returns empty roles",
+			fkInfo:        map[string]string{},
+			expectedRoles: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := detectRolesInTable(tt.fkInfo)
+
+			assert.Equal(t, len(tt.expectedRoles), len(result), "expected %d roles, got %d", len(tt.expectedRoles), len(result))
+
+			for colName, expectedRole := range tt.expectedRoles {
+				detectedRole, ok := result[colName]
+				require.True(t, ok, "expected role for column %s", colName)
+				assert.Equal(t, expectedRole, detectedRole.Role, "role mismatch for column %s", colName)
+			}
+		})
+	}
+}
+
+func Test_detectFKColumnPattern_WithRoleDetection(t *testing.T) {
+	tests := []struct {
+		name                string
+		columnName          string
+		fkInfo              *FKRelationshipInfo
+		expectRole          string
+		expectRoleInDesc    bool
+		expectDescContains  []string
+	}{
+		{
+			name:       "host_id with DB constraint includes role in description",
+			columnName: "host_id",
+			fkInfo: &FKRelationshipInfo{
+				TargetTable:    "users",
+				TargetColumn:   "id",
+				IsDBConstraint: true,
+				Confidence:     1.0,
+			},
+			expectRole:       "host",
+			expectRoleInDesc: true,
+			expectDescContains: []string{
+				"Foreign key to users.id",
+				"Role: host",
+				"content provider",
+			},
+		},
+		{
+			name:       "visitor_id with pk_match includes role in description",
+			columnName: "visitor_id",
+			fkInfo: &FKRelationshipInfo{
+				TargetTable:     "users",
+				TargetColumn:    "user_id",
+				IsDBConstraint:  false,
+				DetectionMethod: "pk_match",
+				Confidence:      0.95,
+			},
+			expectRole:       "visitor",
+			expectRoleInDesc: true,
+			expectDescContains: []string{
+				"Foreign key to users.user_id",
+				"95% confidence",
+				"Role: visitor",
+				"content consumer",
+			},
+		},
+		{
+			name:       "payer_id includes payer role",
+			columnName: "payer_id",
+			fkInfo: &FKRelationshipInfo{
+				TargetTable:    "users",
+				TargetColumn:   "id",
+				IsDBConstraint: true,
+				Confidence:     1.0,
+			},
+			expectRole:       "payer",
+			expectRoleInDesc: true,
+			expectDescContains: []string{
+				"Role: payer",
+				"payment source",
+			},
+		},
+		{
+			name:       "source_account_id includes source role",
+			columnName: "source_account_id",
+			fkInfo: &FKRelationshipInfo{
+				TargetTable:    "accounts",
+				TargetColumn:   "id",
+				IsDBConstraint: true,
+				Confidence:     1.0,
+			},
+			expectRole:       "source",
+			expectRoleInDesc: true,
+			expectDescContains: []string{
+				"Role: source",
+				"source account",
+			},
+		},
+		{
+			name:       "user_id (generic) has no role in description",
+			columnName: "user_id",
+			fkInfo: &FKRelationshipInfo{
+				TargetTable:    "users",
+				TargetColumn:   "id",
+				IsDBConstraint: true,
+				Confidence:     1.0,
+			},
+			expectRole:       "",
+			expectRoleInDesc: false,
+			expectDescContains: []string{
+				"Foreign key to users.id",
+			},
+		},
+		{
+			name:       "nil FK info returns nil",
+			columnName: "host_id",
+			fkInfo:     nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+			}
+
+			result := detectFKColumnPattern(col, tt.fkInfo)
+
+			if tt.fkInfo == nil {
+				assert.Nil(t, result)
+				return
+			}
+
+			require.NotNil(t, result)
+			assert.Equal(t, tt.expectRole, result.DetectedRole, "detected role mismatch")
+
+			for _, expected := range tt.expectDescContains {
+				assert.Contains(t, result.Description, expected,
+					"description should contain '%s', got: %s", expected, result.Description)
+			}
+
+			if !tt.expectRoleInDesc {
+				assert.NotContains(t, result.Description, "Role:",
+					"description should NOT contain role for generic FK")
+			}
+		})
+	}
+}
+
+func Test_RolePatterns_Coverage(t *testing.T) {
+	// Verify that all roles have descriptions
+	for entityType, roles := range RolePatterns {
+		for _, role := range roles {
+			desc, ok := RoleDescriptions[role]
+			assert.True(t, ok, "role %s (entity type: %s) should have a description", role, entityType)
+			assert.NotEmpty(t, desc, "role %s should have a non-empty description", role)
+		}
+	}
+}
+
+func Test_FKAssociation_SetFromDetectedRole(t *testing.T) {
+	// This tests that convertToColumnDetails properly sets FKAssociation
+	// from the detected role when LLM doesn't provide one
+	tableName := "engagements"
+	columns := []*models.SchemaColumn{
+		{ColumnName: "host_id", DataType: "uuid"},
+		{ColumnName: "visitor_id", DataType: "uuid"},
+		{ColumnName: "user_id", DataType: "uuid"},
+	}
+
+	enrichments := []columnEnrichment{
+		{Name: "host_id", Description: "Host user", Role: "dimension"},
+		{Name: "visitor_id", Description: "Visitor user", Role: "dimension", FKAssociation: nil},
+		{Name: "user_id", Description: "Generic user", Role: "dimension"},
+	}
+
+	fkInfo := map[string]string{
+		"host_id":    "users",
+		"visitor_id": "users",
+		"user_id":    "users",
+	}
+
+	fkDetailedInfo := map[string]*FKRelationshipInfo{
+		"host_id": {
+			TargetTable:    "users",
+			TargetColumn:   "id",
+			IsDBConstraint: true,
+			Confidence:     1.0,
+		},
+		"visitor_id": {
+			TargetTable:    "users",
+			TargetColumn:   "id",
+			IsDBConstraint: true,
+			Confidence:     1.0,
+		},
+		"user_id": {
+			TargetTable:    "users",
+			TargetColumn:   "id",
+			IsDBConstraint: true,
+			Confidence:     1.0,
+		},
+	}
+
+	svc := &columnEnrichmentService{}
+	details := svc.convertToColumnDetails(
+		tableName,
+		enrichments,
+		columns,
+		fkInfo,
+		fkDetailedInfo,
+		nil, // enumSamples
+		nil, // enumDefs
+		nil, // enumDistributions
+	)
+
+	// Find columns by name
+	var hostCol, visitorCol, userCol *models.ColumnDetail
+	for i := range details {
+		switch details[i].Name {
+		case "host_id":
+			hostCol = &details[i]
+		case "visitor_id":
+			visitorCol = &details[i]
+		case "user_id":
+			userCol = &details[i]
+		}
+	}
+
+	// host_id should have FKAssociation set to "host"
+	require.NotNil(t, hostCol)
+	assert.Equal(t, "host", hostCol.FKAssociation, "host_id should have FKAssociation 'host'")
+	assert.Contains(t, hostCol.Description, "Role: host", "host_id description should include role")
+
+	// visitor_id should have FKAssociation set to "visitor"
+	require.NotNil(t, visitorCol)
+	assert.Equal(t, "visitor", visitorCol.FKAssociation, "visitor_id should have FKAssociation 'visitor'")
+	assert.Contains(t, visitorCol.Description, "Role: visitor", "visitor_id description should include role")
+
+	// user_id should NOT have FKAssociation (generic reference)
+	require.NotNil(t, userCol)
+	assert.Empty(t, userCol.FKAssociation, "user_id should NOT have FKAssociation (generic reference)")
+	assert.NotContains(t, userCol.Description, "Role:", "user_id description should NOT include role")
+}

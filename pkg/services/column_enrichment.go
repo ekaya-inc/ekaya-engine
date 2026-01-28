@@ -993,16 +993,183 @@ func generateTimestampScaleDescription(scale, columnName string) string {
 	return description
 }
 
+// ============================================================================
+// Role Detection from Column Naming Patterns
+// ============================================================================
+
+// RolePatterns maps entity types to their known role prefixes.
+// When multiple columns in the same table reference the same entity,
+// the column name prefix indicates the semantic role of that reference.
+//
+// Examples:
+//   - host_id -> User with role "host" (content provider)
+//   - visitor_id -> User with role "visitor" (content consumer)
+//   - payer_id -> User with role "payer" (person making payment)
+//   - payee_id -> User with role "payee" (person receiving payment)
+var RolePatterns = map[string][]string{
+	// User roles - common patterns for person-to-person relationships
+	"user": {
+		"host", "visitor",           // content/marketplace platforms
+		"creator", "owner",          // ownership relationships
+		"sender", "recipient",       // messaging/transfers
+		"payer", "payee",            // financial transactions
+		"buyer", "seller",           // e-commerce
+		"assignee", "assignor",      // task/ticket assignment
+		"author", "reviewer",        // content creation/review
+		"requester", "approver",     // approval workflows
+		"parent", "child",           // hierarchical relationships
+		"manager", "employee",       // organizational relationships
+		"referrer", "referee",       // referral programs
+		"inviter", "invitee",        // invitation flows
+		"follower", "following",     // social relationships
+		"mentor", "mentee",          // mentorship
+		"driver", "rider",           // transportation platforms
+		"provider", "consumer",      // service marketplaces
+		"instructor", "student",     // educational platforms
+		"landlord", "tenant",        // property platforms
+		"lender", "borrower",        // lending platforms
+	},
+	// Account roles - for financial or multi-party transactions
+	"account": {
+		"source", "destination",     // transfer endpoints
+		"from", "to",                // transfer direction
+		"debit", "credit",           // accounting entries
+		"payer", "payee",            // payment parties (can apply to accounts too)
+		"billing", "shipping",       // e-commerce accounts
+	},
+}
+
+// RoleDescriptions provides human-readable descriptions for known roles.
+// Used to generate informative FK descriptions.
+var RoleDescriptions = map[string]string{
+	// User roles
+	"host":       "content provider",
+	"visitor":    "content consumer",
+	"creator":    "entity creator",
+	"owner":      "entity owner",
+	"sender":     "message sender",
+	"recipient":  "message recipient",
+	"payer":      "payment source",
+	"payee":      "payment recipient",
+	"buyer":      "purchasing party",
+	"seller":     "selling party",
+	"assignee":   "assigned party",
+	"assignor":   "assigning party",
+	"author":     "content author",
+	"reviewer":   "content reviewer",
+	"requester":  "request initiator",
+	"approver":   "request approver",
+	"parent":     "parent entity",
+	"child":      "child entity",
+	"manager":    "managing party",
+	"employee":   "managed party",
+	"referrer":   "referring party",
+	"referee":    "referred party",
+	"inviter":    "inviting party",
+	"invitee":    "invited party",
+	"follower":   "following party",
+	"following":  "followed party",
+	"mentor":     "mentoring party",
+	"mentee":     "mentored party",
+	"driver":     "driver/operator",
+	"rider":      "passenger/rider",
+	"provider":   "service provider",
+	"consumer":   "service consumer",
+	"instructor": "instructor/teacher",
+	"student":    "student/learner",
+	"landlord":   "property owner",
+	"tenant":     "property renter",
+	"lender":     "lending party",
+	"borrower":   "borrowing party",
+	// Account roles
+	"source":      "source account",
+	"destination": "destination account",
+	"from":        "originating account",
+	"to":          "receiving account",
+	"debit":       "debited account",
+	"credit":      "credited account",
+	"billing":     "billing account",
+	"shipping":    "shipping account",
+}
+
+// DetectedRole contains the result of role detection from a column name.
+type DetectedRole struct {
+	Role        string // Detected role (e.g., "host", "visitor", "payer")
+	Description string // Human-readable description of the role
+}
+
+// detectRoleFromColumnName extracts a semantic role from a column name.
+// Returns nil if no role pattern is detected.
+//
+// The function handles column names in the format: {role}_{suffix}
+// where suffix is typically "id", "user_id", "account_id", etc.
+//
+// Examples:
+//   - "host_id" -> role: "host"
+//   - "host_user_id" -> role: "host"
+//   - "visitor_id" -> role: "visitor"
+//   - "payer_account_id" -> role: "payer"
+//   - "source_account_id" -> role: "source"
+//   - "user_id" -> nil (generic reference, no role)
+func detectRoleFromColumnName(columnName string) *DetectedRole {
+	colLower := strings.ToLower(columnName)
+
+	// Check all role patterns
+	for _, roles := range RolePatterns {
+		for _, role := range roles {
+			// Check for prefix pattern: {role}_
+			if strings.HasPrefix(colLower, role+"_") {
+				desc := RoleDescriptions[role]
+				if desc == "" {
+					desc = role // fallback to role name if no description
+				}
+				return &DetectedRole{
+					Role:        role,
+					Description: desc,
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// detectRolesInTable analyzes all FK columns in a table and identifies role-based references.
+// Returns a map of column_name -> DetectedRole for columns with detected roles.
+//
+// This is particularly useful when multiple columns reference the same target table
+// with different roles (e.g., host_id and visitor_id both referencing users).
+func detectRolesInTable(fkInfo map[string]string) map[string]*DetectedRole {
+	result := make(map[string]*DetectedRole)
+
+	// Group FK columns by target table to identify role-based patterns
+	columnsByTarget := make(map[string][]string)
+	for colName, targetTable := range fkInfo {
+		columnsByTarget[targetTable] = append(columnsByTarget[targetTable], colName)
+	}
+
+	// Detect roles for all FK columns
+	for colName := range fkInfo {
+		if role := detectRoleFromColumnName(colName); role != nil {
+			result[colName] = role
+		}
+	}
+
+	return result
+}
+
 // FKColumnDescription contains the auto-generated description for a foreign key column.
 // This is used to provide accurate, data-driven descriptions for FK columns based on
 // how the relationship was detected (database constraint vs data overlap analysis).
 type FKColumnDescription struct {
-	Description  string  // Auto-generated description with target info and detection context
-	SemanticType string  // Semantic type: "foreign_key" or "logical_foreign_key"
-	Role         string  // Column role: "identifier"
-	TargetTable  string  // Target table the FK references
-	TargetColumn string  // Target column the FK references
-	Confidence   float64 // Detection confidence (1.0 for DB constraints, lower for inferred)
+	Description   string  // Auto-generated description with target info and detection context
+	SemanticType  string  // Semantic type: "foreign_key" or "logical_foreign_key"
+	Role          string  // Column role: "identifier"
+	TargetTable   string  // Target table the FK references
+	TargetColumn  string  // Target column the FK references
+	Confidence    float64 // Detection confidence (1.0 for DB constraints, lower for inferred)
+	DetectedRole  string  // Semantic role detected from column name (e.g., "host", "visitor")
+	RoleDesc      string  // Human-readable description of the detected role
 }
 
 // detectFKColumnPattern checks if a column is a foreign key and generates an auto-description
@@ -1010,20 +1177,24 @@ type FKColumnDescription struct {
 //
 // Pattern detection rules:
 // - Column must have a confirmed FK relationship
+// - Role detection from column name prefixes (e.g., host_id -> role: host)
 // - For database FK constraints (detection_method = "foreign_key"):
-//   - Description: "Foreign key to {table}.{column}."
+//   - Description: "Foreign key to {table}.{column}. Role: {role} ({description})."
 // - For inferred FKs (detection_method = "pk_match"):
-//   - Description: "Foreign key to {table}.{column}. No database constraint - logical reference only."
+//   - Description: "Foreign key to {table}.{column}. Role: {role}. No database constraint - logical reference only."
 //   - Includes confidence percentage based on match analysis
 //
 // Returns nil if no FK relationship exists for this column.
-func detectFKColumnPattern(_ *models.SchemaColumn, fkInfo *FKRelationshipInfo) *FKColumnDescription {
+func detectFKColumnPattern(col *models.SchemaColumn, fkInfo *FKRelationshipInfo) *FKColumnDescription {
 	if fkInfo == nil {
 		return nil
 	}
 
 	var description string
 	var semanticType string
+
+	// Detect role from column name
+	detectedRole := detectRoleFromColumnName(col.ColumnName)
 
 	if fkInfo.IsDBConstraint {
 		// Database FK constraint - explicit relationship
@@ -1041,7 +1212,13 @@ func detectFKColumnPattern(_ *models.SchemaColumn, fkInfo *FKRelationshipInfo) *
 		semanticType = "logical_foreign_key"
 	}
 
-	return &FKColumnDescription{
+	// Append role information if detected
+	if detectedRole != nil {
+		description = fmt.Sprintf("%s Role: %s (%s).",
+			strings.TrimSuffix(description, "."), detectedRole.Role, detectedRole.Description)
+	}
+
+	result := &FKColumnDescription{
 		Description:  description,
 		SemanticType: semanticType,
 		Role:         models.ColumnRoleIdentifier,
@@ -1049,6 +1226,13 @@ func detectFKColumnPattern(_ *models.SchemaColumn, fkInfo *FKRelationshipInfo) *
 		TargetColumn: fkInfo.TargetColumn,
 		Confidence:   fkInfo.Confidence,
 	}
+
+	if detectedRole != nil {
+		result.DetectedRole = detectedRole.Role
+		result.RoleDesc = detectedRole.Description
+	}
+
+	return result
 }
 
 // applyEnumDistributions merges distribution data into EnumValue structs.
@@ -1624,11 +1808,18 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 
 		// Apply FK column pattern detection for logical FKs (pk_match detected)
 		// This provides accurate descriptions based on how the relationship was detected
+		// Also detects semantic roles from column naming patterns (e.g., host_id -> role: host)
 		if fkDetail, ok := fkDetailedInfo[col.ColumnName]; ok {
 			if fkColDesc := detectFKColumnPattern(col, fkDetail); fkColDesc != nil {
 				detail.Description = fkColDesc.Description
 				detail.SemanticType = fkColDesc.SemanticType
 				detail.Role = fkColDesc.Role
+
+				// Set FKAssociation from detected role if not already set by LLM
+				// Deterministic role detection takes precedence when available
+				if fkColDesc.DetectedRole != "" && detail.FKAssociation == "" {
+					detail.FKAssociation = fkColDesc.DetectedRole
+				}
 			}
 		}
 
