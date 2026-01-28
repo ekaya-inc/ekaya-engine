@@ -2268,9 +2268,10 @@ func TestColumnEnrichmentService_convertToColumnDetails_WithEnumDefinitions(t *t
 	}
 
 	fkInfo := map[string]string{}
+	fkDetailedInfo := map[string]*FKRelationshipInfo{}
 	enumDistributions := map[string]*datasource.EnumDistributionResult{}
 
-	details := service.convertToColumnDetails("billing_transactions", enrichments, columns, fkInfo, enumSamples, enumDefs, enumDistributions)
+	details := service.convertToColumnDetails("billing_transactions", enrichments, columns, fkInfo, fkDetailedInfo, enumSamples, enumDefs, enumDistributions)
 
 	require.Equal(t, 3, len(details))
 
@@ -4225,4 +4226,199 @@ func TestGenerateTimestampScaleDescription_UpdatedColumn(t *testing.T) {
 func TestGenerateTimestampScaleDescription_UnknownScale(t *testing.T) {
 	result := generateTimestampScaleDescription("unknown", "created_at")
 	assert.Equal(t, "", result)
+}
+
+// =============================================================================
+// FK Column Pattern Detection Tests
+// =============================================================================
+
+func TestDetectFKColumnPattern_DBConstraint(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "user_id",
+		DataType:   "uuid",
+	}
+
+	fkInfo := &FKRelationshipInfo{
+		TargetTable:     "users",
+		TargetColumn:    "id",
+		DetectionMethod: models.DetectionMethodForeignKey,
+		Confidence:      1.0,
+		IsDBConstraint:  true,
+	}
+
+	result := detectFKColumnPattern(col, fkInfo)
+
+	require.NotNil(t, result, "Should detect FK column pattern for DB constraint")
+	assert.Equal(t, "Foreign key to users.id.", result.Description)
+	assert.Equal(t, "foreign_key", result.SemanticType)
+	assert.Equal(t, models.ColumnRoleIdentifier, result.Role)
+	assert.Equal(t, 1.0, result.Confidence)
+}
+
+func TestDetectFKColumnPattern_LogicalFK(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "host_id",
+		DataType:   "uuid",
+	}
+
+	fkInfo := &FKRelationshipInfo{
+		TargetTable:     "users",
+		TargetColumn:    "user_id",
+		DetectionMethod: models.DetectionMethodPKMatch,
+		Confidence:      0.9,
+		IsDBConstraint:  false,
+	}
+
+	result := detectFKColumnPattern(col, fkInfo)
+
+	require.NotNil(t, result, "Should detect FK column pattern for logical FK")
+	assert.Contains(t, result.Description, "Foreign key to users.user_id")
+	assert.Contains(t, result.Description, "90% confidence")
+	assert.Contains(t, result.Description, "No database constraint")
+	assert.Contains(t, result.Description, "logical reference validated via data overlap")
+	assert.Equal(t, "logical_foreign_key", result.SemanticType)
+	assert.Equal(t, models.ColumnRoleIdentifier, result.Role)
+	assert.Equal(t, 0.9, result.Confidence)
+}
+
+func TestDetectFKColumnPattern_NilFKInfo(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "user_id",
+		DataType:   "uuid",
+	}
+
+	result := detectFKColumnPattern(col, nil)
+
+	assert.Nil(t, result, "Should return nil when no FK info is provided")
+}
+
+func TestDetectFKColumnPattern_DifferentTargets(t *testing.T) {
+	tests := []struct {
+		name         string
+		targetTable  string
+		targetColumn string
+		wantContains string
+	}{
+		{"accounts table", "accounts", "id", "Foreign key to accounts.id"},
+		{"orders table", "orders", "order_id", "Foreign key to orders.order_id"},
+		{"products table", "products", "product_uuid", "Foreign key to products.product_uuid"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "ref_id",
+				DataType:   "uuid",
+			}
+
+			fkInfo := &FKRelationshipInfo{
+				TargetTable:     tt.targetTable,
+				TargetColumn:    tt.targetColumn,
+				DetectionMethod: models.DetectionMethodPKMatch,
+				Confidence:      0.9,
+				IsDBConstraint:  false,
+			}
+
+			result := detectFKColumnPattern(col, fkInfo)
+
+			require.NotNil(t, result)
+			assert.Contains(t, result.Description, tt.wantContains)
+		})
+	}
+}
+
+func TestFKRelationshipInfo_Fields(t *testing.T) {
+	fkInfo := &FKRelationshipInfo{
+		TargetTable:     "users",
+		TargetColumn:    "id",
+		DetectionMethod: models.DetectionMethodPKMatch,
+		Confidence:      0.85,
+		IsDBConstraint:  false,
+	}
+
+	assert.Equal(t, "users", fkInfo.TargetTable)
+	assert.Equal(t, "id", fkInfo.TargetColumn)
+	assert.Equal(t, models.DetectionMethodPKMatch, fkInfo.DetectionMethod)
+	assert.Equal(t, 0.85, fkInfo.Confidence)
+	assert.False(t, fkInfo.IsDBConstraint)
+}
+
+func TestColumnEnrichmentService_convertToColumnDetails_WithFKPatternDetection(t *testing.T) {
+	logger := zap.NewNop()
+	service := &columnEnrichmentService{
+		logger: logger,
+	}
+
+	columns := []*models.SchemaColumn{
+		{ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+		{ColumnName: "user_id", DataType: "uuid"},
+		{ColumnName: "host_id", DataType: "uuid"},
+		{ColumnName: "status", DataType: "varchar"},
+	}
+
+	enrichments := []columnEnrichment{
+		{Name: "id", Description: "Primary key", Role: "identifier", SemanticType: "identifier"},
+		{Name: "user_id", Description: "LLM description for user_id", Role: "identifier", SemanticType: "identifier"},
+		{Name: "host_id", Description: "LLM description for host_id", Role: "identifier", SemanticType: "identifier"},
+		{Name: "status", Description: "Status field", Role: "dimension", SemanticType: "status"},
+	}
+
+	// Simple FK info for LLM context
+	fkInfo := map[string]string{
+		"user_id": "users",
+		"host_id": "users",
+	}
+
+	// Detailed FK info for pattern detection
+	fkDetailedInfo := map[string]*FKRelationshipInfo{
+		"user_id": {
+			TargetTable:     "users",
+			TargetColumn:    "id",
+			DetectionMethod: models.DetectionMethodForeignKey, // DB constraint
+			Confidence:      1.0,
+			IsDBConstraint:  true,
+		},
+		"host_id": {
+			TargetTable:     "users",
+			TargetColumn:    "user_id",
+			DetectionMethod: models.DetectionMethodPKMatch, // Inferred
+			Confidence:      0.9,
+			IsDBConstraint:  false,
+		},
+	}
+
+	enumSamples := map[string][]string{}
+	enumDefs := []models.EnumDefinition{}
+	enumDistributions := map[string]*datasource.EnumDistributionResult{}
+
+	details := service.convertToColumnDetails("engagements", enrichments, columns, fkInfo, fkDetailedInfo, enumSamples, enumDefs, enumDistributions)
+
+	require.Equal(t, 4, len(details))
+
+	// Check user_id - DB FK constraint
+	userIDCol := findColumnDetail(details, "user_id")
+	require.NotNil(t, userIDCol)
+	assert.True(t, userIDCol.IsForeignKey)
+	assert.Equal(t, "users", userIDCol.ForeignTable)
+	assert.Equal(t, "Foreign key to users.id.", userIDCol.Description)
+	assert.Equal(t, "foreign_key", userIDCol.SemanticType)
+	assert.Equal(t, models.ColumnRoleIdentifier, userIDCol.Role)
+
+	// Check host_id - Logical FK (inferred via pk_match)
+	hostIDCol := findColumnDetail(details, "host_id")
+	require.NotNil(t, hostIDCol)
+	assert.True(t, hostIDCol.IsForeignKey)
+	assert.Equal(t, "users", hostIDCol.ForeignTable)
+	assert.Contains(t, hostIDCol.Description, "Foreign key to users.user_id")
+	assert.Contains(t, hostIDCol.Description, "90% confidence")
+	assert.Contains(t, hostIDCol.Description, "No database constraint")
+	assert.Equal(t, "logical_foreign_key", hostIDCol.SemanticType)
+	assert.Equal(t, models.ColumnRoleIdentifier, hostIDCol.Role)
+
+	// Check status - should retain LLM enrichment (no FK pattern applies)
+	statusCol := findColumnDetail(details, "status")
+	require.NotNil(t, statusCol)
+	assert.False(t, statusCol.IsForeignKey)
+	assert.Equal(t, "Status field", statusCol.Description)
+	assert.Equal(t, "status", statusCol.SemanticType)
 }

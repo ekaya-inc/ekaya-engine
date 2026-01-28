@@ -194,13 +194,22 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 		return nil
 	}
 
-	// Get FK info for this table
+	// Get FK info for this table (simple map for LLM context)
 	fkInfo, err := s.getForeignKeyInfo(ctx, projectID, tableName)
 	if err != nil {
 		s.logger.Warn("Failed to get FK info, continuing without",
 			zap.String("table", tableName),
 			zap.Error(err))
 		fkInfo = make(map[string]string)
+	}
+
+	// Get detailed FK info for auto-description generation
+	fkDetailedInfo, err := s.getForeignKeyDetailedInfo(ctx, projectID, tableName)
+	if err != nil {
+		s.logger.Warn("Failed to get detailed FK info, continuing without",
+			zap.String("table", tableName),
+			zap.Error(err))
+		fkDetailedInfo = make(map[string]*FKRelationshipInfo)
 	}
 
 	// Identify enum candidates
@@ -233,8 +242,8 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 		return fmt.Errorf("LLM enrichment failed: %w", err)
 	}
 
-	// Convert enrichments to ColumnDetail and save, merging enum definitions and distributions
-	columnDetails := s.convertToColumnDetails(tableName, enrichments, columns, fkInfo, enumSamples, enumDefs, enumDistributions)
+	// Convert enrichments to ColumnDetail and save, merging enum definitions, distributions, and FK info
+	columnDetails := s.convertToColumnDetails(tableName, enrichments, columns, fkInfo, fkDetailedInfo, enumSamples, enumDefs, enumDistributions)
 	if err := s.ontologyRepo.UpdateColumnDetails(ctx, projectID, tableName, columnDetails); err != nil {
 		return fmt.Errorf("save column details: %w", err)
 	}
@@ -276,7 +285,18 @@ func (s *columnEnrichmentService) getColumnsForTable(ctx context.Context, projec
 	return columnsByTable[tableName], nil
 }
 
+// FKRelationshipInfo contains detailed information about a foreign key relationship.
+// This includes the target table/column and detection method for generating accurate descriptions.
+type FKRelationshipInfo struct {
+	TargetTable     string  // The target table this FK references
+	TargetColumn    string  // The target column this FK references
+	DetectionMethod string  // "foreign_key" (DB constraint) or "pk_match" (inferred from data)
+	Confidence      float64 // 1.0 for FK constraints, 0.7-0.95 for pk_match
+	IsDBConstraint  bool    // True if this is an actual database FK constraint
+}
+
 // getForeignKeyInfo returns a map of column_name -> target_table for FK columns.
+// This simplified version is used for the LLM prompt context.
 func (s *columnEnrichmentService) getForeignKeyInfo(ctx context.Context, projectID uuid.UUID, tableName string) (map[string]string, error) {
 	// Get relationships for this table
 	relationships, err := s.relationshipRepo.GetByTables(ctx, projectID, []string{tableName})
@@ -294,6 +314,33 @@ func (s *columnEnrichmentService) getForeignKeyInfo(ctx context.Context, project
 	}
 
 	return fkInfo, nil
+}
+
+// getForeignKeyDetailedInfo returns detailed FK relationship information for each column.
+// This is used for generating accurate auto-descriptions with detection method context.
+func (s *columnEnrichmentService) getForeignKeyDetailedInfo(ctx context.Context, projectID uuid.UUID, tableName string) (map[string]*FKRelationshipInfo, error) {
+	// Get relationships for this table
+	relationships, err := s.relationshipRepo.GetByTables(ctx, projectID, []string{tableName})
+	if err != nil {
+		return nil, err
+	}
+
+	// Build detailed FK map
+	fkDetailedInfo := make(map[string]*FKRelationshipInfo)
+	for _, rel := range relationships {
+		// Only include relationships where this table is the source
+		if rel.SourceColumnTable == tableName && rel.SourceColumnName != "" {
+			fkDetailedInfo[rel.SourceColumnName] = &FKRelationshipInfo{
+				TargetTable:     rel.TargetColumnTable,
+				TargetColumn:    rel.TargetColumnName,
+				DetectionMethod: rel.DetectionMethod,
+				Confidence:      rel.Confidence,
+				IsDBConstraint:  rel.DetectionMethod == models.DetectionMethodForeignKey,
+			}
+		}
+	}
+
+	return fkDetailedInfo, nil
 }
 
 // sampleEnumValues samples distinct values for columns likely to be enums.
@@ -946,6 +993,64 @@ func generateTimestampScaleDescription(scale, columnName string) string {
 	return description
 }
 
+// FKColumnDescription contains the auto-generated description for a foreign key column.
+// This is used to provide accurate, data-driven descriptions for FK columns based on
+// how the relationship was detected (database constraint vs data overlap analysis).
+type FKColumnDescription struct {
+	Description  string  // Auto-generated description with target info and detection context
+	SemanticType string  // Semantic type: "foreign_key" or "logical_foreign_key"
+	Role         string  // Column role: "identifier"
+	TargetTable  string  // Target table the FK references
+	TargetColumn string  // Target column the FK references
+	Confidence   float64 // Detection confidence (1.0 for DB constraints, lower for inferred)
+}
+
+// detectFKColumnPattern checks if a column is a foreign key and generates an auto-description
+// based on how the relationship was detected.
+//
+// Pattern detection rules:
+// - Column must have a confirmed FK relationship
+// - For database FK constraints (detection_method = "foreign_key"):
+//   - Description: "Foreign key to {table}.{column}."
+// - For inferred FKs (detection_method = "pk_match"):
+//   - Description: "Foreign key to {table}.{column}. No database constraint - logical reference only."
+//   - Includes confidence percentage based on match analysis
+//
+// Returns nil if no FK relationship exists for this column.
+func detectFKColumnPattern(_ *models.SchemaColumn, fkInfo *FKRelationshipInfo) *FKColumnDescription {
+	if fkInfo == nil {
+		return nil
+	}
+
+	var description string
+	var semanticType string
+
+	if fkInfo.IsDBConstraint {
+		// Database FK constraint - explicit relationship
+		description = fmt.Sprintf("Foreign key to %s.%s.",
+			fkInfo.TargetTable, fkInfo.TargetColumn)
+		semanticType = "foreign_key"
+	} else {
+		// Inferred FK via data overlap analysis
+		// pk_match relationships are only created when join analysis shows >95% match rate
+		// (less than 5% orphan values). The confidence value reflects detection confidence,
+		// not the actual match rate.
+		confidencePct := fkInfo.Confidence * 100
+		description = fmt.Sprintf("Foreign key to %s.%s (%.0f%% confidence). No database constraint - logical reference validated via data overlap.",
+			fkInfo.TargetTable, fkInfo.TargetColumn, confidencePct)
+		semanticType = "logical_foreign_key"
+	}
+
+	return &FKColumnDescription{
+		Description:  description,
+		SemanticType: semanticType,
+		Role:         models.ColumnRoleIdentifier,
+		TargetTable:  fkInfo.TargetTable,
+		TargetColumn: fkInfo.TargetColumn,
+		Confidence:   fkInfo.Confidence,
+	}
+}
+
 // applyEnumDistributions merges distribution data into EnumValue structs.
 func applyEnumDistributions(enumValues []models.EnumValue, dist *datasource.EnumDistributionResult) []models.EnumValue {
 	if dist == nil || len(dist.Distributions) == 0 {
@@ -1449,6 +1554,7 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 	enrichments []columnEnrichment,
 	columns []*models.SchemaColumn,
 	fkInfo map[string]string,
+	fkDetailedInfo map[string]*FKRelationshipInfo,
 	enumSamples map[string][]string,
 	enumDefs []models.EnumDefinition,
 	enumDistributions map[string]*datasource.EnumDistributionResult,
@@ -1514,6 +1620,16 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 			detail.Description = timestampScale.Description
 			detail.SemanticType = timestampScale.SemanticType
 			detail.Role = timestampScale.Role
+		}
+
+		// Apply FK column pattern detection for logical FKs (pk_match detected)
+		// This provides accurate descriptions based on how the relationship was detected
+		if fkDetail, ok := fkDetailedInfo[col.ColumnName]; ok {
+			if fkColDesc := detectFKColumnPattern(col, fkDetail); fkColDesc != nil {
+				detail.Description = fkColDesc.Description
+				detail.SemanticType = fkColDesc.SemanticType
+				detail.Role = fkColDesc.Role
+			}
 		}
 
 		// Merge project-level enum definitions if available

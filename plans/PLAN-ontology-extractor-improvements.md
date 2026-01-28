@@ -471,7 +471,7 @@ After implementation, re-run ontology extraction on tikr_production:
 - [x] **3. Monetary Column Detection**
 - [x] **4. UUID Text Column Detection**
 - [x] **5. Timestamp Scale Detection**
-- [ ] **6. FK Target Resolution via Data Overlap**
+- [x] **6. FK Target Resolution via Data Overlap**
 - [ ] **7. Cardinality Inference from Data**
 - [ ] **8. Role Detection from Column Naming**
 - [ ] **9. Boolean Naming Pattern Detection**
