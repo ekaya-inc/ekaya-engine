@@ -4676,12 +4676,12 @@ func Test_detectRolesInTable(t *testing.T) {
 
 func Test_detectFKColumnPattern_WithRoleDetection(t *testing.T) {
 	tests := []struct {
-		name                string
-		columnName          string
-		fkInfo              *FKRelationshipInfo
-		expectRole          string
-		expectRoleInDesc    bool
-		expectDescContains  []string
+		name               string
+		columnName         string
+		fkInfo             *FKRelationshipInfo
+		expectRole         string
+		expectRoleInDesc   bool
+		expectDescContains []string
 	}{
 		{
 			name:       "host_id with DB constraint includes role in description",
@@ -4895,4 +4895,477 @@ func Test_FKAssociation_SetFromDetectedRole(t *testing.T) {
 	require.NotNil(t, userCol)
 	assert.Empty(t, userCol.FKAssociation, "user_id should NOT have FKAssociation (generic reference)")
 	assert.NotContains(t, userCol.Description, "Role:", "user_id description should NOT include role")
+}
+
+// ============================================================================
+// Boolean Naming Pattern Detection Tests
+// ============================================================================
+
+func TestDetectBooleanNamingPattern_TypicalIsPrefix(t *testing.T) {
+	// Typical is_ prefixed boolean column
+	col := &models.SchemaColumn{
+		ColumnName: "is_active",
+		DataType:   "boolean",
+	}
+
+	result := detectBooleanNamingPattern(col)
+
+	require.NotNil(t, result, "Should detect boolean pattern for is_ prefix")
+	assert.Contains(t, result.Description, "Boolean flag")
+	assert.Contains(t, result.Description, "Indicates whether")
+	assert.Contains(t, result.Description, "active")
+	assert.Equal(t, "boolean_flag", result.SemanticType)
+	assert.Equal(t, models.ColumnRoleDimension, result.Role)
+	assert.Equal(t, "active", result.FeatureName)
+	assert.Equal(t, "is_", result.NamingPattern)
+}
+
+func TestDetectBooleanNamingPattern_HasPrefix(t *testing.T) {
+	// has_ prefixed boolean column
+	col := &models.SchemaColumn{
+		ColumnName: "has_premium_subscription",
+		DataType:   "boolean",
+	}
+
+	result := detectBooleanNamingPattern(col)
+
+	require.NotNil(t, result, "Should detect boolean pattern for has_ prefix")
+	assert.Contains(t, result.Description, "Boolean flag")
+	assert.Contains(t, result.Description, "Indicates whether this entity has")
+	assert.Contains(t, result.Description, "premium subscription")
+	assert.Equal(t, "boolean_flag", result.SemanticType)
+	assert.Equal(t, "premium_subscription", result.FeatureName)
+	assert.Equal(t, "has_", result.NamingPattern)
+}
+
+func TestDetectBooleanNamingPattern_CanPrefix(t *testing.T) {
+	// can_ prefixed boolean column
+	col := &models.SchemaColumn{
+		ColumnName: "can_edit",
+		DataType:   "boolean",
+	}
+
+	result := detectBooleanNamingPattern(col)
+
+	require.NotNil(t, result, "Should detect boolean pattern for can_ prefix")
+	assert.Contains(t, result.Description, "Boolean flag")
+	assert.Contains(t, result.Description, "Indicates whether this entity can")
+	assert.Contains(t, result.Description, "edit")
+	assert.Equal(t, "can_", result.NamingPattern)
+}
+
+func TestDetectBooleanNamingPattern_AllPrefixes(t *testing.T) {
+	// Test all supported prefixes
+	tests := []struct {
+		prefix     string
+		columnName string
+		expectedIn string
+	}{
+		{"is_", "is_verified", "Indicates whether"},
+		{"has_", "has_access", "Indicates whether this entity has"},
+		{"can_", "can_login", "Indicates whether this entity can"},
+		{"should_", "should_notify", "Indicates whether this entity should"},
+		{"allow_", "allow_marketing", "Indicates whether"},
+		{"allows_", "allows_sharing", "Indicates whether"},
+		{"needs_", "needs_review", "Indicates whether this entity needs"},
+		{"was_", "was_deleted", "Indicates whether this entity was"},
+		{"will_", "will_expire", "Indicates whether this entity will"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.prefix, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "boolean",
+			}
+
+			result := detectBooleanNamingPattern(col)
+
+			require.NotNil(t, result, "Should detect boolean pattern for %s prefix", tt.prefix)
+			assert.Contains(t, result.Description, tt.expectedIn, "Description should contain prefix description")
+			assert.Equal(t, tt.prefix, result.NamingPattern)
+		})
+	}
+}
+
+func TestDetectBooleanNamingPattern_NonBooleanPrefix(t *testing.T) {
+	// Column names that don't start with known prefixes
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"regular column", "active"},
+		{"status column", "status"},
+		{"enabled suffix", "feature_enabled"},
+		{"flag suffix", "email_verified_flag"},
+		{"different prefix", "do_send_emails"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "boolean",
+			}
+
+			result := detectBooleanNamingPattern(col)
+			assert.Nil(t, result, "Should not detect for column: %s", tt.columnName)
+		})
+	}
+}
+
+func TestDetectBooleanNamingPattern_BooleanDataTypes(t *testing.T) {
+	// Test different boolean data type representations
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"boolean", "boolean"},
+		{"bool", "bool"},
+		{"BOOLEAN", "BOOLEAN"},
+		{"bit", "bit"},
+		{"bit(1)", "bit(1)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "is_active",
+				DataType:   tt.dataType,
+			}
+
+			result := detectBooleanNamingPattern(col)
+			require.NotNil(t, result, "Should detect for data type: %s", tt.dataType)
+			assert.Equal(t, "boolean_flag", result.SemanticType)
+		})
+	}
+}
+
+func TestDetectBooleanNamingPattern_NonBooleanDataTypes(t *testing.T) {
+	// Non-boolean data types should not be detected (unless boolean-like integer)
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"text", "text"},
+		{"varchar", "varchar(10)"},
+		{"timestamp", "timestamp"},
+		{"date", "date"},
+		{"uuid", "uuid"},
+		{"jsonb", "jsonb"},
+		{"float", "float"},
+		{"decimal", "decimal(10,2)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "is_active",
+				DataType:   tt.dataType,
+			}
+
+			result := detectBooleanNamingPattern(col)
+			assert.Nil(t, result, "Should not detect for non-boolean type: %s", tt.dataType)
+		})
+	}
+}
+
+func TestDetectBooleanNamingPattern_BooleanLikeInteger(t *testing.T) {
+	// Integer columns with exactly 2 distinct values (0/1) should be detected
+	distinctCount := int64(2)
+	col := &models.SchemaColumn{
+		ColumnName:    "is_enabled",
+		DataType:      "integer",
+		DistinctCount: &distinctCount,
+		SampleValues:  []string{"0", "1"},
+	}
+
+	result := detectBooleanNamingPattern(col)
+
+	require.NotNil(t, result, "Should detect boolean-like integer column")
+	assert.Equal(t, "boolean_flag", result.SemanticType)
+	assert.Equal(t, "enabled", result.FeatureName)
+}
+
+func TestDetectBooleanNamingPattern_IntegerWithTrueFalse(t *testing.T) {
+	// Integer columns with true/false sample values
+	distinctCount := int64(2)
+	col := &models.SchemaColumn{
+		ColumnName:    "has_feature",
+		DataType:      "smallint",
+		DistinctCount: &distinctCount,
+		SampleValues:  []string{"true", "false"},
+	}
+
+	result := detectBooleanNamingPattern(col)
+
+	require.NotNil(t, result, "Should detect integer column with true/false values")
+	assert.Equal(t, "boolean_flag", result.SemanticType)
+}
+
+func TestDetectBooleanNamingPattern_IntegerNotBooleanLike(t *testing.T) {
+	// Integer columns with more than 2 distinct values should NOT be detected
+	distinctCount := int64(5)
+	col := &models.SchemaColumn{
+		ColumnName:    "is_status",
+		DataType:      "integer",
+		DistinctCount: &distinctCount,
+		SampleValues:  []string{"0", "1", "2", "3", "4"},
+	}
+
+	result := detectBooleanNamingPattern(col)
+
+	assert.Nil(t, result, "Should not detect integer column with more than 2 distinct values")
+}
+
+func TestDetectBooleanNamingPattern_IntegerWithNonBinaryValues(t *testing.T) {
+	// Integer columns with 2 distinct values but not 0/1
+	distinctCount := int64(2)
+	col := &models.SchemaColumn{
+		ColumnName:    "is_type",
+		DataType:      "integer",
+		DistinctCount: &distinctCount,
+		SampleValues:  []string{"5", "10"},
+	}
+
+	result := detectBooleanNamingPattern(col)
+
+	assert.Nil(t, result, "Should not detect integer column with non-binary values")
+}
+
+func TestDetectBooleanNamingPattern_IntegerNoDistinctCount(t *testing.T) {
+	// Integer columns without distinct count should not be detected
+	col := &models.SchemaColumn{
+		ColumnName: "is_enabled",
+		DataType:   "integer",
+		// No DistinctCount
+	}
+
+	result := detectBooleanNamingPattern(col)
+
+	assert.Nil(t, result, "Should not detect integer column without distinct count")
+}
+
+func TestDetectBooleanNamingPattern_CaseInsensitive(t *testing.T) {
+	// Column name matching should be case-insensitive
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"uppercase", "IS_ACTIVE"},
+		{"mixed case", "Is_Active"},
+		{"camel case like", "IS_active"},
+		{"all caps has", "HAS_FEATURE"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "boolean",
+			}
+
+			result := detectBooleanNamingPattern(col)
+			require.NotNil(t, result, "Should detect case-insensitive: %s", tt.columnName)
+		})
+	}
+}
+
+func TestHumanizeFeatureName_BasicConversion(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"active", "active"},
+		{"email_verified", "email verified"},
+		{"premium_subscription", "premium subscription"},
+		{"two_factor_auth", "two factor auth"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := humanizeFeatureName(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestHumanizeFeatureName_Abbreviations(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"pc_enabled", "PC enabled"},
+		{"api_access", "API access"},
+		{"ssl_verified", "SSL verified"},
+		{"mfa_enabled", "MFA enabled"},
+		{"sso_active", "SSO active"},
+		{"id_verified", "ID verified"},
+		{"uuid_generated", "UUID generated"},
+		{"url_shortened", "URL shortened"},
+		{"http_enabled", "HTTP enabled"},
+		{"https_required", "HTTPS required"},
+		{"tls_configured", "TLS configured"},
+		{"2fa_enabled", "2FA enabled"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := humanizeFeatureName(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestIsBooleanType(t *testing.T) {
+	tests := []struct {
+		dataType string
+		expected bool
+	}{
+		{"boolean", true},
+		{"bool", true},
+		{"BOOLEAN", true},
+		{"bit", true},
+		{"bit(1)", true},
+		{"integer", false},
+		{"text", false},
+		{"varchar", false},
+		{"timestamp", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.dataType, func(t *testing.T) {
+			result := isBooleanType(tt.dataType)
+			assert.Equal(t, tt.expected, result, "isBooleanType(%s)", tt.dataType)
+		})
+	}
+}
+
+func TestIsBooleanLikeIntegerColumn(t *testing.T) {
+	distinctCount2 := int64(2)
+	distinctCount5 := int64(5)
+
+	tests := []struct {
+		name     string
+		col      *models.SchemaColumn
+		expected bool
+	}{
+		{
+			name: "integer with 2 values 0/1",
+			col: &models.SchemaColumn{
+				DataType:      "integer",
+				DistinctCount: &distinctCount2,
+				SampleValues:  []string{"0", "1"},
+			},
+			expected: true,
+		},
+		{
+			name: "smallint with 2 values",
+			col: &models.SchemaColumn{
+				DataType:      "smallint",
+				DistinctCount: &distinctCount2,
+				SampleValues:  []string{"0", "1"},
+			},
+			expected: true,
+		},
+		{
+			name: "bigint with 2 values",
+			col: &models.SchemaColumn{
+				DataType:      "bigint",
+				DistinctCount: &distinctCount2,
+				SampleValues:  []string{"0", "1"},
+			},
+			expected: true,
+		},
+		{
+			name: "integer with true/false strings",
+			col: &models.SchemaColumn{
+				DataType:      "integer",
+				DistinctCount: &distinctCount2,
+				SampleValues:  []string{"true", "false"},
+			},
+			expected: true,
+		},
+		{
+			name: "integer with more than 2 values",
+			col: &models.SchemaColumn{
+				DataType:      "integer",
+				DistinctCount: &distinctCount5,
+				SampleValues:  []string{"0", "1", "2", "3", "4"},
+			},
+			expected: false,
+		},
+		{
+			name: "integer with non-binary sample values",
+			col: &models.SchemaColumn{
+				DataType:      "integer",
+				DistinctCount: &distinctCount2,
+				SampleValues:  []string{"5", "10"},
+			},
+			expected: false,
+		},
+		{
+			name: "integer without distinct count",
+			col: &models.SchemaColumn{
+				DataType: "integer",
+			},
+			expected: false,
+		},
+		{
+			name: "non-integer type",
+			col: &models.SchemaColumn{
+				DataType:      "text",
+				DistinctCount: &distinctCount2,
+				SampleValues:  []string{"0", "1"},
+			},
+			expected: false,
+		},
+		{
+			name: "integer with no sample values (still valid if count is 2)",
+			col: &models.SchemaColumn{
+				DataType:      "integer",
+				DistinctCount: &distinctCount2,
+				SampleValues:  []string{},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isBooleanLikeIntegerColumn(tt.col)
+			assert.Equal(t, tt.expected, result, "isBooleanLikeIntegerColumn for %s", tt.name)
+		})
+	}
+}
+
+func TestGenerateBooleanDescription(t *testing.T) {
+	tests := []struct {
+		name             string
+		prefixDesc       string
+		humanizedFeature string
+		expectedContains []string
+	}{
+		{
+			name:             "is prefix",
+			prefixDesc:       "Indicates whether",
+			humanizedFeature: "active",
+			expectedContains: []string{"Boolean flag", "Indicates whether", "active"},
+		},
+		{
+			name:             "has prefix",
+			prefixDesc:       "Indicates whether this entity has",
+			humanizedFeature: "premium subscription",
+			expectedContains: []string{"Boolean flag", "Indicates whether this entity has", "premium subscription"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := generateBooleanDescription(tt.prefixDesc, tt.humanizedFeature)
+			for _, expected := range tt.expectedContains {
+				assert.Contains(t, result, expected)
+			}
+		})
+	}
 }

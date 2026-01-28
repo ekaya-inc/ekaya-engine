@@ -994,6 +994,169 @@ func generateTimestampScaleDescription(scale, columnName string) string {
 }
 
 // ============================================================================
+// Boolean Naming Pattern Detection
+// ============================================================================
+
+// BooleanColumnDescription contains the auto-generated description for a boolean column.
+type BooleanColumnDescription struct {
+	Description   string // Auto-generated description with distribution info
+	SemanticType  string // Semantic type: "boolean_flag"
+	Role          string // Column role: "dimension" (typically used for filtering/grouping)
+	FeatureName   string // Humanized feature name extracted from column name
+	NamingPattern string // "is_" or "has_"
+}
+
+// booleanPrefixes maps column name prefixes to their interpretation.
+// These are the common naming conventions for boolean columns.
+var booleanPrefixes = map[string]string{
+	"is_":     "Indicates whether",
+	"has_":    "Indicates whether this entity has",
+	"can_":    "Indicates whether this entity can",
+	"should_": "Indicates whether this entity should",
+	"allow_":  "Indicates whether",
+	"allows_": "Indicates whether",
+	"needs_":  "Indicates whether this entity needs",
+	"was_":    "Indicates whether this entity was",
+	"will_":   "Indicates whether this entity will",
+}
+
+// detectBooleanNamingPattern checks if a column matches a boolean naming pattern and returns
+// an auto-generated description if detected.
+//
+// Pattern detection rules:
+// - Column name starts with is_, has_, can_, should_, allow_, allows_, needs_, was_, will_
+// - Data type is boolean
+// - OR data type is integer/smallint with exactly 2 distinct values (0/1)
+//
+// Returns nil if the column doesn't match the boolean pattern.
+func detectBooleanNamingPattern(col *models.SchemaColumn) *BooleanColumnDescription {
+	colNameLower := strings.ToLower(col.ColumnName)
+
+	// Find matching prefix
+	var matchedPrefix string
+	var prefixDesc string
+	for prefix, desc := range booleanPrefixes {
+		if strings.HasPrefix(colNameLower, prefix) {
+			matchedPrefix = prefix
+			prefixDesc = desc
+			break
+		}
+	}
+
+	if matchedPrefix == "" {
+		return nil
+	}
+
+	// Check column type is boolean or boolean-like (integer with 2 values)
+	if !isBooleanType(col.DataType) && !isBooleanLikeIntegerColumn(col) {
+		return nil
+	}
+
+	// Extract feature name from column (e.g., "is_pc_enabled" -> "pc_enabled")
+	featureName := strings.TrimPrefix(colNameLower, matchedPrefix)
+	humanizedFeature := humanizeFeatureName(featureName)
+
+	// Generate description
+	description := generateBooleanDescription(prefixDesc, humanizedFeature)
+
+	return &BooleanColumnDescription{
+		Description:   description,
+		SemanticType:  "boolean_flag",
+		Role:          models.ColumnRoleDimension, // Booleans are typically used for filtering
+		FeatureName:   featureName,
+		NamingPattern: matchedPrefix,
+	}
+}
+
+// isBooleanType checks if a column data type is a boolean type.
+func isBooleanType(dataType string) bool {
+	dataTypeLower := strings.ToLower(dataType)
+	return dataTypeLower == "boolean" ||
+		dataTypeLower == "bool" ||
+		strings.HasPrefix(dataTypeLower, "bit")
+}
+
+// isBooleanLikeIntegerColumn checks if an integer column is boolean-like
+// (has exactly 2 distinct values, typically 0 and 1).
+func isBooleanLikeIntegerColumn(col *models.SchemaColumn) bool {
+	dataTypeLower := strings.ToLower(col.DataType)
+
+	// Must be integer type
+	if !strings.Contains(dataTypeLower, "int") {
+		return false
+	}
+
+	// Must have exactly 2 distinct values (0/1 or similar binary representation)
+	if col.DistinctCount == nil || *col.DistinctCount != 2 {
+		return false
+	}
+
+	// Check if sample values are 0 and 1 (or similar binary values)
+	if len(col.SampleValues) > 0 {
+		for _, val := range col.SampleValues {
+			if val != "0" && val != "1" && val != "true" && val != "false" {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+// humanizeFeatureName converts a snake_case feature name to a human-readable form.
+// Examples:
+//   - "pc_enabled" -> "PC enabled"
+//   - "email_verified" -> "email verified"
+//   - "active" -> "active"
+func humanizeFeatureName(feature string) string {
+	// Replace underscores with spaces
+	result := strings.ReplaceAll(feature, "_", " ")
+
+	// Capitalize known abbreviations
+	abbreviations := map[string]string{
+		"pc":    "PC",
+		"id":    "ID",
+		"uuid":  "UUID",
+		"url":   "URL",
+		"api":   "API",
+		"http":  "HTTP",
+		"https": "HTTPS",
+		"ssl":   "SSL",
+		"tls":   "TLS",
+		"mfa":   "MFA",
+		"2fa":   "2FA",
+		"sso":   "SSO",
+	}
+
+	words := strings.Fields(result)
+	for i, word := range words {
+		if upper, ok := abbreviations[strings.ToLower(word)]; ok {
+			words[i] = upper
+		}
+	}
+
+	return strings.Join(words, " ")
+}
+
+// generateBooleanDescription generates a description for a boolean column.
+func generateBooleanDescription(prefixDesc, humanizedFeature string) string {
+	var sb strings.Builder
+
+	sb.WriteString("Boolean flag. ")
+	sb.WriteString(prefixDesc)
+	sb.WriteString(" ")
+	sb.WriteString(humanizedFeature)
+	sb.WriteString(".")
+
+	// Note: We can't show accurate true/false percentages without actual count data per value.
+	// The enum distribution analysis (analyzeEnumDistributions) handles this for boolean columns
+	// when they're identified as enum candidates. So we don't add percentage here to avoid
+	// potentially inaccurate information.
+
+	return sb.String()
+}
+
+// ============================================================================
 // Role Detection from Column Naming Patterns
 // ============================================================================
 
@@ -1009,33 +1172,33 @@ func generateTimestampScaleDescription(scale, columnName string) string {
 var RolePatterns = map[string][]string{
 	// User roles - common patterns for person-to-person relationships
 	"user": {
-		"host", "visitor",           // content/marketplace platforms
-		"creator", "owner",          // ownership relationships
-		"sender", "recipient",       // messaging/transfers
-		"payer", "payee",            // financial transactions
-		"buyer", "seller",           // e-commerce
-		"assignee", "assignor",      // task/ticket assignment
-		"author", "reviewer",        // content creation/review
-		"requester", "approver",     // approval workflows
-		"parent", "child",           // hierarchical relationships
-		"manager", "employee",       // organizational relationships
-		"referrer", "referee",       // referral programs
-		"inviter", "invitee",        // invitation flows
-		"follower", "following",     // social relationships
-		"mentor", "mentee",          // mentorship
-		"driver", "rider",           // transportation platforms
-		"provider", "consumer",      // service marketplaces
-		"instructor", "student",     // educational platforms
-		"landlord", "tenant",        // property platforms
-		"lender", "borrower",        // lending platforms
+		"host", "visitor", // content/marketplace platforms
+		"creator", "owner", // ownership relationships
+		"sender", "recipient", // messaging/transfers
+		"payer", "payee", // financial transactions
+		"buyer", "seller", // e-commerce
+		"assignee", "assignor", // task/ticket assignment
+		"author", "reviewer", // content creation/review
+		"requester", "approver", // approval workflows
+		"parent", "child", // hierarchical relationships
+		"manager", "employee", // organizational relationships
+		"referrer", "referee", // referral programs
+		"inviter", "invitee", // invitation flows
+		"follower", "following", // social relationships
+		"mentor", "mentee", // mentorship
+		"driver", "rider", // transportation platforms
+		"provider", "consumer", // service marketplaces
+		"instructor", "student", // educational platforms
+		"landlord", "tenant", // property platforms
+		"lender", "borrower", // lending platforms
 	},
 	// Account roles - for financial or multi-party transactions
 	"account": {
-		"source", "destination",     // transfer endpoints
-		"from", "to",                // transfer direction
-		"debit", "credit",           // accounting entries
-		"payer", "payee",            // payment parties (can apply to accounts too)
-		"billing", "shipping",       // e-commerce accounts
+		"source", "destination", // transfer endpoints
+		"from", "to", // transfer direction
+		"debit", "credit", // accounting entries
+		"payer", "payee", // payment parties (can apply to accounts too)
+		"billing", "shipping", // e-commerce accounts
 	},
 }
 
@@ -1162,14 +1325,14 @@ func detectRolesInTable(fkInfo map[string]string) map[string]*DetectedRole {
 // This is used to provide accurate, data-driven descriptions for FK columns based on
 // how the relationship was detected (database constraint vs data overlap analysis).
 type FKColumnDescription struct {
-	Description   string  // Auto-generated description with target info and detection context
-	SemanticType  string  // Semantic type: "foreign_key" or "logical_foreign_key"
-	Role          string  // Column role: "identifier"
-	TargetTable   string  // Target table the FK references
-	TargetColumn  string  // Target column the FK references
-	Confidence    float64 // Detection confidence (1.0 for DB constraints, lower for inferred)
-	DetectedRole  string  // Semantic role detected from column name (e.g., "host", "visitor")
-	RoleDesc      string  // Human-readable description of the detected role
+	Description  string  // Auto-generated description with target info and detection context
+	SemanticType string  // Semantic type: "foreign_key" or "logical_foreign_key"
+	Role         string  // Column role: "identifier"
+	TargetTable  string  // Target table the FK references
+	TargetColumn string  // Target column the FK references
+	Confidence   float64 // Detection confidence (1.0 for DB constraints, lower for inferred)
+	DetectedRole string  // Semantic role detected from column name (e.g., "host", "visitor")
+	RoleDesc     string  // Human-readable description of the detected role
 }
 
 // detectFKColumnPattern checks if a column is a foreign key and generates an auto-description
@@ -1180,6 +1343,7 @@ type FKColumnDescription struct {
 // - Role detection from column name prefixes (e.g., host_id -> role: host)
 // - For database FK constraints (detection_method = "foreign_key"):
 //   - Description: "Foreign key to {table}.{column}. Role: {role} ({description})."
+//
 // - For inferred FKs (detection_method = "pk_match"):
 //   - Description: "Foreign key to {table}.{column}. Role: {role}. No database constraint - logical reference only."
 //   - Includes confidence percentage based on match analysis
@@ -1804,6 +1968,13 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 			detail.Description = timestampScale.Description
 			detail.SemanticType = timestampScale.SemanticType
 			detail.Role = timestampScale.Role
+		}
+
+		// Apply boolean naming pattern detection (overrides LLM description with data-driven description)
+		if booleanDesc := detectBooleanNamingPattern(col); booleanDesc != nil {
+			detail.Description = booleanDesc.Description
+			detail.SemanticType = booleanDesc.SemanticType
+			detail.Role = booleanDesc.Role
 		}
 
 		// Apply FK column pattern detection for logical FKs (pk_match detected)

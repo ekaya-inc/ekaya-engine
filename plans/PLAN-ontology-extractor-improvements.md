@@ -474,5 +474,5 @@ After implementation, re-run ontology extraction on tikr_production:
 - [x] **6. FK Target Resolution via Data Overlap**
 - [x] **7. Cardinality Inference from Data**
 - [x] **8. Role Detection from Column Naming**
-- [ ] **9. Boolean Naming Pattern Detection**
+- [x] **9. Boolean Naming Pattern Detection**
 - [ ] **10. Email/External ID Pattern Detection**
