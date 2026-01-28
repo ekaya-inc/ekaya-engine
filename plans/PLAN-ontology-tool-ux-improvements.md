@@ -9,7 +9,7 @@ When an AI agent answers ontology questions using MCP tools, two friction points
 
 These are quick wins that improve the agent workflow without changing question structure.
 
-## Task 1: Add Inspection Tools
+## Task 1: Add Inspection Tools [x]
 
 ### Problem
 
