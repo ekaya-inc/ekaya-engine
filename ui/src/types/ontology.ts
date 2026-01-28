@@ -492,14 +492,16 @@ export type DAGNodeStatus = 'pending' | 'running' | 'completed' | 'failed' | 'sk
  * DAG node names in execution order
  */
 export type DAGNodeName =
+  | 'KnowledgeSeeding'
   | 'EntityDiscovery'
   | 'EntityEnrichment'
   | 'FKDiscovery'
   | 'PKMatchDiscovery'
   | 'RelationshipDiscovery'
   | 'RelationshipEnrichment'
-  | 'OntologyFinalization'
+  | 'ColumnFeatureExtraction'
   | 'ColumnEnrichment'
+  | 'OntologyFinalization'
   | 'GlossaryDiscovery'
   | 'GlossaryEnrichment';
 
@@ -539,44 +541,52 @@ export interface DAGStatusResponse {
  * Human-readable descriptions for each DAG node
  */
 export const DAGNodeDescriptions: Record<DAGNodeName, { title: string; description: string }> = {
+  KnowledgeSeeding: {
+    title: 'Seeding Knowledge',
+    description: 'Initialize project knowledge from description and schema',
+  },
   EntityDiscovery: {
-    title: 'Entity Discovery',
+    title: 'Discovering Entities',
     description: 'Identifying entities from schema constraints',
   },
   EntityEnrichment: {
-    title: 'Entity Enrichment',
+    title: 'Enriching Entities',
     description: 'Generating entity names and descriptions',
   },
   FKDiscovery: {
-    title: 'Foreign Key Discovery',
+    title: 'Discovering Foreign Keys',
     description: 'Discovering foreign key relationships',
   },
   PKMatchDiscovery: {
-    title: 'Primary Key Match Discovery',
+    title: 'Discovering Primary Key Matches',
     description: 'Discovering relationships via primary key matching',
   },
   RelationshipDiscovery: {
-    title: 'Relationship Discovery',
+    title: 'Discovering Relationships',
     description: 'Discovering foreign key relationships',
   },
   RelationshipEnrichment: {
-    title: 'Relationship Enrichment',
+    title: 'Enriching Relationships',
     description: 'Generating relationship descriptions',
   },
-  OntologyFinalization: {
-    title: 'Ontology Finalization',
-    description: 'Generating domain summary and conventions',
+  ColumnFeatureExtraction: {
+    title: 'Extracting Column Features',
+    description: 'Analyzing column statistics and patterns',
   },
   ColumnEnrichment: {
-    title: 'Column Enrichment',
+    title: 'Enriching Columns',
     description: 'Generating column descriptions and semantic types',
   },
+  OntologyFinalization: {
+    title: 'Finalizing Ontology',
+    description: 'Generating domain summary and conventions',
+  },
   GlossaryDiscovery: {
-    title: 'Glossary Discovery',
+    title: 'Discovering Glossary Terms',
     description: 'Discovering business glossary terms and definitions',
   },
   GlossaryEnrichment: {
-    title: 'Glossary Enrichment',
+    title: 'Enriching Glossary',
     description: 'Generating SQL definitions for glossary terms',
   },
 };
