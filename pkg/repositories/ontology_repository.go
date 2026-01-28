@@ -290,19 +290,16 @@ func (r *ontologyRepository) DeleteByProject(ctx context.Context, projectID uuid
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback on defer is best-effort
 
-	// 1. Clean up project_knowledge (fallback - also has CASCADE via ontology_id FK)
-	_, err = tx.Exec(ctx, `DELETE FROM engine_project_knowledge WHERE project_id = $1`, projectID)
-	if err != nil {
-		return fmt.Errorf("failed to delete project knowledge: %w", err)
-	}
+	// NOTE: project_knowledge is NOT deleted here - it has project-lifecycle scope
+	// and persists across ontology re-extractions. Only deleted when project is deleted.
 
-	// 2. Clean up business_glossary (fallback - also has CASCADE via ontology_id FK)
+	// 1. Clean up business_glossary (fallback - also has CASCADE via ontology_id FK)
 	_, err = tx.Exec(ctx, `DELETE FROM engine_business_glossary WHERE project_id = $1`, projectID)
 	if err != nil {
 		return fmt.Errorf("failed to delete business glossary: %w", err)
 	}
 
-	// 3. Delete ontologies (cascades to other ontology tables like entities, relationships, etc.)
+	// 2. Delete ontologies (cascades to other ontology tables like entities, relationships, etc.)
 	_, err = tx.Exec(ctx, `DELETE FROM engine_ontologies WHERE project_id = $1`, projectID)
 	if err != nil {
 		return fmt.Errorf("failed to delete ontologies: %w", err)

@@ -166,11 +166,6 @@ func TestKnowledgeService_StoreWithSource_Manual(t *testing.T) {
 	if fact.Source != "manual" {
 		t.Errorf("Source = %v, want %v", fact.Source, "manual")
 	}
-
-	// Verify project_overview has nil ontologyID (survives ontology deletion)
-	if fact.OntologyID != nil {
-		t.Errorf("OntologyID = %v, want nil for project_overview facts", fact.OntologyID)
-	}
 }
 
 func TestKnowledgeService_StoreWithSource_Inferred(t *testing.T) {
@@ -189,14 +184,6 @@ func TestKnowledgeService_StoreWithSource_Inferred(t *testing.T) {
 	// Verify the fact was stored
 	if fact.Source != "inferred" {
 		t.Errorf("Source = %v, want %v", fact.Source, "inferred")
-	}
-
-	// Verify non-overview facts get linked to ontology
-	if fact.OntologyID == nil {
-		t.Errorf("OntologyID should not be nil for non-overview facts when active ontology exists")
-	}
-	if fact.OntologyID != nil && *fact.OntologyID != tc.ontologyID {
-		t.Errorf("OntologyID = %v, want %v", *fact.OntologyID, tc.ontologyID)
 	}
 }
 
@@ -245,20 +232,23 @@ func TestKnowledgeService_StoreWithSource_ProjectOverviewNilOntology(t *testing.
 		t.Fatalf("StoreWithSource failed: %v", err)
 	}
 
-	// Verify ontologyID is nil for project_overview
-	if fact.OntologyID != nil {
-		t.Errorf("project_overview fact should have nil OntologyID, got %v", fact.OntologyID)
+	// Verify the fact was stored with the correct values
+	if fact.FactType != "overview" {
+		t.Errorf("FactType = %v, want %v", fact.FactType, "overview")
+	}
+	if fact.Key != "project_overview" {
+		t.Errorf("Key = %v, want %v", fact.Key, "project_overview")
 	}
 
-	// Store a different fact type - should get ontology ID
+	// Store a different fact type
 	otherFact, err := tc.service.StoreWithSource(ctx, tc.projectID, "convention", "timestamp_format", "UTC timestamps", "", "manual")
 	if err != nil {
 		t.Fatalf("StoreWithSource for convention failed: %v", err)
 	}
 
-	// Verify non-overview facts get the ontology ID
-	if otherFact.OntologyID == nil {
-		t.Error("convention fact should have ontologyID when active ontology exists")
+	// Verify the convention fact was stored
+	if otherFact.FactType != "convention" {
+		t.Errorf("FactType = %v, want %v", otherFact.FactType, "convention")
 	}
 }
 

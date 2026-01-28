@@ -290,12 +290,11 @@ func (e *OntologyToolExecutor) storeKnowledge(ctx context.Context, arguments str
 	}
 
 	fact := &models.KnowledgeFact{
-		ProjectID:  e.projectID,
-		OntologyID: &e.ontologyID,
-		FactType:   args.FactType,
-		Key:        args.Key,
-		Value:      args.Value,
-		Context:    args.Context,
+		ProjectID: e.projectID,
+		FactType:  args.FactType,
+		Key:       args.Key,
+		Value:     args.Value,
+		Context:   args.Context,
 	}
 
 	if err := e.knowledgeRepo.Upsert(ctx, fact); err != nil {

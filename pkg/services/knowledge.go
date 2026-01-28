@@ -60,21 +60,12 @@ func NewKnowledgeService(
 var _ KnowledgeService = (*knowledgeService)(nil)
 
 func (s *knowledgeService) Store(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
-	// Look up active ontology to associate knowledge with it
-	var ontologyID *uuid.UUID
-	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-	if err == nil && ontology != nil {
-		ontologyID = &ontology.ID
-	}
-	// If no active ontology found, ontologyID remains nil (allowed by schema)
-
 	fact := &models.KnowledgeFact{
-		ProjectID:  projectID,
-		OntologyID: ontologyID,
-		FactType:   factType,
-		Key:        key,
-		Value:      value,
-		Context:    contextInfo,
+		ProjectID: projectID,
+		FactType:  factType,
+		Key:       key,
+		Value:     value,
+		Context:   contextInfo,
 	}
 
 	if err := s.repo.Upsert(ctx, fact); err != nil {
@@ -96,8 +87,7 @@ func (s *knowledgeService) Store(ctx context.Context, projectID uuid.UUID, factT
 
 // StoreWithSource creates or updates a knowledge fact with explicit source provenance.
 // The source parameter should be "manual" for user-entered data or "inferred" for LLM-extracted data.
-// For project_overview facts (factType="overview", key="project_overview"), ontologyID is set to nil
-// so the fact survives ontology deletion and can be reused on re-extraction.
+// Knowledge facts have project-lifecycle scope and persist across ontology re-extractions.
 func (s *knowledgeService) StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo, source string) (*models.KnowledgeFact, error) {
 	// Validate and convert source to ProvenanceSource
 	provenanceSource := models.ProvenanceSource(source)
@@ -130,28 +120,12 @@ func (s *knowledgeService) StoreWithSource(ctx context.Context, projectID uuid.U
 		return nil, fmt.Errorf("unsupported source: %s", source)
 	}
 
-	// Determine ontologyID based on fact type:
-	// - For project_overview facts, set ontologyID to nil so they survive ontology deletion
-	// - For other facts, associate with active ontology if available
-	var ontologyID *uuid.UUID
-	if factType == "overview" && key == "project_overview" {
-		// Project overview should survive ontology deletion
-		ontologyID = nil
-	} else {
-		// Look up active ontology for other fact types
-		ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
-		if err == nil && ontology != nil {
-			ontologyID = &ontology.ID
-		}
-	}
-
 	fact := &models.KnowledgeFact{
-		ProjectID:  projectID,
-		OntologyID: ontologyID,
-		FactType:   factType,
-		Key:        key,
-		Value:      value,
-		Context:    contextInfo,
+		ProjectID: projectID,
+		FactType:  factType,
+		Key:       key,
+		Value:     value,
+		Context:   contextInfo,
 	}
 
 	if err := s.repo.Upsert(provenanceCtx, fact); err != nil {

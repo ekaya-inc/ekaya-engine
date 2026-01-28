@@ -80,7 +80,7 @@ func (r *knowledgeRepository) Upsert(ctx context.Context, fact *models.Knowledge
 		return nil
 	}
 
-	// No ID provided - upsert by (project_id, ontology_id, fact_type, key)
+	// No ID provided - upsert by (project_id, fact_type, key)
 	fact.ID = uuid.New()
 	fact.CreatedAt = now
 
@@ -95,10 +95,10 @@ func (r *knowledgeRepository) Upsert(ctx context.Context, fact *models.Knowledge
 
 	query := `
 		INSERT INTO engine_project_knowledge (
-			id, project_id, ontology_id, fact_type, key, value, context,
+			id, project_id, fact_type, key, value, context,
 			source, created_by, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		ON CONFLICT (project_id, ontology_id, fact_type, key)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		ON CONFLICT (project_id, fact_type, key)
 		DO UPDATE SET
 			value = EXCLUDED.value,
 			context = EXCLUDED.context,
@@ -108,7 +108,7 @@ func (r *knowledgeRepository) Upsert(ctx context.Context, fact *models.Knowledge
 		RETURNING id, created_at`
 
 	err := scope.Conn.QueryRow(ctx, query,
-		fact.ID, fact.ProjectID, fact.OntologyID, fact.FactType, fact.Key, fact.Value, fact.Context,
+		fact.ID, fact.ProjectID, fact.FactType, fact.Key, fact.Value, fact.Context,
 		fact.Source, fact.CreatedBy, fact.CreatedAt, fact.UpdatedAt,
 	).Scan(&fact.ID, &fact.CreatedAt)
 	if err != nil {
@@ -125,7 +125,7 @@ func (r *knowledgeRepository) GetByProject(ctx context.Context, projectID uuid.U
 	}
 
 	query := `
-		SELECT id, project_id, ontology_id, fact_type, key, value, context,
+		SELECT id, project_id, fact_type, key, value, context,
 		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_project_knowledge
 		WHERE project_id = $1
@@ -159,7 +159,7 @@ func (r *knowledgeRepository) GetByType(ctx context.Context, projectID uuid.UUID
 	}
 
 	query := `
-		SELECT id, project_id, ontology_id, fact_type, key, value, context,
+		SELECT id, project_id, fact_type, key, value, context,
 		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_project_knowledge
 		WHERE project_id = $1 AND fact_type = $2
@@ -193,7 +193,7 @@ func (r *knowledgeRepository) GetByKey(ctx context.Context, projectID uuid.UUID,
 	}
 
 	query := `
-		SELECT id, project_id, ontology_id, fact_type, key, value, context,
+		SELECT id, project_id, fact_type, key, value, context,
 		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_project_knowledge
 		WHERE project_id = $1 AND fact_type = $2 AND key = $3`
@@ -272,7 +272,7 @@ func scanKnowledgeFactRow(row pgx.Row) (*models.KnowledgeFact, error) {
 	var context *string
 
 	err := row.Scan(
-		&f.ID, &f.ProjectID, &f.OntologyID, &f.FactType, &f.Key, &f.Value, &context,
+		&f.ID, &f.ProjectID, &f.FactType, &f.Key, &f.Value, &context,
 		&f.Source, &f.LastEditSource, &f.CreatedBy, &f.UpdatedBy, &f.CreatedAt, &f.UpdatedAt,
 	)
 	if err != nil {
@@ -294,7 +294,7 @@ func scanKnowledgeFactRows(rows pgx.Rows) (*models.KnowledgeFact, error) {
 	var context *string
 
 	err := rows.Scan(
-		&f.ID, &f.ProjectID, &f.OntologyID, &f.FactType, &f.Key, &f.Value, &context,
+		&f.ID, &f.ProjectID, &f.FactType, &f.Key, &f.Value, &context,
 		&f.Source, &f.LastEditSource, &f.CreatedBy, &f.UpdatedBy, &f.CreatedAt, &f.UpdatedAt,
 	)
 	if err != nil {

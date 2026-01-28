@@ -128,24 +128,13 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 			), nil
 		}
 
-		// Look up active ontology to associate knowledge with it (optional dependency)
-		var ontologyID *uuid.UUID
-		if deps.OntologyRepository != nil {
-			ontology, err := deps.OntologyRepository.GetActive(tenantCtx, projectID)
-			if err == nil && ontology != nil {
-				ontologyID = &ontology.ID
-			}
-		}
-		// If no active ontology found or OntologyRepository not provided, ontologyID remains nil (allowed by schema)
-
-		// Build KnowledgeFact
+		// Build KnowledgeFact (project-lifecycle scope, no ontology association)
 		knowledgeFact := &models.KnowledgeFact{
-			ProjectID:  projectID,
-			OntologyID: ontologyID,
-			FactType:   category,
-			Key:        fact, // Using fact as the key for upsert semantics
-			Value:      fact,
-			Context:    context,
+			ProjectID: projectID,
+			FactType:  category,
+			Key:       fact, // Using fact as the key for upsert semantics
+			Value:     fact,
+			Context:   context,
 		}
 
 		// If fact_id provided, parse it and set ID for explicit update

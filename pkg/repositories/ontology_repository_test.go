@@ -718,14 +718,13 @@ func TestOntologyRepository_DeleteByProject_CleansUpRelatedData(t *testing.T) {
 	// Create an ontology
 	ontology := tc.createTestOntology(ctx, 1, true)
 
-	// Create knowledge facts linked to this project and ontology
+	// Create knowledge facts linked to this project (project-level scope)
 	knowledgeRepo := NewKnowledgeRepository()
 	fact := &models.KnowledgeFact{
-		ProjectID:  tc.projectID,
-		OntologyID: &ontology.ID,
-		FactType:   "terminology",
-		Key:        "test_term",
-		Value:      "A test term definition",
+		ProjectID: tc.projectID,
+		FactType:  "terminology",
+		Key:       "test_term",
+		Value:     "A test term definition",
 	}
 	err := knowledgeRepo.Upsert(ctx, fact)
 	if err != nil {
@@ -779,13 +778,13 @@ func TestOntologyRepository_DeleteByProject_CleansUpRelatedData(t *testing.T) {
 		t.Error("expected ontology to be deleted")
 	}
 
-	// Verify knowledge facts are deleted
+	// Verify knowledge facts SURVIVE ontology deletion (project-lifecycle scope)
 	facts, err = knowledgeRepo.GetByProject(ctx, tc.projectID)
 	if err != nil {
 		t.Fatalf("failed to get knowledge facts after delete: %v", err)
 	}
-	if len(facts) != 0 {
-		t.Errorf("expected 0 knowledge facts after delete, got %d", len(facts))
+	if len(facts) == 0 {
+		t.Error("expected knowledge facts to survive ontology deletion (project-lifecycle scope)")
 	}
 
 	// Verify glossary terms are deleted
