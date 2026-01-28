@@ -209,7 +209,7 @@ func registerUpdateColumnsTool(s *server.MCPServer, deps *OntologyToolDeps) {
 
 ---
 
-## Task 3: Enhance probe_column to Include Metadata
+## Task 3: Enhance probe_column to Include Metadata [x]
 
 ### Alternative to Task 1
 
