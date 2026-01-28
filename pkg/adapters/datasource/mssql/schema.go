@@ -505,6 +505,147 @@ func (s *SchemaDiscoverer) GetDistinctValues(ctx context.Context, schemaName, ta
 	return values, nil
 }
 
+// GetEnumValueDistribution analyzes value distribution for an enum column.
+// Returns count and percentage for each distinct value, sorted by count descending.
+// If completionTimestampCol is provided, also computes completion rate per value.
+func (s *SchemaDiscoverer) GetEnumValueDistribution(ctx context.Context, schemaName, tableName, columnName string, completionTimestampCol string, limit int) (*datasource.EnumDistributionResult, error) {
+	quotedTable := buildFullyQualifiedName(schemaName, tableName)
+	quotedCol := quoteName(columnName)
+
+	// Get total row count and null count first
+	totalQuery := fmt.Sprintf(`
+		SET NOCOUNT ON;
+		SELECT COUNT(*) as total_rows,
+		       SUM(CASE WHEN %s IS NULL THEN 1 ELSE 0 END) as null_count,
+		       COUNT(DISTINCT %s) as distinct_count
+		FROM %s WITH (NOLOCK)
+	`, quotedCol, quotedCol, quotedTable)
+
+	var totalRows, nullCount, distinctCount int64
+	if err := s.db.QueryRowContext(ctx, totalQuery).Scan(&totalRows, &nullCount, &distinctCount); err != nil {
+		return nil, fmt.Errorf("get totals for %s.%s.%s: %w", schemaName, tableName, columnName, err)
+	}
+
+	result := &datasource.EnumDistributionResult{
+		ColumnName:    columnName,
+		TotalRows:     totalRows,
+		DistinctCount: distinctCount,
+		NullCount:     nullCount,
+		Distributions: []datasource.EnumValueDistribution{},
+	}
+
+	// Build the distribution query - with or without completion timestamp analysis
+	var query string
+	if completionTimestampCol != "" {
+		quotedCompletionCol := quoteName(completionTimestampCol)
+		result.CompletionTimestampCol = completionTimestampCol
+
+		query = fmt.Sprintf(`
+			SET NOCOUNT ON;
+			SELECT TOP (%d) CAST(%s AS NVARCHAR(MAX)) as value,
+			       COUNT(*) as count,
+			       ROUND(100.0 * COUNT(*) / NULLIF(CAST(%d AS FLOAT), 0), 2) as percentage,
+			       SUM(CASE WHEN %s IS NOT NULL THEN 1 ELSE 0 END) as has_completion_at,
+			       ROUND(100.0 * SUM(CASE WHEN %s IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(CAST(COUNT(*) AS FLOAT), 0), 2) as completion_rate
+			FROM %s WITH (NOLOCK)
+			WHERE %s IS NOT NULL
+			GROUP BY %s
+			ORDER BY count DESC
+		`, limit, quotedCol, totalRows, quotedCompletionCol, quotedCompletionCol, quotedTable, quotedCol, quotedCol)
+	} else {
+		query = fmt.Sprintf(`
+			SET NOCOUNT ON;
+			SELECT TOP (%d) CAST(%s AS NVARCHAR(MAX)) as value,
+			       COUNT(*) as count,
+			       ROUND(100.0 * COUNT(*) / NULLIF(CAST(%d AS FLOAT), 0), 2) as percentage,
+			       0 as has_completion_at,
+			       0.0 as completion_rate
+			FROM %s WITH (NOLOCK)
+			WHERE %s IS NOT NULL
+			GROUP BY %s
+			ORDER BY count DESC
+		`, limit, quotedCol, totalRows, quotedTable, quotedCol, quotedCol)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("get enum distribution for %s.%s.%s: %w", schemaName, tableName, columnName, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var dist datasource.EnumValueDistribution
+		var percentage, completionRate float64
+		if err := rows.Scan(&dist.Value, &dist.Count, &percentage, &dist.HasCompletionAt, &completionRate); err != nil {
+			return nil, fmt.Errorf("scan distribution row: %w", err)
+		}
+		dist.Percentage = percentage
+		dist.CompletionRate = completionRate
+		dist.TotalRows = totalRows
+		result.Distributions = append(result.Distributions, dist)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate distribution rows: %w", err)
+	}
+
+	// Infer state semantics if completion timestamp was provided and we have data
+	if completionTimestampCol != "" && len(result.Distributions) > 0 {
+		result.HasStateSemantics = inferStateSemantics(result.Distributions)
+	}
+
+	return result, nil
+}
+
+// inferStateSemantics analyzes distribution data to classify values as initial/terminal/error states.
+// Sets the Is* flags on each EnumValueDistribution.
+func inferStateSemantics(distributions []datasource.EnumValueDistribution) bool {
+	if len(distributions) == 0 {
+		return false
+	}
+
+	// Find max count for relative comparisons
+	var maxCount int64 = distributions[0].Count
+	var totalCount int64
+	for _, d := range distributions {
+		if d.Count > maxCount {
+			maxCount = d.Count
+		}
+		totalCount += d.Count
+	}
+
+	if totalCount == 0 {
+		return false
+	}
+
+	foundInitial := false
+	foundTerminal := false
+	avgCount := totalCount / int64(len(distributions))
+
+	for i := range distributions {
+		d := &distributions[i]
+
+		// Terminal state: high completion rate (~100%) and significant count
+		if d.CompletionRate >= 95.0 && d.Count > 0 {
+			d.IsLikelyTerminalState = true
+			foundTerminal = true
+		}
+
+		// Initial state: low completion rate (~0%) and high count
+		if d.CompletionRate <= 5.0 && d.Count >= avgCount/2 {
+			d.IsLikelyInitialState = true
+			foundInitial = true
+		}
+
+		// Error/rare state: very low count relative to others (<5% of max)
+		if maxCount > 0 && float64(d.Count)/float64(maxCount) < 0.05 {
+			d.IsLikelyErrorState = true
+		}
+	}
+
+	return foundInitial || foundTerminal
+}
+
 // Close releases the database connection.
 func (s *SchemaDiscoverer) Close() error {
 	if s.db != nil {

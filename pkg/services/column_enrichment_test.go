@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -2267,8 +2268,10 @@ func TestColumnEnrichmentService_convertToColumnDetails_WithEnumDefinitions(t *t
 	}
 
 	fkInfo := map[string]string{}
+	fkDetailedInfo := map[string]*FKRelationshipInfo{}
+	enumDistributions := map[string]*datasource.EnumDistributionResult{}
 
-	details := service.convertToColumnDetails("billing_transactions", enrichments, columns, fkInfo, enumSamples, enumDefs)
+	details := service.convertToColumnDetails("billing_transactions", enrichments, columns, fkInfo, fkDetailedInfo, enumSamples, enumDefs, enumDistributions)
 
 	require.Equal(t, 3, len(details))
 
@@ -2399,4 +2402,3572 @@ func TestColumnEnrichmentResponse_MultipleQuestions(t *testing.T) {
 
 	assert.Equal(t, "temporal", response.Questions[2].Category)
 	assert.Equal(t, 2, response.Questions[2].Priority)
+}
+
+// TestApplyEnumDistributions verifies that distribution metadata is properly applied to enum values.
+func TestApplyEnumDistributions(t *testing.T) {
+	// Create enum values from LLM enrichment (without distribution data)
+	enumValues := []models.EnumValue{
+		{Value: "pending", Label: "Pending"},
+		{Value: "processing", Label: "Processing"},
+		{Value: "completed", Label: "Completed"},
+		{Value: "failed", Label: "Failed"},
+	}
+
+	// Create distribution data from database analysis
+	dist := &datasource.EnumDistributionResult{
+		ColumnName:    "status",
+		TotalRows:     1000,
+		DistinctCount: 4,
+		NullCount:     10,
+		Distributions: []datasource.EnumValueDistribution{
+			{
+				Value:                 "completed",
+				Count:                 500,
+				Percentage:            50.0,
+				CompletionRate:        100.0,
+				IsLikelyTerminalState: true,
+			},
+			{
+				Value:                "pending",
+				Count:                300,
+				Percentage:           30.0,
+				CompletionRate:       0.0,
+				IsLikelyInitialState: true,
+			},
+			{
+				Value:              "processing",
+				Count:              180,
+				Percentage:         18.0,
+				CompletionRate:     0.0,
+				IsLikelyErrorState: false,
+			},
+			{
+				Value:              "failed",
+				Count:              10,
+				Percentage:         1.0,
+				CompletionRate:     0.0,
+				IsLikelyErrorState: true,
+			},
+		},
+		HasStateSemantics: true,
+	}
+
+	// Apply distributions
+	result := applyEnumDistributions(enumValues, dist)
+
+	// Verify results
+	require.Len(t, result, 4)
+
+	// Find each value and verify its distribution data
+	pendingVal := findEnumValue(result, "pending")
+	require.NotNil(t, pendingVal)
+	assert.Equal(t, int64(300), *pendingVal.Count)
+	assert.Equal(t, 30.0, *pendingVal.Percentage)
+	assert.True(t, *pendingVal.IsLikelyInitialState)
+	assert.Nil(t, pendingVal.IsLikelyTerminalState)
+
+	completedVal := findEnumValue(result, "completed")
+	require.NotNil(t, completedVal)
+	assert.Equal(t, int64(500), *completedVal.Count)
+	assert.Equal(t, 50.0, *completedVal.Percentage)
+	assert.True(t, *completedVal.IsLikelyTerminalState)
+	assert.Nil(t, completedVal.IsLikelyInitialState)
+
+	failedVal := findEnumValue(result, "failed")
+	require.NotNil(t, failedVal)
+	assert.Equal(t, int64(10), *failedVal.Count)
+	assert.True(t, *failedVal.IsLikelyErrorState)
+}
+
+// TestApplyEnumDistributions_NoDistributionData verifies graceful handling when no distribution exists.
+func TestApplyEnumDistributions_NoDistributionData(t *testing.T) {
+	enumValues := []models.EnumValue{
+		{Value: "active", Label: "Active"},
+		{Value: "inactive", Label: "Inactive"},
+	}
+
+	// No distribution data
+	result := applyEnumDistributions(enumValues, nil)
+
+	// Should return the original values unchanged
+	require.Len(t, result, 2)
+	assert.Nil(t, result[0].Count)
+	assert.Nil(t, result[0].Percentage)
+}
+
+// TestApplyEnumDistributions_PartialMatch verifies handling when not all values have distribution data.
+func TestApplyEnumDistributions_PartialMatch(t *testing.T) {
+	enumValues := []models.EnumValue{
+		{Value: "active", Label: "Active"},
+		{Value: "inactive", Label: "Inactive"},
+		{Value: "unknown", Label: "Unknown"}, // This won't have distribution data
+	}
+
+	dist := &datasource.EnumDistributionResult{
+		Distributions: []datasource.EnumValueDistribution{
+			{Value: "active", Count: 800, Percentage: 80.0},
+			{Value: "inactive", Count: 200, Percentage: 20.0},
+			// "unknown" is not in distribution (maybe it was added after analysis)
+		},
+	}
+
+	result := applyEnumDistributions(enumValues, dist)
+
+	require.Len(t, result, 3)
+
+	activeVal := findEnumValue(result, "active")
+	assert.Equal(t, int64(800), *activeVal.Count)
+
+	unknownVal := findEnumValue(result, "unknown")
+	assert.Nil(t, unknownVal.Count, "Values not in distribution should not have count set")
+}
+
+// TestFindCompletionTimestampColumn verifies completion timestamp column detection.
+func TestFindCompletionTimestampColumn(t *testing.T) {
+	tests := []struct {
+		name     string
+		columns  []*models.SchemaColumn
+		expected string
+	}{
+		{
+			name: "finds completed_at",
+			columns: []*models.SchemaColumn{
+				{ColumnName: "id", DataType: "integer"},
+				{ColumnName: "status", DataType: "varchar"},
+				{ColumnName: "completed_at", DataType: "timestamp"},
+				{ColumnName: "created_at", DataType: "timestamp"},
+			},
+			expected: "completed_at",
+		},
+		{
+			name: "finds finished_at",
+			columns: []*models.SchemaColumn{
+				{ColumnName: "id", DataType: "integer"},
+				{ColumnName: "finished_at", DataType: "timestamp with time zone"},
+			},
+			expected: "finished_at",
+		},
+		{
+			name: "finds ended_at",
+			columns: []*models.SchemaColumn{
+				{ColumnName: "ended_at", DataType: "datetime"},
+			},
+			expected: "ended_at",
+		},
+		{
+			name: "fallback to completion-like column",
+			columns: []*models.SchemaColumn{
+				{ColumnName: "job_completion_time", DataType: "timestamp"},
+			},
+			expected: "job_completion_time",
+		},
+		{
+			name: "ignores non-timestamp columns",
+			columns: []*models.SchemaColumn{
+				{ColumnName: "completed_at", DataType: "varchar"}, // Not a timestamp!
+				{ColumnName: "status", DataType: "varchar"},
+			},
+			expected: "",
+		},
+		{
+			name: "returns empty when no completion column",
+			columns: []*models.SchemaColumn{
+				{ColumnName: "id", DataType: "integer"},
+				{ColumnName: "created_at", DataType: "timestamp"},
+				{ColumnName: "updated_at", DataType: "timestamp"},
+			},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := findCompletionTimestampColumn(tt.columns)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestIsTimestampType verifies timestamp type detection.
+func TestIsTimestampType(t *testing.T) {
+	tests := []struct {
+		dataType string
+		expected bool
+	}{
+		{"timestamp", true},
+		{"timestamp with time zone", true},
+		{"timestamp without time zone", true},
+		{"TIMESTAMP", true},
+		{"datetime", true},
+		{"datetime2", true},
+		{"date", true},
+		{"varchar", false},
+		{"integer", false},
+		{"bigint", false},
+		{"text", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.dataType, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isTimestampType(tt.dataType))
+		})
+	}
+}
+
+// Helper function for tests
+func findEnumValue(values []models.EnumValue, target string) *models.EnumValue {
+	for i := range values {
+		if values[i].Value == target {
+			return &values[i]
+		}
+	}
+	return nil
+}
+
+// ============================================================================
+// Soft Delete Pattern Recognition Tests
+// ============================================================================
+
+func TestDetectSoftDeletePattern_TypicalSoftDelete(t *testing.T) {
+	// Typical GORM soft delete: deleted_at, timestamp, nullable, 97% NULL
+	rowCount := int64(1000)
+	nullCount := int64(970) // 97% NULL = 97% active
+
+	col := &models.SchemaColumn{
+		ColumnName: "deleted_at",
+		DataType:   "timestamp with time zone",
+		IsNullable: true,
+		RowCount:   &rowCount,
+		NullCount:  &nullCount,
+	}
+
+	result := detectSoftDeletePattern(col)
+
+	require.NotNil(t, result, "Should detect soft delete pattern")
+	assert.Contains(t, result.Description, "Soft delete timestamp")
+	assert.Contains(t, result.Description, "NULL = active record")
+	assert.Contains(t, result.Description, "97.0% of records are active")
+	assert.Equal(t, "soft_delete_timestamp", result.SemanticType)
+	assert.Equal(t, models.ColumnRoleAttribute, result.Role)
+	assert.InDelta(t, 97.0, result.ActiveRate, 0.1)
+}
+
+func TestDetectSoftDeletePattern_AllActiveRecords(t *testing.T) {
+	// Edge case: all records are active (100% NULL)
+	rowCount := int64(500)
+	nullCount := int64(500) // 100% NULL
+
+	col := &models.SchemaColumn{
+		ColumnName: "deleted_at",
+		DataType:   "timestamp",
+		IsNullable: true,
+		RowCount:   &rowCount,
+		NullCount:  &nullCount,
+	}
+
+	result := detectSoftDeletePattern(col)
+
+	require.NotNil(t, result)
+	assert.Contains(t, result.Description, "100.0% of records are active")
+	assert.InDelta(t, 100.0, result.ActiveRate, 0.1)
+}
+
+func TestDetectSoftDeletePattern_MinimumThreshold(t *testing.T) {
+	// Boundary case: exactly 90% NULL (should match)
+	rowCount := int64(1000)
+	nullCount := int64(900) // 90% NULL
+
+	col := &models.SchemaColumn{
+		ColumnName: "deleted_at",
+		DataType:   "timestamp",
+		IsNullable: true,
+		RowCount:   &rowCount,
+		NullCount:  &nullCount,
+	}
+
+	result := detectSoftDeletePattern(col)
+
+	require.NotNil(t, result, "Should detect at exactly 90% threshold")
+	assert.InDelta(t, 90.0, result.ActiveRate, 0.1)
+}
+
+func TestDetectSoftDeletePattern_BelowThreshold(t *testing.T) {
+	// Below threshold: 89% NULL (should NOT match)
+	rowCount := int64(1000)
+	nullCount := int64(890) // 89% NULL
+
+	col := &models.SchemaColumn{
+		ColumnName: "deleted_at",
+		DataType:   "timestamp",
+		IsNullable: true,
+		RowCount:   &rowCount,
+		NullCount:  &nullCount,
+	}
+
+	result := detectSoftDeletePattern(col)
+
+	assert.Nil(t, result, "Should not detect when below 90% threshold")
+}
+
+func TestDetectSoftDeletePattern_WrongColumnName(t *testing.T) {
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"created_at column", "created_at"},
+		{"updated_at column", "updated_at"},
+		{"is_deleted column", "is_deleted"},
+		{"deleted column", "deleted"},
+		{"deletion_timestamp column", "deletion_timestamp"},
+		{"removed_at column", "removed_at"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rowCount := int64(1000)
+			nullCount := int64(970)
+
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "timestamp",
+				IsNullable: true,
+				RowCount:   &rowCount,
+				NullCount:  &nullCount,
+			}
+
+			result := detectSoftDeletePattern(col)
+			assert.Nil(t, result, "Should not detect for column name: %s", tt.columnName)
+		})
+	}
+}
+
+func TestDetectSoftDeletePattern_WrongDataType(t *testing.T) {
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"boolean type", "boolean"},
+		{"integer type", "integer"},
+		{"varchar type", "varchar(255)"},
+		{"text type", "text"},
+		{"bigint type", "bigint"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rowCount := int64(1000)
+			nullCount := int64(970)
+
+			col := &models.SchemaColumn{
+				ColumnName: "deleted_at",
+				DataType:   tt.dataType,
+				IsNullable: true,
+				RowCount:   &rowCount,
+				NullCount:  &nullCount,
+			}
+
+			result := detectSoftDeletePattern(col)
+			assert.Nil(t, result, "Should not detect for data type: %s", tt.dataType)
+		})
+	}
+}
+
+func TestDetectSoftDeletePattern_NotNullable(t *testing.T) {
+	// deleted_at that is NOT NULL is not a soft delete pattern
+	rowCount := int64(1000)
+	nullCount := int64(970)
+
+	col := &models.SchemaColumn{
+		ColumnName: "deleted_at",
+		DataType:   "timestamp",
+		IsNullable: false, // NOT NULL constraint
+		RowCount:   &rowCount,
+		NullCount:  &nullCount,
+	}
+
+	result := detectSoftDeletePattern(col)
+	assert.Nil(t, result, "Should not detect when column is NOT NULL")
+}
+
+func TestDetectSoftDeletePattern_NoStats(t *testing.T) {
+	// No statistics available - should assume high null rate
+	col := &models.SchemaColumn{
+		ColumnName: "deleted_at",
+		DataType:   "timestamp with time zone",
+		IsNullable: true,
+		RowCount:   nil, // No stats
+		NullCount:  nil,
+	}
+
+	result := detectSoftDeletePattern(col)
+
+	require.NotNil(t, result, "Should detect with no stats (assumes 100% active)")
+	assert.Contains(t, result.Description, "100.0% of records are active")
+}
+
+func TestDetectSoftDeletePattern_ZeroRows(t *testing.T) {
+	// Edge case: empty table
+	rowCount := int64(0)
+	nullCount := int64(0)
+
+	col := &models.SchemaColumn{
+		ColumnName: "deleted_at",
+		DataType:   "timestamp",
+		IsNullable: true,
+		RowCount:   &rowCount,
+		NullCount:  &nullCount,
+	}
+
+	result := detectSoftDeletePattern(col)
+
+	// Should still detect pattern based on schema, assume 100% active
+	require.NotNil(t, result)
+	assert.Contains(t, result.Description, "100.0% of records are active")
+}
+
+func TestDetectSoftDeletePattern_WithNonNullCount(t *testing.T) {
+	// Some systems track NonNullCount instead of NullCount
+	rowCount := int64(1000)
+	nonNullCount := int64(30) // 30 deleted records = 97% active
+
+	col := &models.SchemaColumn{
+		ColumnName:   "deleted_at",
+		DataType:     "timestamptz",
+		IsNullable:   true,
+		RowCount:     &rowCount,
+		NonNullCount: &nonNullCount,
+		NullCount:    nil, // Only NonNullCount available
+	}
+
+	result := detectSoftDeletePattern(col)
+
+	require.NotNil(t, result)
+	assert.InDelta(t, 97.0, result.ActiveRate, 0.1)
+}
+
+func TestDetectSoftDeletePattern_TimestampVariants(t *testing.T) {
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"plain timestamp", "timestamp"},
+		{"timestamp with tz", "timestamp with time zone"},
+		{"timestamptz", "timestamptz"},
+		{"datetime", "datetime"},
+		{"datetime2", "datetime2"},
+		{"TIMESTAMP uppercase", "TIMESTAMP"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rowCount := int64(1000)
+			nullCount := int64(950)
+
+			col := &models.SchemaColumn{
+				ColumnName: "deleted_at",
+				DataType:   tt.dataType,
+				IsNullable: true,
+				RowCount:   &rowCount,
+				NullCount:  &nullCount,
+			}
+
+			result := detectSoftDeletePattern(col)
+			require.NotNil(t, result, "Should detect for timestamp variant: %s", tt.dataType)
+		})
+	}
+}
+
+func TestDetectSoftDeletePattern_CaseInsensitiveColumnName(t *testing.T) {
+	tests := []struct {
+		name       string
+		columnName string
+		shouldFind bool
+	}{
+		{"lowercase", "deleted_at", true},
+		{"UPPERCASE", "DELETED_AT", true},
+		{"MixedCase", "Deleted_At", true},
+		{"partial match", "deleted_at_timestamp", false}, // Exact match required
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rowCount := int64(1000)
+			nullCount := int64(950)
+
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "timestamp",
+				IsNullable: true,
+				RowCount:   &rowCount,
+				NullCount:  &nullCount,
+			}
+
+			result := detectSoftDeletePattern(col)
+			if tt.shouldFind {
+				assert.NotNil(t, result, "Should detect for column name: %s", tt.columnName)
+			} else {
+				assert.Nil(t, result, "Should not detect for column name: %s", tt.columnName)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// Monetary Column Detection Tests
+// =============================================================================
+
+func TestDetectMonetaryColumnPattern_TypicalAmount(t *testing.T) {
+	// Typical monetary column: amount, bigint, with currency column
+	col := &models.SchemaColumn{
+		ColumnName: "amount",
+		DataType:   "bigint",
+	}
+
+	result := detectMonetaryColumnPattern(col, "currency")
+
+	require.NotNil(t, result, "Should detect monetary pattern")
+	assert.Contains(t, result.Description, "Monetary amount in minor units")
+	assert.Contains(t, result.Description, "Pair with currency column")
+	assert.Contains(t, result.Description, "ISO 4217")
+	assert.Equal(t, "currency_cents", result.SemanticType)
+	assert.Equal(t, models.ColumnRoleMeasure, result.Role)
+	assert.Equal(t, "currency", result.CurrencyColumn)
+}
+
+func TestDetectMonetaryColumnPattern_AmountWithoutCurrency(t *testing.T) {
+	// Amount column without a currency column - still detect but different description
+	col := &models.SchemaColumn{
+		ColumnName: "amount",
+		DataType:   "bigint",
+	}
+
+	result := detectMonetaryColumnPattern(col, "")
+
+	require.NotNil(t, result, "Should detect monetary pattern without currency column")
+	assert.Contains(t, result.Description, "Monetary amount in minor units")
+	assert.Contains(t, result.Description, "Integer values represent smallest currency unit")
+	assert.NotContains(t, result.Description, "Pair with")
+	assert.Equal(t, "currency_cents", result.SemanticType)
+	assert.Empty(t, result.CurrencyColumn)
+}
+
+func TestDetectMonetaryColumnPattern_SuffixPatterns(t *testing.T) {
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"total_amount", "total_amount"},
+		{"base_amount", "base_amount"},
+		{"net_amount", "net_amount"},
+		{"tikr_share", "tikr_share"},
+		{"creator_share", "creator_share"},
+		{"grand_total", "grand_total"},
+		{"sub_total", "sub_total"},
+		{"unit_price", "unit_price"},
+		{"list_price", "list_price"},
+		{"total_cost", "total_cost"},
+		{"service_fee", "service_fee"},
+		{"platform_fee", "platform_fee"},
+		{"order_value", "order_value"},
+		{"total_value", "total_value"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "bigint",
+			}
+
+			result := detectMonetaryColumnPattern(col, "currency")
+
+			require.NotNil(t, result, "Should detect monetary pattern for: %s", tt.columnName)
+			assert.Equal(t, "currency_cents", result.SemanticType)
+			assert.Equal(t, models.ColumnRoleMeasure, result.Role)
+		})
+	}
+}
+
+func TestDetectMonetaryColumnPattern_IntegerTypes(t *testing.T) {
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"bigint", "bigint"},
+		{"integer", "integer"},
+		{"int", "int"},
+		{"int4", "int4"},
+		{"int8", "int8"},
+		{"smallint", "smallint"},
+		{"numeric", "numeric"},
+		{"BIGINT uppercase", "BIGINT"},
+		{"INTEGER uppercase", "INTEGER"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "amount",
+				DataType:   tt.dataType,
+			}
+
+			result := detectMonetaryColumnPattern(col, "currency")
+
+			require.NotNil(t, result, "Should detect for integer type: %s", tt.dataType)
+			assert.Equal(t, "currency_cents", result.SemanticType)
+		})
+	}
+}
+
+func TestDetectMonetaryColumnPattern_NonIntegerTypes(t *testing.T) {
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"varchar", "varchar(255)"},
+		{"text", "text"},
+		{"boolean", "boolean"},
+		{"timestamp", "timestamp"},
+		{"date", "date"},
+		{"double", "double precision"},
+		{"float", "float"},
+		{"real", "real"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "amount",
+				DataType:   tt.dataType,
+			}
+
+			result := detectMonetaryColumnPattern(col, "currency")
+
+			assert.Nil(t, result, "Should NOT detect for non-integer type: %s", tt.dataType)
+		})
+	}
+}
+
+func TestDetectMonetaryColumnPattern_NonMonetaryColumnNames(t *testing.T) {
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"created_at", "created_at"},
+		{"user_id", "user_id"},
+		{"status", "status"},
+		{"count", "count"},
+		{"quantity", "quantity"},
+		{"position", "position"},
+		{"version", "version"},
+		{"amount_type", "amount_type"}, // Contains amount but as prefix
+		{"preamount", "preamount"},     // Contains amount but not as suffix/standalone
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "bigint",
+			}
+
+			result := detectMonetaryColumnPattern(col, "currency")
+
+			assert.Nil(t, result, "Should NOT detect monetary pattern for: %s", tt.columnName)
+		})
+	}
+}
+
+func TestDetectMonetaryColumnPattern_CaseInsensitiveColumnName(t *testing.T) {
+	tests := []struct {
+		name       string
+		columnName string
+		shouldFind bool
+	}{
+		{"lowercase amount", "amount", true},
+		{"UPPERCASE AMOUNT", "AMOUNT", true},
+		{"MixedCase Amount", "Amount", true},
+		{"TOTAL_AMOUNT uppercase", "TOTAL_AMOUNT", true},
+		{"Total_Price mixed", "Total_Price", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "bigint",
+			}
+
+			result := detectMonetaryColumnPattern(col, "currency")
+
+			if tt.shouldFind {
+				require.NotNil(t, result, "Should detect for column name: %s", tt.columnName)
+			} else {
+				assert.Nil(t, result, "Should not detect for column name: %s", tt.columnName)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// findCurrencyColumn Tests
+// =============================================================================
+
+func TestFindCurrencyColumn_ExactMatch(t *testing.T) {
+	columns := []*models.SchemaColumn{
+		{ColumnName: "id", DataType: "bigint"},
+		{ColumnName: "amount", DataType: "bigint"},
+		{ColumnName: "currency", DataType: "varchar(3)", SampleValues: []string{"USD", "EUR", "GBP"}},
+		{ColumnName: "created_at", DataType: "timestamp"},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	assert.Equal(t, "currency", result)
+}
+
+func TestFindCurrencyColumn_SuffixMatch(t *testing.T) {
+	columns := []*models.SchemaColumn{
+		{ColumnName: "id", DataType: "bigint"},
+		{ColumnName: "amount", DataType: "bigint"},
+		{ColumnName: "payment_currency", DataType: "varchar(3)", SampleValues: []string{"USD", "CAD", "AUD"}},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	assert.Equal(t, "payment_currency", result)
+}
+
+func TestFindCurrencyColumn_ISO4217Validation(t *testing.T) {
+	columns := []*models.SchemaColumn{
+		{ColumnName: "currency", DataType: "varchar(10)", SampleValues: []string{"USD", "EUR", "GBP", "CAD", "AUD"}},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	assert.Equal(t, "currency", result)
+}
+
+func TestFindCurrencyColumn_NotISO4217(t *testing.T) {
+	// Currency column with non-ISO4217 values (lowercase, long strings)
+	columns := []*models.SchemaColumn{
+		{ColumnName: "currency", DataType: "varchar(50)", SampleValues: []string{"usd", "euro", "dollar"}},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	// Should not match because sample values don't look like ISO 4217
+	assert.Empty(t, result)
+}
+
+func TestFindCurrencyColumn_MixedISO4217Values(t *testing.T) {
+	// More than 50% are ISO 4217 codes, should match
+	columns := []*models.SchemaColumn{
+		{ColumnName: "currency", DataType: "varchar(10)", SampleValues: []string{"USD", "EUR", "GBP", "unknown"}},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	// 3/4 = 75% are ISO 4217, should match
+	assert.Equal(t, "currency", result)
+}
+
+func TestFindCurrencyColumn_NoSampleValues(t *testing.T) {
+	// No sample values, but name and type match - should assume it's currency
+	columns := []*models.SchemaColumn{
+		{ColumnName: "currency", DataType: "varchar(3)", SampleValues: nil},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	assert.Equal(t, "currency", result)
+}
+
+func TestFindCurrencyColumn_WrongType(t *testing.T) {
+	// Column named currency but wrong type (integer)
+	columns := []*models.SchemaColumn{
+		{ColumnName: "currency", DataType: "integer", SampleValues: []string{"1", "2", "3"}},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	assert.Empty(t, result)
+}
+
+func TestFindCurrencyColumn_NoCurrencyColumn(t *testing.T) {
+	columns := []*models.SchemaColumn{
+		{ColumnName: "id", DataType: "bigint"},
+		{ColumnName: "amount", DataType: "bigint"},
+		{ColumnName: "status", DataType: "varchar(20)"},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	assert.Empty(t, result)
+}
+
+func TestFindCurrencyColumn_CaseInsensitive(t *testing.T) {
+	columns := []*models.SchemaColumn{
+		{ColumnName: "CURRENCY", DataType: "varchar(3)", SampleValues: []string{"USD", "EUR"}},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	assert.Equal(t, "CURRENCY", result)
+}
+
+// =============================================================================
+// isISO4217CurrencyCode Tests
+// =============================================================================
+
+func TestIsISO4217CurrencyCode_ValidCodes(t *testing.T) {
+	validCodes := []string{"USD", "EUR", "GBP", "CAD", "AUD", "JPY", "CNY", "INR", "BRL", "MXN"}
+
+	for _, code := range validCodes {
+		t.Run(code, func(t *testing.T) {
+			assert.True(t, isISO4217CurrencyCode(code), "Should be valid ISO 4217: %s", code)
+		})
+	}
+}
+
+func TestIsISO4217CurrencyCode_InvalidCodes(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{"lowercase", "usd"},
+		{"mixed case", "Usd"},
+		{"too short", "US"},
+		{"too long", "USDC"},
+		{"with number", "US1"},
+		{"with space", "US "},
+		{"empty", ""},
+		{"numbers only", "123"},
+		{"with special char", "US$"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.False(t, isISO4217CurrencyCode(tt.value), "Should NOT be valid ISO 4217: %s", tt.value)
+		})
+	}
+}
+
+// =============================================================================
+// isMonetaryIntegerType Tests
+// =============================================================================
+
+func TestIsMonetaryIntegerType_ValidTypes(t *testing.T) {
+	validTypes := []string{
+		"bigint", "BIGINT", "integer", "INTEGER", "int", "INT",
+		"int4", "INT4", "int8", "INT8", "smallint", "SMALLINT",
+		"numeric", "NUMERIC", "numeric(10,0)",
+	}
+
+	for _, typ := range validTypes {
+		t.Run(typ, func(t *testing.T) {
+			assert.True(t, isMonetaryIntegerType(typ), "Should be valid monetary integer type: %s", typ)
+		})
+	}
+}
+
+func TestIsMonetaryIntegerType_InvalidTypes(t *testing.T) {
+	invalidTypes := []string{
+		"varchar", "text", "boolean", "timestamp", "date",
+		"double precision", "float", "real", "uuid", "jsonb",
+	}
+
+	for _, typ := range invalidTypes {
+		t.Run(typ, func(t *testing.T) {
+			assert.False(t, isMonetaryIntegerType(typ), "Should NOT be valid monetary integer type: %s", typ)
+		})
+	}
+}
+
+// =============================================================================
+// UUID Text Column Detection Tests
+// =============================================================================
+
+func TestDetectUUIDTextColumnPattern_TypicalUUIDColumn(t *testing.T) {
+	// Typical UUID column: text type with all sample values matching UUID format
+	col := &models.SchemaColumn{
+		ColumnName: "channel_id",
+		DataType:   "varchar(36)",
+		SampleValues: []string{
+			"550e8400-e29b-41d4-a716-446655440000",
+			"6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+			"f47ac10b-58cc-4372-a567-0e02b2c3d479",
+			"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+			"3fa85f64-5717-4562-b3fc-2c963f66afa6",
+		},
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+
+	require.NotNil(t, result, "Should detect UUID text pattern")
+	assert.Contains(t, result.Description, "UUID stored as text")
+	assert.Contains(t, result.Description, "36 characters")
+	assert.Contains(t, result.Description, "Logical foreign key")
+	assert.Equal(t, "uuid_text", result.SemanticType)
+	assert.Equal(t, models.ColumnRoleIdentifier, result.Role)
+	assert.InDelta(t, 100.0, result.MatchRate, 0.1)
+}
+
+func TestDetectUUIDTextColumnPattern_LowercaseUUIDs(t *testing.T) {
+	// UUIDs can be stored in lowercase
+	col := &models.SchemaColumn{
+		ColumnName: "external_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"550e8400-e29b-41d4-a716-446655440000",
+			"6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+			"f47ac10b-58cc-4372-a567-0e02b2c3d479",
+		},
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+
+	require.NotNil(t, result, "Should detect lowercase UUIDs")
+	assert.Equal(t, "uuid_text", result.SemanticType)
+}
+
+func TestDetectUUIDTextColumnPattern_UppercaseUUIDs(t *testing.T) {
+	// UUIDs can be stored in uppercase
+	col := &models.SchemaColumn{
+		ColumnName: "session_id",
+		DataType:   "char(36)",
+		SampleValues: []string{
+			"550E8400-E29B-41D4-A716-446655440000",
+			"6BA7B810-9DAD-11D1-80B4-00C04FD430C8",
+			"F47AC10B-58CC-4372-A567-0E02B2C3D479",
+		},
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+
+	require.NotNil(t, result, "Should detect uppercase UUIDs")
+	assert.Equal(t, "uuid_text", result.SemanticType)
+}
+
+func TestDetectUUIDTextColumnPattern_MixedCaseUUIDs(t *testing.T) {
+	// UUIDs can have mixed case
+	col := &models.SchemaColumn{
+		ColumnName: "ref_id",
+		DataType:   "varchar(40)",
+		SampleValues: []string{
+			"550e8400-E29B-41d4-A716-446655440000",
+			"6BA7b810-9dad-11D1-80B4-00c04fd430c8",
+		},
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+
+	require.NotNil(t, result, "Should detect mixed-case UUIDs")
+	assert.Equal(t, "uuid_text", result.SemanticType)
+}
+
+func TestDetectUUIDTextColumnPattern_TextTypeVariants(t *testing.T) {
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"varchar", "varchar(36)"},
+		{"VARCHAR uppercase", "VARCHAR(36)"},
+		{"text", "text"},
+		{"TEXT uppercase", "TEXT"},
+		{"char", "char(36)"},
+		{"CHAR uppercase", "CHAR(36)"},
+		{"character varying", "character varying(36)"},
+		{"nvarchar", "nvarchar(36)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "uuid_col",
+				DataType:   tt.dataType,
+				SampleValues: []string{
+					"550e8400-e29b-41d4-a716-446655440000",
+					"6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+				},
+			}
+
+			result := detectUUIDTextColumnPattern(col)
+			require.NotNil(t, result, "Should detect for text type: %s", tt.dataType)
+			assert.Equal(t, "uuid_text", result.SemanticType)
+		})
+	}
+}
+
+func TestDetectUUIDTextColumnPattern_NonTextTypes(t *testing.T) {
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"uuid native", "uuid"},
+		{"integer", "integer"},
+		{"bigint", "bigint"},
+		{"boolean", "boolean"},
+		{"timestamp", "timestamp"},
+		{"date", "date"},
+		{"jsonb", "jsonb"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "uuid_col",
+				DataType:   tt.dataType,
+				SampleValues: []string{
+					"550e8400-e29b-41d4-a716-446655440000",
+					"6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+				},
+			}
+
+			result := detectUUIDTextColumnPattern(col)
+			assert.Nil(t, result, "Should NOT detect for non-text type: %s", tt.dataType)
+		})
+	}
+}
+
+func TestDetectUUIDTextColumnPattern_NoSampleValues(t *testing.T) {
+	// No sample values available
+	col := &models.SchemaColumn{
+		ColumnName:   "maybe_uuid",
+		DataType:     "varchar(36)",
+		SampleValues: nil,
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+	assert.Nil(t, result, "Should NOT detect when no sample values available")
+}
+
+func TestDetectUUIDTextColumnPattern_EmptySampleValues(t *testing.T) {
+	// Empty sample values array
+	col := &models.SchemaColumn{
+		ColumnName:   "maybe_uuid",
+		DataType:     "varchar(36)",
+		SampleValues: []string{},
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+	assert.Nil(t, result, "Should NOT detect when sample values are empty")
+}
+
+func TestDetectUUIDTextColumnPattern_BelowThreshold(t *testing.T) {
+	// Only 50% match (below 99% threshold)
+	col := &models.SchemaColumn{
+		ColumnName: "mixed_id",
+		DataType:   "varchar(50)",
+		SampleValues: []string{
+			"550e8400-e29b-41d4-a716-446655440000", // UUID
+			"not-a-uuid-at-all",                    // Not UUID
+			"6ba7b810-9dad-11d1-80b4-00c04fd430c8", // UUID
+			"another-random-string",                // Not UUID
+		},
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+	assert.Nil(t, result, "Should NOT detect when below 99% threshold (50%)")
+}
+
+func TestDetectUUIDTextColumnPattern_SingleNonUUID(t *testing.T) {
+	// 98% match (still below 99% threshold with 50 samples, 1 non-match)
+	samples := make([]string, 100)
+	for i := 0; i < 99; i++ {
+		samples[i] = "550e8400-e29b-41d4-a716-446655440000"
+	}
+	samples[99] = "not-a-uuid" // 1% non-match -> 99% match (at threshold)
+
+	col := &models.SchemaColumn{
+		ColumnName:   "almost_all_uuids",
+		DataType:     "varchar(50)",
+		SampleValues: samples,
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+	// 99% is exactly at the threshold (>99% required), so should not match
+	assert.Nil(t, result, "Should NOT detect at exactly 99% (need >99%)")
+}
+
+func TestDetectUUIDTextColumnPattern_AllMatch(t *testing.T) {
+	// 100% match (above 99% threshold)
+	samples := make([]string, 100)
+	for i := 0; i < 100; i++ {
+		samples[i] = "550e8400-e29b-41d4-a716-446655440000"
+	}
+
+	col := &models.SchemaColumn{
+		ColumnName:   "all_uuids",
+		DataType:     "varchar(36)",
+		SampleValues: samples,
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+	require.NotNil(t, result, "Should detect at 100% match rate")
+	assert.InDelta(t, 100.0, result.MatchRate, 0.1)
+}
+
+func TestDetectUUIDTextColumnPattern_InvalidUUIDFormats(t *testing.T) {
+	tests := []struct {
+		name   string
+		values []string
+	}{
+		{"missing hyphens", []string{"550e8400e29b41d4a716446655440000"}},
+		{"wrong hyphen positions", []string{"550e8-400e29b41d4-a716-446655440000"}},
+		{"too short", []string{"550e8400-e29b-41d4-a716-446655440"}},
+		{"too long", []string{"550e8400-e29b-41d4-a716-4466554400000"}},
+		{"invalid characters", []string{"550e8400-e29b-41d4-a716-44665544GGGG"}},
+		{"with braces", []string{"{550e8400-e29b-41d4-a716-446655440000}"}},
+		{"urn format", []string{"urn:uuid:550e8400-e29b-41d4-a716-446655440000"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName:   "invalid_format",
+				DataType:     "varchar(50)",
+				SampleValues: tt.values,
+			}
+
+			result := detectUUIDTextColumnPattern(col)
+			assert.Nil(t, result, "Should NOT detect invalid UUID format: %s", tt.name)
+		})
+	}
+}
+
+func TestDetectUUIDTextColumnPattern_SingleValue(t *testing.T) {
+	// Single sample value that is a UUID (100% match)
+	col := &models.SchemaColumn{
+		ColumnName:   "single_uuid",
+		DataType:     "text",
+		SampleValues: []string{"550e8400-e29b-41d4-a716-446655440000"},
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+	require.NotNil(t, result, "Should detect single UUID value")
+	assert.Equal(t, "uuid_text", result.SemanticType)
+}
+
+func TestDetectUUIDTextColumnPattern_NilUUIDs(t *testing.T) {
+	// v1 UUID (time-based)
+	col := &models.SchemaColumn{
+		ColumnName: "v1_uuid",
+		DataType:   "varchar(36)",
+		SampleValues: []string{
+			"6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+			"6ba7b811-9dad-11d1-80b4-00c04fd430c8",
+		},
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+	require.NotNil(t, result, "Should detect v1 UUIDs")
+	assert.Equal(t, "uuid_text", result.SemanticType)
+}
+
+// =============================================================================
+// isTextType Tests
+// =============================================================================
+
+func TestIsTextType_ValidTypes(t *testing.T) {
+	validTypes := []string{
+		"varchar", "VARCHAR", "varchar(255)",
+		"text", "TEXT",
+		"char", "CHAR", "char(36)",
+		"character varying", "CHARACTER VARYING",
+		"nvarchar", "NVARCHAR",
+		"character", "CHARACTER",
+	}
+
+	for _, typ := range validTypes {
+		t.Run(typ, func(t *testing.T) {
+			assert.True(t, isTextType(typ), "Should be valid text type: %s", typ)
+		})
+	}
+}
+
+func TestIsTextType_InvalidTypes(t *testing.T) {
+	invalidTypes := []string{
+		"uuid", "UUID",
+		"integer", "INTEGER",
+		"bigint", "BIGINT",
+		"boolean", "BOOLEAN",
+		"timestamp", "TIMESTAMP",
+		"date", "DATE",
+		"jsonb", "JSONB",
+		"bytea", "BYTEA",
+		"double precision",
+		"numeric",
+	}
+
+	for _, typ := range invalidTypes {
+		t.Run(typ, func(t *testing.T) {
+			assert.False(t, isTextType(typ), "Should NOT be valid text type: %s", typ)
+		})
+	}
+}
+
+// =============================================================================
+// detectTimestampScalePattern Tests
+// =============================================================================
+
+func TestDetectTimestampScalePattern_Seconds(t *testing.T) {
+	// Typical Unix timestamp in seconds (10 digits)
+	col := &models.SchemaColumn{
+		ColumnName: "created_at",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"1704067200", // 2024-01-01 00:00:00 UTC
+			"1704153600", // 2024-01-02 00:00:00 UTC
+			"1704240000", // 2024-01-03 00:00:00 UTC
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+
+	require.NotNil(t, result, "Should detect timestamp pattern")
+	assert.Contains(t, result.Description, "Unix timestamp in seconds")
+	assert.Contains(t, result.Description, "since Unix epoch")
+	assert.Equal(t, "unix_timestamp_seconds", result.SemanticType)
+	assert.Equal(t, models.ColumnRoleAttribute, result.Role)
+	assert.Equal(t, "seconds", result.Scale)
+}
+
+func TestDetectTimestampScalePattern_Milliseconds(t *testing.T) {
+	// Unix timestamp in milliseconds (13 digits)
+	col := &models.SchemaColumn{
+		ColumnName: "updated_at",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"1704067200000", // 2024-01-01 00:00:00.000 UTC
+			"1704153600000", // 2024-01-02 00:00:00.000 UTC
+			"1704240000123", // 2024-01-03 00:00:00.123 UTC
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+
+	require.NotNil(t, result, "Should detect milliseconds timestamp pattern")
+	assert.Contains(t, result.Description, "Unix timestamp in milliseconds")
+	assert.Equal(t, "unix_timestamp_milliseconds", result.SemanticType)
+	assert.Equal(t, "milliseconds", result.Scale)
+}
+
+func TestDetectTimestampScalePattern_Microseconds(t *testing.T) {
+	// Unix timestamp in microseconds (16 digits)
+	col := &models.SchemaColumn{
+		ColumnName: "event_time",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"1704067200000000", // 2024-01-01 00:00:00.000000 UTC
+			"1704153600123456", // 2024-01-02 00:00:00.123456 UTC
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+
+	require.NotNil(t, result, "Should detect microseconds timestamp pattern")
+	assert.Contains(t, result.Description, "Unix timestamp in microseconds")
+	assert.Equal(t, "unix_timestamp_microseconds", result.SemanticType)
+	assert.Equal(t, "microseconds", result.Scale)
+}
+
+func TestDetectTimestampScalePattern_Nanoseconds(t *testing.T) {
+	// Unix timestamp in nanoseconds (19 digits)
+	col := &models.SchemaColumn{
+		ColumnName: "marker_at",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"1704067200000000000", // 2024-01-01 00:00:00.000000000 UTC
+			"1704153600123456789", // 2024-01-02 00:00:00.123456789 UTC
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+
+	require.NotNil(t, result, "Should detect nanoseconds timestamp pattern")
+	assert.Contains(t, result.Description, "Unix timestamp in nanoseconds")
+	assert.Equal(t, "unix_timestamp_nanoseconds", result.SemanticType)
+	assert.Equal(t, "nanoseconds", result.Scale)
+}
+
+func TestDetectTimestampScalePattern_MarkerAtWithCursorHint(t *testing.T) {
+	// marker_at columns should get cursor-based pagination hint
+	col := &models.SchemaColumn{
+		ColumnName: "marker_at",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"1704067200000000000",
+			"1704153600000000000",
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+
+	require.NotNil(t, result, "Should detect timestamp pattern for marker_at")
+	assert.Contains(t, result.Description, "cursor-based pagination", "marker_at should mention cursor-based pagination")
+}
+
+func TestDetectTimestampScalePattern_CreatedAtWithRecordHint(t *testing.T) {
+	// created_at columns should get record timestamp hint
+	col := &models.SchemaColumn{
+		ColumnName: "created_at",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"1704067200",
+			"1704153600",
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+
+	require.NotNil(t, result, "Should detect timestamp pattern for created_at")
+	assert.Contains(t, result.Description, "Record timestamp", "created_at should mention record timestamp")
+}
+
+func TestDetectTimestampScalePattern_TimeColumnName(t *testing.T) {
+	// Column names containing 'time' should be detected
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"event_time", "event_time"},
+		{"start_time", "start_time"},
+		{"end_time", "end_time"},
+		{"timestamp", "timestamp"},
+		{"process_time", "process_time"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "bigint",
+				SampleValues: []string{
+					"1704067200",
+					"1704153600",
+				},
+			}
+
+			result := detectTimestampScalePattern(col)
+			require.NotNil(t, result, "Should detect timestamp pattern for: %s", tt.columnName)
+			assert.Equal(t, "unix_timestamp_seconds", result.SemanticType)
+		})
+	}
+}
+
+func TestDetectTimestampScalePattern_AtSuffixColumnNames(t *testing.T) {
+	// Column names ending with '_at' should be detected
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"created_at", "created_at"},
+		{"updated_at", "updated_at"},
+		{"deleted_at", "deleted_at"},
+		{"started_at", "started_at"},
+		{"finished_at", "finished_at"},
+		{"expires_at", "expires_at"},
+		{"marker_at", "marker_at"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "bigint",
+				SampleValues: []string{
+					"1704067200",
+					"1704153600",
+				},
+			}
+
+			result := detectTimestampScalePattern(col)
+			require.NotNil(t, result, "Should detect timestamp pattern for: %s", tt.columnName)
+		})
+	}
+}
+
+func TestDetectTimestampScalePattern_NonTimestampColumnNames(t *testing.T) {
+	// Column names that don't match timestamp patterns should not be detected
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"user_id", "user_id"},
+		{"amount", "amount"},
+		{"count", "count"},
+		{"status", "status"},
+		{"version", "version"},
+		{"flat", "flat"},     // ends with 'at' but not '_at'
+		{"format", "format"}, // ends with 'at' but not '_at'
+		{"combat", "combat"}, // ends with 'at' but not '_at'
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "bigint",
+				SampleValues: []string{
+					"1704067200",
+					"1704153600",
+				},
+			}
+
+			result := detectTimestampScalePattern(col)
+			assert.Nil(t, result, "Should NOT detect timestamp pattern for: %s", tt.columnName)
+		})
+	}
+}
+
+func TestDetectTimestampScalePattern_NonBigintTypes(t *testing.T) {
+	// Non-bigint types should not be detected
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"integer", "integer"},
+		{"int4", "int4"},
+		{"smallint", "smallint"},
+		{"varchar", "varchar(255)"},
+		{"text", "text"},
+		{"timestamp", "timestamp"},
+		{"timestamptz", "timestamptz"},
+		{"date", "date"},
+		{"boolean", "boolean"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "created_at",
+				DataType:   tt.dataType,
+				SampleValues: []string{
+					"1704067200",
+					"1704153600",
+				},
+			}
+
+			result := detectTimestampScalePattern(col)
+			assert.Nil(t, result, "Should NOT detect timestamp pattern for type: %s", tt.dataType)
+		})
+	}
+}
+
+func TestDetectTimestampScalePattern_BigintTypeVariants(t *testing.T) {
+	// Various bigint type representations should be detected
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"bigint", "bigint"},
+		{"BIGINT", "BIGINT"},
+		{"int8", "int8"},
+		{"INT8", "INT8"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "created_at",
+				DataType:   tt.dataType,
+				SampleValues: []string{
+					"1704067200",
+					"1704153600",
+				},
+			}
+
+			result := detectTimestampScalePattern(col)
+			require.NotNil(t, result, "Should detect timestamp pattern for type: %s", tt.dataType)
+		})
+	}
+}
+
+func TestDetectTimestampScalePattern_NoSampleValues(t *testing.T) {
+	// No sample values should not be detected
+	col := &models.SchemaColumn{
+		ColumnName:   "created_at",
+		DataType:     "bigint",
+		SampleValues: []string{},
+	}
+
+	result := detectTimestampScalePattern(col)
+	assert.Nil(t, result, "Should NOT detect timestamp pattern without sample values")
+}
+
+func TestDetectTimestampScalePattern_NilSampleValues(t *testing.T) {
+	// Nil sample values should not be detected
+	col := &models.SchemaColumn{
+		ColumnName:   "created_at",
+		DataType:     "bigint",
+		SampleValues: nil,
+	}
+
+	result := detectTimestampScalePattern(col)
+	assert.Nil(t, result, "Should NOT detect timestamp pattern with nil sample values")
+}
+
+func TestDetectTimestampScalePattern_MixedDigitLengths(t *testing.T) {
+	// If less than 80% of values have consistent digit length, should not detect
+	col := &models.SchemaColumn{
+		ColumnName: "created_at",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"1704067200",       // 10 digits (seconds)
+			"1704067200000",    // 13 digits (milliseconds)
+			"1704067200000000", // 16 digits (microseconds)
+			"1704067200",       // 10 digits
+			"1704067200000",    // 13 digits
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+	assert.Nil(t, result, "Should NOT detect timestamp pattern with mixed digit lengths")
+}
+
+func TestDetectTimestampScalePattern_InvalidDigitLengths(t *testing.T) {
+	// Values with digit lengths outside known timestamp ranges
+	tests := []struct {
+		name   string
+		values []string
+	}{
+		{"too_short", []string{"12345", "67890", "11111"}},                           // 5 digits
+		{"too_long", []string{"12345678901234567890123", "98765432109876543210123"}}, // 23 digits
+		{"8_digits", []string{"12345678", "87654321"}},                               // 8 digits - just below seconds range
+		{"21_digits", []string{"123456789012345678901", "987654321098765432109"}},    // 21 digits - just above nanoseconds range
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName:   "created_at",
+				DataType:     "bigint",
+				SampleValues: tt.values,
+			}
+
+			result := detectTimestampScalePattern(col)
+			assert.Nil(t, result, "Should NOT detect timestamp pattern for digit lengths: %v", tt.values)
+		})
+	}
+}
+
+func TestDetectTimestampScalePattern_NegativeValues(t *testing.T) {
+	// Negative values should be ignored (but not cause failure)
+	col := &models.SchemaColumn{
+		ColumnName: "created_at",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"-1704067200", // negative
+			"1704067200",  // positive, 10 digits
+			"1704153600",  // positive, 10 digits
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+	// Should still detect based on the valid positive values (2 out of 3 = 66%, but negative is skipped)
+	// With 2 valid values both being 10 digits = 100% of valid values
+	require.NotNil(t, result, "Should detect timestamp pattern ignoring negative values")
+	assert.Equal(t, "seconds", result.Scale)
+}
+
+func TestDetectTimestampScalePattern_EmptyStringValues(t *testing.T) {
+	// Empty string values should be ignored
+	col := &models.SchemaColumn{
+		ColumnName: "created_at",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"",
+			"1704067200",
+			"1704153600",
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+	require.NotNil(t, result, "Should detect timestamp pattern ignoring empty values")
+	assert.Equal(t, "seconds", result.Scale)
+}
+
+func TestDetectTimestampScalePattern_CaseInsensitiveColumnName(t *testing.T) {
+	// Column name matching should be case-insensitive
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"CREATED_AT", "CREATED_AT"},
+		{"Created_At", "Created_At"},
+		{"EVENT_TIME", "EVENT_TIME"},
+		{"Event_Time", "Event_Time"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "bigint",
+				SampleValues: []string{
+					"1704067200",
+					"1704153600",
+				},
+			}
+
+			result := detectTimestampScalePattern(col)
+			require.NotNil(t, result, "Should detect timestamp pattern for: %s (case-insensitive)", tt.columnName)
+		})
+	}
+}
+
+func TestDetectTimestampScalePattern_DigitLengthBoundaries(t *testing.T) {
+	// Test boundary values for each scale range
+	tests := []struct {
+		name          string
+		digits        int
+		expectedScale string
+	}{
+		{"9_digits_seconds", 9, "seconds"},
+		{"10_digits_seconds", 10, "seconds"},
+		{"11_digits_seconds", 11, "seconds"},
+		{"12_digits_milliseconds", 12, "milliseconds"},
+		{"13_digits_milliseconds", 13, "milliseconds"},
+		{"14_digits_milliseconds", 14, "milliseconds"},
+		{"15_digits_microseconds", 15, "microseconds"},
+		{"16_digits_microseconds", 16, "microseconds"},
+		{"17_digits_microseconds", 17, "microseconds"},
+		{"18_digits_nanoseconds", 18, "nanoseconds"},
+		{"19_digits_nanoseconds", 19, "nanoseconds"},
+		{"20_digits_nanoseconds", 20, "nanoseconds"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Generate a value with exactly the required number of digits
+			value := "1"
+			for i := 1; i < tt.digits; i++ {
+				value += "0"
+			}
+
+			col := &models.SchemaColumn{
+				ColumnName: "created_at",
+				DataType:   "bigint",
+				SampleValues: []string{
+					value,
+					value,
+				},
+			}
+
+			result := detectTimestampScalePattern(col)
+			require.NotNil(t, result, "Should detect timestamp pattern for %d digits", tt.digits)
+			assert.Equal(t, tt.expectedScale, result.Scale, "Expected scale %s for %d digits", tt.expectedScale, tt.digits)
+		})
+	}
+}
+
+// =============================================================================
+// isBigintType Tests
+// =============================================================================
+
+func TestIsBigintType_ValidTypes(t *testing.T) {
+	validTypes := []string{
+		"bigint", "BIGINT", "Bigint",
+		"int8", "INT8", "Int8",
+	}
+
+	for _, typ := range validTypes {
+		t.Run(typ, func(t *testing.T) {
+			assert.True(t, isBigintType(typ), "Should be valid bigint type: %s", typ)
+		})
+	}
+}
+
+func TestIsBigintType_InvalidTypes(t *testing.T) {
+	invalidTypes := []string{
+		"integer", "INTEGER",
+		"int", "INT",
+		"int4", "INT4",
+		"smallint", "SMALLINT",
+		"numeric", "NUMERIC",
+		"varchar", "text", "boolean",
+		"timestamp", "date",
+		"double precision", "real", "float",
+	}
+
+	for _, typ := range invalidTypes {
+		t.Run(typ, func(t *testing.T) {
+			assert.False(t, isBigintType(typ), "Should NOT be valid bigint type: %s", typ)
+		})
+	}
+}
+
+// =============================================================================
+// countDigits Tests
+// =============================================================================
+
+func TestCountDigits(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected int
+	}{
+		{"12345", 5},
+		{"1704067200", 10},
+		{"1704067200000", 13},
+		{"1704067200000000", 16},
+		{"1704067200000000000", 19},
+		{"", 0},
+		{"abc", 0},
+		{"-123", 3},
+		{"12.34", 4},
+		{"1,234,567", 7},
+		{"  123  ", 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := countDigits(tt.input)
+			assert.Equal(t, tt.expected, result, "countDigits(%q) should be %d", tt.input, tt.expected)
+		})
+	}
+}
+
+// =============================================================================
+// inferTimestampScale Tests
+// =============================================================================
+
+func TestInferTimestampScale_EmptyValues(t *testing.T) {
+	result := inferTimestampScale([]string{})
+	assert.Equal(t, "", result)
+}
+
+func TestInferTimestampScale_AllEmptyStrings(t *testing.T) {
+	result := inferTimestampScale([]string{"", "", ""})
+	assert.Equal(t, "", result)
+}
+
+func TestInferTimestampScale_AllNegative(t *testing.T) {
+	result := inferTimestampScale([]string{"-1", "-2", "-3"})
+	assert.Equal(t, "", result)
+}
+
+func TestInferTimestampScale_ConsistentLength(t *testing.T) {
+	// All 10-digit values should return "seconds"
+	result := inferTimestampScale([]string{"1704067200", "1704153600", "1704240000"})
+	assert.Equal(t, "seconds", result)
+}
+
+func TestInferTimestampScale_80PercentThreshold(t *testing.T) {
+	// 4 out of 5 = 80% with same length should pass
+	values := []string{
+		"1704067200", // 10 digits
+		"1704153600", // 10 digits
+		"1704240000", // 10 digits
+		"1704326400", // 10 digits
+		"12345",      // 5 digits
+	}
+	result := inferTimestampScale(values)
+	assert.Equal(t, "seconds", result)
+}
+
+func TestInferTimestampScale_Below80PercentThreshold(t *testing.T) {
+	// 3 out of 5 = 60% with same length should fail
+	values := []string{
+		"1704067200",     // 10 digits
+		"1704153600",     // 10 digits
+		"1704240000",     // 10 digits
+		"12345678901234", // 14 digits
+		"1234567890123",  // 13 digits
+	}
+	result := inferTimestampScale(values)
+	assert.Equal(t, "", result)
+}
+
+// =============================================================================
+// generateTimestampScaleDescription Tests
+// =============================================================================
+
+func TestGenerateTimestampScaleDescription_AllScales(t *testing.T) {
+	tests := []struct {
+		scale           string
+		expectedContain string
+	}{
+		{"seconds", "seconds since Unix epoch (1970-01-01)"},
+		{"milliseconds", "milliseconds since Unix epoch"},
+		{"microseconds", "microseconds since Unix epoch"},
+		{"nanoseconds", "nanoseconds since Unix epoch"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.scale, func(t *testing.T) {
+			result := generateTimestampScaleDescription(tt.scale, "created_at")
+			assert.Contains(t, result, tt.expectedContain)
+		})
+	}
+}
+
+func TestGenerateTimestampScaleDescription_MarkerColumn(t *testing.T) {
+	result := generateTimestampScaleDescription("nanoseconds", "marker_at")
+	assert.Contains(t, result, "cursor-based pagination")
+}
+
+func TestGenerateTimestampScaleDescription_CursorColumn(t *testing.T) {
+	result := generateTimestampScaleDescription("nanoseconds", "cursor_time")
+	assert.Contains(t, result, "cursor-based pagination")
+}
+
+func TestGenerateTimestampScaleDescription_CreatedColumn(t *testing.T) {
+	result := generateTimestampScaleDescription("seconds", "created_at")
+	assert.Contains(t, result, "Record timestamp")
+}
+
+func TestGenerateTimestampScaleDescription_UpdatedColumn(t *testing.T) {
+	result := generateTimestampScaleDescription("seconds", "updated_at")
+	assert.Contains(t, result, "Record timestamp")
+}
+
+func TestGenerateTimestampScaleDescription_UnknownScale(t *testing.T) {
+	result := generateTimestampScaleDescription("unknown", "created_at")
+	assert.Equal(t, "", result)
+}
+
+// =============================================================================
+// FK Column Pattern Detection Tests
+// =============================================================================
+
+func TestDetectFKColumnPattern_DBConstraint(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "user_id",
+		DataType:   "uuid",
+	}
+
+	fkInfo := &FKRelationshipInfo{
+		TargetTable:     "users",
+		TargetColumn:    "id",
+		DetectionMethod: models.DetectionMethodForeignKey,
+		Confidence:      1.0,
+		IsDBConstraint:  true,
+	}
+
+	result := detectFKColumnPattern(col, fkInfo)
+
+	require.NotNil(t, result, "Should detect FK column pattern for DB constraint")
+	assert.Equal(t, "Foreign key to users.id.", result.Description)
+	assert.Equal(t, "foreign_key", result.SemanticType)
+	assert.Equal(t, models.ColumnRoleIdentifier, result.Role)
+	assert.Equal(t, 1.0, result.Confidence)
+}
+
+func TestDetectFKColumnPattern_LogicalFK(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "host_id",
+		DataType:   "uuid",
+	}
+
+	fkInfo := &FKRelationshipInfo{
+		TargetTable:     "users",
+		TargetColumn:    "user_id",
+		DetectionMethod: models.DetectionMethodPKMatch,
+		Confidence:      0.9,
+		IsDBConstraint:  false,
+	}
+
+	result := detectFKColumnPattern(col, fkInfo)
+
+	require.NotNil(t, result, "Should detect FK column pattern for logical FK")
+	assert.Contains(t, result.Description, "Foreign key to users.user_id")
+	assert.Contains(t, result.Description, "90% confidence")
+	assert.Contains(t, result.Description, "No database constraint")
+	assert.Contains(t, result.Description, "logical reference validated via data overlap")
+	assert.Equal(t, "logical_foreign_key", result.SemanticType)
+	assert.Equal(t, models.ColumnRoleIdentifier, result.Role)
+	assert.Equal(t, 0.9, result.Confidence)
+}
+
+func TestDetectFKColumnPattern_NilFKInfo(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "user_id",
+		DataType:   "uuid",
+	}
+
+	result := detectFKColumnPattern(col, nil)
+
+	assert.Nil(t, result, "Should return nil when no FK info is provided")
+}
+
+func TestDetectFKColumnPattern_DifferentTargets(t *testing.T) {
+	tests := []struct {
+		name         string
+		targetTable  string
+		targetColumn string
+		wantContains string
+	}{
+		{"accounts table", "accounts", "id", "Foreign key to accounts.id"},
+		{"orders table", "orders", "order_id", "Foreign key to orders.order_id"},
+		{"products table", "products", "product_uuid", "Foreign key to products.product_uuid"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "ref_id",
+				DataType:   "uuid",
+			}
+
+			fkInfo := &FKRelationshipInfo{
+				TargetTable:     tt.targetTable,
+				TargetColumn:    tt.targetColumn,
+				DetectionMethod: models.DetectionMethodPKMatch,
+				Confidence:      0.9,
+				IsDBConstraint:  false,
+			}
+
+			result := detectFKColumnPattern(col, fkInfo)
+
+			require.NotNil(t, result)
+			assert.Contains(t, result.Description, tt.wantContains)
+		})
+	}
+}
+
+func TestFKRelationshipInfo_Fields(t *testing.T) {
+	fkInfo := &FKRelationshipInfo{
+		TargetTable:     "users",
+		TargetColumn:    "id",
+		DetectionMethod: models.DetectionMethodPKMatch,
+		Confidence:      0.85,
+		IsDBConstraint:  false,
+	}
+
+	assert.Equal(t, "users", fkInfo.TargetTable)
+	assert.Equal(t, "id", fkInfo.TargetColumn)
+	assert.Equal(t, models.DetectionMethodPKMatch, fkInfo.DetectionMethod)
+	assert.Equal(t, 0.85, fkInfo.Confidence)
+	assert.False(t, fkInfo.IsDBConstraint)
+}
+
+func TestColumnEnrichmentService_convertToColumnDetails_WithFKPatternDetection(t *testing.T) {
+	logger := zap.NewNop()
+	service := &columnEnrichmentService{
+		logger: logger,
+	}
+
+	columns := []*models.SchemaColumn{
+		{ColumnName: "id", DataType: "uuid", IsPrimaryKey: true},
+		{ColumnName: "user_id", DataType: "uuid"},
+		{ColumnName: "host_id", DataType: "uuid"},
+		{ColumnName: "status", DataType: "varchar"},
+	}
+
+	enrichments := []columnEnrichment{
+		{Name: "id", Description: "Primary key", Role: "identifier", SemanticType: "identifier"},
+		{Name: "user_id", Description: "LLM description for user_id", Role: "identifier", SemanticType: "identifier"},
+		{Name: "host_id", Description: "LLM description for host_id", Role: "identifier", SemanticType: "identifier"},
+		{Name: "status", Description: "Status field", Role: "dimension", SemanticType: "status"},
+	}
+
+	// Simple FK info for LLM context
+	fkInfo := map[string]string{
+		"user_id": "users",
+		"host_id": "users",
+	}
+
+	// Detailed FK info for pattern detection
+	fkDetailedInfo := map[string]*FKRelationshipInfo{
+		"user_id": {
+			TargetTable:     "users",
+			TargetColumn:    "id",
+			DetectionMethod: models.DetectionMethodForeignKey, // DB constraint
+			Confidence:      1.0,
+			IsDBConstraint:  true,
+		},
+		"host_id": {
+			TargetTable:     "users",
+			TargetColumn:    "user_id",
+			DetectionMethod: models.DetectionMethodPKMatch, // Inferred
+			Confidence:      0.9,
+			IsDBConstraint:  false,
+		},
+	}
+
+	enumSamples := map[string][]string{}
+	enumDefs := []models.EnumDefinition{}
+	enumDistributions := map[string]*datasource.EnumDistributionResult{}
+
+	details := service.convertToColumnDetails("engagements", enrichments, columns, fkInfo, fkDetailedInfo, enumSamples, enumDefs, enumDistributions)
+
+	require.Equal(t, 4, len(details))
+
+	// Check user_id - DB FK constraint
+	userIDCol := findColumnDetail(details, "user_id")
+	require.NotNil(t, userIDCol)
+	assert.True(t, userIDCol.IsForeignKey)
+	assert.Equal(t, "users", userIDCol.ForeignTable)
+	assert.Equal(t, "Foreign key to users.id.", userIDCol.Description)
+	assert.Equal(t, "foreign_key", userIDCol.SemanticType)
+	assert.Equal(t, models.ColumnRoleIdentifier, userIDCol.Role)
+
+	// Check host_id - Logical FK (inferred via pk_match)
+	hostIDCol := findColumnDetail(details, "host_id")
+	require.NotNil(t, hostIDCol)
+	assert.True(t, hostIDCol.IsForeignKey)
+	assert.Equal(t, "users", hostIDCol.ForeignTable)
+	assert.Contains(t, hostIDCol.Description, "Foreign key to users.user_id")
+	assert.Contains(t, hostIDCol.Description, "90% confidence")
+	assert.Contains(t, hostIDCol.Description, "No database constraint")
+	assert.Equal(t, "logical_foreign_key", hostIDCol.SemanticType)
+	assert.Equal(t, models.ColumnRoleIdentifier, hostIDCol.Role)
+
+	// Check status - should retain LLM enrichment (no FK pattern applies)
+	statusCol := findColumnDetail(details, "status")
+	require.NotNil(t, statusCol)
+	assert.False(t, statusCol.IsForeignKey)
+	assert.Equal(t, "Status field", statusCol.Description)
+	assert.Equal(t, "status", statusCol.SemanticType)
+}
+
+// ============================================================================
+// Role Detection Tests
+// ============================================================================
+
+func Test_detectRoleFromColumnName(t *testing.T) {
+	tests := []struct {
+		name         string
+		columnName   string
+		expectedRole string
+		expectedDesc string
+		expectNil    bool
+	}{
+		// User roles - content/marketplace platforms
+		{
+			name:         "host_id detects host role",
+			columnName:   "host_id",
+			expectedRole: "host",
+			expectedDesc: "content provider",
+		},
+		{
+			name:         "visitor_id detects visitor role",
+			columnName:   "visitor_id",
+			expectedRole: "visitor",
+			expectedDesc: "content consumer",
+		},
+		{
+			name:         "host_user_id detects host role",
+			columnName:   "host_user_id",
+			expectedRole: "host",
+			expectedDesc: "content provider",
+		},
+
+		// User roles - ownership
+		{
+			name:         "creator_id detects creator role",
+			columnName:   "creator_id",
+			expectedRole: "creator",
+			expectedDesc: "entity creator",
+		},
+		{
+			name:         "owner_id detects owner role",
+			columnName:   "owner_id",
+			expectedRole: "owner",
+			expectedDesc: "entity owner",
+		},
+
+		// User roles - messaging/transfers
+		{
+			name:         "sender_id detects sender role",
+			columnName:   "sender_id",
+			expectedRole: "sender",
+			expectedDesc: "message sender",
+		},
+		{
+			name:         "recipient_id detects recipient role",
+			columnName:   "recipient_id",
+			expectedRole: "recipient",
+			expectedDesc: "message recipient",
+		},
+
+		// User roles - financial transactions
+		{
+			name:         "payer_id detects payer role",
+			columnName:   "payer_id",
+			expectedRole: "payer",
+			expectedDesc: "payment source",
+		},
+		{
+			name:         "payee_id detects payee role",
+			columnName:   "payee_id",
+			expectedRole: "payee",
+			expectedDesc: "payment recipient",
+		},
+		{
+			name:         "payer_user_id detects payer role",
+			columnName:   "payer_user_id",
+			expectedRole: "payer",
+			expectedDesc: "payment source",
+		},
+
+		// User roles - e-commerce
+		{
+			name:         "buyer_id detects buyer role",
+			columnName:   "buyer_id",
+			expectedRole: "buyer",
+			expectedDesc: "purchasing party",
+		},
+		{
+			name:         "seller_id detects seller role",
+			columnName:   "seller_id",
+			expectedRole: "seller",
+			expectedDesc: "selling party",
+		},
+
+		// Account roles
+		{
+			name:         "source_account_id detects source role",
+			columnName:   "source_account_id",
+			expectedRole: "source",
+			expectedDesc: "source account",
+		},
+		{
+			name:         "destination_account_id detects destination role",
+			columnName:   "destination_account_id",
+			expectedRole: "destination",
+			expectedDesc: "destination account",
+		},
+		{
+			name:         "from_account_id detects from role",
+			columnName:   "from_account_id",
+			expectedRole: "from",
+			expectedDesc: "originating account",
+		},
+		{
+			name:         "to_account_id detects to role",
+			columnName:   "to_account_id",
+			expectedRole: "to",
+			expectedDesc: "receiving account",
+		},
+
+		// Generic references (no role)
+		{
+			name:       "user_id has no role",
+			columnName: "user_id",
+			expectNil:  true,
+		},
+		{
+			name:       "account_id has no role",
+			columnName: "account_id",
+			expectNil:  true,
+		},
+		{
+			name:       "order_id has no role",
+			columnName: "order_id",
+			expectNil:  true,
+		},
+
+		// Other columns
+		{
+			name:       "status has no role",
+			columnName: "status",
+			expectNil:  true,
+		},
+		{
+			name:       "created_at has no role",
+			columnName: "created_at",
+			expectNil:  true,
+		},
+		{
+			name:       "amount has no role",
+			columnName: "amount",
+			expectNil:  true,
+		},
+
+		// Edge cases - partial matches should NOT detect roles
+		{
+			name:       "ghost_id does not match host",
+			columnName: "ghost_id",
+			expectNil:  true,
+		},
+
+		// Case insensitivity
+		{
+			name:         "HOST_ID uppercase detects host role",
+			columnName:   "HOST_ID",
+			expectedRole: "host",
+			expectedDesc: "content provider",
+		},
+		{
+			name:         "Host_User_Id mixed case detects host role",
+			columnName:   "Host_User_Id",
+			expectedRole: "host",
+			expectedDesc: "content provider",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := detectRoleFromColumnName(tt.columnName)
+
+			if tt.expectNil {
+				assert.Nil(t, result, "expected nil for column %s", tt.columnName)
+				return
+			}
+
+			require.NotNil(t, result, "expected role detection for column %s", tt.columnName)
+			assert.Equal(t, tt.expectedRole, result.Role, "role mismatch for column %s", tt.columnName)
+			assert.Equal(t, tt.expectedDesc, result.Description, "description mismatch for column %s", tt.columnName)
+		})
+	}
+}
+
+func Test_detectRolesInTable(t *testing.T) {
+	tests := []struct {
+		name          string
+		fkInfo        map[string]string
+		expectedRoles map[string]string
+	}{
+		{
+			name: "detects multiple roles to same table",
+			fkInfo: map[string]string{
+				"host_id":    "users",
+				"visitor_id": "users",
+				"order_id":   "orders",
+			},
+			expectedRoles: map[string]string{
+				"host_id":    "host",
+				"visitor_id": "visitor",
+			},
+		},
+		{
+			name: "detects account roles",
+			fkInfo: map[string]string{
+				"source_account_id": "accounts",
+				"dest_account_id":   "accounts",
+			},
+			expectedRoles: map[string]string{
+				"source_account_id": "source",
+			},
+		},
+		{
+			name: "no roles detected for generic FKs",
+			fkInfo: map[string]string{
+				"user_id":    "users",
+				"account_id": "accounts",
+				"order_id":   "orders",
+			},
+			expectedRoles: map[string]string{},
+		},
+		{
+			name:          "empty FK info returns empty roles",
+			fkInfo:        map[string]string{},
+			expectedRoles: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := detectRolesInTable(tt.fkInfo)
+
+			assert.Equal(t, len(tt.expectedRoles), len(result), "expected %d roles, got %d", len(tt.expectedRoles), len(result))
+
+			for colName, expectedRole := range tt.expectedRoles {
+				detectedRole, ok := result[colName]
+				require.True(t, ok, "expected role for column %s", colName)
+				assert.Equal(t, expectedRole, detectedRole.Role, "role mismatch for column %s", colName)
+			}
+		})
+	}
+}
+
+func Test_detectFKColumnPattern_WithRoleDetection(t *testing.T) {
+	tests := []struct {
+		name               string
+		columnName         string
+		fkInfo             *FKRelationshipInfo
+		expectRole         string
+		expectRoleInDesc   bool
+		expectDescContains []string
+	}{
+		{
+			name:       "host_id with DB constraint includes role in description",
+			columnName: "host_id",
+			fkInfo: &FKRelationshipInfo{
+				TargetTable:    "users",
+				TargetColumn:   "id",
+				IsDBConstraint: true,
+				Confidence:     1.0,
+			},
+			expectRole:       "host",
+			expectRoleInDesc: true,
+			expectDescContains: []string{
+				"Foreign key to users.id",
+				"Role: host",
+				"content provider",
+			},
+		},
+		{
+			name:       "visitor_id with pk_match includes role in description",
+			columnName: "visitor_id",
+			fkInfo: &FKRelationshipInfo{
+				TargetTable:     "users",
+				TargetColumn:    "user_id",
+				IsDBConstraint:  false,
+				DetectionMethod: "pk_match",
+				Confidence:      0.95,
+			},
+			expectRole:       "visitor",
+			expectRoleInDesc: true,
+			expectDescContains: []string{
+				"Foreign key to users.user_id",
+				"95% confidence",
+				"Role: visitor",
+				"content consumer",
+			},
+		},
+		{
+			name:       "payer_id includes payer role",
+			columnName: "payer_id",
+			fkInfo: &FKRelationshipInfo{
+				TargetTable:    "users",
+				TargetColumn:   "id",
+				IsDBConstraint: true,
+				Confidence:     1.0,
+			},
+			expectRole:       "payer",
+			expectRoleInDesc: true,
+			expectDescContains: []string{
+				"Role: payer",
+				"payment source",
+			},
+		},
+		{
+			name:       "source_account_id includes source role",
+			columnName: "source_account_id",
+			fkInfo: &FKRelationshipInfo{
+				TargetTable:    "accounts",
+				TargetColumn:   "id",
+				IsDBConstraint: true,
+				Confidence:     1.0,
+			},
+			expectRole:       "source",
+			expectRoleInDesc: true,
+			expectDescContains: []string{
+				"Role: source",
+				"source account",
+			},
+		},
+		{
+			name:       "user_id (generic) has no role in description",
+			columnName: "user_id",
+			fkInfo: &FKRelationshipInfo{
+				TargetTable:    "users",
+				TargetColumn:   "id",
+				IsDBConstraint: true,
+				Confidence:     1.0,
+			},
+			expectRole:       "",
+			expectRoleInDesc: false,
+			expectDescContains: []string{
+				"Foreign key to users.id",
+			},
+		},
+		{
+			name:       "nil FK info returns nil",
+			columnName: "host_id",
+			fkInfo:     nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+			}
+
+			result := detectFKColumnPattern(col, tt.fkInfo)
+
+			if tt.fkInfo == nil {
+				assert.Nil(t, result)
+				return
+			}
+
+			require.NotNil(t, result)
+			assert.Equal(t, tt.expectRole, result.DetectedRole, "detected role mismatch")
+
+			for _, expected := range tt.expectDescContains {
+				assert.Contains(t, result.Description, expected,
+					"description should contain '%s', got: %s", expected, result.Description)
+			}
+
+			if !tt.expectRoleInDesc {
+				assert.NotContains(t, result.Description, "Role:",
+					"description should NOT contain role for generic FK")
+			}
+		})
+	}
+}
+
+func Test_RolePatterns_Coverage(t *testing.T) {
+	// Verify that all roles have descriptions
+	for entityType, roles := range RolePatterns {
+		for _, role := range roles {
+			desc, ok := RoleDescriptions[role]
+			assert.True(t, ok, "role %s (entity type: %s) should have a description", role, entityType)
+			assert.NotEmpty(t, desc, "role %s should have a non-empty description", role)
+		}
+	}
+}
+
+func Test_FKAssociation_SetFromDetectedRole(t *testing.T) {
+	// This tests that convertToColumnDetails properly sets FKAssociation
+	// from the detected role when LLM doesn't provide one
+	tableName := "engagements"
+	columns := []*models.SchemaColumn{
+		{ColumnName: "host_id", DataType: "uuid"},
+		{ColumnName: "visitor_id", DataType: "uuid"},
+		{ColumnName: "user_id", DataType: "uuid"},
+	}
+
+	enrichments := []columnEnrichment{
+		{Name: "host_id", Description: "Host user", Role: "dimension"},
+		{Name: "visitor_id", Description: "Visitor user", Role: "dimension", FKAssociation: nil},
+		{Name: "user_id", Description: "Generic user", Role: "dimension"},
+	}
+
+	fkInfo := map[string]string{
+		"host_id":    "users",
+		"visitor_id": "users",
+		"user_id":    "users",
+	}
+
+	fkDetailedInfo := map[string]*FKRelationshipInfo{
+		"host_id": {
+			TargetTable:    "users",
+			TargetColumn:   "id",
+			IsDBConstraint: true,
+			Confidence:     1.0,
+		},
+		"visitor_id": {
+			TargetTable:    "users",
+			TargetColumn:   "id",
+			IsDBConstraint: true,
+			Confidence:     1.0,
+		},
+		"user_id": {
+			TargetTable:    "users",
+			TargetColumn:   "id",
+			IsDBConstraint: true,
+			Confidence:     1.0,
+		},
+	}
+
+	svc := &columnEnrichmentService{}
+	details := svc.convertToColumnDetails(
+		tableName,
+		enrichments,
+		columns,
+		fkInfo,
+		fkDetailedInfo,
+		nil, // enumSamples
+		nil, // enumDefs
+		nil, // enumDistributions
+	)
+
+	// Find columns by name
+	var hostCol, visitorCol, userCol *models.ColumnDetail
+	for i := range details {
+		switch details[i].Name {
+		case "host_id":
+			hostCol = &details[i]
+		case "visitor_id":
+			visitorCol = &details[i]
+		case "user_id":
+			userCol = &details[i]
+		}
+	}
+
+	// host_id should have FKAssociation set to "host"
+	require.NotNil(t, hostCol)
+	assert.Equal(t, "host", hostCol.FKAssociation, "host_id should have FKAssociation 'host'")
+	assert.Contains(t, hostCol.Description, "Role: host", "host_id description should include role")
+
+	// visitor_id should have FKAssociation set to "visitor"
+	require.NotNil(t, visitorCol)
+	assert.Equal(t, "visitor", visitorCol.FKAssociation, "visitor_id should have FKAssociation 'visitor'")
+	assert.Contains(t, visitorCol.Description, "Role: visitor", "visitor_id description should include role")
+
+	// user_id should NOT have FKAssociation (generic reference)
+	require.NotNil(t, userCol)
+	assert.Empty(t, userCol.FKAssociation, "user_id should NOT have FKAssociation (generic reference)")
+	assert.NotContains(t, userCol.Description, "Role:", "user_id description should NOT include role")
+}
+
+// ============================================================================
+// Boolean Naming Pattern Detection Tests
+// ============================================================================
+
+func TestDetectBooleanNamingPattern_TypicalIsPrefix(t *testing.T) {
+	// Typical is_ prefixed boolean column
+	col := &models.SchemaColumn{
+		ColumnName: "is_active",
+		DataType:   "boolean",
+	}
+
+	result := detectBooleanNamingPattern(col)
+
+	require.NotNil(t, result, "Should detect boolean pattern for is_ prefix")
+	assert.Contains(t, result.Description, "Boolean flag")
+	assert.Contains(t, result.Description, "Indicates whether")
+	assert.Contains(t, result.Description, "active")
+	assert.Equal(t, "boolean_flag", result.SemanticType)
+	assert.Equal(t, models.ColumnRoleDimension, result.Role)
+	assert.Equal(t, "active", result.FeatureName)
+	assert.Equal(t, "is_", result.NamingPattern)
+}
+
+func TestDetectBooleanNamingPattern_HasPrefix(t *testing.T) {
+	// has_ prefixed boolean column
+	col := &models.SchemaColumn{
+		ColumnName: "has_premium_subscription",
+		DataType:   "boolean",
+	}
+
+	result := detectBooleanNamingPattern(col)
+
+	require.NotNil(t, result, "Should detect boolean pattern for has_ prefix")
+	assert.Contains(t, result.Description, "Boolean flag")
+	assert.Contains(t, result.Description, "Indicates whether this entity has")
+	assert.Contains(t, result.Description, "premium subscription")
+	assert.Equal(t, "boolean_flag", result.SemanticType)
+	assert.Equal(t, "premium_subscription", result.FeatureName)
+	assert.Equal(t, "has_", result.NamingPattern)
+}
+
+func TestDetectBooleanNamingPattern_CanPrefix(t *testing.T) {
+	// can_ prefixed boolean column
+	col := &models.SchemaColumn{
+		ColumnName: "can_edit",
+		DataType:   "boolean",
+	}
+
+	result := detectBooleanNamingPattern(col)
+
+	require.NotNil(t, result, "Should detect boolean pattern for can_ prefix")
+	assert.Contains(t, result.Description, "Boolean flag")
+	assert.Contains(t, result.Description, "Indicates whether this entity can")
+	assert.Contains(t, result.Description, "edit")
+	assert.Equal(t, "can_", result.NamingPattern)
+}
+
+func TestDetectBooleanNamingPattern_AllPrefixes(t *testing.T) {
+	// Test all supported prefixes
+	tests := []struct {
+		prefix     string
+		columnName string
+		expectedIn string
+	}{
+		{"is_", "is_verified", "Indicates whether"},
+		{"has_", "has_access", "Indicates whether this entity has"},
+		{"can_", "can_login", "Indicates whether this entity can"},
+		{"should_", "should_notify", "Indicates whether this entity should"},
+		{"allow_", "allow_marketing", "Indicates whether"},
+		{"allows_", "allows_sharing", "Indicates whether"},
+		{"needs_", "needs_review", "Indicates whether this entity needs"},
+		{"was_", "was_deleted", "Indicates whether this entity was"},
+		{"will_", "will_expire", "Indicates whether this entity will"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.prefix, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "boolean",
+			}
+
+			result := detectBooleanNamingPattern(col)
+
+			require.NotNil(t, result, "Should detect boolean pattern for %s prefix", tt.prefix)
+			assert.Contains(t, result.Description, tt.expectedIn, "Description should contain prefix description")
+			assert.Equal(t, tt.prefix, result.NamingPattern)
+		})
+	}
+}
+
+func TestDetectBooleanNamingPattern_NonBooleanPrefix(t *testing.T) {
+	// Column names that don't start with known prefixes
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"regular column", "active"},
+		{"status column", "status"},
+		{"enabled suffix", "feature_enabled"},
+		{"flag suffix", "email_verified_flag"},
+		{"different prefix", "do_send_emails"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "boolean",
+			}
+
+			result := detectBooleanNamingPattern(col)
+			assert.Nil(t, result, "Should not detect for column: %s", tt.columnName)
+		})
+	}
+}
+
+func TestDetectBooleanNamingPattern_BooleanDataTypes(t *testing.T) {
+	// Test different boolean data type representations
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"boolean", "boolean"},
+		{"bool", "bool"},
+		{"BOOLEAN", "BOOLEAN"},
+		{"bit", "bit"},
+		{"bit(1)", "bit(1)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "is_active",
+				DataType:   tt.dataType,
+			}
+
+			result := detectBooleanNamingPattern(col)
+			require.NotNil(t, result, "Should detect for data type: %s", tt.dataType)
+			assert.Equal(t, "boolean_flag", result.SemanticType)
+		})
+	}
+}
+
+func TestDetectBooleanNamingPattern_NonBooleanDataTypes(t *testing.T) {
+	// Non-boolean data types should not be detected (unless boolean-like integer)
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"text", "text"},
+		{"varchar", "varchar(10)"},
+		{"timestamp", "timestamp"},
+		{"date", "date"},
+		{"uuid", "uuid"},
+		{"jsonb", "jsonb"},
+		{"float", "float"},
+		{"decimal", "decimal(10,2)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "is_active",
+				DataType:   tt.dataType,
+			}
+
+			result := detectBooleanNamingPattern(col)
+			assert.Nil(t, result, "Should not detect for non-boolean type: %s", tt.dataType)
+		})
+	}
+}
+
+func TestDetectBooleanNamingPattern_BooleanLikeInteger(t *testing.T) {
+	// Integer columns with exactly 2 distinct values (0/1) should be detected
+	distinctCount := int64(2)
+	col := &models.SchemaColumn{
+		ColumnName:    "is_enabled",
+		DataType:      "integer",
+		DistinctCount: &distinctCount,
+		SampleValues:  []string{"0", "1"},
+	}
+
+	result := detectBooleanNamingPattern(col)
+
+	require.NotNil(t, result, "Should detect boolean-like integer column")
+	assert.Equal(t, "boolean_flag", result.SemanticType)
+	assert.Equal(t, "enabled", result.FeatureName)
+}
+
+func TestDetectBooleanNamingPattern_IntegerWithTrueFalse(t *testing.T) {
+	// Integer columns with true/false sample values
+	distinctCount := int64(2)
+	col := &models.SchemaColumn{
+		ColumnName:    "has_feature",
+		DataType:      "smallint",
+		DistinctCount: &distinctCount,
+		SampleValues:  []string{"true", "false"},
+	}
+
+	result := detectBooleanNamingPattern(col)
+
+	require.NotNil(t, result, "Should detect integer column with true/false values")
+	assert.Equal(t, "boolean_flag", result.SemanticType)
+}
+
+func TestDetectBooleanNamingPattern_IntegerNotBooleanLike(t *testing.T) {
+	// Integer columns with more than 2 distinct values should NOT be detected
+	distinctCount := int64(5)
+	col := &models.SchemaColumn{
+		ColumnName:    "is_status",
+		DataType:      "integer",
+		DistinctCount: &distinctCount,
+		SampleValues:  []string{"0", "1", "2", "3", "4"},
+	}
+
+	result := detectBooleanNamingPattern(col)
+
+	assert.Nil(t, result, "Should not detect integer column with more than 2 distinct values")
+}
+
+func TestDetectBooleanNamingPattern_IntegerWithNonBinaryValues(t *testing.T) {
+	// Integer columns with 2 distinct values but not 0/1
+	distinctCount := int64(2)
+	col := &models.SchemaColumn{
+		ColumnName:    "is_type",
+		DataType:      "integer",
+		DistinctCount: &distinctCount,
+		SampleValues:  []string{"5", "10"},
+	}
+
+	result := detectBooleanNamingPattern(col)
+
+	assert.Nil(t, result, "Should not detect integer column with non-binary values")
+}
+
+func TestDetectBooleanNamingPattern_IntegerNoDistinctCount(t *testing.T) {
+	// Integer columns without distinct count should not be detected
+	col := &models.SchemaColumn{
+		ColumnName: "is_enabled",
+		DataType:   "integer",
+		// No DistinctCount
+	}
+
+	result := detectBooleanNamingPattern(col)
+
+	assert.Nil(t, result, "Should not detect integer column without distinct count")
+}
+
+func TestDetectBooleanNamingPattern_CaseInsensitive(t *testing.T) {
+	// Column name matching should be case-insensitive
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"uppercase", "IS_ACTIVE"},
+		{"mixed case", "Is_Active"},
+		{"camel case like", "IS_active"},
+		{"all caps has", "HAS_FEATURE"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "boolean",
+			}
+
+			result := detectBooleanNamingPattern(col)
+			require.NotNil(t, result, "Should detect case-insensitive: %s", tt.columnName)
+		})
+	}
+}
+
+func TestHumanizeFeatureName_BasicConversion(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"active", "active"},
+		{"email_verified", "email verified"},
+		{"premium_subscription", "premium subscription"},
+		{"two_factor_auth", "two factor auth"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := humanizeFeatureName(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestHumanizeFeatureName_Abbreviations(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"pc_enabled", "PC enabled"},
+		{"api_access", "API access"},
+		{"ssl_verified", "SSL verified"},
+		{"mfa_enabled", "MFA enabled"},
+		{"sso_active", "SSO active"},
+		{"id_verified", "ID verified"},
+		{"uuid_generated", "UUID generated"},
+		{"url_shortened", "URL shortened"},
+		{"http_enabled", "HTTP enabled"},
+		{"https_required", "HTTPS required"},
+		{"tls_configured", "TLS configured"},
+		{"2fa_enabled", "2FA enabled"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := humanizeFeatureName(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestIsBooleanType(t *testing.T) {
+	tests := []struct {
+		dataType string
+		expected bool
+	}{
+		{"boolean", true},
+		{"bool", true},
+		{"BOOLEAN", true},
+		{"bit", true},
+		{"bit(1)", true},
+		{"integer", false},
+		{"text", false},
+		{"varchar", false},
+		{"timestamp", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.dataType, func(t *testing.T) {
+			result := isBooleanType(tt.dataType)
+			assert.Equal(t, tt.expected, result, "isBooleanType(%s)", tt.dataType)
+		})
+	}
+}
+
+func TestIsBooleanLikeIntegerColumn(t *testing.T) {
+	distinctCount2 := int64(2)
+	distinctCount5 := int64(5)
+
+	tests := []struct {
+		name     string
+		col      *models.SchemaColumn
+		expected bool
+	}{
+		{
+			name: "integer with 2 values 0/1",
+			col: &models.SchemaColumn{
+				DataType:      "integer",
+				DistinctCount: &distinctCount2,
+				SampleValues:  []string{"0", "1"},
+			},
+			expected: true,
+		},
+		{
+			name: "smallint with 2 values",
+			col: &models.SchemaColumn{
+				DataType:      "smallint",
+				DistinctCount: &distinctCount2,
+				SampleValues:  []string{"0", "1"},
+			},
+			expected: true,
+		},
+		{
+			name: "bigint with 2 values",
+			col: &models.SchemaColumn{
+				DataType:      "bigint",
+				DistinctCount: &distinctCount2,
+				SampleValues:  []string{"0", "1"},
+			},
+			expected: true,
+		},
+		{
+			name: "integer with true/false strings",
+			col: &models.SchemaColumn{
+				DataType:      "integer",
+				DistinctCount: &distinctCount2,
+				SampleValues:  []string{"true", "false"},
+			},
+			expected: true,
+		},
+		{
+			name: "integer with more than 2 values",
+			col: &models.SchemaColumn{
+				DataType:      "integer",
+				DistinctCount: &distinctCount5,
+				SampleValues:  []string{"0", "1", "2", "3", "4"},
+			},
+			expected: false,
+		},
+		{
+			name: "integer with non-binary sample values",
+			col: &models.SchemaColumn{
+				DataType:      "integer",
+				DistinctCount: &distinctCount2,
+				SampleValues:  []string{"5", "10"},
+			},
+			expected: false,
+		},
+		{
+			name: "integer without distinct count",
+			col: &models.SchemaColumn{
+				DataType: "integer",
+			},
+			expected: false,
+		},
+		{
+			name: "non-integer type",
+			col: &models.SchemaColumn{
+				DataType:      "text",
+				DistinctCount: &distinctCount2,
+				SampleValues:  []string{"0", "1"},
+			},
+			expected: false,
+		},
+		{
+			name: "integer with no sample values (still valid if count is 2)",
+			col: &models.SchemaColumn{
+				DataType:      "integer",
+				DistinctCount: &distinctCount2,
+				SampleValues:  []string{},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isBooleanLikeIntegerColumn(tt.col)
+			assert.Equal(t, tt.expected, result, "isBooleanLikeIntegerColumn for %s", tt.name)
+		})
+	}
+}
+
+func TestGenerateBooleanDescription(t *testing.T) {
+	tests := []struct {
+		name             string
+		prefixDesc       string
+		humanizedFeature string
+		expectedContains []string
+	}{
+		{
+			name:             "is prefix",
+			prefixDesc:       "Indicates whether",
+			humanizedFeature: "active",
+			expectedContains: []string{"Boolean flag", "Indicates whether", "active"},
+		},
+		{
+			name:             "has prefix",
+			prefixDesc:       "Indicates whether this entity has",
+			humanizedFeature: "premium subscription",
+			expectedContains: []string{"Boolean flag", "Indicates whether this entity has", "premium subscription"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := generateBooleanDescription(tt.prefixDesc, tt.humanizedFeature)
+			for _, expected := range tt.expectedContains {
+				assert.Contains(t, result, expected)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// External ID Pattern Detection Tests
+// =============================================================================
+
+func TestDetectExternalIDPattern_AWSSESMessageID(t *testing.T) {
+	// AWS SES Message-ID format: hexadecimal-uuid@email.amazonses.com
+	col := &models.SchemaColumn{
+		ColumnName: "linked_email_id",
+		DataType:   "varchar(100)",
+		SampleValues: []string{
+			"0102018d1234abcd-12345678-1234-1234-1234-123456789012@email.amazonses.com",
+			"0102018d5678efab-abcd1234-5678-abcd-5678-abcdef123456@email.amazonses.com",
+			"0102018d9012abcd-98765432-1098-7654-3210-fedcba987654@email.amazonses.com",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect AWS SES Message-ID pattern")
+	assert.Equal(t, "AWS SES Message-ID", result.PatternName)
+	assert.Equal(t, "external_id_aws_ses", result.SemanticType)
+	assert.Contains(t, result.Description, "AWS SES")
+	assert.Contains(t, result.Description, "email")
+	assert.Equal(t, models.ColumnRoleIdentifier, result.Role)
+	assert.InDelta(t, 100.0, result.MatchRate, 0.1)
+}
+
+func TestDetectExternalIDPattern_StripePaymentIntent(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "payment_intent_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"pi_1234567890abcdef",
+			"pi_abcdefghijklmnop",
+			"pi_ABCD1234efgh5678",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Payment Intent pattern")
+	assert.Equal(t, "Stripe Payment Intent", result.PatternName)
+	assert.Equal(t, "external_id_stripe_payment_intent", result.SemanticType)
+	assert.Contains(t, result.Description, "Stripe")
+	assert.Contains(t, result.Description, "Payment Intent")
+}
+
+func TestDetectExternalIDPattern_StripePaymentMethod(t *testing.T) {
+	// Stripe Payment Method IDs are in the format: pm_<alphanumeric>
+	col := &models.SchemaColumn{
+		ColumnName: "payment_method",
+		DataType:   "varchar(30)",
+		SampleValues: []string{
+			"pm_1234567890abcdef",
+			"pm_ABCDEFghij123456",
+			"pm_XYZ789abc789XYZ7",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Payment Method pattern")
+	assert.Equal(t, "Stripe Payment Method", result.PatternName)
+	assert.Equal(t, "external_id_stripe_payment_method", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeCharge(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "charge_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"ch_1234567890abcdef",
+			"ch_abcdefghijklmnop",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Charge pattern")
+	assert.Equal(t, "Stripe Charge", result.PatternName)
+	assert.Equal(t, "external_id_stripe_charge", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeCustomer(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "stripe_customer_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"cus_1234567890abcdef",
+			"cus_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Customer pattern")
+	assert.Equal(t, "Stripe Customer", result.PatternName)
+	assert.Equal(t, "external_id_stripe_customer", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeSubscription(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "subscription_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"sub_1234567890abcdef",
+			"sub_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Subscription pattern")
+	assert.Equal(t, "Stripe Subscription", result.PatternName)
+	assert.Equal(t, "external_id_stripe_subscription", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeInvoice(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "invoice_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"in_1234567890abcdef",
+			"in_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Invoice pattern")
+	assert.Equal(t, "Stripe Invoice", result.PatternName)
+	assert.Equal(t, "external_id_stripe_invoice", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeRefund(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "refund_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"re_1234567890abcdef",
+			"re_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Refund pattern")
+	assert.Equal(t, "Stripe Refund", result.PatternName)
+	assert.Equal(t, "external_id_stripe_refund", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripePrice(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "price_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"price_1234567890abcdef",
+			"price_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Price pattern")
+	assert.Equal(t, "Stripe Price", result.PatternName)
+	assert.Equal(t, "external_id_stripe_price", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeProduct(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "product_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"prod_1234567890abcdef",
+			"prod_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Product pattern")
+	assert.Equal(t, "Stripe Product", result.PatternName)
+	assert.Equal(t, "external_id_stripe_product", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeTransfer(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "transfer_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"tr_1234567890abcdef",
+			"tr_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Transfer pattern")
+	assert.Equal(t, "Stripe Transfer", result.PatternName)
+	assert.Equal(t, "external_id_stripe_transfer", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripePayout(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "payout_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"po_1234567890abcdef",
+			"po_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Payout pattern")
+	assert.Equal(t, "Stripe Payout", result.PatternName)
+	assert.Equal(t, "external_id_stripe_payout", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeBalanceTransaction(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "txn_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"txn_1234567890abcdef",
+			"txn_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Balance Transaction pattern")
+	assert.Equal(t, "Stripe Balance Transaction", result.PatternName)
+	assert.Equal(t, "external_id_stripe_balance_txn", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeSetupIntent(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "setup_intent_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"seti_1234567890abcdef",
+			"seti_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Setup Intent pattern")
+	assert.Equal(t, "Stripe Setup Intent", result.PatternName)
+	assert.Equal(t, "external_id_stripe_setup_intent", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeEvent(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "event_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"evt_1234567890abcdef",
+			"evt_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Event pattern")
+	assert.Equal(t, "Stripe Event", result.PatternName)
+	assert.Equal(t, "external_id_stripe_event", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_StripeAccount(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "connect_account_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"acct_1234567890abcdef",
+			"acct_ABCDefghIJKL1234",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Stripe Account pattern")
+	assert.Equal(t, "Stripe Account", result.PatternName)
+	assert.Equal(t, "external_id_stripe_account", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_TwilioSMSMessage(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "sms_sid",
+		DataType:   "text",
+		SampleValues: []string{
+			"SM1234567890abcdef1234567890abcdef",
+			"SM0987654321fedcba0987654321fedcba",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Twilio SMS Message SID pattern")
+	assert.Equal(t, "Twilio Message SID", result.PatternName)
+	assert.Equal(t, "external_id_twilio_message", result.SemanticType)
+	assert.Contains(t, result.Description, "Twilio")
+}
+
+func TestDetectExternalIDPattern_TwilioMMSMessage(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "mms_sid",
+		DataType:   "text",
+		SampleValues: []string{
+			"MM1234567890abcdef1234567890abcdef",
+			"MM0987654321fedcba0987654321fedcba",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Twilio MMS Message SID pattern")
+	assert.Equal(t, "Twilio Message SID", result.PatternName)
+}
+
+func TestDetectExternalIDPattern_TwilioCallSID(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "call_sid",
+		DataType:   "text",
+		SampleValues: []string{
+			"CA1234567890abcdef1234567890abcdef",
+			"CA0987654321fedcba0987654321fedcba",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Twilio Call SID pattern")
+	assert.Equal(t, "Twilio Call SID", result.PatternName)
+	assert.Equal(t, "external_id_twilio_call", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_TwilioAccountSID(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "twilio_account",
+		DataType:   "text",
+		SampleValues: []string{
+			"AC1234567890abcdef1234567890abcdef",
+			"AC0987654321fedcba0987654321fedcba",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect Twilio Account SID pattern")
+	assert.Equal(t, "Twilio Account SID", result.PatternName)
+	assert.Equal(t, "external_id_twilio_account", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_MongoDBObjectId(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "mongo_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"507f1f77bcf86cd799439011",
+			"507f191e810c19729de860ea",
+			"5c8f8f8f8f8f8f8f8f8f8f8f",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect MongoDB ObjectId pattern")
+	assert.Equal(t, "MongoDB ObjectId", result.PatternName)
+	assert.Equal(t, "external_id_mongodb_objectid", result.SemanticType)
+	assert.Contains(t, result.Description, "MongoDB")
+}
+
+func TestDetectExternalIDPattern_NonTextColumn(t *testing.T) {
+	// Should not detect patterns in non-text columns
+	col := &models.SchemaColumn{
+		ColumnName: "external_id",
+		DataType:   "integer",
+		SampleValues: []string{
+			"12345",
+			"67890",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	assert.Nil(t, result, "Should not detect pattern in non-text column")
+}
+
+func TestDetectExternalIDPattern_NoSampleValues(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName:   "external_id",
+		DataType:     "text",
+		SampleValues: []string{},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	assert.Nil(t, result, "Should not detect pattern without sample values")
+}
+
+func TestDetectExternalIDPattern_AllEmptyValues(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName:   "external_id",
+		DataType:     "text",
+		SampleValues: []string{"", "", ""},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	assert.Nil(t, result, "Should not detect pattern with all empty values")
+}
+
+func TestDetectExternalIDPattern_LowMatchRate(t *testing.T) {
+	// Only 50% match rate (2 out of 4 values match)
+	col := &models.SchemaColumn{
+		ColumnName: "mixed_ids",
+		DataType:   "text",
+		SampleValues: []string{
+			"pi_1234567890abcdef",
+			"pi_abcdefghijklmnop",
+			"some_other_value_123",
+			"another_random_string",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	assert.Nil(t, result, "Should not detect pattern with <95% match rate")
+}
+
+func TestDetectExternalIDPattern_ExactThreshold(t *testing.T) {
+	// 95% match rate (19 out of 20 values match) - should NOT detect (needs >95%)
+	sampleValues := make([]string, 20)
+	for i := 0; i < 19; i++ {
+		sampleValues[i] = fmt.Sprintf("pi_%016d", i)
+	}
+	sampleValues[19] = "not_a_stripe_id"
+
+	col := &models.SchemaColumn{
+		ColumnName:   "payment_ids",
+		DataType:     "text",
+		SampleValues: sampleValues,
+	}
+
+	result := detectExternalIDPattern(col)
+
+	assert.Nil(t, result, "Should not detect pattern with exactly 95% match rate (needs >95%)")
+}
+
+func TestDetectExternalIDPattern_Above95Percent(t *testing.T) {
+	// 96% match rate (48 out of 50 values match) - should detect
+	sampleValues := make([]string, 50)
+	for i := 0; i < 48; i++ {
+		sampleValues[i] = fmt.Sprintf("pi_%016d", i)
+	}
+	sampleValues[48] = "not_a_stripe_id"
+	sampleValues[49] = "also_not_stripe"
+
+	col := &models.SchemaColumn{
+		ColumnName:   "payment_ids",
+		DataType:     "text",
+		SampleValues: sampleValues,
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect pattern with >95% match rate")
+	assert.Equal(t, "Stripe Payment Intent", result.PatternName)
+	assert.InDelta(t, 96.0, result.MatchRate, 0.1)
+}
+
+func TestDetectExternalIDPattern_RandomText(t *testing.T) {
+	// Random text that doesn't match any pattern
+	col := &models.SchemaColumn{
+		ColumnName: "description",
+		DataType:   "text",
+		SampleValues: []string{
+			"Hello world",
+			"This is a test",
+			"Random description text",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	assert.Nil(t, result, "Should not detect pattern in random text")
+}
+
+func TestDetectExternalIDPattern_TextTypeVariants(t *testing.T) {
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"varchar", "varchar(100)"},
+		{"VARCHAR uppercase", "VARCHAR(100)"},
+		{"text", "text"},
+		{"TEXT uppercase", "TEXT"},
+		{"char", "char(50)"},
+		{"CHAR uppercase", "CHAR(50)"},
+		{"character varying", "character varying(100)"},
+		{"nvarchar", "nvarchar(100)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "stripe_id",
+				DataType:   tt.dataType,
+				SampleValues: []string{
+					"pi_1234567890abcdef",
+					"pi_abcdefghijklmnop",
+				},
+			}
+
+			result := detectExternalIDPattern(col)
+			require.NotNil(t, result, "Should detect pattern with data type: %s", tt.dataType)
+		})
+	}
+}
+
+func TestDetectExternalIDPattern_IgnoresEmptyValuesInMatchRate(t *testing.T) {
+	// 3 out of 3 non-empty values match, 2 empty values should be ignored
+	col := &models.SchemaColumn{
+		ColumnName: "stripe_customer_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"cus_1234567890abcdef",
+			"",
+			"cus_ABCDefghIJKL1234",
+			"",
+			"cus_XYZ789xyz789XYZ7",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect pattern ignoring empty values")
+	assert.Equal(t, "Stripe Customer", result.PatternName)
+	assert.InDelta(t, 100.0, result.MatchRate, 0.1)
+}
+
+func TestDetectExternalIDPattern_AllPatternDescriptions(t *testing.T) {
+	// Verify all patterns have meaningful descriptions
+	for _, pattern := range externalIDPatterns {
+		assert.NotEmpty(t, pattern.Name, "Pattern must have a name")
+		assert.NotEmpty(t, pattern.SemanticType, "Pattern must have a semantic type")
+		assert.NotEmpty(t, pattern.Description, "Pattern must have a description")
+		assert.NotNil(t, pattern.Pattern, "Pattern must have a regex")
+
+		// Verify description contains useful context
+		t.Run(pattern.Name, func(t *testing.T) {
+			// Description should mention the service name
+			hasServiceContext := false
+			serviceKeywords := []string{"AWS", "Stripe", "Twilio", "PayPal", "MongoDB", "SendGrid", "Firebase", "Plaid"}
+			for _, keyword := range serviceKeywords {
+				if strings.Contains(pattern.Description, keyword) {
+					hasServiceContext = true
+					break
+				}
+			}
+			assert.True(t, hasServiceContext, "Description should mention the service: %s", pattern.Description)
+		})
+	}
+}
+
+func TestDetectExternalIDPattern_SendgridMessageID(t *testing.T) {
+	col := &models.SchemaColumn{
+		ColumnName: "sendgrid_message_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"message-id-12345.sendgrid.net",
+			"another_message.test.sendgrid.net",
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect SendGrid Message ID pattern")
+	assert.Equal(t, "Sendgrid Message ID", result.PatternName)
+	assert.Equal(t, "external_id_sendgrid", result.SemanticType)
+}
+
+func TestDetectExternalIDPattern_MixedStripeIDs(t *testing.T) {
+	// Column contains different Stripe ID types - first matching pattern wins
+	col := &models.SchemaColumn{
+		ColumnName: "stripe_ids",
+		DataType:   "text",
+		SampleValues: []string{
+			"pi_1234567890abcdef", // Payment Intent
+			"pi_abcdefghijklmnop", // Payment Intent
+			"pi_XYZ789xyz789XYZ7", // Payment Intent
+		},
+	}
+
+	result := detectExternalIDPattern(col)
+
+	require.NotNil(t, result, "Should detect consistent Stripe IDs")
+	assert.Equal(t, "Stripe Payment Intent", result.PatternName)
 }

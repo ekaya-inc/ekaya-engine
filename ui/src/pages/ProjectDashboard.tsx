@@ -46,7 +46,7 @@ import type {
 } from '../types';
 import { APP_ID_AI_DATA_LIAISON } from '../types';
 
-type TileColor = 'blue' | 'green' | 'purple' | 'orange' | 'gray' | 'indigo' | 'cyan';
+type TileColor = 'blue' | 'green' | 'purple' | 'orange' | 'gray' | 'indigo' | 'cyan' | 'amber';
 
 interface Tile {
   title: string;
@@ -415,6 +415,13 @@ const ProjectDashboard = () => {
       color: 'purple',
     },
     {
+      title: 'Ontology Questions',
+      icon: MessageCircleQuestion,
+      path: `/projects/${pid}/ontology-questions`,
+      disabled: !isConnected || !hasSelectedTables, // Disabled if no datasource or no tables
+      color: 'amber',
+    },
+    {
       title: 'Project Knowledge',
       icon: Lightbulb,
       path: `/projects/${pid}/project-knowledge`,
@@ -484,6 +491,7 @@ const ProjectDashboard = () => {
       gray: 'bg-gray-500/10 text-gray-500 hover:bg-gray-500/20',
       indigo: 'bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500/20',
       cyan: 'bg-cyan-500/10 text-cyan-500 hover:bg-cyan-500/20',
+      amber: 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20',
     };
 
     return colorMap[color];
@@ -493,8 +501,9 @@ const ProjectDashboard = () => {
     const Icon = tile.icon;
     const colorClasses = getColorClasses(tile.color);
 
-    // Check for ontology badge
+    // Check for ontology badges
     const isOntologyTile = tile.title === 'Ontology';
+    const isQuestionsTile = tile.title === 'Ontology Questions';
     const pendingQuestions = ontologyStatus?.pendingQuestionCount ?? 0;
     const isBuilding = ontologyStatus?.progress.state === 'building' || ontologyStatus?.progress.state === 'initializing';
     const progressCurrent = ontologyStatus?.progress.current ?? 0;
@@ -517,8 +526,8 @@ const ProjectDashboard = () => {
             >
               <Icon className="h-8 w-8" />
             </div>
-            {/* Badge for pending questions */}
-            {isOntologyTile && pendingQuestions > 0 && !tile.disabled && (
+            {/* Badge for pending questions (show on Ontology and Ontology Questions tiles) */}
+            {(isOntologyTile || isQuestionsTile) && pendingQuestions > 0 && !tile.disabled && (
               <div className="absolute -top-1 -right-1 flex items-center gap-1 bg-amber-500 text-white text-xs font-medium px-2 py-0.5 rounded-full">
                 <MessageCircleQuestion className="h-3 w-3" />
                 {pendingQuestions}
