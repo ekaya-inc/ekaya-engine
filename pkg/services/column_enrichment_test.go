@@ -3606,3 +3606,623 @@ func TestIsTextType_InvalidTypes(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// detectTimestampScalePattern Tests
+// =============================================================================
+
+func TestDetectTimestampScalePattern_Seconds(t *testing.T) {
+	// Typical Unix timestamp in seconds (10 digits)
+	col := &models.SchemaColumn{
+		ColumnName: "created_at",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"1704067200", // 2024-01-01 00:00:00 UTC
+			"1704153600", // 2024-01-02 00:00:00 UTC
+			"1704240000", // 2024-01-03 00:00:00 UTC
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+
+	require.NotNil(t, result, "Should detect timestamp pattern")
+	assert.Contains(t, result.Description, "Unix timestamp in seconds")
+	assert.Contains(t, result.Description, "since Unix epoch")
+	assert.Equal(t, "unix_timestamp_seconds", result.SemanticType)
+	assert.Equal(t, models.ColumnRoleAttribute, result.Role)
+	assert.Equal(t, "seconds", result.Scale)
+}
+
+func TestDetectTimestampScalePattern_Milliseconds(t *testing.T) {
+	// Unix timestamp in milliseconds (13 digits)
+	col := &models.SchemaColumn{
+		ColumnName: "updated_at",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"1704067200000", // 2024-01-01 00:00:00.000 UTC
+			"1704153600000", // 2024-01-02 00:00:00.000 UTC
+			"1704240000123", // 2024-01-03 00:00:00.123 UTC
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+
+	require.NotNil(t, result, "Should detect milliseconds timestamp pattern")
+	assert.Contains(t, result.Description, "Unix timestamp in milliseconds")
+	assert.Equal(t, "unix_timestamp_milliseconds", result.SemanticType)
+	assert.Equal(t, "milliseconds", result.Scale)
+}
+
+func TestDetectTimestampScalePattern_Microseconds(t *testing.T) {
+	// Unix timestamp in microseconds (16 digits)
+	col := &models.SchemaColumn{
+		ColumnName: "event_time",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"1704067200000000", // 2024-01-01 00:00:00.000000 UTC
+			"1704153600123456", // 2024-01-02 00:00:00.123456 UTC
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+
+	require.NotNil(t, result, "Should detect microseconds timestamp pattern")
+	assert.Contains(t, result.Description, "Unix timestamp in microseconds")
+	assert.Equal(t, "unix_timestamp_microseconds", result.SemanticType)
+	assert.Equal(t, "microseconds", result.Scale)
+}
+
+func TestDetectTimestampScalePattern_Nanoseconds(t *testing.T) {
+	// Unix timestamp in nanoseconds (19 digits)
+	col := &models.SchemaColumn{
+		ColumnName: "marker_at",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"1704067200000000000", // 2024-01-01 00:00:00.000000000 UTC
+			"1704153600123456789", // 2024-01-02 00:00:00.123456789 UTC
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+
+	require.NotNil(t, result, "Should detect nanoseconds timestamp pattern")
+	assert.Contains(t, result.Description, "Unix timestamp in nanoseconds")
+	assert.Equal(t, "unix_timestamp_nanoseconds", result.SemanticType)
+	assert.Equal(t, "nanoseconds", result.Scale)
+}
+
+func TestDetectTimestampScalePattern_MarkerAtWithCursorHint(t *testing.T) {
+	// marker_at columns should get cursor-based pagination hint
+	col := &models.SchemaColumn{
+		ColumnName: "marker_at",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"1704067200000000000",
+			"1704153600000000000",
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+
+	require.NotNil(t, result, "Should detect timestamp pattern for marker_at")
+	assert.Contains(t, result.Description, "cursor-based pagination", "marker_at should mention cursor-based pagination")
+}
+
+func TestDetectTimestampScalePattern_CreatedAtWithRecordHint(t *testing.T) {
+	// created_at columns should get record timestamp hint
+	col := &models.SchemaColumn{
+		ColumnName: "created_at",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"1704067200",
+			"1704153600",
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+
+	require.NotNil(t, result, "Should detect timestamp pattern for created_at")
+	assert.Contains(t, result.Description, "Record timestamp", "created_at should mention record timestamp")
+}
+
+func TestDetectTimestampScalePattern_TimeColumnName(t *testing.T) {
+	// Column names containing 'time' should be detected
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"event_time", "event_time"},
+		{"start_time", "start_time"},
+		{"end_time", "end_time"},
+		{"timestamp", "timestamp"},
+		{"process_time", "process_time"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "bigint",
+				SampleValues: []string{
+					"1704067200",
+					"1704153600",
+				},
+			}
+
+			result := detectTimestampScalePattern(col)
+			require.NotNil(t, result, "Should detect timestamp pattern for: %s", tt.columnName)
+			assert.Equal(t, "unix_timestamp_seconds", result.SemanticType)
+		})
+	}
+}
+
+func TestDetectTimestampScalePattern_AtSuffixColumnNames(t *testing.T) {
+	// Column names ending with '_at' should be detected
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"created_at", "created_at"},
+		{"updated_at", "updated_at"},
+		{"deleted_at", "deleted_at"},
+		{"started_at", "started_at"},
+		{"finished_at", "finished_at"},
+		{"expires_at", "expires_at"},
+		{"marker_at", "marker_at"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "bigint",
+				SampleValues: []string{
+					"1704067200",
+					"1704153600",
+				},
+			}
+
+			result := detectTimestampScalePattern(col)
+			require.NotNil(t, result, "Should detect timestamp pattern for: %s", tt.columnName)
+		})
+	}
+}
+
+func TestDetectTimestampScalePattern_NonTimestampColumnNames(t *testing.T) {
+	// Column names that don't match timestamp patterns should not be detected
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"user_id", "user_id"},
+		{"amount", "amount"},
+		{"count", "count"},
+		{"status", "status"},
+		{"version", "version"},
+		{"flat", "flat"},     // ends with 'at' but not '_at'
+		{"format", "format"}, // ends with 'at' but not '_at'
+		{"combat", "combat"}, // ends with 'at' but not '_at'
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "bigint",
+				SampleValues: []string{
+					"1704067200",
+					"1704153600",
+				},
+			}
+
+			result := detectTimestampScalePattern(col)
+			assert.Nil(t, result, "Should NOT detect timestamp pattern for: %s", tt.columnName)
+		})
+	}
+}
+
+func TestDetectTimestampScalePattern_NonBigintTypes(t *testing.T) {
+	// Non-bigint types should not be detected
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"integer", "integer"},
+		{"int4", "int4"},
+		{"smallint", "smallint"},
+		{"varchar", "varchar(255)"},
+		{"text", "text"},
+		{"timestamp", "timestamp"},
+		{"timestamptz", "timestamptz"},
+		{"date", "date"},
+		{"boolean", "boolean"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "created_at",
+				DataType:   tt.dataType,
+				SampleValues: []string{
+					"1704067200",
+					"1704153600",
+				},
+			}
+
+			result := detectTimestampScalePattern(col)
+			assert.Nil(t, result, "Should NOT detect timestamp pattern for type: %s", tt.dataType)
+		})
+	}
+}
+
+func TestDetectTimestampScalePattern_BigintTypeVariants(t *testing.T) {
+	// Various bigint type representations should be detected
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"bigint", "bigint"},
+		{"BIGINT", "BIGINT"},
+		{"int8", "int8"},
+		{"INT8", "INT8"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "created_at",
+				DataType:   tt.dataType,
+				SampleValues: []string{
+					"1704067200",
+					"1704153600",
+				},
+			}
+
+			result := detectTimestampScalePattern(col)
+			require.NotNil(t, result, "Should detect timestamp pattern for type: %s", tt.dataType)
+		})
+	}
+}
+
+func TestDetectTimestampScalePattern_NoSampleValues(t *testing.T) {
+	// No sample values should not be detected
+	col := &models.SchemaColumn{
+		ColumnName:   "created_at",
+		DataType:     "bigint",
+		SampleValues: []string{},
+	}
+
+	result := detectTimestampScalePattern(col)
+	assert.Nil(t, result, "Should NOT detect timestamp pattern without sample values")
+}
+
+func TestDetectTimestampScalePattern_NilSampleValues(t *testing.T) {
+	// Nil sample values should not be detected
+	col := &models.SchemaColumn{
+		ColumnName:   "created_at",
+		DataType:     "bigint",
+		SampleValues: nil,
+	}
+
+	result := detectTimestampScalePattern(col)
+	assert.Nil(t, result, "Should NOT detect timestamp pattern with nil sample values")
+}
+
+func TestDetectTimestampScalePattern_MixedDigitLengths(t *testing.T) {
+	// If less than 80% of values have consistent digit length, should not detect
+	col := &models.SchemaColumn{
+		ColumnName: "created_at",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"1704067200",       // 10 digits (seconds)
+			"1704067200000",    // 13 digits (milliseconds)
+			"1704067200000000", // 16 digits (microseconds)
+			"1704067200",       // 10 digits
+			"1704067200000",    // 13 digits
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+	assert.Nil(t, result, "Should NOT detect timestamp pattern with mixed digit lengths")
+}
+
+func TestDetectTimestampScalePattern_InvalidDigitLengths(t *testing.T) {
+	// Values with digit lengths outside known timestamp ranges
+	tests := []struct {
+		name   string
+		values []string
+	}{
+		{"too_short", []string{"12345", "67890", "11111"}},                           // 5 digits
+		{"too_long", []string{"12345678901234567890123", "98765432109876543210123"}}, // 23 digits
+		{"8_digits", []string{"12345678", "87654321"}},                               // 8 digits - just below seconds range
+		{"21_digits", []string{"123456789012345678901", "987654321098765432109"}},    // 21 digits - just above nanoseconds range
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName:   "created_at",
+				DataType:     "bigint",
+				SampleValues: tt.values,
+			}
+
+			result := detectTimestampScalePattern(col)
+			assert.Nil(t, result, "Should NOT detect timestamp pattern for digit lengths: %v", tt.values)
+		})
+	}
+}
+
+func TestDetectTimestampScalePattern_NegativeValues(t *testing.T) {
+	// Negative values should be ignored (but not cause failure)
+	col := &models.SchemaColumn{
+		ColumnName: "created_at",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"-1704067200", // negative
+			"1704067200",  // positive, 10 digits
+			"1704153600",  // positive, 10 digits
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+	// Should still detect based on the valid positive values (2 out of 3 = 66%, but negative is skipped)
+	// With 2 valid values both being 10 digits = 100% of valid values
+	require.NotNil(t, result, "Should detect timestamp pattern ignoring negative values")
+	assert.Equal(t, "seconds", result.Scale)
+}
+
+func TestDetectTimestampScalePattern_EmptyStringValues(t *testing.T) {
+	// Empty string values should be ignored
+	col := &models.SchemaColumn{
+		ColumnName: "created_at",
+		DataType:   "bigint",
+		SampleValues: []string{
+			"",
+			"1704067200",
+			"1704153600",
+		},
+	}
+
+	result := detectTimestampScalePattern(col)
+	require.NotNil(t, result, "Should detect timestamp pattern ignoring empty values")
+	assert.Equal(t, "seconds", result.Scale)
+}
+
+func TestDetectTimestampScalePattern_CaseInsensitiveColumnName(t *testing.T) {
+	// Column name matching should be case-insensitive
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"CREATED_AT", "CREATED_AT"},
+		{"Created_At", "Created_At"},
+		{"EVENT_TIME", "EVENT_TIME"},
+		{"Event_Time", "Event_Time"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "bigint",
+				SampleValues: []string{
+					"1704067200",
+					"1704153600",
+				},
+			}
+
+			result := detectTimestampScalePattern(col)
+			require.NotNil(t, result, "Should detect timestamp pattern for: %s (case-insensitive)", tt.columnName)
+		})
+	}
+}
+
+func TestDetectTimestampScalePattern_DigitLengthBoundaries(t *testing.T) {
+	// Test boundary values for each scale range
+	tests := []struct {
+		name          string
+		digits        int
+		expectedScale string
+	}{
+		{"9_digits_seconds", 9, "seconds"},
+		{"10_digits_seconds", 10, "seconds"},
+		{"11_digits_seconds", 11, "seconds"},
+		{"12_digits_milliseconds", 12, "milliseconds"},
+		{"13_digits_milliseconds", 13, "milliseconds"},
+		{"14_digits_milliseconds", 14, "milliseconds"},
+		{"15_digits_microseconds", 15, "microseconds"},
+		{"16_digits_microseconds", 16, "microseconds"},
+		{"17_digits_microseconds", 17, "microseconds"},
+		{"18_digits_nanoseconds", 18, "nanoseconds"},
+		{"19_digits_nanoseconds", 19, "nanoseconds"},
+		{"20_digits_nanoseconds", 20, "nanoseconds"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Generate a value with exactly the required number of digits
+			value := "1"
+			for i := 1; i < tt.digits; i++ {
+				value += "0"
+			}
+
+			col := &models.SchemaColumn{
+				ColumnName: "created_at",
+				DataType:   "bigint",
+				SampleValues: []string{
+					value,
+					value,
+				},
+			}
+
+			result := detectTimestampScalePattern(col)
+			require.NotNil(t, result, "Should detect timestamp pattern for %d digits", tt.digits)
+			assert.Equal(t, tt.expectedScale, result.Scale, "Expected scale %s for %d digits", tt.expectedScale, tt.digits)
+		})
+	}
+}
+
+// =============================================================================
+// isBigintType Tests
+// =============================================================================
+
+func TestIsBigintType_ValidTypes(t *testing.T) {
+	validTypes := []string{
+		"bigint", "BIGINT", "Bigint",
+		"int8", "INT8", "Int8",
+	}
+
+	for _, typ := range validTypes {
+		t.Run(typ, func(t *testing.T) {
+			assert.True(t, isBigintType(typ), "Should be valid bigint type: %s", typ)
+		})
+	}
+}
+
+func TestIsBigintType_InvalidTypes(t *testing.T) {
+	invalidTypes := []string{
+		"integer", "INTEGER",
+		"int", "INT",
+		"int4", "INT4",
+		"smallint", "SMALLINT",
+		"numeric", "NUMERIC",
+		"varchar", "text", "boolean",
+		"timestamp", "date",
+		"double precision", "real", "float",
+	}
+
+	for _, typ := range invalidTypes {
+		t.Run(typ, func(t *testing.T) {
+			assert.False(t, isBigintType(typ), "Should NOT be valid bigint type: %s", typ)
+		})
+	}
+}
+
+// =============================================================================
+// countDigits Tests
+// =============================================================================
+
+func TestCountDigits(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected int
+	}{
+		{"12345", 5},
+		{"1704067200", 10},
+		{"1704067200000", 13},
+		{"1704067200000000", 16},
+		{"1704067200000000000", 19},
+		{"", 0},
+		{"abc", 0},
+		{"-123", 3},
+		{"12.34", 4},
+		{"1,234,567", 7},
+		{"  123  ", 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := countDigits(tt.input)
+			assert.Equal(t, tt.expected, result, "countDigits(%q) should be %d", tt.input, tt.expected)
+		})
+	}
+}
+
+// =============================================================================
+// inferTimestampScale Tests
+// =============================================================================
+
+func TestInferTimestampScale_EmptyValues(t *testing.T) {
+	result := inferTimestampScale([]string{})
+	assert.Equal(t, "", result)
+}
+
+func TestInferTimestampScale_AllEmptyStrings(t *testing.T) {
+	result := inferTimestampScale([]string{"", "", ""})
+	assert.Equal(t, "", result)
+}
+
+func TestInferTimestampScale_AllNegative(t *testing.T) {
+	result := inferTimestampScale([]string{"-1", "-2", "-3"})
+	assert.Equal(t, "", result)
+}
+
+func TestInferTimestampScale_ConsistentLength(t *testing.T) {
+	// All 10-digit values should return "seconds"
+	result := inferTimestampScale([]string{"1704067200", "1704153600", "1704240000"})
+	assert.Equal(t, "seconds", result)
+}
+
+func TestInferTimestampScale_80PercentThreshold(t *testing.T) {
+	// 4 out of 5 = 80% with same length should pass
+	values := []string{
+		"1704067200", // 10 digits
+		"1704153600", // 10 digits
+		"1704240000", // 10 digits
+		"1704326400", // 10 digits
+		"12345",      // 5 digits
+	}
+	result := inferTimestampScale(values)
+	assert.Equal(t, "seconds", result)
+}
+
+func TestInferTimestampScale_Below80PercentThreshold(t *testing.T) {
+	// 3 out of 5 = 60% with same length should fail
+	values := []string{
+		"1704067200",     // 10 digits
+		"1704153600",     // 10 digits
+		"1704240000",     // 10 digits
+		"12345678901234", // 14 digits
+		"1234567890123",  // 13 digits
+	}
+	result := inferTimestampScale(values)
+	assert.Equal(t, "", result)
+}
+
+// =============================================================================
+// generateTimestampScaleDescription Tests
+// =============================================================================
+
+func TestGenerateTimestampScaleDescription_AllScales(t *testing.T) {
+	tests := []struct {
+		scale           string
+		expectedContain string
+	}{
+		{"seconds", "seconds since Unix epoch (1970-01-01)"},
+		{"milliseconds", "milliseconds since Unix epoch"},
+		{"microseconds", "microseconds since Unix epoch"},
+		{"nanoseconds", "nanoseconds since Unix epoch"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.scale, func(t *testing.T) {
+			result := generateTimestampScaleDescription(tt.scale, "created_at")
+			assert.Contains(t, result, tt.expectedContain)
+		})
+	}
+}
+
+func TestGenerateTimestampScaleDescription_MarkerColumn(t *testing.T) {
+	result := generateTimestampScaleDescription("nanoseconds", "marker_at")
+	assert.Contains(t, result, "cursor-based pagination")
+}
+
+func TestGenerateTimestampScaleDescription_CursorColumn(t *testing.T) {
+	result := generateTimestampScaleDescription("nanoseconds", "cursor_time")
+	assert.Contains(t, result, "cursor-based pagination")
+}
+
+func TestGenerateTimestampScaleDescription_CreatedColumn(t *testing.T) {
+	result := generateTimestampScaleDescription("seconds", "created_at")
+	assert.Contains(t, result, "Record timestamp")
+}
+
+func TestGenerateTimestampScaleDescription_UpdatedColumn(t *testing.T) {
+	result := generateTimestampScaleDescription("seconds", "updated_at")
+	assert.Contains(t, result, "Record timestamp")
+}
+
+func TestGenerateTimestampScaleDescription_UnknownScale(t *testing.T) {
+	result := generateTimestampScaleDescription("unknown", "created_at")
+	assert.Equal(t, "", result)
+}

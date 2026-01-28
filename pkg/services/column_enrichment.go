@@ -772,6 +772,180 @@ func isTextType(dataType string) bool {
 		strings.Contains(dataTypeLower, "varchar")
 }
 
+// TimestampScaleDescription contains the auto-generated description for a bigint column
+// storing Unix timestamps in various precision scales.
+type TimestampScaleDescription struct {
+	Description  string // Auto-generated description with scale info
+	SemanticType string // Semantic type: "unix_timestamp_seconds", "unix_timestamp_milliseconds", etc.
+	Role         string // Column role: "attribute"
+	Scale        string // seconds, milliseconds, microseconds, nanoseconds
+}
+
+// detectTimestampScalePattern checks if a bigint column contains Unix timestamps and
+// determines the scale (seconds, milliseconds, microseconds, nanoseconds) based on
+// the digit length of sample values.
+//
+// Pattern detection rules:
+// - Column type is bigint/int8
+// - Column name ends with '_at' or contains 'time'
+// - Has sample values available
+// - Digit length analysis:
+//   - 9-11 digits = seconds (e.g., 1704067200)
+//   - 12-14 digits = milliseconds (e.g., 1704067200000)
+//   - 15-17 digits = microseconds (e.g., 1704067200000000)
+//   - 18-20 digits = nanoseconds (e.g., 1704067200000000000)
+//
+// Returns nil if the column doesn't match the timestamp pattern.
+func detectTimestampScalePattern(col *models.SchemaColumn) *TimestampScaleDescription {
+	colNameLower := strings.ToLower(col.ColumnName)
+
+	// Check if column name matches timestamp patterns
+	isTimestampLike := false
+	if strings.HasSuffix(colNameLower, "_at") {
+		isTimestampLike = true
+	} else if strings.Contains(colNameLower, "time") {
+		isTimestampLike = true
+	}
+
+	if !isTimestampLike {
+		return nil
+	}
+
+	// Check column type is bigint
+	if !isBigintType(col.DataType) {
+		return nil
+	}
+
+	// Need sample values to analyze
+	if len(col.SampleValues) == 0 {
+		return nil
+	}
+
+	// Analyze digit lengths of sample values
+	scale := inferTimestampScale(col.SampleValues)
+	if scale == "" {
+		return nil
+	}
+
+	// Generate description based on detected scale
+	description := generateTimestampScaleDescription(scale, colNameLower)
+	semanticType := "unix_timestamp_" + scale
+
+	return &TimestampScaleDescription{
+		Description:  description,
+		SemanticType: semanticType,
+		Role:         models.ColumnRoleAttribute,
+		Scale:        scale,
+	}
+}
+
+// isBigintType checks if a column data type is a bigint type suitable for storing
+// Unix timestamps in various precision scales.
+func isBigintType(dataType string) bool {
+	dataTypeLower := strings.ToLower(dataType)
+	return dataTypeLower == "bigint" ||
+		dataTypeLower == "int8" ||
+		strings.HasPrefix(dataTypeLower, "bigint")
+}
+
+// inferTimestampScale analyzes sample values to determine the timestamp scale.
+// Returns empty string if values don't fit any known timestamp pattern.
+func inferTimestampScale(sampleValues []string) string {
+	if len(sampleValues) == 0 {
+		return ""
+	}
+
+	// Count digit lengths, ignoring invalid values
+	lengthCounts := make(map[int]int)
+	validCount := 0
+
+	for _, val := range sampleValues {
+		// Skip empty or negative values
+		if val == "" || strings.HasPrefix(val, "-") {
+			continue
+		}
+
+		// Count digits (ignore non-digit characters)
+		digitCount := countDigits(val)
+		if digitCount > 0 {
+			lengthCounts[digitCount]++
+			validCount++
+		}
+	}
+
+	if validCount == 0 {
+		return ""
+	}
+
+	// Find the most common digit length
+	maxCount := 0
+	dominantLength := 0
+	for length, count := range lengthCounts {
+		if count > maxCount {
+			maxCount = count
+			dominantLength = length
+		}
+	}
+
+	// Require at least 80% of values to have the same length pattern
+	if float64(maxCount)/float64(validCount) < 0.80 {
+		return ""
+	}
+
+	// Classify by digit length ranges
+	switch {
+	case dominantLength >= 9 && dominantLength <= 11:
+		return "seconds"
+	case dominantLength >= 12 && dominantLength <= 14:
+		return "milliseconds"
+	case dominantLength >= 15 && dominantLength <= 17:
+		return "microseconds"
+	case dominantLength >= 18 && dominantLength <= 20:
+		return "nanoseconds"
+	default:
+		return ""
+	}
+}
+
+// countDigits counts the number of digit characters in a string.
+func countDigits(s string) int {
+	count := 0
+	for _, c := range s {
+		if c >= '0' && c <= '9' {
+			count++
+		}
+	}
+	return count
+}
+
+// generateTimestampScaleDescription generates a description for a Unix timestamp column.
+func generateTimestampScaleDescription(scale, columnName string) string {
+	var scaleDesc string
+	switch scale {
+	case "seconds":
+		scaleDesc = "seconds since Unix epoch (1970-01-01)"
+	case "milliseconds":
+		scaleDesc = "milliseconds since Unix epoch"
+	case "microseconds":
+		scaleDesc = "microseconds since Unix epoch"
+	case "nanoseconds":
+		scaleDesc = "nanoseconds since Unix epoch"
+	default:
+		return ""
+	}
+
+	description := fmt.Sprintf("Unix timestamp in %s.", scaleDesc)
+
+	// Add usage hints based on column name
+	if strings.Contains(columnName, "marker") || strings.Contains(columnName, "cursor") {
+		description += " Used for cursor-based pagination ordering."
+	} else if strings.Contains(columnName, "created") || strings.Contains(columnName, "updated") {
+		description += " Record timestamp."
+	}
+
+	return description
+}
+
 // applyEnumDistributions merges distribution data into EnumValue structs.
 func applyEnumDistributions(enumValues []models.EnumValue, dist *datasource.EnumDistributionResult) []models.EnumValue {
 	if dist == nil || len(dist.Distributions) == 0 {
@@ -1333,6 +1507,13 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 			detail.Description = uuidText.Description
 			detail.SemanticType = uuidText.SemanticType
 			detail.Role = uuidText.Role
+		}
+
+		// Apply timestamp scale pattern detection (overrides LLM description with data-driven description)
+		if timestampScale := detectTimestampScalePattern(col); timestampScale != nil {
+			detail.Description = timestampScale.Description
+			detail.SemanticType = timestampScale.SemanticType
+			detail.Role = timestampScale.Role
 		}
 
 		// Merge project-level enum definitions if available
