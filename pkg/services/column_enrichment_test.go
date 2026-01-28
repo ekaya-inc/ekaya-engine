@@ -3283,3 +3283,326 @@ func TestIsMonetaryIntegerType_InvalidTypes(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// UUID Text Column Detection Tests
+// =============================================================================
+
+func TestDetectUUIDTextColumnPattern_TypicalUUIDColumn(t *testing.T) {
+	// Typical UUID column: text type with all sample values matching UUID format
+	col := &models.SchemaColumn{
+		ColumnName: "channel_id",
+		DataType:   "varchar(36)",
+		SampleValues: []string{
+			"550e8400-e29b-41d4-a716-446655440000",
+			"6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+			"f47ac10b-58cc-4372-a567-0e02b2c3d479",
+			"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+			"3fa85f64-5717-4562-b3fc-2c963f66afa6",
+		},
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+
+	require.NotNil(t, result, "Should detect UUID text pattern")
+	assert.Contains(t, result.Description, "UUID stored as text")
+	assert.Contains(t, result.Description, "36 characters")
+	assert.Contains(t, result.Description, "Logical foreign key")
+	assert.Equal(t, "uuid_text", result.SemanticType)
+	assert.Equal(t, models.ColumnRoleIdentifier, result.Role)
+	assert.InDelta(t, 100.0, result.MatchRate, 0.1)
+}
+
+func TestDetectUUIDTextColumnPattern_LowercaseUUIDs(t *testing.T) {
+	// UUIDs can be stored in lowercase
+	col := &models.SchemaColumn{
+		ColumnName: "external_id",
+		DataType:   "text",
+		SampleValues: []string{
+			"550e8400-e29b-41d4-a716-446655440000",
+			"6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+			"f47ac10b-58cc-4372-a567-0e02b2c3d479",
+		},
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+
+	require.NotNil(t, result, "Should detect lowercase UUIDs")
+	assert.Equal(t, "uuid_text", result.SemanticType)
+}
+
+func TestDetectUUIDTextColumnPattern_UppercaseUUIDs(t *testing.T) {
+	// UUIDs can be stored in uppercase
+	col := &models.SchemaColumn{
+		ColumnName: "session_id",
+		DataType:   "char(36)",
+		SampleValues: []string{
+			"550E8400-E29B-41D4-A716-446655440000",
+			"6BA7B810-9DAD-11D1-80B4-00C04FD430C8",
+			"F47AC10B-58CC-4372-A567-0E02B2C3D479",
+		},
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+
+	require.NotNil(t, result, "Should detect uppercase UUIDs")
+	assert.Equal(t, "uuid_text", result.SemanticType)
+}
+
+func TestDetectUUIDTextColumnPattern_MixedCaseUUIDs(t *testing.T) {
+	// UUIDs can have mixed case
+	col := &models.SchemaColumn{
+		ColumnName: "ref_id",
+		DataType:   "varchar(40)",
+		SampleValues: []string{
+			"550e8400-E29B-41d4-A716-446655440000",
+			"6BA7b810-9dad-11D1-80B4-00c04fd430c8",
+		},
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+
+	require.NotNil(t, result, "Should detect mixed-case UUIDs")
+	assert.Equal(t, "uuid_text", result.SemanticType)
+}
+
+func TestDetectUUIDTextColumnPattern_TextTypeVariants(t *testing.T) {
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"varchar", "varchar(36)"},
+		{"VARCHAR uppercase", "VARCHAR(36)"},
+		{"text", "text"},
+		{"TEXT uppercase", "TEXT"},
+		{"char", "char(36)"},
+		{"CHAR uppercase", "CHAR(36)"},
+		{"character varying", "character varying(36)"},
+		{"nvarchar", "nvarchar(36)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "uuid_col",
+				DataType:   tt.dataType,
+				SampleValues: []string{
+					"550e8400-e29b-41d4-a716-446655440000",
+					"6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+				},
+			}
+
+			result := detectUUIDTextColumnPattern(col)
+			require.NotNil(t, result, "Should detect for text type: %s", tt.dataType)
+			assert.Equal(t, "uuid_text", result.SemanticType)
+		})
+	}
+}
+
+func TestDetectUUIDTextColumnPattern_NonTextTypes(t *testing.T) {
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"uuid native", "uuid"},
+		{"integer", "integer"},
+		{"bigint", "bigint"},
+		{"boolean", "boolean"},
+		{"timestamp", "timestamp"},
+		{"date", "date"},
+		{"jsonb", "jsonb"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "uuid_col",
+				DataType:   tt.dataType,
+				SampleValues: []string{
+					"550e8400-e29b-41d4-a716-446655440000",
+					"6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+				},
+			}
+
+			result := detectUUIDTextColumnPattern(col)
+			assert.Nil(t, result, "Should NOT detect for non-text type: %s", tt.dataType)
+		})
+	}
+}
+
+func TestDetectUUIDTextColumnPattern_NoSampleValues(t *testing.T) {
+	// No sample values available
+	col := &models.SchemaColumn{
+		ColumnName:   "maybe_uuid",
+		DataType:     "varchar(36)",
+		SampleValues: nil,
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+	assert.Nil(t, result, "Should NOT detect when no sample values available")
+}
+
+func TestDetectUUIDTextColumnPattern_EmptySampleValues(t *testing.T) {
+	// Empty sample values array
+	col := &models.SchemaColumn{
+		ColumnName:   "maybe_uuid",
+		DataType:     "varchar(36)",
+		SampleValues: []string{},
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+	assert.Nil(t, result, "Should NOT detect when sample values are empty")
+}
+
+func TestDetectUUIDTextColumnPattern_BelowThreshold(t *testing.T) {
+	// Only 50% match (below 99% threshold)
+	col := &models.SchemaColumn{
+		ColumnName: "mixed_id",
+		DataType:   "varchar(50)",
+		SampleValues: []string{
+			"550e8400-e29b-41d4-a716-446655440000", // UUID
+			"not-a-uuid-at-all",                    // Not UUID
+			"6ba7b810-9dad-11d1-80b4-00c04fd430c8", // UUID
+			"another-random-string",                // Not UUID
+		},
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+	assert.Nil(t, result, "Should NOT detect when below 99% threshold (50%)")
+}
+
+func TestDetectUUIDTextColumnPattern_SingleNonUUID(t *testing.T) {
+	// 98% match (still below 99% threshold with 50 samples, 1 non-match)
+	samples := make([]string, 100)
+	for i := 0; i < 99; i++ {
+		samples[i] = "550e8400-e29b-41d4-a716-446655440000"
+	}
+	samples[99] = "not-a-uuid" // 1% non-match -> 99% match (at threshold)
+
+	col := &models.SchemaColumn{
+		ColumnName:   "almost_all_uuids",
+		DataType:     "varchar(50)",
+		SampleValues: samples,
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+	// 99% is exactly at the threshold (>99% required), so should not match
+	assert.Nil(t, result, "Should NOT detect at exactly 99% (need >99%)")
+}
+
+func TestDetectUUIDTextColumnPattern_AllMatch(t *testing.T) {
+	// 100% match (above 99% threshold)
+	samples := make([]string, 100)
+	for i := 0; i < 100; i++ {
+		samples[i] = "550e8400-e29b-41d4-a716-446655440000"
+	}
+
+	col := &models.SchemaColumn{
+		ColumnName:   "all_uuids",
+		DataType:     "varchar(36)",
+		SampleValues: samples,
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+	require.NotNil(t, result, "Should detect at 100% match rate")
+	assert.InDelta(t, 100.0, result.MatchRate, 0.1)
+}
+
+func TestDetectUUIDTextColumnPattern_InvalidUUIDFormats(t *testing.T) {
+	tests := []struct {
+		name   string
+		values []string
+	}{
+		{"missing hyphens", []string{"550e8400e29b41d4a716446655440000"}},
+		{"wrong hyphen positions", []string{"550e8-400e29b41d4-a716-446655440000"}},
+		{"too short", []string{"550e8400-e29b-41d4-a716-446655440"}},
+		{"too long", []string{"550e8400-e29b-41d4-a716-4466554400000"}},
+		{"invalid characters", []string{"550e8400-e29b-41d4-a716-44665544GGGG"}},
+		{"with braces", []string{"{550e8400-e29b-41d4-a716-446655440000}"}},
+		{"urn format", []string{"urn:uuid:550e8400-e29b-41d4-a716-446655440000"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName:   "invalid_format",
+				DataType:     "varchar(50)",
+				SampleValues: tt.values,
+			}
+
+			result := detectUUIDTextColumnPattern(col)
+			assert.Nil(t, result, "Should NOT detect invalid UUID format: %s", tt.name)
+		})
+	}
+}
+
+func TestDetectUUIDTextColumnPattern_SingleValue(t *testing.T) {
+	// Single sample value that is a UUID (100% match)
+	col := &models.SchemaColumn{
+		ColumnName:   "single_uuid",
+		DataType:     "text",
+		SampleValues: []string{"550e8400-e29b-41d4-a716-446655440000"},
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+	require.NotNil(t, result, "Should detect single UUID value")
+	assert.Equal(t, "uuid_text", result.SemanticType)
+}
+
+func TestDetectUUIDTextColumnPattern_NilUUIDs(t *testing.T) {
+	// v1 UUID (time-based)
+	col := &models.SchemaColumn{
+		ColumnName: "v1_uuid",
+		DataType:   "varchar(36)",
+		SampleValues: []string{
+			"6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+			"6ba7b811-9dad-11d1-80b4-00c04fd430c8",
+		},
+	}
+
+	result := detectUUIDTextColumnPattern(col)
+	require.NotNil(t, result, "Should detect v1 UUIDs")
+	assert.Equal(t, "uuid_text", result.SemanticType)
+}
+
+// =============================================================================
+// isTextType Tests
+// =============================================================================
+
+func TestIsTextType_ValidTypes(t *testing.T) {
+	validTypes := []string{
+		"varchar", "VARCHAR", "varchar(255)",
+		"text", "TEXT",
+		"char", "CHAR", "char(36)",
+		"character varying", "CHARACTER VARYING",
+		"nvarchar", "NVARCHAR",
+		"character", "CHARACTER",
+	}
+
+	for _, typ := range validTypes {
+		t.Run(typ, func(t *testing.T) {
+			assert.True(t, isTextType(typ), "Should be valid text type: %s", typ)
+		})
+	}
+}
+
+func TestIsTextType_InvalidTypes(t *testing.T) {
+	invalidTypes := []string{
+		"uuid", "UUID",
+		"integer", "INTEGER",
+		"bigint", "BIGINT",
+		"boolean", "BOOLEAN",
+		"timestamp", "TIMESTAMP",
+		"date", "DATE",
+		"jsonb", "JSONB",
+		"bytea", "BYTEA",
+		"double precision",
+		"numeric",
+	}
+
+	for _, typ := range invalidTypes {
+		t.Run(typ, func(t *testing.T) {
+			assert.False(t, isTextType(typ), "Should NOT be valid text type: %s", typ)
+		})
+	}
+}

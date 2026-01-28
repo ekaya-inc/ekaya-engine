@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -704,6 +705,73 @@ func isISO4217CurrencyCode(value string) bool {
 	return true
 }
 
+// UUIDTextColumnDescription contains the auto-generated description for a text column containing UUIDs.
+type UUIDTextColumnDescription struct {
+	Description  string  // Auto-generated description
+	SemanticType string  // Semantic type: "uuid_text"
+	Role         string  // Column role: "identifier"
+	MatchRate    float64 // Percentage of sample values matching UUID format (0.0-100.0)
+}
+
+// uuidPattern matches standard UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+// Case-insensitive to handle both uppercase and lowercase UUIDs.
+var uuidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// detectUUIDTextColumnPattern checks if a text column contains UUID values and returns
+// an auto-generated description if detected.
+//
+// Pattern detection rules:
+// - Column type is text/varchar/char
+// - Has sample values available
+// - >99% of sample values match UUID format (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+//
+// Returns nil if the column doesn't match the UUID text pattern.
+func detectUUIDTextColumnPattern(col *models.SchemaColumn) *UUIDTextColumnDescription {
+	// Check column type is text-based
+	if !isTextType(col.DataType) {
+		return nil
+	}
+
+	// Need sample values to analyze
+	if len(col.SampleValues) == 0 {
+		return nil
+	}
+
+	// Count how many sample values match UUID pattern
+	uuidMatchCount := 0
+	for _, val := range col.SampleValues {
+		if uuidPattern.MatchString(val) {
+			uuidMatchCount++
+		}
+	}
+
+	// Calculate match rate
+	matchRate := float64(uuidMatchCount) / float64(len(col.SampleValues)) * 100.0
+
+	// Require >99% match rate for high confidence
+	if matchRate <= 99.0 {
+		return nil
+	}
+
+	// Generate description
+	description := "UUID stored as text (36 characters). Logical foreign key - no database constraint."
+
+	return &UUIDTextColumnDescription{
+		Description:  description,
+		SemanticType: "uuid_text",
+		Role:         models.ColumnRoleIdentifier,
+		MatchRate:    matchRate,
+	}
+}
+
+// isTextType checks if a column data type is a text/varchar/char type.
+func isTextType(dataType string) bool {
+	dataTypeLower := strings.ToLower(dataType)
+	return strings.Contains(dataTypeLower, "char") ||
+		strings.Contains(dataTypeLower, "text") ||
+		strings.Contains(dataTypeLower, "varchar")
+}
+
 // applyEnumDistributions merges distribution data into EnumValue structs.
 func applyEnumDistributions(enumValues []models.EnumValue, dist *datasource.EnumDistributionResult) []models.EnumValue {
 	if dist == nil || len(dist.Distributions) == 0 {
@@ -1258,6 +1326,13 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 			detail.Description = monetary.Description
 			detail.SemanticType = monetary.SemanticType
 			detail.Role = monetary.Role
+		}
+
+		// Apply UUID text column pattern detection (overrides LLM description with data-driven description)
+		if uuidText := detectUUIDTextColumnPattern(col); uuidText != nil {
+			detail.Description = uuidText.Description
+			detail.SemanticType = uuidText.SemanticType
+			detail.Role = uuidText.Role
 		}
 
 		// Merge project-level enum definitions if available
