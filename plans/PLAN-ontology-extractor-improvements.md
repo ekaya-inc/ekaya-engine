@@ -468,7 +468,7 @@ After implementation, re-run ontology extraction on tikr_production:
 
 - [x] **1. Enum Value Distribution Analysis** - Implemented value distribution with count/percentage, terminal state detection via completion timestamp correlation, and state semantics (initial/terminal/error states)
 - [x] **2. Soft Delete Pattern Recognition**
-- [ ] **3. Monetary Column Detection**
+- [x] **3. Monetary Column Detection**
 - [ ] **4. UUID Text Column Detection**
 - [ ] **5. Timestamp Scale Detection**
 - [ ] **6. FK Target Resolution via Data Overlap**

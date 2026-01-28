@@ -2911,3 +2911,375 @@ func TestDetectSoftDeletePattern_CaseInsensitiveColumnName(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// Monetary Column Detection Tests
+// =============================================================================
+
+func TestDetectMonetaryColumnPattern_TypicalAmount(t *testing.T) {
+	// Typical monetary column: amount, bigint, with currency column
+	col := &models.SchemaColumn{
+		ColumnName: "amount",
+		DataType:   "bigint",
+	}
+
+	result := detectMonetaryColumnPattern(col, "currency")
+
+	require.NotNil(t, result, "Should detect monetary pattern")
+	assert.Contains(t, result.Description, "Monetary amount in minor units")
+	assert.Contains(t, result.Description, "Pair with currency column")
+	assert.Contains(t, result.Description, "ISO 4217")
+	assert.Equal(t, "currency_cents", result.SemanticType)
+	assert.Equal(t, models.ColumnRoleMeasure, result.Role)
+	assert.Equal(t, "currency", result.CurrencyColumn)
+}
+
+func TestDetectMonetaryColumnPattern_AmountWithoutCurrency(t *testing.T) {
+	// Amount column without a currency column - still detect but different description
+	col := &models.SchemaColumn{
+		ColumnName: "amount",
+		DataType:   "bigint",
+	}
+
+	result := detectMonetaryColumnPattern(col, "")
+
+	require.NotNil(t, result, "Should detect monetary pattern without currency column")
+	assert.Contains(t, result.Description, "Monetary amount in minor units")
+	assert.Contains(t, result.Description, "Integer values represent smallest currency unit")
+	assert.NotContains(t, result.Description, "Pair with")
+	assert.Equal(t, "currency_cents", result.SemanticType)
+	assert.Empty(t, result.CurrencyColumn)
+}
+
+func TestDetectMonetaryColumnPattern_SuffixPatterns(t *testing.T) {
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"total_amount", "total_amount"},
+		{"base_amount", "base_amount"},
+		{"net_amount", "net_amount"},
+		{"tikr_share", "tikr_share"},
+		{"creator_share", "creator_share"},
+		{"grand_total", "grand_total"},
+		{"sub_total", "sub_total"},
+		{"unit_price", "unit_price"},
+		{"list_price", "list_price"},
+		{"total_cost", "total_cost"},
+		{"service_fee", "service_fee"},
+		{"platform_fee", "platform_fee"},
+		{"order_value", "order_value"},
+		{"total_value", "total_value"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "bigint",
+			}
+
+			result := detectMonetaryColumnPattern(col, "currency")
+
+			require.NotNil(t, result, "Should detect monetary pattern for: %s", tt.columnName)
+			assert.Equal(t, "currency_cents", result.SemanticType)
+			assert.Equal(t, models.ColumnRoleMeasure, result.Role)
+		})
+	}
+}
+
+func TestDetectMonetaryColumnPattern_IntegerTypes(t *testing.T) {
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"bigint", "bigint"},
+		{"integer", "integer"},
+		{"int", "int"},
+		{"int4", "int4"},
+		{"int8", "int8"},
+		{"smallint", "smallint"},
+		{"numeric", "numeric"},
+		{"BIGINT uppercase", "BIGINT"},
+		{"INTEGER uppercase", "INTEGER"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "amount",
+				DataType:   tt.dataType,
+			}
+
+			result := detectMonetaryColumnPattern(col, "currency")
+
+			require.NotNil(t, result, "Should detect for integer type: %s", tt.dataType)
+			assert.Equal(t, "currency_cents", result.SemanticType)
+		})
+	}
+}
+
+func TestDetectMonetaryColumnPattern_NonIntegerTypes(t *testing.T) {
+	tests := []struct {
+		name     string
+		dataType string
+	}{
+		{"varchar", "varchar(255)"},
+		{"text", "text"},
+		{"boolean", "boolean"},
+		{"timestamp", "timestamp"},
+		{"date", "date"},
+		{"double", "double precision"},
+		{"float", "float"},
+		{"real", "real"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: "amount",
+				DataType:   tt.dataType,
+			}
+
+			result := detectMonetaryColumnPattern(col, "currency")
+
+			assert.Nil(t, result, "Should NOT detect for non-integer type: %s", tt.dataType)
+		})
+	}
+}
+
+func TestDetectMonetaryColumnPattern_NonMonetaryColumnNames(t *testing.T) {
+	tests := []struct {
+		name       string
+		columnName string
+	}{
+		{"created_at", "created_at"},
+		{"user_id", "user_id"},
+		{"status", "status"},
+		{"count", "count"},
+		{"quantity", "quantity"},
+		{"position", "position"},
+		{"version", "version"},
+		{"amount_type", "amount_type"}, // Contains amount but as prefix
+		{"preamount", "preamount"},     // Contains amount but not as suffix/standalone
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "bigint",
+			}
+
+			result := detectMonetaryColumnPattern(col, "currency")
+
+			assert.Nil(t, result, "Should NOT detect monetary pattern for: %s", tt.columnName)
+		})
+	}
+}
+
+func TestDetectMonetaryColumnPattern_CaseInsensitiveColumnName(t *testing.T) {
+	tests := []struct {
+		name       string
+		columnName string
+		shouldFind bool
+	}{
+		{"lowercase amount", "amount", true},
+		{"UPPERCASE AMOUNT", "AMOUNT", true},
+		{"MixedCase Amount", "Amount", true},
+		{"TOTAL_AMOUNT uppercase", "TOTAL_AMOUNT", true},
+		{"Total_Price mixed", "Total_Price", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &models.SchemaColumn{
+				ColumnName: tt.columnName,
+				DataType:   "bigint",
+			}
+
+			result := detectMonetaryColumnPattern(col, "currency")
+
+			if tt.shouldFind {
+				require.NotNil(t, result, "Should detect for column name: %s", tt.columnName)
+			} else {
+				assert.Nil(t, result, "Should not detect for column name: %s", tt.columnName)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// findCurrencyColumn Tests
+// =============================================================================
+
+func TestFindCurrencyColumn_ExactMatch(t *testing.T) {
+	columns := []*models.SchemaColumn{
+		{ColumnName: "id", DataType: "bigint"},
+		{ColumnName: "amount", DataType: "bigint"},
+		{ColumnName: "currency", DataType: "varchar(3)", SampleValues: []string{"USD", "EUR", "GBP"}},
+		{ColumnName: "created_at", DataType: "timestamp"},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	assert.Equal(t, "currency", result)
+}
+
+func TestFindCurrencyColumn_SuffixMatch(t *testing.T) {
+	columns := []*models.SchemaColumn{
+		{ColumnName: "id", DataType: "bigint"},
+		{ColumnName: "amount", DataType: "bigint"},
+		{ColumnName: "payment_currency", DataType: "varchar(3)", SampleValues: []string{"USD", "CAD", "AUD"}},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	assert.Equal(t, "payment_currency", result)
+}
+
+func TestFindCurrencyColumn_ISO4217Validation(t *testing.T) {
+	columns := []*models.SchemaColumn{
+		{ColumnName: "currency", DataType: "varchar(10)", SampleValues: []string{"USD", "EUR", "GBP", "CAD", "AUD"}},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	assert.Equal(t, "currency", result)
+}
+
+func TestFindCurrencyColumn_NotISO4217(t *testing.T) {
+	// Currency column with non-ISO4217 values (lowercase, long strings)
+	columns := []*models.SchemaColumn{
+		{ColumnName: "currency", DataType: "varchar(50)", SampleValues: []string{"usd", "euro", "dollar"}},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	// Should not match because sample values don't look like ISO 4217
+	assert.Empty(t, result)
+}
+
+func TestFindCurrencyColumn_MixedISO4217Values(t *testing.T) {
+	// More than 50% are ISO 4217 codes, should match
+	columns := []*models.SchemaColumn{
+		{ColumnName: "currency", DataType: "varchar(10)", SampleValues: []string{"USD", "EUR", "GBP", "unknown"}},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	// 3/4 = 75% are ISO 4217, should match
+	assert.Equal(t, "currency", result)
+}
+
+func TestFindCurrencyColumn_NoSampleValues(t *testing.T) {
+	// No sample values, but name and type match - should assume it's currency
+	columns := []*models.SchemaColumn{
+		{ColumnName: "currency", DataType: "varchar(3)", SampleValues: nil},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	assert.Equal(t, "currency", result)
+}
+
+func TestFindCurrencyColumn_WrongType(t *testing.T) {
+	// Column named currency but wrong type (integer)
+	columns := []*models.SchemaColumn{
+		{ColumnName: "currency", DataType: "integer", SampleValues: []string{"1", "2", "3"}},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	assert.Empty(t, result)
+}
+
+func TestFindCurrencyColumn_NoCurrencyColumn(t *testing.T) {
+	columns := []*models.SchemaColumn{
+		{ColumnName: "id", DataType: "bigint"},
+		{ColumnName: "amount", DataType: "bigint"},
+		{ColumnName: "status", DataType: "varchar(20)"},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	assert.Empty(t, result)
+}
+
+func TestFindCurrencyColumn_CaseInsensitive(t *testing.T) {
+	columns := []*models.SchemaColumn{
+		{ColumnName: "CURRENCY", DataType: "varchar(3)", SampleValues: []string{"USD", "EUR"}},
+	}
+
+	result := findCurrencyColumn(columns)
+
+	assert.Equal(t, "CURRENCY", result)
+}
+
+// =============================================================================
+// isISO4217CurrencyCode Tests
+// =============================================================================
+
+func TestIsISO4217CurrencyCode_ValidCodes(t *testing.T) {
+	validCodes := []string{"USD", "EUR", "GBP", "CAD", "AUD", "JPY", "CNY", "INR", "BRL", "MXN"}
+
+	for _, code := range validCodes {
+		t.Run(code, func(t *testing.T) {
+			assert.True(t, isISO4217CurrencyCode(code), "Should be valid ISO 4217: %s", code)
+		})
+	}
+}
+
+func TestIsISO4217CurrencyCode_InvalidCodes(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{"lowercase", "usd"},
+		{"mixed case", "Usd"},
+		{"too short", "US"},
+		{"too long", "USDC"},
+		{"with number", "US1"},
+		{"with space", "US "},
+		{"empty", ""},
+		{"numbers only", "123"},
+		{"with special char", "US$"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.False(t, isISO4217CurrencyCode(tt.value), "Should NOT be valid ISO 4217: %s", tt.value)
+		})
+	}
+}
+
+// =============================================================================
+// isMonetaryIntegerType Tests
+// =============================================================================
+
+func TestIsMonetaryIntegerType_ValidTypes(t *testing.T) {
+	validTypes := []string{
+		"bigint", "BIGINT", "integer", "INTEGER", "int", "INT",
+		"int4", "INT4", "int8", "INT8", "smallint", "SMALLINT",
+		"numeric", "NUMERIC", "numeric(10,0)",
+	}
+
+	for _, typ := range validTypes {
+		t.Run(typ, func(t *testing.T) {
+			assert.True(t, isMonetaryIntegerType(typ), "Should be valid monetary integer type: %s", typ)
+		})
+	}
+}
+
+func TestIsMonetaryIntegerType_InvalidTypes(t *testing.T) {
+	invalidTypes := []string{
+		"varchar", "text", "boolean", "timestamp", "date",
+		"double precision", "float", "real", "uuid", "jsonb",
+	}
+
+	for _, typ := range invalidTypes {
+		t.Run(typ, func(t *testing.T) {
+			assert.False(t, isMonetaryIntegerType(typ), "Should NOT be valid monetary integer type: %s", typ)
+		})
+	}
+}

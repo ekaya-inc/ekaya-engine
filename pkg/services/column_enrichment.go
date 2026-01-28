@@ -506,6 +506,14 @@ type SoftDeleteDescription struct {
 	ActiveRate   float64 // Percentage of active records (0.0-100.0)
 }
 
+// MonetaryColumnDescription contains the auto-generated description for a monetary column.
+type MonetaryColumnDescription struct {
+	Description    string // Auto-generated description with currency info
+	SemanticType   string // Semantic type: "currency_cents"
+	Role           string // Column role: "measure"
+	CurrencyColumn string // Name of the paired currency column (if found)
+}
+
 // detectSoftDeletePattern checks if a column matches the soft delete pattern and returns
 // an auto-generated description if detected.
 //
@@ -566,6 +574,134 @@ func detectSoftDeletePattern(col *models.SchemaColumn) *SoftDeleteDescription {
 		Role:         models.ColumnRoleAttribute,
 		ActiveRate:   activeRate,
 	}
+}
+
+// monetaryColumnPatterns contains patterns for identifying monetary amount columns.
+// Matches columns named: amount, *_amount, *_share, *_total, *_price, *_cost, *_fee, *_value
+var monetaryColumnPatterns = []string{
+	"_amount", "_share", "_total", "_price", "_cost", "_fee", "_value",
+}
+
+// detectMonetaryColumnPattern checks if a column matches the monetary column pattern and returns
+// an auto-generated description if detected.
+//
+// Pattern detection rules:
+// - Column named 'amount' or ends with monetary patterns (_amount, _share, _total, _price, _cost, _fee, _value)
+// - Type is bigint or integer
+// - Same table has a currency column with ISO 4217 values (detected via currencyColumn parameter)
+//
+// Returns nil if the column doesn't match the monetary pattern.
+func detectMonetaryColumnPattern(col *models.SchemaColumn, currencyColumn string) *MonetaryColumnDescription {
+	colNameLower := strings.ToLower(col.ColumnName)
+
+	// Check if column name matches monetary patterns
+	isMonetary := colNameLower == "amount"
+	if !isMonetary {
+		for _, pattern := range monetaryColumnPatterns {
+			if strings.HasSuffix(colNameLower, pattern) {
+				isMonetary = true
+				break
+			}
+		}
+	}
+
+	if !isMonetary {
+		return nil
+	}
+
+	// Check column type is integer-based (monetary values stored as minor units)
+	if !isMonetaryIntegerType(col.DataType) {
+		return nil
+	}
+
+	// Generate description based on whether currency column was found
+	var description string
+	if currencyColumn != "" {
+		description = fmt.Sprintf(
+			"Monetary amount in minor units (cents/pence). Pair with %s column for denomination. ISO 4217 currency codes.",
+			currencyColumn,
+		)
+	} else {
+		description = "Monetary amount in minor units (cents/pence). Integer values represent smallest currency unit."
+	}
+
+	return &MonetaryColumnDescription{
+		Description:    description,
+		SemanticType:   "currency_cents",
+		Role:           models.ColumnRoleMeasure,
+		CurrencyColumn: currencyColumn,
+	}
+}
+
+// isMonetaryIntegerType checks if a column data type is suitable for storing monetary values in minor units.
+// This includes bigint, integer, and numeric types commonly used for cents/pence representation.
+func isMonetaryIntegerType(dataType string) bool {
+	dataTypeLower := strings.ToLower(dataType)
+	return strings.Contains(dataTypeLower, "bigint") ||
+		dataTypeLower == "integer" ||
+		dataTypeLower == "int" ||
+		dataTypeLower == "int4" ||
+		dataTypeLower == "int8" ||
+		strings.Contains(dataTypeLower, "smallint") ||
+		strings.Contains(dataTypeLower, "numeric")
+}
+
+// findCurrencyColumn looks for a currency column in the given columns list.
+// Returns the column name if found, or empty string if not found.
+//
+// Detection criteria:
+// - Column named 'currency' or '*_currency'
+// - Type is text/varchar/char
+// - Has sample values that look like ISO 4217 codes (3 uppercase letters)
+func findCurrencyColumn(columns []*models.SchemaColumn) string {
+	for _, col := range columns {
+		colNameLower := strings.ToLower(col.ColumnName)
+
+		// Check column name pattern
+		if colNameLower != "currency" && !strings.HasSuffix(colNameLower, "_currency") {
+			continue
+		}
+
+		// Check column type is text-based
+		dataTypeLower := strings.ToLower(col.DataType)
+		if !strings.Contains(dataTypeLower, "char") &&
+			!strings.Contains(dataTypeLower, "text") &&
+			!strings.Contains(dataTypeLower, "varchar") {
+			continue
+		}
+
+		// Check if we have sample values that look like ISO 4217 codes
+		if len(col.SampleValues) > 0 {
+			iso4217Count := 0
+			for _, val := range col.SampleValues {
+				if isISO4217CurrencyCode(val) {
+					iso4217Count++
+				}
+			}
+			// If >50% of sample values look like ISO 4217 codes, it's a currency column
+			if float64(iso4217Count)/float64(len(col.SampleValues)) > 0.5 {
+				return col.ColumnName
+			}
+		} else {
+			// No sample values, but name and type match - assume it's currency
+			return col.ColumnName
+		}
+	}
+	return ""
+}
+
+// isISO4217CurrencyCode checks if a value looks like an ISO 4217 currency code.
+// ISO 4217 codes are exactly 3 uppercase ASCII letters.
+func isISO4217CurrencyCode(value string) bool {
+	if len(value) != 3 {
+		return false
+	}
+	for _, c := range value {
+		if c < 'A' || c > 'Z' {
+			return false
+		}
+	}
+	return true
 }
 
 // applyEnumDistributions merges distribution data into EnumValue structs.
@@ -1081,6 +1217,9 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 		enrichmentByName[e.Name] = e
 	}
 
+	// Find currency column for monetary pattern detection (one lookup for all columns)
+	currencyColumn := findCurrencyColumn(columns)
+
 	// Build column details with schema overlay
 	details := make([]models.ColumnDetail, 0, len(columns))
 	for _, col := range columns {
@@ -1112,6 +1251,13 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 			detail.Description = softDelete.Description
 			detail.SemanticType = softDelete.SemanticType
 			detail.Role = softDelete.Role
+		}
+
+		// Apply monetary column pattern detection (overrides LLM description with data-driven description)
+		if monetary := detectMonetaryColumnPattern(col, currencyColumn); monetary != nil {
+			detail.Description = monetary.Description
+			detail.SemanticType = monetary.SemanticType
+			detail.Role = monetary.Role
 		}
 
 		// Merge project-level enum definitions if available
