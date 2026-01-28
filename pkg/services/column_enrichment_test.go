@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -2267,8 +2268,9 @@ func TestColumnEnrichmentService_convertToColumnDetails_WithEnumDefinitions(t *t
 	}
 
 	fkInfo := map[string]string{}
+	enumDistributions := map[string]*datasource.EnumDistributionResult{}
 
-	details := service.convertToColumnDetails("billing_transactions", enrichments, columns, fkInfo, enumSamples, enumDefs)
+	details := service.convertToColumnDetails("billing_transactions", enrichments, columns, fkInfo, enumSamples, enumDefs, enumDistributions)
 
 	require.Equal(t, 3, len(details))
 
@@ -2399,4 +2401,225 @@ func TestColumnEnrichmentResponse_MultipleQuestions(t *testing.T) {
 
 	assert.Equal(t, "temporal", response.Questions[2].Category)
 	assert.Equal(t, 2, response.Questions[2].Priority)
+}
+
+// TestApplyEnumDistributions verifies that distribution metadata is properly applied to enum values.
+func TestApplyEnumDistributions(t *testing.T) {
+	// Create enum values from LLM enrichment (without distribution data)
+	enumValues := []models.EnumValue{
+		{Value: "pending", Label: "Pending"},
+		{Value: "processing", Label: "Processing"},
+		{Value: "completed", Label: "Completed"},
+		{Value: "failed", Label: "Failed"},
+	}
+
+	// Create distribution data from database analysis
+	dist := &datasource.EnumDistributionResult{
+		ColumnName:    "status",
+		TotalRows:     1000,
+		DistinctCount: 4,
+		NullCount:     10,
+		Distributions: []datasource.EnumValueDistribution{
+			{
+				Value:                 "completed",
+				Count:                 500,
+				Percentage:            50.0,
+				CompletionRate:        100.0,
+				IsLikelyTerminalState: true,
+			},
+			{
+				Value:                "pending",
+				Count:                300,
+				Percentage:           30.0,
+				CompletionRate:       0.0,
+				IsLikelyInitialState: true,
+			},
+			{
+				Value:              "processing",
+				Count:              180,
+				Percentage:         18.0,
+				CompletionRate:     0.0,
+				IsLikelyErrorState: false,
+			},
+			{
+				Value:              "failed",
+				Count:              10,
+				Percentage:         1.0,
+				CompletionRate:     0.0,
+				IsLikelyErrorState: true,
+			},
+		},
+		HasStateSemantics: true,
+	}
+
+	// Apply distributions
+	result := applyEnumDistributions(enumValues, dist)
+
+	// Verify results
+	require.Len(t, result, 4)
+
+	// Find each value and verify its distribution data
+	pendingVal := findEnumValue(result, "pending")
+	require.NotNil(t, pendingVal)
+	assert.Equal(t, int64(300), *pendingVal.Count)
+	assert.Equal(t, 30.0, *pendingVal.Percentage)
+	assert.True(t, *pendingVal.IsLikelyInitialState)
+	assert.Nil(t, pendingVal.IsLikelyTerminalState)
+
+	completedVal := findEnumValue(result, "completed")
+	require.NotNil(t, completedVal)
+	assert.Equal(t, int64(500), *completedVal.Count)
+	assert.Equal(t, 50.0, *completedVal.Percentage)
+	assert.True(t, *completedVal.IsLikelyTerminalState)
+	assert.Nil(t, completedVal.IsLikelyInitialState)
+
+	failedVal := findEnumValue(result, "failed")
+	require.NotNil(t, failedVal)
+	assert.Equal(t, int64(10), *failedVal.Count)
+	assert.True(t, *failedVal.IsLikelyErrorState)
+}
+
+// TestApplyEnumDistributions_NoDistributionData verifies graceful handling when no distribution exists.
+func TestApplyEnumDistributions_NoDistributionData(t *testing.T) {
+	enumValues := []models.EnumValue{
+		{Value: "active", Label: "Active"},
+		{Value: "inactive", Label: "Inactive"},
+	}
+
+	// No distribution data
+	result := applyEnumDistributions(enumValues, nil)
+
+	// Should return the original values unchanged
+	require.Len(t, result, 2)
+	assert.Nil(t, result[0].Count)
+	assert.Nil(t, result[0].Percentage)
+}
+
+// TestApplyEnumDistributions_PartialMatch verifies handling when not all values have distribution data.
+func TestApplyEnumDistributions_PartialMatch(t *testing.T) {
+	enumValues := []models.EnumValue{
+		{Value: "active", Label: "Active"},
+		{Value: "inactive", Label: "Inactive"},
+		{Value: "unknown", Label: "Unknown"}, // This won't have distribution data
+	}
+
+	dist := &datasource.EnumDistributionResult{
+		Distributions: []datasource.EnumValueDistribution{
+			{Value: "active", Count: 800, Percentage: 80.0},
+			{Value: "inactive", Count: 200, Percentage: 20.0},
+			// "unknown" is not in distribution (maybe it was added after analysis)
+		},
+	}
+
+	result := applyEnumDistributions(enumValues, dist)
+
+	require.Len(t, result, 3)
+
+	activeVal := findEnumValue(result, "active")
+	assert.Equal(t, int64(800), *activeVal.Count)
+
+	unknownVal := findEnumValue(result, "unknown")
+	assert.Nil(t, unknownVal.Count, "Values not in distribution should not have count set")
+}
+
+// TestFindCompletionTimestampColumn verifies completion timestamp column detection.
+func TestFindCompletionTimestampColumn(t *testing.T) {
+	tests := []struct {
+		name     string
+		columns  []*models.SchemaColumn
+		expected string
+	}{
+		{
+			name: "finds completed_at",
+			columns: []*models.SchemaColumn{
+				{ColumnName: "id", DataType: "integer"},
+				{ColumnName: "status", DataType: "varchar"},
+				{ColumnName: "completed_at", DataType: "timestamp"},
+				{ColumnName: "created_at", DataType: "timestamp"},
+			},
+			expected: "completed_at",
+		},
+		{
+			name: "finds finished_at",
+			columns: []*models.SchemaColumn{
+				{ColumnName: "id", DataType: "integer"},
+				{ColumnName: "finished_at", DataType: "timestamp with time zone"},
+			},
+			expected: "finished_at",
+		},
+		{
+			name: "finds ended_at",
+			columns: []*models.SchemaColumn{
+				{ColumnName: "ended_at", DataType: "datetime"},
+			},
+			expected: "ended_at",
+		},
+		{
+			name: "fallback to completion-like column",
+			columns: []*models.SchemaColumn{
+				{ColumnName: "job_completion_time", DataType: "timestamp"},
+			},
+			expected: "job_completion_time",
+		},
+		{
+			name: "ignores non-timestamp columns",
+			columns: []*models.SchemaColumn{
+				{ColumnName: "completed_at", DataType: "varchar"}, // Not a timestamp!
+				{ColumnName: "status", DataType: "varchar"},
+			},
+			expected: "",
+		},
+		{
+			name: "returns empty when no completion column",
+			columns: []*models.SchemaColumn{
+				{ColumnName: "id", DataType: "integer"},
+				{ColumnName: "created_at", DataType: "timestamp"},
+				{ColumnName: "updated_at", DataType: "timestamp"},
+			},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := findCompletionTimestampColumn(tt.columns)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestIsTimestampType verifies timestamp type detection.
+func TestIsTimestampType(t *testing.T) {
+	tests := []struct {
+		dataType string
+		expected bool
+	}{
+		{"timestamp", true},
+		{"timestamp with time zone", true},
+		{"timestamp without time zone", true},
+		{"TIMESTAMP", true},
+		{"datetime", true},
+		{"datetime2", true},
+		{"date", true},
+		{"varchar", false},
+		{"integer", false},
+		{"bigint", false},
+		{"text", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.dataType, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isTimestampType(tt.dataType))
+		})
+	}
+}
+
+// Helper function for tests
+func findEnumValue(values []models.EnumValue, target string) *models.EnumValue {
+	for i := range values {
+		if values[i].Value == target {
+			return &values[i]
+		}
+	}
+	return nil
 }

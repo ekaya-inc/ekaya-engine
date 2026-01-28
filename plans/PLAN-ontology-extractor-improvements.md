@@ -461,3 +461,18 @@ After implementation, re-run ontology extraction on tikr_production:
 3. Re-run extractor after each improvement
 4. Compare: questions generated, auto-answers provided, confidence scores
 5. Validate auto-answers against manual research from the 190 Q&A session
+
+---
+
+## Implementation Status
+
+- [x] **1. Enum Value Distribution Analysis** - Implemented value distribution with count/percentage, terminal state detection via completion timestamp correlation, and state semantics (initial/terminal/error states)
+- [ ] **2. Soft Delete Pattern Recognition**
+- [ ] **3. Monetary Column Detection**
+- [ ] **4. UUID Text Column Detection**
+- [ ] **5. Timestamp Scale Detection**
+- [ ] **6. FK Target Resolution via Data Overlap**
+- [ ] **7. Cardinality Inference from Data**
+- [ ] **8. Role Detection from Column Naming**
+- [ ] **9. Boolean Naming Pattern Detection**
+- [ ] **10. Email/External ID Pattern Detection**

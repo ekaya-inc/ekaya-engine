@@ -202,6 +202,9 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 		fkInfo = make(map[string]string)
 	}
 
+	// Identify enum candidates
+	enumCandidates := s.identifyEnumCandidates(columns)
+
 	// Sample enum values for likely enum columns
 	enumSamples, err := s.sampleEnumValues(ctx, projectID, entity, columns)
 	if err != nil {
@@ -209,6 +212,15 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 			zap.String("table", tableName),
 			zap.Error(err))
 		enumSamples = make(map[string][]string)
+	}
+
+	// Analyze enum value distributions (count, percentage, state semantics)
+	enumDistributions, err := s.analyzeEnumDistributions(ctx, projectID, entity, columns, enumCandidates)
+	if err != nil {
+		s.logger.Warn("Failed to analyze enum distributions, continuing without",
+			zap.String("table", tableName),
+			zap.Error(err))
+		enumDistributions = make(map[string]*datasource.EnumDistributionResult)
 	}
 
 	// Enum definitions are no longer loaded from files (cloud service has no project files)
@@ -220,8 +232,8 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 		return fmt.Errorf("LLM enrichment failed: %w", err)
 	}
 
-	// Convert enrichments to ColumnDetail and save, merging enum definitions
-	columnDetails := s.convertToColumnDetails(tableName, enrichments, columns, fkInfo, enumSamples, enumDefs)
+	// Convert enrichments to ColumnDetail and save, merging enum definitions and distributions
+	columnDetails := s.convertToColumnDetails(tableName, enrichments, columns, fkInfo, enumSamples, enumDefs, enumDistributions)
 	if err := s.ontologyRepo.UpdateColumnDetails(ctx, projectID, tableName, columnDetails); err != nil {
 		return fmt.Errorf("save column details: %w", err)
 	}
@@ -389,6 +401,141 @@ func (s *columnEnrichmentService) identifyEnumCandidates(columns []*models.Schem
 	}
 
 	return candidates
+}
+
+// analyzeEnumDistributions retrieves value distribution for enum columns and identifies state semantics.
+// This function enriches enum values with count, percentage, and state classification metadata.
+func (s *columnEnrichmentService) analyzeEnumDistributions(
+	ctx context.Context,
+	projectID uuid.UUID,
+	entity *models.OntologyEntity,
+	columns []*models.SchemaColumn,
+	enumCandidates []*models.SchemaColumn,
+) (map[string]*datasource.EnumDistributionResult, error) {
+	result := make(map[string]*datasource.EnumDistributionResult)
+
+	if len(enumCandidates) == 0 {
+		return result, nil
+	}
+
+	// Get datasource for this entity
+	ds, err := s.getDatasource(ctx, projectID, entity)
+	if err != nil {
+		return nil, fmt.Errorf("get datasource: %w", err)
+	}
+
+	// Create schema discoverer
+	adapter, err := s.adapterFactory.NewSchemaDiscoverer(ctx, ds.DatasourceType, ds.Config, projectID, ds.ID, "")
+	if err != nil {
+		return nil, fmt.Errorf("create schema discoverer: %w", err)
+	}
+	defer adapter.Close()
+
+	// Find a completion timestamp column if one exists (for state machine detection)
+	// Common patterns: completed_at, finished_at, ended_at, closed_at
+	completionCol := findCompletionTimestampColumn(columns)
+
+	// Analyze distribution for each enum candidate
+	for _, col := range enumCandidates {
+		dist, err := adapter.GetEnumValueDistribution(ctx, entity.PrimarySchema, entity.PrimaryTable, col.ColumnName, completionCol, 100)
+		if err != nil {
+			s.logger.Debug("Failed to get enum distribution for column, skipping",
+				zap.String("column", col.ColumnName),
+				zap.Error(err))
+			continue
+		}
+
+		// Only store if we have meaningful distribution data
+		if dist != nil && len(dist.Distributions) > 0 && len(dist.Distributions) < 50 {
+			result[col.ColumnName] = dist
+		}
+	}
+
+	return result, nil
+}
+
+// findCompletionTimestampColumn finds a column that likely represents completion time.
+// Returns empty string if no such column is found.
+func findCompletionTimestampColumn(columns []*models.SchemaColumn) string {
+	// Priority order for completion timestamp columns
+	completionPatterns := []string{
+		"completed_at", "finished_at", "ended_at", "closed_at",
+		"done_at", "resolved_at", "fulfilled_at", "success_at",
+	}
+
+	columnMap := make(map[string]*models.SchemaColumn)
+	for _, col := range columns {
+		columnMap[strings.ToLower(col.ColumnName)] = col
+	}
+
+	// Look for exact matches first
+	for _, pattern := range completionPatterns {
+		if col, ok := columnMap[pattern]; ok {
+			if isTimestampType(col.DataType) {
+				return col.ColumnName
+			}
+		}
+	}
+
+	// Fallback: look for any timestamp column containing "complet" or "finish"
+	for _, col := range columns {
+		nameLower := strings.ToLower(col.ColumnName)
+		if isTimestampType(col.DataType) {
+			if strings.Contains(nameLower, "complet") || strings.Contains(nameLower, "finish") {
+				return col.ColumnName
+			}
+		}
+	}
+
+	return ""
+}
+
+// isTimestampType checks if a column data type is a timestamp/datetime type.
+func isTimestampType(dataType string) bool {
+	dataTypeLower := strings.ToLower(dataType)
+	return strings.Contains(dataTypeLower, "timestamp") ||
+		strings.Contains(dataTypeLower, "datetime") ||
+		strings.Contains(dataTypeLower, "date")
+}
+
+// applyEnumDistributions merges distribution data into EnumValue structs.
+func applyEnumDistributions(enumValues []models.EnumValue, dist *datasource.EnumDistributionResult) []models.EnumValue {
+	if dist == nil || len(dist.Distributions) == 0 {
+		return enumValues
+	}
+
+	// Build a map of value -> distribution for quick lookup
+	distMap := make(map[string]datasource.EnumValueDistribution)
+	for _, d := range dist.Distributions {
+		distMap[d.Value] = d
+	}
+
+	// Apply distribution data to each enum value
+	for i := range enumValues {
+		ev := &enumValues[i]
+		if d, ok := distMap[ev.Value]; ok {
+			count := d.Count
+			percentage := d.Percentage
+			ev.Count = &count
+			ev.Percentage = &percentage
+
+			// Apply state semantics if detected
+			if d.IsLikelyInitialState {
+				isTrue := true
+				ev.IsLikelyInitialState = &isTrue
+			}
+			if d.IsLikelyTerminalState {
+				isTrue := true
+				ev.IsLikelyTerminalState = &isTrue
+			}
+			if d.IsLikelyErrorState {
+				isTrue := true
+				ev.IsLikelyErrorState = &isTrue
+			}
+		}
+	}
+
+	return enumValues
 }
 
 // getDatasource retrieves the datasource for the entity's primary schema.
@@ -848,6 +995,7 @@ func (s *columnEnrichmentService) writeFKContext(sb *strings.Builder, fkInfo map
 // convertToColumnDetails converts LLM enrichments to ColumnDetail structs.
 // It merges project-level enum definitions when available, using them to provide
 // accurate descriptions for enum values that the LLM cannot infer.
+// It also applies enum distribution metadata (count, percentage, state semantics).
 func (s *columnEnrichmentService) convertToColumnDetails(
 	tableName string,
 	enrichments []columnEnrichment,
@@ -855,6 +1003,7 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 	fkInfo map[string]string,
 	enumSamples map[string][]string,
 	enumDefs []models.EnumDefinition,
+	enumDistributions map[string]*datasource.EnumDistributionResult,
 ) []models.ColumnDetail {
 	// Build a map for quick lookup
 	enrichmentByName := make(map[string]columnEnrichment)
@@ -904,6 +1053,11 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 					detail.EnumValues = mergedEnums
 				}
 			}
+		}
+
+		// Apply enum distribution metadata (count, percentage, state semantics)
+		if dist, hasDist := enumDistributions[col.ColumnName]; hasDist && len(detail.EnumValues) > 0 {
+			detail.EnumValues = applyEnumDistributions(detail.EnumValues, dist)
 		}
 
 		details = append(details, detail)

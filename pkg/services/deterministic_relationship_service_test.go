@@ -1315,6 +1315,10 @@ func (m *mockTestSchemaDiscoverer) GetDistinctValues(ctx context.Context, schema
 	return nil, nil
 }
 
+func (m *mockTestSchemaDiscoverer) GetEnumValueDistribution(ctx context.Context, schemaName, tableName, columnName string, completionTimestampCol string, limit int) (*datasource.EnumDistributionResult, error) {
+	return nil, nil
+}
+
 func (m *mockTestSchemaDiscoverer) Close() error {
 	return nil
 }

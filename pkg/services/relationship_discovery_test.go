@@ -144,6 +144,10 @@ func (m *rdMockSchemaDiscoverer) GetDistinctValues(ctx context.Context, schemaNa
 	return nil, nil
 }
 
+func (m *rdMockSchemaDiscoverer) GetEnumValueDistribution(ctx context.Context, schemaName, tableName, columnName string, completionTimestampCol string, limit int) (*datasource.EnumDistributionResult, error) {
+	return nil, nil
+}
+
 func (m *rdMockSchemaDiscoverer) Close() error {
 	return nil
 }

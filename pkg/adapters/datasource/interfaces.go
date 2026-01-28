@@ -93,6 +93,13 @@ type SchemaDiscoverer interface {
 	// Used during the scanning phase to collect sample values for enum detection.
 	GetDistinctValues(ctx context.Context, schemaName, tableName, columnName string, limit int) ([]string, error)
 
+	// GetEnumValueDistribution analyzes value distribution for an enum column.
+	// Returns count and percentage for each distinct value, sorted by count descending.
+	// If completionTimestampCol is non-empty, also computes completion rate per value
+	// to identify initial vs terminal states in state machine columns.
+	GetEnumValueDistribution(ctx context.Context, schemaName, tableName, columnName string,
+		completionTimestampCol string, limit int) (*EnumDistributionResult, error)
+
 	// Close releases the database connection.
 	Close() error
 }
