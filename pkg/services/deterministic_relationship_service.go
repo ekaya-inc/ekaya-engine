@@ -167,9 +167,21 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 		columnByID[c.ID] = c
 	}
 
+	// Get datasource to create schema discoverer for cardinality analysis
+	ds, err := s.datasourceService.Get(ctx, projectID, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("get datasource: %w", err)
+	}
+
+	discoverer, err := s.adapterFactory.NewSchemaDiscoverer(ctx, ds.DatasourceType, ds.Config, projectID, datasourceID, "")
+	if err != nil {
+		return nil, fmt.Errorf("create schema discoverer: %w", err)
+	}
+	defer discoverer.Close()
+
 	// Process each FK from schema relationships
 	var fkCount int
-	for _, schemaRel := range schemaRels {
+	for i, schemaRel := range schemaRels {
 		// Resolve source column/table
 		sourceCol := columnByID[schemaRel.SourceColumnID]
 		sourceTable := tableByID[schemaRel.SourceTableID]
@@ -208,9 +220,38 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 			detectionMethod = models.DetectionMethodManual
 		}
 
+		// Compute cardinality from actual data using join analysis
+		// This determines if the relationship is 1:1, N:1, 1:N, or N:M
+		cardinality := models.CardinalityNTo1 // Default fallback
+		joinResult, err := discoverer.AnalyzeJoin(ctx,
+			sourceTable.SchemaName, sourceTable.TableName, sourceCol.ColumnName,
+			targetTable.SchemaName, targetTable.TableName, targetCol.ColumnName)
+		if err != nil {
+			s.logger.Warn("Failed to analyze FK join for cardinality - using default N:1",
+				zap.String("source", fmt.Sprintf("%s.%s.%s", sourceTable.SchemaName, sourceTable.TableName, sourceCol.ColumnName)),
+				zap.String("target", fmt.Sprintf("%s.%s.%s", targetTable.SchemaName, targetTable.TableName, targetCol.ColumnName)),
+				zap.Error(err))
+		} else {
+			cardinality = InferCardinality(joinResult)
+			s.logger.Debug("Computed FK cardinality from data",
+				zap.String("source", fmt.Sprintf("%s.%s.%s", sourceTable.SchemaName, sourceTable.TableName, sourceCol.ColumnName)),
+				zap.String("target", fmt.Sprintf("%s.%s.%s", targetTable.SchemaName, targetTable.TableName, targetCol.ColumnName)),
+				zap.String("cardinality", cardinality),
+				zap.Int64("join_count", joinResult.JoinCount),
+				zap.Int64("source_matched", joinResult.SourceMatched),
+				zap.Int64("target_matched", joinResult.TargetMatched))
+		}
+
+		// Report progress to UI
+		if progressCallback != nil {
+			msg := fmt.Sprintf("Analyzing FK %s.%s → %s.%s (%d/%d)",
+				sourceTable.TableName, sourceCol.ColumnName,
+				targetTable.TableName, targetCol.ColumnName,
+				i+1, len(schemaRels))
+			progressCallback(i+1, len(schemaRels), msg)
+		}
+
 		// Create bidirectional relationship (both forward and reverse)
-		// FK constraints are typically N:1 (many-to-one): the FK column (source)
-		// has many values pointing to one PK (target)
 		rel := &models.EntityRelationship{
 			OntologyID:         ontology.ID,
 			SourceEntityID:     sourceEntity.ID,
@@ -226,10 +267,10 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 			DetectionMethod:    detectionMethod,
 			Confidence:         1.0,
 			Status:             models.RelationshipStatusConfirmed,
-			Cardinality:        models.CardinalityNTo1,
+			Cardinality:        cardinality,
 		}
 
-		err := s.createBidirectionalRelationship(ctx, rel)
+		err = s.createBidirectionalRelationship(ctx, rel)
 		if err != nil {
 			return nil, fmt.Errorf("create bidirectional FK relationship: %w", err)
 		}

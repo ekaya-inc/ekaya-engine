@@ -107,6 +107,15 @@ type EnumValue struct {
 	Value       string `json:"value"`
 	Label       string `json:"label,omitempty"`
 	Description string `json:"description,omitempty"`
+
+	// Distribution metadata (populated by enum distribution analysis)
+	Count      *int64   `json:"count,omitempty"`      // Number of records with this value
+	Percentage *float64 `json:"percentage,omitempty"` // Percentage of total records (0.0-100.0)
+
+	// State semantics (populated when state column detected with completion timestamp)
+	IsLikelyInitialState  *bool `json:"is_likely_initial_state,omitempty"`  // High count, low completion rate
+	IsLikelyTerminalState *bool `json:"is_likely_terminal_state,omitempty"` // High completion rate (~100%)
+	IsLikelyErrorState    *bool `json:"is_likely_error_state,omitempty"`    // Low count relative to others
 }
 
 // UnmarshalJSON handles LLM responses that may return enum values in different formats:

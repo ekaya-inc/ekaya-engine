@@ -38,8 +38,191 @@ func (d *ColumnToolDeps) GetLogger() *zap.Logger { return d.Logger }
 
 // RegisterColumnTools registers column metadata MCP tools.
 func RegisterColumnTools(s *server.MCPServer, deps *ColumnToolDeps) {
+	registerGetColumnMetadataTool(s, deps)
 	registerUpdateColumnTool(s, deps)
 	registerDeleteColumnMetadataTool(s, deps)
+}
+
+// registerGetColumnMetadataTool adds the get_column_metadata tool for inspecting current column metadata.
+func registerGetColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps) {
+	tool := mcp.NewTool(
+		"get_column_metadata",
+		mcp.WithDescription(
+			"Get current ontology metadata for a specific column. "+
+				"Returns description, semantic_type, enum_values, entity, role, and schema info (data_type, is_nullable, is_primary_key). "+
+				"Use this before update_column to see what's already documented. "+
+				"Example: get_column_metadata(table='users', column='status') returns current metadata for the status column.",
+		),
+		mcp.WithString(
+			"table",
+			mcp.Required(),
+			mcp.Description("Table name containing the column"),
+		),
+		mcp.WithString(
+			"column",
+			mcp.Required(),
+			mcp.Description("Column name to inspect"),
+		),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := AcquireToolAccessWithoutProvenance(ctx, deps, "get_column_metadata")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Get required parameters
+		table, err := req.RequireString("table")
+		if err != nil {
+			return nil, err
+		}
+		table = trimString(table)
+		if table == "" {
+			return NewErrorResult("invalid_parameters", "parameter 'table' cannot be empty"), nil
+		}
+
+		column, err := req.RequireString("column")
+		if err != nil {
+			return nil, err
+		}
+		column = trimString(column)
+		if column == "" {
+			return NewErrorResult("invalid_parameters", "parameter 'column' cannot be empty"), nil
+		}
+
+		// Get datasource ID
+		datasourceID, err := deps.ProjectService.GetDefaultDatasourceID(tenantCtx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get datasource: %w", err)
+		}
+
+		// Validate table exists in schema registry
+		schemaTable, err := deps.SchemaRepo.FindTableByName(tenantCtx, projectID, datasourceID, table)
+		if err != nil {
+			return nil, fmt.Errorf("failed to lookup table: %w", err)
+		}
+		if schemaTable == nil {
+			return NewErrorResult("TABLE_NOT_FOUND",
+				fmt.Sprintf("table %q not found in schema registry", table)), nil
+		}
+
+		// Validate column exists in table
+		schemaColumn, err := deps.SchemaRepo.GetColumnByName(tenantCtx, schemaTable.ID, column)
+		if err != nil {
+			return nil, fmt.Errorf("failed to lookup column: %w", err)
+		}
+		if schemaColumn == nil {
+			return NewErrorResult("COLUMN_NOT_FOUND",
+				fmt.Sprintf("column %q not found in table %q", column, table)), nil
+		}
+
+		// Build response with schema info
+		response := getColumnMetadataResponse{
+			Table:  table,
+			Column: column,
+			Schema: columnSchemaInfo{
+				DataType:     schemaColumn.DataType,
+				IsNullable:   schemaColumn.IsNullable,
+				IsPrimaryKey: schemaColumn.IsPrimaryKey,
+			},
+		}
+
+		// Get ontology metadata if available
+		ontology, err := deps.OntologyRepo.GetActive(tenantCtx, projectID)
+		if err != nil {
+			deps.Logger.Warn("Failed to get active ontology for column metadata",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+		}
+
+		if ontology != nil {
+			// Get column details from ontology
+			columnDetails := ontology.GetColumnDetails(table)
+			for _, colDetail := range columnDetails {
+				if colDetail.Name == column {
+					response.Metadata = &columnMetadataInfo{
+						Description:  colDetail.Description,
+						SemanticType: colDetail.SemanticType,
+						Entity:       colDetail.SemanticType, // Entity is stored in SemanticType
+						Role:         colDetail.Role,
+					}
+
+					// Format enum values
+					if len(colDetail.EnumValues) > 0 {
+						response.Metadata.EnumValues = formatEnumValues(colDetail.EnumValues)
+					}
+					break
+				}
+			}
+		}
+
+		// Fallback: check engine_column_metadata for additional metadata
+		if deps.ColumnMetadataRepo != nil {
+			columnMeta, err := deps.ColumnMetadataRepo.GetByTableColumn(tenantCtx, projectID, table, column)
+			if err != nil {
+				deps.Logger.Warn("Failed to get column metadata fallback",
+					zap.String("project_id", projectID.String()),
+					zap.String("table", table),
+					zap.String("column", column),
+					zap.Error(err))
+			} else if columnMeta != nil {
+				// Initialize metadata section if not already present
+				if response.Metadata == nil {
+					response.Metadata = &columnMetadataInfo{}
+				}
+
+				// Merge in column_metadata values if not already set from ontology
+				if columnMeta.Description != nil && *columnMeta.Description != "" && response.Metadata.Description == "" {
+					response.Metadata.Description = *columnMeta.Description
+				}
+				if columnMeta.Entity != nil && *columnMeta.Entity != "" && response.Metadata.Entity == "" {
+					response.Metadata.Entity = *columnMeta.Entity
+				}
+				if columnMeta.Role != nil && *columnMeta.Role != "" && response.Metadata.Role == "" {
+					response.Metadata.Role = *columnMeta.Role
+				}
+				if len(columnMeta.EnumValues) > 0 && len(response.Metadata.EnumValues) == 0 {
+					response.Metadata.EnumValues = columnMeta.EnumValues
+				}
+			}
+		}
+
+		jsonResult, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// getColumnMetadataResponse is the response format for get_column_metadata tool.
+type getColumnMetadataResponse struct {
+	Table    string              `json:"table"`
+	Column   string              `json:"column"`
+	Schema   columnSchemaInfo    `json:"schema"`
+	Metadata *columnMetadataInfo `json:"metadata,omitempty"`
+}
+
+// columnSchemaInfo contains schema-level information about a column.
+type columnSchemaInfo struct {
+	DataType     string `json:"data_type"`
+	IsNullable   bool   `json:"is_nullable"`
+	IsPrimaryKey bool   `json:"is_primary_key"`
+}
+
+// columnMetadataInfo contains ontology metadata for a column.
+type columnMetadataInfo struct {
+	Description  string   `json:"description,omitempty"`
+	SemanticType string   `json:"semantic_type,omitempty"`
+	EnumValues   []string `json:"enum_values,omitempty"`
+	Entity       string   `json:"entity,omitempty"`
+	Role         string   `json:"role,omitempty"`
 }
 
 // registerUpdateColumnTool adds the update_column tool for adding or updating column semantic information.

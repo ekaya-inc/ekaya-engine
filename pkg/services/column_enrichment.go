@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -193,7 +194,7 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 		return nil
 	}
 
-	// Get FK info for this table
+	// Get FK info for this table (simple map for LLM context)
 	fkInfo, err := s.getForeignKeyInfo(ctx, projectID, tableName)
 	if err != nil {
 		s.logger.Warn("Failed to get FK info, continuing without",
@@ -202,6 +203,18 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 		fkInfo = make(map[string]string)
 	}
 
+	// Get detailed FK info for auto-description generation
+	fkDetailedInfo, err := s.getForeignKeyDetailedInfo(ctx, projectID, tableName)
+	if err != nil {
+		s.logger.Warn("Failed to get detailed FK info, continuing without",
+			zap.String("table", tableName),
+			zap.Error(err))
+		fkDetailedInfo = make(map[string]*FKRelationshipInfo)
+	}
+
+	// Identify enum candidates
+	enumCandidates := s.identifyEnumCandidates(columns)
+
 	// Sample enum values for likely enum columns
 	enumSamples, err := s.sampleEnumValues(ctx, projectID, entity, columns)
 	if err != nil {
@@ -209,6 +222,15 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 			zap.String("table", tableName),
 			zap.Error(err))
 		enumSamples = make(map[string][]string)
+	}
+
+	// Analyze enum value distributions (count, percentage, state semantics)
+	enumDistributions, err := s.analyzeEnumDistributions(ctx, projectID, entity, columns, enumCandidates)
+	if err != nil {
+		s.logger.Warn("Failed to analyze enum distributions, continuing without",
+			zap.String("table", tableName),
+			zap.Error(err))
+		enumDistributions = make(map[string]*datasource.EnumDistributionResult)
 	}
 
 	// Enum definitions are no longer loaded from files (cloud service has no project files)
@@ -220,8 +242,8 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 		return fmt.Errorf("LLM enrichment failed: %w", err)
 	}
 
-	// Convert enrichments to ColumnDetail and save, merging enum definitions
-	columnDetails := s.convertToColumnDetails(tableName, enrichments, columns, fkInfo, enumSamples, enumDefs)
+	// Convert enrichments to ColumnDetail and save, merging enum definitions, distributions, and FK info
+	columnDetails := s.convertToColumnDetails(tableName, enrichments, columns, fkInfo, fkDetailedInfo, enumSamples, enumDefs, enumDistributions)
 	if err := s.ontologyRepo.UpdateColumnDetails(ctx, projectID, tableName, columnDetails); err != nil {
 		return fmt.Errorf("save column details: %w", err)
 	}
@@ -263,7 +285,18 @@ func (s *columnEnrichmentService) getColumnsForTable(ctx context.Context, projec
 	return columnsByTable[tableName], nil
 }
 
+// FKRelationshipInfo contains detailed information about a foreign key relationship.
+// This includes the target table/column and detection method for generating accurate descriptions.
+type FKRelationshipInfo struct {
+	TargetTable     string  // The target table this FK references
+	TargetColumn    string  // The target column this FK references
+	DetectionMethod string  // "foreign_key" (DB constraint) or "pk_match" (inferred from data)
+	Confidence      float64 // 1.0 for FK constraints, 0.7-0.95 for pk_match
+	IsDBConstraint  bool    // True if this is an actual database FK constraint
+}
+
 // getForeignKeyInfo returns a map of column_name -> target_table for FK columns.
+// This simplified version is used for the LLM prompt context.
 func (s *columnEnrichmentService) getForeignKeyInfo(ctx context.Context, projectID uuid.UUID, tableName string) (map[string]string, error) {
 	// Get relationships for this table
 	relationships, err := s.relationshipRepo.GetByTables(ctx, projectID, []string{tableName})
@@ -281,6 +314,33 @@ func (s *columnEnrichmentService) getForeignKeyInfo(ctx context.Context, project
 	}
 
 	return fkInfo, nil
+}
+
+// getForeignKeyDetailedInfo returns detailed FK relationship information for each column.
+// This is used for generating accurate auto-descriptions with detection method context.
+func (s *columnEnrichmentService) getForeignKeyDetailedInfo(ctx context.Context, projectID uuid.UUID, tableName string) (map[string]*FKRelationshipInfo, error) {
+	// Get relationships for this table
+	relationships, err := s.relationshipRepo.GetByTables(ctx, projectID, []string{tableName})
+	if err != nil {
+		return nil, err
+	}
+
+	// Build detailed FK map
+	fkDetailedInfo := make(map[string]*FKRelationshipInfo)
+	for _, rel := range relationships {
+		// Only include relationships where this table is the source
+		if rel.SourceColumnTable == tableName && rel.SourceColumnName != "" {
+			fkDetailedInfo[rel.SourceColumnName] = &FKRelationshipInfo{
+				TargetTable:     rel.TargetColumnTable,
+				TargetColumn:    rel.TargetColumnName,
+				DetectionMethod: rel.DetectionMethod,
+				Confidence:      rel.Confidence,
+				IsDBConstraint:  rel.DetectionMethod == models.DetectionMethodForeignKey,
+			}
+		}
+	}
+
+	return fkDetailedInfo, nil
 }
 
 // sampleEnumValues samples distinct values for columns likely to be enums.
@@ -389,6 +449,1226 @@ func (s *columnEnrichmentService) identifyEnumCandidates(columns []*models.Schem
 	}
 
 	return candidates
+}
+
+// analyzeEnumDistributions retrieves value distribution for enum columns and identifies state semantics.
+// This function enriches enum values with count, percentage, and state classification metadata.
+func (s *columnEnrichmentService) analyzeEnumDistributions(
+	ctx context.Context,
+	projectID uuid.UUID,
+	entity *models.OntologyEntity,
+	columns []*models.SchemaColumn,
+	enumCandidates []*models.SchemaColumn,
+) (map[string]*datasource.EnumDistributionResult, error) {
+	result := make(map[string]*datasource.EnumDistributionResult)
+
+	if len(enumCandidates) == 0 {
+		return result, nil
+	}
+
+	// Get datasource for this entity
+	ds, err := s.getDatasource(ctx, projectID, entity)
+	if err != nil {
+		return nil, fmt.Errorf("get datasource: %w", err)
+	}
+
+	// Create schema discoverer
+	adapter, err := s.adapterFactory.NewSchemaDiscoverer(ctx, ds.DatasourceType, ds.Config, projectID, ds.ID, "")
+	if err != nil {
+		return nil, fmt.Errorf("create schema discoverer: %w", err)
+	}
+	defer adapter.Close()
+
+	// Find a completion timestamp column if one exists (for state machine detection)
+	// Common patterns: completed_at, finished_at, ended_at, closed_at
+	completionCol := findCompletionTimestampColumn(columns)
+
+	// Analyze distribution for each enum candidate
+	for _, col := range enumCandidates {
+		dist, err := adapter.GetEnumValueDistribution(ctx, entity.PrimarySchema, entity.PrimaryTable, col.ColumnName, completionCol, 100)
+		if err != nil {
+			s.logger.Debug("Failed to get enum distribution for column, skipping",
+				zap.String("column", col.ColumnName),
+				zap.Error(err))
+			continue
+		}
+
+		// Only store if we have meaningful distribution data
+		if dist != nil && len(dist.Distributions) > 0 && len(dist.Distributions) < 50 {
+			result[col.ColumnName] = dist
+		}
+	}
+
+	return result, nil
+}
+
+// findCompletionTimestampColumn finds a column that likely represents completion time.
+// Returns empty string if no such column is found.
+func findCompletionTimestampColumn(columns []*models.SchemaColumn) string {
+	// Priority order for completion timestamp columns
+	completionPatterns := []string{
+		"completed_at", "finished_at", "ended_at", "closed_at",
+		"done_at", "resolved_at", "fulfilled_at", "success_at",
+	}
+
+	columnMap := make(map[string]*models.SchemaColumn)
+	for _, col := range columns {
+		columnMap[strings.ToLower(col.ColumnName)] = col
+	}
+
+	// Look for exact matches first
+	for _, pattern := range completionPatterns {
+		if col, ok := columnMap[pattern]; ok {
+			if isTimestampType(col.DataType) {
+				return col.ColumnName
+			}
+		}
+	}
+
+	// Fallback: look for any timestamp column containing "complet" or "finish"
+	for _, col := range columns {
+		nameLower := strings.ToLower(col.ColumnName)
+		if isTimestampType(col.DataType) {
+			if strings.Contains(nameLower, "complet") || strings.Contains(nameLower, "finish") {
+				return col.ColumnName
+			}
+		}
+	}
+
+	return ""
+}
+
+// isTimestampType checks if a column data type is a timestamp/datetime type.
+func isTimestampType(dataType string) bool {
+	dataTypeLower := strings.ToLower(dataType)
+	return strings.Contains(dataTypeLower, "timestamp") ||
+		strings.Contains(dataTypeLower, "datetime") ||
+		strings.Contains(dataTypeLower, "date")
+}
+
+// SoftDeleteDescription contains the auto-generated description for a soft delete column.
+type SoftDeleteDescription struct {
+	Description  string  // Auto-generated description with active record percentage
+	SemanticType string  // Semantic type: "soft_delete_timestamp"
+	Role         string  // Column role: "attribute"
+	ActiveRate   float64 // Percentage of active records (0.0-100.0)
+}
+
+// MonetaryColumnDescription contains the auto-generated description for a monetary column.
+type MonetaryColumnDescription struct {
+	Description    string // Auto-generated description with currency info
+	SemanticType   string // Semantic type: "currency_cents"
+	Role           string // Column role: "measure"
+	CurrencyColumn string // Name of the paired currency column (if found)
+}
+
+// detectSoftDeletePattern checks if a column matches the soft delete pattern and returns
+// an auto-generated description if detected.
+//
+// Pattern detection rules:
+// - Column named 'deleted_at'
+// - Type is timestamp or timestamptz
+// - 90%+ values are NULL (indicating active records)
+// - Non-NULL values represent soft-deleted records
+//
+// Returns nil if the column doesn't match the soft delete pattern.
+func detectSoftDeletePattern(col *models.SchemaColumn) *SoftDeleteDescription {
+	colNameLower := strings.ToLower(col.ColumnName)
+
+	// Check column name matches soft delete pattern
+	if colNameLower != "deleted_at" {
+		return nil
+	}
+
+	// Check column type is timestamp
+	if !isTimestampType(col.DataType) {
+		return nil
+	}
+
+	// Column must be nullable (soft delete columns are NULL for active records)
+	if !col.IsNullable {
+		return nil
+	}
+
+	// Calculate null rate if stats are available
+	var nullRate float64 = 1.0 // Assume high null rate if no stats
+	var activeRate float64 = 100.0
+
+	if col.RowCount != nil && *col.RowCount > 0 {
+		if col.NullCount != nil {
+			nullRate = float64(*col.NullCount) / float64(*col.RowCount)
+			activeRate = nullRate * 100.0
+		} else if col.NonNullCount != nil {
+			// NonNullCount = deleted records, so null rate = 1 - (non_null / total)
+			nullRate = 1.0 - (float64(*col.NonNullCount) / float64(*col.RowCount))
+			activeRate = nullRate * 100.0
+		}
+	}
+
+	// Soft delete pattern requires 90%+ NULL values (i.e., 90%+ active records)
+	if nullRate < 0.90 {
+		return nil
+	}
+
+	// Generate description with active record percentage
+	description := fmt.Sprintf(
+		"Soft delete timestamp (GORM pattern). NULL = active record, timestamp = soft-deleted at that time. %.1f%% of records are active.",
+		activeRate,
+	)
+
+	return &SoftDeleteDescription{
+		Description:  description,
+		SemanticType: "soft_delete_timestamp",
+		Role:         models.ColumnRoleAttribute,
+		ActiveRate:   activeRate,
+	}
+}
+
+// monetaryColumnPatterns contains patterns for identifying monetary amount columns.
+// Matches columns named: amount, *_amount, *_share, *_total, *_price, *_cost, *_fee, *_value
+var monetaryColumnPatterns = []string{
+	"_amount", "_share", "_total", "_price", "_cost", "_fee", "_value",
+}
+
+// detectMonetaryColumnPattern checks if a column matches the monetary column pattern and returns
+// an auto-generated description if detected.
+//
+// Pattern detection rules:
+// - Column named 'amount' or ends with monetary patterns (_amount, _share, _total, _price, _cost, _fee, _value)
+// - Type is bigint or integer
+// - Same table has a currency column with ISO 4217 values (detected via currencyColumn parameter)
+//
+// Returns nil if the column doesn't match the monetary pattern.
+func detectMonetaryColumnPattern(col *models.SchemaColumn, currencyColumn string) *MonetaryColumnDescription {
+	colNameLower := strings.ToLower(col.ColumnName)
+
+	// Check if column name matches monetary patterns
+	isMonetary := colNameLower == "amount"
+	if !isMonetary {
+		for _, pattern := range monetaryColumnPatterns {
+			if strings.HasSuffix(colNameLower, pattern) {
+				isMonetary = true
+				break
+			}
+		}
+	}
+
+	if !isMonetary {
+		return nil
+	}
+
+	// Check column type is integer-based (monetary values stored as minor units)
+	if !isMonetaryIntegerType(col.DataType) {
+		return nil
+	}
+
+	// Generate description based on whether currency column was found
+	var description string
+	if currencyColumn != "" {
+		description = fmt.Sprintf(
+			"Monetary amount in minor units (cents/pence). Pair with %s column for denomination. ISO 4217 currency codes.",
+			currencyColumn,
+		)
+	} else {
+		description = "Monetary amount in minor units (cents/pence). Integer values represent smallest currency unit."
+	}
+
+	return &MonetaryColumnDescription{
+		Description:    description,
+		SemanticType:   "currency_cents",
+		Role:           models.ColumnRoleMeasure,
+		CurrencyColumn: currencyColumn,
+	}
+}
+
+// isMonetaryIntegerType checks if a column data type is suitable for storing monetary values in minor units.
+// This includes bigint, integer, and numeric types commonly used for cents/pence representation.
+func isMonetaryIntegerType(dataType string) bool {
+	dataTypeLower := strings.ToLower(dataType)
+	return strings.Contains(dataTypeLower, "bigint") ||
+		dataTypeLower == "integer" ||
+		dataTypeLower == "int" ||
+		dataTypeLower == "int4" ||
+		dataTypeLower == "int8" ||
+		strings.Contains(dataTypeLower, "smallint") ||
+		strings.Contains(dataTypeLower, "numeric")
+}
+
+// findCurrencyColumn looks for a currency column in the given columns list.
+// Returns the column name if found, or empty string if not found.
+//
+// Detection criteria:
+// - Column named 'currency' or '*_currency'
+// - Type is text/varchar/char
+// - Has sample values that look like ISO 4217 codes (3 uppercase letters)
+func findCurrencyColumn(columns []*models.SchemaColumn) string {
+	for _, col := range columns {
+		colNameLower := strings.ToLower(col.ColumnName)
+
+		// Check column name pattern
+		if colNameLower != "currency" && !strings.HasSuffix(colNameLower, "_currency") {
+			continue
+		}
+
+		// Check column type is text-based
+		dataTypeLower := strings.ToLower(col.DataType)
+		if !strings.Contains(dataTypeLower, "char") &&
+			!strings.Contains(dataTypeLower, "text") &&
+			!strings.Contains(dataTypeLower, "varchar") {
+			continue
+		}
+
+		// Check if we have sample values that look like ISO 4217 codes
+		if len(col.SampleValues) > 0 {
+			iso4217Count := 0
+			for _, val := range col.SampleValues {
+				if isISO4217CurrencyCode(val) {
+					iso4217Count++
+				}
+			}
+			// If >50% of sample values look like ISO 4217 codes, it's a currency column
+			if float64(iso4217Count)/float64(len(col.SampleValues)) > 0.5 {
+				return col.ColumnName
+			}
+		} else {
+			// No sample values, but name and type match - assume it's currency
+			return col.ColumnName
+		}
+	}
+	return ""
+}
+
+// isISO4217CurrencyCode checks if a value looks like an ISO 4217 currency code.
+// ISO 4217 codes are exactly 3 uppercase ASCII letters.
+func isISO4217CurrencyCode(value string) bool {
+	if len(value) != 3 {
+		return false
+	}
+	for _, c := range value {
+		if c < 'A' || c > 'Z' {
+			return false
+		}
+	}
+	return true
+}
+
+// UUIDTextColumnDescription contains the auto-generated description for a text column containing UUIDs.
+type UUIDTextColumnDescription struct {
+	Description  string  // Auto-generated description
+	SemanticType string  // Semantic type: "uuid_text"
+	Role         string  // Column role: "identifier"
+	MatchRate    float64 // Percentage of sample values matching UUID format (0.0-100.0)
+}
+
+// uuidPattern matches standard UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+// Case-insensitive to handle both uppercase and lowercase UUIDs.
+var uuidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// detectUUIDTextColumnPattern checks if a text column contains UUID values and returns
+// an auto-generated description if detected.
+//
+// Pattern detection rules:
+// - Column type is text/varchar/char
+// - Has sample values available
+// - >99% of sample values match UUID format (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+//
+// Returns nil if the column doesn't match the UUID text pattern.
+func detectUUIDTextColumnPattern(col *models.SchemaColumn) *UUIDTextColumnDescription {
+	// Check column type is text-based
+	if !isTextType(col.DataType) {
+		return nil
+	}
+
+	// Need sample values to analyze
+	if len(col.SampleValues) == 0 {
+		return nil
+	}
+
+	// Count how many sample values match UUID pattern
+	uuidMatchCount := 0
+	for _, val := range col.SampleValues {
+		if uuidPattern.MatchString(val) {
+			uuidMatchCount++
+		}
+	}
+
+	// Calculate match rate
+	matchRate := float64(uuidMatchCount) / float64(len(col.SampleValues)) * 100.0
+
+	// Require >99% match rate for high confidence
+	if matchRate <= 99.0 {
+		return nil
+	}
+
+	// Generate description
+	description := "UUID stored as text (36 characters). Logical foreign key - no database constraint."
+
+	return &UUIDTextColumnDescription{
+		Description:  description,
+		SemanticType: "uuid_text",
+		Role:         models.ColumnRoleIdentifier,
+		MatchRate:    matchRate,
+	}
+}
+
+// isTextType checks if a column data type is a text/varchar/char type.
+func isTextType(dataType string) bool {
+	dataTypeLower := strings.ToLower(dataType)
+	return strings.Contains(dataTypeLower, "char") ||
+		strings.Contains(dataTypeLower, "text") ||
+		strings.Contains(dataTypeLower, "varchar")
+}
+
+// TimestampScaleDescription contains the auto-generated description for a bigint column
+// storing Unix timestamps in various precision scales.
+type TimestampScaleDescription struct {
+	Description  string // Auto-generated description with scale info
+	SemanticType string // Semantic type: "unix_timestamp_seconds", "unix_timestamp_milliseconds", etc.
+	Role         string // Column role: "attribute"
+	Scale        string // seconds, milliseconds, microseconds, nanoseconds
+}
+
+// detectTimestampScalePattern checks if a bigint column contains Unix timestamps and
+// determines the scale (seconds, milliseconds, microseconds, nanoseconds) based on
+// the digit length of sample values.
+//
+// Pattern detection rules:
+// - Column type is bigint/int8
+// - Column name ends with '_at' or contains 'time'
+// - Has sample values available
+// - Digit length analysis:
+//   - 9-11 digits = seconds (e.g., 1704067200)
+//   - 12-14 digits = milliseconds (e.g., 1704067200000)
+//   - 15-17 digits = microseconds (e.g., 1704067200000000)
+//   - 18-20 digits = nanoseconds (e.g., 1704067200000000000)
+//
+// Returns nil if the column doesn't match the timestamp pattern.
+func detectTimestampScalePattern(col *models.SchemaColumn) *TimestampScaleDescription {
+	colNameLower := strings.ToLower(col.ColumnName)
+
+	// Check if column name matches timestamp patterns
+	isTimestampLike := false
+	if strings.HasSuffix(colNameLower, "_at") {
+		isTimestampLike = true
+	} else if strings.Contains(colNameLower, "time") {
+		isTimestampLike = true
+	}
+
+	if !isTimestampLike {
+		return nil
+	}
+
+	// Check column type is bigint
+	if !isBigintType(col.DataType) {
+		return nil
+	}
+
+	// Need sample values to analyze
+	if len(col.SampleValues) == 0 {
+		return nil
+	}
+
+	// Analyze digit lengths of sample values
+	scale := inferTimestampScale(col.SampleValues)
+	if scale == "" {
+		return nil
+	}
+
+	// Generate description based on detected scale
+	description := generateTimestampScaleDescription(scale, colNameLower)
+	semanticType := "unix_timestamp_" + scale
+
+	return &TimestampScaleDescription{
+		Description:  description,
+		SemanticType: semanticType,
+		Role:         models.ColumnRoleAttribute,
+		Scale:        scale,
+	}
+}
+
+// isBigintType checks if a column data type is a bigint type suitable for storing
+// Unix timestamps in various precision scales.
+func isBigintType(dataType string) bool {
+	dataTypeLower := strings.ToLower(dataType)
+	return dataTypeLower == "bigint" ||
+		dataTypeLower == "int8" ||
+		strings.HasPrefix(dataTypeLower, "bigint")
+}
+
+// inferTimestampScale analyzes sample values to determine the timestamp scale.
+// Returns empty string if values don't fit any known timestamp pattern.
+func inferTimestampScale(sampleValues []string) string {
+	if len(sampleValues) == 0 {
+		return ""
+	}
+
+	// Count digit lengths, ignoring invalid values
+	lengthCounts := make(map[int]int)
+	validCount := 0
+
+	for _, val := range sampleValues {
+		// Skip empty or negative values
+		if val == "" || strings.HasPrefix(val, "-") {
+			continue
+		}
+
+		// Count digits (ignore non-digit characters)
+		digitCount := countDigits(val)
+		if digitCount > 0 {
+			lengthCounts[digitCount]++
+			validCount++
+		}
+	}
+
+	if validCount == 0 {
+		return ""
+	}
+
+	// Find the most common digit length
+	maxCount := 0
+	dominantLength := 0
+	for length, count := range lengthCounts {
+		if count > maxCount {
+			maxCount = count
+			dominantLength = length
+		}
+	}
+
+	// Require at least 80% of values to have the same length pattern
+	if float64(maxCount)/float64(validCount) < 0.80 {
+		return ""
+	}
+
+	// Classify by digit length ranges
+	switch {
+	case dominantLength >= 9 && dominantLength <= 11:
+		return "seconds"
+	case dominantLength >= 12 && dominantLength <= 14:
+		return "milliseconds"
+	case dominantLength >= 15 && dominantLength <= 17:
+		return "microseconds"
+	case dominantLength >= 18 && dominantLength <= 20:
+		return "nanoseconds"
+	default:
+		return ""
+	}
+}
+
+// countDigits counts the number of digit characters in a string.
+func countDigits(s string) int {
+	count := 0
+	for _, c := range s {
+		if c >= '0' && c <= '9' {
+			count++
+		}
+	}
+	return count
+}
+
+// generateTimestampScaleDescription generates a description for a Unix timestamp column.
+func generateTimestampScaleDescription(scale, columnName string) string {
+	var scaleDesc string
+	switch scale {
+	case "seconds":
+		scaleDesc = "seconds since Unix epoch (1970-01-01)"
+	case "milliseconds":
+		scaleDesc = "milliseconds since Unix epoch"
+	case "microseconds":
+		scaleDesc = "microseconds since Unix epoch"
+	case "nanoseconds":
+		scaleDesc = "nanoseconds since Unix epoch"
+	default:
+		return ""
+	}
+
+	description := fmt.Sprintf("Unix timestamp in %s.", scaleDesc)
+
+	// Add usage hints based on column name
+	if strings.Contains(columnName, "marker") || strings.Contains(columnName, "cursor") {
+		description += " Used for cursor-based pagination ordering."
+	} else if strings.Contains(columnName, "created") || strings.Contains(columnName, "updated") {
+		description += " Record timestamp."
+	}
+
+	return description
+}
+
+// ============================================================================
+// Boolean Naming Pattern Detection
+// ============================================================================
+
+// BooleanColumnDescription contains the auto-generated description for a boolean column.
+type BooleanColumnDescription struct {
+	Description   string // Auto-generated description with distribution info
+	SemanticType  string // Semantic type: "boolean_flag"
+	Role          string // Column role: "dimension" (typically used for filtering/grouping)
+	FeatureName   string // Humanized feature name extracted from column name
+	NamingPattern string // "is_" or "has_"
+}
+
+// booleanPrefixes maps column name prefixes to their interpretation.
+// These are the common naming conventions for boolean columns.
+var booleanPrefixes = map[string]string{
+	"is_":     "Indicates whether",
+	"has_":    "Indicates whether this entity has",
+	"can_":    "Indicates whether this entity can",
+	"should_": "Indicates whether this entity should",
+	"allow_":  "Indicates whether",
+	"allows_": "Indicates whether",
+	"needs_":  "Indicates whether this entity needs",
+	"was_":    "Indicates whether this entity was",
+	"will_":   "Indicates whether this entity will",
+}
+
+// detectBooleanNamingPattern checks if a column matches a boolean naming pattern and returns
+// an auto-generated description if detected.
+//
+// Pattern detection rules:
+// - Column name starts with is_, has_, can_, should_, allow_, allows_, needs_, was_, will_
+// - Data type is boolean
+// - OR data type is integer/smallint with exactly 2 distinct values (0/1)
+//
+// Returns nil if the column doesn't match the boolean pattern.
+func detectBooleanNamingPattern(col *models.SchemaColumn) *BooleanColumnDescription {
+	colNameLower := strings.ToLower(col.ColumnName)
+
+	// Find matching prefix
+	var matchedPrefix string
+	var prefixDesc string
+	for prefix, desc := range booleanPrefixes {
+		if strings.HasPrefix(colNameLower, prefix) {
+			matchedPrefix = prefix
+			prefixDesc = desc
+			break
+		}
+	}
+
+	if matchedPrefix == "" {
+		return nil
+	}
+
+	// Check column type is boolean or boolean-like (integer with 2 values)
+	if !isBooleanType(col.DataType) && !isBooleanLikeIntegerColumn(col) {
+		return nil
+	}
+
+	// Extract feature name from column (e.g., "is_pc_enabled" -> "pc_enabled")
+	featureName := strings.TrimPrefix(colNameLower, matchedPrefix)
+	humanizedFeature := humanizeFeatureName(featureName)
+
+	// Generate description
+	description := generateBooleanDescription(prefixDesc, humanizedFeature)
+
+	return &BooleanColumnDescription{
+		Description:   description,
+		SemanticType:  "boolean_flag",
+		Role:          models.ColumnRoleDimension, // Booleans are typically used for filtering
+		FeatureName:   featureName,
+		NamingPattern: matchedPrefix,
+	}
+}
+
+// isBooleanType checks if a column data type is a boolean type.
+func isBooleanType(dataType string) bool {
+	dataTypeLower := strings.ToLower(dataType)
+	return dataTypeLower == "boolean" ||
+		dataTypeLower == "bool" ||
+		strings.HasPrefix(dataTypeLower, "bit")
+}
+
+// isBooleanLikeIntegerColumn checks if an integer column is boolean-like
+// (has exactly 2 distinct values, typically 0 and 1).
+func isBooleanLikeIntegerColumn(col *models.SchemaColumn) bool {
+	dataTypeLower := strings.ToLower(col.DataType)
+
+	// Must be integer type
+	if !strings.Contains(dataTypeLower, "int") {
+		return false
+	}
+
+	// Must have exactly 2 distinct values (0/1 or similar binary representation)
+	if col.DistinctCount == nil || *col.DistinctCount != 2 {
+		return false
+	}
+
+	// Check if sample values are 0 and 1 (or similar binary values)
+	if len(col.SampleValues) > 0 {
+		for _, val := range col.SampleValues {
+			if val != "0" && val != "1" && val != "true" && val != "false" {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+// humanizeFeatureName converts a snake_case feature name to a human-readable form.
+// Examples:
+//   - "pc_enabled" -> "PC enabled"
+//   - "email_verified" -> "email verified"
+//   - "active" -> "active"
+func humanizeFeatureName(feature string) string {
+	// Replace underscores with spaces
+	result := strings.ReplaceAll(feature, "_", " ")
+
+	// Capitalize known abbreviations
+	abbreviations := map[string]string{
+		"pc":    "PC",
+		"id":    "ID",
+		"uuid":  "UUID",
+		"url":   "URL",
+		"api":   "API",
+		"http":  "HTTP",
+		"https": "HTTPS",
+		"ssl":   "SSL",
+		"tls":   "TLS",
+		"mfa":   "MFA",
+		"2fa":   "2FA",
+		"sso":   "SSO",
+	}
+
+	words := strings.Fields(result)
+	for i, word := range words {
+		if upper, ok := abbreviations[strings.ToLower(word)]; ok {
+			words[i] = upper
+		}
+	}
+
+	return strings.Join(words, " ")
+}
+
+// generateBooleanDescription generates a description for a boolean column.
+func generateBooleanDescription(prefixDesc, humanizedFeature string) string {
+	var sb strings.Builder
+
+	sb.WriteString("Boolean flag. ")
+	sb.WriteString(prefixDesc)
+	sb.WriteString(" ")
+	sb.WriteString(humanizedFeature)
+	sb.WriteString(".")
+
+	// Note: We can't show accurate true/false percentages without actual count data per value.
+	// The enum distribution analysis (analyzeEnumDistributions) handles this for boolean columns
+	// when they're identified as enum candidates. So we don't add percentage here to avoid
+	// potentially inaccurate information.
+
+	return sb.String()
+}
+
+// ============================================================================
+// External ID Pattern Detection
+// ============================================================================
+
+// ExternalIDPatternDescription contains the auto-generated description for a column
+// containing external service identifiers (e.g., AWS SES Message-ID, Stripe IDs).
+type ExternalIDPatternDescription struct {
+	Description  string  // Auto-generated description with pattern info
+	SemanticType string  // Semantic type: "external_id_aws_ses", "external_id_stripe", etc.
+	Role         string  // Column role: "identifier"
+	PatternName  string  // Name of the detected pattern (e.g., "AWS SES Message-ID")
+	MatchRate    float64 // Percentage of sample values matching the pattern (0.0-100.0)
+}
+
+// ExternalIDPattern represents a known external ID format with its regex and metadata.
+type ExternalIDPattern struct {
+	Name         string         // Human-readable name (e.g., "AWS SES Message-ID")
+	Pattern      *regexp.Regexp // Regex pattern to match
+	SemanticType string         // Semantic type for this pattern
+	Description  string         // Description template with format info
+}
+
+// externalIDPatterns defines known external ID formats and their patterns.
+// Patterns are checked in order - more specific patterns should come first.
+var externalIDPatterns = []ExternalIDPattern{
+	{
+		Name:         "AWS SES Message-ID",
+		Pattern:      regexp.MustCompile(`^[0-9a-f-]+@email\.amazonses\.com$`),
+		SemanticType: "external_id_aws_ses",
+		Description:  "AWS SES Message-ID format. External reference to sent email in AWS SES.",
+	},
+	{
+		Name:         "Stripe Payment Intent",
+		Pattern:      regexp.MustCompile(`^pi_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_payment_intent",
+		Description:  "Stripe Payment Intent ID. External reference to a payment in Stripe.",
+	},
+	{
+		Name:         "Stripe Payment Method",
+		Pattern:      regexp.MustCompile(`^pm_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_payment_method",
+		Description:  "Stripe Payment Method ID. External reference to a stored payment method in Stripe.",
+	},
+	{
+		Name:         "Stripe Charge",
+		Pattern:      regexp.MustCompile(`^ch_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_charge",
+		Description:  "Stripe Charge ID. External reference to a charge in Stripe.",
+	},
+	{
+		Name:         "Stripe Customer",
+		Pattern:      regexp.MustCompile(`^cus_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_customer",
+		Description:  "Stripe Customer ID. External reference to a customer in Stripe.",
+	},
+	{
+		Name:         "Stripe Subscription",
+		Pattern:      regexp.MustCompile(`^sub_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_subscription",
+		Description:  "Stripe Subscription ID. External reference to a subscription in Stripe.",
+	},
+	{
+		Name:         "Stripe Invoice",
+		Pattern:      regexp.MustCompile(`^in_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_invoice",
+		Description:  "Stripe Invoice ID. External reference to an invoice in Stripe.",
+	},
+	{
+		Name:         "Stripe Refund",
+		Pattern:      regexp.MustCompile(`^re_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_refund",
+		Description:  "Stripe Refund ID. External reference to a refund in Stripe.",
+	},
+	{
+		Name:         "Stripe Price",
+		Pattern:      regexp.MustCompile(`^price_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_price",
+		Description:  "Stripe Price ID. External reference to a price object in Stripe.",
+	},
+	{
+		Name:         "Stripe Product",
+		Pattern:      regexp.MustCompile(`^prod_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_product",
+		Description:  "Stripe Product ID. External reference to a product in Stripe.",
+	},
+	{
+		Name:         "Stripe Transfer",
+		Pattern:      regexp.MustCompile(`^tr_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_transfer",
+		Description:  "Stripe Transfer ID. External reference to a transfer in Stripe.",
+	},
+	{
+		Name:         "Stripe Payout",
+		Pattern:      regexp.MustCompile(`^po_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_payout",
+		Description:  "Stripe Payout ID. External reference to a payout in Stripe.",
+	},
+	{
+		Name:         "Stripe Balance Transaction",
+		Pattern:      regexp.MustCompile(`^txn_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_balance_txn",
+		Description:  "Stripe Balance Transaction ID. External reference to a balance transaction in Stripe.",
+	},
+	{
+		Name:         "Stripe Setup Intent",
+		Pattern:      regexp.MustCompile(`^seti_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_setup_intent",
+		Description:  "Stripe Setup Intent ID. External reference to a setup intent in Stripe.",
+	},
+	{
+		Name:         "Stripe Event",
+		Pattern:      regexp.MustCompile(`^evt_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_event",
+		Description:  "Stripe Event ID. External reference to a webhook event in Stripe.",
+	},
+	{
+		Name:         "Stripe Account",
+		Pattern:      regexp.MustCompile(`^acct_[a-zA-Z0-9]+$`),
+		SemanticType: "external_id_stripe_account",
+		Description:  "Stripe Connect Account ID. External reference to a connected account in Stripe.",
+	},
+	{
+		Name:         "Twilio Message SID",
+		Pattern:      regexp.MustCompile(`^(SM|MM)[a-f0-9]{32}$`),
+		SemanticType: "external_id_twilio_message",
+		Description:  "Twilio Message SID. External reference to an SMS/MMS message in Twilio.",
+	},
+	{
+		Name:         "Twilio Call SID",
+		Pattern:      regexp.MustCompile(`^CA[a-f0-9]{32}$`),
+		SemanticType: "external_id_twilio_call",
+		Description:  "Twilio Call SID. External reference to a phone call in Twilio.",
+	},
+	{
+		Name:         "Twilio Account SID",
+		Pattern:      regexp.MustCompile(`^AC[a-f0-9]{32}$`),
+		SemanticType: "external_id_twilio_account",
+		Description:  "Twilio Account SID. External reference to a Twilio account.",
+	},
+	{
+		Name:         "PayPal Transaction ID",
+		Pattern:      regexp.MustCompile(`^[A-Z0-9]{17}$`),
+		SemanticType: "external_id_paypal_transaction",
+		Description:  "PayPal Transaction ID format. External reference to a transaction in PayPal.",
+	},
+	{
+		Name:         "MongoDB ObjectId",
+		Pattern:      regexp.MustCompile(`^[a-f0-9]{24}$`),
+		SemanticType: "external_id_mongodb_objectid",
+		Description:  "MongoDB ObjectId format. External reference to a document in MongoDB.",
+	},
+	{
+		Name:         "Sendgrid Message ID",
+		Pattern:      regexp.MustCompile(`^[a-zA-Z0-9-_.]+\.sendgrid\.net$`),
+		SemanticType: "external_id_sendgrid",
+		Description:  "SendGrid Message ID format. External reference to an email in SendGrid.",
+	},
+	{
+		Name:         "Firebase UID",
+		Pattern:      regexp.MustCompile(`^[a-zA-Z0-9]{28}$`),
+		SemanticType: "external_id_firebase_uid",
+		Description:  "Firebase UID format. External reference to a user in Firebase Auth.",
+	},
+	{
+		Name:         "Plaid ID",
+		Pattern:      regexp.MustCompile(`^[a-zA-Z0-9]{30,40}$`),
+		SemanticType: "external_id_plaid",
+		Description:  "Plaid ID format. External reference to an item/account in Plaid.",
+	},
+	// Note: UUID detection is handled by detectUUIDTextColumnPattern
+	// We skip UUID here to avoid duplicate detection
+}
+
+// detectExternalIDPattern checks if a text column contains external service identifiers
+// and returns an auto-generated description if detected.
+//
+// Pattern detection rules:
+// - Column type is text/varchar/char
+// - Has sample values available
+// - >95% of non-empty sample values match a known external ID pattern
+//
+// Returns nil if no external ID pattern is detected.
+func detectExternalIDPattern(col *models.SchemaColumn) *ExternalIDPatternDescription {
+	// Check column type is text-based
+	if !isTextType(col.DataType) {
+		return nil
+	}
+
+	// Need sample values to analyze
+	if len(col.SampleValues) == 0 {
+		return nil
+	}
+
+	// Filter out empty values
+	nonEmptyValues := make([]string, 0, len(col.SampleValues))
+	for _, val := range col.SampleValues {
+		if val != "" {
+			nonEmptyValues = append(nonEmptyValues, val)
+		}
+	}
+
+	if len(nonEmptyValues) == 0 {
+		return nil
+	}
+
+	// Check each pattern against sample values
+	for _, extPattern := range externalIDPatterns {
+		matchCount := 0
+		for _, val := range nonEmptyValues {
+			if extPattern.Pattern.MatchString(val) {
+				matchCount++
+			}
+		}
+
+		// Calculate match rate
+		matchRate := float64(matchCount) / float64(len(nonEmptyValues)) * 100.0
+
+		// Require >95% match rate for high confidence
+		if matchRate > 95.0 {
+			return &ExternalIDPatternDescription{
+				Description:  extPattern.Description,
+				SemanticType: extPattern.SemanticType,
+				Role:         models.ColumnRoleIdentifier,
+				PatternName:  extPattern.Name,
+				MatchRate:    matchRate,
+			}
+		}
+	}
+
+	return nil
+}
+
+// ============================================================================
+// Role Detection from Column Naming Patterns
+// ============================================================================
+
+// RolePatterns maps entity types to their known role prefixes.
+// When multiple columns in the same table reference the same entity,
+// the column name prefix indicates the semantic role of that reference.
+//
+// Examples:
+//   - host_id -> User with role "host" (content provider)
+//   - visitor_id -> User with role "visitor" (content consumer)
+//   - payer_id -> User with role "payer" (person making payment)
+//   - payee_id -> User with role "payee" (person receiving payment)
+var RolePatterns = map[string][]string{
+	// User roles - common patterns for person-to-person relationships
+	"user": {
+		"host", "visitor", // content/marketplace platforms
+		"creator", "owner", // ownership relationships
+		"sender", "recipient", // messaging/transfers
+		"payer", "payee", // financial transactions
+		"buyer", "seller", // e-commerce
+		"assignee", "assignor", // task/ticket assignment
+		"author", "reviewer", // content creation/review
+		"requester", "approver", // approval workflows
+		"parent", "child", // hierarchical relationships
+		"manager", "employee", // organizational relationships
+		"referrer", "referee", // referral programs
+		"inviter", "invitee", // invitation flows
+		"follower", "following", // social relationships
+		"mentor", "mentee", // mentorship
+		"driver", "rider", // transportation platforms
+		"provider", "consumer", // service marketplaces
+		"instructor", "student", // educational platforms
+		"landlord", "tenant", // property platforms
+		"lender", "borrower", // lending platforms
+	},
+	// Account roles - for financial or multi-party transactions
+	"account": {
+		"source", "destination", // transfer endpoints
+		"from", "to", // transfer direction
+		"debit", "credit", // accounting entries
+		"payer", "payee", // payment parties (can apply to accounts too)
+		"billing", "shipping", // e-commerce accounts
+	},
+}
+
+// RoleDescriptions provides human-readable descriptions for known roles.
+// Used to generate informative FK descriptions.
+var RoleDescriptions = map[string]string{
+	// User roles
+	"host":       "content provider",
+	"visitor":    "content consumer",
+	"creator":    "entity creator",
+	"owner":      "entity owner",
+	"sender":     "message sender",
+	"recipient":  "message recipient",
+	"payer":      "payment source",
+	"payee":      "payment recipient",
+	"buyer":      "purchasing party",
+	"seller":     "selling party",
+	"assignee":   "assigned party",
+	"assignor":   "assigning party",
+	"author":     "content author",
+	"reviewer":   "content reviewer",
+	"requester":  "request initiator",
+	"approver":   "request approver",
+	"parent":     "parent entity",
+	"child":      "child entity",
+	"manager":    "managing party",
+	"employee":   "managed party",
+	"referrer":   "referring party",
+	"referee":    "referred party",
+	"inviter":    "inviting party",
+	"invitee":    "invited party",
+	"follower":   "following party",
+	"following":  "followed party",
+	"mentor":     "mentoring party",
+	"mentee":     "mentored party",
+	"driver":     "driver/operator",
+	"rider":      "passenger/rider",
+	"provider":   "service provider",
+	"consumer":   "service consumer",
+	"instructor": "instructor/teacher",
+	"student":    "student/learner",
+	"landlord":   "property owner",
+	"tenant":     "property renter",
+	"lender":     "lending party",
+	"borrower":   "borrowing party",
+	// Account roles
+	"source":      "source account",
+	"destination": "destination account",
+	"from":        "originating account",
+	"to":          "receiving account",
+	"debit":       "debited account",
+	"credit":      "credited account",
+	"billing":     "billing account",
+	"shipping":    "shipping account",
+}
+
+// DetectedRole contains the result of role detection from a column name.
+type DetectedRole struct {
+	Role        string // Detected role (e.g., "host", "visitor", "payer")
+	Description string // Human-readable description of the role
+}
+
+// detectRoleFromColumnName extracts a semantic role from a column name.
+// Returns nil if no role pattern is detected.
+//
+// The function handles column names in the format: {role}_{suffix}
+// where suffix is typically "id", "user_id", "account_id", etc.
+//
+// Examples:
+//   - "host_id" -> role: "host"
+//   - "host_user_id" -> role: "host"
+//   - "visitor_id" -> role: "visitor"
+//   - "payer_account_id" -> role: "payer"
+//   - "source_account_id" -> role: "source"
+//   - "user_id" -> nil (generic reference, no role)
+func detectRoleFromColumnName(columnName string) *DetectedRole {
+	colLower := strings.ToLower(columnName)
+
+	// Check all role patterns
+	for _, roles := range RolePatterns {
+		for _, role := range roles {
+			// Check for prefix pattern: {role}_
+			if strings.HasPrefix(colLower, role+"_") {
+				desc := RoleDescriptions[role]
+				if desc == "" {
+					desc = role // fallback to role name if no description
+				}
+				return &DetectedRole{
+					Role:        role,
+					Description: desc,
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// detectRolesInTable analyzes all FK columns in a table and identifies role-based references.
+// Returns a map of column_name -> DetectedRole for columns with detected roles.
+//
+// This is particularly useful when multiple columns reference the same target table
+// with different roles (e.g., host_id and visitor_id both referencing users).
+func detectRolesInTable(fkInfo map[string]string) map[string]*DetectedRole {
+	result := make(map[string]*DetectedRole)
+
+	// Group FK columns by target table to identify role-based patterns
+	columnsByTarget := make(map[string][]string)
+	for colName, targetTable := range fkInfo {
+		columnsByTarget[targetTable] = append(columnsByTarget[targetTable], colName)
+	}
+
+	// Detect roles for all FK columns
+	for colName := range fkInfo {
+		if role := detectRoleFromColumnName(colName); role != nil {
+			result[colName] = role
+		}
+	}
+
+	return result
+}
+
+// FKColumnDescription contains the auto-generated description for a foreign key column.
+// This is used to provide accurate, data-driven descriptions for FK columns based on
+// how the relationship was detected (database constraint vs data overlap analysis).
+type FKColumnDescription struct {
+	Description  string  // Auto-generated description with target info and detection context
+	SemanticType string  // Semantic type: "foreign_key" or "logical_foreign_key"
+	Role         string  // Column role: "identifier"
+	TargetTable  string  // Target table the FK references
+	TargetColumn string  // Target column the FK references
+	Confidence   float64 // Detection confidence (1.0 for DB constraints, lower for inferred)
+	DetectedRole string  // Semantic role detected from column name (e.g., "host", "visitor")
+	RoleDesc     string  // Human-readable description of the detected role
+}
+
+// detectFKColumnPattern checks if a column is a foreign key and generates an auto-description
+// based on how the relationship was detected.
+//
+// Pattern detection rules:
+// - Column must have a confirmed FK relationship
+// - Role detection from column name prefixes (e.g., host_id -> role: host)
+// - For database FK constraints (detection_method = "foreign_key"):
+//   - Description: "Foreign key to {table}.{column}. Role: {role} ({description})."
+//
+// - For inferred FKs (detection_method = "pk_match"):
+//   - Description: "Foreign key to {table}.{column}. Role: {role}. No database constraint - logical reference only."
+//   - Includes confidence percentage based on match analysis
+//
+// Returns nil if no FK relationship exists for this column.
+func detectFKColumnPattern(col *models.SchemaColumn, fkInfo *FKRelationshipInfo) *FKColumnDescription {
+	if fkInfo == nil {
+		return nil
+	}
+
+	var description string
+	var semanticType string
+
+	// Detect role from column name
+	detectedRole := detectRoleFromColumnName(col.ColumnName)
+
+	if fkInfo.IsDBConstraint {
+		// Database FK constraint - explicit relationship
+		description = fmt.Sprintf("Foreign key to %s.%s.",
+			fkInfo.TargetTable, fkInfo.TargetColumn)
+		semanticType = "foreign_key"
+	} else {
+		// Inferred FK via data overlap analysis
+		// pk_match relationships are only created when join analysis shows >95% match rate
+		// (less than 5% orphan values). The confidence value reflects detection confidence,
+		// not the actual match rate.
+		confidencePct := fkInfo.Confidence * 100
+		description = fmt.Sprintf("Foreign key to %s.%s (%.0f%% confidence). No database constraint - logical reference validated via data overlap.",
+			fkInfo.TargetTable, fkInfo.TargetColumn, confidencePct)
+		semanticType = "logical_foreign_key"
+	}
+
+	// Append role information if detected
+	if detectedRole != nil {
+		description = fmt.Sprintf("%s Role: %s (%s).",
+			strings.TrimSuffix(description, "."), detectedRole.Role, detectedRole.Description)
+	}
+
+	result := &FKColumnDescription{
+		Description:  description,
+		SemanticType: semanticType,
+		Role:         models.ColumnRoleIdentifier,
+		TargetTable:  fkInfo.TargetTable,
+		TargetColumn: fkInfo.TargetColumn,
+		Confidence:   fkInfo.Confidence,
+	}
+
+	if detectedRole != nil {
+		result.DetectedRole = detectedRole.Role
+		result.RoleDesc = detectedRole.Description
+	}
+
+	return result
+}
+
+// applyEnumDistributions merges distribution data into EnumValue structs.
+func applyEnumDistributions(enumValues []models.EnumValue, dist *datasource.EnumDistributionResult) []models.EnumValue {
+	if dist == nil || len(dist.Distributions) == 0 {
+		return enumValues
+	}
+
+	// Build a map of value -> distribution for quick lookup
+	distMap := make(map[string]datasource.EnumValueDistribution)
+	for _, d := range dist.Distributions {
+		distMap[d.Value] = d
+	}
+
+	// Apply distribution data to each enum value
+	for i := range enumValues {
+		ev := &enumValues[i]
+		if d, ok := distMap[ev.Value]; ok {
+			count := d.Count
+			percentage := d.Percentage
+			ev.Count = &count
+			ev.Percentage = &percentage
+
+			// Apply state semantics if detected
+			if d.IsLikelyInitialState {
+				isTrue := true
+				ev.IsLikelyInitialState = &isTrue
+			}
+			if d.IsLikelyTerminalState {
+				isTrue := true
+				ev.IsLikelyTerminalState = &isTrue
+			}
+			if d.IsLikelyErrorState {
+				isTrue := true
+				ev.IsLikelyErrorState = &isTrue
+			}
+		}
+	}
+
+	return enumValues
 }
 
 // getDatasource retrieves the datasource for the entity's primary schema.
@@ -848,19 +2128,25 @@ func (s *columnEnrichmentService) writeFKContext(sb *strings.Builder, fkInfo map
 // convertToColumnDetails converts LLM enrichments to ColumnDetail structs.
 // It merges project-level enum definitions when available, using them to provide
 // accurate descriptions for enum values that the LLM cannot infer.
+// It also applies enum distribution metadata (count, percentage, state semantics).
 func (s *columnEnrichmentService) convertToColumnDetails(
 	tableName string,
 	enrichments []columnEnrichment,
 	columns []*models.SchemaColumn,
 	fkInfo map[string]string,
+	fkDetailedInfo map[string]*FKRelationshipInfo,
 	enumSamples map[string][]string,
 	enumDefs []models.EnumDefinition,
+	enumDistributions map[string]*datasource.EnumDistributionResult,
 ) []models.ColumnDetail {
 	// Build a map for quick lookup
 	enrichmentByName := make(map[string]columnEnrichment)
 	for _, e := range enrichments {
 		enrichmentByName[e.Name] = e
 	}
+
+	// Find currency column for monetary pattern detection (one lookup for all columns)
+	currencyColumn := findCurrencyColumn(columns)
 
 	// Build column details with schema overlay
 	details := make([]models.ColumnDetail, 0, len(columns))
@@ -888,6 +2174,71 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 			}
 		}
 
+		// Apply soft delete pattern detection (overrides LLM description with data-driven description)
+		if softDelete := detectSoftDeletePattern(col); softDelete != nil {
+			detail.Description = softDelete.Description
+			detail.SemanticType = softDelete.SemanticType
+			detail.Role = softDelete.Role
+		}
+
+		// Apply monetary column pattern detection (overrides LLM description with data-driven description)
+		if monetary := detectMonetaryColumnPattern(col, currencyColumn); monetary != nil {
+			detail.Description = monetary.Description
+			detail.SemanticType = monetary.SemanticType
+			detail.Role = monetary.Role
+		}
+
+		// Apply UUID text column pattern detection (overrides LLM description with data-driven description)
+		// If UUID pattern is detected, skip external ID detection since UUID is a specific type
+		uuidDetected := false
+		if uuidText := detectUUIDTextColumnPattern(col); uuidText != nil {
+			detail.Description = uuidText.Description
+			detail.SemanticType = uuidText.SemanticType
+			detail.Role = uuidText.Role
+			uuidDetected = true
+		}
+
+		// Apply external ID pattern detection (only if UUID was not detected)
+		// This detects patterns like AWS SES Message-ID, Stripe IDs, Twilio SIDs, etc.
+		if !uuidDetected {
+			if externalID := detectExternalIDPattern(col); externalID != nil {
+				detail.Description = externalID.Description
+				detail.SemanticType = externalID.SemanticType
+				detail.Role = externalID.Role
+			}
+		}
+
+		// Apply timestamp scale pattern detection (overrides LLM description with data-driven description)
+		if timestampScale := detectTimestampScalePattern(col); timestampScale != nil {
+			detail.Description = timestampScale.Description
+			detail.SemanticType = timestampScale.SemanticType
+			detail.Role = timestampScale.Role
+		}
+
+		// Apply boolean naming pattern detection (overrides LLM description with data-driven description)
+		if booleanDesc := detectBooleanNamingPattern(col); booleanDesc != nil {
+			detail.Description = booleanDesc.Description
+			detail.SemanticType = booleanDesc.SemanticType
+			detail.Role = booleanDesc.Role
+		}
+
+		// Apply FK column pattern detection for logical FKs (pk_match detected)
+		// This provides accurate descriptions based on how the relationship was detected
+		// Also detects semantic roles from column naming patterns (e.g., host_id -> role: host)
+		if fkDetail, ok := fkDetailedInfo[col.ColumnName]; ok {
+			if fkColDesc := detectFKColumnPattern(col, fkDetail); fkColDesc != nil {
+				detail.Description = fkColDesc.Description
+				detail.SemanticType = fkColDesc.SemanticType
+				detail.Role = fkColDesc.Role
+
+				// Set FKAssociation from detected role if not already set by LLM
+				// Deterministic role detection takes precedence when available
+				if fkColDesc.DetectedRole != "" && detail.FKAssociation == "" {
+					detail.FKAssociation = fkColDesc.DetectedRole
+				}
+			}
+		}
+
 		// Merge project-level enum definitions if available
 		// This overrides LLM-inferred enum values with explicit definitions
 		if sampledValues, hasSamples := enumSamples[col.ColumnName]; hasSamples && len(enumDefs) > 0 {
@@ -904,6 +2255,11 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 					detail.EnumValues = mergedEnums
 				}
 			}
+		}
+
+		// Apply enum distribution metadata (count, percentage, state semantics)
+		if dist, hasDist := enumDistributions[col.ColumnName]; hasDist && len(detail.EnumValues) > 0 {
+			detail.EnumValues = applyEnumDistributions(detail.EnumValues, dist)
 		}
 
 		details = append(details, detail)

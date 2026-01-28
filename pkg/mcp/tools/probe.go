@@ -334,18 +334,38 @@ func probeColumn(ctx context.Context, deps *ProbeToolDeps, projectID uuid.UUID, 
 					semantic.Entity = entitySummary.BusinessName
 				}
 
-				// Extract enum labels
+				// Extract enum labels and distribution data
 				if len(colDetail.EnumValues) > 0 {
 					enumLabels := make(map[string]string)
+					var enumDist []probeEnumValueDetail
+
 					for _, ev := range colDetail.EnumValues {
 						if ev.Label != "" {
 							enumLabels[ev.Value] = ev.Label
 						} else if ev.Description != "" {
 							enumLabels[ev.Value] = ev.Description
 						}
+
+						// Add distribution data if available
+						if ev.Count != nil || ev.IsLikelyInitialState != nil || ev.IsLikelyTerminalState != nil || ev.IsLikelyErrorState != nil {
+							detail := probeEnumValueDetail{
+								Value:                 ev.Value,
+								Label:                 ev.Label,
+								Count:                 ev.Count,
+								Percentage:            ev.Percentage,
+								IsLikelyInitialState:  ev.IsLikelyInitialState,
+								IsLikelyTerminalState: ev.IsLikelyTerminalState,
+								IsLikelyErrorState:    ev.IsLikelyErrorState,
+							}
+							enumDist = append(enumDist, detail)
+						}
 					}
+
 					if len(enumLabels) > 0 {
 						semantic.EnumLabels = enumLabels
+					}
+					if len(enumDist) > 0 {
+						semantic.EnumDistribution = enumDist
 					}
 				}
 
@@ -435,10 +455,22 @@ type probeColumnJoinability struct {
 
 // probeColumnSemantic contains semantic information from the ontology.
 type probeColumnSemantic struct {
-	Entity      string            `json:"entity,omitempty"`
-	Role        string            `json:"role,omitempty"`
-	Description string            `json:"description,omitempty"`
-	EnumLabels  map[string]string `json:"enum_labels,omitempty"`
+	Entity           string                 `json:"entity,omitempty"`
+	Role             string                 `json:"role,omitempty"`
+	Description      string                 `json:"description,omitempty"`
+	EnumLabels       map[string]string      `json:"enum_labels,omitempty"`
+	EnumDistribution []probeEnumValueDetail `json:"enum_distribution,omitempty"` // Distribution with state semantics
+}
+
+// probeEnumValueDetail provides detailed enum value information including distribution and state semantics.
+type probeEnumValueDetail struct {
+	Value                 string   `json:"value"`
+	Label                 string   `json:"label,omitempty"`
+	Count                 *int64   `json:"count,omitempty"`
+	Percentage            *float64 `json:"percentage,omitempty"`
+	IsLikelyInitialState  *bool    `json:"is_likely_initial_state,omitempty"`
+	IsLikelyTerminalState *bool    `json:"is_likely_terminal_state,omitempty"`
+	IsLikelyErrorState    *bool    `json:"is_likely_error_state,omitempty"`
 }
 
 // probeColumnsResponse is the response format for probe_columns batch tool.

@@ -45,8 +45,8 @@ func TestRegisterColumnTools(t *testing.T) {
 	err = json.Unmarshal(resultBytes, &response)
 	require.NoError(t, err)
 
-	// Verify both tools are registered
-	expectedTools := []string{"update_column", "delete_column_metadata"}
+	// Verify all tools are registered
+	expectedTools := []string{"get_column_metadata", "update_column", "delete_column_metadata"}
 	foundTools := make(map[string]bool)
 
 	for _, tool := range response.Result.Tools {
@@ -56,6 +56,70 @@ func TestRegisterColumnTools(t *testing.T) {
 	for _, expected := range expectedTools {
 		assert.True(t, foundTools[expected], "tool %s should be registered", expected)
 	}
+}
+
+func TestGetColumnMetadataTool_Structure(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &ColumnToolDeps{
+		Logger: zap.NewNop(),
+	}
+
+	RegisterColumnTools(mcpServer, deps)
+
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				InputSchema struct {
+					Type       string                 `json:"type"`
+					Properties map[string]interface{} `json:"properties"`
+					Required   []string               `json:"required"`
+				} `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+
+	err = json.Unmarshal(resultBytes, &response)
+	require.NoError(t, err)
+
+	// Find get_column_metadata tool
+	var getColumnTool *struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		InputSchema struct {
+			Type       string                 `json:"type"`
+			Properties map[string]interface{} `json:"properties"`
+			Required   []string               `json:"required"`
+		} `json:"inputSchema"`
+	}
+
+	for i := range response.Result.Tools {
+		if response.Result.Tools[i].Name == "get_column_metadata" {
+			getColumnTool = &response.Result.Tools[i]
+			break
+		}
+	}
+
+	require.NotNil(t, getColumnTool, "get_column_metadata tool should exist")
+
+	// Verify description mentions use before update_column
+	assert.Contains(t, getColumnTool.Description, "update_column", "description should mention use before update_column")
+
+	// Verify required parameters
+	assert.Contains(t, getColumnTool.InputSchema.Required, "table", "table should be required")
+	assert.Contains(t, getColumnTool.InputSchema.Required, "column", "column should be required")
+
+	// Verify properties exist
+	assert.Contains(t, getColumnTool.InputSchema.Properties, "table", "should have table parameter")
+	assert.Contains(t, getColumnTool.InputSchema.Properties, "column", "should have column parameter")
 }
 
 func TestUpdateColumnTool_Structure(t *testing.T) {
@@ -187,6 +251,128 @@ func TestDeleteColumnMetadataTool_Structure(t *testing.T) {
 // ============================================================================
 // Response Format Tests
 // ============================================================================
+
+func TestGetColumnMetadata_ResponseStructure(t *testing.T) {
+	// Test with full metadata
+	response := getColumnMetadataResponse{
+		Table:  "users",
+		Column: "status",
+		Schema: columnSchemaInfo{
+			DataType:     "varchar(50)",
+			IsNullable:   false,
+			IsPrimaryKey: false,
+		},
+		Metadata: &columnMetadataInfo{
+			Description:  "User account status",
+			SemanticType: "enum",
+			EnumValues:   []string{"ACTIVE - Normal account", "SUSPENDED - Temporarily disabled"},
+			Entity:       "User",
+			Role:         "attribute",
+		},
+	}
+
+	// Verify response has required fields
+	assert.NotEmpty(t, response.Table, "response should have table field")
+	assert.NotEmpty(t, response.Column, "response should have column field")
+	assert.NotEmpty(t, response.Schema.DataType, "response should have schema.data_type field")
+
+	// Verify metadata section
+	require.NotNil(t, response.Metadata, "response should have metadata when enriched")
+	assert.NotEmpty(t, response.Metadata.Description, "metadata should have description")
+	assert.NotEmpty(t, response.Metadata.Entity, "metadata should have entity")
+	assert.NotEmpty(t, response.Metadata.Role, "metadata should have role")
+	assert.NotEmpty(t, response.Metadata.EnumValues, "metadata should have enum_values")
+}
+
+func TestGetColumnMetadata_ResponseStructure_NoMetadata(t *testing.T) {
+	// Test with only schema info (no ontology metadata)
+	response := getColumnMetadataResponse{
+		Table:  "users",
+		Column: "created_at",
+		Schema: columnSchemaInfo{
+			DataType:     "timestamp",
+			IsNullable:   false,
+			IsPrimaryKey: false,
+		},
+		Metadata: nil, // No metadata yet
+	}
+
+	// Verify response has schema fields
+	assert.Equal(t, "users", response.Table)
+	assert.Equal(t, "created_at", response.Column)
+	assert.Equal(t, "timestamp", response.Schema.DataType)
+	assert.False(t, response.Schema.IsNullable)
+	assert.False(t, response.Schema.IsPrimaryKey)
+
+	// Verify metadata is nil (omitted in JSON)
+	assert.Nil(t, response.Metadata)
+}
+
+func TestGetColumnMetadata_JSONSerialization(t *testing.T) {
+	response := getColumnMetadataResponse{
+		Table:  "users",
+		Column: "status",
+		Schema: columnSchemaInfo{
+			DataType:     "varchar(50)",
+			IsNullable:   false,
+			IsPrimaryKey: false,
+		},
+		Metadata: &columnMetadataInfo{
+			Description: "User account status",
+			Entity:      "User",
+			Role:        "attribute",
+		},
+	}
+
+	// Marshal to JSON
+	jsonData, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	// Verify JSON structure
+	var decoded map[string]any
+	err = json.Unmarshal(jsonData, &decoded)
+	require.NoError(t, err)
+
+	assert.Equal(t, "users", decoded["table"])
+	assert.Equal(t, "status", decoded["column"])
+
+	schema, ok := decoded["schema"].(map[string]any)
+	require.True(t, ok, "schema should be a map")
+	assert.Equal(t, "varchar(50)", schema["data_type"])
+	assert.Equal(t, false, schema["is_nullable"])
+	assert.Equal(t, false, schema["is_primary_key"])
+
+	metadata, ok := decoded["metadata"].(map[string]any)
+	require.True(t, ok, "metadata should be a map")
+	assert.Equal(t, "User account status", metadata["description"])
+	assert.Equal(t, "User", metadata["entity"])
+	assert.Equal(t, "attribute", metadata["role"])
+}
+
+func TestGetColumnMetadata_JSONSerialization_OmitsEmptyMetadata(t *testing.T) {
+	response := getColumnMetadataResponse{
+		Table:  "users",
+		Column: "created_at",
+		Schema: columnSchemaInfo{
+			DataType:     "timestamp",
+			IsNullable:   true,
+			IsPrimaryKey: false,
+		},
+		Metadata: nil, // No metadata
+	}
+
+	// Marshal to JSON
+	jsonData, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	// Verify metadata is omitted (not included as null)
+	var decoded map[string]any
+	err = json.Unmarshal(jsonData, &decoded)
+	require.NoError(t, err)
+
+	_, hasMetadata := decoded["metadata"]
+	assert.False(t, hasMetadata, "metadata should be omitted when nil")
+}
 
 func TestUpdateColumn_ResponseStructure(t *testing.T) {
 	response := updateColumnResponse{
@@ -357,6 +543,102 @@ func TestEnumValues_Roundtrip(t *testing.T) {
 // ============================================================================
 // Error Result Tests
 // ============================================================================
+
+// TestGetColumnMetadataTool_ErrorResults tests error result patterns for get_column_metadata tool.
+// These tests validate the error result structure without requiring database setup.
+func TestGetColumnMetadataTool_ErrorResults(t *testing.T) {
+	t.Run("empty table name after trimming", func(t *testing.T) {
+		// Simulate empty table name validation
+		table := "   " // whitespace only
+		table = strings.TrimSpace(table)
+
+		if table == "" {
+			result := NewErrorResult("invalid_parameters", "parameter 'table' cannot be empty")
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse error response
+			var errResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errResp)
+			require.NoError(t, err)
+
+			assert.True(t, errResp.Error)
+			assert.Equal(t, "invalid_parameters", errResp.Code)
+			assert.Contains(t, errResp.Message, "table")
+			assert.Contains(t, errResp.Message, "cannot be empty")
+		}
+	})
+
+	t.Run("empty column name after trimming", func(t *testing.T) {
+		// Simulate empty column name validation
+		column := "   " // whitespace only
+		column = strings.TrimSpace(column)
+
+		if column == "" {
+			result := NewErrorResult("invalid_parameters", "parameter 'column' cannot be empty")
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse error response
+			var errResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errResp)
+			require.NoError(t, err)
+
+			assert.True(t, errResp.Error)
+			assert.Equal(t, "invalid_parameters", errResp.Code)
+			assert.Contains(t, errResp.Message, "column")
+			assert.Contains(t, errResp.Message, "cannot be empty")
+		}
+	})
+
+	t.Run("table not found", func(t *testing.T) {
+		// Simulate table not found error
+		table := "nonexistent_table"
+		result := NewErrorResult("TABLE_NOT_FOUND",
+			fmt.Sprintf("table %q not found in schema registry", table))
+
+		// Verify it's an error result
+		assert.NotNil(t, result)
+		assert.True(t, result.IsError)
+
+		// Parse error response
+		var errResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(result)), &errResp)
+		require.NoError(t, err)
+
+		assert.True(t, errResp.Error)
+		assert.Equal(t, "TABLE_NOT_FOUND", errResp.Code)
+		assert.Contains(t, errResp.Message, "nonexistent_table")
+		assert.Contains(t, errResp.Message, "not found")
+	})
+
+	t.Run("column not found", func(t *testing.T) {
+		// Simulate column not found error
+		table := "users"
+		column := "nonexistent_column"
+		result := NewErrorResult("COLUMN_NOT_FOUND",
+			fmt.Sprintf("column %q not found in table %q", column, table))
+
+		// Verify it's an error result
+		assert.NotNil(t, result)
+		assert.True(t, result.IsError)
+
+		// Parse error response
+		var errResp ErrorResponse
+		err := json.Unmarshal([]byte(getTextContent(result)), &errResp)
+		require.NoError(t, err)
+
+		assert.True(t, errResp.Error)
+		assert.Equal(t, "COLUMN_NOT_FOUND", errResp.Code)
+		assert.Contains(t, errResp.Message, "nonexistent_column")
+		assert.Contains(t, errResp.Message, "users")
+		assert.Contains(t, errResp.Message, "not found")
+	})
+}
 
 // TestUpdateColumnTool_ErrorResults tests error result patterns for update_column tool.
 // These tests validate the error result structure without requiring database setup.
