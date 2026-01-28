@@ -507,6 +507,7 @@ func main() {
 		Logger:             logger,
 	}
 	mcptools.RegisterColumnTools(mcpServer.MCP(), columnToolDeps)
+	mcptools.RegisterBatchTools(mcpServer.MCP(), columnToolDeps)
 
 	// Register column probe tools (for deep-diving into column statistics and semantics)
 	probeToolDeps := &mcptools.ProbeToolDeps{

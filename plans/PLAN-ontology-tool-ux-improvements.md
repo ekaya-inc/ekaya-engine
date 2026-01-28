@@ -109,7 +109,7 @@ func RegisterOntologyInspectionTools(s *server.MCPServer, deps *OntologyToolDeps
 
 ---
 
-## Task 2: Add Batch Update Tools
+## Task 2: Add Batch Update Tools [x]
 
 ### Problem
 

@@ -39,6 +39,7 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "update_project_knowledge", Description: "Create or update domain facts (terminology, business rules, enumerations, conventions)", ToolGroup: ToolGroupDeveloper},
 	{Name: "delete_project_knowledge", Description: "Remove incorrect or outdated domain facts", ToolGroup: ToolGroupDeveloper},
 	{Name: "update_column", Description: "Add or update semantic information about a column (description, enum_values, entity, role)", ToolGroup: ToolGroupDeveloper},
+	{Name: "update_columns", Description: "Batch update metadata for multiple columns (up to 50) in a single transaction", ToolGroup: ToolGroupDeveloper},
 	{Name: "delete_column_metadata", Description: "Clear custom metadata for a column, reverting to schema-only information", ToolGroup: ToolGroupDeveloper},
 	{Name: "list_ontology_questions", Description: "List ontology questions with filtering by status, category, entity, priority, and pagination", ToolGroup: ToolGroupDeveloper},
 	{Name: "resolve_ontology_question", Description: "Mark an ontology question as resolved after researching and updating the ontology", ToolGroup: ToolGroupDeveloper},
