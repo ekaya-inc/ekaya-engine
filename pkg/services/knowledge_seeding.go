@@ -63,7 +63,32 @@ func (s *knowledgeSeedingService) ExtractKnowledgeFromOverview(ctx context.Conte
 		return 0, nil
 	}
 
-	// 2. Get schema summary for context
+	// 2. Get existing knowledge facts (excluding project_overview)
+	allFacts, err := s.knowledgeService.GetAll(ctx, projectID)
+	if err != nil {
+		s.logger.Warn("Failed to get existing knowledge facts, continuing without them",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		allFacts = nil
+	}
+
+	// Filter out project_overview - it's the input, not learned knowledge
+	existingFacts := make([]*models.KnowledgeFact, 0, len(allFacts))
+	for _, fact := range allFacts {
+		if fact.Key != "project_overview" {
+			existingFacts = append(existingFacts, fact)
+		}
+	}
+
+	// Skip seeding if we already have learned facts (knowledge seeding is one-time initialization)
+	if len(existingFacts) > 0 {
+		s.logger.Info("Knowledge facts already exist, skipping seeding",
+			zap.String("project_id", projectID.String()),
+			zap.Int("existing_facts", len(existingFacts)))
+		return 0, nil
+	}
+
+	// 3. Get schema summary for context
 	schemaContext, err := s.schemaService.GetDatasourceSchemaForPrompt(ctx, projectID, datasourceID, true)
 	if err != nil {
 		s.logger.Warn("Failed to get schema summary, continuing without schema context",
@@ -72,13 +97,13 @@ func (s *knowledgeSeedingService) ExtractKnowledgeFromOverview(ctx context.Conte
 		schemaContext = ""
 	}
 
-	// 3. Use LLM to extract knowledge facts
+	// 4. Use LLM to extract knowledge facts
 	extractedFacts, err := s.extractKnowledgeFacts(ctx, projectID, projectOverview, schemaContext)
 	if err != nil {
 		return 0, fmt.Errorf("failed to extract knowledge facts: %w", err)
 	}
 
-	// 4. Store extracted facts with source='inferred'
+	// 5. Store extracted facts with source='inferred'
 	storedCount := 0
 	for _, fact := range extractedFacts {
 		if _, err := s.knowledgeService.StoreWithSource(
@@ -205,7 +230,7 @@ Respond with a JSON object containing extracted facts:
   ]
 }
 
-Extract all relevant facts from the overview. Return an empty array if no clear facts can be extracted.`)
+Return {"facts": []} if no clear facts can be extracted from the overview.`)
 
 	return sb.String()
 }
