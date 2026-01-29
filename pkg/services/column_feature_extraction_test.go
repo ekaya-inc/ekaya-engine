@@ -1864,3 +1864,336 @@ func TestMergeEnumAnalysis_DoesNotLowerConfidence(t *testing.T) {
 		t.Errorf("Confidence = %v, should remain 0.95", features[0].Confidence)
 	}
 }
+
+// ============================================================================
+// Phase 4: FK Resolution Tests
+// ============================================================================
+
+func TestRunPhase4FKResolution_SkipsWhenEmpty(t *testing.T) {
+	svc := &columnFeatureExtractionService{
+		logger: zap.NewNop(),
+	}
+
+	err := svc.runPhase4FKResolution(
+		context.Background(),
+		uuid.New(),
+		uuid.New(),
+		[]uuid.UUID{}, // Empty queue
+		nil,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Errorf("runPhase4FKResolution() error = %v, want nil", err)
+	}
+}
+
+func TestRunPhase4FKResolution_FallsBackToLLMOnlyWithoutDatasource(t *testing.T) {
+	projectID := uuid.New()
+	fkColumnID := uuid.New()
+
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		return &llm.GenerateResponseResult{
+			Content: `{"target_table": "users", "target_column": "id", "confidence": 0.8, "reasoning": "Standard FK naming convention."}`,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.MockClient = mockClient
+
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), zap.NewNop())
+
+	profiles := []*models.ColumnDataProfile{
+		{
+			ColumnID:           fkColumnID,
+			ColumnName:         "user_id",
+			TableName:          "orders",
+			DataType:           "uuid",
+			SampleValues:       []string{"550e8400-e29b-41d4-a716-446655440000"},
+			ClassificationPath: models.ClassificationPathUUID,
+		},
+	}
+
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:          fkColumnID,
+			Purpose:           models.PurposeIdentifier,
+			NeedsFKResolution: true,
+			IdentifierFeatures: &models.IdentifierFeatures{
+				IdentifierType: models.IdentifierTypeForeignKey,
+			},
+		},
+	}
+
+	// Service WITHOUT datasource dependencies
+	svc := &columnFeatureExtractionService{
+		llmFactory:  mockFactory,
+		workerPool:  workerPool,
+		logger:      zap.NewNop(),
+		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+		// datasourceService and adapterFactory are nil
+	}
+
+	err := svc.runPhase4FKResolution(
+		context.Background(),
+		projectID,
+		uuid.New(),
+		[]uuid.UUID{fkColumnID},
+		profiles,
+		features,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("runPhase4FKResolution() error = %v", err)
+	}
+
+	// Verify LLM was called (LLM-only fallback)
+	if mockClient.GenerateResponseCalls != 1 {
+		t.Errorf("GenerateResponseCalls = %d, want 1", mockClient.GenerateResponseCalls)
+	}
+
+	// Verify features were updated
+	f := features[0]
+	if f.NeedsFKResolution {
+		t.Error("NeedsFKResolution should be false after resolution")
+	}
+	if f.IdentifierFeatures == nil {
+		t.Fatal("IdentifierFeatures should not be nil")
+	}
+	if f.IdentifierFeatures.FKTargetTable != "users" {
+		t.Errorf("FKTargetTable = %v, want 'users'", f.IdentifierFeatures.FKTargetTable)
+	}
+	if f.IdentifierFeatures.FKTargetColumn != "id" {
+		t.Errorf("FKTargetColumn = %v, want 'id'", f.IdentifierFeatures.FKTargetColumn)
+	}
+}
+
+func TestMergeFKResolution(t *testing.T) {
+	svc := &columnFeatureExtractionService{
+		logger: zap.NewNop(),
+	}
+
+	columnID := uuid.New()
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:          columnID,
+			Purpose:           models.PurposeIdentifier,
+			NeedsFKResolution: true,
+			IdentifierFeatures: &models.IdentifierFeatures{
+				IdentifierType: models.IdentifierTypeForeignKey,
+			},
+		},
+	}
+
+	result := &FKResolutionResult{
+		ColumnID:       columnID,
+		FKTargetTable:  "customers",
+		FKTargetColumn: "id",
+		FKConfidence:   0.92,
+		LLMModelUsed:   "claude-3-haiku",
+	}
+
+	svc.mergeFKResolution(features, result)
+
+	// Verify update
+	f := features[0]
+	if f.NeedsFKResolution {
+		t.Error("NeedsFKResolution should be false after merge")
+	}
+	if f.IdentifierFeatures.FKTargetTable != "customers" {
+		t.Errorf("FKTargetTable = %v, want 'customers'", f.IdentifierFeatures.FKTargetTable)
+	}
+	if f.IdentifierFeatures.FKTargetColumn != "id" {
+		t.Errorf("FKTargetColumn = %v, want 'id'", f.IdentifierFeatures.FKTargetColumn)
+	}
+	if f.IdentifierFeatures.FKConfidence != 0.92 {
+		t.Errorf("FKConfidence = %v, want 0.92", f.IdentifierFeatures.FKConfidence)
+	}
+	if f.Role != models.RoleForeignKey {
+		t.Errorf("Role = %v, want %v", f.Role, models.RoleForeignKey)
+	}
+}
+
+func TestMergeFKResolution_CreatesIdentifierFeatures(t *testing.T) {
+	svc := &columnFeatureExtractionService{
+		logger: zap.NewNop(),
+	}
+
+	columnID := uuid.New()
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:           columnID,
+			NeedsFKResolution:  true,
+			IdentifierFeatures: nil, // No identifier features yet
+		},
+	}
+
+	result := &FKResolutionResult{
+		ColumnID:       columnID,
+		FKTargetTable:  "products",
+		FKTargetColumn: "id",
+		FKConfidence:   0.85,
+	}
+
+	svc.mergeFKResolution(features, result)
+
+	// Should create IdentifierFeatures
+	if features[0].IdentifierFeatures == nil {
+		t.Fatal("IdentifierFeatures should be created")
+	}
+	if features[0].IdentifierFeatures.FKTargetTable != "products" {
+		t.Errorf("FKTargetTable = %v, want 'products'", features[0].IdentifierFeatures.FKTargetTable)
+	}
+}
+
+func TestMergeFKResolution_NoTargetDoesNotSetRole(t *testing.T) {
+	svc := &columnFeatureExtractionService{
+		logger: zap.NewNop(),
+	}
+
+	columnID := uuid.New()
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:          columnID,
+			Role:              models.RoleAttribute, // Original role
+			NeedsFKResolution: true,
+			IdentifierFeatures: &models.IdentifierFeatures{
+				IdentifierType: "internal_uuid",
+			},
+		},
+	}
+
+	// Result with empty target (no FK found)
+	result := &FKResolutionResult{
+		ColumnID:       columnID,
+		FKTargetTable:  "",
+		FKTargetColumn: "",
+		FKConfidence:   0,
+	}
+
+	svc.mergeFKResolution(features, result)
+
+	// Role should remain unchanged (not set to foreign_key)
+	if features[0].Role != models.RoleAttribute {
+		t.Errorf("Role = %v, want %v (should not change when no target)", features[0].Role, models.RoleAttribute)
+	}
+}
+
+func TestBuildFKResolutionPrompt(t *testing.T) {
+	svc := &columnFeatureExtractionService{
+		logger: zap.NewNop(),
+	}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:      uuid.New(),
+		ColumnName:    "customer_id",
+		TableName:     "orders",
+		DataType:      "uuid",
+		DistinctCount: 1000,
+		SampleValues:  []string{"abc-123", "def-456"},
+	}
+
+	candidates := []phase4FKCandidate{
+		{
+			Table:          "customers",
+			Column:         "id",
+			DataType:       "uuid",
+			OverlapRate:    0.98,
+			MatchedCount:   980,
+			TargetDistinct: 5000,
+		},
+		{
+			Table:          "users",
+			Column:         "id",
+			DataType:       "uuid",
+			OverlapRate:    0.65,
+			MatchedCount:   650,
+			TargetDistinct: 10000,
+		},
+	}
+
+	prompt := svc.buildFKResolutionPrompt(profile, candidates)
+
+	// Verify prompt contains key information
+	if !strings.Contains(prompt, "customer_id") {
+		t.Error("Prompt should contain column name")
+	}
+	if !strings.Contains(prompt, "orders") {
+		t.Error("Prompt should contain table name")
+	}
+	if !strings.Contains(prompt, "customers") {
+		t.Error("Prompt should contain candidate table 'customers'")
+	}
+	if !strings.Contains(prompt, "98.0%") {
+		t.Error("Prompt should contain overlap rate percentage")
+	}
+	if !strings.Contains(prompt, "FK Target Resolution") {
+		t.Error("Prompt should have proper header")
+	}
+}
+
+func TestParseFKResolutionResponse(t *testing.T) {
+	svc := &columnFeatureExtractionService{
+		logger: zap.NewNop(),
+	}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:   uuid.New(),
+		ColumnName: "user_id",
+	}
+
+	candidates := []phase4FKCandidate{
+		{Table: "users", Column: "id", OverlapRate: 0.95},
+		{Table: "accounts", Column: "id", OverlapRate: 0.70},
+	}
+
+	content := `{"target_table": "users", "target_column": "id", "confidence": 0.92, "reasoning": "High overlap and naming match."}`
+
+	result, err := svc.parseFKResolutionResponse(profile, content, "test-model", candidates)
+	if err != nil {
+		t.Fatalf("parseFKResolutionResponse() error = %v", err)
+	}
+
+	if result.ColumnID != profile.ColumnID {
+		t.Error("ColumnID should match profile")
+	}
+	if result.FKTargetTable != "users" {
+		t.Errorf("FKTargetTable = %v, want 'users'", result.FKTargetTable)
+	}
+	if result.FKTargetColumn != "id" {
+		t.Errorf("FKTargetColumn = %v, want 'id'", result.FKTargetColumn)
+	}
+	if result.FKConfidence != 0.92 {
+		t.Errorf("FKConfidence = %v, want 0.92", result.FKConfidence)
+	}
+}
+
+func TestParseFKResolutionResponse_FallsBackToHighestOverlap(t *testing.T) {
+	svc := &columnFeatureExtractionService{
+		logger: zap.NewNop(),
+	}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:   uuid.New(),
+		ColumnName: "ref_id",
+	}
+
+	candidates := []phase4FKCandidate{
+		{Table: "items", Column: "id", OverlapRate: 0.95}, // Best overlap
+		{Table: "products", Column: "id", OverlapRate: 0.70},
+	}
+
+	// LLM response chooses something not in candidates
+	content := `{"target_table": "nonexistent", "target_column": "id", "confidence": 0.5, "reasoning": "Guess."}`
+
+	result, err := svc.parseFKResolutionResponse(profile, content, "test-model", candidates)
+	if err != nil {
+		t.Fatalf("parseFKResolutionResponse() error = %v", err)
+	}
+
+	// Should fall back to highest overlap candidate
+	if result.FKTargetTable != "items" {
+		t.Errorf("FKTargetTable = %v, want 'items' (fallback to highest overlap)", result.FKTargetTable)
+	}
+}

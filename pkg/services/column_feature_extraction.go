@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/adapters/datasource"
 	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
@@ -38,11 +40,13 @@ type ColumnFeatureExtractionService interface {
 }
 
 type columnFeatureExtractionService struct {
-	schemaRepo   repositories.SchemaRepository
-	llmFactory   llm.LLMClientFactory
-	workerPool   *llm.WorkerPool
-	getTenantCtx TenantContextFunc
-	logger       *zap.Logger
+	schemaRepo        repositories.SchemaRepository
+	datasourceService DatasourceService
+	adapterFactory    datasource.DatasourceAdapterFactory
+	llmFactory        llm.LLMClientFactory
+	workerPool        *llm.WorkerPool
+	getTenantCtx      TenantContextFunc
+	logger            *zap.Logger
 
 	// Cached classifiers (created lazily)
 	classifiersMu sync.RWMutex
@@ -77,6 +81,29 @@ func NewColumnFeatureExtractionServiceWithLLM(
 		getTenantCtx: getTenantCtx,
 		logger:       logger.Named("column-feature-extraction"),
 		classifiers:  make(map[models.ClassificationPath]ColumnClassifier),
+	}
+}
+
+// NewColumnFeatureExtractionServiceFull creates a column feature extraction service with all dependencies.
+// Use this constructor for full Phase 2-4 functionality including FK resolution with data overlap queries.
+func NewColumnFeatureExtractionServiceFull(
+	schemaRepo repositories.SchemaRepository,
+	datasourceService DatasourceService,
+	adapterFactory datasource.DatasourceAdapterFactory,
+	llmFactory llm.LLMClientFactory,
+	workerPool *llm.WorkerPool,
+	getTenantCtx TenantContextFunc,
+	logger *zap.Logger,
+) ColumnFeatureExtractionService {
+	return &columnFeatureExtractionService{
+		schemaRepo:        schemaRepo,
+		datasourceService: datasourceService,
+		adapterFactory:    adapterFactory,
+		llmFactory:        llmFactory,
+		workerPool:        workerPool,
+		getTenantCtx:      getTenantCtx,
+		logger:            logger.Named("column-feature-extraction"),
+		classifiers:       make(map[models.ClassificationPath]ColumnClassifier),
 	}
 }
 
@@ -148,7 +175,12 @@ func (s *columnFeatureExtractionService) ExtractColumnFeatures(
 			return 0, fmt.Errorf("phase 3 enum analysis failed: %w", err)
 		}
 
-		// TODO: Phase 4-6 will be implemented in subsequent tasks
+		// Phase 4: FK Resolution (parallel LLM, with data overlap queries)
+		if err := s.runPhase4FKResolution(ctx, projectID, datasourceID, phase2Result.Phase4FKQueue, phase1Result.Profiles, phase2Result.Features, progressCallback); err != nil {
+			return 0, fmt.Errorf("phase 4 FK resolution failed: %w", err)
+		}
+
+		// TODO: Phase 5-6 will be implemented in subsequent tasks
 	}
 
 	return phase1Result.TotalColumns, nil
@@ -1979,5 +2011,588 @@ func (s *columnFeatureExtractionService) mergeEnumAnalysis(
 	}
 
 	s.logger.Warn("Could not find feature to merge enum analysis",
+		zap.String("column_id", result.ColumnID.String()))
+}
+
+// ============================================================================
+// Phase 4: FK Resolution (Parallel LLM)
+// ============================================================================
+
+// FKResolutionResult contains the result of FK resolution for a single column.
+type FKResolutionResult struct {
+	ColumnID       uuid.UUID `json:"column_id"`
+	FKTargetTable  string    `json:"fk_target_table"`
+	FKTargetColumn string    `json:"fk_target_column"`
+	FKConfidence   float64   `json:"fk_confidence"`
+	LLMModelUsed   string    `json:"llm_model_used"`
+}
+
+// phase4FKCandidate represents a potential FK target with overlap statistics for Phase 4.
+type phase4FKCandidate struct {
+	Schema         string
+	Table          string
+	Column         string
+	ColumnID       uuid.UUID
+	DataType       string
+	OverlapRate    float64 // Match rate from CheckValueOverlap (0.0-1.0)
+	MatchedCount   int64   // Number of source values that matched target
+	TargetDistinct int64   // Distinct values in target column
+}
+
+// runPhase4FKResolution resolves FK targets for columns flagged in Phase 2.
+// Only runs for columns with NeedsFKResolution=true. Each FK candidate gets ONE LLM request
+// after running data overlap queries to gather evidence.
+func (s *columnFeatureExtractionService) runPhase4FKResolution(
+	ctx context.Context,
+	projectID, datasourceID uuid.UUID,
+	fkQueue []uuid.UUID,
+	profiles []*models.ColumnDataProfile,
+	features []*models.ColumnFeatures,
+	progressCallback dag.ProgressCallback,
+) error {
+	if len(fkQueue) == 0 {
+		s.logger.Info("Phase 4: No FK candidates, skipping")
+		return nil
+	}
+
+	s.logger.Info("Starting Phase 4: FK Resolution",
+		zap.Int("fk_candidates", len(fkQueue)))
+
+	// Check if we have datasource dependencies (required for overlap queries)
+	if s.datasourceService == nil || s.adapterFactory == nil {
+		s.logger.Warn("Phase 4: Datasource dependencies not configured, using LLM-only resolution")
+		return s.runPhase4FKResolutionLLMOnly(ctx, projectID, fkQueue, profiles, features, progressCallback)
+	}
+
+	// Report initial progress
+	if progressCallback != nil {
+		progressCallback(0, len(fkQueue), "Resolving FK targets")
+	}
+
+	// Build profile lookup for quick access
+	profileByID := make(map[uuid.UUID]*models.ColumnDataProfile, len(profiles))
+	for _, p := range profiles {
+		profileByID[p.ColumnID] = p
+	}
+
+	// Get datasource to create schema discoverer for overlap queries
+	ds, err := s.datasourceService.Get(ctx, projectID, datasourceID)
+	if err != nil {
+		return fmt.Errorf("get datasource: %w", err)
+	}
+
+	discoverer, err := s.adapterFactory.NewSchemaDiscoverer(ctx, ds.DatasourceType, ds.Config, projectID, datasourceID, "")
+	if err != nil {
+		return fmt.Errorf("create schema discoverer: %w", err)
+	}
+	defer discoverer.Close()
+
+	// Get all PK columns as potential FK targets
+	pkColumns, err := s.schemaRepo.GetPrimaryKeyColumns(ctx, projectID, datasourceID)
+	if err != nil {
+		return fmt.Errorf("get primary key columns: %w", err)
+	}
+
+	// Get all tables to build tableID -> table lookup
+	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, false)
+	if err != nil {
+		return fmt.Errorf("list tables: %w", err)
+	}
+	tableByID := make(map[uuid.UUID]*models.SchemaTable, len(tables))
+	for _, t := range tables {
+		tableByID[t.ID] = t
+	}
+
+	// Build work items - ONE request per FK candidate column
+	workItems := make([]llm.WorkItem[*FKResolutionResult], 0, len(fkQueue))
+	for _, columnID := range fkQueue {
+		cid := columnID
+		profile := profileByID[cid]
+		if profile == nil {
+			s.logger.Warn("FK candidate profile not found, skipping",
+				zap.String("column_id", cid.String()))
+			continue
+		}
+
+		// Get the table info for the source column
+		sourceTable := tableByID[profile.TableID]
+		if sourceTable == nil {
+			s.logger.Warn("FK candidate table not found, skipping",
+				zap.String("column_id", cid.String()))
+			continue
+		}
+
+		workItems = append(workItems, llm.WorkItem[*FKResolutionResult]{
+			ID: cid.String(),
+			Execute: func(ctx context.Context) (*FKResolutionResult, error) {
+				return s.resolveFKTarget(ctx, projectID, profile, sourceTable, pkColumns, tableByID, discoverer)
+			},
+		})
+	}
+
+	if len(workItems) == 0 {
+		s.logger.Info("Phase 4: No valid FK work items")
+		return nil
+	}
+
+	// Process in parallel with progress updates
+	results := llm.Process(ctx, s.workerPool, workItems, func(completed, total int) {
+		if progressCallback != nil {
+			progressCallback(completed, total, "Resolving FK targets")
+		}
+	})
+
+	// Track outcomes for logging
+	var successCount, failureCount, noTargetCount int
+	for _, r := range results {
+		if r.Err != nil {
+			s.logger.Error("FK resolution failed",
+				zap.String("column_id", r.ID),
+				zap.Error(r.Err))
+			failureCount++
+			continue
+		}
+		if r.Result.FKTargetTable == "" {
+			noTargetCount++
+			continue
+		}
+		s.mergeFKResolution(features, r.Result)
+		successCount++
+	}
+
+	s.logger.Info("Phase 4 complete",
+		zap.Int("resolved", successCount),
+		zap.Int("no_target", noTargetCount),
+		zap.Int("failed", failureCount))
+
+	// Report final progress
+	if progressCallback != nil {
+		summary := fmt.Sprintf("Resolved %d FK targets", successCount)
+		progressCallback(len(fkQueue), len(fkQueue), summary)
+	}
+
+	return nil
+}
+
+// runPhase4FKResolutionLLMOnly resolves FK targets using only LLM analysis (no overlap queries).
+// This is a fallback when datasource dependencies are not configured.
+func (s *columnFeatureExtractionService) runPhase4FKResolutionLLMOnly(
+	ctx context.Context,
+	projectID uuid.UUID,
+	fkQueue []uuid.UUID,
+	profiles []*models.ColumnDataProfile,
+	features []*models.ColumnFeatures,
+	progressCallback dag.ProgressCallback,
+) error {
+	// Report initial progress
+	if progressCallback != nil {
+		progressCallback(0, len(fkQueue), "Resolving FK targets (LLM-only)")
+	}
+
+	// Build profile lookup
+	profileByID := make(map[uuid.UUID]*models.ColumnDataProfile, len(profiles))
+	for _, p := range profiles {
+		profileByID[p.ColumnID] = p
+	}
+
+	// Build work items
+	workItems := make([]llm.WorkItem[*FKResolutionResult], 0, len(fkQueue))
+	for _, columnID := range fkQueue {
+		cid := columnID
+		profile := profileByID[cid]
+		if profile == nil {
+			continue
+		}
+
+		workItems = append(workItems, llm.WorkItem[*FKResolutionResult]{
+			ID: cid.String(),
+			Execute: func(ctx context.Context) (*FKResolutionResult, error) {
+				return s.resolveFKTargetLLMOnly(ctx, projectID, profile)
+			},
+		})
+	}
+
+	if len(workItems) == 0 {
+		return nil
+	}
+
+	// Process in parallel
+	results := llm.Process(ctx, s.workerPool, workItems, func(completed, total int) {
+		if progressCallback != nil {
+			progressCallback(completed, total, "Resolving FK targets (LLM-only)")
+		}
+	})
+
+	// Merge results
+	var successCount int
+	for _, r := range results {
+		if r.Err != nil || r.Result.FKTargetTable == "" {
+			continue
+		}
+		s.mergeFKResolution(features, r.Result)
+		successCount++
+	}
+
+	if progressCallback != nil {
+		progressCallback(len(fkQueue), len(fkQueue), fmt.Sprintf("Resolved %d FK targets", successCount))
+	}
+
+	return nil
+}
+
+// resolveFKTarget resolves the FK target for a single column using overlap queries and LLM analysis.
+func (s *columnFeatureExtractionService) resolveFKTarget(
+	ctx context.Context,
+	projectID uuid.UUID,
+	profile *models.ColumnDataProfile,
+	sourceTable *models.SchemaTable,
+	pkColumns []*models.SchemaColumn,
+	tableByID map[uuid.UUID]*models.SchemaTable,
+	discoverer datasource.SchemaDiscoverer,
+) (*FKResolutionResult, error) {
+	// Find candidate PK columns with compatible types
+	candidates := make([]phase4FKCandidate, 0)
+
+	for _, pkCol := range pkColumns {
+		// Skip self-reference (same table)
+		if pkCol.SchemaTableID == profile.TableID {
+			continue
+		}
+
+		// Skip incompatible types
+		if !areTypesCompatibleForFK(profile.DataType, pkCol.DataType) {
+			continue
+		}
+
+		// Get table info for this PK
+		pkTable := tableByID[pkCol.SchemaTableID]
+		if pkTable == nil {
+			continue
+		}
+
+		// Run value overlap query
+		overlap, err := discoverer.CheckValueOverlap(ctx,
+			sourceTable.SchemaName, sourceTable.TableName, profile.ColumnName,
+			pkTable.SchemaName, pkTable.TableName, pkCol.ColumnName,
+			1000) // Sample up to 1000 values
+		if err != nil {
+			s.logger.Debug("Overlap check failed, skipping candidate",
+				zap.String("source", fmt.Sprintf("%s.%s", sourceTable.TableName, profile.ColumnName)),
+				zap.String("target", fmt.Sprintf("%s.%s", pkTable.TableName, pkCol.ColumnName)),
+				zap.Error(err))
+			continue
+		}
+
+		// Only consider candidates with meaningful overlap
+		if overlap.MatchRate < 0.5 {
+			continue
+		}
+
+		candidates = append(candidates, phase4FKCandidate{
+			Schema:         pkTable.SchemaName,
+			Table:          pkTable.TableName,
+			Column:         pkCol.ColumnName,
+			ColumnID:       pkCol.ID,
+			DataType:       pkCol.DataType,
+			OverlapRate:    overlap.MatchRate,
+			MatchedCount:   overlap.MatchedCount,
+			TargetDistinct: overlap.TargetDistinct,
+		})
+	}
+
+	// No candidates with meaningful overlap
+	if len(candidates) == 0 {
+		s.logger.Debug("No FK candidates with sufficient overlap",
+			zap.String("column", fmt.Sprintf("%s.%s", sourceTable.TableName, profile.ColumnName)))
+		return &FKResolutionResult{
+			ColumnID: profile.ColumnID,
+		}, nil
+	}
+
+	// Sort by overlap rate (highest first)
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].OverlapRate > candidates[j].OverlapRate
+	})
+
+	// If only one candidate with high overlap (>90%), use it directly
+	if len(candidates) == 1 && candidates[0].OverlapRate >= 0.9 {
+		return &FKResolutionResult{
+			ColumnID:       profile.ColumnID,
+			FKTargetTable:  candidates[0].Table,
+			FKTargetColumn: candidates[0].Column,
+			FKConfidence:   candidates[0].OverlapRate,
+			LLMModelUsed:   "data_overlap",
+		}, nil
+	}
+
+	// Multiple candidates or uncertain - use LLM to decide
+	return s.resolveFKTargetWithLLM(ctx, projectID, profile, candidates)
+}
+
+// resolveFKTargetWithLLM uses LLM to choose among FK candidates with overlap evidence.
+func (s *columnFeatureExtractionService) resolveFKTargetWithLLM(
+	ctx context.Context,
+	projectID uuid.UUID,
+	profile *models.ColumnDataProfile,
+	candidates []phase4FKCandidate,
+) (*FKResolutionResult, error) {
+	prompt := s.buildFKResolutionPrompt(profile, candidates)
+	systemMsg := `You are a database schema analyst. Your task is to identify the most likely foreign key target for a column based on data overlap analysis.
+
+Focus on:
+1. Match rate (higher is better - indicates data compatibility)
+2. Column naming conventions (user_id typically references users.id)
+3. Business logic (what makes sense semantically)
+
+Respond with valid JSON only.`
+
+	// Get LLM client
+	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("create LLM client: %w", err)
+	}
+
+	// Call LLM with low temperature for deterministic choice
+	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.1, false)
+	if err != nil {
+		return nil, fmt.Errorf("LLM call failed: %w", err)
+	}
+
+	// Parse the response
+	return s.parseFKResolutionResponse(profile, result.Content, llmClient.GetModel(), candidates)
+}
+
+// resolveFKTargetLLMOnly resolves FK target using only LLM analysis (no overlap data).
+func (s *columnFeatureExtractionService) resolveFKTargetLLMOnly(
+	ctx context.Context,
+	projectID uuid.UUID,
+	profile *models.ColumnDataProfile,
+) (*FKResolutionResult, error) {
+	prompt := s.buildFKResolutionPromptLLMOnly(profile)
+	systemMsg := `You are a database schema analyst. Your task is to infer the most likely foreign key target based on column naming conventions and business logic.
+
+If you cannot determine the target with reasonable confidence, respond with an empty target.
+
+Respond with valid JSON only.`
+
+	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("create LLM client: %w", err)
+	}
+
+	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.1, false)
+	if err != nil {
+		return nil, fmt.Errorf("LLM call failed: %w", err)
+	}
+
+	return s.parseFKResolutionResponseLLMOnly(profile, result.Content, llmClient.GetModel())
+}
+
+// buildFKResolutionPrompt creates a prompt for FK resolution with overlap evidence.
+func (s *columnFeatureExtractionService) buildFKResolutionPrompt(
+	profile *models.ColumnDataProfile,
+	candidates []phase4FKCandidate,
+) string {
+	var sb strings.Builder
+
+	sb.WriteString("# FK Target Resolution\n\n")
+	sb.WriteString(fmt.Sprintf("**Source Table:** %s\n", profile.TableName))
+	sb.WriteString(fmt.Sprintf("**Source Column:** %s\n", profile.ColumnName))
+	sb.WriteString(fmt.Sprintf("**Data Type:** %s\n", profile.DataType))
+	sb.WriteString(fmt.Sprintf("**Distinct Values:** %d\n", profile.DistinctCount))
+
+	if len(profile.SampleValues) > 0 {
+		sb.WriteString("\n**Sample Values:**\n")
+		for i, val := range profile.SampleValues {
+			if i >= 5 {
+				break
+			}
+			sb.WriteString(fmt.Sprintf("- `%s`\n", val))
+		}
+	}
+
+	sb.WriteString("\n## Candidate FK Targets\n\n")
+	sb.WriteString("The following tables have primary key columns with data overlap:\n\n")
+
+	for i, c := range candidates {
+		sb.WriteString(fmt.Sprintf("### Candidate %d: %s.%s\n", i+1, c.Table, c.Column))
+		sb.WriteString(fmt.Sprintf("- **Match Rate:** %.1f%% of source values found in target\n", c.OverlapRate*100))
+		sb.WriteString(fmt.Sprintf("- **Matched Count:** %d values\n", c.MatchedCount))
+		sb.WriteString(fmt.Sprintf("- **Target Distinct:** %d values\n", c.TargetDistinct))
+		sb.WriteString(fmt.Sprintf("- **Data Type:** %s\n\n", c.DataType))
+	}
+
+	sb.WriteString("## Task\n\n")
+	sb.WriteString("Based on the overlap analysis and naming conventions, determine which candidate is the most likely FK target.\n\n")
+
+	sb.WriteString("## Response Format\n\n")
+	sb.WriteString("```json\n")
+	sb.WriteString("{\n")
+	sb.WriteString("  \"target_table\": \"users\",\n")
+	sb.WriteString("  \"target_column\": \"id\",\n")
+	sb.WriteString("  \"confidence\": 0.95,\n")
+	sb.WriteString("  \"reasoning\": \"High match rate (98%) and column naming (user_id → users.id) strongly suggest this FK relationship.\"\n")
+	sb.WriteString("}\n")
+	sb.WriteString("```\n")
+
+	return sb.String()
+}
+
+// buildFKResolutionPromptLLMOnly creates a prompt for FK resolution without overlap data.
+func (s *columnFeatureExtractionService) buildFKResolutionPromptLLMOnly(
+	profile *models.ColumnDataProfile,
+) string {
+	var sb strings.Builder
+
+	sb.WriteString("# FK Target Inference\n\n")
+	sb.WriteString(fmt.Sprintf("**Table:** %s\n", profile.TableName))
+	sb.WriteString(fmt.Sprintf("**Column:** %s\n", profile.ColumnName))
+	sb.WriteString(fmt.Sprintf("**Data Type:** %s\n", profile.DataType))
+	sb.WriteString(fmt.Sprintf("**Is Primary Key:** %v\n", profile.IsPrimaryKey))
+
+	if len(profile.SampleValues) > 0 {
+		sb.WriteString("\n**Sample Values:**\n")
+		for i, val := range profile.SampleValues {
+			if i >= 5 {
+				break
+			}
+			sb.WriteString(fmt.Sprintf("- `%s`\n", val))
+		}
+	}
+
+	sb.WriteString("\n## Task\n\n")
+	sb.WriteString("Based on naming conventions and the data samples, infer the most likely FK target table and column.\n")
+	sb.WriteString("Common patterns:\n")
+	sb.WriteString("- `user_id` → `users.id`\n")
+	sb.WriteString("- `order_id` → `orders.id`\n")
+	sb.WriteString("- `product_uuid` → `products.id`\n\n")
+
+	sb.WriteString("If you cannot determine the target with reasonable confidence, return empty strings.\n\n")
+
+	sb.WriteString("## Response Format\n\n")
+	sb.WriteString("```json\n")
+	sb.WriteString("{\n")
+	sb.WriteString("  \"target_table\": \"users\",\n")
+	sb.WriteString("  \"target_column\": \"id\",\n")
+	sb.WriteString("  \"confidence\": 0.7,\n")
+	sb.WriteString("  \"reasoning\": \"Column name 'user_id' follows standard FK naming convention pointing to users table.\"\n")
+	sb.WriteString("}\n")
+	sb.WriteString("```\n")
+
+	return sb.String()
+}
+
+// fkResolutionLLMResponse is the expected JSON response from the LLM for FK resolution.
+type fkResolutionLLMResponse struct {
+	TargetTable  string  `json:"target_table"`
+	TargetColumn string  `json:"target_column"`
+	Confidence   float64 `json:"confidence"`
+	Reasoning    string  `json:"reasoning"`
+}
+
+// parseFKResolutionResponse parses the LLM response for FK resolution.
+func (s *columnFeatureExtractionService) parseFKResolutionResponse(
+	profile *models.ColumnDataProfile,
+	content string,
+	model string,
+	candidates []phase4FKCandidate,
+) (*FKResolutionResult, error) {
+	response, err := llm.ParseJSONResponse[fkResolutionLLMResponse](content)
+	if err != nil {
+		return nil, fmt.Errorf("parse FK resolution response: %w", err)
+	}
+
+	// Validate that the response matches one of the candidates
+	var matchedCandidate *phase4FKCandidate
+	for i := range candidates {
+		if strings.EqualFold(candidates[i].Table, response.TargetTable) &&
+			strings.EqualFold(candidates[i].Column, response.TargetColumn) {
+			matchedCandidate = &candidates[i]
+			break
+		}
+	}
+
+	// If LLM chose something not in candidates, use highest overlap candidate
+	if matchedCandidate == nil && len(candidates) > 0 {
+		s.logger.Warn("LLM chose target not in candidates, using highest overlap",
+			zap.String("llm_choice", fmt.Sprintf("%s.%s", response.TargetTable, response.TargetColumn)),
+			zap.String("best_candidate", fmt.Sprintf("%s.%s", candidates[0].Table, candidates[0].Column)))
+		matchedCandidate = &candidates[0]
+	}
+
+	if matchedCandidate == nil {
+		return &FKResolutionResult{
+			ColumnID: profile.ColumnID,
+		}, nil
+	}
+
+	return &FKResolutionResult{
+		ColumnID:       profile.ColumnID,
+		FKTargetTable:  matchedCandidate.Table,
+		FKTargetColumn: matchedCandidate.Column,
+		FKConfidence:   response.Confidence,
+		LLMModelUsed:   model,
+	}, nil
+}
+
+// parseFKResolutionResponseLLMOnly parses the LLM response for LLM-only FK resolution.
+func (s *columnFeatureExtractionService) parseFKResolutionResponseLLMOnly(
+	profile *models.ColumnDataProfile,
+	content string,
+	model string,
+) (*FKResolutionResult, error) {
+	response, err := llm.ParseJSONResponse[fkResolutionLLMResponse](content)
+	if err != nil {
+		return nil, fmt.Errorf("parse FK resolution response: %w", err)
+	}
+
+	if response.TargetTable == "" || response.TargetColumn == "" {
+		return &FKResolutionResult{
+			ColumnID: profile.ColumnID,
+		}, nil
+	}
+
+	return &FKResolutionResult{
+		ColumnID:       profile.ColumnID,
+		FKTargetTable:  response.TargetTable,
+		FKTargetColumn: response.TargetColumn,
+		FKConfidence:   response.Confidence,
+		LLMModelUsed:   model,
+	}, nil
+}
+
+// mergeFKResolution merges the FK resolution results into the existing column features.
+func (s *columnFeatureExtractionService) mergeFKResolution(
+	features []*models.ColumnFeatures,
+	result *FKResolutionResult,
+) {
+	for _, f := range features {
+		if f.ColumnID == result.ColumnID {
+			// Update identifier features with FK resolution
+			if f.IdentifierFeatures == nil {
+				f.IdentifierFeatures = &models.IdentifierFeatures{}
+			}
+			f.IdentifierFeatures.FKTargetTable = result.FKTargetTable
+			f.IdentifierFeatures.FKTargetColumn = result.FKTargetColumn
+			f.IdentifierFeatures.FKConfidence = result.FKConfidence
+
+			// Update the identifier type to foreign_key if we found a target
+			if result.FKTargetTable != "" {
+				f.IdentifierFeatures.IdentifierType = models.IdentifierTypeForeignKey
+				f.Role = models.RoleForeignKey
+			}
+
+			// Mark FK resolution as complete
+			f.NeedsFKResolution = false
+
+			s.logger.Debug("Merged FK resolution",
+				zap.String("column_id", result.ColumnID.String()),
+				zap.String("target", fmt.Sprintf("%s.%s", result.FKTargetTable, result.FKTargetColumn)),
+				zap.Float64("confidence", result.FKConfidence))
+			return
+		}
+	}
+
+	s.logger.Warn("Could not find feature to merge FK resolution",
 		zap.String("column_id", result.ColumnID.String()))
 }
