@@ -219,6 +219,27 @@ psql -c "SELECT set_config('app.current_project_id', '<project-id>', false); SEL
 
 Tables **without** RLS (admin tables): `engine_projects`, `engine_users`
 
+### Critical: Always Filter by project_id
+
+**When running analytics or exploratory queries, ALWAYS filter by `project_id` explicitly.** Do not rely on RLS via `set_config()` alone—use explicit WHERE clauses.
+
+Multiple projects share the same database. Queries without `project_id` filters will return data from ALL projects, leading to:
+- Inflated counts (e.g., 1,793 columns instead of 575)
+- False "duplicate" detection (same table name exists in different projects)
+- Incorrect analysis and wasted debugging time
+
+```sql
+-- WRONG: RLS may not filter as expected in all contexts
+SELECT set_config('app.current_project_id', '<project-id>', false);
+SELECT COUNT(*) FROM engine_schema_columns WHERE deleted_at IS NULL;
+
+-- CORRECT: Always use explicit project_id filter
+SELECT COUNT(*)
+FROM engine_schema_columns
+WHERE deleted_at IS NULL
+  AND project_id = '<project-id>';
+```
+
 ## Testing
 
 ```bash
