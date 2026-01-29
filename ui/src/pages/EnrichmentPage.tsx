@@ -19,12 +19,10 @@ import {
   CardTitle,
 } from "../components/ui/Card";
 import ontologyApi from "../services/ontologyApi";
-import ontologyService from "../services/ontologyService";
 import type {
   ColumnDetail,
   EnrichmentResponse,
   EntitySummary,
-  OntologyWorkflowStatus,
 } from "../types";
 
 /**
@@ -42,9 +40,6 @@ const EnrichmentPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // State for ontology status (to check if extraction has been run)
-  const [ontologyStatus, setOntologyStatus] = useState<OntologyWorkflowStatus | null>(null);
-
   // Track which tables are expanded
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
 
@@ -60,20 +55,6 @@ const EnrichmentPage = () => {
       return next;
     });
   };
-
-  // Subscribe to ontology status updates
-  useEffect(() => {
-    if (!pid) return;
-
-    ontologyService.setProjectId(pid);
-    const unsubscribe = ontologyService.subscribe((status) => {
-      setOntologyStatus(status);
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, [pid]);
 
   // Fetch enrichment data
   const fetchEnrichment = useCallback(async (): Promise<void> => {
@@ -132,23 +113,23 @@ const EnrichmentPage = () => {
     return roleColors[role.toLowerCase()] ?? 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-300';
   };
 
-  // Check if ontology is complete
-  const isOntologyComplete = ontologyStatus?.progress.state === 'complete'
-    || ontologyStatus?.ontologyReady === true;
-
   // Get entity summaries and column details
   const entitySummaries = enrichment?.entity_summaries ?? [];
+  const columnDetails = enrichment?.column_details ?? [];
   const columnDetailsMap = new Map<string, ColumnDetail[]>();
-  for (const ec of enrichment?.column_details ?? []) {
+  for (const ec of columnDetails) {
     columnDetailsMap.set(ec.table_name, ec.columns);
   }
 
-  // Calculate summary statistics
-  const tableCount = entitySummaries.length;
-  const columnCount = (enrichment?.column_details ?? []).reduce(
+  // Calculate summary statistics - use column_details as primary source when entity_summaries is empty
+  const tableCount = entitySummaries.length > 0 ? entitySummaries.length : columnDetails.length;
+  const columnCount = columnDetails.reduce(
     (acc, ec) => acc + ec.columns.length,
     0
   );
+
+  // Determine if we have any enrichment data
+  const hasEnrichmentData = entitySummaries.length > 0 || columnDetails.length > 0;
 
   // Loading state
   if (loading) {
@@ -205,8 +186,8 @@ const EnrichmentPage = () => {
     );
   }
 
-  // Empty state
-  if (!enrichment || entitySummaries.length === 0) {
+  // Empty state - check both entity_summaries AND column_details
+  if (!enrichment || !hasEnrichmentData) {
     return (
       <div className="mx-auto max-w-6xl">
         <div className="mb-6">
@@ -220,29 +201,16 @@ const EnrichmentPage = () => {
             <div className="mb-4">
               <Sparkles className="h-16 w-16 mx-auto text-muted-foreground" />
             </div>
-            {!isOntologyComplete ? (
-              <>
-                <h2 className="text-xl font-semibold mb-2">Run Ontology Extraction First</h2>
-                <p className="text-sm text-muted-foreground mb-6">
-                  No enrichment data available yet. Run the ontology extraction workflow to generate semantic information about your tables and columns.
-                </p>
-                <Button onClick={() => navigate(`/projects/${pid}/ontology`)}>
-                  Go to Ontology
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </>
-            ) : (
-              <>
-                <h2 className="text-xl font-semibold mb-2">No Enrichment Data Available</h2>
-                <p className="text-sm text-muted-foreground mb-6">
-                  The ontology extraction has completed, but no enrichment data was generated. This may indicate an issue with the extraction process.
-                </p>
-                <Button onClick={() => navigate(`/projects/${pid}/ontology`)}>
-                  Go to Ontology
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </>
-            )}
+            <>
+              <h2 className="text-xl font-semibold mb-2">No Column Enrichment Data</h2>
+              <p className="text-sm text-muted-foreground mb-6">
+                No column enrichment data available yet. Run the column feature extraction step in the ontology workflow to generate semantic information about your columns.
+              </p>
+              <Button onClick={() => navigate(`/projects/${pid}/ontology`)}>
+                Go to Ontology
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </>
           </div>
         </div>
       </div>
@@ -339,16 +307,16 @@ const EnrichmentPage = () => {
     </div>
   );
 
-  // Render table row
-  const renderTableRow = (entity: EntitySummary) => {
-    const columns = columnDetailsMap.get(entity.table_name) ?? [];
-    const isExpanded = expandedTables.has(entity.table_name);
+  // Render table row - works with either EntitySummary or just table name from column_details
+  const renderTableRow = (tableName: string, entity?: EntitySummary) => {
+    const columns = columnDetailsMap.get(tableName) ?? [];
+    const isExpanded = expandedTables.has(tableName);
 
     return (
-      <div key={entity.table_name} className="border border-border-light rounded-lg mb-3 last:mb-0">
+      <div key={tableName} className="border border-border-light rounded-lg mb-3 last:mb-0">
         {/* Table Header */}
         <button
-          onClick={() => toggleExpanded(entity.table_name)}
+          onClick={() => toggleExpanded(tableName)}
           className="w-full p-4 flex items-center justify-between hover:bg-surface-secondary/30 transition-colors rounded-t-lg"
         >
           <div className="flex items-center gap-3">
@@ -360,15 +328,15 @@ const EnrichmentPage = () => {
             <div className="text-left">
               <div className="flex items-center gap-2">
                 <span className="font-mono font-medium text-text-primary">
-                  {entity.table_name}
+                  {tableName}
                 </span>
-                {entity.domain && (
+                {entity?.domain && (
                   <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
                     {entity.domain}
                   </span>
                 )}
               </div>
-              {entity.business_name && entity.business_name !== entity.table_name && (
+              {entity?.business_name && entity.business_name !== tableName && (
                 <div className="text-sm text-text-secondary mt-0.5">
                   {entity.business_name}
                 </div>
@@ -381,7 +349,7 @@ const EnrichmentPage = () => {
         </button>
 
         {/* Table Description (if expanded) */}
-        {isExpanded && entity.description && (
+        {isExpanded && entity?.description && (
           <div className="px-4 pb-3 border-b border-border-light bg-surface-secondary/20">
             <p className="text-sm text-text-secondary pl-8">
               {entity.description}
@@ -416,6 +384,11 @@ const EnrichmentPage = () => {
       </div>
     );
   };
+
+  // Get list of tables to render - prefer entitySummaries, fall back to column_details tables
+  const tablesToRender = entitySummaries.length > 0
+    ? entitySummaries.map(e => ({ tableName: e.table_name, entity: e }))
+    : columnDetails.map(cd => ({ tableName: cd.table_name, entity: undefined }));
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -467,7 +440,7 @@ const EnrichmentPage = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {entitySummaries.map(renderTableRow)}
+          {tablesToRender.map(({ tableName, entity }) => renderTableRow(tableName, entity))}
         </CardContent>
       </Card>
     </div>

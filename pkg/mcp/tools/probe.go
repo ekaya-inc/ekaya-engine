@@ -422,6 +422,57 @@ func probeColumn(ctx context.Context, deps *ProbeToolDeps, projectID uuid.UUID, 
 		response.SampleValues = column.SampleValues
 	}
 
+	// Extract column features from metadata if available
+	if features := column.GetColumnFeatures(); features != nil {
+		response.Features = &probeColumnFeatures{
+			Purpose:            features.Purpose,
+			SemanticType:       features.SemanticType,
+			Role:               features.Role,
+			Description:        features.Description,
+			ClassificationPath: string(features.ClassificationPath),
+			Confidence:         features.Confidence,
+		}
+
+		// Add timestamp features if present
+		if features.TimestampFeatures != nil {
+			response.Features.TimestampFeatures = &probeTimestampFeatures{
+				TimestampPurpose: features.TimestampFeatures.TimestampPurpose,
+				IsSoftDelete:     features.TimestampFeatures.IsSoftDelete,
+				IsAuditField:     features.TimestampFeatures.IsAuditField,
+			}
+		}
+
+		// Add boolean features if present
+		if features.BooleanFeatures != nil {
+			response.Features.BooleanFeatures = &probeBooleanFeatures{
+				TrueMeaning:  features.BooleanFeatures.TrueMeaning,
+				FalseMeaning: features.BooleanFeatures.FalseMeaning,
+				BooleanType:  features.BooleanFeatures.BooleanType,
+			}
+		}
+
+		// Add identifier features if present
+		if features.IdentifierFeatures != nil {
+			response.Features.IdentifierFeatures = &probeIdentifierFeatures{
+				IdentifierType:   features.IdentifierFeatures.IdentifierType,
+				ExternalService:  features.IdentifierFeatures.ExternalService,
+				FKTargetTable:    features.IdentifierFeatures.FKTargetTable,
+				FKTargetColumn:   features.IdentifierFeatures.FKTargetColumn,
+				FKConfidence:     features.IdentifierFeatures.FKConfidence,
+				EntityReferenced: features.IdentifierFeatures.EntityReferenced,
+			}
+		}
+
+		// Add monetary features if present
+		if features.MonetaryFeatures != nil {
+			response.Features.MonetaryFeatures = &probeMonetaryFeatures{
+				IsMonetary:           features.MonetaryFeatures.IsMonetary,
+				CurrencyUnit:         features.MonetaryFeatures.CurrencyUnit,
+				PairedCurrencyColumn: features.MonetaryFeatures.PairedCurrencyColumn,
+			}
+		}
+	}
+
 	return response, nil
 }
 
@@ -433,7 +484,55 @@ type probeColumnResponse struct {
 	Joinability  *probeColumnJoinability `json:"joinability,omitempty"`
 	SampleValues []string                `json:"sample_values,omitempty"` // Distinct values for low-cardinality columns (≤50 values)
 	Semantic     *probeColumnSemantic    `json:"semantic,omitempty"`
-	Error        string                  `json:"error,omitempty"` // For batch mode partial failures
+	Features     *probeColumnFeatures    `json:"features,omitempty"` // Column features from extraction pipeline
+	Error        string                  `json:"error,omitempty"`    // For batch mode partial failures
+}
+
+// probeColumnFeatures contains extracted column features from the feature extraction pipeline.
+type probeColumnFeatures struct {
+	Purpose            string  `json:"purpose,omitempty"`             // "identifier", "timestamp", "flag", "measure", "enum", "text"
+	SemanticType       string  `json:"semantic_type,omitempty"`       // More specific type like "soft_delete_timestamp", "monetary"
+	Role               string  `json:"role,omitempty"`                // "primary_key", "foreign_key", "attribute", "measure"
+	Description        string  `json:"description,omitempty"`         // LLM-generated business description
+	ClassificationPath string  `json:"classification_path,omitempty"` // Analysis path taken: "timestamp", "boolean", "enum", etc.
+	Confidence         float64 `json:"confidence,omitempty"`          // Classification confidence (0.0 - 1.0)
+
+	// Path-specific features (populated based on classification)
+	TimestampFeatures  *probeTimestampFeatures  `json:"timestamp_features,omitempty"`
+	BooleanFeatures    *probeBooleanFeatures    `json:"boolean_features,omitempty"`
+	IdentifierFeatures *probeIdentifierFeatures `json:"identifier_features,omitempty"`
+	MonetaryFeatures   *probeMonetaryFeatures   `json:"monetary_features,omitempty"`
+}
+
+// probeTimestampFeatures contains timestamp-specific classification results.
+type probeTimestampFeatures struct {
+	TimestampPurpose string `json:"timestamp_purpose,omitempty"` // "audit_created", "audit_updated", "soft_delete", etc.
+	IsSoftDelete     bool   `json:"is_soft_delete,omitempty"`
+	IsAuditField     bool   `json:"is_audit_field,omitempty"`
+}
+
+// probeBooleanFeatures contains boolean-specific classification results.
+type probeBooleanFeatures struct {
+	TrueMeaning  string `json:"true_meaning,omitempty"`
+	FalseMeaning string `json:"false_meaning,omitempty"`
+	BooleanType  string `json:"boolean_type,omitempty"` // "feature_flag", "status_indicator", "permission"
+}
+
+// probeIdentifierFeatures contains identifier-specific classification results.
+type probeIdentifierFeatures struct {
+	IdentifierType   string  `json:"identifier_type,omitempty"`   // "internal_uuid", "foreign_key", "external_service_id"
+	ExternalService  string  `json:"external_service,omitempty"`  // "stripe", "twilio", etc.
+	FKTargetTable    string  `json:"fk_target_table,omitempty"`   // Resolved FK target table
+	FKTargetColumn   string  `json:"fk_target_column,omitempty"`  // Resolved FK target column
+	FKConfidence     float64 `json:"fk_confidence,omitempty"`     // FK resolution confidence
+	EntityReferenced string  `json:"entity_referenced,omitempty"` // Entity this identifier refers to
+}
+
+// probeMonetaryFeatures contains monetary-specific classification results.
+type probeMonetaryFeatures struct {
+	IsMonetary           bool   `json:"is_monetary,omitempty"`
+	CurrencyUnit         string `json:"currency_unit,omitempty"`          // "cents", "dollars", "USD"
+	PairedCurrencyColumn string `json:"paired_currency_column,omitempty"` // Column containing currency code
 }
 
 // probeColumnStatistics contains statistical information about a column.

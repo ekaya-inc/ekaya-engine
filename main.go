@@ -433,7 +433,7 @@ func main() {
 	ontologyDAGHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register ontology enrichment handler (protected) - read-only tiered ontology for UI
-	ontologyEnrichmentHandler := handlers.NewOntologyEnrichmentHandler(ontologyRepo, logger)
+	ontologyEnrichmentHandler := handlers.NewOntologyEnrichmentHandler(ontologyRepo, schemaRepo, projectService, logger)
 	ontologyEnrichmentHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register glossary handler (protected) - business glossary for MCP clients
