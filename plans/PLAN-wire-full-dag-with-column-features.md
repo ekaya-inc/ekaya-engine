@@ -125,7 +125,7 @@ ColumnFeatureExtraction Phase 4 already performs FK resolution via data overlap 
 
 ### Task 4: Update PKMatchDiscovery to Leverage ColumnFeatures
 
-**File:** `pkg/services/dag/pk_match_discovery_node.go`
+- [x] **File:** `pkg/services/deterministic_relationship_service.go`
 
 PKMatchDiscovery detects FKs via data overlap (join analysis). ColumnFeatureExtraction Phase 4 does similar work.
 

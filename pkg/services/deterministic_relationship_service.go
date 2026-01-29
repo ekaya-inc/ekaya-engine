@@ -738,6 +738,22 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 		return nil, fmt.Errorf("list columns: %w", err)
 	}
 
+	// Build a map of column IDs that already have relationships created by FKDiscovery/Phase 4.
+	// This avoids running redundant SQL join analysis for columns we've already processed.
+	existingRelationships, err := s.relationshipRepo.GetByOntology(ctx, ontology.ID)
+	if err != nil {
+		return nil, fmt.Errorf("get existing relationships: %w", err)
+	}
+	columnsWithRelationships := make(map[uuid.UUID]bool)
+	for _, rel := range existingRelationships {
+		if rel.SourceColumnID != nil {
+			columnsWithRelationships[*rel.SourceColumnID] = true
+		}
+	}
+	s.logger.Debug("Loaded existing relationships for deduplication",
+		zap.Int("existing_count", len(existingRelationships)),
+		zap.Int("columns_with_relationships", len(columnsWithRelationships)))
+
 	// Get datasource to create schema discoverer for join analysis
 	ds, err := s.datasourceService.Get(ctx, projectID, datasourceID)
 	if err != nil {
@@ -808,7 +824,12 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	}
 
 	// Build list of filtered FK candidate columns (columns that could reference entity columns)
-	var allCandidates []*pkMatchCandidate
+	// We track priority candidates (Role=foreign_key) separately to process them first.
+	var priorityCandidates []*pkMatchCandidate
+	var regularCandidates []*pkMatchCandidate
+	var skippedHighConfidence int
+	var skippedExistingRelationship int
+
 	for _, col := range columns {
 		table, ok := tableByID[col.SchemaTableID]
 		if !ok {
@@ -822,6 +843,30 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 
 		// Get column features for purpose-based filtering
 		features := col.GetColumnFeatures()
+
+		// Skip columns with high FK confidence (>0.8) from Phase 4 - they already have
+		// resolved FK targets and relationships were created in FKDiscovery.
+		// This avoids redundant SQL join analysis.
+		if features != nil && features.IdentifierFeatures != nil {
+			if features.IdentifierFeatures.FKConfidence > 0.8 && features.IdentifierFeatures.FKTargetTable != "" {
+				s.logger.Debug("Skipping column with high FK confidence from Phase 4",
+					zap.String("table", table.TableName),
+					zap.String("column", col.ColumnName),
+					zap.Float64("fk_confidence", features.IdentifierFeatures.FKConfidence),
+					zap.String("fk_target", features.IdentifierFeatures.FKTargetTable))
+				skippedHighConfidence++
+				continue
+			}
+		}
+
+		// Skip columns that already have relationships from FKDiscovery
+		if columnsWithRelationships[col.ID] {
+			s.logger.Debug("Skipping column with existing relationship",
+				zap.String("table", table.TableName),
+				zap.String("column", col.ColumnName))
+			skippedExistingRelationship++
+			continue
+		}
 
 		// Exclude columns based on stored purpose (timestamp, flag, measure, etc.)
 		if features != nil {
@@ -872,15 +917,30 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 				zap.Bool("is_joinable", col.IsJoinable != nil && *col.IsJoinable))
 		}
 
-		allCandidates = append(allCandidates, &pkMatchCandidate{
+		candidate := &pkMatchCandidate{
 			column: col,
 			schema: table.SchemaName,
 			table:  table.TableName,
-		})
+		}
+
+		// Prioritize columns with Role=foreign_key - they're more likely to be valid FKs
+		if features != nil && features.Role == models.RoleForeignKey {
+			priorityCandidates = append(priorityCandidates, candidate)
+		} else {
+			regularCandidates = append(regularCandidates, candidate)
+		}
 	}
+
+	// Combine candidates with priority ones first
+	allCandidates := append(priorityCandidates, regularCandidates...)
+
 	s.logger.Info("PK-match discovery setup complete",
 		zap.Int("entity_ref_columns", len(entityRefColumns)),
-		zap.Int("total_candidates", len(allCandidates)))
+		zap.Int("priority_candidates", len(priorityCandidates)),
+		zap.Int("regular_candidates", len(regularCandidates)),
+		zap.Int("total_candidates", len(allCandidates)),
+		zap.Int("skipped_high_confidence", skippedHighConfidence),
+		zap.Int("skipped_existing_relationship", skippedExistingRelationship))
 
 	// For each entity reference column, find candidates with compatible types and test joins
 	var inferredCount int
