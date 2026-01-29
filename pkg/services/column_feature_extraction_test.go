@@ -2197,3 +2197,543 @@ func TestParseFKResolutionResponse_FallsBackToHighestOverlap(t *testing.T) {
 		t.Errorf("FKTargetTable = %v, want 'items' (fallback to highest overlap)", result.FKTargetTable)
 	}
 }
+
+// ============================================================================
+// Phase 5: Cross-Column Analysis Tests
+// ============================================================================
+
+func TestRunPhase5CrossColumnAnalysis_Success(t *testing.T) {
+	projectID := uuid.New()
+	amountColumnID := uuid.New()
+	softDeleteColumnID := uuid.New()
+	currencyColumnID := uuid.New()
+
+	// Create mock LLM client that returns a valid cross-column analysis response
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		return &llm.GenerateResponseResult{
+			Content: `{
+				"monetary_pairings": [
+					{
+						"amount_column": "total_amount",
+						"currency_column": "currency_code",
+						"currency_unit": "cents",
+						"amount_description": "Total transaction amount including taxes",
+						"confidence": 0.92
+					}
+				],
+				"soft_delete_validations": [
+					{
+						"column_name": "deleted_at",
+						"is_soft_delete": true,
+						"non_null_meaning": "Record was soft-deleted at this timestamp",
+						"description": "Soft delete marker for logical deletion",
+						"confidence": 0.95
+					}
+				]
+			}`,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.MockClient = mockClient
+
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), zap.NewNop())
+
+	// Create profiles for the table columns
+	profiles := []*models.ColumnDataProfile{
+		{
+			ColumnID:     amountColumnID,
+			ColumnName:   "total_amount",
+			TableName:    "orders",
+			DataType:     "numeric",
+			SampleValues: []string{"1000", "2500", "500"},
+		},
+		{
+			ColumnID:     currencyColumnID,
+			ColumnName:   "currency_code",
+			TableName:    "orders",
+			DataType:     "varchar(3)",
+			SampleValues: []string{"USD", "EUR", "GBP"},
+			DetectedPatterns: []models.DetectedPattern{
+				{PatternName: models.PatternISO4217, MatchRate: 1.0},
+			},
+		},
+		{
+			ColumnID:     softDeleteColumnID,
+			ColumnName:   "deleted_at",
+			TableName:    "orders",
+			DataType:     "timestamp",
+			NullRate:     0.95,
+			SampleValues: []string{"2024-01-15 10:30:00"},
+		},
+	}
+
+	// Create initial features (as would come from Phase 2)
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:              amountColumnID,
+			ClassificationPath:    models.ClassificationPathNumeric,
+			Purpose:               models.PurposeMeasure,
+			NeedsCrossColumnCheck: true,
+			MonetaryFeatures: &models.MonetaryFeatures{
+				IsMonetary: false, // Will be confirmed in Phase 5
+			},
+		},
+		{
+			ColumnID:           currencyColumnID,
+			ClassificationPath: models.ClassificationPathText,
+			Purpose:            models.PurposeText,
+		},
+		{
+			ColumnID:              softDeleteColumnID,
+			ClassificationPath:    models.ClassificationPathTimestamp,
+			Purpose:               models.PurposeTimestamp,
+			NeedsCrossColumnCheck: true,
+			TimestampFeatures: &models.TimestampFeatures{
+				IsSoftDelete: true, // Initial detection from Phase 2
+			},
+		},
+	}
+
+	svc := &columnFeatureExtractionService{
+		llmFactory:  mockFactory,
+		workerPool:  workerPool,
+		logger:      zap.NewNop(),
+		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+	}
+
+	// Track progress
+	var progressCalls []int
+	progressCallback := func(completed, total int, message string) {
+		progressCalls = append(progressCalls, completed)
+	}
+
+	err := svc.runPhase5CrossColumnAnalysis(
+		context.Background(),
+		projectID,
+		[]string{"orders"},
+		profiles,
+		features,
+		progressCallback,
+	)
+	if err != nil {
+		t.Fatalf("runPhase5CrossColumnAnalysis() error = %v", err)
+	}
+
+	// Verify LLM was called
+	if mockClient.GenerateResponseCalls != 1 {
+		t.Errorf("GenerateResponseCalls = %d, want 1", mockClient.GenerateResponseCalls)
+	}
+
+	// Verify progress was reported
+	if len(progressCalls) == 0 {
+		t.Error("No progress callbacks received")
+	}
+
+	// Verify monetary features were updated
+	amountFeature := features[0]
+	if amountFeature.NeedsCrossColumnCheck {
+		t.Error("NeedsCrossColumnCheck should be false after analysis")
+	}
+	if amountFeature.MonetaryFeatures == nil {
+		t.Fatal("MonetaryFeatures should not be nil")
+	}
+	if !amountFeature.MonetaryFeatures.IsMonetary {
+		t.Error("IsMonetary should be true")
+	}
+	if amountFeature.MonetaryFeatures.CurrencyUnit != "cents" {
+		t.Errorf("CurrencyUnit = %v, want 'cents'", amountFeature.MonetaryFeatures.CurrencyUnit)
+	}
+	if amountFeature.MonetaryFeatures.PairedCurrencyColumn != "currency_code" {
+		t.Errorf("PairedCurrencyColumn = %v, want 'currency_code'", amountFeature.MonetaryFeatures.PairedCurrencyColumn)
+	}
+	if amountFeature.SemanticType != "monetary" {
+		t.Errorf("SemanticType = %v, want 'monetary'", amountFeature.SemanticType)
+	}
+
+	// Verify soft delete features were updated
+	softDeleteFeature := features[2]
+	if softDeleteFeature.NeedsCrossColumnCheck {
+		t.Error("NeedsCrossColumnCheck should be false after analysis")
+	}
+	if softDeleteFeature.TimestampFeatures == nil {
+		t.Fatal("TimestampFeatures should not be nil")
+	}
+	if !softDeleteFeature.TimestampFeatures.IsSoftDelete {
+		t.Error("IsSoftDelete should be true after validation")
+	}
+	if softDeleteFeature.Description != "Soft delete marker for logical deletion" {
+		t.Errorf("Description = %v, want 'Soft delete marker for logical deletion'", softDeleteFeature.Description)
+	}
+}
+
+func TestRunPhase5CrossColumnAnalysis_EmptyQueue(t *testing.T) {
+	svc := &columnFeatureExtractionService{
+		logger: zap.NewNop(),
+	}
+
+	// Empty table queue should skip phase without error
+	err := svc.runPhase5CrossColumnAnalysis(
+		context.Background(),
+		uuid.New(),
+		[]string{}, // empty queue
+		nil,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Errorf("runPhase5CrossColumnAnalysis() with empty queue should not error, got: %v", err)
+	}
+}
+
+func TestRunPhase5CrossColumnAnalysis_ContinuesOnFailure(t *testing.T) {
+	projectID := uuid.New()
+
+	callCount := 0
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		callCount++
+		// Fail on second call
+		if callCount == 2 {
+			return nil, context.DeadlineExceeded
+		}
+		return &llm.GenerateResponseResult{
+			Content: `{"monetary_pairings": [], "soft_delete_validations": []}`,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.MockClient = mockClient
+
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), zap.NewNop())
+
+	// Create profiles for multiple tables
+	col1ID := uuid.New()
+	col2ID := uuid.New()
+	col3ID := uuid.New()
+	profiles := []*models.ColumnDataProfile{
+		{ColumnID: col1ID, ColumnName: "amount1", TableName: "table1"},
+		{ColumnID: col2ID, ColumnName: "amount2", TableName: "table2"},
+		{ColumnID: col3ID, ColumnName: "amount3", TableName: "table3"},
+	}
+
+	features := []*models.ColumnFeatures{
+		{ColumnID: col1ID, NeedsCrossColumnCheck: true, MonetaryFeatures: &models.MonetaryFeatures{}},
+		{ColumnID: col2ID, NeedsCrossColumnCheck: true, MonetaryFeatures: &models.MonetaryFeatures{}},
+		{ColumnID: col3ID, NeedsCrossColumnCheck: true, MonetaryFeatures: &models.MonetaryFeatures{}},
+	}
+
+	svc := &columnFeatureExtractionService{
+		llmFactory:  mockFactory,
+		workerPool:  workerPool,
+		logger:      zap.NewNop(),
+		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+	}
+
+	err := svc.runPhase5CrossColumnAnalysis(
+		context.Background(),
+		projectID,
+		[]string{"table1", "table2", "table3"},
+		profiles,
+		features,
+		nil,
+	)
+
+	// Should not return error - continues on individual failures
+	if err != nil {
+		t.Errorf("runPhase5CrossColumnAnalysis() should continue on individual failures, got error: %v", err)
+	}
+
+	// All 3 LLM calls should have been attempted
+	if callCount != 3 {
+		t.Errorf("Expected 3 LLM calls, got %d", callCount)
+	}
+}
+
+func TestBuildCrossColumnPrompt(t *testing.T) {
+	svc := &columnFeatureExtractionService{
+		logger: zap.NewNop(),
+	}
+
+	amountColumnID := uuid.New()
+	softDeleteColumnID := uuid.New()
+	currencyColumnID := uuid.New()
+
+	allProfiles := []*models.ColumnDataProfile{
+		{ColumnID: amountColumnID, ColumnName: "total_amount", TableName: "orders", DataType: "numeric", NullRate: 0.0, DistinctCount: 500},
+		{ColumnID: currencyColumnID, ColumnName: "currency_code", TableName: "orders", DataType: "varchar(3)", NullRate: 0.0, DistinctCount: 5},
+		{ColumnID: softDeleteColumnID, ColumnName: "deleted_at", TableName: "orders", DataType: "timestamp", NullRate: 0.95, DistinctCount: 10},
+	}
+
+	monetaryColumns := []*models.ColumnDataProfile{
+		{ColumnID: amountColumnID, ColumnName: "total_amount", DataType: "numeric", SampleValues: []string{"1000", "2500"}},
+	}
+
+	softDeleteColumns := []*models.ColumnDataProfile{
+		{ColumnID: softDeleteColumnID, ColumnName: "deleted_at", DataType: "timestamp", NullRate: 0.95, SampleValues: []string{"2024-01-15"}},
+	}
+
+	currencyColumns := []*models.ColumnDataProfile{
+		{ColumnID: currencyColumnID, ColumnName: "currency_code", DataType: "varchar(3)", SampleValues: []string{"USD", "EUR"}},
+	}
+
+	prompt := svc.buildCrossColumnPrompt("orders", allProfiles, monetaryColumns, softDeleteColumns, currencyColumns)
+
+	// Verify prompt contains key sections
+	if !strings.Contains(prompt, "Cross-Column Analysis") {
+		t.Error("Prompt should contain 'Cross-Column Analysis' header")
+	}
+	if !strings.Contains(prompt, "**Table:** orders") {
+		t.Error("Prompt should contain table name")
+	}
+	if !strings.Contains(prompt, "Monetary Column Analysis") {
+		t.Error("Prompt should contain monetary analysis section")
+	}
+	if !strings.Contains(prompt, "Soft Delete Validation") {
+		t.Error("Prompt should contain soft delete validation section")
+	}
+	if !strings.Contains(prompt, "total_amount") {
+		t.Error("Prompt should contain monetary column name")
+	}
+	if !strings.Contains(prompt, "deleted_at") {
+		t.Error("Prompt should contain soft delete column name")
+	}
+	if !strings.Contains(prompt, "currency_code") {
+		t.Error("Prompt should contain currency column name")
+	}
+	if !strings.Contains(prompt, "95.0%") {
+		t.Error("Prompt should contain null rate for soft delete column")
+	}
+}
+
+func TestParseCrossColumnResponse(t *testing.T) {
+	svc := &columnFeatureExtractionService{
+		logger: zap.NewNop(),
+	}
+
+	amountColumnID := uuid.New()
+	softDeleteColumnID := uuid.New()
+
+	monetaryColumns := []*models.ColumnDataProfile{
+		{ColumnID: amountColumnID, ColumnName: "amount"},
+	}
+	softDeleteColumns := []*models.ColumnDataProfile{
+		{ColumnID: softDeleteColumnID, ColumnName: "removed_at"},
+	}
+
+	content := `{
+		"monetary_pairings": [
+			{
+				"amount_column": "amount",
+				"currency_column": "currency",
+				"currency_unit": "dollars",
+				"amount_description": "Order total",
+				"confidence": 0.88
+			}
+		],
+		"soft_delete_validations": [
+			{
+				"column_name": "removed_at",
+				"is_soft_delete": true,
+				"non_null_meaning": "Item was removed from cart",
+				"description": "Tracks when item was removed",
+				"confidence": 0.9
+			}
+		]
+	}`
+
+	result, err := svc.parseCrossColumnResponse("orders", content, "test-model", monetaryColumns, softDeleteColumns)
+	if err != nil {
+		t.Fatalf("parseCrossColumnResponse() error = %v", err)
+	}
+
+	if result.TableName != "orders" {
+		t.Errorf("TableName = %v, want 'orders'", result.TableName)
+	}
+	if result.LLMModelUsed != "test-model" {
+		t.Errorf("LLMModelUsed = %v, want 'test-model'", result.LLMModelUsed)
+	}
+
+	// Verify monetary pairings
+	if len(result.MonetaryPairings) != 1 {
+		t.Fatalf("len(MonetaryPairings) = %d, want 1", len(result.MonetaryPairings))
+	}
+	mp := result.MonetaryPairings[0]
+	if mp.AmountColumnID != amountColumnID {
+		t.Errorf("AmountColumnID = %v, want %v", mp.AmountColumnID, amountColumnID)
+	}
+	if mp.AmountColumnName != "amount" {
+		t.Errorf("AmountColumnName = %v, want 'amount'", mp.AmountColumnName)
+	}
+	if mp.CurrencyColumnName != "currency" {
+		t.Errorf("CurrencyColumnName = %v, want 'currency'", mp.CurrencyColumnName)
+	}
+	if mp.CurrencyUnit != "dollars" {
+		t.Errorf("CurrencyUnit = %v, want 'dollars'", mp.CurrencyUnit)
+	}
+	if mp.Confidence != 0.88 {
+		t.Errorf("Confidence = %v, want 0.88", mp.Confidence)
+	}
+
+	// Verify soft delete validations
+	if len(result.SoftDeleteValidations) != 1 {
+		t.Fatalf("len(SoftDeleteValidations) = %d, want 1", len(result.SoftDeleteValidations))
+	}
+	sd := result.SoftDeleteValidations[0]
+	if sd.ColumnID != softDeleteColumnID {
+		t.Errorf("ColumnID = %v, want %v", sd.ColumnID, softDeleteColumnID)
+	}
+	if sd.ColumnName != "removed_at" {
+		t.Errorf("ColumnName = %v, want 'removed_at'", sd.ColumnName)
+	}
+	if !sd.IsSoftDelete {
+		t.Error("IsSoftDelete should be true")
+	}
+	if sd.NonNullMeaning != "Item was removed from cart" {
+		t.Errorf("NonNullMeaning = %v, want 'Item was removed from cart'", sd.NonNullMeaning)
+	}
+}
+
+func TestMergeCrossColumnAnalysis(t *testing.T) {
+	svc := &columnFeatureExtractionService{
+		logger: zap.NewNop(),
+	}
+
+	amountColumnID := uuid.New()
+	softDeleteColumnID := uuid.New()
+
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:              amountColumnID,
+			ClassificationPath:    models.ClassificationPathNumeric,
+			NeedsCrossColumnCheck: true,
+			MonetaryFeatures:      &models.MonetaryFeatures{IsMonetary: false},
+			Confidence:            0.7,
+		},
+		{
+			ColumnID:              softDeleteColumnID,
+			ClassificationPath:    models.ClassificationPathTimestamp,
+			NeedsCrossColumnCheck: true,
+			TimestampFeatures:     &models.TimestampFeatures{IsSoftDelete: true},
+			Confidence:            0.8,
+		},
+	}
+
+	result := &CrossColumnResult{
+		TableName: "orders",
+		MonetaryPairings: []MonetaryPairing{
+			{
+				AmountColumnID:     amountColumnID,
+				AmountColumnName:   "total_amount",
+				CurrencyColumnName: "currency",
+				CurrencyUnit:       "cents",
+				AmountDescription:  "Total order amount",
+				Confidence:         0.95,
+			},
+		},
+		SoftDeleteValidations: []SoftDeleteValidation{
+			{
+				ColumnID:       softDeleteColumnID,
+				ColumnName:     "deleted_at",
+				IsSoftDelete:   true,
+				NonNullMeaning: "Record deleted",
+				Description:    "Soft delete timestamp",
+				Confidence:     0.92,
+			},
+		},
+	}
+
+	svc.mergeCrossColumnAnalysis(features, result)
+
+	// Verify monetary feature updates
+	amountFeature := features[0]
+	if amountFeature.NeedsCrossColumnCheck {
+		t.Error("NeedsCrossColumnCheck should be false after merge")
+	}
+	if !amountFeature.MonetaryFeatures.IsMonetary {
+		t.Error("IsMonetary should be true")
+	}
+	if amountFeature.MonetaryFeatures.CurrencyUnit != "cents" {
+		t.Errorf("CurrencyUnit = %v, want 'cents'", amountFeature.MonetaryFeatures.CurrencyUnit)
+	}
+	if amountFeature.MonetaryFeatures.PairedCurrencyColumn != "currency" {
+		t.Errorf("PairedCurrencyColumn = %v, want 'currency'", amountFeature.MonetaryFeatures.PairedCurrencyColumn)
+	}
+	if amountFeature.SemanticType != "monetary" {
+		t.Errorf("SemanticType = %v, want 'monetary'", amountFeature.SemanticType)
+	}
+	if amountFeature.Role != models.RoleMeasure {
+		t.Errorf("Role = %v, want 'measure'", amountFeature.Role)
+	}
+	if amountFeature.Confidence != 0.95 {
+		t.Errorf("Confidence = %v, want 0.95 (higher value from cross-column)", amountFeature.Confidence)
+	}
+
+	// Verify soft delete feature updates
+	softDeleteFeature := features[1]
+	if softDeleteFeature.NeedsCrossColumnCheck {
+		t.Error("NeedsCrossColumnCheck should be false after merge")
+	}
+	if !softDeleteFeature.TimestampFeatures.IsSoftDelete {
+		t.Error("IsSoftDelete should be true")
+	}
+	if softDeleteFeature.SemanticType != models.TimestampPurposeSoftDelete {
+		t.Errorf("SemanticType = %v, want '%v'", softDeleteFeature.SemanticType, models.TimestampPurposeSoftDelete)
+	}
+	if softDeleteFeature.Description != "Soft delete timestamp" {
+		t.Errorf("Description = %v, want 'Soft delete timestamp'", softDeleteFeature.Description)
+	}
+	if softDeleteFeature.Confidence != 0.92 {
+		t.Errorf("Confidence = %v, want 0.92 (higher value from cross-column)", softDeleteFeature.Confidence)
+	}
+}
+
+func TestMergeCrossColumnAnalysis_SoftDeleteRejected(t *testing.T) {
+	svc := &columnFeatureExtractionService{
+		logger: zap.NewNop(),
+	}
+
+	columnID := uuid.New()
+
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:              columnID,
+			ClassificationPath:    models.ClassificationPathTimestamp,
+			NeedsCrossColumnCheck: true,
+			TimestampFeatures:     &models.TimestampFeatures{IsSoftDelete: true},
+			SemanticType:          "soft_delete",
+		},
+	}
+
+	// LLM determines this is NOT a soft delete (e.g., it's an optional event timestamp)
+	result := &CrossColumnResult{
+		TableName: "events",
+		SoftDeleteValidations: []SoftDeleteValidation{
+			{
+				ColumnID:       columnID,
+				ColumnName:     "completed_at",
+				IsSoftDelete:   false, // Rejected!
+				NonNullMeaning: "Task was completed at this time",
+				Description:    "Optional completion timestamp",
+				Confidence:     0.85,
+			},
+		},
+	}
+
+	svc.mergeCrossColumnAnalysis(features, result)
+
+	// Verify soft delete was rejected
+	feature := features[0]
+	if feature.NeedsCrossColumnCheck {
+		t.Error("NeedsCrossColumnCheck should be false after merge")
+	}
+	// IsSoftDelete should be false (LLM rejected it)
+	if feature.TimestampFeatures.IsSoftDelete {
+		t.Error("IsSoftDelete should be false after validation rejected it")
+	}
+	// SemanticType should NOT be soft_delete anymore
+	if feature.SemanticType == models.TimestampPurposeSoftDelete {
+		t.Errorf("SemanticType should not be '%v' after rejection", models.TimestampPurposeSoftDelete)
+	}
+}

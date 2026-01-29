@@ -180,7 +180,12 @@ func (s *columnFeatureExtractionService) ExtractColumnFeatures(
 			return 0, fmt.Errorf("phase 4 FK resolution failed: %w", err)
 		}
 
-		// TODO: Phase 5-6 will be implemented in subsequent tasks
+		// Phase 5: Cross-Column Analysis (parallel LLM, 1 request/table)
+		if err := s.runPhase5CrossColumnAnalysis(ctx, projectID, phase2Result.Phase5CrossColumnQueue, phase1Result.Profiles, phase2Result.Features, progressCallback); err != nil {
+			return 0, fmt.Errorf("phase 5 cross-column analysis failed: %w", err)
+		}
+
+		// TODO: Phase 6 (store results) will be implemented in subsequent tasks
 	}
 
 	return phase1Result.TotalColumns, nil
@@ -2595,4 +2600,533 @@ func (s *columnFeatureExtractionService) mergeFKResolution(
 
 	s.logger.Warn("Could not find feature to merge FK resolution",
 		zap.String("column_id", result.ColumnID.String()))
+}
+
+// ============================================================================
+// Phase 5: Cross-Column Analysis (Parallel LLM)
+// ============================================================================
+
+// CrossColumnResult contains the result of cross-column analysis for a single table.
+// This phase validates monetary pairings and soft delete timestamps by analyzing
+// relationships between columns in the same table.
+type CrossColumnResult struct {
+	TableName string `json:"table_name"`
+
+	// Monetary column pairings discovered
+	MonetaryPairings []MonetaryPairing `json:"monetary_pairings,omitempty"`
+
+	// Soft delete validation results
+	SoftDeleteValidations []SoftDeleteValidation `json:"soft_delete_validations,omitempty"`
+
+	LLMModelUsed string `json:"llm_model_used"`
+}
+
+// MonetaryPairing represents a validated pairing between a numeric amount column
+// and a currency column in the same table.
+type MonetaryPairing struct {
+	AmountColumnID     uuid.UUID `json:"amount_column_id"`
+	AmountColumnName   string    `json:"amount_column_name"`
+	CurrencyColumnName string    `json:"currency_column_name"`
+	CurrencyUnit       string    `json:"currency_unit"`      // "cents", "dollars", "basis_points"
+	AmountDescription  string    `json:"amount_description"` // What this amount represents
+	Confidence         float64   `json:"confidence"`
+}
+
+// SoftDeleteValidation represents the validation result for a suspected soft delete column.
+type SoftDeleteValidation struct {
+	ColumnID       uuid.UUID `json:"column_id"`
+	ColumnName     string    `json:"column_name"`
+	IsSoftDelete   bool      `json:"is_soft_delete"`   // Confirmed as soft delete?
+	NonNullMeaning string    `json:"non_null_meaning"` // What does a non-NULL value indicate?
+	Description    string    `json:"description"`
+	Confidence     float64   `json:"confidence"`
+}
+
+// runPhase5CrossColumnAnalysis analyzes column relationships per table.
+// Only runs for tables flagged in Phase 2 with NeedsCrossColumnCheck=true.
+// Each table gets ONE LLM request that analyzes:
+// - Monetary pairings: Which numeric amounts pair with which currency column?
+// - Soft delete validation: Is this really a soft delete? What does non-NULL indicate?
+func (s *columnFeatureExtractionService) runPhase5CrossColumnAnalysis(
+	ctx context.Context,
+	projectID uuid.UUID,
+	tableQueue []string,
+	profiles []*models.ColumnDataProfile,
+	features []*models.ColumnFeatures,
+	progressCallback dag.ProgressCallback,
+) error {
+	if len(tableQueue) == 0 {
+		s.logger.Info("Phase 5: No tables need cross-column analysis, skipping")
+		return nil
+	}
+
+	s.logger.Info("Starting Phase 5: Cross-Column Analysis",
+		zap.Int("tables_to_analyze", len(tableQueue)))
+
+	// Report initial progress
+	if progressCallback != nil {
+		progressCallback(0, len(tableQueue), "Analyzing column relationships")
+	}
+
+	// Build profile lookup by table name
+	profilesByTable := make(map[string][]*models.ColumnDataProfile)
+	for _, p := range profiles {
+		profilesByTable[p.TableName] = append(profilesByTable[p.TableName], p)
+	}
+
+	// Build features lookup by column ID
+	featuresByColumnID := make(map[uuid.UUID]*models.ColumnFeatures)
+	for _, f := range features {
+		featuresByColumnID[f.ColumnID] = f
+	}
+
+	// Build work items - ONE request per table
+	workItems := make([]llm.WorkItem[*CrossColumnResult], 0, len(tableQueue))
+	for _, tableName := range tableQueue {
+		tn := tableName
+		tableProfiles := profilesByTable[tn]
+		if len(tableProfiles) == 0 {
+			s.logger.Warn("No profiles found for table, skipping",
+				zap.String("table", tn))
+			continue
+		}
+
+		workItems = append(workItems, llm.WorkItem[*CrossColumnResult]{
+			ID: tn,
+			Execute: func(ctx context.Context) (*CrossColumnResult, error) {
+				return s.analyzeCrossColumn(ctx, projectID, tn, tableProfiles, featuresByColumnID)
+			},
+		})
+	}
+
+	if len(workItems) == 0 {
+		s.logger.Info("Phase 5: No valid cross-column work items")
+		return nil
+	}
+
+	// Process in parallel with progress updates
+	results := llm.Process(ctx, s.workerPool, workItems, func(completed, total int) {
+		if progressCallback != nil {
+			progressCallback(completed, total, "Analyzing column relationships")
+		}
+	})
+
+	// Track outcomes for logging
+	var successCount, failureCount int
+	var monetaryPairingsFound, softDeleteValidations int
+
+	for _, r := range results {
+		if r.Err != nil {
+			s.logger.Error("Cross-column analysis failed",
+				zap.String("table", r.ID),
+				zap.Error(r.Err))
+			failureCount++
+			continue
+		}
+
+		s.mergeCrossColumnAnalysis(features, r.Result)
+		successCount++
+		monetaryPairingsFound += len(r.Result.MonetaryPairings)
+		softDeleteValidations += len(r.Result.SoftDeleteValidations)
+	}
+
+	s.logger.Info("Phase 5 complete",
+		zap.Int("tables_analyzed", successCount),
+		zap.Int("failed", failureCount),
+		zap.Int("monetary_pairings", monetaryPairingsFound),
+		zap.Int("soft_delete_validations", softDeleteValidations))
+
+	// Report final progress
+	if progressCallback != nil {
+		summary := fmt.Sprintf("Analyzed %d tables for column relationships", successCount)
+		progressCallback(len(tableQueue), len(tableQueue), summary)
+	}
+
+	return nil
+}
+
+// analyzeCrossColumn sends ONE focused LLM request to analyze cross-column relationships
+// for a single table. It gathers table context and sends a request analyzing:
+// - Monetary pairing: which numeric amounts pair with which currency column
+// - Soft delete validation: is this really a soft delete timestamp
+func (s *columnFeatureExtractionService) analyzeCrossColumn(
+	ctx context.Context,
+	projectID uuid.UUID,
+	tableName string,
+	tableProfiles []*models.ColumnDataProfile,
+	featuresByColumnID map[uuid.UUID]*models.ColumnFeatures,
+) (*CrossColumnResult, error) {
+	// Gather context: find columns that need cross-column analysis
+	var potentialMonetaryColumns []*models.ColumnDataProfile
+	var potentialSoftDeleteColumns []*models.ColumnDataProfile
+	var currencyColumns []*models.ColumnDataProfile
+
+	for _, profile := range tableProfiles {
+		features := featuresByColumnID[profile.ColumnID]
+		if features == nil {
+			continue
+		}
+
+		// Check for potential monetary columns
+		if features.NeedsCrossColumnCheck && features.MonetaryFeatures != nil {
+			potentialMonetaryColumns = append(potentialMonetaryColumns, profile)
+		}
+
+		// Check for potential soft delete columns
+		if features.NeedsCrossColumnCheck && features.TimestampFeatures != nil && features.TimestampFeatures.IsSoftDelete {
+			potentialSoftDeleteColumns = append(potentialSoftDeleteColumns, profile)
+		}
+
+		// Identify currency columns (text with ISO 4217 pattern)
+		if profile.MatchesPatternWithThreshold(models.PatternISO4217, 0.8) {
+			currencyColumns = append(currencyColumns, profile)
+		}
+	}
+
+	// If nothing to analyze, return empty result
+	if len(potentialMonetaryColumns) == 0 && len(potentialSoftDeleteColumns) == 0 {
+		return &CrossColumnResult{
+			TableName: tableName,
+		}, nil
+	}
+
+	prompt := s.buildCrossColumnPrompt(tableName, tableProfiles, potentialMonetaryColumns, potentialSoftDeleteColumns, currencyColumns)
+	systemMsg := `You are a database schema analyst. Your task is to analyze relationships between columns in the same table.
+
+Focus on:
+1. Monetary pairing: Which numeric columns represent monetary amounts and which currency column do they pair with?
+2. Soft delete validation: For high-null-rate timestamp columns, confirm if they are soft delete markers and what non-NULL values mean.
+
+Base your analysis on DATA patterns (value distributions, null rates), not column names. Column names are provided for context only.
+Respond with valid JSON only.`
+
+	// Get LLM client
+	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("create LLM client: %w", err)
+	}
+
+	// Call LLM with low temperature for deterministic analysis
+	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.2, false)
+	if err != nil {
+		return nil, fmt.Errorf("LLM call failed: %w", err)
+	}
+
+	// Parse the response
+	return s.parseCrossColumnResponse(tableName, result.Content, llmClient.GetModel(), potentialMonetaryColumns, potentialSoftDeleteColumns)
+}
+
+// buildCrossColumnPrompt creates a focused prompt for cross-column analysis.
+func (s *columnFeatureExtractionService) buildCrossColumnPrompt(
+	tableName string,
+	allProfiles []*models.ColumnDataProfile,
+	monetaryColumns []*models.ColumnDataProfile,
+	softDeleteColumns []*models.ColumnDataProfile,
+	currencyColumns []*models.ColumnDataProfile,
+) string {
+	var sb strings.Builder
+
+	sb.WriteString("# Cross-Column Analysis\n\n")
+	sb.WriteString(fmt.Sprintf("**Table:** %s\n\n", tableName))
+
+	// List all columns for context
+	sb.WriteString("## All Columns in Table\n\n")
+	sb.WriteString("| Column | Type | Null Rate | Distinct Count |\n")
+	sb.WriteString("|--------|------|-----------|----------------|\n")
+	for _, p := range allProfiles {
+		sb.WriteString(fmt.Sprintf("| %s | %s | %.1f%% | %d |\n",
+			p.ColumnName, p.DataType, p.NullRate*100, p.DistinctCount))
+	}
+	sb.WriteString("\n")
+
+	// Monetary analysis section
+	if len(monetaryColumns) > 0 {
+		sb.WriteString("## Monetary Column Analysis\n\n")
+		sb.WriteString("The following numeric columns may represent monetary amounts:\n\n")
+
+		for _, col := range monetaryColumns {
+			sb.WriteString(fmt.Sprintf("### %s\n", col.ColumnName))
+			sb.WriteString(fmt.Sprintf("- **Data type:** %s\n", col.DataType))
+			if len(col.SampleValues) > 0 {
+				sb.WriteString("- **Sample values:** ")
+				samples := col.SampleValues
+				if len(samples) > 5 {
+					samples = samples[:5]
+				}
+				sb.WriteString(strings.Join(samples, ", "))
+				sb.WriteString("\n")
+			}
+			sb.WriteString("\n")
+		}
+
+		if len(currencyColumns) > 0 {
+			sb.WriteString("### Potential Currency Columns\n\n")
+			for _, col := range currencyColumns {
+				sb.WriteString(fmt.Sprintf("- **%s** (type: %s)", col.ColumnName, col.DataType))
+				if len(col.SampleValues) > 0 {
+					samples := col.SampleValues
+					if len(samples) > 5 {
+						samples = samples[:5]
+					}
+					sb.WriteString(fmt.Sprintf(" - values: %s", strings.Join(samples, ", ")))
+				}
+				sb.WriteString("\n")
+			}
+			sb.WriteString("\n")
+		}
+
+		sb.WriteString("**Task:** For each numeric column, determine:\n")
+		sb.WriteString("1. Is it a monetary amount? (not a percentage, count, or ID)\n")
+		sb.WriteString("2. What currency column (if any) does it pair with?\n")
+		sb.WriteString("3. What unit is the amount in? (cents, dollars, basis_points)\n")
+		sb.WriteString("4. What does this amount represent?\n\n")
+	}
+
+	// Soft delete analysis section
+	if len(softDeleteColumns) > 0 {
+		sb.WriteString("## Soft Delete Validation\n\n")
+		sb.WriteString("The following timestamp columns have high null rates and may be soft delete markers:\n\n")
+
+		for _, col := range softDeleteColumns {
+			sb.WriteString(fmt.Sprintf("### %s\n", col.ColumnName))
+			sb.WriteString(fmt.Sprintf("- **Data type:** %s\n", col.DataType))
+			sb.WriteString(fmt.Sprintf("- **Null rate:** %.1f%%\n", col.NullRate*100))
+			if len(col.SampleValues) > 0 {
+				sb.WriteString("- **Sample non-NULL values:** ")
+				samples := col.SampleValues
+				if len(samples) > 3 {
+					samples = samples[:3]
+				}
+				sb.WriteString(strings.Join(samples, ", "))
+				sb.WriteString("\n")
+			}
+			sb.WriteString("\n")
+		}
+
+		sb.WriteString("**Task:** For each timestamp column, determine:\n")
+		sb.WriteString("1. Is this truly a soft delete marker? (or could it be something else like an optional event time?)\n")
+		sb.WriteString("2. What does a non-NULL value indicate? (e.g., \"record was deleted\", \"user unsubscribed\")\n\n")
+	}
+
+	sb.WriteString("## Response Format\n\n")
+	sb.WriteString("```json\n")
+	sb.WriteString("{\n")
+	sb.WriteString("  \"monetary_pairings\": [\n")
+	sb.WriteString("    {\n")
+	sb.WriteString("      \"amount_column\": \"total_amount\",\n")
+	sb.WriteString("      \"currency_column\": \"currency_code\",\n")
+	sb.WriteString("      \"currency_unit\": \"cents\",\n")
+	sb.WriteString("      \"amount_description\": \"Total transaction amount including taxes\",\n")
+	sb.WriteString("      \"confidence\": 0.9\n")
+	sb.WriteString("    }\n")
+	sb.WriteString("  ],\n")
+	sb.WriteString("  \"soft_delete_validations\": [\n")
+	sb.WriteString("    {\n")
+	sb.WriteString("      \"column_name\": \"deleted_at\",\n")
+	sb.WriteString("      \"is_soft_delete\": true,\n")
+	sb.WriteString("      \"non_null_meaning\": \"Record was soft-deleted at this timestamp\",\n")
+	sb.WriteString("      \"description\": \"Soft delete marker for logical deletion without removing the row\",\n")
+	sb.WriteString("      \"confidence\": 0.95\n")
+	sb.WriteString("    }\n")
+	sb.WriteString("  ]\n")
+	sb.WriteString("}\n")
+	sb.WriteString("```\n")
+
+	return sb.String()
+}
+
+// crossColumnLLMResponse is the expected JSON response from the LLM for cross-column analysis.
+type crossColumnLLMResponse struct {
+	MonetaryPairings      []monetaryPairingLLMResponse      `json:"monetary_pairings"`
+	SoftDeleteValidations []softDeleteValidationLLMResponse `json:"soft_delete_validations"`
+}
+
+type monetaryPairingLLMResponse struct {
+	AmountColumn      string  `json:"amount_column"`
+	CurrencyColumn    string  `json:"currency_column"`
+	CurrencyUnit      string  `json:"currency_unit"`
+	AmountDescription string  `json:"amount_description"`
+	Confidence        float64 `json:"confidence"`
+}
+
+type softDeleteValidationLLMResponse struct {
+	ColumnName     string  `json:"column_name"`
+	IsSoftDelete   bool    `json:"is_soft_delete"`
+	NonNullMeaning string  `json:"non_null_meaning"`
+	Description    string  `json:"description"`
+	Confidence     float64 `json:"confidence"`
+}
+
+// parseCrossColumnResponse parses the LLM response into a CrossColumnResult.
+func (s *columnFeatureExtractionService) parseCrossColumnResponse(
+	tableName string,
+	content string,
+	model string,
+	monetaryColumns []*models.ColumnDataProfile,
+	softDeleteColumns []*models.ColumnDataProfile,
+) (*CrossColumnResult, error) {
+	response, err := llm.ParseJSONResponse[crossColumnLLMResponse](content)
+	if err != nil {
+		return nil, fmt.Errorf("parse cross-column analysis response: %w", err)
+	}
+
+	// Build column name to ID lookup
+	columnIDByName := make(map[string]uuid.UUID)
+	for _, col := range monetaryColumns {
+		columnIDByName[col.ColumnName] = col.ColumnID
+	}
+	for _, col := range softDeleteColumns {
+		columnIDByName[col.ColumnName] = col.ColumnID
+	}
+
+	result := &CrossColumnResult{
+		TableName:    tableName,
+		LLMModelUsed: model,
+	}
+
+	// Convert monetary pairings
+	for _, mp := range response.MonetaryPairings {
+		columnID, ok := columnIDByName[mp.AmountColumn]
+		if !ok {
+			s.logger.Warn("Monetary pairing references unknown column",
+				zap.String("table", tableName),
+				zap.String("column", mp.AmountColumn))
+			continue
+		}
+
+		result.MonetaryPairings = append(result.MonetaryPairings, MonetaryPairing{
+			AmountColumnID:     columnID,
+			AmountColumnName:   mp.AmountColumn,
+			CurrencyColumnName: mp.CurrencyColumn,
+			CurrencyUnit:       mp.CurrencyUnit,
+			AmountDescription:  mp.AmountDescription,
+			Confidence:         mp.Confidence,
+		})
+	}
+
+	// Convert soft delete validations
+	for _, sd := range response.SoftDeleteValidations {
+		columnID, ok := columnIDByName[sd.ColumnName]
+		if !ok {
+			s.logger.Warn("Soft delete validation references unknown column",
+				zap.String("table", tableName),
+				zap.String("column", sd.ColumnName))
+			continue
+		}
+
+		result.SoftDeleteValidations = append(result.SoftDeleteValidations, SoftDeleteValidation{
+			ColumnID:       columnID,
+			ColumnName:     sd.ColumnName,
+			IsSoftDelete:   sd.IsSoftDelete,
+			NonNullMeaning: sd.NonNullMeaning,
+			Description:    sd.Description,
+			Confidence:     sd.Confidence,
+		})
+	}
+
+	return result, nil
+}
+
+// mergeCrossColumnAnalysis merges the cross-column analysis results into the existing column features.
+func (s *columnFeatureExtractionService) mergeCrossColumnAnalysis(
+	features []*models.ColumnFeatures,
+	result *CrossColumnResult,
+) {
+	// Build feature lookup by column ID
+	featureByID := make(map[uuid.UUID]*models.ColumnFeatures)
+	for _, f := range features {
+		featureByID[f.ColumnID] = f
+	}
+
+	// Merge monetary pairings
+	for _, mp := range result.MonetaryPairings {
+		f := featureByID[mp.AmountColumnID]
+		if f == nil {
+			s.logger.Warn("Could not find feature for monetary pairing",
+				zap.String("table", result.TableName),
+				zap.String("column", mp.AmountColumnName))
+			continue
+		}
+
+		// Update or create monetary features
+		if f.MonetaryFeatures == nil {
+			f.MonetaryFeatures = &models.MonetaryFeatures{}
+		}
+		f.MonetaryFeatures.IsMonetary = true
+		f.MonetaryFeatures.CurrencyUnit = mp.CurrencyUnit
+		f.MonetaryFeatures.PairedCurrencyColumn = mp.CurrencyColumnName
+		f.MonetaryFeatures.AmountDescription = mp.AmountDescription
+
+		// Update semantic type and role
+		f.SemanticType = "monetary"
+		f.Role = models.RoleMeasure
+
+		// Update description if we got a better one
+		if mp.AmountDescription != "" && f.Description == "" {
+			f.Description = mp.AmountDescription
+		}
+
+		// Update confidence if higher
+		if mp.Confidence > f.Confidence {
+			f.Confidence = mp.Confidence
+		}
+
+		// Mark cross-column check as complete
+		f.NeedsCrossColumnCheck = false
+
+		s.logger.Debug("Merged monetary pairing",
+			zap.String("table", result.TableName),
+			zap.String("amount_column", mp.AmountColumnName),
+			zap.String("currency_column", mp.CurrencyColumnName),
+			zap.String("unit", mp.CurrencyUnit))
+	}
+
+	// Merge soft delete validations
+	for _, sd := range result.SoftDeleteValidations {
+		f := featureByID[sd.ColumnID]
+		if f == nil {
+			s.logger.Warn("Could not find feature for soft delete validation",
+				zap.String("table", result.TableName),
+				zap.String("column", sd.ColumnName))
+			continue
+		}
+
+		// Update timestamp features
+		if f.TimestampFeatures == nil {
+			f.TimestampFeatures = &models.TimestampFeatures{}
+		}
+		f.TimestampFeatures.IsSoftDelete = sd.IsSoftDelete
+
+		// Update semantic type based on validation
+		if sd.IsSoftDelete {
+			f.SemanticType = models.TimestampPurposeSoftDelete
+			f.TimestampFeatures.TimestampPurpose = models.TimestampPurposeSoftDelete
+		} else {
+			// Soft delete was rejected - clear the soft delete semantic type if it was set
+			if f.SemanticType == models.TimestampPurposeSoftDelete {
+				f.SemanticType = models.TimestampPurposeEventTime // Revert to generic timestamp purpose
+			}
+			if f.TimestampFeatures.TimestampPurpose == models.TimestampPurposeSoftDelete {
+				f.TimestampFeatures.TimestampPurpose = models.TimestampPurposeEventTime
+			}
+		}
+
+		// Update description
+		if sd.Description != "" {
+			f.Description = sd.Description
+		}
+
+		// Update confidence if higher
+		if sd.Confidence > f.Confidence {
+			f.Confidence = sd.Confidence
+		}
+
+		// Mark cross-column check as complete
+		f.NeedsCrossColumnCheck = false
+
+		s.logger.Debug("Merged soft delete validation",
+			zap.String("table", result.TableName),
+			zap.String("column", sd.ColumnName),
+			zap.Bool("is_soft_delete", sd.IsSoftDelete))
+	}
 }
