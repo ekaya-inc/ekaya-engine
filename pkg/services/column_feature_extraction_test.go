@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -760,6 +761,9 @@ func (m *mockSchemaRepoForFeatureExtraction) UpdateColumnStats(ctx context.Conte
 	return nil
 }
 func (m *mockSchemaRepoForFeatureExtraction) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
+	return nil
+}
+func (m *mockSchemaRepoForFeatureExtraction) UpdateColumnFeatures(ctx context.Context, columnID uuid.UUID, features *models.ColumnFeatures) error {
 	return nil
 }
 func (m *mockSchemaRepoForFeatureExtraction) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
@@ -2736,4 +2740,194 @@ func TestMergeCrossColumnAnalysis_SoftDeleteRejected(t *testing.T) {
 	if feature.SemanticType == models.TimestampPurposeSoftDelete {
 		t.Errorf("SemanticType should not be '%v' after rejection", models.TimestampPurposeSoftDelete)
 	}
+}
+
+// ============================================================================
+// Phase 6: Store Results Tests
+// ============================================================================
+
+func TestStoreFeatures_Success(t *testing.T) {
+	// Create mock schema repo that tracks feature updates
+	schemaRepo := &mockSchemaRepoForStoreFeatures{
+		storedFeatures: make(map[uuid.UUID]*models.ColumnFeatures),
+	}
+
+	svc := &columnFeatureExtractionService{
+		schemaRepo: schemaRepo,
+		logger:     zap.NewNop(),
+	}
+
+	projectID := uuid.New()
+	col1ID := uuid.New()
+	col2ID := uuid.New()
+
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:           col1ID,
+			ClassificationPath: models.ClassificationPathTimestamp,
+			Purpose:            models.PurposeTimestamp,
+			Description:        "Created timestamp",
+		},
+		{
+			ColumnID:           col2ID,
+			ClassificationPath: models.ClassificationPathBoolean,
+			Purpose:            models.PurposeFlag,
+			Description:        "Active flag",
+		},
+	}
+
+	ctx := context.Background()
+	err := svc.storeFeatures(ctx, projectID, features)
+	if err != nil {
+		t.Fatalf("storeFeatures failed: %v", err)
+	}
+
+	// Verify both features were stored
+	if len(schemaRepo.storedFeatures) != 2 {
+		t.Errorf("Expected 2 stored features, got %d", len(schemaRepo.storedFeatures))
+	}
+
+	// Verify the features were stored correctly
+	if stored, ok := schemaRepo.storedFeatures[col1ID]; !ok {
+		t.Error("Feature for col1 not found")
+	} else if stored.Description != "Created timestamp" {
+		t.Errorf("Expected description 'Created timestamp', got '%s'", stored.Description)
+	}
+
+	if stored, ok := schemaRepo.storedFeatures[col2ID]; !ok {
+		t.Error("Feature for col2 not found")
+	} else if stored.Description != "Active flag" {
+		t.Errorf("Expected description 'Active flag', got '%s'", stored.Description)
+	}
+}
+
+func TestStoreFeatures_EmptyFeatures(t *testing.T) {
+	schemaRepo := &mockSchemaRepoForStoreFeatures{
+		storedFeatures: make(map[uuid.UUID]*models.ColumnFeatures),
+	}
+
+	svc := &columnFeatureExtractionService{
+		schemaRepo: schemaRepo,
+		logger:     zap.NewNop(),
+	}
+
+	ctx := context.Background()
+	err := svc.storeFeatures(ctx, uuid.New(), []*models.ColumnFeatures{})
+	if err != nil {
+		t.Fatalf("storeFeatures with empty list should not fail: %v", err)
+	}
+
+	if len(schemaRepo.storedFeatures) != 0 {
+		t.Errorf("Expected 0 stored features, got %d", len(schemaRepo.storedFeatures))
+	}
+}
+
+func TestStoreFeatures_ContinuesOnError(t *testing.T) {
+	col1ID := uuid.New()
+	col2ID := uuid.New()
+	col3ID := uuid.New()
+
+	schemaRepo := &mockSchemaRepoForStoreFeatures{
+		storedFeatures: make(map[uuid.UUID]*models.ColumnFeatures),
+		failForColumns: map[uuid.UUID]bool{col2ID: true}, // Fail for col2
+	}
+
+	svc := &columnFeatureExtractionService{
+		schemaRepo: schemaRepo,
+		logger:     zap.NewNop(),
+	}
+
+	features := []*models.ColumnFeatures{
+		{ColumnID: col1ID, Description: "Col1"},
+		{ColumnID: col2ID, Description: "Col2"}, // This will fail
+		{ColumnID: col3ID, Description: "Col3"},
+	}
+
+	ctx := context.Background()
+	err := svc.storeFeatures(ctx, uuid.New(), features)
+	// Should not return error since some succeeded
+	if err != nil {
+		t.Fatalf("storeFeatures should not fail when some columns succeed: %v", err)
+	}
+
+	// Verify col1 and col3 were stored, col2 was not
+	if _, ok := schemaRepo.storedFeatures[col1ID]; !ok {
+		t.Error("Feature for col1 should be stored")
+	}
+	if _, ok := schemaRepo.storedFeatures[col2ID]; ok {
+		t.Error("Feature for col2 should NOT be stored (should have failed)")
+	}
+	if _, ok := schemaRepo.storedFeatures[col3ID]; !ok {
+		t.Error("Feature for col3 should be stored")
+	}
+}
+
+func TestStoreFeatures_AllFail_ReturnsError(t *testing.T) {
+	col1ID := uuid.New()
+	col2ID := uuid.New()
+
+	schemaRepo := &mockSchemaRepoForStoreFeatures{
+		storedFeatures: make(map[uuid.UUID]*models.ColumnFeatures),
+		failForColumns: map[uuid.UUID]bool{col1ID: true, col2ID: true}, // All fail
+	}
+
+	svc := &columnFeatureExtractionService{
+		schemaRepo: schemaRepo,
+		logger:     zap.NewNop(),
+	}
+
+	features := []*models.ColumnFeatures{
+		{ColumnID: col1ID, Description: "Col1"},
+		{ColumnID: col2ID, Description: "Col2"},
+	}
+
+	ctx := context.Background()
+	err := svc.storeFeatures(ctx, uuid.New(), features)
+	// Should return error since all failed
+	if err == nil {
+		t.Fatal("storeFeatures should fail when all columns fail")
+	}
+}
+
+func TestStoreFeatures_SkipsNilFeatures(t *testing.T) {
+	col1ID := uuid.New()
+
+	schemaRepo := &mockSchemaRepoForStoreFeatures{
+		storedFeatures: make(map[uuid.UUID]*models.ColumnFeatures),
+	}
+
+	svc := &columnFeatureExtractionService{
+		schemaRepo: schemaRepo,
+		logger:     zap.NewNop(),
+	}
+
+	features := []*models.ColumnFeatures{
+		{ColumnID: col1ID, Description: "Col1"},
+		nil, // Should be skipped
+	}
+
+	ctx := context.Background()
+	err := svc.storeFeatures(ctx, uuid.New(), features)
+	if err != nil {
+		t.Fatalf("storeFeatures should not fail: %v", err)
+	}
+
+	if len(schemaRepo.storedFeatures) != 1 {
+		t.Errorf("Expected 1 stored feature (nil should be skipped), got %d", len(schemaRepo.storedFeatures))
+	}
+}
+
+// mockSchemaRepoForStoreFeatures is a minimal mock for testing storeFeatures
+type mockSchemaRepoForStoreFeatures struct {
+	mockSchemaRepoForFeatureExtraction
+	storedFeatures map[uuid.UUID]*models.ColumnFeatures
+	failForColumns map[uuid.UUID]bool
+}
+
+func (m *mockSchemaRepoForStoreFeatures) UpdateColumnFeatures(ctx context.Context, columnID uuid.UUID, features *models.ColumnFeatures) error {
+	if m.failForColumns != nil && m.failForColumns[columnID] {
+		return fmt.Errorf("simulated failure for column %s", columnID)
+	}
+	m.storedFeatures[columnID] = features
+	return nil
 }

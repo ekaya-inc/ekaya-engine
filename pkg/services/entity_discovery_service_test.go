@@ -1228,6 +1228,9 @@ func (m *mockSchemaRepoForGrouping) UpdateColumnStats(ctx context.Context, colum
 func (m *mockSchemaRepoForGrouping) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
 	return nil
 }
+func (m *mockSchemaRepoForGrouping) UpdateColumnFeatures(ctx context.Context, columnID uuid.UUID, features *models.ColumnFeatures) error {
+	return nil
+}
 func (m *mockSchemaRepoForGrouping) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
 	return nil, nil
 }

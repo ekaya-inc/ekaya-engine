@@ -67,8 +67,8 @@ type ColumnDataProfile struct {
 	RowCount      int64   `json:"row_count"`
 	DistinctCount int64   `json:"distinct_count"`
 	NullCount     int64   `json:"null_count"`
-	NullRate      float64 `json:"null_rate"`      // null_count / row_count (0.0 - 1.0)
-	Cardinality   float64 `json:"cardinality"`    // distinct_count / row_count (0.0 - 1.0)
+	NullRate      float64 `json:"null_rate"`   // null_count / row_count (0.0 - 1.0)
+	Cardinality   float64 `json:"cardinality"` // distinct_count / row_count (0.0 - 1.0)
 
 	// For numeric columns
 	MinValue *float64 `json:"min_value,omitempty"`
@@ -171,18 +171,18 @@ type DetectedPattern struct {
 
 // Pattern names for external service IDs and other recognized patterns.
 const (
-	PatternUUID            = "uuid"
-	PatternStripeID        = "stripe_id"
-	PatternAWSSES          = "aws_ses"
-	PatternTwilioSID       = "twilio_sid"
-	PatternISO4217         = "iso4217"
-	PatternUnixSeconds     = "unix_seconds"
-	PatternUnixMillis      = "unix_millis"
-	PatternUnixMicros      = "unix_micros"
-	PatternUnixNanos       = "unix_nanos"
-	PatternEmail           = "email"
-	PatternURL             = "url"
-	PatternGenericExtID    = "generic_external_id"
+	PatternUUID         = "uuid"
+	PatternStripeID     = "stripe_id"
+	PatternAWSSES       = "aws_ses"
+	PatternTwilioSID    = "twilio_sid"
+	PatternISO4217      = "iso4217"
+	PatternUnixSeconds  = "unix_seconds"
+	PatternUnixMillis   = "unix_millis"
+	PatternUnixMicros   = "unix_micros"
+	PatternUnixNanos    = "unix_nanos"
+	PatternEmail        = "email"
+	PatternURL          = "url"
+	PatternGenericExtID = "generic_external_id"
 )
 
 // ============================================================================
@@ -212,9 +212,9 @@ type ColumnFeatures struct {
 	MonetaryFeatures   *MonetaryFeatures   `json:"monetary_features,omitempty"`
 
 	// Flags for follow-up phases (set during Phase 2)
-	NeedsEnumAnalysis     bool `json:"needs_enum_analysis"`       // Enqueue to Phase 3
-	NeedsFKResolution     bool `json:"needs_fk_resolution"`       // Enqueue to Phase 4
-	NeedsCrossColumnCheck bool `json:"needs_cross_column_check"`  // Enqueue to Phase 5
+	NeedsEnumAnalysis     bool `json:"needs_enum_analysis"`      // Enqueue to Phase 3
+	NeedsFKResolution     bool `json:"needs_fk_resolution"`      // Enqueue to Phase 4
+	NeedsCrossColumnCheck bool `json:"needs_cross_column_check"` // Enqueue to Phase 5
 
 	// Analysis metadata
 	AnalyzedAt   time.Time `json:"analyzed_at"`
@@ -390,11 +390,11 @@ type IdentifierFeatures struct {
 
 // Identifier type constants.
 const (
-	IdentifierTypeInternalUUID     = "internal_uuid"
-	IdentifierTypeExternalUUID     = "external_uuid"
-	IdentifierTypePrimaryKey       = "primary_key"
-	IdentifierTypeForeignKey       = "foreign_key"
-	IdentifierTypeExternalService  = "external_service_id"
+	IdentifierTypeInternalUUID    = "internal_uuid"
+	IdentifierTypeExternalUUID    = "external_uuid"
+	IdentifierTypePrimaryKey      = "primary_key"
+	IdentifierTypeForeignKey      = "foreign_key"
+	IdentifierTypeExternalService = "external_service_id"
 )
 
 // External service constants.
@@ -492,12 +492,12 @@ const (
 
 // Phase ID constants.
 const (
-	PhaseIDDataCollection      = "phase1"
+	PhaseIDDataCollection       = "phase1"
 	PhaseIDColumnClassification = "phase2"
-	PhaseIDEnumAnalysis        = "phase3"
-	PhaseIDFKResolution        = "phase4"
-	PhaseIDCrossColumnAnalysis = "phase5"
-	PhaseIDStoreResults        = "phase6"
+	PhaseIDEnumAnalysis         = "phase3"
+	PhaseIDFKResolution         = "phase4"
+	PhaseIDCrossColumnAnalysis  = "phase5"
+	PhaseIDStoreResults         = "phase6"
 )
 
 // Percentage returns the completion percentage for the current phase (0-100).

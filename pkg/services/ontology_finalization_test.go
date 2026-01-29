@@ -320,6 +320,9 @@ func (m *mockSchemaRepoForFinalization) UpdateColumnStats(ctx context.Context, c
 func (m *mockSchemaRepoForFinalization) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
 	return nil
 }
+func (m *mockSchemaRepoForFinalization) UpdateColumnFeatures(ctx context.Context, columnID uuid.UUID, features *models.ColumnFeatures) error {
+	return nil
+}
 func (m *mockSchemaRepoForFinalization) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
 	return nil, nil
 }

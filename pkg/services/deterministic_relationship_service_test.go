@@ -1713,6 +1713,10 @@ func (m *mockTestSchemaRepo) UpdateColumnMetadata(ctx context.Context, projectID
 	return nil
 }
 
+func (m *mockTestSchemaRepo) UpdateColumnFeatures(ctx context.Context, columnID uuid.UUID, features *models.ColumnFeatures) error {
+	return nil
+}
+
 func (m *mockTestSchemaRepo) UpsertTable(ctx context.Context, table *models.SchemaTable) error {
 	return nil
 }

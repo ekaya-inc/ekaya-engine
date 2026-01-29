@@ -185,7 +185,26 @@ func (s *columnFeatureExtractionService) ExtractColumnFeatures(
 			return 0, fmt.Errorf("phase 5 cross-column analysis failed: %w", err)
 		}
 
-		// TODO: Phase 6 (store results) will be implemented in subsequent tasks
+		// Phase 6: Store Results (deterministic, no LLM)
+		if progressCallback != nil {
+			progressCallback(0, 1, "Saving column features...")
+		}
+
+		s.logger.Info("Starting Phase 6: Store Results",
+			zap.Int("features_to_store", len(phase2Result.Features)))
+
+		if err := s.storeFeatures(ctx, projectID, phase2Result.Features); err != nil {
+			return 0, fmt.Errorf("phase 6 store results failed: %w", err)
+		}
+
+		if progressCallback != nil {
+			progressCallback(1, 1, "Column feature extraction complete")
+		}
+
+		s.logger.Info("Column feature extraction Phase 6 complete",
+			zap.Int("features_stored", len(phase2Result.Features)))
+
+		return len(phase2Result.Features), nil
 	}
 
 	return phase1Result.TotalColumns, nil
@@ -3129,4 +3148,49 @@ func (s *columnFeatureExtractionService) mergeCrossColumnAnalysis(
 			zap.String("column", sd.ColumnName),
 			zap.Bool("is_soft_delete", sd.IsSoftDelete))
 	}
+}
+
+// storeFeatures persists all column features to the database.
+// Each column's features are stored in the metadata JSONB field under the "column_features" key.
+func (s *columnFeatureExtractionService) storeFeatures(
+	ctx context.Context,
+	projectID uuid.UUID,
+	features []*models.ColumnFeatures,
+) error {
+	if len(features) == 0 {
+		s.logger.Info("No features to store")
+		return nil
+	}
+
+	s.logger.Info("Storing column features",
+		zap.String("project_id", projectID.String()),
+		zap.Int("feature_count", len(features)))
+
+	var successCount, errorCount int
+	for _, f := range features {
+		if f == nil {
+			continue
+		}
+
+		err := s.schemaRepo.UpdateColumnFeatures(ctx, f.ColumnID, f)
+		if err != nil {
+			s.logger.Error("Failed to store column features",
+				zap.String("column_id", f.ColumnID.String()),
+				zap.Error(err))
+			errorCount++
+			// Continue processing other columns even if one fails
+			continue
+		}
+		successCount++
+	}
+
+	s.logger.Info("Column features storage complete",
+		zap.Int("success_count", successCount),
+		zap.Int("error_count", errorCount))
+
+	if errorCount > 0 && successCount == 0 {
+		return fmt.Errorf("failed to store any column features: all %d updates failed", errorCount)
+	}
+
+	return nil
 }

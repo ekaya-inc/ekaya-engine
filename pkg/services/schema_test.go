@@ -251,6 +251,10 @@ func (m *mockSchemaRepository) UpdateColumnMetadata(ctx context.Context, project
 	return nil
 }
 
+func (m *mockSchemaRepository) UpdateColumnFeatures(ctx context.Context, columnID uuid.UUID, features *models.ColumnFeatures) error {
+	return nil
+}
+
 func (m *mockSchemaRepository) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
 	if m.listRelationshipsErr != nil {
 		return nil, m.listRelationshipsErr

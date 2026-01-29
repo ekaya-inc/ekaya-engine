@@ -52,6 +52,9 @@ type SchemaRepository interface {
 	UpdateColumnSelection(ctx context.Context, projectID, columnID uuid.UUID, isSelected bool) error
 	UpdateColumnStats(ctx context.Context, columnID uuid.UUID, distinctCount, nullCount, minLength, maxLength *int64, sampleValues []string) error
 	UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error
+	// UpdateColumnFeatures stores column features (from LLM classification) in the column's metadata field.
+	// The features are stored under the "column_features" key in the metadata JSONB column.
+	UpdateColumnFeatures(ctx context.Context, columnID uuid.UUID, features *models.ColumnFeatures) error
 
 	// Relationships
 	ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error)
@@ -821,6 +824,38 @@ func (r *schemaRepository) UpdateColumnMetadata(ctx context.Context, projectID, 
 	result, err := scope.Conn.Exec(ctx, query, projectID, columnID, businessName, description)
 	if err != nil {
 		return fmt.Errorf("failed to update column metadata: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return apperrors.ErrNotFound
+	}
+
+	return nil
+}
+
+func (r *schemaRepository) UpdateColumnFeatures(ctx context.Context, columnID uuid.UUID, features *models.ColumnFeatures) error {
+	scope, ok := database.GetTenantScope(ctx)
+	if !ok {
+		return fmt.Errorf("no tenant scope in context")
+	}
+
+	// Marshal features to JSON
+	featuresJSON, err := json.Marshal(features)
+	if err != nil {
+		return fmt.Errorf("failed to marshal column features: %w", err)
+	}
+
+	// Update the metadata field, merging with existing metadata using jsonb_set
+	// This preserves any existing metadata while adding/updating the column_features key
+	query := `
+		UPDATE engine_schema_columns
+		SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{column_features}', $2::jsonb),
+		    updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL`
+
+	result, err := scope.Conn.Exec(ctx, query, columnID, featuresJSON)
+	if err != nil {
+		return fmt.Errorf("failed to update column features: %w", err)
 	}
 
 	if result.RowsAffected() == 0 {
