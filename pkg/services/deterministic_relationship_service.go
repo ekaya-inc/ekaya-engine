@@ -154,8 +154,10 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 		return nil, fmt.Errorf("list tables: %w", err)
 	}
 	tableByID := make(map[uuid.UUID]*models.SchemaTable)
+	tableByName := make(map[string]*models.SchemaTable) // "schema.table" → table
 	for _, t := range tables {
 		tableByID[t.ID] = t
+		tableByName[fmt.Sprintf("%s.%s", t.SchemaName, t.TableName)] = t
 	}
 
 	columns, err := s.schemaRepo.ListColumnsByDatasource(ctx, projectID, datasourceID)
@@ -179,8 +181,23 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 	}
 	defer discoverer.Close()
 
-	// Process each FK from schema relationships
-	var fkCount int
+	// Phase 1: Create relationships from ColumnFeatures (pre-resolved FKs from Phase 4)
+	// These are data-driven FK discoveries from ColumnFeatureExtraction
+	columnFeaturesCount, err := s.discoverFKRelationshipsFromColumnFeatures(
+		ctx, ontology, columns, tableByID, tableByName, entityByPrimaryTable, discoverer, progressCallback,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("discover FK relationships from column features: %w", err)
+	}
+	if columnFeaturesCount > 0 {
+		s.logger.Info("Created relationships from ColumnFeatures",
+			zap.Int("count", columnFeaturesCount))
+	}
+
+	// Phase 2: Process each FK from schema relationships (PostgreSQL foreign keys)
+	// These relationships have confidence=1.0 since they're defined in the schema.
+	// The upsert will update any overlapping relationships from Phase 1.
+	var schemaFKCount int
 	for i, schemaRel := range schemaRels {
 		// Resolve source column/table
 		sourceCol := columnByID[schemaRel.SourceColumnID]
@@ -275,7 +292,7 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 			return nil, fmt.Errorf("create bidirectional FK relationship: %w", err)
 		}
 
-		fkCount++
+		schemaFKCount++
 	}
 
 	// Collect column stats for pk_match discovery
@@ -284,9 +301,182 @@ func (s *deterministicRelationshipService) DiscoverFKRelationships(ctx context.C
 		return nil, fmt.Errorf("collect column stats: %w", err)
 	}
 
+	// Total relationships: ColumnFeatures-derived + schema FK constraints
+	// Note: Upsert semantics mean overlapping relationships are counted only once in the DB,
+	// but we report both counts for visibility into the sources.
+	totalCount := columnFeaturesCount + schemaFKCount
+	s.logger.Info("FK relationship discovery complete",
+		zap.Int("from_column_features", columnFeaturesCount),
+		zap.Int("from_schema_fks", schemaFKCount),
+		zap.Int("total", totalCount))
+
 	return &FKDiscoveryResult{
-		FKRelationships: fkCount,
+		FKRelationships: totalCount,
 	}, nil
+}
+
+// discoverFKRelationshipsFromColumnFeatures creates entity relationships from columns
+// where ColumnFeatureExtraction Phase 4 has already resolved FK targets.
+// This avoids redundant SQL queries for FKs that were already discovered via data overlap analysis.
+func (s *deterministicRelationshipService) discoverFKRelationshipsFromColumnFeatures(
+	ctx context.Context,
+	ontology *models.TieredOntology,
+	columns []*models.SchemaColumn,
+	tableByID map[uuid.UUID]*models.SchemaTable,
+	tableByName map[string]*models.SchemaTable,
+	entityByPrimaryTable map[string]*models.OntologyEntity,
+	discoverer datasource.SchemaDiscoverer,
+	progressCallback RelationshipProgressCallback,
+) (int, error) {
+	// Find columns with pre-resolved FK targets from ColumnFeatureExtraction
+	var fkColumns []*models.SchemaColumn
+	for _, col := range columns {
+		features := col.GetColumnFeatures()
+		if features == nil || features.IdentifierFeatures == nil {
+			continue
+		}
+		if features.IdentifierFeatures.FKTargetTable == "" {
+			continue
+		}
+		fkColumns = append(fkColumns, col)
+	}
+
+	if len(fkColumns) == 0 {
+		return 0, nil
+	}
+
+	s.logger.Info("Processing pre-resolved FKs from ColumnFeatures",
+		zap.Int("count", len(fkColumns)))
+
+	var createdCount int
+	for i, col := range fkColumns {
+		features := col.GetColumnFeatures()
+		idFeatures := features.IdentifierFeatures
+
+		// Get source table
+		sourceTable := tableByID[col.SchemaTableID]
+		if sourceTable == nil {
+			s.logger.Debug("Source table not found for column",
+				zap.String("column_id", col.ID.String()))
+			continue
+		}
+
+		// Find source entity by primary table
+		sourceKey := fmt.Sprintf("%s.%s", sourceTable.SchemaName, sourceTable.TableName)
+		sourceEntity := entityByPrimaryTable[sourceKey]
+		if sourceEntity == nil {
+			s.logger.Debug("No entity owns source table",
+				zap.String("table", sourceKey))
+			continue
+		}
+
+		// Resolve target table from FK target info
+		// FKTargetTable may be just the table name or "schema.table"
+		targetTableKey := idFeatures.FKTargetTable
+		if !strings.Contains(targetTableKey, ".") {
+			// Assume same schema as source if not specified
+			targetTableKey = fmt.Sprintf("%s.%s", sourceTable.SchemaName, idFeatures.FKTargetTable)
+		}
+
+		targetTable := tableByName[targetTableKey]
+		if targetTable == nil {
+			s.logger.Debug("Target table not found",
+				zap.String("target_table", targetTableKey),
+				zap.String("source_column", col.ColumnName))
+			continue
+		}
+
+		// Find target entity by primary table
+		targetEntity := entityByPrimaryTable[targetTableKey]
+		if targetEntity == nil {
+			s.logger.Debug("No entity owns target table",
+				zap.String("table", targetTableKey))
+			continue
+		}
+
+		// Find target column (use FKTargetColumn if specified, otherwise try to find PK)
+		var targetCol *models.SchemaColumn
+		targetColName := idFeatures.FKTargetColumn
+		if targetColName == "" {
+			// Default to "id" if not specified (common convention)
+			targetColName = "id"
+		}
+
+		// Find the target column in the target table
+		for _, c := range columns {
+			if c.SchemaTableID == targetTable.ID && c.ColumnName == targetColName {
+				targetCol = c
+				break
+			}
+		}
+		if targetCol == nil {
+			s.logger.Debug("Target column not found",
+				zap.String("target_table", targetTableKey),
+				zap.String("target_column", targetColName))
+			continue
+		}
+
+		// Report progress
+		if progressCallback != nil {
+			msg := fmt.Sprintf("Creating FK from ColumnFeatures: %s.%s → %s.%s (%d/%d)",
+				sourceTable.TableName, col.ColumnName,
+				targetTable.TableName, targetCol.ColumnName,
+				i+1, len(fkColumns))
+			progressCallback(i+1, len(fkColumns), msg)
+		}
+
+		// Compute cardinality from actual data
+		cardinality := models.CardinalityNTo1 // Default for FK relationships
+		joinResult, err := discoverer.AnalyzeJoin(ctx,
+			sourceTable.SchemaName, sourceTable.TableName, col.ColumnName,
+			targetTable.SchemaName, targetTable.TableName, targetCol.ColumnName)
+		if err != nil {
+			s.logger.Debug("Failed to analyze join for cardinality - using default N:1",
+				zap.String("source", fmt.Sprintf("%s.%s.%s", sourceTable.SchemaName, sourceTable.TableName, col.ColumnName)),
+				zap.String("target", fmt.Sprintf("%s.%s.%s", targetTable.SchemaName, targetTable.TableName, targetCol.ColumnName)),
+				zap.Error(err))
+		} else {
+			cardinality = InferCardinality(joinResult)
+		}
+
+		// Use the FK confidence from ColumnFeatures
+		confidence := idFeatures.FKConfidence
+		if confidence == 0 {
+			confidence = 0.9 // Default high confidence for data-driven FK discovery
+		}
+
+		// Create bidirectional relationship
+		rel := &models.EntityRelationship{
+			OntologyID:         ontology.ID,
+			SourceEntityID:     sourceEntity.ID,
+			TargetEntityID:     targetEntity.ID,
+			SourceColumnSchema: sourceTable.SchemaName,
+			SourceColumnTable:  sourceTable.TableName,
+			SourceColumnName:   col.ColumnName,
+			SourceColumnID:     &col.ID,
+			TargetColumnSchema: targetTable.SchemaName,
+			TargetColumnTable:  targetTable.TableName,
+			TargetColumnName:   targetCol.ColumnName,
+			TargetColumnID:     &targetCol.ID,
+			DetectionMethod:    models.DetectionMethodDataOverlap, // Indicates data-driven discovery
+			Confidence:         confidence,
+			Status:             models.RelationshipStatusConfirmed,
+			Cardinality:        cardinality,
+		}
+
+		if err := s.createBidirectionalRelationship(ctx, rel); err != nil {
+			return createdCount, fmt.Errorf("create bidirectional relationship from ColumnFeatures: %w", err)
+		}
+
+		createdCount++
+		s.logger.Debug("Created relationship from ColumnFeatures",
+			zap.String("source", fmt.Sprintf("%s.%s.%s", sourceTable.SchemaName, sourceTable.TableName, col.ColumnName)),
+			zap.String("target", fmt.Sprintf("%s.%s.%s", targetTable.SchemaName, targetTable.TableName, targetCol.ColumnName)),
+			zap.Float64("confidence", confidence),
+			zap.String("cardinality", cardinality))
+	}
+
+	return createdCount, nil
 }
 
 // collectColumnStats analyzes column statistics from the target database

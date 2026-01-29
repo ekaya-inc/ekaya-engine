@@ -104,7 +104,7 @@ For columns where ColumnFeatureExtraction already provides complete metadata:
 
 ### Task 3: Update FKDiscovery to Leverage ColumnFeatures
 
-**File:** `pkg/services/dag/fk_discovery_node.go`
+- [x] **File:** `pkg/services/deterministic_relationship_service.go`
 
 ColumnFeatureExtraction Phase 4 already performs FK resolution via data overlap analysis. FKDiscovery should:
 

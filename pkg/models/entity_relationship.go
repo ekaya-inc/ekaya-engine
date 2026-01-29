@@ -8,9 +8,10 @@ import (
 
 // Detection methods for entity relationships.
 const (
-	DetectionMethodForeignKey = "foreign_key" // Discovered from database FK constraint
-	DetectionMethodPKMatch    = "pk_match"    // Inferred from PK type/cardinality matching
-	DetectionMethodManual     = "manual"      // Created by user through chat
+	DetectionMethodForeignKey  = "foreign_key"  // Discovered from database FK constraint
+	DetectionMethodPKMatch     = "pk_match"     // Inferred from PK type/cardinality matching
+	DetectionMethodDataOverlap = "data_overlap" // Inferred from data overlap analysis in ColumnFeatureExtraction
+	DetectionMethodManual      = "manual"       // Created by user through chat
 )
 
 // Relationship status values.

@@ -5121,3 +5121,379 @@ func TestPKMatch_InfersCardinalityFromJoinAnalysis(t *testing.T) {
 		})
 	}
 }
+
+// TestFKDiscovery_FromColumnFeatures tests that FK relationships are created from
+// columns where ColumnFeatureExtraction Phase 4 has already resolved FK targets.
+func TestFKDiscovery_FromColumnFeatures(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Add order entity
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	userIDColumnID := uuid.New()
+	buyerIDColumnID := uuid.New()
+
+	// Setup tables with columns
+	// The buyer_id column has ColumnFeatures with FKTargetTable already resolved
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            userIDColumnID,
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            buyerIDColumnID,
+					SchemaTableID: ordersTableID,
+					ColumnName:    "buyer_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					// ColumnFeatures stored in Metadata with FK target already resolved
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose":       "identifier",
+							"semantic_type": "foreign_key",
+							"role":          "foreign_key",
+							"identifier_features": map[string]any{
+								"identifier_type":  "foreign_key",
+								"fk_target_table":  "users",
+								"fk_target_column": "id",
+								"fk_confidence":    0.95,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// No schema-level FK relationships - only ColumnFeatures
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{}
+
+	// Setup join analysis to return valid join (no orphans)
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		// Simulate a valid FK relationship: all source values exist in target
+		return &datasource.JoinAnalysis{
+			JoinCount:     100,
+			SourceMatched: 100,
+			TargetMatched: 50,
+			OrphanCount:   0, // No orphans = valid FK
+		}, nil
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify: 1 FK relationship discovered from ColumnFeatures (creates 2 rows: forward + reverse)
+	if result.FKRelationships != 1 {
+		t.Errorf("expected 1 FK relationship, got %d", result.FKRelationships)
+	}
+
+	// Bidirectional: 2 relationships created (forward + reverse)
+	if len(mocks.relationshipRepo.created) != 2 {
+		t.Fatalf("expected 2 relationships to be created (bidirectional), got %d", len(mocks.relationshipRepo.created))
+	}
+
+	// Find the forward relationship (order -> user via buyer_id)
+	var forwardRel *models.EntityRelationship
+	for _, rel := range mocks.relationshipRepo.created {
+		if rel.SourceEntityID == orderEntityID && rel.TargetEntityID == userEntityID {
+			forwardRel = rel
+			break
+		}
+	}
+
+	if forwardRel == nil {
+		t.Fatal("forward relationship (order -> user) not found")
+	}
+
+	// Verify: forward relationship has detection_method="data_overlap"
+	if forwardRel.DetectionMethod != models.DetectionMethodDataOverlap {
+		t.Errorf("expected forward DetectionMethod=%q, got %q", models.DetectionMethodDataOverlap, forwardRel.DetectionMethod)
+	}
+
+	// Verify: confidence matches the ColumnFeatures FK confidence
+	if forwardRel.Confidence != 0.95 {
+		t.Errorf("expected confidence=0.95, got %f", forwardRel.Confidence)
+	}
+
+	// Verify: source column info
+	if forwardRel.SourceColumnTable != "orders" || forwardRel.SourceColumnName != "buyer_id" {
+		t.Errorf("expected source=orders.buyer_id, got %s.%s", forwardRel.SourceColumnTable, forwardRel.SourceColumnName)
+	}
+
+	// Verify: target column info
+	if forwardRel.TargetColumnTable != "users" || forwardRel.TargetColumnName != "id" {
+		t.Errorf("expected target=users.id, got %s.%s", forwardRel.TargetColumnTable, forwardRel.TargetColumnName)
+	}
+}
+
+// TestFKDiscovery_ColumnFeaturesAndSchemaFK_Deduplication tests that when both
+// ColumnFeatures and schema FK constraints point to the same relationship,
+// only one relationship is created (via upsert semantics).
+func TestFKDiscovery_ColumnFeaturesAndSchemaFK_Deduplication(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	userEntityID := uuid.New()
+	orderEntityID := uuid.New()
+
+	// Create mocks
+	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
+
+	// Add order entity
+	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
+		ID:            orderEntityID,
+		OntologyID:    ontologyID,
+		Name:          "order",
+		PrimarySchema: "public",
+		PrimaryTable:  "orders",
+	})
+
+	usersTableID := uuid.New()
+	ordersTableID := uuid.New()
+	userIDColumnID := uuid.New()
+	buyerIDColumnID := uuid.New()
+
+	// Setup tables with columns - buyer_id has ColumnFeatures with FK resolved
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         usersTableID,
+			SchemaName: "public",
+			TableName:  "users",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            userIDColumnID,
+					SchemaTableID: usersTableID,
+					ColumnName:    "id",
+					DataType:      "uuid",
+					IsPrimaryKey:  true,
+				},
+			},
+		},
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            buyerIDColumnID,
+					SchemaTableID: ordersTableID,
+					ColumnName:    "buyer_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose":       "identifier",
+							"semantic_type": "foreign_key",
+							"role":          "foreign_key",
+							"identifier_features": map[string]any{
+								"identifier_type":  "foreign_key",
+								"fk_target_table":  "users",
+								"fk_target_column": "id",
+								"fk_confidence":    0.85, // Lower confidence from data overlap
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// ALSO have a schema-level FK constraint for the same relationship
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{
+		{
+			ID:               uuid.New(),
+			ProjectID:        projectID,
+			SourceTableID:    ordersTableID,
+			SourceColumnID:   buyerIDColumnID,
+			TargetTableID:    usersTableID,
+			TargetColumnID:   userIDColumnID,
+			RelationshipType: models.RelationshipTypeFK,
+		},
+	}
+
+	// Setup join analysis
+	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
+		return &datasource.JoinAnalysis{
+			JoinCount:     100,
+			SourceMatched: 100,
+			TargetMatched: 50,
+			OrphanCount:   0,
+		}, nil
+	}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Result count shows both sources found the relationship
+	// (ColumnFeatures: 1, SchemaFK: 1, total: 2)
+	// But thanks to upsert, the DB will have only one unique relationship
+	if result.FKRelationships != 2 {
+		t.Errorf("expected 2 FK relationships reported (from both sources), got %d", result.FKRelationships)
+	}
+
+	// The mock doesn't implement upsert deduplication, so we see 4 relationships created
+	// (2 from ColumnFeatures, 2 from SchemaFK). In production, the DB upsert would
+	// deduplicate these, but the mock just appends.
+	// The key point is that the code correctly processes both sources.
+	if len(mocks.relationshipRepo.created) != 4 {
+		t.Fatalf("expected 4 relationships created by mock (bidirectional from both sources), got %d", len(mocks.relationshipRepo.created))
+	}
+
+	// The first pair should be from ColumnFeatures (data_overlap)
+	foundDataOverlap := false
+	foundForeignKey := false
+	for _, rel := range mocks.relationshipRepo.created {
+		if rel.DetectionMethod == models.DetectionMethodDataOverlap {
+			foundDataOverlap = true
+		}
+		if rel.DetectionMethod == models.DetectionMethodForeignKey {
+			foundForeignKey = true
+		}
+	}
+
+	if !foundDataOverlap {
+		t.Error("expected at least one relationship with detection_method=data_overlap")
+	}
+	if !foundForeignKey {
+		t.Error("expected at least one relationship with detection_method=foreign_key")
+	}
+}
+
+// TestFKDiscovery_ColumnFeatures_NoTargetTable tests that columns with ColumnFeatures
+// but unresolvable target tables are skipped gracefully.
+func TestFKDiscovery_ColumnFeatures_NoTargetTable(t *testing.T) {
+	projectID := uuid.New()
+	datasourceID := uuid.New()
+	ontologyID := uuid.New()
+	orderEntityID := uuid.New()
+
+	// Create mocks with just the order entity (no user entity/table)
+	mocks := setupMocks(projectID, ontologyID, datasourceID, orderEntityID)
+	mocks.entityRepo.entities = []*models.OntologyEntity{
+		{
+			ID:            orderEntityID,
+			OntologyID:    ontologyID,
+			Name:          "order",
+			PrimarySchema: "public",
+			PrimaryTable:  "orders",
+		},
+	}
+
+	ordersTableID := uuid.New()
+	buyerIDColumnID := uuid.New()
+
+	// Setup tables - only orders table, no users table
+	mocks.schemaRepo.tables = []*models.SchemaTable{
+		{
+			ID:         ordersTableID,
+			SchemaName: "public",
+			TableName:  "orders",
+			Columns: []models.SchemaColumn{
+				{
+					ID:            buyerIDColumnID,
+					SchemaTableID: ordersTableID,
+					ColumnName:    "buyer_id",
+					DataType:      "uuid",
+					IsPrimaryKey:  false,
+					// ColumnFeatures points to non-existent "users" table
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose":       "identifier",
+							"semantic_type": "foreign_key",
+							"role":          "foreign_key",
+							"identifier_features": map[string]any{
+								"identifier_type":  "foreign_key",
+								"fk_target_table":  "users", // Table doesn't exist
+								"fk_target_column": "id",
+								"fk_confidence":    0.95,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	mocks.schemaRepo.relationships = []*models.SchemaRelationship{}
+
+	service := NewDeterministicRelationshipService(
+		mocks.datasourceService,
+		mocks.projectService,
+		mocks.adapterFactory,
+		mocks.ontologyRepo,
+		mocks.entityRepo,
+		mocks.relationshipRepo,
+		mocks.schemaRepo,
+		zap.NewNop(),
+	)
+
+	result, err := service.DiscoverFKRelationships(context.Background(), projectID, datasourceID, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No relationships should be created since target table doesn't exist
+	if result.FKRelationships != 0 {
+		t.Errorf("expected 0 FK relationships (target table missing), got %d", result.FKRelationships)
+	}
+
+	if len(mocks.relationshipRepo.created) != 0 {
+		t.Errorf("expected 0 relationships created, got %d", len(mocks.relationshipRepo.created))
+	}
+}
