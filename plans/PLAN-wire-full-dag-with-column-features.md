@@ -92,7 +92,7 @@ if features := col.GetColumnFeatures(); features != nil {
 - Copy `IdentifierFeatures.EntityReferenced` to `ColumnDetail.FKAssociation`
 - Copy `TimestampFeatures` semantics (soft_delete, audit_created, etc.)
 
-#### 2c. Reduce LLM Calls
+#### 2c. Reduce LLM Calls ✅
 
 For columns where ColumnFeatureExtraction already provides complete metadata:
 - Skip the per-column LLM enrichment call
