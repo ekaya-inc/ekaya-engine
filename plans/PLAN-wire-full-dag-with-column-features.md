@@ -44,7 +44,7 @@ Stored in `SchemaColumn.Metadata["column_features"]`:
 
 ### Task 1: Re-enable All DAG Nodes
 
-**File:** `pkg/models/ontology_dag.go`
+- [x] **File:** `pkg/models/ontology_dag.go`
 
 Uncomment all nodes in `AllDAGNodes()` function (lines ~130-145).
 

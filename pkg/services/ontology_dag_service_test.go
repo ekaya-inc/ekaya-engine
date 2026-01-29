@@ -23,20 +23,18 @@ import (
 func TestDAGNodes_AllNodesHaveCorrectOrder(t *testing.T) {
 	allNodes := models.AllDAGNodes()
 
-	// NOTE: AllDAGNodes() is temporarily limited during ColumnFeatureExtraction development.
-	// TODO: Restore full expected order when all nodes are re-enabled.
 	expectedOrder := []models.DAGNodeName{
 		models.DAGNodeKnowledgeSeeding,
 		models.DAGNodeColumnFeatureExtraction,
-		// models.DAGNodeEntityDiscovery,
-		// models.DAGNodeEntityEnrichment,
-		// models.DAGNodeFKDiscovery,
-		// models.DAGNodeColumnEnrichment,
-		// models.DAGNodePKMatchDiscovery,
-		// models.DAGNodeRelationshipEnrichment,
-		// models.DAGNodeOntologyFinalization,
-		// models.DAGNodeGlossaryDiscovery,
-		// models.DAGNodeGlossaryEnrichment,
+		models.DAGNodeEntityDiscovery,
+		models.DAGNodeEntityEnrichment,
+		models.DAGNodeFKDiscovery,
+		models.DAGNodeColumnEnrichment,
+		models.DAGNodePKMatchDiscovery,
+		models.DAGNodeRelationshipEnrichment,
+		models.DAGNodeOntologyFinalization,
+		models.DAGNodeGlossaryDiscovery,
+		models.DAGNodeGlossaryEnrichment,
 	}
 
 	assert.Equal(t, len(expectedOrder), len(allNodes))

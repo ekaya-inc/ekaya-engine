@@ -126,21 +126,19 @@ var DAGNodeOrder = map[DAGNodeName]int{
 }
 
 // AllDAGNodes returns all DAG node names in execution order.
-// NOTE: Temporarily limited to KnowledgeSeeding and ColumnFeatureExtraction for development.
-// TODO: Re-enable remaining nodes after ColumnFeatureExtraction is implemented.
 func AllDAGNodes() []DAGNodeName {
 	return []DAGNodeName{
 		DAGNodeKnowledgeSeeding,
 		DAGNodeColumnFeatureExtraction,
-		// DAGNodeEntityDiscovery,
-		// DAGNodeEntityEnrichment,
-		// DAGNodeFKDiscovery,
-		// DAGNodeColumnEnrichment,
-		// DAGNodePKMatchDiscovery,
-		// DAGNodeRelationshipEnrichment,
-		// DAGNodeOntologyFinalization,
-		// DAGNodeGlossaryDiscovery,
-		// DAGNodeGlossaryEnrichment,
+		DAGNodeEntityDiscovery,
+		DAGNodeEntityEnrichment,
+		DAGNodeFKDiscovery,
+		DAGNodeColumnEnrichment,
+		DAGNodePKMatchDiscovery,
+		DAGNodeRelationshipEnrichment,
+		DAGNodeOntologyFinalization,
+		DAGNodeGlossaryDiscovery,
+		DAGNodeGlossaryEnrichment,
 	}
 }
 
