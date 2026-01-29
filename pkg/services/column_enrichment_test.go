@@ -2276,10 +2276,9 @@ func TestColumnEnrichmentService_convertToColumnDetails_WithEnumDefinitions(t *t
 	}
 
 	fkInfo := map[string]string{}
-	fkDetailedInfo := map[string]*FKRelationshipInfo{}
 	enumDistributions := map[string]*datasource.EnumDistributionResult{}
 
-	details := service.convertToColumnDetails("billing_transactions", enrichments, columns, fkInfo, fkDetailedInfo, enumSamples, enumDefs, enumDistributions)
+	details := service.convertToColumnDetails("billing_transactions", enrichments, columns, fkInfo, enumSamples, enumDefs, enumDistributions)
 
 	require.Equal(t, 3, len(details))
 
@@ -2819,16 +2818,15 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 	}
 
 	tests := []struct {
-		name                string
-		columns             []*models.SchemaColumn
-		enrichments         []columnEnrichment
-		fkInfo              map[string]string
-		fkDetailedInfo      map[string]*FKRelationshipInfo
-		expectedDescription string
+		name                 string
+		columns              []*models.SchemaColumn
+		enrichments          []columnEnrichment
+		fkInfo               map[string]string
+		expectedDescription  string
 		expectedSemanticType string
-		expectedRole        string
-		expectedFKAssoc     string
-		expectedEnumCount   int
+		expectedRole         string
+		expectedFKAssoc      string
+		expectedEnumCount    int
 	}{
 		{
 			name: "ColumnFeatures SemanticType takes precedence over LLM",
@@ -2843,8 +2841,8 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 							"semantic_type": "soft_delete",
 							"role":          "attribute",
 							"timestamp_features": map[string]any{
-								"is_soft_delete":     true,
-								"timestamp_purpose":  "soft_delete",
+								"is_soft_delete":    true,
+								"timestamp_purpose": "soft_delete",
 							},
 						},
 					},
@@ -2859,7 +2857,6 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 				},
 			},
 			fkInfo:               make(map[string]string),
-			fkDetailedInfo:       make(map[string]*FKRelationshipInfo),
 			expectedDescription:  "When the record was deleted", // LLM desc used when Features desc empty
 			expectedSemanticType: "soft_delete",                 // ColumnFeatures takes precedence
 			expectedRole:         "attribute",
@@ -2896,7 +2893,6 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 				},
 			},
 			fkInfo:               make(map[string]string),
-			fkDetailedInfo:       make(map[string]*FKRelationshipInfo),
 			expectedDescription:  "LLM description",
 			expectedSemanticType: "status",
 			expectedRole:         "dimension",
@@ -2932,7 +2928,6 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 				},
 			},
 			fkInfo:               make(map[string]string),
-			fkDetailedInfo:       make(map[string]*FKRelationshipInfo),
 			expectedDescription:  "LLM FK description",
 			expectedSemanticType: "foreign_key", // ColumnFeatures takes precedence
 			expectedRole:         "foreign_key",
@@ -2947,7 +2942,6 @@ func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
 				tt.enrichments,
 				tt.columns,
 				tt.fkInfo,
-				tt.fkDetailedInfo,
 				nil, // enumSamples
 				nil, // enumDefs
 				nil, // enumDistributions

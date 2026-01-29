@@ -202,15 +202,6 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 		fkInfo = make(map[string]string)
 	}
 
-	// Get detailed FK info for auto-description generation
-	fkDetailedInfo, err := s.getForeignKeyDetailedInfo(ctx, projectID, tableName)
-	if err != nil {
-		s.logger.Warn("Failed to get detailed FK info, continuing without",
-			zap.String("table", tableName),
-			zap.Error(err))
-		fkDetailedInfo = make(map[string]*FKRelationshipInfo)
-	}
-
 	// Identify enum candidates
 	enumCandidates := s.identifyEnumCandidates(columns)
 
@@ -273,7 +264,7 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 	enrichments = append(enrichments, syntheticEnrichments...)
 
 	// Convert enrichments to ColumnDetail and save, merging enum definitions, distributions, and FK info
-	columnDetails := s.convertToColumnDetails(tableName, enrichments, columns, fkInfo, fkDetailedInfo, enumSamples, enumDefs, enumDistributions)
+	columnDetails := s.convertToColumnDetails(tableName, enrichments, columns, fkInfo, enumSamples, enumDefs, enumDistributions)
 	if err := s.ontologyRepo.UpdateColumnDetails(ctx, projectID, tableName, columnDetails); err != nil {
 		return fmt.Errorf("save column details: %w", err)
 	}
@@ -315,16 +306,6 @@ func (s *columnEnrichmentService) getColumnsForTable(ctx context.Context, projec
 	return columnsByTable[tableName], nil
 }
 
-// FKRelationshipInfo contains detailed information about a foreign key relationship.
-// This includes the target table/column and detection method for generating accurate descriptions.
-type FKRelationshipInfo struct {
-	TargetTable     string  // The target table this FK references
-	TargetColumn    string  // The target column this FK references
-	DetectionMethod string  // "foreign_key" (DB constraint) or "pk_match" (inferred from data)
-	Confidence      float64 // 1.0 for FK constraints, 0.7-0.95 for pk_match
-	IsDBConstraint  bool    // True if this is an actual database FK constraint
-}
-
 // getForeignKeyInfo returns a map of column_name -> target_table for FK columns.
 // This simplified version is used for the LLM prompt context.
 func (s *columnEnrichmentService) getForeignKeyInfo(ctx context.Context, projectID uuid.UUID, tableName string) (map[string]string, error) {
@@ -346,32 +327,9 @@ func (s *columnEnrichmentService) getForeignKeyInfo(ctx context.Context, project
 	return fkInfo, nil
 }
 
-// getForeignKeyDetailedInfo returns detailed FK relationship information for each column.
-// This is used for generating accurate auto-descriptions with detection method context.
-func (s *columnEnrichmentService) getForeignKeyDetailedInfo(ctx context.Context, projectID uuid.UUID, tableName string) (map[string]*FKRelationshipInfo, error) {
-	// Get relationships for this table
-	relationships, err := s.relationshipRepo.GetByTables(ctx, projectID, []string{tableName})
-	if err != nil {
-		return nil, err
-	}
-
-	// Build detailed FK map
-	fkDetailedInfo := make(map[string]*FKRelationshipInfo)
-	for _, rel := range relationships {
-		// Only include relationships where this table is the source
-		if rel.SourceColumnTable == tableName && rel.SourceColumnName != "" {
-			fkDetailedInfo[rel.SourceColumnName] = &FKRelationshipInfo{
-				TargetTable:     rel.TargetColumnTable,
-				TargetColumn:    rel.TargetColumnName,
-				DetectionMethod: rel.DetectionMethod,
-				Confidence:      rel.Confidence,
-				IsDBConstraint:  rel.DetectionMethod == models.DetectionMethodForeignKey,
-			}
-		}
-	}
-
-	return fkDetailedInfo, nil
-}
+// NOTE: FKRelationshipInfo type and getForeignKeyDetailedInfo function have been removed.
+// Detailed FK information (target table/column, detection method, confidence) is now available
+// through ColumnFeatures.IdentifierFeatures populated by the column_feature_extraction service.
 
 // sampleEnumValues samples distinct values for columns likely to be enums.
 func (s *columnEnrichmentService) sampleEnumValues(
@@ -660,82 +618,14 @@ func isTextType(dataType string) bool {
 		strings.Contains(dataTypeLower, "varchar")
 }
 
-// ============================================================================
-// Boolean Naming Pattern Detection
-// ============================================================================
-
-// BooleanColumnDescription contains the auto-generated description for a boolean column.
-type BooleanColumnDescription struct {
-	Description   string // Auto-generated description with distribution info
-	SemanticType  string // Semantic type: "boolean_flag"
-	Role          string // Column role: "dimension" (typically used for filtering/grouping)
-	FeatureName   string // Humanized feature name extracted from column name
-	NamingPattern string // "is_" or "has_"
-}
-
-// booleanPrefixes maps column name prefixes to their interpretation.
-// These are the common naming conventions for boolean columns.
-var booleanPrefixes = map[string]string{
-	"is_":     "Indicates whether",
-	"has_":    "Indicates whether this entity has",
-	"can_":    "Indicates whether this entity can",
-	"should_": "Indicates whether this entity should",
-	"allow_":  "Indicates whether",
-	"allows_": "Indicates whether",
-	"needs_":  "Indicates whether this entity needs",
-	"was_":    "Indicates whether this entity was",
-	"will_":   "Indicates whether this entity will",
-}
-
-// detectBooleanNamingPattern checks if a column matches a boolean naming pattern and returns
-// an auto-generated description if detected.
-//
-// Pattern detection rules:
-// - Column name starts with is_, has_, can_, should_, allow_, allows_, needs_, was_, will_
-// - Data type is boolean
-// - OR data type is integer/smallint with exactly 2 distinct values (0/1)
-//
-// Returns nil if the column doesn't match the boolean pattern.
-func detectBooleanNamingPattern(col *models.SchemaColumn) *BooleanColumnDescription {
-	colNameLower := strings.ToLower(col.ColumnName)
-
-	// Find matching prefix
-	var matchedPrefix string
-	var prefixDesc string
-	for prefix, desc := range booleanPrefixes {
-		if strings.HasPrefix(colNameLower, prefix) {
-			matchedPrefix = prefix
-			prefixDesc = desc
-			break
-		}
-	}
-
-	if matchedPrefix == "" {
-		return nil
-	}
-
-	// Check column type is boolean or boolean-like (integer with 2 values)
-	if !isBooleanType(col.DataType) && !isBooleanLikeIntegerColumn(col) {
-		return nil
-	}
-
-	// Extract feature name from column (e.g., "is_pc_enabled" -> "pc_enabled")
-	featureName := strings.TrimPrefix(colNameLower, matchedPrefix)
-	humanizedFeature := humanizeFeatureName(featureName)
-
-	// Generate description
-	description := generateBooleanDescription(prefixDesc, humanizedFeature)
-
-	return &BooleanColumnDescription{
-		Description:   description,
-		SemanticType:  "boolean_flag",
-		Role:          models.ColumnRoleDimension, // Booleans are typically used for filtering
-		FeatureName:   featureName,
-		NamingPattern: matchedPrefix,
-	}
-}
+// NOTE: Boolean naming pattern detection (BooleanColumnDescription, booleanPrefixes,
+// detectBooleanNamingPattern, isBooleanLikeIntegerColumn, humanizeFeatureName,
+// generateBooleanDescription) has been removed. Boolean classification is now handled by the
+// column_feature_extraction service in Phase 2. Features are stored in SchemaColumn.Metadata
+// and retrieved via GetColumnFeatures(). See BooleanFeatures for true/false meanings.
 
 // isBooleanType checks if a column data type is a boolean type.
+// This helper is still used by column_feature_extraction.go for classification path routing.
 func isBooleanType(dataType string) bool {
 	dataTypeLower := strings.ToLower(dataType)
 	return dataTypeLower == "boolean" ||
@@ -743,308 +633,18 @@ func isBooleanType(dataType string) bool {
 		strings.HasPrefix(dataTypeLower, "bit")
 }
 
-// isBooleanLikeIntegerColumn checks if an integer column is boolean-like
-// (has exactly 2 distinct values, typically 0 and 1).
-func isBooleanLikeIntegerColumn(col *models.SchemaColumn) bool {
-	dataTypeLower := strings.ToLower(col.DataType)
-
-	// Must be integer type
-	if !strings.Contains(dataTypeLower, "int") {
-		return false
-	}
-
-	// Must have exactly 2 distinct values (0/1 or similar binary representation)
-	if col.DistinctCount == nil || *col.DistinctCount != 2 {
-		return false
-	}
-
-	// Check if sample values are 0 and 1 (or similar binary values)
-	if len(col.SampleValues) > 0 {
-		for _, val := range col.SampleValues {
-			if val != "0" && val != "1" && val != "true" && val != "false" {
-				return false
-			}
-		}
-	}
-
-	return true
-}
-
-// humanizeFeatureName converts a snake_case feature name to a human-readable form.
-// Examples:
-//   - "pc_enabled" -> "PC enabled"
-//   - "email_verified" -> "email verified"
-//   - "active" -> "active"
-func humanizeFeatureName(feature string) string {
-	// Replace underscores with spaces
-	result := strings.ReplaceAll(feature, "_", " ")
-
-	// Capitalize known abbreviations
-	abbreviations := map[string]string{
-		"pc":    "PC",
-		"id":    "ID",
-		"uuid":  "UUID",
-		"url":   "URL",
-		"api":   "API",
-		"http":  "HTTP",
-		"https": "HTTPS",
-		"ssl":   "SSL",
-		"tls":   "TLS",
-		"mfa":   "MFA",
-		"2fa":   "2FA",
-		"sso":   "SSO",
-	}
-
-	words := strings.Fields(result)
-	for i, word := range words {
-		if upper, ok := abbreviations[strings.ToLower(word)]; ok {
-			words[i] = upper
-		}
-	}
-
-	return strings.Join(words, " ")
-}
-
-// generateBooleanDescription generates a description for a boolean column.
-func generateBooleanDescription(prefixDesc, humanizedFeature string) string {
-	var sb strings.Builder
-
-	sb.WriteString("Boolean flag. ")
-	sb.WriteString(prefixDesc)
-	sb.WriteString(" ")
-	sb.WriteString(humanizedFeature)
-	sb.WriteString(".")
-
-	// Note: We can't show accurate true/false percentages without actual count data per value.
-	// The enum distribution analysis (analyzeEnumDistributions) handles this for boolean columns
-	// when they're identified as enum candidates. So we don't add percentage here to avoid
-	// potentially inaccurate information.
-
-	return sb.String()
-}
-
 // NOTE: ExternalIDPatternDescription, ExternalIDPattern, externalIDPatterns, and detectExternalIDPattern
 // have been removed. External ID detection is now handled by the column_feature_extraction service
 // in Phase 2 (ClassificationPathExternalID). See PLAN-extracting-column-features.md for details.
 
-// ============================================================================
-// Role Detection from Column Naming Patterns
-// ============================================================================
+// NOTE: Role detection from column naming patterns (RolePatterns, RoleDescriptions, DetectedRole,
+// detectRoleFromColumnName) has been removed. Role detection is now handled by the
+// column_feature_extraction service in Phase 2. The EntityReferenced field in IdentifierFeatures
+// captures the semantic role (e.g., "host", "visitor", "payer").
 
-// RolePatterns maps entity types to their known role prefixes.
-// When multiple columns in the same table reference the same entity,
-// the column name prefix indicates the semantic role of that reference.
-//
-// Examples:
-//   - host_id -> User with role "host" (content provider)
-//   - visitor_id -> User with role "visitor" (content consumer)
-//   - payer_id -> User with role "payer" (person making payment)
-//   - payee_id -> User with role "payee" (person receiving payment)
-var RolePatterns = map[string][]string{
-	// User roles - common patterns for person-to-person relationships
-	"user": {
-		"host", "visitor", // content/marketplace platforms
-		"creator", "owner", // ownership relationships
-		"sender", "recipient", // messaging/transfers
-		"payer", "payee", // financial transactions
-		"buyer", "seller", // e-commerce
-		"assignee", "assignor", // task/ticket assignment
-		"author", "reviewer", // content creation/review
-		"requester", "approver", // approval workflows
-		"parent", "child", // hierarchical relationships
-		"manager", "employee", // organizational relationships
-		"referrer", "referee", // referral programs
-		"inviter", "invitee", // invitation flows
-		"follower", "following", // social relationships
-		"mentor", "mentee", // mentorship
-		"driver", "rider", // transportation platforms
-		"provider", "consumer", // service marketplaces
-		"instructor", "student", // educational platforms
-		"landlord", "tenant", // property platforms
-		"lender", "borrower", // lending platforms
-	},
-	// Account roles - for financial or multi-party transactions
-	"account": {
-		"source", "destination", // transfer endpoints
-		"from", "to", // transfer direction
-		"debit", "credit", // accounting entries
-		"payer", "payee", // payment parties (can apply to accounts too)
-		"billing", "shipping", // e-commerce accounts
-	},
-}
-
-// RoleDescriptions provides human-readable descriptions for known roles.
-// Used to generate informative FK descriptions.
-var RoleDescriptions = map[string]string{
-	// User roles
-	"host":       "content provider",
-	"visitor":    "content consumer",
-	"creator":    "entity creator",
-	"owner":      "entity owner",
-	"sender":     "message sender",
-	"recipient":  "message recipient",
-	"payer":      "payment source",
-	"payee":      "payment recipient",
-	"buyer":      "purchasing party",
-	"seller":     "selling party",
-	"assignee":   "assigned party",
-	"assignor":   "assigning party",
-	"author":     "content author",
-	"reviewer":   "content reviewer",
-	"requester":  "request initiator",
-	"approver":   "request approver",
-	"parent":     "parent entity",
-	"child":      "child entity",
-	"manager":    "managing party",
-	"employee":   "managed party",
-	"referrer":   "referring party",
-	"referee":    "referred party",
-	"inviter":    "inviting party",
-	"invitee":    "invited party",
-	"follower":   "following party",
-	"following":  "followed party",
-	"mentor":     "mentoring party",
-	"mentee":     "mentored party",
-	"driver":     "driver/operator",
-	"rider":      "passenger/rider",
-	"provider":   "service provider",
-	"consumer":   "service consumer",
-	"instructor": "instructor/teacher",
-	"student":    "student/learner",
-	"landlord":   "property owner",
-	"tenant":     "property renter",
-	"lender":     "lending party",
-	"borrower":   "borrowing party",
-	// Account roles
-	"source":      "source account",
-	"destination": "destination account",
-	"from":        "originating account",
-	"to":          "receiving account",
-	"debit":       "debited account",
-	"credit":      "credited account",
-	"billing":     "billing account",
-	"shipping":    "shipping account",
-}
-
-// DetectedRole contains the result of role detection from a column name.
-type DetectedRole struct {
-	Role        string // Detected role (e.g., "host", "visitor", "payer")
-	Description string // Human-readable description of the role
-}
-
-// detectRoleFromColumnName extracts a semantic role from a column name.
-// Returns nil if no role pattern is detected.
-//
-// The function handles column names in the format: {role}_{suffix}
-// where suffix is typically "id", "user_id", "account_id", etc.
-//
-// Examples:
-//   - "host_id" -> role: "host"
-//   - "host_user_id" -> role: "host"
-//   - "visitor_id" -> role: "visitor"
-//   - "payer_account_id" -> role: "payer"
-//   - "source_account_id" -> role: "source"
-//   - "user_id" -> nil (generic reference, no role)
-func detectRoleFromColumnName(columnName string) *DetectedRole {
-	colLower := strings.ToLower(columnName)
-
-	// Check all role patterns
-	for _, roles := range RolePatterns {
-		for _, role := range roles {
-			// Check for prefix pattern: {role}_
-			if strings.HasPrefix(colLower, role+"_") {
-				desc := RoleDescriptions[role]
-				if desc == "" {
-					desc = role // fallback to role name if no description
-				}
-				return &DetectedRole{
-					Role:        role,
-					Description: desc,
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-// FKColumnDescription contains the auto-generated description for a foreign key column.
-// This is used to provide accurate, data-driven descriptions for FK columns based on
-// how the relationship was detected (database constraint vs data overlap analysis).
-type FKColumnDescription struct {
-	Description  string  // Auto-generated description with target info and detection context
-	SemanticType string  // Semantic type: "foreign_key" or "logical_foreign_key"
-	Role         string  // Column role: "identifier"
-	TargetTable  string  // Target table the FK references
-	TargetColumn string  // Target column the FK references
-	Confidence   float64 // Detection confidence (1.0 for DB constraints, lower for inferred)
-	DetectedRole string  // Semantic role detected from column name (e.g., "host", "visitor")
-	RoleDesc     string  // Human-readable description of the detected role
-}
-
-// detectFKColumnPattern checks if a column is a foreign key and generates an auto-description
-// based on how the relationship was detected.
-//
-// Pattern detection rules:
-// - Column must have a confirmed FK relationship
-// - Role detection from column name prefixes (e.g., host_id -> role: host)
-// - For database FK constraints (detection_method = "foreign_key"):
-//   - Description: "Foreign key to {table}.{column}. Role: {role} ({description})."
-//
-// - For inferred FKs (detection_method = "pk_match"):
-//   - Description: "Foreign key to {table}.{column}. Role: {role}. No database constraint - logical reference only."
-//   - Includes confidence percentage based on match analysis
-//
-// Returns nil if no FK relationship exists for this column.
-func detectFKColumnPattern(col *models.SchemaColumn, fkInfo *FKRelationshipInfo) *FKColumnDescription {
-	if fkInfo == nil {
-		return nil
-	}
-
-	var description string
-	var semanticType string
-
-	// Detect role from column name
-	detectedRole := detectRoleFromColumnName(col.ColumnName)
-
-	if fkInfo.IsDBConstraint {
-		// Database FK constraint - explicit relationship
-		description = fmt.Sprintf("Foreign key to %s.%s.",
-			fkInfo.TargetTable, fkInfo.TargetColumn)
-		semanticType = "foreign_key"
-	} else {
-		// Inferred FK via data overlap analysis
-		// pk_match relationships are only created when join analysis shows >95% match rate
-		// (less than 5% orphan values). The confidence value reflects detection confidence,
-		// not the actual match rate.
-		confidencePct := fkInfo.Confidence * 100
-		description = fmt.Sprintf("Foreign key to %s.%s (%.0f%% confidence). No database constraint - logical reference validated via data overlap.",
-			fkInfo.TargetTable, fkInfo.TargetColumn, confidencePct)
-		semanticType = "logical_foreign_key"
-	}
-
-	// Append role information if detected
-	if detectedRole != nil {
-		description = fmt.Sprintf("%s Role: %s (%s).",
-			strings.TrimSuffix(description, "."), detectedRole.Role, detectedRole.Description)
-	}
-
-	result := &FKColumnDescription{
-		Description:  description,
-		SemanticType: semanticType,
-		Role:         models.ColumnRoleIdentifier,
-		TargetTable:  fkInfo.TargetTable,
-		TargetColumn: fkInfo.TargetColumn,
-		Confidence:   fkInfo.Confidence,
-	}
-
-	if detectedRole != nil {
-		result.DetectedRole = detectedRole.Role
-		result.RoleDesc = detectedRole.Description
-	}
-
-	return result
-}
+// NOTE: FK column pattern detection (FKColumnDescription, detectFKColumnPattern) has been removed.
+// FK detection is now handled by the column_feature_extraction service in Phase 4 (FK resolution).
+// The IdentifierFeatures fields (FKTargetTable, FKTargetColumn, EntityReferenced) provide FK metadata.
 
 // applyEnumDistributions merges distribution data into EnumValue structs.
 func applyEnumDistributions(enumValues []models.EnumValue, dist *datasource.EnumDistributionResult) []models.EnumValue {
@@ -1549,7 +1149,6 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 	enrichments []columnEnrichment,
 	columns []*models.SchemaColumn,
 	fkInfo map[string]string,
-	fkDetailedInfo map[string]*FKRelationshipInfo,
 	enumSamples map[string][]string,
 	enumDefs []models.EnumDefinition,
 	enumDistributions map[string]*datasource.EnumDistributionResult,
@@ -1684,48 +1283,9 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 			}
 		}
 
-		// NOTE: detectBooleanNamingPattern and detectFKColumnPattern are kept as fallbacks
-		// for when ColumnFeatures are not available (e.g., columns not yet processed by
-		// the feature extraction pipeline). These will be removed once all columns are
-		// guaranteed to have ColumnFeatures populated.
-
-		// Fallback: Apply boolean naming pattern detection if no ColumnFeatures
-		// or if ColumnFeatures didn't provide description/type
-		if detail.Description == "" || detail.SemanticType == "" {
-			if booleanDesc := detectBooleanNamingPattern(col); booleanDesc != nil {
-				if detail.Description == "" {
-					detail.Description = booleanDesc.Description
-				}
-				if detail.SemanticType == "" {
-					detail.SemanticType = booleanDesc.SemanticType
-				}
-				if detail.Role == "" {
-					detail.Role = booleanDesc.Role
-				}
-			}
-		}
-
-		// Fallback: Apply FK column pattern detection for logical FKs
-		// This is still useful for description generation based on detection method
-		if fkDetail, ok := fkDetailedInfo[col.ColumnName]; ok {
-			if fkColDesc := detectFKColumnPattern(col, fkDetail); fkColDesc != nil {
-				// Only use FK description if ColumnFeatures didn't provide one
-				if detail.Description == "" {
-					detail.Description = fkColDesc.Description
-				}
-				if detail.SemanticType == "" {
-					detail.SemanticType = fkColDesc.SemanticType
-				}
-				if detail.Role == "" {
-					detail.Role = fkColDesc.Role
-				}
-
-				// Set FKAssociation from detected role if not already set
-				if fkColDesc.DetectedRole != "" && detail.FKAssociation == "" {
-					detail.FKAssociation = fkColDesc.DetectedRole
-				}
-			}
-		}
+		// NOTE: detectBooleanNamingPattern and detectFKColumnPattern fallbacks have been removed.
+		// All columns now get their features from the column_feature_extraction service in Phase 2+.
+		// Boolean features come from BooleanFeatures, FK features from IdentifierFeatures.
 
 		// Merge project-level enum definitions if available
 		// This overrides LLM-inferred enum values with explicit definitions
