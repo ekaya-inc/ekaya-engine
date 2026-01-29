@@ -162,7 +162,7 @@ RelationshipEnrichment generates LLM descriptions for relationships. It can leve
 
 ### Task 6: Update OntologyFinalization
 
-**File:** `pkg/services/dag/ontology_finalization_node.go`
+- [x] **File:** `pkg/services/dag/ontology_finalization_node.go`
 
 OntologyFinalization aggregates the final ontology. Ensure it:
 

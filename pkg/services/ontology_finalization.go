@@ -76,6 +76,30 @@ func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uu
 		return fmt.Errorf("get relationships: %w", err)
 	}
 
+	// Get table names from entities for column lookup
+	tableNames := make([]string, 0, len(entities))
+	for _, e := range entities {
+		tableNames = append(tableNames, e.PrimaryTable)
+	}
+
+	// Get all columns for these tables (needed for ColumnFeatures analysis)
+	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames, true)
+	if err != nil {
+		return fmt.Errorf("get columns by tables: %w", err)
+	}
+
+	// Extract insights from ColumnFeatures
+	insights := s.extractColumnFeatureInsights(columnsByTable)
+
+	s.logger.Debug("Extracted column feature insights",
+		zap.Int("soft_delete_tables", len(insights.softDeleteTables)),
+		zap.Int("audit_created_tables", len(insights.auditCreatedTables)),
+		zap.Int("audit_updated_tables", len(insights.auditUpdatedTables)),
+		zap.Int("monetary_total", insights.monetaryTotal),
+		zap.Int("monetary_with_currency", insights.monetaryWithCurrency),
+		zap.Int("external_services", len(insights.externalServices)),
+	)
+
 	// Aggregate unique domains from entity.Domain fields
 	primaryDomains := s.aggregateUniqueDomains(entities)
 
@@ -87,14 +111,14 @@ func (s *ontologyFinalizationService) Finalize(ctx context.Context, projectID uu
 		entityByID[e.ID] = e
 	}
 
-	// Generate domain description via LLM
-	description, err := s.generateDomainDescription(ctx, projectID, entities, relationships, entityNameByID)
+	// Generate domain description via LLM (include ColumnFeature insights for richer context)
+	description, err := s.generateDomainDescription(ctx, projectID, entities, relationships, entityNameByID, insights)
 	if err != nil {
 		return fmt.Errorf("generate domain description: %w", err)
 	}
 
-	// Discover project conventions (soft delete, currency, audit columns)
-	conventions, err := s.discoverConventions(ctx, projectID, entities)
+	// Discover project conventions using pre-extracted insights
+	conventions, err := s.discoverConventionsWithInsights(ctx, projectID, entities, columnsByTable, insights)
 	if err != nil {
 		s.logger.Debug("Failed to discover conventions, continuing without", zap.Error(err))
 		// Non-fatal - continue without conventions
@@ -270,6 +294,7 @@ func (s *ontologyFinalizationService) generateDomainDescription(
 	entities []*models.OntologyEntity,
 	relationships []*models.EntityRelationship,
 	entityNameByID map[uuid.UUID]string,
+	insights *columnFeatureInsights,
 ) (string, error) {
 	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
 	if err != nil {
@@ -277,7 +302,7 @@ func (s *ontologyFinalizationService) generateDomainDescription(
 	}
 
 	systemMessage := s.domainDescriptionSystemMessage()
-	prompt := s.buildDomainDescriptionPrompt(entities, relationships, entityNameByID)
+	prompt := s.buildDomainDescriptionPrompt(entities, relationships, entityNameByID, insights)
 
 	result, err := llmClient.GenerateResponse(ctx, prompt, systemMessage, 0.3, false)
 	if err != nil {
@@ -321,6 +346,7 @@ func (s *ontologyFinalizationService) buildDomainDescriptionPrompt(
 	entities []*models.OntologyEntity,
 	relationships []*models.EntityRelationship,
 	entityNameByID map[uuid.UUID]string,
+	insights *columnFeatureInsights,
 ) string {
 	var sb strings.Builder
 
@@ -357,6 +383,17 @@ func (s *ontologyFinalizationService) buildDomainDescriptionPrompt(
 		}
 	}
 
+	// Include feature-derived insights if available
+	if insights != nil {
+		insightLines := s.buildFeatureInsightsSection(insights, len(entities))
+		if len(insightLines) > 0 {
+			sb.WriteString("\n## Technical Patterns Detected\n\n")
+			for _, line := range insightLines {
+				sb.WriteString(fmt.Sprintf("- %s\n", line))
+			}
+		}
+	}
+
 	sb.WriteString("\n## Response Format\n\n")
 	sb.WriteString("Respond with a JSON object:\n")
 	sb.WriteString("```json\n")
@@ -366,6 +403,54 @@ func (s *ontologyFinalizationService) buildDomainDescriptionPrompt(
 	sb.WriteString("```\n")
 
 	return sb.String()
+}
+
+// buildFeatureInsightsSection generates human-readable insights from ColumnFeatures analysis.
+func (s *ontologyFinalizationService) buildFeatureInsightsSection(
+	insights *columnFeatureInsights,
+	totalEntities int,
+) []string {
+	var lines []string
+
+	// Soft-delete pattern
+	if len(insights.softDeleteTables) > 0 {
+		lines = append(lines, fmt.Sprintf("Soft-delete pattern detected on %d tables (column: %s)",
+			len(insights.softDeleteTables), insights.softDeleteColumn))
+	}
+
+	// Monetary columns with currency pairing
+	if insights.monetaryTotal > 0 {
+		if insights.monetaryWithCurrency > 0 {
+			lines = append(lines, fmt.Sprintf("Monetary columns: %d total, %d paired with currency codes",
+				insights.monetaryTotal, insights.monetaryWithCurrency))
+		} else {
+			lines = append(lines, fmt.Sprintf("Monetary columns: %d total", insights.monetaryTotal))
+		}
+	}
+
+	// External service integrations
+	if len(insights.externalServices) > 0 {
+		services := make([]string, 0, len(insights.externalServices))
+		for svc, count := range insights.externalServices {
+			services = append(services, fmt.Sprintf("%s (%d)", svc, count))
+		}
+		sort.Strings(services)
+		lines = append(lines, fmt.Sprintf("External ID integrations: %s", strings.Join(services, ", ")))
+	}
+
+	// Audit column coverage
+	createdPct := 0.0
+	updatedPct := 0.0
+	if totalEntities > 0 {
+		createdPct = float64(len(insights.auditCreatedTables)) / float64(totalEntities) * 100
+		updatedPct = float64(len(insights.auditUpdatedTables)) / float64(totalEntities) * 100
+	}
+	if createdPct >= 50 || updatedPct >= 50 {
+		lines = append(lines, fmt.Sprintf("Audit timestamps: created_at (%.0f%% coverage), updated_at (%.0f%% coverage)",
+			createdPct, updatedPct))
+	}
+
+	return lines
 }
 
 // domainDescriptionResponse is the expected LLM response structure.
@@ -389,39 +474,70 @@ func (s *ontologyFinalizationService) parseDomainDescriptionResponse(content str
 // for it to be considered a project-wide convention.
 const conventionThreshold = 0.5
 
-// discoverConventions analyzes schema columns to detect project-wide conventions.
-func (s *ontologyFinalizationService) discoverConventions(
-	ctx context.Context,
-	projectID uuid.UUID,
+// columnFeatureInsights holds aggregated insights from ColumnFeatures analysis.
+// These insights are used to enhance convention detection and LLM prompts.
+type columnFeatureInsights struct {
+	// Soft-delete tables detected via ColumnFeatures
+	softDeleteTables []string
+	softDeleteColumn string
+
+	// Audit column coverage
+	auditCreatedTables []string
+	auditUpdatedTables []string
+
+	// Monetary columns with paired currency codes
+	monetaryWithCurrency int
+	monetaryTotal        int
+
+	// External service integrations
+	externalServices map[string]int // service -> count of columns
+}
+
+// discoverConventionsWithInsights analyzes schema columns to detect project-wide conventions.
+// Uses pre-extracted ColumnFeatures insights for more accurate detection.
+func (s *ontologyFinalizationService) discoverConventionsWithInsights(
+	_ context.Context,
+	_ uuid.UUID,
 	entities []*models.OntologyEntity,
+	columnsByTable map[string][]*models.SchemaColumn,
+	insights *columnFeatureInsights,
 ) (*models.ProjectConventions, error) {
 	if len(entities) == 0 {
 		return nil, nil
 	}
 
-	// Get table names from entities
-	tableNames := make([]string, 0, len(entities))
-	for _, e := range entities {
-		tableNames = append(tableNames, e.PrimaryTable)
-	}
-
-	// Get all columns for these tables
-	columnsByTable, err := s.schemaRepo.GetColumnsByTables(ctx, projectID, tableNames, true)
-	if err != nil {
-		return nil, fmt.Errorf("get columns by tables: %w", err)
-	}
-
-	totalTables := len(tableNames)
+	totalTables := len(entities)
 	conventions := &models.ProjectConventions{}
 
-	// Detect soft delete convention
-	conventions.SoftDelete = s.detectSoftDelete(columnsByTable, totalTables)
+	// Detect soft delete convention (prefer ColumnFeatures if available)
+	if len(insights.softDeleteTables) > 0 {
+		coverage := float64(len(insights.softDeleteTables)) / float64(totalTables)
+		if coverage >= conventionThreshold {
+			conventions.SoftDelete = &models.SoftDeleteConvention{
+				Enabled:    true,
+				Column:     insights.softDeleteColumn,
+				ColumnType: "timestamp",
+				Filter:     fmt.Sprintf("%s IS NULL", insights.softDeleteColumn),
+				Coverage:   coverage,
+			}
+		}
+	}
+	// Fall back to pattern-based detection if ColumnFeatures didn't find soft delete
+	if conventions.SoftDelete == nil {
+		conventions.SoftDelete = s.detectSoftDelete(columnsByTable, totalTables)
+	}
 
 	// Detect currency convention
 	conventions.Currency = s.detectCurrency(columnsByTable)
 
-	// Detect audit columns
-	conventions.AuditColumns = s.detectAuditColumns(columnsByTable, totalTables)
+	// Detect audit columns (prefer ColumnFeatures if available)
+	if len(insights.auditCreatedTables) > 0 || len(insights.auditUpdatedTables) > 0 {
+		conventions.AuditColumns = s.buildAuditColumnsFromInsights(insights, totalTables)
+	}
+	// Fall back to pattern-based detection if ColumnFeatures didn't find audit columns
+	if len(conventions.AuditColumns) == 0 {
+		conventions.AuditColumns = s.detectAuditColumns(columnsByTable, totalTables)
+	}
 
 	// Return nil if no conventions found
 	if conventions.SoftDelete == nil && conventions.Currency == nil && len(conventions.AuditColumns) == 0 {
@@ -429,6 +545,96 @@ func (s *ontologyFinalizationService) discoverConventions(
 	}
 
 	return conventions, nil
+}
+
+// extractColumnFeatureInsights aggregates insights from ColumnFeatures across all columns.
+func (s *ontologyFinalizationService) extractColumnFeatureInsights(
+	columnsByTable map[string][]*models.SchemaColumn,
+) *columnFeatureInsights {
+	insights := &columnFeatureInsights{
+		externalServices: make(map[string]int),
+	}
+
+	softDeleteByColumn := make(map[string][]string) // column name -> table names
+
+	for tableName, columns := range columnsByTable {
+		for _, col := range columns {
+			features := col.GetColumnFeatures()
+			if features == nil {
+				continue
+			}
+
+			// Check for soft-delete pattern
+			if features.TimestampFeatures != nil && features.TimestampFeatures.IsSoftDelete {
+				softDeleteByColumn[col.ColumnName] = append(softDeleteByColumn[col.ColumnName], tableName)
+			}
+
+			// Check for audit columns
+			if features.TimestampFeatures != nil && features.TimestampFeatures.IsAuditField {
+				switch features.TimestampFeatures.TimestampPurpose {
+				case models.TimestampPurposeAuditCreated:
+					insights.auditCreatedTables = append(insights.auditCreatedTables, tableName)
+				case models.TimestampPurposeAuditUpdated:
+					insights.auditUpdatedTables = append(insights.auditUpdatedTables, tableName)
+				}
+			}
+
+			// Check for monetary columns
+			if features.MonetaryFeatures != nil && features.MonetaryFeatures.IsMonetary {
+				insights.monetaryTotal++
+				if features.MonetaryFeatures.PairedCurrencyColumn != "" {
+					insights.monetaryWithCurrency++
+				}
+			}
+
+			// Check for external service identifiers
+			if features.IdentifierFeatures != nil && features.IdentifierFeatures.ExternalService != "" {
+				insights.externalServices[features.IdentifierFeatures.ExternalService]++
+			}
+		}
+	}
+
+	// Find the most common soft-delete column
+	var maxCount int
+	for colName, tables := range softDeleteByColumn {
+		if len(tables) > maxCount {
+			maxCount = len(tables)
+			insights.softDeleteColumn = colName
+			insights.softDeleteTables = tables
+		}
+	}
+
+	return insights
+}
+
+// buildAuditColumnsFromInsights creates AuditColumnInfo from ColumnFeatures insights.
+func (s *ontologyFinalizationService) buildAuditColumnsFromInsights(
+	insights *columnFeatureInsights,
+	totalTables int,
+) []models.AuditColumnInfo {
+	var result []models.AuditColumnInfo
+
+	if len(insights.auditCreatedTables) > 0 {
+		coverage := float64(len(insights.auditCreatedTables)) / float64(totalTables)
+		if coverage >= conventionThreshold {
+			result = append(result, models.AuditColumnInfo{
+				Column:   "created_at",
+				Coverage: coverage,
+			})
+		}
+	}
+
+	if len(insights.auditUpdatedTables) > 0 {
+		coverage := float64(len(insights.auditUpdatedTables)) / float64(totalTables)
+		if coverage >= conventionThreshold {
+			result = append(result, models.AuditColumnInfo{
+				Column:   "updated_at",
+				Coverage: coverage,
+			})
+		}
+	}
+
+	return result
 }
 
 // detectSoftDelete looks for soft-delete patterns across tables.
