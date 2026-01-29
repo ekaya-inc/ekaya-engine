@@ -216,7 +216,7 @@ func main() {
 		ontologyRepo, ontologyEntityRepo, entityRelationshipRepo, schemaRepo, convRepo, projectRepo, ontologyQuestionService,
 		datasourceService, adapterFactory, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
 	relationshipEnrichmentService := services.NewRelationshipEnrichmentService(
-		entityRelationshipRepo, ontologyEntityRepo, knowledgeRepo, convRepo, ontologyQuestionService, ontologyRepo, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
+		entityRelationshipRepo, ontologyEntityRepo, knowledgeRepo, convRepo, ontologyQuestionService, ontologyRepo, schemaRepo, llmFactory, llmWorkerPool, llmCircuitBreaker, getTenantCtx, logger)
 	glossaryRepo := repositories.NewGlossaryRepository()
 	glossaryService := services.NewGlossaryService(glossaryRepo, ontologyRepo, ontologyEntityRepo, knowledgeRepo, schemaRepo, datasourceService, adapterFactory, llmFactory, getTenantCtx, logger, cfg.Env)
 

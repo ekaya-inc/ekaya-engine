@@ -755,10 +755,10 @@ func TestRelationshipEnrichmentService_ColumnFeaturesIntegration(t *testing.T) {
 						"column_features": map[string]any{
 							"description": "References the content creator who receives engagement",
 							"identifier_features": map[string]any{
-								"identifier_type":     "foreign_key",
-								"entity_referenced":   "host",
-								"fk_target_table":     "users",
-								"fk_target_column":    "id",
+								"identifier_type":   "foreign_key",
+								"entity_referenced": "host",
+								"fk_target_table":   "users",
+								"fk_target_column":  "id",
 							},
 						},
 					},
