@@ -1366,3 +1366,501 @@ func TestUnknownClassifier_NoLLMCall(t *testing.T) {
 func containsStr(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
+
+// ============================================================================
+// Phase 3: Enum Value Analysis Tests
+// ============================================================================
+
+func TestRunPhase3EnumAnalysis_Success(t *testing.T) {
+	projectID := uuid.New()
+	enumColumnID := uuid.New()
+
+	// Create mock LLM client that returns a valid enum analysis response
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		return &llm.GenerateResponseResult{
+			Content: `{
+				"is_state_machine": true,
+				"state_description": "Order processing workflow",
+				"values": [
+					{"value": "0", "label": "pending", "category": "initial"},
+					{"value": "1", "label": "processing", "category": "in_progress"},
+					{"value": "2", "label": "completed", "category": "terminal_success"},
+					{"value": "3", "label": "failed", "category": "terminal_error"}
+				],
+				"confidence": 0.9,
+				"description": "Tracks order status from creation through fulfillment."
+			}`,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.MockClient = mockClient
+
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), zap.NewNop())
+
+	// Create profiles for the enum column
+	profiles := []*models.ColumnDataProfile{
+		{
+			ColumnID:           enumColumnID,
+			ColumnName:         "status",
+			TableName:          "orders",
+			DataType:           "integer",
+			DistinctCount:      4,
+			SampleValues:       []string{"0", "1", "2", "3"},
+			ClassificationPath: models.ClassificationPathEnum,
+		},
+	}
+
+	// Create initial features (as would come from Phase 2)
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:           enumColumnID,
+			ClassificationPath: models.ClassificationPathEnum,
+			Purpose:            models.PurposeEnum,
+			NeedsEnumAnalysis:  true,
+			EnumFeatures: &models.EnumFeatures{
+				IsStateMachine: true, // Phase 2 initial detection
+			},
+		},
+	}
+
+	svc := &columnFeatureExtractionService{
+		llmFactory:  mockFactory,
+		workerPool:  workerPool,
+		logger:      zap.NewNop(),
+		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+	}
+
+	// Track progress
+	var progressCalls []int
+	progressCallback := func(completed, total int, message string) {
+		progressCalls = append(progressCalls, completed)
+	}
+
+	err := svc.runPhase3EnumAnalysis(
+		context.Background(),
+		projectID,
+		[]uuid.UUID{enumColumnID},
+		profiles,
+		features,
+		progressCallback,
+	)
+	if err != nil {
+		t.Fatalf("runPhase3EnumAnalysis() error = %v", err)
+	}
+
+	// Verify LLM was called
+	if mockClient.GenerateResponseCalls != 1 {
+		t.Errorf("GenerateResponseCalls = %d, want 1", mockClient.GenerateResponseCalls)
+	}
+
+	// Verify progress was reported
+	if len(progressCalls) == 0 {
+		t.Error("No progress callbacks received")
+	}
+
+	// Verify features were updated
+	f := features[0]
+	if f.NeedsEnumAnalysis {
+		t.Error("NeedsEnumAnalysis should be false after analysis")
+	}
+	if f.EnumFeatures == nil {
+		t.Fatal("EnumFeatures should not be nil")
+	}
+	if !f.EnumFeatures.IsStateMachine {
+		t.Error("IsStateMachine should be true")
+	}
+	if f.EnumFeatures.StateDescription != "Order processing workflow" {
+		t.Errorf("StateDescription = %v, want 'Order processing workflow'", f.EnumFeatures.StateDescription)
+	}
+	if len(f.EnumFeatures.Values) != 4 {
+		t.Errorf("len(Values) = %d, want 4", len(f.EnumFeatures.Values))
+	}
+
+	// Verify individual values
+	valueLabels := make(map[string]string)
+	valueCategories := make(map[string]string)
+	for _, v := range f.EnumFeatures.Values {
+		valueLabels[v.Value] = v.Label
+		valueCategories[v.Value] = v.Category
+	}
+
+	expectedLabels := map[string]string{
+		"0": "pending",
+		"1": "processing",
+		"2": "completed",
+		"3": "failed",
+	}
+	for val, wantLabel := range expectedLabels {
+		if gotLabel := valueLabels[val]; gotLabel != wantLabel {
+			t.Errorf("Value %s label = %v, want %v", val, gotLabel, wantLabel)
+		}
+	}
+
+	expectedCategories := map[string]string{
+		"0": "initial",
+		"1": "in_progress",
+		"2": "terminal_success",
+		"3": "terminal_error",
+	}
+	for val, wantCat := range expectedCategories {
+		if gotCat := valueCategories[val]; gotCat != wantCat {
+			t.Errorf("Value %s category = %v, want %v", val, gotCat, wantCat)
+		}
+	}
+
+	// Verify description was updated
+	if f.Description != "Tracks order status from creation through fulfillment." {
+		t.Errorf("Description = %v, want 'Tracks order status from creation through fulfillment.'", f.Description)
+	}
+}
+
+func TestRunPhase3EnumAnalysis_EmptyQueue(t *testing.T) {
+	svc := &columnFeatureExtractionService{
+		logger: zap.NewNop(),
+	}
+
+	// Empty enum queue should skip phase without error
+	err := svc.runPhase3EnumAnalysis(
+		context.Background(),
+		uuid.New(),
+		[]uuid.UUID{}, // empty queue
+		nil,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Errorf("runPhase3EnumAnalysis() with empty queue should not error, got: %v", err)
+	}
+}
+
+func TestRunPhase3EnumAnalysis_ContinuesOnFailure(t *testing.T) {
+	projectID := uuid.New()
+	col1ID := uuid.New()
+	col2ID := uuid.New()
+	col3ID := uuid.New()
+
+	callCount := 0
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		callCount++
+		// Fail on second call
+		if callCount == 2 {
+			return nil, context.DeadlineExceeded
+		}
+		return &llm.GenerateResponseResult{
+			Content: `{"is_state_machine": false, "state_description": "", "values": [{"value": "A", "label": "Type A"}], "confidence": 0.8, "description": "Category type."}`,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.MockClient = mockClient
+
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), zap.NewNop())
+
+	profiles := []*models.ColumnDataProfile{
+		{ColumnID: col1ID, ColumnName: "type1", TableName: "t1", ClassificationPath: models.ClassificationPathEnum, SampleValues: []string{"A", "B"}},
+		{ColumnID: col2ID, ColumnName: "type2", TableName: "t1", ClassificationPath: models.ClassificationPathEnum, SampleValues: []string{"X", "Y"}},
+		{ColumnID: col3ID, ColumnName: "type3", TableName: "t1", ClassificationPath: models.ClassificationPathEnum, SampleValues: []string{"1", "2"}},
+	}
+
+	features := []*models.ColumnFeatures{
+		{ColumnID: col1ID, ClassificationPath: models.ClassificationPathEnum, NeedsEnumAnalysis: true, EnumFeatures: &models.EnumFeatures{}},
+		{ColumnID: col2ID, ClassificationPath: models.ClassificationPathEnum, NeedsEnumAnalysis: true, EnumFeatures: &models.EnumFeatures{}},
+		{ColumnID: col3ID, ClassificationPath: models.ClassificationPathEnum, NeedsEnumAnalysis: true, EnumFeatures: &models.EnumFeatures{}},
+	}
+
+	svc := &columnFeatureExtractionService{
+		llmFactory:  mockFactory,
+		workerPool:  workerPool,
+		logger:      zap.NewNop(),
+		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+	}
+
+	err := svc.runPhase3EnumAnalysis(
+		context.Background(),
+		projectID,
+		[]uuid.UUID{col1ID, col2ID, col3ID},
+		profiles,
+		features,
+		nil,
+	)
+
+	// Should not return error - continues on individual failures
+	if err != nil {
+		t.Errorf("runPhase3EnumAnalysis() should continue on individual failures, got error: %v", err)
+	}
+
+	// All 3 LLM calls should have been attempted
+	if callCount != 3 {
+		t.Errorf("Expected 3 LLM calls, got %d", callCount)
+	}
+
+	// Count successful analyses
+	successCount := 0
+	for _, f := range features {
+		if !f.NeedsEnumAnalysis && len(f.EnumFeatures.Values) > 0 {
+			successCount++
+		}
+	}
+	if successCount != 2 {
+		t.Errorf("Expected 2 successful analyses, got %d", successCount)
+	}
+}
+
+func TestRunPhase3EnumAnalysis_NonStateMachine(t *testing.T) {
+	projectID := uuid.New()
+	enumColumnID := uuid.New()
+
+	// Create mock LLM client that returns a non-state-machine enum
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		return &llm.GenerateResponseResult{
+			Content: `{
+				"is_state_machine": false,
+				"state_description": "",
+				"values": [
+					{"value": "red", "label": "Red Color"},
+					{"value": "green", "label": "Green Color"},
+					{"value": "blue", "label": "Blue Color"}
+				],
+				"confidence": 0.95,
+				"description": "Color category for the product."
+			}`,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.MockClient = mockClient
+
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), zap.NewNop())
+
+	profiles := []*models.ColumnDataProfile{
+		{
+			ColumnID:           enumColumnID,
+			ColumnName:         "color",
+			TableName:          "products",
+			DataType:           "varchar(20)",
+			DistinctCount:      3,
+			SampleValues:       []string{"red", "green", "blue"},
+			ClassificationPath: models.ClassificationPathEnum,
+		},
+	}
+
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:           enumColumnID,
+			ClassificationPath: models.ClassificationPathEnum,
+			Purpose:            models.PurposeEnum,
+			NeedsEnumAnalysis:  true,
+			EnumFeatures:       &models.EnumFeatures{},
+		},
+	}
+
+	svc := &columnFeatureExtractionService{
+		llmFactory:  mockFactory,
+		workerPool:  workerPool,
+		logger:      zap.NewNop(),
+		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+	}
+
+	err := svc.runPhase3EnumAnalysis(
+		context.Background(),
+		projectID,
+		[]uuid.UUID{enumColumnID},
+		profiles,
+		features,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("runPhase3EnumAnalysis() error = %v", err)
+	}
+
+	f := features[0]
+	if f.EnumFeatures.IsStateMachine {
+		t.Error("IsStateMachine should be false for category enum")
+	}
+	if len(f.EnumFeatures.Values) != 3 {
+		t.Errorf("len(Values) = %d, want 3", len(f.EnumFeatures.Values))
+	}
+	// Non-state-machine enums should not have categories
+	for _, v := range f.EnumFeatures.Values {
+		if v.Category != "" {
+			t.Errorf("Non-state-machine value %s should not have category, got %s", v.Value, v.Category)
+		}
+	}
+}
+
+func TestRunPhase3EnumAnalysis_MissingProfile(t *testing.T) {
+	projectID := uuid.New()
+	missingColumnID := uuid.New()
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.MockClient = llm.NewMockLLMClient()
+
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), zap.NewNop())
+
+	// Empty profiles - column ID in queue won't be found
+	profiles := []*models.ColumnDataProfile{}
+	features := []*models.ColumnFeatures{}
+
+	svc := &columnFeatureExtractionService{
+		llmFactory:  mockFactory,
+		workerPool:  workerPool,
+		logger:      zap.NewNop(),
+		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+	}
+
+	// Should not error, just skip the column
+	err := svc.runPhase3EnumAnalysis(
+		context.Background(),
+		projectID,
+		[]uuid.UUID{missingColumnID},
+		profiles,
+		features,
+		nil,
+	)
+	if err != nil {
+		t.Errorf("runPhase3EnumAnalysis() should skip missing profiles, got error: %v", err)
+	}
+}
+
+func TestBuildEnumAnalysisPrompt(t *testing.T) {
+	svc := &columnFeatureExtractionService{logger: zap.NewNop()}
+
+	profile := &models.ColumnDataProfile{
+		ColumnID:      uuid.New(),
+		ColumnName:    "order_status",
+		TableName:     "orders",
+		DataType:      "integer",
+		DistinctCount: 5,
+		SampleValues:  []string{"0", "1", "2", "3", "4"},
+	}
+
+	prompt := svc.buildEnumAnalysisPrompt(profile)
+
+	// Verify prompt contains expected sections
+	expectedContents := []string{
+		"# Enum Value Analysis",
+		"**Table:** orders",
+		"**Column:** order_status",
+		"**Data type:** integer",
+		"**Distinct values:** 5",
+		"**Values found in data:**",
+		"- `0`",
+		"- `1`",
+		"## Task",
+		"state machine",
+		"## Response Format",
+	}
+
+	for _, expected := range expectedContents {
+		if !containsStr(prompt, expected) {
+			t.Errorf("Prompt should contain %q", expected)
+		}
+	}
+}
+
+func TestMergeEnumAnalysis_UpdatesFeatures(t *testing.T) {
+	svc := &columnFeatureExtractionService{logger: zap.NewNop()}
+
+	columnID := uuid.New()
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:          columnID,
+			NeedsEnumAnalysis: true,
+			Confidence:        0.5,
+			EnumFeatures:      &models.EnumFeatures{},
+		},
+	}
+
+	result := &EnumAnalysisResult{
+		ColumnID:         columnID,
+		IsStateMachine:   true,
+		StateDescription: "Test workflow",
+		Values: []models.ColumnEnumValue{
+			{Value: "A", Label: "Alpha", Category: "initial"},
+			{Value: "B", Label: "Beta", Category: "terminal"},
+		},
+		Description: "Test description",
+		Confidence:  0.9,
+	}
+
+	svc.mergeEnumAnalysis(features, result)
+
+	f := features[0]
+	if f.NeedsEnumAnalysis {
+		t.Error("NeedsEnumAnalysis should be false after merge")
+	}
+	if !f.EnumFeatures.IsStateMachine {
+		t.Error("IsStateMachine should be true")
+	}
+	if f.EnumFeatures.StateDescription != "Test workflow" {
+		t.Errorf("StateDescription = %v, want 'Test workflow'", f.EnumFeatures.StateDescription)
+	}
+	if len(f.EnumFeatures.Values) != 2 {
+		t.Errorf("len(Values) = %d, want 2", len(f.EnumFeatures.Values))
+	}
+	if f.Description != "Test description" {
+		t.Errorf("Description = %v, want 'Test description'", f.Description)
+	}
+	if f.Confidence != 0.9 {
+		t.Errorf("Confidence = %v, want 0.9", f.Confidence)
+	}
+}
+
+func TestMergeEnumAnalysis_CreatesEnumFeaturesIfNil(t *testing.T) {
+	svc := &columnFeatureExtractionService{logger: zap.NewNop()}
+
+	columnID := uuid.New()
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:          columnID,
+			NeedsEnumAnalysis: true,
+			EnumFeatures:      nil, // nil initially
+		},
+	}
+
+	result := &EnumAnalysisResult{
+		ColumnID:       columnID,
+		IsStateMachine: false,
+		Values:         []models.ColumnEnumValue{{Value: "X", Label: "X Label"}},
+		Confidence:     0.8,
+	}
+
+	svc.mergeEnumAnalysis(features, result)
+
+	if features[0].EnumFeatures == nil {
+		t.Error("EnumFeatures should be created if nil")
+	}
+	if len(features[0].EnumFeatures.Values) != 1 {
+		t.Errorf("len(Values) = %d, want 1", len(features[0].EnumFeatures.Values))
+	}
+}
+
+func TestMergeEnumAnalysis_DoesNotLowerConfidence(t *testing.T) {
+	svc := &columnFeatureExtractionService{logger: zap.NewNop()}
+
+	columnID := uuid.New()
+	features := []*models.ColumnFeatures{
+		{
+			ColumnID:          columnID,
+			NeedsEnumAnalysis: true,
+			Confidence:        0.95, // Higher initial confidence
+			EnumFeatures:      &models.EnumFeatures{},
+		},
+	}
+
+	result := &EnumAnalysisResult{
+		ColumnID:   columnID,
+		Confidence: 0.7, // Lower confidence from enum analysis
+	}
+
+	svc.mergeEnumAnalysis(features, result)
+
+	// Confidence should NOT be lowered
+	if features[0].Confidence != 0.95 {
+		t.Errorf("Confidence = %v, should remain 0.95", features[0].Confidence)
+	}
+}

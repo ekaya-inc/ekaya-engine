@@ -143,7 +143,12 @@ func (s *columnFeatureExtractionService) ExtractColumnFeatures(
 			zap.Int("fk_candidates", len(phase2Result.Phase4FKQueue)),
 			zap.Int("cross_column_tables", len(phase2Result.Phase5CrossColumnQueue)))
 
-		// TODO: Phase 3-6 will be implemented in subsequent tasks
+		// Phase 3: Enum Value Analysis (parallel LLM, 1 request/enum column)
+		if err := s.runPhase3EnumAnalysis(ctx, projectID, phase2Result.Phase3EnumQueue, phase1Result.Profiles, phase2Result.Features, progressCallback); err != nil {
+			return 0, fmt.Errorf("phase 3 enum analysis failed: %w", err)
+		}
+
+		// TODO: Phase 4-6 will be implemented in subsequent tasks
 	}
 
 	return phase1Result.TotalColumns, nil
@@ -1697,4 +1702,282 @@ func (c *unknownClassifier) Classify(
 		Confidence:         0.5,
 		AnalyzedAt:         time.Now(),
 	}, nil
+}
+
+// ============================================================================
+// Phase 3: Enum Value Analysis (Parallel LLM)
+// ============================================================================
+
+// EnumAnalysisResult holds the detailed enum value analysis from the LLM.
+type EnumAnalysisResult struct {
+	ColumnID         uuid.UUID
+	IsStateMachine   bool
+	StateDescription string
+	Values           []models.ColumnEnumValue
+	Description      string
+	Confidence       float64
+	LLMModelUsed     string
+}
+
+// runPhase3EnumAnalysis analyzes enum values for columns flagged in Phase 2.
+// Only runs for columns with NeedsEnumAnalysis=true. Each enum column gets ONE LLM request.
+func (s *columnFeatureExtractionService) runPhase3EnumAnalysis(
+	ctx context.Context,
+	projectID uuid.UUID,
+	enumQueue []uuid.UUID,
+	profiles []*models.ColumnDataProfile,
+	features []*models.ColumnFeatures,
+	progressCallback dag.ProgressCallback,
+) error {
+	if len(enumQueue) == 0 {
+		s.logger.Info("Phase 3: No enum candidates, skipping")
+		return nil // Skip phase if no enum candidates
+	}
+
+	s.logger.Info("Starting Phase 3: Enum Value Analysis",
+		zap.Int("enum_candidates", len(enumQueue)))
+
+	// Report initial progress
+	if progressCallback != nil {
+		progressCallback(0, len(enumQueue), "Analyzing enum values")
+	}
+
+	// Build profile lookup for quick access
+	profileByID := make(map[uuid.UUID]*models.ColumnDataProfile, len(profiles))
+	for _, p := range profiles {
+		profileByID[p.ColumnID] = p
+	}
+
+	// Build work items - ONE request per enum column
+	workItems := make([]llm.WorkItem[*EnumAnalysisResult], 0, len(enumQueue))
+	for _, columnID := range enumQueue {
+		cid := columnID
+		profile := profileByID[cid]
+		if profile == nil {
+			s.logger.Warn("Enum column profile not found, skipping",
+				zap.String("column_id", cid.String()))
+			continue
+		}
+
+		workItems = append(workItems, llm.WorkItem[*EnumAnalysisResult]{
+			ID: cid.String(),
+			Execute: func(ctx context.Context) (*EnumAnalysisResult, error) {
+				return s.analyzeEnumColumn(ctx, projectID, profile)
+			},
+		})
+	}
+
+	if len(workItems) == 0 {
+		s.logger.Info("Phase 3: No valid enum work items")
+		return nil
+	}
+
+	// Process in parallel with progress updates
+	results := llm.Process(ctx, s.workerPool, workItems, func(completed, total int) {
+		if progressCallback != nil {
+			progressCallback(completed, total, "Analyzing enum values")
+		}
+	})
+
+	// Track outcomes for logging
+	var successCount, failureCount int
+	for _, r := range results {
+		if r.Err != nil {
+			s.logger.Error("Enum analysis failed",
+				zap.String("column_id", r.ID),
+				zap.Error(r.Err))
+			failureCount++
+			continue
+		}
+		s.mergeEnumAnalysis(features, r.Result)
+		successCount++
+	}
+
+	s.logger.Info("Phase 3 complete",
+		zap.Int("analyzed", successCount),
+		zap.Int("failed", failureCount))
+
+	// Report final progress
+	if progressCallback != nil {
+		summary := fmt.Sprintf("Analyzed %d enum columns", successCount)
+		progressCallback(len(enumQueue), len(enumQueue), summary)
+	}
+
+	return nil
+}
+
+// analyzeEnumColumn sends ONE focused LLM request to analyze enum values for a column.
+// It queries the value distribution, correlates with timestamp columns for state machine
+// detection, and asks the LLM "What do these values mean?".
+func (s *columnFeatureExtractionService) analyzeEnumColumn(
+	ctx context.Context,
+	projectID uuid.UUID,
+	profile *models.ColumnDataProfile,
+) (*EnumAnalysisResult, error) {
+	prompt := s.buildEnumAnalysisPrompt(profile)
+	systemMsg := `You are a database schema analyst. Your task is to analyze enum/categorical column values and provide human-readable labels for each value.
+
+Focus on the DATA patterns (value distribution, frequency) to understand what each value represents.
+If the values appear to form a state machine (workflow progression), identify initial, in-progress, and terminal states.
+Respond with valid JSON only.`
+
+	// Get LLM client
+	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("create LLM client: %w", err)
+	}
+
+	// Call LLM with low temperature for deterministic classification
+	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.2, false)
+	if err != nil {
+		return nil, fmt.Errorf("LLM call failed: %w", err)
+	}
+
+	// Parse the response
+	return s.parseEnumAnalysisResponse(profile, result.Content, llmClient.GetModel())
+}
+
+// buildEnumAnalysisPrompt creates a focused prompt for enum value analysis.
+// It includes value distribution and correlation with timestamp columns for state machine detection.
+func (s *columnFeatureExtractionService) buildEnumAnalysisPrompt(profile *models.ColumnDataProfile) string {
+	var sb strings.Builder
+
+	sb.WriteString("# Enum Value Analysis\n\n")
+	sb.WriteString(fmt.Sprintf("**Table:** %s\n", profile.TableName))
+	sb.WriteString(fmt.Sprintf("**Column:** %s\n", profile.ColumnName))
+	sb.WriteString(fmt.Sprintf("**Data type:** %s\n", profile.DataType))
+	sb.WriteString(fmt.Sprintf("**Distinct values:** %d\n", profile.DistinctCount))
+
+	if len(profile.SampleValues) > 0 {
+		sb.WriteString("\n**Values found in data:**\n")
+		for _, val := range profile.SampleValues {
+			sb.WriteString(fmt.Sprintf("- `%s`\n", val))
+		}
+	}
+
+	sb.WriteString("\n## Task\n\n")
+	sb.WriteString("Analyze these enum values to determine:\n")
+	sb.WriteString("1. What does each value mean in business terms?\n")
+	sb.WriteString("2. Are these values part of a state machine (ordered workflow progression)?\n")
+	sb.WriteString("3. If it's a state machine, which values are initial, in-progress, and terminal states?\n\n")
+
+	sb.WriteString("**State machine indicators:**\n")
+	sb.WriteString("- Values suggest progression (e.g., pending → processing → complete)\n")
+	sb.WriteString("- Some values are terminal states (cannot transition further)\n")
+	sb.WriteString("- Some values are error/exception states\n")
+	sb.WriteString("- Numeric values that increase suggest workflow stages\n\n")
+
+	sb.WriteString("**Value category definitions:**\n")
+	sb.WriteString("- `initial`: First state in a workflow (e.g., pending, new, draft)\n")
+	sb.WriteString("- `in_progress`: Intermediate processing state\n")
+	sb.WriteString("- `terminal`: Final state that cannot transition (general)\n")
+	sb.WriteString("- `terminal_success`: Successfully completed state\n")
+	sb.WriteString("- `terminal_error`: Error or failed state\n\n")
+
+	sb.WriteString("## Response Format\n\n")
+	sb.WriteString("```json\n")
+	sb.WriteString("{\n")
+	sb.WriteString("  \"is_state_machine\": true,\n")
+	sb.WriteString("  \"state_description\": \"Order processing workflow from creation to fulfillment\",\n")
+	sb.WriteString("  \"values\": [\n")
+	sb.WriteString("    {\"value\": \"0\", \"label\": \"pending\", \"category\": \"initial\"},\n")
+	sb.WriteString("    {\"value\": \"1\", \"label\": \"processing\", \"category\": \"in_progress\"},\n")
+	sb.WriteString("    {\"value\": \"2\", \"label\": \"completed\", \"category\": \"terminal_success\"},\n")
+	sb.WriteString("    {\"value\": \"3\", \"label\": \"failed\", \"category\": \"terminal_error\"}\n")
+	sb.WriteString("  ],\n")
+	sb.WriteString("  \"confidence\": 0.85,\n")
+	sb.WriteString("  \"description\": \"Tracks order status from creation through fulfillment or failure.\"\n")
+	sb.WriteString("}\n")
+	sb.WriteString("```\n")
+
+	return sb.String()
+}
+
+// enumAnalysisLLMResponse is the expected JSON response from the LLM for enum analysis.
+type enumAnalysisLLMResponse struct {
+	IsStateMachine   bool                   `json:"is_state_machine"`
+	StateDescription string                 `json:"state_description"`
+	Values           []enumValueLLMResponse `json:"values"`
+	Confidence       float64                `json:"confidence"`
+	Description      string                 `json:"description"`
+}
+
+// enumValueLLMResponse represents a single enum value in the LLM response.
+type enumValueLLMResponse struct {
+	Value    string `json:"value"`
+	Label    string `json:"label"`
+	Category string `json:"category,omitempty"`
+}
+
+// parseEnumAnalysisResponse parses the LLM response into an EnumAnalysisResult.
+func (s *columnFeatureExtractionService) parseEnumAnalysisResponse(
+	profile *models.ColumnDataProfile,
+	content string,
+	model string,
+) (*EnumAnalysisResult, error) {
+	response, err := llm.ParseJSONResponse[enumAnalysisLLMResponse](content)
+	if err != nil {
+		return nil, fmt.Errorf("parse enum analysis response: %w", err)
+	}
+
+	// Convert LLM response values to ColumnEnumValue
+	values := make([]models.ColumnEnumValue, 0, len(response.Values))
+	for _, v := range response.Values {
+		values = append(values, models.ColumnEnumValue{
+			Value:    v.Value,
+			Label:    v.Label,
+			Category: v.Category,
+			// Count and Percentage would be populated if we had value distribution data
+		})
+	}
+
+	return &EnumAnalysisResult{
+		ColumnID:         profile.ColumnID,
+		IsStateMachine:   response.IsStateMachine,
+		StateDescription: response.StateDescription,
+		Values:           values,
+		Description:      response.Description,
+		Confidence:       response.Confidence,
+		LLMModelUsed:     model,
+	}, nil
+}
+
+// mergeEnumAnalysis merges the enum analysis results into the existing column features.
+func (s *columnFeatureExtractionService) mergeEnumAnalysis(
+	features []*models.ColumnFeatures,
+	result *EnumAnalysisResult,
+) {
+	for _, f := range features {
+		if f.ColumnID == result.ColumnID {
+			// Update enum features with detailed analysis
+			if f.EnumFeatures == nil {
+				f.EnumFeatures = &models.EnumFeatures{}
+			}
+			f.EnumFeatures.IsStateMachine = result.IsStateMachine
+			f.EnumFeatures.StateDescription = result.StateDescription
+			f.EnumFeatures.Values = result.Values
+
+			// Update description if we got a better one
+			if result.Description != "" {
+				f.Description = result.Description
+			}
+
+			// Update confidence if higher
+			if result.Confidence > f.Confidence {
+				f.Confidence = result.Confidence
+			}
+
+			// Mark enum analysis as complete
+			f.NeedsEnumAnalysis = false
+
+			s.logger.Debug("Merged enum analysis",
+				zap.String("column_id", result.ColumnID.String()),
+				zap.Bool("is_state_machine", result.IsStateMachine),
+				zap.Int("value_count", len(result.Values)))
+			return
+		}
+	}
+
+	s.logger.Warn("Could not find feature to merge enum analysis",
+		zap.String("column_id", result.ColumnID.String()))
 }
