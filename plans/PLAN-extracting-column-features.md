@@ -836,9 +836,9 @@ func (s *columnFeatureExtractionService) classifySingleColumn(
 
 ---
 
-### Task 4: Implement Path-Specific Classifiers
+### Task 4: Implement Path-Specific Classifiers ✓
 
-**File:** `pkg/services/column_classifiers.go` (new)
+**File:** `pkg/services/column_feature_extraction.go` (classifiers added to existing file)
 
 Each classifier builds a focused prompt for its classification path.
 
