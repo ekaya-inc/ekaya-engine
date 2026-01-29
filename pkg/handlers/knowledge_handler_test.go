@@ -104,12 +104,25 @@ func (m *mockKnowledgeService) Delete(ctx context.Context, id uuid.UUID) error {
 	return m.deleteErr
 }
 
+// mockKnowledgeParsingService is a mock for testing knowledge parsing.
+type mockKnowledgeParsingService struct {
+	facts    []*models.KnowledgeFact
+	parseErr error
+}
+
+func (m *mockKnowledgeParsingService) ParseAndStore(ctx context.Context, projectID uuid.UUID, freeFormText string) ([]*models.KnowledgeFact, error) {
+	if m.parseErr != nil {
+		return nil, m.parseErr
+	}
+	return m.facts, nil
+}
+
 func TestKnowledgeHandler_List(t *testing.T) {
 	projectID := uuid.New()
 
 	t.Run("returns empty list when no facts", func(t *testing.T) {
 		mockService := &mockKnowledgeService{facts: []*models.KnowledgeFact{}}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/project-knowledge", nil)
 		req.SetPathValue("pid", projectID.String())
@@ -165,7 +178,7 @@ func TestKnowledgeHandler_List(t *testing.T) {
 		}
 
 		mockService := &mockKnowledgeService{facts: facts}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/project-knowledge", nil)
 		req.SetPathValue("pid", projectID.String())
@@ -214,7 +227,7 @@ func TestKnowledgeHandler_List(t *testing.T) {
 
 	t.Run("returns error on service failure", func(t *testing.T) {
 		mockService := &mockKnowledgeService{getAllErr: errors.New("database error")}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/project-knowledge", nil)
 		req.SetPathValue("pid", projectID.String())
@@ -229,7 +242,7 @@ func TestKnowledgeHandler_List(t *testing.T) {
 
 	t.Run("returns error for invalid project ID", func(t *testing.T) {
 		mockService := &mockKnowledgeService{}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		req := httptest.NewRequest(http.MethodGet, "/api/projects/invalid/project-knowledge", nil)
 		req.SetPathValue("pid", "invalid")
@@ -248,7 +261,7 @@ func TestKnowledgeHandler_Create(t *testing.T) {
 
 	t.Run("creates fact successfully", func(t *testing.T) {
 		mockService := &mockKnowledgeService{}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		body := CreateKnowledgeRequest{
 			FactType: "business_rule",
@@ -281,7 +294,7 @@ func TestKnowledgeHandler_Create(t *testing.T) {
 
 	t.Run("returns error for missing fact_type", func(t *testing.T) {
 		mockService := &mockKnowledgeService{}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		body := CreateKnowledgeRequest{
 			Key:   "currency_code",
@@ -303,7 +316,7 @@ func TestKnowledgeHandler_Create(t *testing.T) {
 
 	t.Run("returns error for missing key", func(t *testing.T) {
 		mockService := &mockKnowledgeService{}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		body := CreateKnowledgeRequest{
 			FactType: "business_rule",
@@ -325,7 +338,7 @@ func TestKnowledgeHandler_Create(t *testing.T) {
 
 	t.Run("returns error for missing value", func(t *testing.T) {
 		mockService := &mockKnowledgeService{}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		body := CreateKnowledgeRequest{
 			FactType: "business_rule",
@@ -347,7 +360,7 @@ func TestKnowledgeHandler_Create(t *testing.T) {
 
 	t.Run("returns error on service failure", func(t *testing.T) {
 		mockService := &mockKnowledgeService{storeErr: errors.New("database error")}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		body := CreateKnowledgeRequest{
 			FactType: "business_rule",
@@ -375,7 +388,7 @@ func TestKnowledgeHandler_Update(t *testing.T) {
 
 	t.Run("updates fact successfully", func(t *testing.T) {
 		mockService := &mockKnowledgeService{}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		body := UpdateKnowledgeRequest{
 			FactType: "business_rule",
@@ -409,7 +422,7 @@ func TestKnowledgeHandler_Update(t *testing.T) {
 
 	t.Run("returns 404 for non-existent fact", func(t *testing.T) {
 		mockService := &mockKnowledgeService{updateErr: apperrors.ErrNotFound}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		body := UpdateKnowledgeRequest{
 			FactType: "business_rule",
@@ -433,7 +446,7 @@ func TestKnowledgeHandler_Update(t *testing.T) {
 
 	t.Run("returns error for invalid knowledge ID", func(t *testing.T) {
 		mockService := &mockKnowledgeService{}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		body := UpdateKnowledgeRequest{
 			FactType: "business_rule",
@@ -462,7 +475,7 @@ func TestKnowledgeHandler_Delete(t *testing.T) {
 
 	t.Run("deletes fact successfully", func(t *testing.T) {
 		mockService := &mockKnowledgeService{}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		req := httptest.NewRequest(http.MethodDelete, "/api/projects/"+projectID.String()+"/project-knowledge/"+factID.String(), nil)
 		req.SetPathValue("pid", projectID.String())
@@ -487,7 +500,7 @@ func TestKnowledgeHandler_Delete(t *testing.T) {
 
 	t.Run("returns 404 for non-existent fact", func(t *testing.T) {
 		mockService := &mockKnowledgeService{deleteErr: apperrors.ErrNotFound}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		req := httptest.NewRequest(http.MethodDelete, "/api/projects/"+projectID.String()+"/project-knowledge/"+factID.String(), nil)
 		req.SetPathValue("pid", projectID.String())
@@ -503,7 +516,7 @@ func TestKnowledgeHandler_Delete(t *testing.T) {
 
 	t.Run("returns error for invalid knowledge ID", func(t *testing.T) {
 		mockService := &mockKnowledgeService{}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		req := httptest.NewRequest(http.MethodDelete, "/api/projects/"+projectID.String()+"/project-knowledge/invalid", nil)
 		req.SetPathValue("pid", projectID.String())
@@ -523,7 +536,7 @@ func TestKnowledgeHandler_GetOverview(t *testing.T) {
 
 	t.Run("returns null overview when no overview exists", func(t *testing.T) {
 		mockService := &mockKnowledgeService{factsByType: []*models.KnowledgeFact{}}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/project-knowledge/overview", nil)
 		req.SetPathValue("pid", projectID.String())
@@ -575,7 +588,7 @@ func TestKnowledgeHandler_GetOverview(t *testing.T) {
 				},
 			},
 		}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/project-knowledge/overview", nil)
 		req.SetPathValue("pid", projectID.String())
@@ -636,7 +649,7 @@ func TestKnowledgeHandler_GetOverview(t *testing.T) {
 				},
 			},
 		}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/project-knowledge/overview", nil)
 		req.SetPathValue("pid", projectID.String())
@@ -670,7 +683,7 @@ func TestKnowledgeHandler_GetOverview(t *testing.T) {
 
 	t.Run("returns error on service failure", func(t *testing.T) {
 		mockService := &mockKnowledgeService{getByTypeErr: errors.New("database error")}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String()+"/project-knowledge/overview", nil)
 		req.SetPathValue("pid", projectID.String())
@@ -685,7 +698,7 @@ func TestKnowledgeHandler_GetOverview(t *testing.T) {
 
 	t.Run("returns error for invalid project ID", func(t *testing.T) {
 		mockService := &mockKnowledgeService{}
-		handler := NewKnowledgeHandler(mockService, zap.NewNop())
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
 
 		req := httptest.NewRequest(http.MethodGet, "/api/projects/invalid/project-knowledge/overview", nil)
 		req.SetPathValue("pid", "invalid")

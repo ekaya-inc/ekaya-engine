@@ -55,3 +55,10 @@ export interface UpdateProjectKnowledgeRequest {
   value: string;
   context?: string;
 }
+
+/**
+ * ParseProjectKnowledgeResponse for POST /api/projects/{pid}/project-knowledge/parse endpoint.
+ */
+export interface ParseProjectKnowledgeResponse {
+  facts: ProjectKnowledge[];
+}

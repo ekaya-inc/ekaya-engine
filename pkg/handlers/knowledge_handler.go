@@ -44,24 +44,37 @@ type ProjectOverviewResponse struct {
 	Overview *string `json:"overview"`
 }
 
+// ParseKnowledgeRequest for POST /project-knowledge/parse
+type ParseKnowledgeRequest struct {
+	Text string `json:"text"`
+}
+
+// ParseKnowledgeResponse for POST /project-knowledge/parse
+type ParseKnowledgeResponse struct {
+	Facts []*models.KnowledgeFact `json:"facts"`
+}
+
 // ============================================================================
 // Handler
 // ============================================================================
 
 // KnowledgeHandler handles project knowledge HTTP requests.
 type KnowledgeHandler struct {
-	knowledgeService services.KnowledgeService
-	logger           *zap.Logger
+	knowledgeService        services.KnowledgeService
+	knowledgeParsingService services.KnowledgeParsingService
+	logger                  *zap.Logger
 }
 
 // NewKnowledgeHandler creates a new knowledge handler.
 func NewKnowledgeHandler(
 	knowledgeService services.KnowledgeService,
+	knowledgeParsingService services.KnowledgeParsingService,
 	logger *zap.Logger,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
-		knowledgeService: knowledgeService,
-		logger:           logger,
+		knowledgeService:        knowledgeService,
+		knowledgeParsingService: knowledgeParsingService,
+		logger:                  logger,
 	}
 }
 
@@ -78,6 +91,8 @@ func (h *KnowledgeHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *au
 	// Write endpoints - require provenance for audit tracking
 	mux.HandleFunc("POST "+base,
 		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Create)))
+	mux.HandleFunc("POST "+base+"/parse",
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Parse)))
 	mux.HandleFunc("PUT "+base+"/{kid}",
 		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Update)))
 	mux.HandleFunc("DELETE "+base+"/{kid}",
@@ -298,6 +313,50 @@ func (h *KnowledgeHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: response}); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// Parse handles POST /api/projects/{pid}/project-knowledge/parse
+// It takes a free-form text input and uses LLM to extract structured knowledge facts.
+func (h *KnowledgeHandler) Parse(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	var req ParseKnowledgeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := ErrorResponse(w, http.StatusBadRequest, "invalid_request", "Invalid request body"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	// Validate required fields
+	if req.Text == "" {
+		if err := ErrorResponse(w, http.StatusBadRequest, "validation_error", "text is required"); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	facts, err := h.knowledgeParsingService.ParseAndStore(r.Context(), projectID, req.Text)
+	if err != nil {
+		h.logger.Error("Failed to parse knowledge fact",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "parse_knowledge_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	response := ParseKnowledgeResponse{
+		Facts: facts,
+	}
+
+	if err := WriteJSON(w, http.StatusCreated, ApiResponse{Success: true, Data: response}); err != nil {
 		h.logger.Error("Failed to write response", zap.Error(err))
 	}
 }

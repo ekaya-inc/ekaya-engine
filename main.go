@@ -229,6 +229,8 @@ func main() {
 	// Wire DAG adapters using setter pattern (avoids import cycles)
 	knowledgeSeedingService := services.NewKnowledgeSeedingService(knowledgeService, schemaService, llmFactory, logger)
 	ontologyDAGService.SetKnowledgeSeedingMethods(knowledgeSeedingService)
+	columnFeatureExtractionService := services.NewColumnFeatureExtractionService(schemaRepo, logger)
+	ontologyDAGService.SetColumnFeatureExtractionMethods(columnFeatureExtractionService)
 	ontologyDAGService.SetEntityDiscoveryMethods(services.NewEntityDiscoveryAdapter(entityDiscoveryService))
 	ontologyDAGService.SetEntityEnrichmentMethods(services.NewEntityEnrichmentAdapter(entityDiscoveryService, schemaRepo, getTenantCtx))
 	ontologyDAGService.SetFKDiscoveryMethods(services.NewFKDiscoveryAdapter(deterministicRelationshipService))
@@ -434,7 +436,8 @@ func main() {
 	glossaryHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register knowledge handler (protected) - project knowledge facts
-	knowledgeHandler := handlers.NewKnowledgeHandler(knowledgeService, logger)
+	knowledgeParsingService := services.NewKnowledgeParsingService(knowledgeService, llmFactory, logger)
+	knowledgeHandler := handlers.NewKnowledgeHandler(knowledgeService, knowledgeParsingService, logger)
 	knowledgeHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register installed apps handler (protected) - application installation tracking

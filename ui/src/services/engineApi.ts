@@ -32,6 +32,7 @@ import type {
   ListPendingQueriesResponse,
   ListQueriesResponse,
   MCPConfigResponse,
+  ParseProjectKnowledgeResponse,
   ProjectKnowledge,
   ProjectKnowledgeListResponse,
   Query,
@@ -650,6 +651,23 @@ class EngineApiService {
       {
         method: 'POST',
         body: JSON.stringify(data),
+      }
+    );
+  }
+
+  /**
+   * Parse a free-form fact using LLM and create structured knowledge facts
+   * POST /api/projects/{projectId}/project-knowledge/parse
+   */
+  async parseProjectKnowledge(
+    projectId: string,
+    text: string
+  ): Promise<ApiResponse<ParseProjectKnowledgeResponse>> {
+    return this.makeRequest<ParseProjectKnowledgeResponse>(
+      `/${projectId}/project-knowledge/parse`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ text }),
       }
     );
   }

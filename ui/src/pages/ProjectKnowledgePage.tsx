@@ -153,12 +153,6 @@ const ProjectKnowledgePage = () => {
   const handleDeleteFact = async (fact: ProjectKnowledge): Promise<void> => {
     if (!pid) return;
 
-    const confirmed = window.confirm(
-      `Are you sure you want to delete the fact "${fact.key}"? This action cannot be undone.`
-    );
-
-    if (!confirmed) return;
-
     setDeletingFactId(fact.id);
 
     try {
@@ -314,6 +308,7 @@ const ProjectKnowledgePage = () => {
             isOpen={editorOpen}
             onClose={() => setEditorOpen(false)}
             onSave={handleEditorSave}
+            onProcessing={() => toast({ title: 'Processing fact...', description: 'The fact is being analyzed and will appear shortly.' })}
           />
         )}
       </div>
