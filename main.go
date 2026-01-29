@@ -229,7 +229,8 @@ func main() {
 	// Wire DAG adapters using setter pattern (avoids import cycles)
 	knowledgeSeedingService := services.NewKnowledgeSeedingService(knowledgeService, schemaService, llmFactory, logger)
 	ontologyDAGService.SetKnowledgeSeedingMethods(knowledgeSeedingService)
-	columnFeatureExtractionService := services.NewColumnFeatureExtractionService(schemaRepo, logger)
+	columnFeatureExtractionService := services.NewColumnFeatureExtractionServiceFull(
+		schemaRepo, datasourceService, adapterFactory, llmFactory, llmWorkerPool, getTenantCtx, logger)
 	ontologyDAGService.SetColumnFeatureExtractionMethods(columnFeatureExtractionService)
 	ontologyDAGService.SetEntityDiscoveryMethods(services.NewEntityDiscoveryAdapter(entityDiscoveryService))
 	ontologyDAGService.SetEntityEnrichmentMethods(services.NewEntityEnrichmentAdapter(entityDiscoveryService, schemaRepo, getTenantCtx))
@@ -430,6 +431,10 @@ func main() {
 	// Register ontology DAG handler (protected) - unified workflow execution
 	ontologyDAGHandler := handlers.NewOntologyDAGHandler(ontologyDAGService, projectService, logger)
 	ontologyDAGHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
+
+	// Register ontology enrichment handler (protected) - read-only tiered ontology for UI
+	ontologyEnrichmentHandler := handlers.NewOntologyEnrichmentHandler(ontologyRepo, logger)
+	ontologyEnrichmentHandler.RegisterRoutes(mux, authMiddleware, tenantMiddleware)
 
 	// Register glossary handler (protected) - business glossary for MCP clients
 	glossaryHandler := handlers.NewGlossaryHandler(glossaryService, logger)

@@ -11,6 +11,7 @@ import { ToastProviderComponent } from './hooks/useToast';
 import AIDataLiaisonPage from './pages/AIDataLiaisonPage';
 import ApplicationsPage from './pages/ApplicationsPage';
 import DatasourcePage from './pages/DatasourcePage';
+import EnrichmentPage from './pages/EnrichmentPage';
 import EntitiesPage from './pages/EntitiesPage';
 import GlossaryPage from './pages/GlossaryPage';
 import HelpPage from './pages/HelpPage';
@@ -47,6 +48,7 @@ const App = (): JSX.Element => {
                   <Route path="schema" element={<SchemaPage />} />
                   <Route path="relationships" element={<RelationshipsPage />} />
                   <Route path="entities" element={<EntitiesPage />} />
+                  <Route path="enrichment" element={<EnrichmentPage />} />
                   <Route path="glossary" element={<GlossaryPage />} />
                   <Route path="project-knowledge" element={<ProjectKnowledgePage />} />
                   <Route path="ontology" element={<OntologyPage />} />

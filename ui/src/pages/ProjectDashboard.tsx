@@ -16,6 +16,7 @@ import {
   Plus,
   Search,
   Server,
+  Sparkles,
 } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -427,6 +428,13 @@ const ProjectDashboard = () => {
       path: `/projects/${pid}/project-knowledge`,
       disabled: !isConnected || !hasSelectedTables, // Disabled if no datasource or no tables (domain facts can be added manually)
       color: 'indigo',
+    },
+    {
+      title: 'Enrichment',
+      icon: Sparkles,
+      path: `/projects/${pid}/enrichment`,
+      disabled: !isConnected || !hasSelectedTables, // Disabled if no datasource or no tables
+      color: 'orange',
     },
     {
       title: 'Entities',

@@ -153,6 +153,14 @@ export interface WorkflowResultResponse {
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * Response from GET /api/projects/{project_id}/ontology/enrichment
+ */
+export interface EnrichmentResponse {
+  entity_summaries: EntitySummary[];
+  column_details: EntityColumns[];
+}
+
 // ===================================================================
 // Hierarchical Tiered Ontology (HTO) Types
 // ===================================================================
