@@ -143,7 +143,7 @@ PKMatchDiscovery detects FKs via data overlap (join analysis). ColumnFeatureExtr
 
 ### Task 5: Update RelationshipEnrichment to Use ColumnFeatures
 
-**File:** `pkg/services/dag/relationship_enrichment_node.go`
+- [x] **File:** `pkg/services/relationship_enrichment.go`
 
 RelationshipEnrichment generates LLM descriptions for relationships. It can leverage:
 
