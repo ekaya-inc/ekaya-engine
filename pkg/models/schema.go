@@ -148,6 +148,61 @@ func (c *SchemaColumn) GetColumnFeatures() *ColumnFeatures {
 		}
 	}
 
+	// Extract boolean features if present
+	if boolData, ok := featuresMap["boolean_features"].(map[string]any); ok {
+		features.BooleanFeatures = &BooleanFeatures{}
+		if trueMeaning, ok := boolData["true_meaning"].(string); ok {
+			features.BooleanFeatures.TrueMeaning = trueMeaning
+		}
+		if falseMeaning, ok := boolData["false_meaning"].(string); ok {
+			features.BooleanFeatures.FalseMeaning = falseMeaning
+		}
+		if boolType, ok := boolData["boolean_type"].(string); ok {
+			features.BooleanFeatures.BooleanType = boolType
+		}
+		if truePct, ok := boolData["true_percentage"].(float64); ok {
+			features.BooleanFeatures.TruePercentage = truePct
+		}
+		if falsePct, ok := boolData["false_percentage"].(float64); ok {
+			features.BooleanFeatures.FalsePercentage = falsePct
+		}
+	}
+
+	// Extract enum features if present
+	if enumData, ok := featuresMap["enum_features"].(map[string]any); ok {
+		features.EnumFeatures = &EnumFeatures{}
+		if isStateMachine, ok := enumData["is_state_machine"].(bool); ok {
+			features.EnumFeatures.IsStateMachine = isStateMachine
+		}
+		if stateDesc, ok := enumData["state_description"].(string); ok {
+			features.EnumFeatures.StateDescription = stateDesc
+		}
+		// Extract enum values array
+		if valuesData, ok := enumData["values"].([]any); ok {
+			for _, v := range valuesData {
+				if valMap, ok := v.(map[string]any); ok {
+					enumValue := ColumnEnumValue{}
+					if value, ok := valMap["value"].(string); ok {
+						enumValue.Value = value
+					}
+					if label, ok := valMap["label"].(string); ok {
+						enumValue.Label = label
+					}
+					if category, ok := valMap["category"].(string); ok {
+						enumValue.Category = category
+					}
+					if count, ok := valMap["count"].(float64); ok {
+						enumValue.Count = int64(count)
+					}
+					if pct, ok := valMap["percentage"].(float64); ok {
+						enumValue.Percentage = pct
+					}
+					features.EnumFeatures.Values = append(features.EnumFeatures.Values, enumValue)
+				}
+			}
+		}
+	}
+
 	return features
 }
 

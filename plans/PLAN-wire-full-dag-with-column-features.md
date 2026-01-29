@@ -54,7 +54,7 @@ Uncomment all nodes in `AllDAGNodes()` function (lines ~130-145).
 
 ### Task 2: Clean Up ColumnEnrichment Service
 
-**File:** `pkg/services/column_enrichment.go`
+- [x] **File:** `pkg/services/column_enrichment.go`
 
 ColumnEnrichment currently duplicates work that ColumnFeatureExtraction now handles. Remove or skip these patterns when ColumnFeatures exist:
 

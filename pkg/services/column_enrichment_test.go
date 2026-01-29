@@ -2632,3 +2632,540 @@ func findEnumValue(values []models.EnumValue, target string) *models.EnumValue {
 	}
 	return nil
 }
+
+// TestFilterColumnsForLLM tests the logic for separating columns that need LLM enrichment
+// from those with high-confidence ColumnFeatures.
+func TestFilterColumnsForLLM(t *testing.T) {
+	service := &columnEnrichmentService{
+		logger: zap.NewNop(),
+	}
+
+	tests := []struct {
+		name                     string
+		columns                  []*models.SchemaColumn
+		expectedNeedLLM          int
+		expectedSynthetic        int
+		expectedSyntheticColumns []string
+	}{
+		{
+			name: "all columns need LLM - no features",
+			columns: []*models.SchemaColumn{
+				{ColumnName: "id", DataType: "bigint"},
+				{ColumnName: "name", DataType: "varchar"},
+			},
+			expectedNeedLLM:   2,
+			expectedSynthetic: 0,
+		},
+		{
+			name: "high confidence column skips LLM",
+			columns: []*models.SchemaColumn{
+				{
+					ColumnName: "id",
+					DataType:   "bigint",
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"confidence":    0.95,
+							"description":   "Unique identifier for the user",
+							"semantic_type": "identifier",
+							"role":          "primary_key",
+						},
+					},
+				},
+				{ColumnName: "name", DataType: "varchar"},
+			},
+			expectedNeedLLM:          1,
+			expectedSynthetic:        1,
+			expectedSyntheticColumns: []string{"id"},
+		},
+		{
+			name: "low confidence column needs LLM",
+			columns: []*models.SchemaColumn{
+				{
+					ColumnName: "status",
+					DataType:   "varchar",
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"confidence":    0.6, // Below threshold
+							"description":   "Status value",
+							"semantic_type": "enum",
+							"role":          "dimension",
+						},
+					},
+				},
+			},
+			expectedNeedLLM:   1,
+			expectedSynthetic: 0,
+		},
+		{
+			name: "high confidence but missing description needs LLM",
+			columns: []*models.SchemaColumn{
+				{
+					ColumnName: "value",
+					DataType:   "numeric",
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"confidence":    0.95,
+							"description":   "", // Empty description
+							"semantic_type": "measure",
+							"role":          "measure",
+						},
+					},
+				},
+			},
+			expectedNeedLLM:   1,
+			expectedSynthetic: 0,
+		},
+		{
+			name: "column with enum features copies enum values",
+			columns: []*models.SchemaColumn{
+				{
+					ColumnName: "status",
+					DataType:   "varchar",
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"confidence":    0.95,
+							"description":   "Order status",
+							"semantic_type": "status",
+							"role":          "dimension",
+							"enum_features": map[string]any{
+								"is_state_machine": true,
+								"values": []any{
+									map[string]any{
+										"value":      "pending",
+										"label":      "Pending",
+										"category":   "initial",
+										"count":      float64(100),
+										"percentage": float64(25.0),
+									},
+									map[string]any{
+										"value":      "completed",
+										"label":      "Completed",
+										"category":   "terminal_success",
+										"count":      float64(300),
+										"percentage": float64(75.0),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedNeedLLM:          0,
+			expectedSynthetic:        1,
+			expectedSyntheticColumns: []string{"status"},
+		},
+		{
+			name: "column with identifier features copies FK association",
+			columns: []*models.SchemaColumn{
+				{
+					ColumnName: "host_id",
+					DataType:   "uuid",
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"confidence":    0.95,
+							"description":   "Reference to the host user",
+							"semantic_type": "foreign_key",
+							"role":          "foreign_key",
+							"identifier_features": map[string]any{
+								"identifier_type":   "foreign_key",
+								"entity_referenced": "host",
+								"fk_target_table":   "users",
+								"fk_target_column":  "id",
+								"fk_confidence":     0.98,
+							},
+						},
+					},
+				},
+			},
+			expectedNeedLLM:          0,
+			expectedSynthetic:        1,
+			expectedSyntheticColumns: []string{"host_id"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			needLLM, synthetic := service.filterColumnsForLLM(tt.columns)
+
+			assert.Equal(t, tt.expectedNeedLLM, len(needLLM), "columns needing LLM count")
+			assert.Equal(t, tt.expectedSynthetic, len(synthetic), "synthetic enrichment count")
+
+			// Verify synthetic column names
+			for i, colName := range tt.expectedSyntheticColumns {
+				assert.Equal(t, colName, synthetic[i].Name)
+			}
+
+			// Verify enum values are copied for enum column test
+			if tt.name == "column with enum features copies enum values" && len(synthetic) > 0 {
+				assert.Equal(t, 2, len(synthetic[0].EnumValues))
+				assert.Equal(t, "pending", synthetic[0].EnumValues[0].Value)
+				assert.Equal(t, "Pending", synthetic[0].EnumValues[0].Label)
+			}
+
+			// Verify FK association is copied
+			if tt.name == "column with identifier features copies FK association" && len(synthetic) > 0 {
+				assert.NotNil(t, synthetic[0].FKAssociation)
+				assert.Equal(t, "host", *synthetic[0].FKAssociation)
+			}
+		})
+	}
+}
+
+// TestConvertToColumnDetails_ColumnFeaturesMerge tests that ColumnFeatures are properly
+// merged into ColumnDetail output.
+func TestConvertToColumnDetails_ColumnFeaturesMerge(t *testing.T) {
+	service := &columnEnrichmentService{
+		logger: zap.NewNop(),
+	}
+
+	tests := []struct {
+		name                string
+		columns             []*models.SchemaColumn
+		enrichments         []columnEnrichment
+		fkInfo              map[string]string
+		fkDetailedInfo      map[string]*FKRelationshipInfo
+		expectedDescription string
+		expectedSemanticType string
+		expectedRole        string
+		expectedFKAssoc     string
+		expectedEnumCount   int
+	}{
+		{
+			name: "ColumnFeatures SemanticType takes precedence over LLM",
+			columns: []*models.SchemaColumn{
+				{
+					ColumnName: "deleted_at",
+					DataType:   "timestamp",
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"confidence":    0.95,
+							"description":   "Soft delete timestamp",
+							"semantic_type": "soft_delete",
+							"role":          "attribute",
+							"timestamp_features": map[string]any{
+								"is_soft_delete":     true,
+								"timestamp_purpose":  "soft_delete",
+							},
+						},
+					},
+				},
+			},
+			enrichments: []columnEnrichment{
+				{
+					Name:         "deleted_at",
+					Description:  "When the record was deleted",
+					SemanticType: "timestamp_utc", // LLM says timestamp_utc
+					Role:         "attribute",
+				},
+			},
+			fkInfo:               make(map[string]string),
+			fkDetailedInfo:       make(map[string]*FKRelationshipInfo),
+			expectedDescription:  "When the record was deleted", // LLM desc used when Features desc empty
+			expectedSemanticType: "soft_delete",                 // ColumnFeatures takes precedence
+			expectedRole:         "attribute",
+		},
+		{
+			name: "EnumFeatures values are copied to EnumValues",
+			columns: []*models.SchemaColumn{
+				{
+					ColumnName: "status",
+					DataType:   "varchar",
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"confidence":    0.95,
+							"description":   "Order status",
+							"semantic_type": "status",
+							"role":          "dimension",
+							"enum_features": map[string]any{
+								"values": []any{
+									map[string]any{"value": "pending", "label": "Pending", "category": "initial", "count": float64(10), "percentage": float64(20.0)},
+									map[string]any{"value": "active", "label": "Active", "category": "in_progress", "count": float64(30), "percentage": float64(60.0)},
+									map[string]any{"value": "done", "label": "Done", "category": "terminal_success", "count": float64(10), "percentage": float64(20.0)},
+								},
+							},
+						},
+					},
+				},
+			},
+			enrichments: []columnEnrichment{
+				{
+					Name:         "status",
+					Description:  "LLM description",
+					SemanticType: "enum",
+					Role:         "dimension",
+				},
+			},
+			fkInfo:               make(map[string]string),
+			fkDetailedInfo:       make(map[string]*FKRelationshipInfo),
+			expectedDescription:  "LLM description",
+			expectedSemanticType: "status",
+			expectedRole:         "dimension",
+			expectedEnumCount:    3,
+		},
+		{
+			name: "IdentifierFeatures EntityReferenced becomes FKAssociation",
+			columns: []*models.SchemaColumn{
+				{
+					ColumnName: "visitor_id",
+					DataType:   "uuid",
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"confidence":    0.95,
+							"description":   "Reference to visiting user",
+							"semantic_type": "foreign_key",
+							"role":          "foreign_key",
+							"identifier_features": map[string]any{
+								"entity_referenced": "visitor",
+								"fk_target_table":   "users",
+							},
+						},
+					},
+				},
+			},
+			enrichments: []columnEnrichment{
+				{
+					Name:         "visitor_id",
+					Description:  "LLM FK description",
+					SemanticType: "identifier",
+					Role:         "identifier",
+					// LLM didn't provide FKAssociation
+				},
+			},
+			fkInfo:               make(map[string]string),
+			fkDetailedInfo:       make(map[string]*FKRelationshipInfo),
+			expectedDescription:  "LLM FK description",
+			expectedSemanticType: "foreign_key", // ColumnFeatures takes precedence
+			expectedRole:         "foreign_key",
+			expectedFKAssoc:      "visitor",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			details := service.convertToColumnDetails(
+				"test_table",
+				tt.enrichments,
+				tt.columns,
+				tt.fkInfo,
+				tt.fkDetailedInfo,
+				nil, // enumSamples
+				nil, // enumDefs
+				nil, // enumDistributions
+			)
+
+			require.Equal(t, 1, len(details))
+			detail := details[0]
+
+			assert.Equal(t, tt.expectedDescription, detail.Description, "description")
+			assert.Equal(t, tt.expectedSemanticType, detail.SemanticType, "semantic_type")
+			assert.Equal(t, tt.expectedRole, detail.Role, "role")
+
+			if tt.expectedFKAssoc != "" {
+				assert.Equal(t, tt.expectedFKAssoc, detail.FKAssociation, "fk_association")
+			}
+
+			if tt.expectedEnumCount > 0 {
+				assert.Equal(t, tt.expectedEnumCount, len(detail.EnumValues), "enum values count")
+			}
+		})
+	}
+}
+
+// TestEnrichProject_SkipsLLMForHighConfidenceColumns verifies that the service
+// skips LLM calls for columns with high-confidence ColumnFeatures.
+func TestEnrichProject_SkipsLLMForHighConfidenceColumns(t *testing.T) {
+	projectID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			Name:         "User",
+			PrimaryTable: "users",
+		},
+	}
+
+	// Two columns: one with high-confidence features, one without
+	columns := []*models.SchemaColumn{
+		{
+			ColumnName:   "id",
+			DataType:     "bigint",
+			IsPrimaryKey: true,
+			Metadata: map[string]any{
+				"column_features": map[string]any{
+					"confidence":    0.95,
+					"description":   "Unique user identifier",
+					"semantic_type": "identifier",
+					"role":          "primary_key",
+				},
+			},
+		},
+		{
+			// This column has no features, so needs LLM
+			ColumnName: "email",
+			DataType:   "varchar",
+		},
+	}
+
+	// LLM response only contains the email column (id is skipped)
+	llmResponse := `{
+		"columns": [
+			{
+				"name": "email",
+				"description": "User's email address",
+				"semantic_type": "email",
+				"role": "attribute",
+				"fk_association": null
+			}
+		]
+	}`
+
+	// Setup service
+	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
+	entityRepo := &testColEnrichmentEntityRepo{entities: entities}
+	relRepo := &testColEnrichmentRelRepo{}
+	schemaRepo := &testColEnrichmentSchemaRepo{
+		columnsByTable: map[string][]*models.SchemaColumn{
+			"users": columns,
+		},
+	}
+
+	llmClient := &testColEnrichmentLLMClient{
+		response: llmResponse,
+	}
+	llmFactory := &testColEnrichmentLLMFactory{client: llmClient}
+
+	service := &columnEnrichmentService{
+		ontologyRepo:     ontologyRepo,
+		entityRepo:       entityRepo,
+		relationshipRepo: relRepo,
+		schemaRepo:       schemaRepo,
+		dsSvc:            &testColEnrichmentDatasourceService{},
+		llmFactory:       llmFactory,
+		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:           zap.NewNop(),
+	}
+
+	// Execute
+	result, err := service.EnrichProject(context.Background(), projectID, []string{"users"}, nil)
+
+	// Verify
+	require.NoError(t, err)
+	assert.Equal(t, 1, len(result.TablesEnriched))
+	assert.Equal(t, 0, len(result.TablesFailed))
+
+	// Verify LLM was called once (for email column only)
+	assert.Equal(t, 1, llmClient.callCount)
+
+	// Verify column details were saved for both columns
+	details := ontologyRepo.columnDetails["users"]
+	require.Equal(t, 2, len(details))
+
+	// Find each column in details
+	var idDetail, emailDetail *models.ColumnDetail
+	for i := range details {
+		if details[i].Name == "id" {
+			idDetail = &details[i]
+		} else if details[i].Name == "email" {
+			emailDetail = &details[i]
+		}
+	}
+
+	require.NotNil(t, idDetail, "id column should be in details")
+	require.NotNil(t, emailDetail, "email column should be in details")
+
+	// id column should have ColumnFeatures data (from synthetic enrichment)
+	assert.Equal(t, "Unique user identifier", idDetail.Description)
+	assert.Equal(t, "identifier", idDetail.SemanticType)
+	assert.Equal(t, "primary_key", idDetail.Role)
+
+	// email column should have LLM-provided data
+	assert.Equal(t, "User's email address", emailDetail.Description)
+	assert.Equal(t, "email", emailDetail.SemanticType)
+	assert.Equal(t, "attribute", emailDetail.Role)
+}
+
+// TestEnrichProject_AllColumnsHighConfidence verifies that no LLM calls are made
+// when all columns have high-confidence ColumnFeatures.
+func TestEnrichProject_AllColumnsHighConfidence(t *testing.T) {
+	projectID := uuid.New()
+
+	entities := []*models.OntologyEntity{
+		{
+			ID:           uuid.New(),
+			Name:         "User",
+			PrimaryTable: "users",
+		},
+	}
+
+	// All columns have high-confidence features
+	columns := []*models.SchemaColumn{
+		{
+			ColumnName:   "id",
+			DataType:     "bigint",
+			IsPrimaryKey: true,
+			Metadata: map[string]any{
+				"column_features": map[string]any{
+					"confidence":    0.95,
+					"description":   "Unique user identifier",
+					"semantic_type": "identifier",
+					"role":          "primary_key",
+				},
+			},
+		},
+		{
+			ColumnName: "email",
+			DataType:   "varchar",
+			Metadata: map[string]any{
+				"column_features": map[string]any{
+					"confidence":    0.92,
+					"description":   "User's email address",
+					"semantic_type": "email",
+					"role":          "attribute",
+				},
+			},
+		},
+	}
+
+	// Setup service
+	ontologyRepo := &testColEnrichmentOntologyRepo{columnDetails: make(map[string][]models.ColumnDetail)}
+	entityRepo := &testColEnrichmentEntityRepo{entities: entities}
+	relRepo := &testColEnrichmentRelRepo{}
+	schemaRepo := &testColEnrichmentSchemaRepo{
+		columnsByTable: map[string][]*models.SchemaColumn{
+			"users": columns,
+		},
+	}
+
+	llmClient := &testColEnrichmentLLMClient{
+		response: `{"columns": []}`, // Won't be used
+	}
+	llmFactory := &testColEnrichmentLLMFactory{client: llmClient}
+
+	service := &columnEnrichmentService{
+		ontologyRepo:     ontologyRepo,
+		entityRepo:       entityRepo,
+		relationshipRepo: relRepo,
+		schemaRepo:       schemaRepo,
+		dsSvc:            &testColEnrichmentDatasourceService{},
+		llmFactory:       llmFactory,
+		workerPool:       llm.NewWorkerPool(llm.WorkerPoolConfig{MaxConcurrent: 1}, zap.NewNop()),
+		circuitBreaker:   llm.NewCircuitBreaker(llm.DefaultCircuitBreakerConfig()),
+		logger:           zap.NewNop(),
+	}
+
+	// Execute
+	result, err := service.EnrichProject(context.Background(), projectID, []string{"users"}, nil)
+
+	// Verify
+	require.NoError(t, err)
+	assert.Equal(t, 1, len(result.TablesEnriched))
+	assert.Equal(t, 0, len(result.TablesFailed))
+
+	// Verify LLM was NOT called (all columns skipped)
+	assert.Equal(t, 0, llmClient.callCount, "LLM should not be called when all columns have high-confidence features")
+
+	// Verify column details were saved
+	details := ontologyRepo.columnDetails["users"]
+	require.Equal(t, 2, len(details))
+}

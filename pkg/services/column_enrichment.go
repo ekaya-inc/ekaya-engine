@@ -235,11 +235,42 @@ func (s *columnEnrichmentService) EnrichTable(ctx context.Context, projectID uui
 	// Enum definitions are no longer loaded from files (cloud service has no project files)
 	var enumDefs []models.EnumDefinition
 
-	// Build and send LLM prompt
-	enrichments, err := s.enrichColumnsWithLLM(ctx, projectID, entity, columns, fkInfo, enumSamples)
-	if err != nil {
-		return fmt.Errorf("LLM enrichment failed: %w", err)
+	// Separate columns into those needing LLM enrichment and those already complete
+	// from ColumnFeatureExtraction (high confidence threshold: 0.9)
+	columnsNeedingLLM, syntheticEnrichments := s.filterColumnsForLLM(columns)
+
+	s.logger.Debug("Filtered columns for LLM enrichment",
+		zap.String("table", tableName),
+		zap.Int("total_columns", len(columns)),
+		zap.Int("skipped_columns", len(syntheticEnrichments)),
+		zap.Int("columns_needing_llm", len(columnsNeedingLLM)))
+
+	var enrichments []columnEnrichment
+
+	// Only call LLM if there are columns that need enrichment
+	if len(columnsNeedingLLM) > 0 {
+		// Filter FK info and enum samples for columns needing LLM
+		filteredFKInfo := make(map[string]string)
+		filteredEnumSamples := make(map[string][]string)
+		for _, col := range columnsNeedingLLM {
+			if target, ok := fkInfo[col.ColumnName]; ok {
+				filteredFKInfo[col.ColumnName] = target
+			}
+			if samples, ok := enumSamples[col.ColumnName]; ok {
+				filteredEnumSamples[col.ColumnName] = samples
+			}
+		}
+
+		// Build and send LLM prompt only for columns that need it
+		llmEnrichments, err := s.enrichColumnsWithLLM(ctx, projectID, entity, columnsNeedingLLM, filteredFKInfo, filteredEnumSamples)
+		if err != nil {
+			return fmt.Errorf("LLM enrichment failed: %w", err)
+		}
+		enrichments = append(enrichments, llmEnrichments...)
 	}
+
+	// Add synthetic enrichments for high-confidence columns
+	enrichments = append(enrichments, syntheticEnrichments...)
 
 	// Convert enrichments to ColumnDetail and save, merging enum definitions, distributions, and FK info
 	columnDetails := s.convertToColumnDetails(tableName, enrichments, columns, fkInfo, fkDetailedInfo, enumSamples, enumDefs, enumDistributions)
@@ -407,6 +438,71 @@ func (s *columnEnrichmentService) persistSampleValues(ctx context.Context, colum
 		}
 	}
 	return nil
+}
+
+// highConfidenceThreshold is the minimum confidence level for ColumnFeatures
+// to skip LLM enrichment. Columns with confidence >= this threshold are considered
+// complete enough to not require LLM processing.
+const highConfidenceThreshold = 0.9
+
+// filterColumnsForLLM separates columns into those needing LLM enrichment and those
+// that already have high-confidence ColumnFeatures from the feature extraction pipeline.
+// Returns:
+//   - columnsNeedingLLM: columns that should be sent to the LLM for enrichment
+//   - syntheticEnrichments: pre-built enrichments for high-confidence columns
+func (s *columnEnrichmentService) filterColumnsForLLM(columns []*models.SchemaColumn) ([]*models.SchemaColumn, []columnEnrichment) {
+	var columnsNeedingLLM []*models.SchemaColumn
+	var syntheticEnrichments []columnEnrichment
+
+	for _, col := range columns {
+		features := col.GetColumnFeatures()
+
+		// Column needs LLM enrichment if:
+		// - No ColumnFeatures available
+		// - Confidence below threshold
+		// - Missing description (even if other fields are populated)
+		if features == nil || features.Confidence < highConfidenceThreshold || features.Description == "" {
+			columnsNeedingLLM = append(columnsNeedingLLM, col)
+			continue
+		}
+
+		// Create synthetic enrichment from ColumnFeatures
+		enrichment := columnEnrichment{
+			Name:         col.ColumnName,
+			Description:  features.Description,
+			SemanticType: features.SemanticType,
+			Role:         features.Role,
+		}
+
+		// Copy FK association from IdentifierFeatures
+		if features.IdentifierFeatures != nil && features.IdentifierFeatures.EntityReferenced != "" {
+			assoc := features.IdentifierFeatures.EntityReferenced
+			enrichment.FKAssociation = &assoc
+		}
+
+		// Copy enum values from EnumFeatures
+		if features.EnumFeatures != nil && len(features.EnumFeatures.Values) > 0 {
+			for _, cev := range features.EnumFeatures.Values {
+				ev := models.EnumValue{
+					Value: cev.Value,
+					Label: cev.Label,
+				}
+				if cev.Count > 0 {
+					count := cev.Count
+					ev.Count = &count
+				}
+				if cev.Percentage > 0 {
+					pct := cev.Percentage
+					ev.Percentage = &pct
+				}
+				enrichment.EnumValues = append(enrichment.EnumValues, ev)
+			}
+		}
+
+		syntheticEnrichments = append(syntheticEnrichments, enrichment)
+	}
+
+	return columnsNeedingLLM, syntheticEnrichments
 }
 
 // identifyEnumCandidates identifies columns likely to contain enum values.
@@ -870,30 +966,6 @@ func detectRoleFromColumnName(columnName string) *DetectedRole {
 	}
 
 	return nil
-}
-
-// detectRolesInTable analyzes all FK columns in a table and identifies role-based references.
-// Returns a map of column_name -> DetectedRole for columns with detected roles.
-//
-// This is particularly useful when multiple columns reference the same target table
-// with different roles (e.g., host_id and visitor_id both referencing users).
-func detectRolesInTable(fkInfo map[string]string) map[string]*DetectedRole {
-	result := make(map[string]*DetectedRole)
-
-	// Group FK columns by target table to identify role-based patterns
-	columnsByTarget := make(map[string][]string)
-	for colName, targetTable := range fkInfo {
-		columnsByTarget[targetTable] = append(columnsByTarget[targetTable], colName)
-	}
-
-	// Detect roles for all FK columns
-	for colName := range fkInfo {
-		if role := detectRoleFromColumnName(colName); role != nil {
-			result[colName] = role
-		}
-	}
-
-	return result
 }
 
 // FKColumnDescription contains the auto-generated description for a foreign key column.
@@ -1516,7 +1588,8 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 
 		// Apply stored column features from the feature extraction pipeline (Phase 2+)
 		// These features are populated by the column_feature_extraction service
-		// and stored in the column's metadata field
+		// and stored in the column's metadata field. ColumnFeatures take precedence
+		// over LLM-generated values as they are data-driven and more reliable.
 		if features := col.GetColumnFeatures(); features != nil {
 			// Use description from features if available and LLM didn't provide one
 			if features.Description != "" && detail.Description == "" {
@@ -1530,27 +1603,124 @@ func (s *columnEnrichmentService) convertToColumnDetails(
 			if features.Role != "" {
 				detail.Role = features.Role
 			}
+
+			// Copy EnumFeatures.Values to ColumnDetail.EnumValues if available
+			// EnumFeatures from Phase 3 include LLM-generated labels and state categories
+			if features.EnumFeatures != nil && len(features.EnumFeatures.Values) > 0 {
+				enumValues := make([]models.EnumValue, 0, len(features.EnumFeatures.Values))
+				for _, cev := range features.EnumFeatures.Values {
+					ev := models.EnumValue{
+						Value: cev.Value,
+						Label: cev.Label,
+					}
+					// Map state categories to state flags
+					if cev.Count > 0 {
+						count := cev.Count
+						ev.Count = &count
+					}
+					if cev.Percentage > 0 {
+						pct := cev.Percentage
+						ev.Percentage = &pct
+					}
+					switch cev.Category {
+					case "initial":
+						isTrue := true
+						ev.IsLikelyInitialState = &isTrue
+					case "terminal", "terminal_success":
+						isTrue := true
+						ev.IsLikelyTerminalState = &isTrue
+					case "terminal_error":
+						isTrue := true
+						ev.IsLikelyTerminalState = &isTrue
+						ev.IsLikelyErrorState = &isTrue
+					}
+					enumValues = append(enumValues, ev)
+				}
+				detail.EnumValues = enumValues
+			}
+
+			// Copy IdentifierFeatures.EntityReferenced to FKAssociation
+			// This provides semantic role information (e.g., "host", "visitor", "payer")
+			if features.IdentifierFeatures != nil && features.IdentifierFeatures.EntityReferenced != "" {
+				// Only set if not already set by LLM
+				if detail.FKAssociation == "" {
+					detail.FKAssociation = features.IdentifierFeatures.EntityReferenced
+				}
+			}
+
+			// Copy FK target info from IdentifierFeatures if available
+			if features.IdentifierFeatures != nil && features.IdentifierFeatures.FKTargetTable != "" {
+				detail.IsForeignKey = true
+				detail.ForeignTable = features.IdentifierFeatures.FKTargetTable
+			}
+
+			// Copy BooleanFeatures to description if not already set
+			// BooleanFeatures from Phase 2 include true/false meaning
+			if features.BooleanFeatures != nil && detail.Description == "" {
+				var descParts []string
+				if features.BooleanFeatures.TrueMeaning != "" {
+					descParts = append(descParts, fmt.Sprintf("True: %s", features.BooleanFeatures.TrueMeaning))
+				}
+				if features.BooleanFeatures.FalseMeaning != "" {
+					descParts = append(descParts, fmt.Sprintf("False: %s", features.BooleanFeatures.FalseMeaning))
+				}
+				if len(descParts) > 0 {
+					detail.Description = strings.Join(descParts, ". ")
+				}
+			}
+
+			// Copy TimestampFeatures to semantic type if applicable
+			if features.TimestampFeatures != nil {
+				if features.TimestampFeatures.IsSoftDelete {
+					detail.SemanticType = "soft_delete"
+				} else if features.TimestampFeatures.IsAuditField {
+					switch features.TimestampFeatures.TimestampPurpose {
+					case "audit_created":
+						detail.SemanticType = "audit_created"
+					case "audit_updated":
+						detail.SemanticType = "audit_updated"
+					}
+				}
+			}
 		}
 
-		// Apply boolean naming pattern detection (overrides LLM description with data-driven description)
-		// NOTE: This is kept as it uses column naming patterns which are useful for boolean semantics
-		if booleanDesc := detectBooleanNamingPattern(col); booleanDesc != nil {
-			detail.Description = booleanDesc.Description
-			detail.SemanticType = booleanDesc.SemanticType
-			detail.Role = booleanDesc.Role
+		// NOTE: detectBooleanNamingPattern and detectFKColumnPattern are kept as fallbacks
+		// for when ColumnFeatures are not available (e.g., columns not yet processed by
+		// the feature extraction pipeline). These will be removed once all columns are
+		// guaranteed to have ColumnFeatures populated.
+
+		// Fallback: Apply boolean naming pattern detection if no ColumnFeatures
+		// or if ColumnFeatures didn't provide description/type
+		if detail.Description == "" || detail.SemanticType == "" {
+			if booleanDesc := detectBooleanNamingPattern(col); booleanDesc != nil {
+				if detail.Description == "" {
+					detail.Description = booleanDesc.Description
+				}
+				if detail.SemanticType == "" {
+					detail.SemanticType = booleanDesc.SemanticType
+				}
+				if detail.Role == "" {
+					detail.Role = booleanDesc.Role
+				}
+			}
 		}
 
-		// Apply FK column pattern detection for logical FKs (pk_match detected)
-		// This provides accurate descriptions based on how the relationship was detected
-		// Also detects semantic roles from column naming patterns (e.g., host_id -> role: host)
+		// Fallback: Apply FK column pattern detection for logical FKs
+		// This is still useful for description generation based on detection method
 		if fkDetail, ok := fkDetailedInfo[col.ColumnName]; ok {
 			if fkColDesc := detectFKColumnPattern(col, fkDetail); fkColDesc != nil {
-				detail.Description = fkColDesc.Description
-				detail.SemanticType = fkColDesc.SemanticType
-				detail.Role = fkColDesc.Role
+				// Only use FK description if ColumnFeatures didn't provide one
+				if detail.Description == "" {
+					detail.Description = fkColDesc.Description
+				}
+				if detail.SemanticType == "" {
+					detail.SemanticType = fkColDesc.SemanticType
+				}
+				if detail.Role == "" {
+					detail.Role = fkColDesc.Role
+				}
 
-				// Set FKAssociation from detected role if not already set by LLM
-				// Deterministic role detection takes precedence when available
+				// Set FKAssociation from detected role if not already set
 				if fkColDesc.DetectedRole != "" && detail.FKAssociation == "" {
 					detail.FKAssociation = fkColDesc.DetectedRole
 				}
