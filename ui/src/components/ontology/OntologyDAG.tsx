@@ -32,6 +32,8 @@ import {
 } from '../ui/Dialog';
 import { Input } from '../ui/Input';
 
+import { ExtractionProgress } from './ExtractionProgress';
+
 interface OntologyDAGProps {
   projectId: string;
   datasourceId: string;
@@ -672,23 +674,36 @@ export const OntologyDAG = ({
                         ? node.progress.message
                         : nodeDescription?.description ?? ''}
                     </p>
-                    {node.status === 'running' && node.progress && node.progress.total > 0 && (
-                      <div className="mt-2">
-                        <div className="flex items-center gap-2 text-xs text-text-tertiary mb-1">
-                          <span>
-                            {node.progress.current}/{node.progress.total}
-                          </span>
+                    {/* Multi-phase progress for ColumnFeatureExtraction node */}
+                    {node.name === 'ColumnFeatureExtraction' &&
+                      (node.status === 'running' || node.status === 'completed') && (
+                        <ExtractionProgress
+                          progress={node.progress}
+                          nodeStatus={node.status}
+                          className="mt-2"
+                        />
+                      )}
+                    {/* Standard progress bar for other nodes */}
+                    {node.name !== 'ColumnFeatureExtraction' &&
+                      node.status === 'running' &&
+                      node.progress &&
+                      node.progress.total > 0 && (
+                        <div className="mt-2">
+                          <div className="flex items-center gap-2 text-xs text-text-tertiary mb-1">
+                            <span>
+                              {node.progress.current}/{node.progress.total}
+                            </span>
+                          </div>
+                          <div className="h-1.5 w-full bg-gray-200 rounded-full overflow-hidden dark:bg-gray-700">
+                            <div
+                              className="h-full bg-purple-500 rounded-full transition-all duration-300"
+                              style={{
+                                width: `${Math.round((node.progress.current / node.progress.total) * 100)}%`,
+                              }}
+                            />
+                          </div>
                         </div>
-                        <div className="h-1.5 w-full bg-gray-200 rounded-full overflow-hidden dark:bg-gray-700">
-                          <div
-                            className="h-full bg-purple-500 rounded-full transition-all duration-300"
-                            style={{
-                              width: `${Math.round((node.progress.current / node.progress.total) * 100)}%`,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    )}
+                      )}
                     {node.status === 'failed' && node.error && (
                       <p className="mt-1 text-sm text-red-600 dark:text-red-400">{node.error}</p>
                     )}

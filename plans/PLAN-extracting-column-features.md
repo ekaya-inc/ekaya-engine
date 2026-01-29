@@ -1151,7 +1151,7 @@ func (s *columnFeatureExtractionService) ExtractColumnFeatures(
 
 ---
 
-### Task 10: Update UI to Show Phase-Based Progress
+### Task 10: Update UI to Show Phase-Based Progress ✓
 
 **File:** `ui/src/components/ontology/ExtractionProgress.tsx` (or similar)
 
