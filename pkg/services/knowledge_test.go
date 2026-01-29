@@ -306,3 +306,72 @@ func TestKnowledgeService_StoreWithSource_WithExistingProvenance(t *testing.T) {
 		t.Errorf("Source = %v, want %v", fact.Source, "inferred")
 	}
 }
+
+func TestKnowledgeService_DeleteAll(t *testing.T) {
+	tc := setupKnowledgeServiceTest(t)
+	t.Cleanup(tc.cleanup)
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// Create some test facts
+	_, err := tc.service.StoreWithSource(ctx, tc.projectID, "business_rule", "rule1", "Value 1", "", "manual")
+	if err != nil {
+		t.Fatalf("StoreWithSource failed: %v", err)
+	}
+	_, err = tc.service.StoreWithSource(ctx, tc.projectID, "convention", "convention1", "Value 2", "", "inferred")
+	if err != nil {
+		t.Fatalf("StoreWithSource failed: %v", err)
+	}
+	_, err = tc.service.StoreWithSource(ctx, tc.projectID, "domain_term", "term1", "Value 3", "", "mcp")
+	if err != nil {
+		t.Fatalf("StoreWithSource failed: %v", err)
+	}
+
+	// Verify facts were created
+	facts, err := tc.service.GetAll(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("GetAll failed: %v", err)
+	}
+	if len(facts) < 3 {
+		t.Fatalf("Expected at least 3 facts, got %d", len(facts))
+	}
+
+	// Delete all facts
+	err = tc.service.DeleteAll(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("DeleteAll failed: %v", err)
+	}
+
+	// Verify all facts were deleted
+	facts, err = tc.service.GetAll(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("GetAll after DeleteAll failed: %v", err)
+	}
+	if len(facts) != 0 {
+		t.Errorf("Expected 0 facts after DeleteAll, got %d", len(facts))
+	}
+}
+
+func TestKnowledgeService_DeleteAll_EmptyProject(t *testing.T) {
+	tc := setupKnowledgeServiceTest(t)
+	t.Cleanup(tc.cleanup)
+
+	ctx, cleanup := tc.createTestContext()
+	defer cleanup()
+
+	// DeleteAll on a project with no facts should succeed
+	err := tc.service.DeleteAll(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("DeleteAll on empty project failed: %v", err)
+	}
+
+	// Verify no facts exist
+	facts, err := tc.service.GetAll(ctx, tc.projectID)
+	if err != nil {
+		t.Fatalf("GetAll failed: %v", err)
+	}
+	if len(facts) != 0 {
+		t.Errorf("Expected 0 facts, got %d", len(facts))
+	}
+}

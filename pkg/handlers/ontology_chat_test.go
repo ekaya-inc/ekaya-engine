@@ -138,6 +138,10 @@ func (m *mockKnowledgeServiceUnit) Delete(ctx context.Context, id uuid.UUID) err
 	return nil
 }
 
+func (m *mockKnowledgeServiceUnit) DeleteAll(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
 // ============================================================================
 // Initialize Tests
 // ============================================================================

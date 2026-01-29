@@ -82,6 +82,10 @@ func (m *mockKnowledgeServiceForSeeding) Delete(ctx context.Context, id uuid.UUI
 	return nil
 }
 
+func (m *mockKnowledgeServiceForSeeding) DeleteAll(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
 // mockSchemaServiceForSeeding implements SchemaService for testing.
 type mockSchemaServiceForSeeding struct {
 	schemaForPrompt string

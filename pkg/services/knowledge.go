@@ -33,6 +33,9 @@ type KnowledgeService interface {
 
 	// Delete removes a knowledge fact.
 	Delete(ctx context.Context, id uuid.UUID) error
+
+	// DeleteAll removes all knowledge facts for a project.
+	DeleteAll(ctx context.Context, projectID uuid.UUID) error
 }
 
 type knowledgeService struct {
@@ -204,5 +207,19 @@ func (s *knowledgeService) Delete(ctx context.Context, id uuid.UUID) error {
 			zap.Error(err))
 		return err
 	}
+	return nil
+}
+
+func (s *knowledgeService) DeleteAll(ctx context.Context, projectID uuid.UUID) error {
+	if err := s.repo.DeleteByProject(ctx, projectID); err != nil {
+		s.logger.Error("Failed to delete all knowledge facts",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		return err
+	}
+
+	s.logger.Info("Deleted all knowledge facts",
+		zap.String("project_id", projectID.String()))
+
 	return nil
 }

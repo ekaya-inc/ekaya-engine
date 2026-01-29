@@ -27,6 +27,7 @@ type mockKnowledgeService struct {
 	getAllErr    error
 	getByTypeErr error
 	deleteErr    error
+	deleteAllErr error
 }
 
 func (m *mockKnowledgeService) Store(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
@@ -102,6 +103,10 @@ func (m *mockKnowledgeService) GetByType(ctx context.Context, projectID uuid.UUI
 
 func (m *mockKnowledgeService) Delete(ctx context.Context, id uuid.UUID) error {
 	return m.deleteErr
+}
+
+func (m *mockKnowledgeService) DeleteAll(ctx context.Context, projectID uuid.UUID) error {
+	return m.deleteAllErr
 }
 
 // mockKnowledgeParsingService is a mock for testing knowledge parsing.
@@ -524,6 +529,78 @@ func TestKnowledgeHandler_Delete(t *testing.T) {
 
 		rec := httptest.NewRecorder()
 		handler.Delete(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+}
+
+func TestKnowledgeHandler_DeleteAll(t *testing.T) {
+	projectID := uuid.New()
+
+	t.Run("deletes all facts successfully", func(t *testing.T) {
+		mockService := &mockKnowledgeService{}
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
+
+		req := httptest.NewRequest(http.MethodDelete, "/api/projects/"+projectID.String()+"/project-knowledge", nil)
+		req.SetPathValue("pid", projectID.String())
+
+		rec := httptest.NewRecorder()
+		handler.DeleteAll(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var response ApiResponse
+		if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if !response.Success {
+			t.Fatal("expected success=true")
+		}
+
+		dataBytes, err := json.Marshal(response.Data)
+		if err != nil {
+			t.Fatalf("failed to marshal data: %v", err)
+		}
+
+		var statusResponse map[string]string
+		if err := json.Unmarshal(dataBytes, &statusResponse); err != nil {
+			t.Fatalf("failed to unmarshal status response: %v", err)
+		}
+
+		if statusResponse["status"] != "deleted" {
+			t.Fatalf("expected status=deleted, got %s", statusResponse["status"])
+		}
+	})
+
+	t.Run("returns error on service failure", func(t *testing.T) {
+		mockService := &mockKnowledgeService{deleteAllErr: errors.New("database error")}
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
+
+		req := httptest.NewRequest(http.MethodDelete, "/api/projects/"+projectID.String()+"/project-knowledge", nil)
+		req.SetPathValue("pid", projectID.String())
+
+		rec := httptest.NewRecorder()
+		handler.DeleteAll(rec, req)
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+	})
+
+	t.Run("returns error for invalid project ID", func(t *testing.T) {
+		mockService := &mockKnowledgeService{}
+		handler := NewKnowledgeHandler(mockService, nil, zap.NewNop())
+
+		req := httptest.NewRequest(http.MethodDelete, "/api/projects/invalid/project-knowledge", nil)
+		req.SetPathValue("pid", "invalid")
+
+		rec := httptest.NewRecorder()
+		handler.DeleteAll(rec, req)
 
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)

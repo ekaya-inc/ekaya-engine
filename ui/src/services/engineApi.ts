@@ -703,6 +703,18 @@ class EngineApiService {
     });
   }
 
+  /**
+   * Delete all project knowledge facts
+   * DELETE /api/projects/{projectId}/project-knowledge
+   */
+  async deleteAllProjectKnowledge(
+    projectId: string
+  ): Promise<ApiResponse<void>> {
+    return this.makeRequest<void>(`/${projectId}/project-knowledge`, {
+      method: 'DELETE',
+    });
+  }
+
   // --- MCP Configuration Methods ---
 
   /**

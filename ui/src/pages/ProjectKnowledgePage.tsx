@@ -1,7 +1,9 @@
 import {
+  AlertCircle,
   ArrowLeft,
   ArrowRight,
   Brain,
+  Loader2,
   Plus,
   Edit3,
   Trash2,
@@ -18,6 +20,15 @@ import {
   CardHeader,
   CardTitle,
 } from "../components/ui/Card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/Dialog";
+import { Input } from "../components/ui/Input";
 import { useToast } from "../hooks/useToast";
 import engineApi from "../services/engineApi";
 import ontologyService from "../services/ontologyService";
@@ -91,6 +102,11 @@ const ProjectKnowledgePage = () => {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingFact, setEditingFact] = useState<ProjectKnowledge | null>(null);
   const [deletingFactId, setDeletingFactId] = useState<string | null>(null);
+
+  // Delete all state
+  const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
 
   // Subscribe to ontology status updates
   useEffect(() => {
@@ -194,6 +210,43 @@ const ProjectKnowledgePage = () => {
       variant: 'default',
     });
     fetchFacts();
+  };
+
+  // Handle delete all
+  const handleDeleteAll = async (): Promise<void> => {
+    if (!pid) return;
+
+    setIsDeletingAll(true);
+
+    try {
+      const response = await engineApi.deleteAllProjectKnowledge(pid);
+
+      if (response.success) {
+        toast({
+          title: 'All facts deleted',
+          description: 'All project knowledge facts have been removed.',
+          variant: 'default',
+        });
+        setShowDeleteAllDialog(false);
+        setDeleteConfirmText('');
+        fetchFacts();
+      } else {
+        toast({
+          title: 'Failed to delete facts',
+          description: response.error ?? 'An error occurred while deleting the facts.',
+          variant: 'destructive',
+        });
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to delete facts';
+      toast({
+        title: 'Failed to delete facts',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeletingAll(false);
+    }
   };
 
   // Check if ontology is complete
@@ -342,6 +395,16 @@ const ProjectKnowledgePage = () => {
               <Plus className="mr-2 h-4 w-4" />
               Add Fact
             </Button>
+            {facts.length > 0 && (
+              <Button
+                variant="outline"
+                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                onClick={() => setShowDeleteAllDialog(true)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete All
+              </Button>
+            )}
             <Button variant="outline" onClick={() => navigate(`/projects/${pid}/ontology`)}>
               Go to Ontology
               <ArrowRight className="ml-2 h-4 w-4" />
@@ -457,6 +520,65 @@ const ProjectKnowledgePage = () => {
           onSave={handleEditorSave}
         />
       )}
+
+      {/* Delete All Confirmation Dialog */}
+      <Dialog open={showDeleteAllDialog} onOpenChange={setShowDeleteAllDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Project Knowledge?</DialogTitle>
+            <DialogDescription>
+              This will permanently delete all project knowledge facts. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/50 dark:bg-red-900/20">
+            <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5" />
+            <div className="text-sm text-red-700 dark:text-red-300">
+              <p className="font-medium">Warning</p>
+              <p>All {facts.length} knowledge {facts.length === 1 ? 'fact' : 'facts'} will be permanently deleted.</p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm text-muted-foreground">
+              Type <span className="font-mono font-semibold">delete project knowledge</span> to confirm:
+            </label>
+            <Input
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder="delete project knowledge"
+              disabled={isDeletingAll}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowDeleteAllDialog(false);
+                setDeleteConfirmText('');
+              }}
+              disabled={isDeletingAll}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteAll}
+              disabled={deleteConfirmText !== 'delete project knowledge' || isDeletingAll}
+            >
+              {isDeletingAll ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete All Facts'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

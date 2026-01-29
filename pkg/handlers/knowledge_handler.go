@@ -97,6 +97,8 @@ func (h *KnowledgeHandler) RegisterRoutes(mux *http.ServeMux, authMiddleware *au
 		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Update)))
 	mux.HandleFunc("DELETE "+base+"/{kid}",
 		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.Delete)))
+	mux.HandleFunc("DELETE "+base,
+		authMiddleware.RequireAuthWithPathValidationAndProvenance("pid")(tenantMiddleware(h.DeleteAll)))
 }
 
 // List handles GET /api/projects/{pid}/project-knowledge
@@ -272,6 +274,28 @@ func (h *KnowledgeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := ErrorResponse(w, http.StatusInternalServerError, "delete_knowledge_failed", err.Error()); err != nil {
+			h.logger.Error("Failed to write error response", zap.Error(err))
+		}
+		return
+	}
+
+	if err := WriteJSON(w, http.StatusOK, ApiResponse{Success: true, Data: map[string]string{"status": "deleted"}}); err != nil {
+		h.logger.Error("Failed to write response", zap.Error(err))
+	}
+}
+
+// DeleteAll handles DELETE /api/projects/{pid}/project-knowledge
+func (h *KnowledgeHandler) DeleteAll(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := ParseProjectID(w, r, h.logger)
+	if !ok {
+		return
+	}
+
+	if err := h.knowledgeService.DeleteAll(r.Context(), projectID); err != nil {
+		h.logger.Error("Failed to delete all knowledge facts",
+			zap.String("project_id", projectID.String()),
+			zap.Error(err))
+		if err := ErrorResponse(w, http.StatusInternalServerError, "delete_all_knowledge_failed", err.Error()); err != nil {
 			h.logger.Error("Failed to write error response", zap.Error(err))
 		}
 		return
