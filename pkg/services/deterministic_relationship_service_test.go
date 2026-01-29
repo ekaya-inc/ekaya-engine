@@ -572,75 +572,9 @@ func TestPKMatch_WorksWithoutRowCount(t *testing.T) {
 	}
 }
 
-// TestIsPKMatchExcludedName verifies that the name exclusion function catches
-// all patterns that should not be considered as FK candidates.
-func TestIsPKMatchExcludedName(t *testing.T) {
-	tests := []struct {
-		name     string
-		column   string
-		excluded bool
-	}{
-		// Count patterns with num_ prefix
-		{"num_users should be excluded", "num_users", true},
-		{"num_items should be excluded", "num_items", true},
-		{"NUM_ORDERS should be excluded (case insensitive)", "NUM_ORDERS", true},
-
-		// Count patterns with total_ prefix
-		{"total_amount should be excluded", "total_amount", true},
-		{"total_sales should be excluded", "total_sales", true},
-		{"TOTAL_REVENUE should be excluded (case insensitive)", "TOTAL_REVENUE", true},
-
-		// Existing count suffix patterns
-		{"user_count should be excluded", "user_count", true},
-		{"order_count should be excluded", "order_count", true},
-
-		// Amount/total suffixes
-		{"order_amount should be excluded", "order_amount", true},
-		{"sale_total should be excluded", "sale_total", true},
-
-		// Aggregate function suffixes
-		{"revenue_sum should be excluded", "revenue_sum", true},
-		{"price_avg should be excluded", "price_avg", true},
-		{"score_min should be excluded", "score_min", true},
-		{"value_max should be excluded", "value_max", true},
-
-		// Rating patterns
-		{"rating should be excluded", "rating", true},
-		{"user_rating should be excluded", "user_rating", true},
-		{"product_rating should be excluded", "product_rating", true},
-		{"RATING should be excluded (case insensitive)", "RATING", true},
-
-		// Score patterns
-		{"score should be excluded", "score", true},
-		{"credit_score should be excluded", "credit_score", true},
-		{"quality_score should be excluded", "quality_score", true},
-
-		// Level patterns
-		{"level should be excluded", "level", true},
-		{"mod_level should be excluded", "mod_level", true},
-		{"access_level should be excluded", "access_level", true},
-
-		// Valid FK column names should NOT be excluded
-		{"user_id should NOT be excluded", "user_id", false},
-		{"account_id should NOT be excluded", "account_id", false},
-		{"id should NOT be excluded", "id", false},
-		{"owner_id should NOT be excluded", "owner_id", false},
-		{"host_id should NOT be excluded", "host_id", false},
-
-		// Edge cases - columns with excluded patterns as substrings
-		{"document_id should NOT be excluded (ment != amount)", "document_id", false},
-		{"internal should NOT be excluded (internal != num_)", "internal", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := isPKMatchExcludedName(tt.column)
-			if result != tt.excluded {
-				t.Errorf("isPKMatchExcludedName(%q) = %v, want %v", tt.column, result, tt.excluded)
-			}
-		})
-	}
-}
+// NOTE: TestIsPKMatchExcludedName has been removed.
+// Column filtering now uses stored ColumnFeatures.Purpose instead of name-based patterns.
+// See PLAN-extracting-column-features.md for details.
 
 // TestPKMatch_RequiresJoinableFlag verifies that columns with IsJoinable=false
 // or IsJoinable=nil are skipped and do not create relationships.
@@ -1920,6 +1854,11 @@ func TestPKMatch_SmallIntegerValues_LookupTable(t *testing.T) {
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &refDistinctCount, // 15 distinct values (passes cardinality check: 15/100 = 15% > 1%)
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
 				},
 			},
 		},
@@ -2075,7 +2014,7 @@ func TestPKMatch_LowCardinality_Excluded(t *testing.T) {
 	}
 }
 
-// TestPKMatch_CountColumns_NeverJoined tests that columns with count/aggregate names
+// TestPKMatch_CountColumns_NeverJoined tests that columns with PurposeMeasure feature
 // are excluded from being FK candidates (they should not try to join TO entity PKs)
 func TestPKMatch_CountColumns_NeverJoined(t *testing.T) {
 	projectID := uuid.New()
@@ -2099,9 +2038,9 @@ func TestPKMatch_CountColumns_NeverJoined(t *testing.T) {
 		PrimaryTable:  "accounts",
 	})
 
-	// Mock discoverer should NOT be called because count columns are filtered by name BEFORE cardinality ratio check
+	// Mock discoverer should NOT be called because count columns are filtered by purpose (PurposeMeasure)
 	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
-		t.Errorf("AnalyzeJoin should not be called (count columns should be excluded by name): %s.%s.%s -> %s.%s.%s",
+		t.Errorf("AnalyzeJoin should not be called (measure columns should be excluded by purpose): %s.%s.%s -> %s.%s.%s",
 			sourceSchema, sourceTable, sourceColumn,
 			targetSchema, targetTable, targetColumn)
 		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
@@ -2111,8 +2050,8 @@ func TestPKMatch_CountColumns_NeverJoined(t *testing.T) {
 	accountsTableID := uuid.New()
 
 	// Schema: users.id is a PK (entityRefColumn), accounts has count columns
-	// Count columns should NOT be FK candidates - they are excluded by NAME filter
-	// before the cardinality ratio check would exclude them
+	// Count columns should NOT be FK candidates - they are excluded by PURPOSE filter
+	// (PurposeMeasure) before the cardinality ratio check would exclude them
 	mocks.schemaRepo.tables = []*models.SchemaTable{
 		{
 			ID:         usersTableID,
@@ -2146,27 +2085,42 @@ func TestPKMatch_CountColumns_NeverJoined(t *testing.T) {
 				},
 				{
 					SchemaTableID: accountsTableID,
-					ColumnName:    "num_users", // Count column with num_ prefix
+					ColumnName:    "num_users", // Count column classified as measure
 					DataType:      "bigint",
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &candidateDistinct, // Has sufficient absolute distinct count (>= 20)
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeMeasure,
+						},
+					},
 				},
 				{
 					SchemaTableID: accountsTableID,
-					ColumnName:    "user_count", // Count column with _count suffix
+					ColumnName:    "user_count", // Count column classified as measure
 					DataType:      "bigint",
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &candidateDistinct,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeMeasure,
+						},
+					},
 				},
 				{
 					SchemaTableID: accountsTableID,
-					ColumnName:    "total_items", // Count column with total_ prefix
+					ColumnName:    "total_items", // Count column classified as measure
 					DataType:      "bigint",
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &candidateDistinct,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeMeasure,
+						},
+					},
 				},
 			},
 		},
@@ -2188,8 +2142,8 @@ func TestPKMatch_CountColumns_NeverJoined(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: NO relationships created because count columns are excluded by name filter
-	// Even though they have sufficient DistinctCount, the name filter should prevent them
+	// Verify: NO relationships created because count columns are excluded by purpose (PurposeMeasure)
+	// Even though they have sufficient DistinctCount, the purpose filter should prevent them
 	// from being FK candidates
 	if result.InferredRelationships != 0 {
 		t.Errorf("expected 0 inferred relationships (count columns should be excluded), got %d", result.InferredRelationships)
@@ -2200,7 +2154,7 @@ func TestPKMatch_CountColumns_NeverJoined(t *testing.T) {
 	}
 }
 
-// TestPKMatch_RatingColumns_NeverJoined tests that columns with rating/score/level names
+// TestPKMatch_RatingColumns_NeverJoined tests that columns with PurposeMeasure feature
 // are excluded from being FK candidates (they should not try to join TO entity PKs)
 func TestPKMatch_RatingColumns_NeverJoined(t *testing.T) {
 	projectID := uuid.New()
@@ -2224,9 +2178,9 @@ func TestPKMatch_RatingColumns_NeverJoined(t *testing.T) {
 		PrimaryTable:  "reviews",
 	})
 
-	// Mock discoverer should NOT be called because rating/score/level columns are filtered by name BEFORE cardinality ratio check
+	// Mock discoverer should NOT be called because rating/score/level columns are filtered by purpose (PurposeMeasure)
 	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
-		t.Errorf("AnalyzeJoin should not be called (rating/score/level columns should be excluded by name): %s.%s.%s -> %s.%s.%s",
+		t.Errorf("AnalyzeJoin should not be called (measure columns should be excluded by purpose): %s.%s.%s -> %s.%s.%s",
 			sourceSchema, sourceTable, sourceColumn,
 			targetSchema, targetTable, targetColumn)
 		return &datasource.JoinAnalysis{OrphanCount: 0}, nil
@@ -2236,8 +2190,8 @@ func TestPKMatch_RatingColumns_NeverJoined(t *testing.T) {
 	reviewsTableID := uuid.New()
 
 	// Schema: users.id is a PK (entityRefColumn), reviews has rating/score/level columns
-	// Rating/score/level columns should NOT be FK candidates - they are excluded by NAME filter
-	// before the cardinality ratio check would exclude them
+	// Rating/score/level columns should NOT be FK candidates - they are excluded by PURPOSE filter
+	// (PurposeMeasure) before the cardinality ratio check would exclude them
 	mocks.schemaRepo.tables = []*models.SchemaTable{
 		{
 			ID:         usersTableID,
@@ -2271,27 +2225,42 @@ func TestPKMatch_RatingColumns_NeverJoined(t *testing.T) {
 				},
 				{
 					SchemaTableID: reviewsTableID,
-					ColumnName:    "rating", // Rating column
+					ColumnName:    "rating", // Rating column classified as measure
 					DataType:      "bigint",
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &candidateDistinct, // Has sufficient absolute distinct count (>= 20)
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeMeasure,
+						},
+					},
 				},
 				{
 					SchemaTableID: reviewsTableID,
-					ColumnName:    "mod_level", // Level column
+					ColumnName:    "mod_level", // Level column classified as measure
 					DataType:      "bigint",
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &candidateDistinct,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeMeasure,
+						},
+					},
 				},
 				{
 					SchemaTableID: reviewsTableID,
-					ColumnName:    "score", // Score column
+					ColumnName:    "score", // Score column classified as measure
 					DataType:      "bigint",
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &candidateDistinct,
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeMeasure,
+						},
+					},
 				},
 			},
 		},
@@ -2313,8 +2282,8 @@ func TestPKMatch_RatingColumns_NeverJoined(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: NO relationships created because rating/score/level columns are excluded by name filter
-	// Even though they have sufficient DistinctCount, the name filter should prevent them
+	// Verify: NO relationships created because rating/score/level columns are excluded by purpose (PurposeMeasure)
+	// Even though they have sufficient DistinctCount, the purpose filter should prevent them
 	// from being FK candidates
 	if result.InferredRelationships != 0 {
 		t.Errorf("expected 0 inferred relationships (rating/score/level columns should be excluded), got %d", result.InferredRelationships)
@@ -3305,7 +3274,12 @@ func TestPKMatch_LowCardinalityRatio_IDColumn(t *testing.T) {
 					DataType:      "text",
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
-					DistinctCount: &visitorDistinct, // 500/100k = 0.5% (below old 5% threshold)
+					DistinctCount: &visitorDistinct, // 500/100k = 0.5% (below 5% threshold)
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
 				},
 			},
 		},
@@ -3327,9 +3301,9 @@ func TestPKMatch_LowCardinalityRatio_IDColumn(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify: visitor_id should have passed the cardinality filter because it ends in _id
+	// Verify: visitor_id should have passed the cardinality filter because it has PurposeIdentifier
 	if !joinAnalysisCalled {
-		t.Error("expected join analysis to be called for visitor_id column (should bypass cardinality ratio check for _id columns)")
+		t.Error("expected join analysis to be called for visitor_id column (should bypass cardinality ratio check for identifier columns)")
 	}
 
 	// Verify: relationship created (visitor_id → user_id)
@@ -3510,6 +3484,11 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &visitorDistinct, // 0.8% cardinality
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
 				},
 				{
 					SchemaTableID: billingTableID,
@@ -3518,6 +3497,11 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &hostDistinct, // 0.5% cardinality
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
 				},
 				{
 					SchemaTableID: billingTableID,
@@ -3526,6 +3510,11 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &sessionFKDistinct, // 3% cardinality
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
 				},
 				{
 					SchemaTableID: billingTableID,
@@ -3534,6 +3523,11 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &offerFKDistinct, // 0.15% cardinality
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
 				},
 			},
 		},
@@ -3571,7 +3565,7 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("expected join analysis to be called for %s (should bypass cardinality ratio check for _id columns)", col)
+			t.Errorf("expected join analysis to be called for %s (should bypass cardinality ratio check for identifier columns)", col)
 		}
 	}
 
@@ -3621,39 +3615,9 @@ func TestPKMatch_BillingEngagement_MultiSoftFK_Discovery(t *testing.T) {
 	}
 }
 
-// TestIsLikelyFKColumn tests the isLikelyFKColumn helper function
-func TestIsLikelyFKColumn(t *testing.T) {
-	tests := []struct {
-		columnName string
-		expected   bool
-	}{
-		// Should return true
-		{"user_id", true},
-		{"visitor_id", true},
-		{"host_id", true},
-		{"account_uuid", true},
-		{"session_key", true},
-		{"USER_ID", true}, // case insensitive
-		{"Visitor_Id", true},
-
-		// Should return false
-		{"status", false},
-		{"id", false}, // just "id" doesn't match suffix patterns
-		{"rating", false},
-		{"visitor", false}, // no _id suffix
-		{"created_at", false},
-		{"is_active", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.columnName, func(t *testing.T) {
-			result := isLikelyFKColumn(tt.columnName)
-			if result != tt.expected {
-				t.Errorf("isLikelyFKColumn(%q) = %v, expected %v", tt.columnName, result, tt.expected)
-			}
-		})
-	}
-}
+// NOTE: TestIsLikelyFKColumn has been removed.
+// FK column identification now uses stored ColumnFeatures.Purpose instead of name-based patterns.
+// See PLAN-extracting-column-features.md for details.
 
 // TestPKMatch_NonIDColumn_StillFilteredByCardinality verifies that non-_id columns
 // still get filtered by the cardinality ratio check.
@@ -4385,10 +4349,10 @@ func TestPKMatch_DataBased_CardinalityRatioAlwaysApplied(t *testing.T) {
 	_ = result
 }
 
-// TestPKMatch_LegacyMode_IDColumnsExemptFromFilters verifies that when
-// UseLegacyPatternMatching=true (legacy mode), _id columns are exempt from
-// certain filters like cardinality ratio check.
-func TestPKMatch_LegacyMode_IDColumnsExemptFromFilters(t *testing.T) {
+// TestPKMatch_IdentifierColumnsExemptFromCardinalityFilter verifies that columns
+// with Purpose=identifier (from stored ColumnFeatures) are exempt from the
+// cardinality ratio check, allowing them to be evaluated as FK candidates.
+func TestPKMatch_IdentifierColumnsExemptFromCardinalityFilter(t *testing.T) {
 	projectID := uuid.New()
 	datasourceID := uuid.New()
 	ontologyID := uuid.New()
@@ -4400,9 +4364,7 @@ func TestPKMatch_LegacyMode_IDColumnsExemptFromFilters(t *testing.T) {
 	highRowCount := int64(10000) // 50/10000 = 0.5% < 5% threshold
 	isJoinableTrue := true
 
-	// Create mocks with legacy pattern matching ENABLED (default)
 	mocks := setupMocks(projectID, ontologyID, datasourceID, userEntityID)
-	// UseLegacyPatternMatching defaults to true in setupMocks
 
 	mocks.entityRepo.entities = append(mocks.entityRepo.entities, &models.OntologyEntity{
 		ID:            eventEntityID,
@@ -4412,7 +4374,7 @@ func TestPKMatch_LegacyMode_IDColumnsExemptFromFilters(t *testing.T) {
 		PrimaryTable:  "events",
 	})
 
-	// In legacy mode, _id columns should be evaluated even with low cardinality ratio
+	// Identifier columns with stored features should be evaluated even with low cardinality ratio
 	joinAnalysisCalled := false
 	mocks.discoverer.joinAnalysisFunc = func(ctx context.Context, sourceSchema, sourceTable, sourceColumn, targetSchema, targetTable, targetColumn string) (*datasource.JoinAnalysis, error) {
 		if sourceColumn == "user_id" && sourceTable == "events" {
@@ -4455,8 +4417,8 @@ func TestPKMatch_LegacyMode_IDColumnsExemptFromFilters(t *testing.T) {
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &highRowCount,
 				},
-				// This _id column has low cardinality ratio (0.5% < 5%)
-				// In legacy mode, _id columns skip this check
+				// This column has low cardinality ratio (0.5% < 5%)
+				// But has Purpose=identifier in its features, so it skips cardinality check
 				{
 					SchemaTableID: eventsTableID,
 					ColumnName:    "user_id",
@@ -4464,6 +4426,11 @@ func TestPKMatch_LegacyMode_IDColumnsExemptFromFilters(t *testing.T) {
 					IsPrimaryKey:  false,
 					IsJoinable:    &isJoinableTrue,
 					DistinctCount: &lowDistinct, // 50/10000 = 0.5% < 5%
+					Metadata: map[string]any{
+						"column_features": map[string]any{
+							"purpose": models.PurposeIdentifier,
+						},
+					},
 				},
 			},
 		},
@@ -4485,9 +4452,9 @@ func TestPKMatch_LegacyMode_IDColumnsExemptFromFilters(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// In legacy mode, user_id should have been evaluated (exempt from cardinality ratio check)
+	// Identifier columns (via stored features) should be evaluated (exempt from cardinality ratio check)
 	if !joinAnalysisCalled {
-		t.Error("expected events.user_id to be evaluated in legacy mode (_id columns exempt from cardinality ratio check)")
+		t.Error("expected events.user_id to be evaluated (identifier columns exempt from cardinality ratio check)")
 	}
 }
 

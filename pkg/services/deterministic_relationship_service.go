@@ -508,13 +508,6 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 	startTime := time.Now()
 	s.logger.Info("Starting PK-match relationship discovery")
 
-	// Get ontology settings to determine if we should use legacy pattern matching
-	ontologySettings, err := s.projectService.GetOntologySettings(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("get ontology settings: %w", err)
-	}
-	useLegacyPatternMatching := ontologySettings.UseLegacyPatternMatching
-
 	// Get active ontology for the project
 	ontology, err := s.ontologyRepo.GetActive(ctx, projectID)
 	if err != nil {
@@ -588,24 +581,31 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 				continue
 			}
 
-			// Include if: PK, unique, or passes candidate filters
+			// Include if: PK, unique, or high cardinality (potential join target)
+			// Note: PurposeIdentifier columns are included as FK candidates (below),
+			// but not as entity ref columns unless they're PK/unique, since identifier
+			// columns are often FKs that reference other entities.
 			isCandidate := col.IsPrimaryKey || col.IsUnique ||
-				isEntityReferenceName(col.ColumnName) ||
 				(col.DistinctCount != nil && *col.DistinctCount >= 20)
 
 			if !isCandidate {
 				continue
 			}
 
+			// Get column features for exclusion checks
+			features := col.GetColumnFeatures()
+
 			// Exclude types unlikely to be join keys
 			if isPKMatchExcludedType(col) {
 				continue
 			}
 
-			// Exclude names unlikely to be join keys (count, rating, score, etc.)
-			// Only apply when legacy pattern matching is enabled
-			if useLegacyPatternMatching && isPKMatchExcludedName(col.ColumnName) {
-				continue
+			// Exclude columns based on stored purpose (timestamp, flag, measure, etc.)
+			if features != nil {
+				switch features.Purpose {
+				case models.PurposeTimestamp, models.PurposeFlag, models.PurposeMeasure, models.PurposeEnum:
+					continue
+				}
 			}
 
 			entityRefColumns = append(entityRefColumns, entityRefColumn{
@@ -630,21 +630,26 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 			continue
 		}
 
-		// Exclude names unlikely to be entity references
-		// Only apply when legacy pattern matching is enabled
-		if useLegacyPatternMatching && isPKMatchExcludedName(col.ColumnName) {
-			continue
+		// Get column features for purpose-based filtering
+		features := col.GetColumnFeatures()
+
+		// Exclude columns based on stored purpose (timestamp, flag, measure, etc.)
+		if features != nil {
+			switch features.Purpose {
+			case models.PurposeTimestamp, models.PurposeFlag, models.PurposeMeasure, models.PurposeEnum:
+				continue
+			}
 		}
 
 		// Require explicit joinability determination
-		// When legacy pattern matching is enabled, _id/_uuid/_key columns are exempted
-		// from requiring explicit joinability (they're included even with IsJoinable=nil).
-		// When disabled, all columns must have explicit joinability determination.
+		// All columns must have explicit joinability determination from feature extraction.
+		// Columns with is_joinable=true (or purpose=identifier) proceed to validation.
 		if col.IsJoinable == nil {
-			if useLegacyPatternMatching && isLikelyFKColumn(col.ColumnName) {
-				// _id columns with nil IsJoinable are included for validation (legacy behavior)
+			// Allow identifier columns even without explicit joinability
+			if features != nil && features.Purpose == models.PurposeIdentifier {
+				// Identifier columns proceed to validation
 			} else {
-				continue // No joinability info = skip (new behavior)
+				continue // No joinability info = skip
 			}
 		} else if !*col.IsJoinable {
 			continue
@@ -653,18 +658,16 @@ func (s *deterministicRelationshipService) DiscoverPKMatchRelationships(ctx cont
 		// Apply cardinality filters only if stats exist
 		// Columns with is_joinable=true but no stats proceed to join validation
 		// where CheckValueOverlap will determine actual FK validity.
-		if col.DistinctCount != nil {
+		// Identifier columns (as determined by feature extraction) skip cardinality checks
+		// since they are often valid FK columns even with low cardinality.
+		skipCardinalityCheck := features != nil && features.Purpose == models.PurposeIdentifier
+		if col.DistinctCount != nil && !skipCardinalityCheck {
 			// Check cardinality threshold
 			if *col.DistinctCount < 20 {
 				continue
 			}
 			// Check cardinality ratio if row count available
-			// When legacy pattern matching is enabled, _id/_uuid/_key columns skip this check
-			// since they are often valid FK columns even with low cardinality (e.g., 500 unique
-			// visitors in 100,000 rows = 0.5%).
-			// When disabled, all columns are subject to the cardinality ratio check.
-			skipCardinalityCheck := useLegacyPatternMatching && isLikelyFKColumn(col.ColumnName)
-			if table.RowCount != nil && *table.RowCount > 0 && !skipCardinalityCheck {
+			if table.RowCount != nil && *table.RowCount > 0 {
 				ratio := float64(*col.DistinctCount) / float64(*table.RowCount)
 				if ratio < 0.05 {
 					continue
@@ -853,21 +856,8 @@ func isPKMatchExcludedType(col *models.SchemaColumn) bool {
 	return false
 }
 
-// isLikelyFKColumn returns true for column names that strongly suggest a foreign key relationship.
-// These columns skip the cardinality ratio check because they are likely FK columns even with low
-// cardinality (e.g., 500 unique visitors in 100,000 rows = 0.5%).
-func isLikelyFKColumn(columnName string) bool {
-	lower := strings.ToLower(columnName)
-
-	// Explicit FK patterns
-	if strings.HasSuffix(lower, "_id") ||
-		strings.HasSuffix(lower, "_uuid") ||
-		strings.HasSuffix(lower, "_key") {
-		return true
-	}
-
-	return false
-}
+// NOTE: isLikelyFKColumn has been removed. Column classification is now handled by the
+// column_feature_extraction service. Columns with Purpose=identifier are treated as likely FK columns.
 
 // areTypesCompatibleForFK checks if source and target column types are compatible for FK relationships.
 // Supports exact match, UUID compatibility (text ↔ uuid ↔ varchar ↔ character varying),
@@ -921,45 +911,6 @@ func areTypesCompatibleForFK(sourceType, targetType string) bool {
 	return false
 }
 
-// isPKMatchExcludedName returns true for column names unlikely to be entity references.
-func isPKMatchExcludedName(columnName string) bool {
-	lower := strings.ToLower(columnName)
-
-	// Timestamp patterns
-	if strings.HasSuffix(lower, "_at") || strings.HasSuffix(lower, "_date") {
-		return true
-	}
-
-	// Boolean flag patterns
-	if strings.HasPrefix(lower, "is_") || strings.HasPrefix(lower, "has_") {
-		return true
-	}
-
-	// Status/type/flag patterns (often low-cardinality enums stored as int)
-	if strings.HasSuffix(lower, "_status") || strings.HasSuffix(lower, "_type") || strings.HasSuffix(lower, "_flag") {
-		return true
-	}
-
-	// Count/amount patterns (expanded)
-	if strings.HasPrefix(lower, "num_") || // num_users, num_items
-		strings.HasPrefix(lower, "total_") || // total_amount
-		strings.HasSuffix(lower, "_count") ||
-		strings.HasSuffix(lower, "_amount") ||
-		strings.HasSuffix(lower, "_total") ||
-		strings.HasSuffix(lower, "_sum") ||
-		strings.HasSuffix(lower, "_avg") ||
-		strings.HasSuffix(lower, "_min") ||
-		strings.HasSuffix(lower, "_max") {
-		return true
-	}
-
-	// Rating/score/level patterns - use suffix without underscore to catch all variants
-	// Catches: rating, user_rating, mod_level, credit_score, etc.
-	if strings.HasSuffix(lower, "rating") ||
-		strings.HasSuffix(lower, "score") ||
-		strings.HasSuffix(lower, "level") {
-		return true
-	}
-
-	return false
-}
+// NOTE: isPKMatchExcludedName has been removed. Column classification is now handled by the
+// column_feature_extraction service. Columns are excluded based on their stored Purpose
+// (timestamp, flag, measure, enum) rather than name patterns.

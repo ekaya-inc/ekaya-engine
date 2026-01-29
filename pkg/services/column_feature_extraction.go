@@ -774,18 +774,31 @@ func (c *timestampClassifier) Classify(
 	llmFactory llm.LLMClientFactory,
 	getTenantCtx TenantContextFunc,
 ) (*models.ColumnFeatures, error) {
+	// Acquire fresh connection for this classification to avoid "conn busy" errors
+	// when multiple classifiers run in parallel
+	workCtx := ctx
+	if getTenantCtx != nil {
+		var cleanup func()
+		var err error
+		workCtx, cleanup, err = getTenantCtx(ctx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("acquire tenant context: %w", err)
+		}
+		defer cleanup()
+	}
+
 	// Build the focused prompt for timestamp classification
 	prompt := c.buildPrompt(profile)
 	systemMsg := c.systemMessage()
 
 	// Get LLM client
-	llmClient, err := llmFactory.CreateForProject(ctx, projectID)
+	llmClient, err := llmFactory.CreateForProject(workCtx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
 
 	// Call LLM with low temperature for deterministic classification
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.2, false)
+	result, err := llmClient.GenerateResponse(workCtx, prompt, systemMsg, 0.2, false)
 	if err != nil {
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
@@ -943,15 +956,28 @@ func (c *booleanClassifier) Classify(
 	llmFactory llm.LLMClientFactory,
 	getTenantCtx TenantContextFunc,
 ) (*models.ColumnFeatures, error) {
+	// Acquire fresh connection for this classification to avoid "conn busy" errors
+	// when multiple classifiers run in parallel
+	workCtx := ctx
+	if getTenantCtx != nil {
+		var cleanup func()
+		var err error
+		workCtx, cleanup, err = getTenantCtx(ctx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("acquire tenant context: %w", err)
+		}
+		defer cleanup()
+	}
+
 	prompt := c.buildPrompt(profile)
 	systemMsg := c.systemMessage()
 
-	llmClient, err := llmFactory.CreateForProject(ctx, projectID)
+	llmClient, err := llmFactory.CreateForProject(workCtx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
 
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.2, false)
+	result, err := llmClient.GenerateResponse(workCtx, prompt, systemMsg, 0.2, false)
 	if err != nil {
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
@@ -1048,15 +1074,28 @@ func (c *enumClassifier) Classify(
 	llmFactory llm.LLMClientFactory,
 	getTenantCtx TenantContextFunc,
 ) (*models.ColumnFeatures, error) {
+	// Acquire fresh connection for this classification to avoid "conn busy" errors
+	// when multiple classifiers run in parallel
+	workCtx := ctx
+	if getTenantCtx != nil {
+		var cleanup func()
+		var err error
+		workCtx, cleanup, err = getTenantCtx(ctx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("acquire tenant context: %w", err)
+		}
+		defer cleanup()
+	}
+
 	prompt := c.buildPrompt(profile)
 	systemMsg := c.systemMessage()
 
-	llmClient, err := llmFactory.CreateForProject(ctx, projectID)
+	llmClient, err := llmFactory.CreateForProject(workCtx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
 
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.2, false)
+	result, err := llmClient.GenerateResponse(workCtx, prompt, systemMsg, 0.2, false)
 	if err != nil {
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
@@ -1163,15 +1202,28 @@ func (c *uuidClassifier) Classify(
 	llmFactory llm.LLMClientFactory,
 	getTenantCtx TenantContextFunc,
 ) (*models.ColumnFeatures, error) {
+	// Acquire fresh connection for this classification to avoid "conn busy" errors
+	// when multiple classifiers run in parallel
+	workCtx := ctx
+	if getTenantCtx != nil {
+		var cleanup func()
+		var err error
+		workCtx, cleanup, err = getTenantCtx(ctx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("acquire tenant context: %w", err)
+		}
+		defer cleanup()
+	}
+
 	prompt := c.buildPrompt(profile)
 	systemMsg := c.systemMessage()
 
-	llmClient, err := llmFactory.CreateForProject(ctx, projectID)
+	llmClient, err := llmFactory.CreateForProject(workCtx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
 
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.2, false)
+	result, err := llmClient.GenerateResponse(workCtx, prompt, systemMsg, 0.2, false)
 	if err != nil {
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
@@ -1280,15 +1332,28 @@ func (c *externalIDClassifier) Classify(
 	llmFactory llm.LLMClientFactory,
 	getTenantCtx TenantContextFunc,
 ) (*models.ColumnFeatures, error) {
+	// Acquire fresh connection for this classification to avoid "conn busy" errors
+	// when multiple classifiers run in parallel
+	workCtx := ctx
+	if getTenantCtx != nil {
+		var cleanup func()
+		var err error
+		workCtx, cleanup, err = getTenantCtx(ctx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("acquire tenant context: %w", err)
+		}
+		defer cleanup()
+	}
+
 	prompt := c.buildPrompt(profile)
 	systemMsg := c.systemMessage()
 
-	llmClient, err := llmFactory.CreateForProject(ctx, projectID)
+	llmClient, err := llmFactory.CreateForProject(workCtx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
 
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.2, false)
+	result, err := llmClient.GenerateResponse(workCtx, prompt, systemMsg, 0.2, false)
 	if err != nil {
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
@@ -1393,15 +1458,28 @@ func (c *numericClassifier) Classify(
 	llmFactory llm.LLMClientFactory,
 	getTenantCtx TenantContextFunc,
 ) (*models.ColumnFeatures, error) {
+	// Acquire fresh connection for this classification to avoid "conn busy" errors
+	// when multiple classifiers run in parallel
+	workCtx := ctx
+	if getTenantCtx != nil {
+		var cleanup func()
+		var err error
+		workCtx, cleanup, err = getTenantCtx(ctx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("acquire tenant context: %w", err)
+		}
+		defer cleanup()
+	}
+
 	prompt := c.buildPrompt(profile)
 	systemMsg := c.systemMessage()
 
-	llmClient, err := llmFactory.CreateForProject(ctx, projectID)
+	llmClient, err := llmFactory.CreateForProject(workCtx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
 
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.2, false)
+	result, err := llmClient.GenerateResponse(workCtx, prompt, systemMsg, 0.2, false)
 	if err != nil {
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
@@ -1521,15 +1599,28 @@ func (c *textClassifier) Classify(
 	llmFactory llm.LLMClientFactory,
 	getTenantCtx TenantContextFunc,
 ) (*models.ColumnFeatures, error) {
+	// Acquire fresh connection for this classification to avoid "conn busy" errors
+	// when multiple classifiers run in parallel
+	workCtx := ctx
+	if getTenantCtx != nil {
+		var cleanup func()
+		var err error
+		workCtx, cleanup, err = getTenantCtx(ctx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("acquire tenant context: %w", err)
+		}
+		defer cleanup()
+	}
+
 	prompt := c.buildPrompt(profile)
 	systemMsg := c.systemMessage()
 
-	llmClient, err := llmFactory.CreateForProject(ctx, projectID)
+	llmClient, err := llmFactory.CreateForProject(workCtx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
 
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.2, false)
+	result, err := llmClient.GenerateResponse(workCtx, prompt, systemMsg, 0.2, false)
 	if err != nil {
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
@@ -1641,15 +1732,28 @@ func (c *jsonClassifier) Classify(
 	llmFactory llm.LLMClientFactory,
 	getTenantCtx TenantContextFunc,
 ) (*models.ColumnFeatures, error) {
+	// Acquire fresh connection for this classification to avoid "conn busy" errors
+	// when multiple classifiers run in parallel
+	workCtx := ctx
+	if getTenantCtx != nil {
+		var cleanup func()
+		var err error
+		workCtx, cleanup, err = getTenantCtx(ctx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("acquire tenant context: %w", err)
+		}
+		defer cleanup()
+	}
+
 	prompt := c.buildPrompt(profile)
 	systemMsg := c.systemMessage()
 
-	llmClient, err := llmFactory.CreateForProject(ctx, projectID)
+	llmClient, err := llmFactory.CreateForProject(workCtx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
 
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.2, false)
+	result, err := llmClient.GenerateResponse(workCtx, prompt, systemMsg, 0.2, false)
 	if err != nil {
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}

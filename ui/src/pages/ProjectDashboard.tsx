@@ -63,7 +63,7 @@ interface Tile {
  * This is the index page under /projects/:pid
  *
  * Note: Schema and Queries tiles are disabled when no datasource is configured.
- * Ontology tile is disabled when no datasource is configured OR no tables are selected.
+ * Ontology Extraction tile is disabled when no datasource is configured OR no tables are selected.
  * Users must first configure a datasource via the Datasource tile and select tables in the Schema page.
  */
 const ProjectDashboard = () => {
@@ -409,7 +409,7 @@ const ProjectDashboard = () => {
 
   const intelligenceTiles: Tile[] = [
     {
-      title: 'Ontology',
+      title: 'Ontology Extraction',
       icon: Layers,
       path: `/projects/${pid}/ontology`,
       disabled: !isConnected || !hasSelectedTables || !activeAIConfig, // Disabled if no datasource, no tables, or no AI config
@@ -510,7 +510,7 @@ const ProjectDashboard = () => {
     const colorClasses = getColorClasses(tile.color);
 
     // Check for ontology badges
-    const isOntologyTile = tile.title === 'Ontology';
+    const isOntologyTile = tile.title === 'Ontology Extraction';
     const isQuestionsTile = tile.title === 'Ontology Questions';
     const pendingQuestions = ontologyStatus?.pendingQuestionCount ?? 0;
     const isBuilding = ontologyStatus?.progress.state === 'building' || ontologyStatus?.progress.state === 'initializing';

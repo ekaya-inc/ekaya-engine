@@ -133,13 +133,6 @@ func (s *dataChangeDetectionService) ScanTables(
 		return nil, fmt.Errorf("failed to get active ontology: %w", err)
 	}
 
-	// Get ontology settings to determine if we should use legacy pattern matching
-	ontologySettings, err := s.projectService.GetOntologySettings(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get ontology settings: %w", err)
-	}
-	useLegacyPatternMatching := ontologySettings.UseLegacyPatternMatching
-
 	// Get tables for schema info
 	tables, err := s.schemaRepo.ListTablesByDatasource(ctx, projectID, datasourceID, true)
 	if err != nil {
@@ -207,7 +200,7 @@ func (s *dataChangeDetectionService) ScanTables(
 		}
 
 		// Detect potential FK patterns for non-FK columns
-		fkChanges, err := s.detectPotentialFKs(ctx, discoverer, table, columns, tables, useLegacyPatternMatching)
+		fkChanges, err := s.detectPotentialFKs(ctx, discoverer, table, columns, tables)
 		if err != nil {
 			s.logger.Warn("Failed to detect FK patterns",
 				zap.String("table", tableName),
@@ -325,13 +318,13 @@ func (s *dataChangeDetectionService) detectEnumChanges(
 }
 
 // detectPotentialFKs looks for columns that look like FKs but aren't declared as such.
+// Uses stored ColumnFeatures.Purpose to identify identifier columns as FK candidates.
 func (s *dataChangeDetectionService) detectPotentialFKs(
 	ctx context.Context,
 	discoverer datasource.SchemaDiscoverer,
 	table *models.SchemaTable,
 	columns []*models.SchemaColumn,
 	allTables []*models.SchemaTable,
-	useLegacyPatternMatching bool,
 ) ([]*models.PendingChange, error) {
 	var changes []*models.PendingChange
 
@@ -352,9 +345,14 @@ func (s *dataChangeDetectionService) detectPotentialFKs(
 			continue
 		}
 
-		// When legacy pattern matching is enabled, only check columns ending in _id
-		// When disabled, check all columns and let data validation decide
-		if useLegacyPatternMatching && !strings.HasSuffix(col.ColumnName, "_id") {
+		// Check column features - only check columns classified as identifiers
+		features := col.GetColumnFeatures()
+		if features != nil && features.Purpose != models.PurposeIdentifier {
+			continue
+		}
+
+		// Also check columns ending in _id as a fallback (for columns without features)
+		if features == nil && !strings.HasSuffix(col.ColumnName, "_id") {
 			continue
 		}
 

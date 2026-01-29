@@ -54,6 +54,103 @@ type SchemaColumn struct {
 	SampleValues      []string   `json:"sample_values,omitempty"`      // Distinct values for low-cardinality columns (≤50 values)
 }
 
+// GetColumnFeatures extracts the stored ColumnFeatures from the column's Metadata field.
+// Returns nil if no features have been stored yet.
+// The features are stored under the "column_features" key by UpdateColumnFeatures.
+func (c *SchemaColumn) GetColumnFeatures() *ColumnFeatures {
+	if c.Metadata == nil {
+		return nil
+	}
+	featuresData, ok := c.Metadata["column_features"]
+	if !ok {
+		return nil
+	}
+	featuresMap, ok := featuresData.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	// Extract purpose which is the primary field we need for filtering
+	features := &ColumnFeatures{}
+	if purpose, ok := featuresMap["purpose"].(string); ok {
+		features.Purpose = purpose
+	}
+	if semanticType, ok := featuresMap["semantic_type"].(string); ok {
+		features.SemanticType = semanticType
+	}
+	if role, ok := featuresMap["role"].(string); ok {
+		features.Role = role
+	}
+	if description, ok := featuresMap["description"].(string); ok {
+		features.Description = description
+	}
+	if confidence, ok := featuresMap["confidence"].(float64); ok {
+		features.Confidence = confidence
+	}
+	if path, ok := featuresMap["classification_path"].(string); ok {
+		features.ClassificationPath = ClassificationPath(path)
+	}
+
+	// Extract timestamp features if present
+	if tsData, ok := featuresMap["timestamp_features"].(map[string]any); ok {
+		features.TimestampFeatures = &TimestampFeatures{}
+		if purpose, ok := tsData["timestamp_purpose"].(string); ok {
+			features.TimestampFeatures.TimestampPurpose = purpose
+		}
+		if scale, ok := tsData["timestamp_scale"].(string); ok {
+			features.TimestampFeatures.TimestampScale = scale
+		}
+		if isSoftDelete, ok := tsData["is_soft_delete"].(bool); ok {
+			features.TimestampFeatures.IsSoftDelete = isSoftDelete
+		}
+		if isAudit, ok := tsData["is_audit_field"].(bool); ok {
+			features.TimestampFeatures.IsAuditField = isAudit
+		}
+	}
+
+	// Extract monetary features if present
+	if moneyData, ok := featuresMap["monetary_features"].(map[string]any); ok {
+		features.MonetaryFeatures = &MonetaryFeatures{}
+		if isMonetary, ok := moneyData["is_monetary"].(bool); ok {
+			features.MonetaryFeatures.IsMonetary = isMonetary
+		}
+		if unit, ok := moneyData["currency_unit"].(string); ok {
+			features.MonetaryFeatures.CurrencyUnit = unit
+		}
+		if paired, ok := moneyData["paired_currency_column"].(string); ok {
+			features.MonetaryFeatures.PairedCurrencyColumn = paired
+		}
+		if desc, ok := moneyData["amount_description"].(string); ok {
+			features.MonetaryFeatures.AmountDescription = desc
+		}
+	}
+
+	// Extract identifier features if present
+	if idData, ok := featuresMap["identifier_features"].(map[string]any); ok {
+		features.IdentifierFeatures = &IdentifierFeatures{}
+		if idType, ok := idData["identifier_type"].(string); ok {
+			features.IdentifierFeatures.IdentifierType = idType
+		}
+		if svc, ok := idData["external_service"].(string); ok {
+			features.IdentifierFeatures.ExternalService = svc
+		}
+		if fkTable, ok := idData["fk_target_table"].(string); ok {
+			features.IdentifierFeatures.FKTargetTable = fkTable
+		}
+		if fkCol, ok := idData["fk_target_column"].(string); ok {
+			features.IdentifierFeatures.FKTargetColumn = fkCol
+		}
+		if fkConf, ok := idData["fk_confidence"].(float64); ok {
+			features.IdentifierFeatures.FKConfidence = fkConf
+		}
+		if entityRef, ok := idData["entity_referenced"].(string); ok {
+			features.IdentifierFeatures.EntityReferenced = entityRef
+		}
+	}
+
+	return features
+}
+
 // SchemaRelationship represents a relationship between two columns.
 type SchemaRelationship struct {
 	ID                uuid.UUID          `json:"id"`
