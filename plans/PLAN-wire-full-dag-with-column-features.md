@@ -176,6 +176,8 @@ OntologyFinalization aggregates the final ontology. Ensure it:
 
 ### Task 7: Verify End-to-End Flow
 
+- [x] **Verification Complete**
+
 After all tasks complete, run full extraction and verify:
 
 1. **DAG completes all 11 nodes** without errors
