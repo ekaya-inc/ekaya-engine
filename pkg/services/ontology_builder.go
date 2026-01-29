@@ -249,12 +249,11 @@ func (s *ontologyBuilderService) parseAnswerProcessingResponse(response string, 
 
 	for _, kf := range llmResp.KnowledgeFacts {
 		result.KnowledgeFacts = append(result.KnowledgeFacts, &models.KnowledgeFact{
-			ProjectID:  projectID,
-			OntologyID: &ontologyID,
-			FactType:   kf.FactType,
-			Key:        kf.Key,
-			Value:      kf.Value,
-			Context:    kf.Context,
+			ProjectID: projectID,
+			FactType:  kf.FactType,
+			Key:       kf.Key,
+			Value:     kf.Value,
+			Context:   kf.Context,
 		})
 	}
 

@@ -2,11 +2,13 @@ package services
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/ekaya-inc/ekaya-engine/pkg/llm"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
@@ -21,11 +23,11 @@ func TestDetectPatternsInSamples(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		sampleValues  []string
-		wantPattern   string
-		wantMinRate   float64
-		wantAbsent    []string // patterns that should NOT be detected
+		name         string
+		sampleValues []string
+		wantPattern  string
+		wantMinRate  float64
+		wantAbsent   []string // patterns that should NOT be detected
 	}{
 		{
 			name: "UUID pattern",
@@ -944,4 +946,423 @@ func TestExtractColumnFeatures_EmptySchema(t *testing.T) {
 	if count != 0 {
 		t.Errorf("ExtractColumnFeatures() count = %d, want 0", count)
 	}
+}
+
+// ============================================================================
+// Phase 2: Column Classification Tests
+// ============================================================================
+
+func TestRunPhase2ColumnClassification_Success(t *testing.T) {
+	projectID := uuid.New()
+
+	// Create mock LLM client that returns valid JSON responses
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		// Return different responses based on what type of classification is being done
+		if containsStr(prompt, "Timestamp Column Classification") {
+			return &llm.GenerateResponseResult{
+				Content: `{"purpose": "audit_created", "confidence": 0.9, "is_soft_delete": false, "is_audit_field": true, "description": "Records when the row was created."}`,
+			}, nil
+		}
+		if containsStr(prompt, "Boolean Column Classification") {
+			return &llm.GenerateResponseResult{
+				Content: `{"true_meaning": "Active", "false_meaning": "Inactive", "boolean_type": "status_indicator", "confidence": 0.85, "description": "Indicates whether the record is active."}`,
+			}, nil
+		}
+		if containsStr(prompt, "UUID Column Classification") {
+			return &llm.GenerateResponseResult{
+				Content: `{"identifier_type": "primary_key", "entity_referenced": "", "needs_fk_resolution": false, "confidence": 0.95, "description": "Primary identifier for the record."}`,
+			}, nil
+		}
+		if containsStr(prompt, "JSON Column Classification") {
+			return &llm.GenerateResponseResult{
+				Content: `{"json_type": "settings", "confidence": 0.8, "description": "User configuration settings."}`,
+			}, nil
+		}
+		if containsStr(prompt, "Text Column Classification") {
+			return &llm.GenerateResponseResult{
+				Content: `{"text_type": "email", "confidence": 0.9, "description": "User email address."}`,
+			}, nil
+		}
+		// Default response
+		return &llm.GenerateResponseResult{
+			Content: `{"text_type": "description", "confidence": 0.5, "description": "Generic text field."}`,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.MockClient = mockClient
+
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), zap.NewNop())
+
+	// Build profiles to classify
+	profiles := []*models.ColumnDataProfile{
+		{
+			ColumnID:           uuid.New(),
+			ColumnName:         "created_at",
+			TableName:          "users",
+			DataType:           "timestamp",
+			ClassificationPath: models.ClassificationPathTimestamp,
+		},
+		{
+			ColumnID:           uuid.New(),
+			ColumnName:         "is_active",
+			TableName:          "users",
+			DataType:           "boolean",
+			ClassificationPath: models.ClassificationPathBoolean,
+		},
+		{
+			ColumnID:           uuid.New(),
+			ColumnName:         "id",
+			TableName:          "users",
+			DataType:           "uuid",
+			IsPrimaryKey:       true,
+			ClassificationPath: models.ClassificationPathUUID,
+		},
+	}
+
+	svc := &columnFeatureExtractionService{
+		llmFactory:  mockFactory,
+		workerPool:  workerPool,
+		logger:      zap.NewNop(),
+		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+	}
+
+	// Track progress
+	var progressCalls []int
+	progressCallback := func(completed, total int, message string) {
+		progressCalls = append(progressCalls, completed)
+	}
+
+	result, err := svc.runPhase2ColumnClassification(context.Background(), projectID, profiles, progressCallback)
+	if err != nil {
+		t.Fatalf("runPhase2ColumnClassification() error = %v", err)
+	}
+
+	// Verify results
+	if len(result.Features) != 3 {
+		t.Errorf("len(Features) = %d, want 3", len(result.Features))
+	}
+
+	// Verify progress was reported
+	if len(progressCalls) == 0 {
+		t.Error("No progress callbacks received")
+	}
+
+	// Verify LLM was called for each column
+	if mockClient.GenerateResponseCalls != 3 {
+		t.Errorf("GenerateResponseCalls = %d, want 3", mockClient.GenerateResponseCalls)
+	}
+
+	// Verify classification results
+	featuresByColumn := make(map[string]*models.ColumnFeatures)
+	for _, f := range result.Features {
+		for _, p := range profiles {
+			if p.ColumnID == f.ColumnID {
+				featuresByColumn[p.ColumnName] = f
+				break
+			}
+		}
+	}
+
+	// Check timestamp classification
+	if f, ok := featuresByColumn["created_at"]; ok {
+		if f.ClassificationPath != models.ClassificationPathTimestamp {
+			t.Errorf("created_at ClassificationPath = %v, want timestamp", f.ClassificationPath)
+		}
+		if f.TimestampFeatures == nil {
+			t.Error("created_at TimestampFeatures is nil")
+		} else if !f.TimestampFeatures.IsAuditField {
+			t.Error("created_at should be marked as audit field")
+		}
+	} else {
+		t.Error("created_at not found in results")
+	}
+
+	// Check boolean classification
+	if f, ok := featuresByColumn["is_active"]; ok {
+		if f.ClassificationPath != models.ClassificationPathBoolean {
+			t.Errorf("is_active ClassificationPath = %v, want boolean", f.ClassificationPath)
+		}
+		if f.BooleanFeatures == nil {
+			t.Error("is_active BooleanFeatures is nil")
+		} else if f.BooleanFeatures.BooleanType != "status_indicator" {
+			t.Errorf("is_active BooleanType = %v, want status_indicator", f.BooleanFeatures.BooleanType)
+		}
+	} else {
+		t.Error("is_active not found in results")
+	}
+
+	// Check UUID classification
+	if f, ok := featuresByColumn["id"]; ok {
+		if f.ClassificationPath != models.ClassificationPathUUID {
+			t.Errorf("id ClassificationPath = %v, want uuid", f.ClassificationPath)
+		}
+		if f.Role != models.RolePrimaryKey {
+			t.Errorf("id Role = %v, want primary_key", f.Role)
+		}
+	} else {
+		t.Error("id not found in results")
+	}
+}
+
+func TestRunPhase2ColumnClassification_EmptyProfiles(t *testing.T) {
+	svc := &columnFeatureExtractionService{
+		logger:      zap.NewNop(),
+		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+	}
+
+	result, err := svc.runPhase2ColumnClassification(context.Background(), uuid.New(), []*models.ColumnDataProfile{}, nil)
+	if err != nil {
+		t.Fatalf("runPhase2ColumnClassification() error = %v", err)
+	}
+
+	if len(result.Features) != 0 {
+		t.Errorf("len(Features) = %d, want 0", len(result.Features))
+	}
+	if len(result.Phase3EnumQueue) != 0 {
+		t.Errorf("len(Phase3EnumQueue) = %d, want 0", len(result.Phase3EnumQueue))
+	}
+}
+
+func TestRunPhase2ColumnClassification_RequiresLLMSupport(t *testing.T) {
+	// Service without LLM support
+	svc := &columnFeatureExtractionService{
+		logger:      zap.NewNop(),
+		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+	}
+
+	profiles := []*models.ColumnDataProfile{
+		{
+			ColumnID:           uuid.New(),
+			ColumnName:         "test",
+			TableName:          "test_table",
+			ClassificationPath: models.ClassificationPathText,
+		},
+	}
+
+	_, err := svc.runPhase2ColumnClassification(context.Background(), uuid.New(), profiles, nil)
+	if err == nil {
+		t.Error("Expected error when LLM support is not configured")
+	}
+	if !containsStr(err.Error(), "LLM support") {
+		t.Errorf("Error should mention LLM support, got: %v", err)
+	}
+}
+
+func TestRunPhase2ColumnClassification_EnqueuesFollowUpWork(t *testing.T) {
+	projectID := uuid.New()
+
+	// Create mock LLM client that returns responses that trigger follow-up work
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		if containsStr(prompt, "Enum/Categorical Column Classification") {
+			// Return response that needs detailed enum analysis
+			return &llm.GenerateResponseResult{
+				Content: `{"is_state_machine": true, "state_description": "Order status workflow", "needs_detailed_analysis": true, "confidence": 0.8, "description": "Order processing state."}`,
+			}, nil
+		}
+		if containsStr(prompt, "UUID Column Classification") {
+			// Return response that needs FK resolution
+			return &llm.GenerateResponseResult{
+				Content: `{"identifier_type": "foreign_key", "entity_referenced": "user", "needs_fk_resolution": true, "confidence": 0.7, "description": "References the user."}`,
+			}, nil
+		}
+		if containsStr(prompt, "Numeric Column Classification") {
+			// Return response that may be monetary (needs cross-column check)
+			return &llm.GenerateResponseResult{
+				Content: `{"numeric_type": "monetary", "may_be_monetary": true, "confidence": 0.75, "description": "Transaction amount."}`,
+			}, nil
+		}
+		return &llm.GenerateResponseResult{
+			Content: `{"text_type": "description", "confidence": 0.5, "description": "Generic field."}`,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.MockClient = mockClient
+
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), zap.NewNop())
+
+	profiles := []*models.ColumnDataProfile{
+		{
+			ColumnID:           uuid.New(),
+			ColumnName:         "status",
+			TableName:          "orders",
+			DataType:           "varchar(20)",
+			DistinctCount:      5,
+			ClassificationPath: models.ClassificationPathEnum,
+		},
+		{
+			ColumnID:           uuid.New(),
+			ColumnName:         "user_id",
+			TableName:          "orders",
+			DataType:           "uuid",
+			ClassificationPath: models.ClassificationPathUUID,
+		},
+		{
+			ColumnID:           uuid.New(),
+			ColumnName:         "amount",
+			TableName:          "orders",
+			DataType:           "numeric",
+			ClassificationPath: models.ClassificationPathNumeric,
+		},
+	}
+
+	svc := &columnFeatureExtractionService{
+		llmFactory:  mockFactory,
+		workerPool:  workerPool,
+		logger:      zap.NewNop(),
+		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+	}
+
+	result, err := svc.runPhase2ColumnClassification(context.Background(), projectID, profiles, nil)
+	if err != nil {
+		t.Fatalf("runPhase2ColumnClassification() error = %v", err)
+	}
+
+	// Verify Phase 3 queue (enum analysis)
+	if len(result.Phase3EnumQueue) != 1 {
+		t.Errorf("len(Phase3EnumQueue) = %d, want 1", len(result.Phase3EnumQueue))
+	}
+
+	// Verify Phase 4 queue (FK resolution)
+	if len(result.Phase4FKQueue) != 1 {
+		t.Errorf("len(Phase4FKQueue) = %d, want 1", len(result.Phase4FKQueue))
+	}
+
+	// Verify Phase 5 queue (cross-column analysis for monetary)
+	if len(result.Phase5CrossColumnQueue) != 1 {
+		t.Errorf("len(Phase5CrossColumnQueue) = %d, want 1", len(result.Phase5CrossColumnQueue))
+	}
+	if len(result.Phase5CrossColumnQueue) > 0 && result.Phase5CrossColumnQueue[0] != "orders" {
+		t.Errorf("Phase5CrossColumnQueue[0] = %v, want orders", result.Phase5CrossColumnQueue[0])
+	}
+}
+
+func TestRunPhase2ColumnClassification_ContinuesOnFailure(t *testing.T) {
+	projectID := uuid.New()
+
+	callCount := 0
+	mockClient := llm.NewMockLLMClient()
+	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
+		callCount++
+		// Fail on the second call
+		if callCount == 2 {
+			return nil, context.DeadlineExceeded
+		}
+		return &llm.GenerateResponseResult{
+			Content: `{"true_meaning": "Yes", "false_meaning": "No", "boolean_type": "state", "confidence": 0.8, "description": "Test."}`,
+		}, nil
+	}
+
+	mockFactory := llm.NewMockClientFactory()
+	mockFactory.MockClient = mockClient
+
+	workerPool := llm.NewWorkerPool(llm.DefaultWorkerPoolConfig(), zap.NewNop())
+
+	profiles := []*models.ColumnDataProfile{
+		{ColumnID: uuid.New(), ColumnName: "col1", TableName: "t1", ClassificationPath: models.ClassificationPathBoolean},
+		{ColumnID: uuid.New(), ColumnName: "col2", TableName: "t1", ClassificationPath: models.ClassificationPathBoolean},
+		{ColumnID: uuid.New(), ColumnName: "col3", TableName: "t1", ClassificationPath: models.ClassificationPathBoolean},
+	}
+
+	svc := &columnFeatureExtractionService{
+		llmFactory:  mockFactory,
+		workerPool:  workerPool,
+		logger:      zap.NewNop(),
+		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+	}
+
+	result, err := svc.runPhase2ColumnClassification(context.Background(), projectID, profiles, nil)
+	if err != nil {
+		t.Fatalf("runPhase2ColumnClassification() error = %v (should continue on individual failures)", err)
+	}
+
+	// Should have 2 successful results (1 failure)
+	if len(result.Features) != 2 {
+		t.Errorf("len(Features) = %d, want 2 (1 failure)", len(result.Features))
+	}
+}
+
+func TestGetClassifier_CachesClassifiers(t *testing.T) {
+	svc := &columnFeatureExtractionService{
+		logger:      zap.NewNop(),
+		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+	}
+
+	// Get classifier twice
+	c1 := svc.getClassifier(models.ClassificationPathTimestamp)
+	c2 := svc.getClassifier(models.ClassificationPathTimestamp)
+
+	// Should be the same instance (cached)
+	if c1 != c2 {
+		t.Error("Classifiers should be cached and reused")
+	}
+
+	// Different path should get different classifier
+	c3 := svc.getClassifier(models.ClassificationPathBoolean)
+	if c1 == c3 {
+		t.Error("Different paths should get different classifiers")
+	}
+}
+
+func TestGetClassifier_AllPaths(t *testing.T) {
+	svc := &columnFeatureExtractionService{
+		logger:      zap.NewNop(),
+		classifiers: make(map[models.ClassificationPath]ColumnClassifier),
+	}
+
+	paths := []models.ClassificationPath{
+		models.ClassificationPathTimestamp,
+		models.ClassificationPathBoolean,
+		models.ClassificationPathEnum,
+		models.ClassificationPathUUID,
+		models.ClassificationPathExternalID,
+		models.ClassificationPathNumeric,
+		models.ClassificationPathText,
+		models.ClassificationPathJSON,
+		models.ClassificationPathUnknown,
+	}
+
+	for _, path := range paths {
+		t.Run(string(path), func(t *testing.T) {
+			c := svc.getClassifier(path)
+			if c == nil {
+				t.Errorf("getClassifier(%v) returned nil", path)
+			}
+		})
+	}
+}
+
+func TestUnknownClassifier_NoLLMCall(t *testing.T) {
+	projectID := uuid.New()
+	profile := &models.ColumnDataProfile{
+		ColumnID:           uuid.New(),
+		ColumnName:         "binary_data",
+		TableName:          "files",
+		DataType:           "bytea",
+		ClassificationPath: models.ClassificationPathUnknown,
+	}
+
+	classifier := &unknownClassifier{logger: zap.NewNop()}
+
+	// Should not need LLM factory
+	features, err := classifier.Classify(context.Background(), projectID, profile, nil, nil)
+	if err != nil {
+		t.Fatalf("Classify() error = %v", err)
+	}
+
+	if features.ClassificationPath != models.ClassificationPathUnknown {
+		t.Errorf("ClassificationPath = %v, want unknown", features.ClassificationPath)
+	}
+	if features.Confidence != 0.5 {
+		t.Errorf("Confidence = %v, want 0.5", features.Confidence)
+	}
+}
+
+// containsStr is a local helper since strings.Contains is the right function to use
+// This is just to avoid name collision with datasource_test.go's contains function
+func containsStr(s, substr string) bool {
+	return strings.Contains(s, substr)
 }

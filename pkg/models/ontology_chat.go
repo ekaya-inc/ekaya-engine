@@ -205,14 +205,15 @@ func IsValidFactType(t string) bool {
 }
 
 // KnowledgeFact represents a learned business fact about the project.
+// Knowledge facts have project-lifecycle scope - they persist across ontology
+// re-extractions and are only deleted when the project is deleted.
 type KnowledgeFact struct {
-	ID         uuid.UUID  `json:"id"`
-	ProjectID  uuid.UUID  `json:"project_id"`
-	OntologyID *uuid.UUID `json:"ontology_id,omitempty"` // Links to ontology for CASCADE delete
-	FactType   string     `json:"fact_type"`
-	Key        string     `json:"key"`
-	Value      string     `json:"value"`
-	Context    string     `json:"context,omitempty"`
+	ID        uuid.UUID `json:"id"`
+	ProjectID uuid.UUID `json:"project_id"`
+	FactType  string    `json:"fact_type"`
+	Key       string    `json:"key"`
+	Value     string    `json:"value"`
+	Context   string    `json:"context,omitempty"`
 
 	// Provenance: source tracking (how it was created/modified)
 	Source         string  `json:"source"`                     // 'inference', 'mcp', 'manual'
