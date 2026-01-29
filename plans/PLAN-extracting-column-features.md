@@ -1127,23 +1127,27 @@ func (s *columnFeatureExtractionService) ExtractColumnFeatures(
 
 ---
 
-### Task 9: Remove All Static Column Name Patterns
+### Task 9: Remove All Static Column Name Patterns ✓
 
-**Files to modify:**
+**Status:** Complete
 
-1. `pkg/services/column_enrichment.go`
-   - Remove: `detectSoftDeletePattern()`, `detectMonetaryColumnPattern()`, `detectUUIDTextColumnPattern()`, `detectTimestampScalePattern()`, `detectExternalIDPattern()`
-   - Remove: `monetaryColumnPatterns` variable
-   - Update: `convertToColumnDetails()` to read from stored features instead
+**Files modified:**
 
-2. `pkg/services/column_filter.go`
-   - Remove: `isExcludedName()`, `isEntityReferenceName()`
-   - Remove: `useLegacyPatternMatching` parameter
-   - Update: Use `ColumnFeatures.Purpose` for filtering
+1. `pkg/services/column_enrichment.go` ✓
+   - Removed: `detectSoftDeletePattern()`, `detectMonetaryColumnPattern()`, `detectUUIDTextColumnPattern()`, `detectTimestampScalePattern()`, `detectExternalIDPattern()` (already done in prior work)
+   - Removed: `monetaryColumnPatterns` variable (already done in prior work)
+   - Updated: `convertToColumnDetails()` reads from stored features (already done in prior work)
 
-3. `pkg/services/deterministic_question_generation.go`
-   - Remove any column name pattern checks
-   - Use stored features for question generation
+2. `pkg/services/column_filter.go` ✓
+   - Removed: `isExcludedName()`, `isEntityReferenceName()` (already done in prior work)
+   - Removed: `useLegacyPatternMatching` parameter (already done in prior work)
+   - Updated: Uses `ColumnFeatures.Purpose` for filtering (already done in prior work)
+
+3. `pkg/services/deterministic_question_generation.go` ✓
+   - Removed: `knownOptionalColumnPatterns` variable
+   - Removed: `isKnownOptionalColumn()` function
+   - Updated: `checkHighNullRate()` now uses stored features only (Purpose, TimestampFeatures.IsSoftDelete, JSON purpose)
+   - Updated: Tests to use features instead of name patterns
 
 ---
 

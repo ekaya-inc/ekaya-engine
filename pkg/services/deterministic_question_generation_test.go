@@ -63,7 +63,7 @@ func TestDeterministicQuestionGenerator_HighNullRate(t *testing.T) {
 			wantQuestions: 0,
 		},
 		{
-			name: "skips known optional column deleted_at",
+			name: "skips soft delete timestamp with features",
 			tables: []*models.SchemaTable{
 				{
 					TableName:  "users",
@@ -74,6 +74,14 @@ func TestDeterministicQuestionGenerator_HighNullRate(t *testing.T) {
 							ColumnName: "deleted_at",
 							IsSelected: true,
 							NullCount:  ptrTo(int64(950)),
+							Metadata: map[string]any{
+								"column_features": map[string]any{
+									"purpose": models.PurposeTimestamp,
+									"timestamp_features": map[string]any{
+										"is_soft_delete": true,
+									},
+								},
+							},
 						},
 					},
 				},
@@ -81,7 +89,7 @@ func TestDeterministicQuestionGenerator_HighNullRate(t *testing.T) {
 			wantQuestions: 0,
 		},
 		{
-			name: "skips known optional column with _notes suffix",
+			name: "skips text column with features (internal_notes)",
 			tables: []*models.SchemaTable{
 				{
 					TableName:  "orders",
@@ -92,6 +100,11 @@ func TestDeterministicQuestionGenerator_HighNullRate(t *testing.T) {
 							ColumnName: "internal_notes",
 							IsSelected: true,
 							NullCount:  ptrTo(int64(900)),
+							Metadata: map[string]any{
+								"column_features": map[string]any{
+									"purpose": models.PurposeText,
+								},
+							},
 						},
 					},
 				},
@@ -99,7 +112,7 @@ func TestDeterministicQuestionGenerator_HighNullRate(t *testing.T) {
 			wantQuestions: 0,
 		},
 		{
-			name: "skips known optional column description",
+			name: "skips text column with features (description)",
 			tables: []*models.SchemaTable{
 				{
 					TableName:  "products",
@@ -110,11 +123,36 @@ func TestDeterministicQuestionGenerator_HighNullRate(t *testing.T) {
 							ColumnName: "description",
 							IsSelected: true,
 							NullCount:  ptrTo(int64(850)),
+							Metadata: map[string]any{
+								"column_features": map[string]any{
+									"purpose": models.PurposeText,
+								},
+							},
 						},
 					},
 				},
 			},
 			wantQuestions: 0,
+		},
+		{
+			name: "generates question for high null column without features",
+			tables: []*models.SchemaTable{
+				{
+					TableName:  "users",
+					IsSelected: true,
+					RowCount:   ptrTo(int64(1000)),
+					Columns: []models.SchemaColumn{
+						{
+							ColumnName: "some_field", // No features - question should be generated
+							IsSelected: true,
+							NullCount:  ptrTo(int64(900)),
+						},
+					},
+				},
+			},
+			wantQuestions:  1,
+			wantCategory:   models.QuestionCategoryDataQuality,
+			wantColumnName: "some_field",
 		},
 		{
 			name: "skips unselected tables",
@@ -484,49 +522,9 @@ func TestDeterministicQuestionGenerator_CombinedQuestions(t *testing.T) {
 	assert.True(t, enumQ.IsRequired)
 }
 
-func TestIsKnownOptionalColumn(t *testing.T) {
-	tests := []struct {
-		columnName string
-		want       bool
-	}{
-		// Exact matches
-		{"deleted_at", true},
-		{"DELETED_AT", true}, // case insensitive
-		{"archived_at", true},
-		{"description", true},
-		{"notes", true},
-		{"middle_name", true},
-		{"avatar_url", true},
-		{"metadata", true},
-
-		// Suffix patterns
-		{"internal_notes", true},
-		{"order_description", true},
-		{"image_url", true},
-		{"created_at", true},
-		{"updated_on", true},
-
-		// Prefix patterns
-		{"old_email", true},
-		{"legacy_id", true},
-		{"alt_phone", true},
-		{"custom_field", true},
-
-		// Non-optional columns
-		{"email", false},
-		{"name", false},
-		{"user_id", false},
-		{"amount", false},
-		{"created_by", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.columnName, func(t *testing.T) {
-			got := isKnownOptionalColumn(tt.columnName)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
+// NOTE: TestIsKnownOptionalColumn has been removed because isKnownOptionalColumn()
+// was removed. Column classification is now handled by the column_feature_extraction
+// service and stored in ColumnFeatures. See PLAN-extracting-column-features.md.
 
 func TestIsCrypticValue(t *testing.T) {
 	tests := []struct {
