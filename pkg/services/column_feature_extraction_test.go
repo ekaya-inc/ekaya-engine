@@ -711,6 +711,10 @@ func (m *mockSchemaRepoForFeatureExtraction) ListColumnsByDatasource(ctx context
 	return m.columns, nil
 }
 
+func (m *mockSchemaRepoForFeatureExtraction) GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error) {
+	return nil, nil
+}
+
 // Stub implementations for interface
 func (m *mockSchemaRepoForFeatureExtraction) GetTableByID(ctx context.Context, projectID, tableID uuid.UUID) (*models.SchemaTable, error) {
 	return nil, nil
@@ -763,7 +767,7 @@ func (m *mockSchemaRepoForFeatureExtraction) UpdateColumnStats(ctx context.Conte
 func (m *mockSchemaRepoForFeatureExtraction) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
 	return nil
 }
-func (m *mockSchemaRepoForFeatureExtraction) UpdateColumnFeatures(ctx context.Context, columnID uuid.UUID, features *models.ColumnFeatures) error {
+func (m *mockSchemaRepoForFeatureExtraction) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
 	return nil
 }
 func (m *mockSchemaRepoForFeatureExtraction) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {
@@ -2924,7 +2928,7 @@ type mockSchemaRepoForStoreFeatures struct {
 	failForColumns map[uuid.UUID]bool
 }
 
-func (m *mockSchemaRepoForStoreFeatures) UpdateColumnFeatures(ctx context.Context, columnID uuid.UUID, features *models.ColumnFeatures) error {
+func (m *mockSchemaRepoForStoreFeatures) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
 	if m.failForColumns != nil && m.failForColumns[columnID] {
 		return fmt.Errorf("simulated failure for column %s", columnID)
 	}

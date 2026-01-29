@@ -3276,7 +3276,7 @@ func (s *columnFeatureExtractionService) storeFeatures(
 			continue
 		}
 
-		err := s.schemaRepo.UpdateColumnFeatures(ctx, f.ColumnID, f)
+		err := s.schemaRepo.UpdateColumnFeatures(ctx, projectID, f.ColumnID, f)
 		if err != nil {
 			s.logger.Error("Failed to store column features",
 				zap.String("column_id", f.ColumnID.String()),

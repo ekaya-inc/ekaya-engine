@@ -452,6 +452,12 @@ func (m *mockSchemaRepository) GetNonPKColumnsByExactType(ctx context.Context, p
 func (m *mockSchemaRepository) SelectAllTablesAndColumns(ctx context.Context, projectID, datasourceID uuid.UUID) error {
 	return nil
 }
+func (m *mockSchemaRepository) GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error) {
+	return nil, nil
+}
+func (m *mockSchemaRepository) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
+	return nil
+}
 
 // mockColumnMetadataRepository implements repositories.ColumnMetadataRepository for testing.
 type mockColumnMetadataRepository struct {

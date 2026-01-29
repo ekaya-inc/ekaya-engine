@@ -309,6 +309,10 @@ func (r *testColEnrichmentSchemaRepo) ListColumnsByDatasource(ctx context.Contex
 	return nil, nil
 }
 
+func (r *testColEnrichmentSchemaRepo) GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error) {
+	return nil, nil
+}
+
 func (r *testColEnrichmentSchemaRepo) GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error) {
 	return nil, nil
 }
@@ -329,7 +333,7 @@ func (r *testColEnrichmentSchemaRepo) UpdateColumnMetadata(ctx context.Context, 
 	return nil
 }
 
-func (r *testColEnrichmentSchemaRepo) UpdateColumnFeatures(ctx context.Context, columnID uuid.UUID, features *models.ColumnFeatures) error {
+func (r *testColEnrichmentSchemaRepo) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
 	return nil
 }
 

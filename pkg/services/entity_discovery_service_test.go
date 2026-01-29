@@ -1176,6 +1176,10 @@ func (m *mockSchemaRepoForGrouping) ListColumnsByDatasource(ctx context.Context,
 	return m.columns, nil
 }
 
+func (m *mockSchemaRepoForGrouping) GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error) {
+	return nil, nil
+}
+
 // Stub implementations for interface
 func (m *mockSchemaRepoForGrouping) GetTableByID(ctx context.Context, projectID, tableID uuid.UUID) (*models.SchemaTable, error) {
 	return nil, nil
@@ -1228,7 +1232,7 @@ func (m *mockSchemaRepoForGrouping) UpdateColumnStats(ctx context.Context, colum
 func (m *mockSchemaRepoForGrouping) UpdateColumnMetadata(ctx context.Context, projectID, columnID uuid.UUID, businessName, description *string) error {
 	return nil
 }
-func (m *mockSchemaRepoForGrouping) UpdateColumnFeatures(ctx context.Context, columnID uuid.UUID, features *models.ColumnFeatures) error {
+func (m *mockSchemaRepoForGrouping) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
 	return nil
 }
 func (m *mockSchemaRepoForGrouping) ListRelationshipsByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) ([]*models.SchemaRelationship, error) {

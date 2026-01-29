@@ -184,6 +184,10 @@ func (m *mockSchemaRepository) ListColumnsByDatasource(ctx context.Context, proj
 	return m.columns, nil
 }
 
+func (m *mockSchemaRepository) GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error) {
+	return nil, nil
+}
+
 func (m *mockSchemaRepository) GetColumnByID(ctx context.Context, projectID, columnID uuid.UUID) (*models.SchemaColumn, error) {
 	for _, c := range m.columns {
 		if c.ID == columnID {
@@ -251,7 +255,7 @@ func (m *mockSchemaRepository) UpdateColumnMetadata(ctx context.Context, project
 	return nil
 }
 
-func (m *mockSchemaRepository) UpdateColumnFeatures(ctx context.Context, columnID uuid.UUID, features *models.ColumnFeatures) error {
+func (m *mockSchemaRepository) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
 	return nil
 }
 

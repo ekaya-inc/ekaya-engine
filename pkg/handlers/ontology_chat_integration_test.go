@@ -157,6 +157,10 @@ func (m *mockKnowledgeServiceChat) Delete(ctx context.Context, id uuid.UUID) err
 	return nil
 }
 
+func (m *mockKnowledgeServiceChat) DeleteAll(ctx context.Context, projectID uuid.UUID) error {
+	return nil
+}
+
 // setupChatIntegrationTest creates a test context with mock services.
 func setupChatIntegrationTest(t *testing.T) *chatIntegrationTestContext {
 	t.Helper()

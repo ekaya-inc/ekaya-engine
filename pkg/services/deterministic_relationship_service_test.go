@@ -1427,6 +1427,10 @@ func (m *mockTestSchemaRepo) ListColumnsByDatasource(ctx context.Context, projec
 	return result, nil
 }
 
+func (m *mockTestSchemaRepo) GetColumnsWithFeaturesByDatasource(ctx context.Context, projectID, datasourceID uuid.UUID) (map[string][]*models.SchemaColumn, error) {
+	return nil, nil
+}
+
 func (m *mockTestSchemaRepo) GetColumnsByTables(ctx context.Context, projectID uuid.UUID, tableNames []string, selectedOnly bool) (map[string][]*models.SchemaColumn, error) {
 	return nil, nil
 }
@@ -1647,7 +1651,7 @@ func (m *mockTestSchemaRepo) UpdateColumnMetadata(ctx context.Context, projectID
 	return nil
 }
 
-func (m *mockTestSchemaRepo) UpdateColumnFeatures(ctx context.Context, columnID uuid.UUID, features *models.ColumnFeatures) error {
+func (m *mockTestSchemaRepo) UpdateColumnFeatures(ctx context.Context, projectID, columnID uuid.UUID, features *models.ColumnFeatures) error {
 	return nil
 }
 
