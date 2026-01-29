@@ -5,6 +5,7 @@ This document describes how to use Claude Code's MCP tools and Chrome browser au
 ## Prerequisites
 
 1. **Dev servers running** (user manages these - never start/stop from Claude Code):
+
    ```bash
    # Terminal 1
    make dev-ui        # http://localhost:5173
@@ -24,6 +25,7 @@ http://localhost:3443/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/
 ```
 
 Key pages:
+
 - Dashboard: `/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/`
 - Entities: `/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/entities`
 - Relationships: `/projects/2b5b014f-191a-41b4-b207-85f7d5c3b04b/relationships`
@@ -33,6 +35,7 @@ Key pages:
 ## MCP Tools Available (42 base, up to 50 with optional apps)
 
 ### Read Operations
+
 | Tool | Purpose |
 |------|---------|
 | `mcp__test_data__health` | Server health check |
@@ -57,6 +60,7 @@ Key pages:
 | `mcp__test_data__explain_query` | Analyze query performance with EXPLAIN ANALYZE |
 
 ### Write Operations
+
 | Tool | Purpose |
 |------|---------|
 | `mcp__test_data__update_entity` | Create/update entity (upsert by name) |
@@ -79,6 +83,7 @@ Key pages:
 | `mcp__test_data__execute_approved_query` | Run pre-approved query by ID |
 
 ### Ontology Question Management
+
 | Tool | Purpose |
 |------|---------|
 | `mcp__test_data__resolve_ontology_question` | Mark question as resolved |
@@ -160,6 +165,7 @@ Test that changes made via MCP appear in the UI:
 ```
 
 Example:
+
 ```javascript
 // 1. Create entity via MCP
 mcp__test_data__update_entity({
@@ -191,6 +197,7 @@ Test that changes made in UI appear via MCP:
 ```
 
 Example:
+
 ```javascript
 // 1. Navigate to glossary page
 mcp__claude-in-chrome__navigate({
@@ -208,7 +215,9 @@ mcp__test_data__list_glossary()
 ## Known Issues
 
 ### Glossary Term Creation
+
 The "Create Term" button is disabled until SQL is tested. Workflow:
+
 1. Fill in term name, definition, SQL
 2. Click "Test SQL" button
 3. Wait for "SQL is valid" confirmation
@@ -217,7 +226,9 @@ The "Create Term" button is disabled until SQL is tested. Workflow:
 See: `ui/src/components/GlossaryTermEditor.tsx` lines 172-175, 247-252
 
 ### Entity Deletion
+
 Entities with relationships cannot be deleted. Delete relationships first:
+
 ```javascript
 mcp__test_data__delete_relationship({ from_entity: "EntityA", to_entity: "EntityB" })
 mcp__test_data__delete_entity({ name: "EntityA" })
@@ -239,11 +250,13 @@ See `plans/BUGS-ontology-extraction.md` for ontology extraction issues.
 There are **two separate databases** involved in testing:
 
 ### 1. Datasource Database (via MCP)
+
 - Accessed via `mcp__test_data__*` tools
 - Contains the actual business data (e.g., Tikr tables: users, billing_transactions, etc.)
 - MCP tools query this database and return ontology-enriched results
 
 ### 2. Ekaya Engine Database (via psql)
+
 - Accessed via `psql -d ekaya_engine`
 - Contains Ekaya's internal metadata: ontologies, entities, glossary, project knowledge
 - Use this to investigate ontology extraction issues or check for stale data
@@ -290,6 +303,7 @@ There are **two separate databases** involved in testing:
 ## Investigating Ontology Issues
 
 ### Check Current Ontology
+
 ```sql
 -- Via psql (ekaya_engine database)
 psql -d ekaya_engine -c "
@@ -300,9 +314,11 @@ psql -d ekaya_engine -c "
 ```
 
 ### Check for Stale Data from Prior Ontologies
+
 When a datasource is changed and the old ontology is deleted, some tables may retain stale data because they're linked to `project_id` not `ontology_id`.
 
 **Tables cleaned up on ontology delete (have `ontology_id` FK):**
+
 - `engine_ontology_entities`
 - `engine_entity_relationships`
 - `engine_ontology_questions`
@@ -310,6 +326,7 @@ When a datasource is changed and the old ontology is deleted, some tables may re
 - `engine_ontology_dag`
 
 **Tables NOT cleaned up (have only `project_id` FK):**
+
 - `engine_project_knowledge`
 - `engine_business_glossary`
 
@@ -330,6 +347,7 @@ psql -d ekaya_engine -c "
 ```
 
 ### Verify MCP Returns Current Ontology Data
+
 The MCP server always queries the current active ontology. If you suspect stale data:
 
 1. Check what MCP returns: `mcp__test_data__get_context(depth="domain")`
@@ -337,7 +355,9 @@ The MCP server always queries the current active ontology. If you suspect stale 
 3. If psql shows older data than MCP, you have stale entries from a prior ontology
 
 ### Clean Up Stale Data Manually
+
 If you find stale data from a prior datasource:
+
 ```sql
 -- Delete stale project knowledge (verify dates first!)
 psql -d ekaya_engine -c "
