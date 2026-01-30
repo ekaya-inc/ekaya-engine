@@ -165,10 +165,10 @@ At `depth='tables'` and `depth='columns'`, include table metadata in the output.
 
 ---
 
-### 8. `update_project_knowledge` Fact Field Has 255 Character Limit
+### [x] 8. `update_project_knowledge` Fact Field Has 255 Character Limit
 
 **Severity**: LOW (UX)
-**Status**: Open
+**Status**: Complete
 
 **Description**: The `fact` parameter in `update_project_knowledge` is limited to 255 characters, which is too short for complex business rules.
 
