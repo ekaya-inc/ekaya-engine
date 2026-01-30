@@ -527,6 +527,29 @@ func buildColumnDetails(
 			colDetail["description"] = col.Description
 		}
 
+		// Add enriched column metadata from update_column (MCP enrichment)
+		// These take precedence over datasource column values when present
+		if columnMetadata != nil {
+			if meta, ok := columnMetadata[col.ColumnName]; ok {
+				// Description from update_column overrides datasource description
+				if meta.Description != nil && *meta.Description != "" {
+					colDetail["description"] = *meta.Description
+				}
+				// Entity association (e.g., 'User', 'Account')
+				if meta.Entity != nil && *meta.Entity != "" {
+					colDetail["entity"] = *meta.Entity
+				}
+				// Semantic role (e.g., 'dimension', 'measure', 'identifier', 'attribute')
+				if meta.Role != nil && *meta.Role != "" {
+					colDetail["role"] = *meta.Role
+				}
+				// Enum value labels if defined
+				if len(meta.EnumValues) > 0 {
+					colDetail["enum_values"] = meta.EnumValues
+				}
+			}
+		}
+
 		// Get corresponding schema column if available
 		var schemaCol *models.SchemaColumn
 		if schemaColumns != nil {

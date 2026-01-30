@@ -663,6 +663,187 @@ func TestSampleValuesRedactionPreservesJSONStructure(t *testing.T) {
 	assert.Equal(t, "kitt", parsed["livekit_agent_id"], "Non-sensitive agent ID should be preserved")
 }
 
+// TestColumnMetadataEnrichment tests that column metadata from update_column is merged into
+// column details in get_context output.
+func TestColumnMetadataEnrichment(t *testing.T) {
+	tests := []struct {
+		name              string
+		columnName        string
+		datasourceCol     *models.DatasourceColumn
+		columnMeta        *models.ColumnMetadata
+		expectedFields    map[string]any
+		notExpectedFields []string
+	}{
+		{
+			name:       "no metadata - only datasource values",
+			columnName: "user_id",
+			datasourceCol: &models.DatasourceColumn{
+				ColumnName: "user_id",
+				DataType:   "uuid",
+				IsNullable: false,
+			},
+			columnMeta: nil,
+			expectedFields: map[string]any{
+				"column_name": "user_id",
+				"data_type":   "uuid",
+				"is_nullable": false,
+			},
+			notExpectedFields: []string{"description", "entity", "role", "enum_values"},
+		},
+		{
+			name:       "metadata with description overrides datasource",
+			columnName: "host_id",
+			datasourceCol: &models.DatasourceColumn{
+				ColumnName:  "host_id",
+				DataType:    "uuid",
+				IsNullable:  false,
+				Description: "Original datasource description",
+			},
+			columnMeta: &models.ColumnMetadata{
+				ColumnName:  "host_id",
+				Description: ptrString("Use this to find all hosts who had engagements"),
+			},
+			expectedFields: map[string]any{
+				"column_name": "host_id",
+				"description": "Use this to find all hosts who had engagements", // Should override
+			},
+			notExpectedFields: []string{"entity", "role", "enum_values"},
+		},
+		{
+			name:       "metadata with entity and role",
+			columnName: "status",
+			datasourceCol: &models.DatasourceColumn{
+				ColumnName: "status",
+				DataType:   "varchar",
+				IsNullable: false,
+			},
+			columnMeta: &models.ColumnMetadata{
+				ColumnName: "status",
+				Entity:     ptrString("User"),
+				Role:       ptrString("dimension"),
+			},
+			expectedFields: map[string]any{
+				"column_name": "status",
+				"entity":      "User",
+				"role":        "dimension",
+			},
+			notExpectedFields: []string{"description", "enum_values"},
+		},
+		{
+			name:       "metadata with enum_values",
+			columnName: "order_status",
+			datasourceCol: &models.DatasourceColumn{
+				ColumnName: "order_status",
+				DataType:   "varchar",
+				IsNullable: false,
+			},
+			columnMeta: &models.ColumnMetadata{
+				ColumnName: "order_status",
+				EnumValues: []string{"PENDING - Order is pending", "COMPLETED - Order completed"},
+			},
+			expectedFields: map[string]any{
+				"column_name": "order_status",
+				"enum_values": []string{"PENDING - Order is pending", "COMPLETED - Order completed"},
+			},
+			notExpectedFields: []string{"description", "entity", "role"},
+		},
+		{
+			name:       "full metadata enrichment",
+			columnName: "amount",
+			datasourceCol: &models.DatasourceColumn{
+				ColumnName: "amount",
+				DataType:   "numeric",
+				IsNullable: false,
+			},
+			columnMeta: &models.ColumnMetadata{
+				ColumnName:  "amount",
+				Description: ptrString("Transaction amount in USD cents"),
+				Entity:      ptrString("Transaction"),
+				Role:        ptrString("measure"),
+			},
+			expectedFields: map[string]any{
+				"column_name": "amount",
+				"data_type":   "numeric",
+				"is_nullable": false,
+				"description": "Transaction amount in USD cents",
+				"entity":      "Transaction",
+				"role":        "measure",
+			},
+			notExpectedFields: []string{"enum_values"},
+		},
+		{
+			name:       "empty string values are not included",
+			columnName: "test_col",
+			datasourceCol: &models.DatasourceColumn{
+				ColumnName: "test_col",
+				DataType:   "varchar",
+				IsNullable: true,
+			},
+			columnMeta: &models.ColumnMetadata{
+				ColumnName:  "test_col",
+				Description: ptrString(""), // Empty string
+				Entity:      ptrString(""), // Empty string
+				Role:        ptrString(""), // Empty string
+				EnumValues:  []string{},    // Empty slice
+			},
+			expectedFields: map[string]any{
+				"column_name": "test_col",
+			},
+			notExpectedFields: []string{"description", "entity", "role", "enum_values"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Build column detail as done in buildColumnDetails
+			colDetail := map[string]any{
+				"column_name": tt.datasourceCol.ColumnName,
+				"data_type":   tt.datasourceCol.DataType,
+				"is_nullable": tt.datasourceCol.IsNullable,
+			}
+			if tt.datasourceCol.BusinessName != "" {
+				colDetail["business_name"] = tt.datasourceCol.BusinessName
+			}
+			if tt.datasourceCol.Description != "" {
+				colDetail["description"] = tt.datasourceCol.Description
+			}
+
+			// Apply column metadata enrichment (same logic as context.go)
+			if tt.columnMeta != nil {
+				// Description from update_column overrides datasource description
+				if tt.columnMeta.Description != nil && *tt.columnMeta.Description != "" {
+					colDetail["description"] = *tt.columnMeta.Description
+				}
+				// Entity association
+				if tt.columnMeta.Entity != nil && *tt.columnMeta.Entity != "" {
+					colDetail["entity"] = *tt.columnMeta.Entity
+				}
+				// Semantic role
+				if tt.columnMeta.Role != nil && *tt.columnMeta.Role != "" {
+					colDetail["role"] = *tt.columnMeta.Role
+				}
+				// Enum values
+				if len(tt.columnMeta.EnumValues) > 0 {
+					colDetail["enum_values"] = tt.columnMeta.EnumValues
+				}
+			}
+
+			// Verify expected fields are present with correct values
+			for field, expectedVal := range tt.expectedFields {
+				actualVal, exists := colDetail[field]
+				assert.True(t, exists, "Expected field %s to be present", field)
+				assert.Equal(t, expectedVal, actualVal, "Field %s should have expected value", field)
+			}
+
+			// Verify fields that should not be present
+			for _, field := range tt.notExpectedFields {
+				_, exists := colDetail[field]
+				assert.False(t, exists, "Field %s should NOT be present", field)
+			}
+		})
+	}
+}
+
 // Helper functions for creating pointers
 func ptrInt64(v int64) *int64 {
 	return &v

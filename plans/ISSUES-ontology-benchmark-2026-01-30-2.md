@@ -215,10 +215,10 @@ create_approved_query(
 2. Make `datasource_id` optional in `create_approved_query` (auto-detect like `suggest_approved_query` does)
 3. Add a `list_datasources` tool
 
-### 10. `get_context` Does Not Surface Enriched Column Metadata
+### [x] 10. `get_context` Does Not Surface Enriched Column Metadata
 
 **Severity**: HIGH
-**Status**: Open
+**Status**: Complete
 
 **Description**: Column descriptions added via `update_column` are stored but not included in `get_context` output at the columns depth level. This defeats the purpose of metadata enrichment.
 
@@ -271,5 +271,5 @@ Option 2 (include at domain level) seems cleanest since project knowledge is hig
 | 7 | Feature Request | MEDIUM | Missing `update_table` tool for table-level metadata (split into 7.1-7.4) |
 | 8 | UX | LOW | `update_project_knowledge` fact limited to 255 chars |
 | ~~9~~ | ~~UX~~ | ~~MEDIUM~~ | ~~`create_approved_query` requires undiscoverable datasource_id~~ ✅ |
-| 10 | Bug | HIGH | `get_context` doesn't surface enriched column metadata |
+| ~~10~~ | ~~Bug~~ | ~~HIGH~~ | ~~`get_context` doesn't surface enriched column metadata~~ ✅ |
 | 11 | Feature Gap | HIGH | `get_context` doesn't include project knowledge |
