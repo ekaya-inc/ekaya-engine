@@ -4,8 +4,13 @@
 
 The current ontology extractor creates an "entity" for nearly every table, resulting in redundant abstraction. When Entity = Table 1:1, the entity layer adds no semantic value and creates maintenance overhead.
 
-**Current state:** ~15 entities for tikr_production, most are 1:1 with tables
+**Current state:** ~38 entities for tikr_production, nearly all are 1:1 with tables (one entity per table)
 **Desired state:** 4-5 meaningful entities that aggregate tables or express roles, with everything else as enriched table/column metadata
+
+**Additional issues discovered (2026-01-30):**
+- `occurrences` field exists in entity output but is mostly empty
+- `probe_relationship(from_entity='User')` returns empty - relationships not being populated
+- `get_entity` output missing: occurrences, roles, relationship_count, is_promoted
 
 ## Design Decision
 
@@ -28,7 +33,67 @@ Entities should be **earned through semantic complexity**, not auto-created for 
 | No aliases or roles | BillingTransaction = billing_transactions | Table description suffices |
 | Leaf node with single relationship | PayoutAccount connects only to User | FK metadata on column |
 
+## Prerequisites
+
+### Dependency: Relationship Detection Must Work
+
+The promotion scoring function (Task 2) relies on `countRelationships()`, but currently `probe_relationship(from_entity='User')` returns empty. Before implementing promotion scoring:
+
+1. Verify FK detection is working during extraction
+2. Ensure relationships are being stored in `engine_relationships` table
+3. Test that `probe_relationship` returns data for known FKs (e.g., `users.account_id` → `accounts`)
+
+Without working relationship detection, Criterion 3 (hub scoring) will always return 0.
+
+---
+
+## Occurrences Output Format
+
+Promoted entities should include **occurrences with roles** - showing where the entity appears across tables:
+
+```json
+{
+  "name": "User",
+  "primary_table": "users",
+  "description": "A record of individual users...",
+  "aliases": ["account", "member", "user_profile"],
+  "key_columns": ["user_id", "username"],
+  "occurrences": [
+    {"table": "billing_engagements", "column": "host_id", "role": "host/creator"},
+    {"table": "billing_engagements", "column": "visitor_id", "role": "visitor/consumer"},
+    {"table": "billing_transactions", "column": "payer_user_id", "role": "payer"},
+    {"table": "billing_transactions", "column": "payee_user_id", "role": "payee"},
+    {"table": "sessions", "column": "host_id", "role": "host"},
+    {"table": "engagement_reviews", "column": "reviewer_id", "role": "reviewer"},
+    {"table": "engagement_reviews", "column": "reviewee_id", "role": "reviewee"}
+  ],
+  "relationship_count": 12,
+  "is_promoted": true
+}
+```
+
+This format should be returned by both `get_entity` and `get_context(depth='entities')`.
+
+---
+
 ## Implementation Tasks
+
+### Task 0: Fix Relationship Detection (Prerequisite)
+
+**File:** `pkg/ontology/extractor.go` (or equivalent)
+
+Before promotion scoring can work, ensure relationships are being detected and stored:
+
+1. During extraction, detect FK patterns (columns ending in `_id` that reference other tables)
+2. Store relationships in `engine_relationships` table
+3. For role-based FKs (host_id, visitor_id → users), detect the role from column prefix
+4. Verify `probe_relationship` returns data after extraction
+
+**Acceptance criteria:**
+- `probe_relationship(from_entity='User')` returns User→Account and other relationships
+- Role-based references (host_id, visitor_id) include role in relationship metadata
+
+---
 
 ### Task 1: Add Entity Promotion Criteria to Schema
 
@@ -264,6 +329,8 @@ func handleGetContext(params GetContextParams) (*ContextResponse, error) {
 - `get_context(depth='entities')` returns only promoted entities (4-5 for tikr_production)
 - `get_context(depth='tables')` returns all tables with rich metadata
 - Response indicates when entities are filtered
+- Entity output includes `occurrences` with {table, column, role} for each cross-table reference
+- `get_entity('User')` returns full output including occurrences, relationship_count, is_promoted
 
 ---
 
@@ -372,25 +439,35 @@ func MigrateToPromotionModel(ontology *Ontology) (*Ontology, error) {
 
 ## Expected Outcome for tikr_production
 
-**Before (current):**
+**Before (current - as of 2026-01-30):**
 ```
-Entities: 15
-- User, Account, Session, Engagement, BillingTransaction,
-- BillingEngagement, PayoutAccount, Media, Campaign,
-- Notification, Email, EServer, Channel, Participant, Device
+Entities: 38 (nearly 1:1 with tables)
+- User, Account, Session, Engagement, Billing Transaction, Billing Engagement,
+- Billing Activity, Channel, Channel Favorite, Channel Like, Channel Review,
+- Conversation, Conversation Email, E Server, Email, Engagement Payment,
+- Engagement Review, Event, Inbound Email, Invitation, Job, Marketing Campaign,
+- Media, Media Report, Notification Token, Offer, Participant, Password Reset,
+- Payout Account, Tok Log, Transaction, User Follow, User Promotion, User Review,
+- Account Authentication, Account Block, Account Email Update, Account Verification
+
+Issues:
+- Most entities add no value (1:1 with table)
+- occurrences field is empty for most entities
+- probe_relationship returns empty (relationships not populated)
 ```
 
 **After (with promotion model):**
 ```
-Entities: 4-5 (promoted)
-- User (score: 85) - aggregates user_*, has roles host/visitor/creator
-- Account (score: 60) - 1:N relationship hub to User
+Entities: 4-5 (promoted only)
+- User (score: 85) - has roles host/visitor/creator/payer/payee, 12+ occurrences
+- Account (score: 60) - 1:N relationship hub to User, appears in 5+ tables
 - Engagement (score: 55) - central to billing, multiple relationships
 - Media (score: 50) - has status enum, multiple references
 
-Tables with rich metadata: 15+ (all tables)
+Tables with rich metadata: 38 (all tables)
 - Each table has descriptions, FK annotations, enum values
-- No entity overhead for simple tables
+- No redundant entity layer for simple tables
+- occurrences populated for promoted entities with {table, column, role}
 ```
 
 ## Testing Strategy
@@ -416,7 +493,9 @@ Tables with rich metadata: 15+ (all tables)
 
 | Metric | Before | After |
 |--------|--------|-------|
-| Entity count (tikr_production) | ~15 | 4-5 |
-| Tables with rich metadata | ~15 | ~15 (unchanged) |
-| Entity:Table redundancy | ~80% | 0% |
+| Entity count (tikr_production) | ~38 | 4-5 |
+| Tables with rich metadata | ~38 | ~38 (unchanged) |
+| Entity:Table redundancy | ~95% | 0% |
 | Promotion decisions explainable | No | Yes (logged reasons) |
+| Occurrences populated | No (empty) | Yes (with roles) |
+| Relationships detected | No (empty) | Yes |
