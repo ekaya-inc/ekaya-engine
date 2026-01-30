@@ -86,9 +86,10 @@ Extend the ontology data model to support an explicit `is_sensitive` flag on col
 
 ### 4. get_query_history Returns Empty
 
+- [x] **Status**: Complete
+
 **Severity**: MEDIUM
 **Tool**: `get_query_history`
-**Status**: Open
 
 **Description**: Query history appears to not be recording executed queries.
 

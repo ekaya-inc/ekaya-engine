@@ -29,6 +29,19 @@ type QueryToolDeps struct {
 	Logger           *zap.Logger
 }
 
+// QueryLoggingDeps defines the interface for dependencies needed to log query executions.
+// Both QueryToolDeps and MCPToolDeps implement this interface.
+type QueryLoggingDeps interface {
+	GetLogger() *zap.Logger
+	GetAuditor() *audit.SecurityAuditor
+}
+
+// GetLogger implements QueryLoggingDeps.
+func (d *QueryToolDeps) GetLogger() *zap.Logger { return d.Logger }
+
+// GetAuditor implements QueryLoggingDeps.
+func (d *QueryToolDeps) GetAuditor() *audit.SecurityAuditor { return d.Auditor }
+
 const approvedQueriesToolGroup = "approved_queries"
 
 // approvedQueriesToolNames lists all tools in the approved queries group.
@@ -1110,14 +1123,17 @@ type QueryExecutionLog struct {
 
 // logQueryExecution logs a query execution to the history table.
 // This runs in a goroutine and uses best-effort logging - failures are logged but don't affect the caller.
-func logQueryExecution(ctx context.Context, deps *QueryToolDeps, log QueryExecutionLog) {
+// The deps parameter must implement QueryLoggingDeps interface.
+func logQueryExecution(ctx context.Context, deps QueryLoggingDeps, log QueryExecutionLog) {
+	logger := deps.GetLogger()
+
 	// Get user ID from context if available
 	userID := auth.GetUserIDFromContext(ctx)
 
 	// Get tenant scope
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok || scope == nil {
-		deps.Logger.Warn("Failed to log query execution: tenant scope not found")
+		logger.Warn("Failed to log query execution: tenant scope not found")
 		return
 	}
 
@@ -1127,7 +1143,7 @@ func logQueryExecution(ctx context.Context, deps *QueryToolDeps, log QueryExecut
 		var err error
 		paramsJSON, err = json.Marshal(log.Params)
 		if err != nil {
-			deps.Logger.Warn("Failed to marshal parameters for query execution log",
+			logger.Warn("Failed to marshal parameters for query execution log",
 				zap.Error(err),
 				zap.String("query_id", log.QueryID.String()))
 			paramsJSON = nil
@@ -1171,15 +1187,16 @@ func logQueryExecution(ctx context.Context, deps *QueryToolDeps, log QueryExecut
 	)
 
 	if err != nil {
-		deps.Logger.Error("Failed to log query execution",
+		logger.Error("Failed to log query execution",
 			zap.Error(err),
 			zap.String("project_id", log.ProjectID.String()),
 			zap.String("query_id", log.QueryID.String()))
 	}
 
 	// For modifying queries, also log to SIEM audit trail
-	if log.IsModifying && deps.Auditor != nil {
-		deps.Auditor.LogModifyingQueryExecution(ctx, log.ProjectID, log.QueryID,
+	auditor := deps.GetAuditor()
+	if log.IsModifying && auditor != nil {
+		auditor.LogModifyingQueryExecution(ctx, log.ProjectID, log.QueryID,
 			audit.ModifyingQueryDetails{
 				QueryName:       log.QueryName,
 				SQLType:         log.SQLType,

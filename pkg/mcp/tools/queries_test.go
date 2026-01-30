@@ -1536,3 +1536,110 @@ func TestSuggestQueryUpdate_RequiresAtLeastOneUpdateField(t *testing.T) {
 	// The tool validates that at least one update field is provided
 	// This is enforced in the handler by checking len(updatedFields) == 0
 }
+
+// ============================================================================
+// Query Logging Interface Tests
+// ============================================================================
+
+func TestQueryLoggingDeps_QueryToolDepsImplements(t *testing.T) {
+	// Verify that QueryToolDeps implements QueryLoggingDeps interface
+	var _ QueryLoggingDeps = (*QueryToolDeps)(nil)
+
+	// Create a QueryToolDeps and verify methods work
+	logger := zap.NewNop()
+	deps := &QueryToolDeps{
+		Logger: logger,
+		// Auditor can be nil (optional for non-modifying queries)
+	}
+
+	assert.Equal(t, logger, deps.GetLogger(), "GetLogger should return the logger")
+	assert.Nil(t, deps.GetAuditor(), "GetAuditor should return nil when not set")
+}
+
+func TestQueryLoggingDeps_MCPToolDepsImplements(t *testing.T) {
+	// Verify that MCPToolDeps implements QueryLoggingDeps interface
+	var _ QueryLoggingDeps = (*MCPToolDeps)(nil)
+
+	// Create an MCPToolDeps and verify methods work
+	logger := zap.NewNop()
+	deps := &MCPToolDeps{
+		Logger: logger,
+		// Auditor can be nil (optional for non-modifying queries)
+	}
+
+	assert.Equal(t, logger, deps.GetLogger(), "GetLogger should return the logger")
+	assert.Nil(t, deps.GetAuditor(), "GetAuditor should return nil when not set")
+}
+
+func TestQueryExecutionLog_AllFields(t *testing.T) {
+	// Verify QueryExecutionLog struct has all required fields
+	log := QueryExecutionLog{
+		ProjectID:       uuid.New(),
+		QueryID:         uuid.New(),
+		QueryName:       "Test Query",
+		SQL:             "SELECT * FROM users",
+		SQLType:         "SELECT",
+		Params:          map[string]any{"user_id": "123"},
+		RowCount:        10,
+		RowsAffected:    0,
+		ExecutionTimeMs: 145,
+		IsModifying:     false,
+		Success:         true,
+		ErrorMessage:    "",
+	}
+
+	// Verify all fields are accessible
+	assert.NotEqual(t, uuid.Nil, log.ProjectID)
+	assert.NotEqual(t, uuid.Nil, log.QueryID)
+	assert.Equal(t, "Test Query", log.QueryName)
+	assert.Equal(t, "SELECT * FROM users", log.SQL)
+	assert.Equal(t, "SELECT", log.SQLType)
+	assert.Len(t, log.Params, 1)
+	assert.Equal(t, 10, log.RowCount)
+	assert.Equal(t, int64(0), log.RowsAffected)
+	assert.Equal(t, 145, log.ExecutionTimeMs)
+	assert.False(t, log.IsModifying)
+	assert.True(t, log.Success)
+	assert.Empty(t, log.ErrorMessage)
+}
+
+func TestQueryExecutionLog_ModifyingQuery(t *testing.T) {
+	// Verify QueryExecutionLog works for modifying queries
+	log := QueryExecutionLog{
+		ProjectID:       uuid.New(),
+		QueryID:         uuid.New(),
+		QueryName:       "Update User",
+		SQL:             "UPDATE users SET name = 'test' WHERE id = 1",
+		SQLType:         "UPDATE",
+		Params:          nil,
+		RowCount:        0,
+		RowsAffected:    5,
+		ExecutionTimeMs: 50,
+		IsModifying:     true,
+		Success:         true,
+		ErrorMessage:    "",
+	}
+
+	assert.Equal(t, "UPDATE", log.SQLType)
+	assert.Equal(t, int64(5), log.RowsAffected)
+	assert.True(t, log.IsModifying)
+}
+
+func TestQueryExecutionLog_FailedQuery(t *testing.T) {
+	// Verify QueryExecutionLog captures error information
+	log := QueryExecutionLog{
+		ProjectID:       uuid.New(),
+		QueryID:         uuid.Nil, // Ad-hoc query
+		SQL:             "SELECT * FROM nonexistent_table",
+		SQLType:         "SELECT",
+		RowCount:        0,
+		ExecutionTimeMs: 10,
+		IsModifying:     false,
+		Success:         false,
+		ErrorMessage:    "relation 'nonexistent_table' does not exist",
+	}
+
+	assert.Equal(t, uuid.Nil, log.QueryID)
+	assert.False(t, log.Success)
+	assert.Contains(t, log.ErrorMessage, "nonexistent_table")
+}

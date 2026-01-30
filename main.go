@@ -308,6 +308,7 @@ func main() {
 		ChangeReviewService:          changeReviewService,
 		PendingChangeRepo:            pendingChangeRepo,
 		InstalledAppService:          installedAppService,
+		Auditor:                      securityAuditor, // For SIEM logging of modifying queries
 		Logger:                       logger,
 	}
 	mcpServer := mcp.NewServer("ekaya-engine", cfg.Version, logger,
