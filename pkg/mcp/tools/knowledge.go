@@ -132,12 +132,11 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 		knowledgeFact := &models.KnowledgeFact{
 			ProjectID: projectID,
 			FactType:  category,
-			Key:       fact, // Using fact as the key for upsert semantics
 			Value:     fact,
 			Context:   context,
 		}
 
-		// If fact_id provided, parse it and set ID for explicit update
+		// If fact_id provided, parse it and update existing fact
 		if factIDStr != "" {
 			factIDStr = trimString(factIDStr)
 			factID, err := uuid.Parse(factIDStr)
@@ -148,12 +147,17 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 				), nil
 			}
 			knowledgeFact.ID = factID
-		}
-
-		// Upsert the fact
-		err = deps.KnowledgeRepository.Upsert(tenantCtx, knowledgeFact)
-		if err != nil {
-			return nil, fmt.Errorf("failed to upsert project knowledge: %w", err)
+			// Update existing fact
+			err = deps.KnowledgeRepository.Update(tenantCtx, knowledgeFact)
+			if err != nil {
+				return nil, fmt.Errorf("failed to update project knowledge: %w", err)
+			}
+		} else {
+			// Create new fact
+			err = deps.KnowledgeRepository.Create(tenantCtx, knowledgeFact)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create project knowledge: %w", err)
+			}
 		}
 
 		// Build response

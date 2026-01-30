@@ -262,7 +262,6 @@ func (e *OntologyToolExecutor) querySchemaMetadata(ctx context.Context, argument
 
 type storeKnowledgeArgs struct {
 	FactType string `json:"fact_type"`
-	Key      string `json:"key"`
 	Value    string `json:"value"`
 	Context  string `json:"context"`
 }
@@ -273,8 +272,8 @@ func (e *OntologyToolExecutor) storeKnowledge(ctx context.Context, arguments str
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	if args.FactType == "" || args.Key == "" || args.Value == "" {
-		return "", fmt.Errorf("fact_type, key, and value are required")
+	if args.FactType == "" || args.Value == "" {
+		return "", fmt.Errorf("fact_type and value are required")
 	}
 
 	// Validate fact type
@@ -292,24 +291,21 @@ func (e *OntologyToolExecutor) storeKnowledge(ctx context.Context, arguments str
 	fact := &models.KnowledgeFact{
 		ProjectID: e.projectID,
 		FactType:  args.FactType,
-		Key:       args.Key,
 		Value:     args.Value,
 		Context:   args.Context,
 	}
 
-	if err := e.knowledgeRepo.Upsert(ctx, fact); err != nil {
+	if err := e.knowledgeRepo.Create(ctx, fact); err != nil {
 		return "", fmt.Errorf("failed to store knowledge: %w", err)
 	}
 
 	e.logger.Info("Stored knowledge fact",
-		zap.String("fact_type", args.FactType),
-		zap.String("key", args.Key))
+		zap.String("fact_type", args.FactType))
 
 	response := map[string]any{
 		"success":   true,
 		"fact_id":   fact.ID.String(),
 		"fact_type": args.FactType,
-		"key":       args.Key,
 	}
 
 	responseJSON, err := json.Marshal(response)

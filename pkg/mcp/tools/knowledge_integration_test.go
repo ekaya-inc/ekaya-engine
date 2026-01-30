@@ -206,7 +206,7 @@ func TestUpdateProjectKnowledgeTool_Integration_CreateNewFact(t *testing.T) {
 	var count int
 	err = scope.Conn.QueryRow(ctx, `
 		SELECT COUNT(*) FROM engine_project_knowledge
-		WHERE project_id = $1 AND fact_type = 'terminology' AND key = $2
+		WHERE project_id = $1 AND fact_type = 'terminology' AND value = $2
 	`, tc.projectID, "A tik represents 6 seconds of engagement").Scan(&count)
 	require.NoError(t, err)
 	assert.Equal(t, 1, count, "fact should exist in database")
@@ -224,11 +224,10 @@ func TestUpdateProjectKnowledgeTool_Integration_UpdateExistingFact(t *testing.T)
 	initialFact := &models.KnowledgeFact{
 		ProjectID: tc.projectID,
 		FactType:  "business_rule",
-		Key:       "Platform fees calculation",
 		Value:     "Platform fees calculation",
 		Context:   "Initial observation",
 	}
-	err := tc.knowledgeRepository.Upsert(ctx, initialFact)
+	err := tc.knowledgeRepository.Create(ctx, initialFact)
 	require.NoError(t, err)
 	factID := initialFact.ID
 
@@ -392,11 +391,10 @@ func TestDeleteProjectKnowledgeTool_Integration_DeleteExistingFact(t *testing.T)
 	fact := &models.KnowledgeFact{
 		ProjectID: tc.projectID,
 		FactType:  "convention",
-		Key:       "Fact to delete",
 		Value:     "Fact to delete",
 		Context:   "Test context",
 	}
-	err := tc.knowledgeRepository.Upsert(ctx, fact)
+	err := tc.knowledgeRepository.Create(ctx, fact)
 	require.NoError(t, err)
 	factID := fact.ID
 
@@ -679,7 +677,7 @@ func TestUpdateProjectKnowledgeTool_Integration_LongFact(t *testing.T) {
 
 	var storedFact string
 	err = scope.Conn.QueryRow(ctx, `
-		SELECT key FROM engine_project_knowledge
+		SELECT value FROM engine_project_knowledge
 		WHERE project_id = $1 AND id = $2
 	`, tc.projectID, response.FactID).Scan(&storedFact)
 	require.NoError(t, err)
