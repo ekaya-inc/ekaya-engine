@@ -487,8 +487,30 @@ func buildColumnDetails(
 
 		// Add sample values if requested and available
 		// Sample values are persisted during ontology extraction for low-cardinality columns (≤50 distinct values)
+		// Sensitive data is automatically redacted to prevent exposure of API keys, secrets, etc.
 		if include.SampleValues && schemaCol != nil && len(schemaCol.SampleValues) > 0 {
-			colDetail["sample_values"] = schemaCol.SampleValues
+			// Check if column name indicates sensitive data (e.g., api_key, password)
+			if DefaultSensitiveDetector.IsSensitiveColumn(col.ColumnName) {
+				colDetail["sample_values_redacted"] = true
+				colDetail["redaction_reason"] = "column name matches sensitive pattern"
+			} else {
+				// Check each sample value for sensitive content and redact if needed
+				redactedValues := make([]string, 0, len(schemaCol.SampleValues))
+				anyRedacted := false
+				for _, val := range schemaCol.SampleValues {
+					if DefaultSensitiveDetector.IsSensitiveContent(val) {
+						redactedValues = append(redactedValues, DefaultSensitiveDetector.RedactContent(val))
+						anyRedacted = true
+					} else {
+						redactedValues = append(redactedValues, val)
+					}
+				}
+				colDetail["sample_values"] = redactedValues
+				if anyRedacted {
+					colDetail["sample_values_redacted"] = true
+					colDetail["redaction_reason"] = "values contain sensitive patterns (api keys, secrets, etc.)"
+				}
+			}
 		}
 
 		// Add column features from metadata (from feature extraction pipeline)
