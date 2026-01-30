@@ -243,10 +243,10 @@ probe_column(table='billing_engagements', column='host_id')
 
 ---
 
-### 11. `get_context` Does Not Include Project Knowledge
+### [x] 11. `get_context` Does Not Include Project Knowledge
 
 **Severity**: HIGH
-**Status**: Open
+**Status**: Complete
 
 **Description**: Project knowledge (business rules added via `update_project_knowledge`) is not surfaced in `get_context`. Critical guidance like "sessions table is ephemeral" or "use billing_engagements not billing_transactions for engagement counts" is invisible to agents using the primary discovery workflow.
 
@@ -272,4 +272,4 @@ Option 2 (include at domain level) seems cleanest since project knowledge is hig
 | 8 | UX | LOW | `update_project_knowledge` fact limited to 255 chars |
 | ~~9~~ | ~~UX~~ | ~~MEDIUM~~ | ~~`create_approved_query` requires undiscoverable datasource_id~~ ✅ |
 | ~~10~~ | ~~Bug~~ | ~~HIGH~~ | ~~`get_context` doesn't surface enriched column metadata~~ ✅ |
-| 11 | Feature Gap | HIGH | `get_context` doesn't include project knowledge |
+| ~~11~~ | ~~Feature Gap~~ | ~~HIGH~~ | ~~`get_context` doesn't include project knowledge~~ ✅ |

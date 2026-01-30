@@ -35,6 +35,7 @@ func TestContextToolDeps_Structure(t *testing.T) {
 	assert.Nil(t, deps.SchemaRepo, "SchemaRepo field should be nil by default")
 	assert.Nil(t, deps.ColumnMetadataRepo, "ColumnMetadataRepo field should be nil by default")
 	assert.Nil(t, deps.TableMetadataRepo, "TableMetadataRepo field should be nil by default")
+	assert.Nil(t, deps.KnowledgeRepo, "KnowledgeRepo field should be nil by default")
 	assert.Nil(t, deps.Logger, "Logger field should be nil by default")
 }
 
@@ -49,6 +50,7 @@ func TestContextToolDeps_Initialization(t *testing.T) {
 	var schemaService services.SchemaService
 	var glossaryService services.GlossaryService
 	var schemaRepo repositories.SchemaRepository
+	var knowledgeRepo repositories.KnowledgeRepository
 	logger := zap.NewNop()
 
 	// Verify struct can be initialized with all dependencies
@@ -61,6 +63,7 @@ func TestContextToolDeps_Initialization(t *testing.T) {
 		SchemaService:          schemaService,
 		GlossaryService:        glossaryService,
 		SchemaRepo:             schemaRepo,
+		KnowledgeRepo:          knowledgeRepo,
 		Logger:                 logger,
 	}
 
@@ -261,6 +264,171 @@ func TestBuildGlossaryResponse(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestBuildProjectKnowledgeResponse tests the buildProjectKnowledgeResponse function.
+func TestBuildProjectKnowledgeResponse(t *testing.T) {
+	projectID := uuid.New()
+
+	tests := []struct {
+		name               string
+		facts              []*models.KnowledgeFact
+		expectedCategories []string // categories expected in result
+		expectedFactCounts map[string]int
+	}{
+		{
+			name:               "empty facts returns empty map",
+			facts:              []*models.KnowledgeFact{},
+			expectedCategories: []string{},
+			expectedFactCounts: map[string]int{},
+		},
+		{
+			name:               "nil facts returns empty map",
+			facts:              nil,
+			expectedCategories: []string{},
+			expectedFactCounts: map[string]int{},
+		},
+		{
+			name: "single business_rule fact",
+			facts: []*models.KnowledgeFact{
+				{
+					ID:        uuid.New(),
+					ProjectID: projectID,
+					FactType:  "business_rule",
+					Key:       "sessions-ephemeral",
+					Value:     "sessions table is ephemeral and should not be used for analytics",
+					Context:   "Discovered from table structure",
+				},
+			},
+			expectedCategories: []string{"business_rule"},
+			expectedFactCounts: map[string]int{"business_rule": 1},
+		},
+		{
+			name: "multiple facts in same category",
+			facts: []*models.KnowledgeFact{
+				{
+					ID:        uuid.New(),
+					ProjectID: projectID,
+					FactType:  "business_rule",
+					Key:       "rule-1",
+					Value:     "Use billing_engagements not billing_transactions for engagement counts",
+				},
+				{
+					ID:        uuid.New(),
+					ProjectID: projectID,
+					FactType:  "business_rule",
+					Key:       "rule-2",
+					Value:     "Platform fees are ~33% of total_amount",
+					Context:   "Verified: tikr_share/total_amount ≈ 0.33",
+				},
+			},
+			expectedCategories: []string{"business_rule"},
+			expectedFactCounts: map[string]int{"business_rule": 2},
+		},
+		{
+			name: "facts across multiple categories",
+			facts: []*models.KnowledgeFact{
+				{
+					ID:        uuid.New(),
+					ProjectID: projectID,
+					FactType:  "terminology",
+					Key:       "tik-definition",
+					Value:     "A tik represents 6 seconds of engagement",
+				},
+				{
+					ID:        uuid.New(),
+					ProjectID: projectID,
+					FactType:  "business_rule",
+					Key:       "sessions-ephemeral",
+					Value:     "sessions table is ephemeral",
+				},
+				{
+					ID:        uuid.New(),
+					ProjectID: projectID,
+					FactType:  "convention",
+					Key:       "soft-delete",
+					Value:     "All tables use deleted_at for soft deletes",
+				},
+				{
+					ID:        uuid.New(),
+					ProjectID: projectID,
+					FactType:  "enumeration",
+					Key:       "status-values",
+					Value:     "engagement_status: PENDING, COMPLETED, CANCELLED",
+				},
+			},
+			expectedCategories: []string{"terminology", "business_rule", "convention", "enumeration"},
+			expectedFactCounts: map[string]int{
+				"terminology":   1,
+				"business_rule": 1,
+				"convention":    1,
+				"enumeration":   1,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := buildProjectKnowledgeResponse(tt.facts)
+
+			// Check expected categories are present
+			assert.Equal(t, len(tt.expectedCategories), len(result), "Number of categories should match")
+
+			for _, category := range tt.expectedCategories {
+				facts, exists := result[category]
+				assert.True(t, exists, "Category %s should be present", category)
+				assert.Equal(t, tt.expectedFactCounts[category], len(facts), "Fact count for category %s should match", category)
+			}
+
+			// Verify structure of facts
+			if len(result) > 0 && len(tt.facts) > 0 {
+				// Find a fact with context to verify context is included
+				for _, fact := range tt.facts {
+					if fact.Context != "" {
+						categoryFacts := result[fact.FactType]
+						foundWithContext := false
+						for _, f := range categoryFacts {
+							if f["fact"] == fact.Value {
+								if ctx, ok := f["context"]; ok {
+									assert.Equal(t, fact.Context, ctx)
+									foundWithContext = true
+								}
+							}
+						}
+						if fact.Context != "" {
+							assert.True(t, foundWithContext, "Fact with context should have context field")
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestBuildProjectKnowledgeResponse_ContextOmittedWhenEmpty verifies context is omitted when empty.
+func TestBuildProjectKnowledgeResponse_ContextOmittedWhenEmpty(t *testing.T) {
+	facts := []*models.KnowledgeFact{
+		{
+			ID:        uuid.New(),
+			ProjectID: uuid.New(),
+			FactType:  "business_rule",
+			Key:       "test-rule",
+			Value:     "Test rule value",
+			Context:   "", // Empty context
+		},
+	}
+
+	result := buildProjectKnowledgeResponse(facts)
+
+	require.Len(t, result["business_rule"], 1)
+	factData := result["business_rule"][0]
+
+	// Verify fact value is present
+	assert.Equal(t, "Test rule value", factData["fact"])
+
+	// Verify context is NOT present when empty
+	_, hasContext := factData["context"]
+	assert.False(t, hasContext, "Context should not be present when empty")
 }
 
 // TestFilterDatasourceTables tests the filterDatasourceTables function.

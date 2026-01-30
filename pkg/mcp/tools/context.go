@@ -29,6 +29,7 @@ type ContextToolDeps struct {
 	SchemaRepo             repositories.SchemaRepository
 	ColumnMetadataRepo     repositories.ColumnMetadataRepository
 	TableMetadataRepo      repositories.TableMetadataRepository
+	KnowledgeRepo          repositories.KnowledgeRepository
 	Logger                 *zap.Logger
 }
 
@@ -75,6 +76,7 @@ func registerGetContextTool(s *server.MCPServer, deps *ContextToolDeps) {
 				"Consolidates ontology, schema, and glossary information into a single tool. "+
 				"Depth levels: 'domain' (high-level context, ~500 tokens), 'entities' (entity summaries, ~2k tokens), "+
 				"'tables' (table details with key columns, ~4k tokens), 'columns' (full column details, ~8k tokens). "+
+				"At 'domain' depth, includes project_knowledge (business rules, terminology, conventions) if available. "+
 				"Always returns useful information even without ontology extraction - schema data is always available.",
 		),
 		mcp.WithString(
@@ -214,6 +216,19 @@ func handleContextWithOntology(
 		response["entities"] = domainCtx.Entities
 		response["relationships"] = domainCtx.Relationships
 
+		// Include project knowledge at domain level
+		if deps.KnowledgeRepo != nil {
+			knowledge, err := deps.KnowledgeRepo.GetByProject(ctx, projectID)
+			if err != nil {
+				deps.Logger.Warn("Failed to get project knowledge",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+				// Continue without project knowledge - not a fatal error
+			} else if len(knowledge) > 0 {
+				response["project_knowledge"] = buildProjectKnowledgeResponse(knowledge)
+			}
+		}
+
 	case "entities":
 		entitiesCtx, err := deps.OntologyContextService.GetEntitiesContext(ctx, projectID)
 		if err != nil {
@@ -297,6 +312,19 @@ func handleContextWithoutOntology(
 			})
 		}
 		response["entities"] = tableList
+
+		// Include project knowledge at domain level
+		if deps.KnowledgeRepo != nil {
+			knowledge, err := deps.KnowledgeRepo.GetByProject(ctx, projectID)
+			if err != nil {
+				deps.Logger.Warn("Failed to get project knowledge",
+					zap.String("project_id", projectID.String()),
+					zap.Error(err))
+				// Continue without project knowledge - not a fatal error
+			} else if len(knowledge) > 0 {
+				response["project_knowledge"] = buildProjectKnowledgeResponse(knowledge)
+			}
+		}
 
 	case "entities":
 		// Table list with basic information
@@ -445,6 +473,27 @@ func buildGlossaryResponse(terms []*models.BusinessGlossaryTerm) []map[string]an
 			termData["sql_pattern"] = term.DefiningSQL
 		}
 		result = append(result, termData)
+	}
+	return result
+}
+
+// buildProjectKnowledgeResponse converts knowledge facts to response format.
+// Facts are grouped by category (business_rule, terminology, enumeration, convention).
+func buildProjectKnowledgeResponse(facts []*models.KnowledgeFact) map[string][]map[string]any {
+	if len(facts) == 0 {
+		return map[string][]map[string]any{}
+	}
+
+	// Group facts by category
+	result := make(map[string][]map[string]any)
+	for _, fact := range facts {
+		factData := map[string]any{
+			"fact": fact.Value,
+		}
+		if fact.Context != "" {
+			factData["context"] = fact.Context
+		}
+		result[fact.FactType] = append(result[fact.FactType], factData)
 	}
 	return result
 }
