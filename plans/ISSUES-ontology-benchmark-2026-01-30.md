@@ -62,9 +62,10 @@ Extend the ontology data model to support an explicit `is_sensitive` flag on col
 
 ### 2. create_approved_query Error Message Unclear
 
+- [x] **Status**: Complete
+
 **Severity**: HIGH (UX)
 **Tool**: `create_approved_query`
-**Status**: Open
 
 **Description**: When `output_column_descriptions` is not provided, the error message is confusing.
 
