@@ -1,16 +1,14 @@
 # PLAN: Entity Promotion Model - Earned Entities vs Table Metadata
 
+> **Updated 2026-01-30**: Revised after codebase review. Significant portions already implemented.
+> Key changes: Removed duplicate tasks, corrected assumptions about "broken" features, focused on actual gap.
+
 ## Problem Statement
 
 The current ontology extractor creates an "entity" for nearly every table, resulting in redundant abstraction. When Entity = Table 1:1, the entity layer adds no semantic value and creates maintenance overhead.
 
 **Current state:** ~38 entities for tikr_production, nearly all are 1:1 with tables (one entity per table)
 **Desired state:** 4-5 meaningful entities that aggregate tables or express roles, with everything else as enriched table/column metadata
-
-**Additional issues discovered (2026-01-30):**
-- `occurrences` field exists in entity output but is mostly empty
-- `probe_relationship(from_entity='User')` returns empty - relationships not being populated
-- `get_entity` output missing: occurrences, roles, relationship_count, is_promoted
 
 ## Design Decision
 
@@ -33,469 +31,377 @@ Entities should be **earned through semantic complexity**, not auto-created for 
 | No aliases or roles | BillingTransaction = billing_transactions | Table description suffices |
 | Leaf node with single relationship | PayoutAccount connects only to User | FK metadata on column |
 
-## Prerequisites
-
-### Dependency: Relationship Detection Must Work
-
-The promotion scoring function (Task 2) relies on `countRelationships()`, but currently `probe_relationship(from_entity='User')` returns empty. Before implementing promotion scoring:
-
-1. Verify FK detection is working during extraction
-2. Ensure relationships are being stored in `engine_relationships` table
-3. Test that `probe_relationship` returns data for known FKs (e.g., `users.account_id` → `accounts`)
-
-Without working relationship detection, Criterion 3 (hub scoring) will always return 0.
-
 ---
 
-## Occurrences Output Format
+## What Already Exists (Codebase Review 2026-01-30)
 
-Promoted entities should include **occurrences with roles** - showing where the entity appears across tables:
+### Entity Discovery ✅ ALREADY IMPLEMENTED
 
-```json
-{
-  "name": "User",
-  "primary_table": "users",
-  "description": "A record of individual users...",
-  "aliases": ["account", "member", "user_profile"],
-  "key_columns": ["user_id", "username"],
-  "occurrences": [
-    {"table": "billing_engagements", "column": "host_id", "role": "host/creator"},
-    {"table": "billing_engagements", "column": "visitor_id", "role": "visitor/consumer"},
-    {"table": "billing_transactions", "column": "payer_user_id", "role": "payer"},
-    {"table": "billing_transactions", "column": "payee_user_id", "role": "payee"},
-    {"table": "sessions", "column": "host_id", "role": "host"},
-    {"table": "engagement_reviews", "column": "reviewer_id", "role": "reviewer"},
-    {"table": "engagement_reviews", "column": "reviewee_id", "role": "reviewee"}
-  ],
-  "relationship_count": 12,
-  "is_promoted": true
+**File:** `pkg/services/entity_discovery_service.go`
+
+The current system already:
+1. **Discovers entities from DDL** (PKs, unique constraints) - NOT string pattern matching
+2. **Groups similar tables** (`groupSimilarTables`, `selectPrimaryTable`) to avoid duplicates like `s1_users`, `test_users`
+3. **LLM enriches** with clean names, descriptions, domains, key columns, and aliases
+
+```
+EntityDiscovery (DAG Node 3) - Deterministic DDL analysis
+    ├─ Find PKs and unique constraints
+    ├─ Group similar tables (s1_users, test_users → users)
+    └─ Create ONE entity per concept group
+
+EntityEnrichment (DAG Node 4) - LLM generates metadata
+    ├─ Clean entity names (users → User)
+    ├─ Descriptions, domains
+    └─ Key columns and aliases
+```
+
+### Entity Model ✅ ALREADY IMPLEMENTED
+
+**File:** `pkg/models/ontology_entity.go`
+
+```go
+type OntologyEntity struct {
+    Name           string    // LLM-generated clean name (e.g., "User")
+    Description    string    // LLM explanation
+    Domain         string    // Business domain (e.g., "billing", "hospitality")
+    PrimarySchema  string    // Schema where entity is primarily defined
+    PrimaryTable   string    // Table where entity is primarily defined
+    PrimaryColumn  string    // PK column
+    Confidence     float64   // 0.0-1.0 (DDL=0.5, after enrichment=0.8)
+    // + provenance tracking fields
 }
 ```
 
-This format should be returned by both `get_entity` and `get_context(depth='entities')`.
+### Occurrences ✅ ALREADY IMPLEMENTED (Computed from Relationships)
 
----
+**File:** `pkg/services/entity_service.go:182-208`
 
-## Implementation Tasks
-
-### Task 0: Fix Relationship Detection (Prerequisite)
-
-**File:** `pkg/ontology/extractor.go` (or equivalent)
-
-Before promotion scoring can work, ensure relationships are being detected and stored:
-
-1. During extraction, detect FK patterns (columns ending in `_id` that reference other tables)
-2. Store relationships in `engine_relationships` table
-3. For role-based FKs (host_id, visitor_id → users), detect the role from column prefix
-4. Verify `probe_relationship` returns data after extraction
-
-**Acceptance criteria:**
-- `probe_relationship(from_entity='User')` returns User→Account and other relationships
-- Role-based references (host_id, visitor_id) include role in relationship metadata
-
----
-
-### Task 1: Add Entity Promotion Criteria to Schema
-
-**File:** `pkg/ontology/types.go` (or equivalent)
-
-Add fields to track why an entity exists:
+Occurrences are **derived from relationships at runtime**, not stored separately:
 
 ```go
-type Entity struct {
-    Name        string   `json:"name"`
-    Description string   `json:"description,omitempty"`
-
-    // Promotion criteria - why this entity exists
-    PrimaryTable   string   `json:"primary_table"`            // Main table for this entity
-    SecondaryTables []string `json:"secondary_tables,omitempty"` // Additional tables (user_profiles, etc.)
-    Aliases        []string `json:"aliases,omitempty"`         // Business terms (host, visitor, creator)
-    Roles          []string `json:"roles,omitempty"`           // Roles this entity plays in relationships
-
-    // Computed during extraction
-    RelationshipCount int  `json:"relationship_count"` // How many relationships involve this entity
-    IsPromoted        bool `json:"is_promoted"`        // True if meets promotion criteria
+// computeOccurrences derives entity occurrences from inbound relationships.
+func (s *entityService) computeOccurrences(ctx context.Context, entityID uuid.UUID) ([]*models.OntologyEntityOccurrence, error) {
+    // Get all inbound relationships (where this entity is the target)
+    relationships, err := s.relationshipRepo.GetByTargetEntity(ctx, entityID)
+    // ... converts to occurrences with table, column, association
 }
 ```
 
-**Acceptance criteria:**
-- Entity struct has fields to capture promotion justification
-- Existing entity serialization still works (backwards compatible)
+The `engine_ontology_entity_occurrences` table was **dropped in migration 030** because occurrences are now computed from `engine_entity_relationships`.
+
+### MCP Tools ✅ ALREADY IMPLEMENTED
+
+**File:** `pkg/mcp/tools/entity.go`
+
+1. **`get_entity`** - Returns full entity with occurrences, relationships, aliases, key_columns
+2. **`update_entity`** - Upsert with provenance tracking
+3. **`delete_entity`** - Soft delete with relationship checking
+
+### Relationships ✅ WORKING (Not Empty)
+
+**File:** `pkg/services/deterministic_relationship_service.go`
+
+Relationships ARE populated during extraction:
+1. **Phase 1**: FK discovery from ColumnFeatures (data overlap analysis)
+2. **Phase 2**: FK discovery from database constraints
+3. **Phase 3**: PK match discovery (tests joins via SQL)
+
+If `probe_relationship` returns empty, it's likely a **data issue** for that specific project, not a code bug. Check:
+```sql
+SELECT COUNT(*) FROM engine_entity_relationships WHERE project_id = '<project-id>';
+```
 
 ---
 
-### Task 2: Implement Promotion Scoring Function
+## What's Actually Missing (Real Gap)
 
-**File:** `pkg/ontology/extractor.go` (or equivalent)
+### Gap: No Promotion Filtering
 
-Create a function that scores whether a table should be promoted to entity:
+**The core issue:** All tables with PKs become entities. There's no mechanism to filter by semantic value.
+
+The plan proposes adding a **PromotionScore** function that evaluates each table before creating an entity. Tables scoring < 50 would NOT become entities.
+
+### Gap: `is_promoted` Field
+
+The entity model doesn't have an `is_promoted` flag to distinguish promoted entities from demoted ones (or to preserve manual promotions).
+
+### Gap: Migration for Existing Ontologies
+
+Existing ontologies would need a migration to score and potentially demote redundant entities.
+
+---
+
+## Revised Implementation Tasks
+
+### Task 1: Add Promotion Scoring Function
+
+**File:** `pkg/services/entity_promotion.go` (new)
+
+Create a function that scores whether a table should become an entity:
 
 ```go
-// PromotionScore evaluates if a table warrants entity status
-// Returns score 0-100, where >= 50 means promote to entity
-func PromotionScore(table Table, allTables []Table, relationships []Relationship) int {
+// PromotionScore evaluates if a table warrants entity status.
+// Returns score 0-100, where >= 50 means promote to entity.
+type PromotionResult struct {
+    Score   int
+    Reasons []string
+}
+
+func PromotionScore(
+    tableName string,
+    allTables []*models.SchemaTable,
+    relationships []*models.EntityRelationship,
+) PromotionResult {
     score := 0
-    reasons := []string{}
+    var reasons []string
 
-    // Criterion 1: Multiple tables share this concept (30 points)
-    // Look for tables with same prefix: user_*, account_*
-    relatedTables := findRelatedTables(table.Name, allTables)
-    if len(relatedTables) > 1 {
+    // Criterion 1: Hub in relationship graph (30 points)
+    // Count inbound relationships (how many other tables reference this one)
+    inboundCount := countInboundRelationships(tableName, relationships)
+    if inboundCount >= 5 {
         score += 30
+        reasons = append(reasons, fmt.Sprintf("hub with %d inbound references", inboundCount))
+    } else if inboundCount >= 3 {
+        score += 20
+        reasons = append(reasons, fmt.Sprintf("%d inbound references", inboundCount))
+    }
+
+    // Criterion 2: Multiple roles reference this table (25 points)
+    // e.g., host_id and visitor_id both reference users
+    roleRefs := findRoleBasedReferences(tableName, relationships)
+    if len(roleRefs) >= 2 {
+        score += 25
+        reasons = append(reasons, fmt.Sprintf("%d distinct roles", len(roleRefs)))
+    }
+
+    // Criterion 3: Multiple tables share this concept (20 points)
+    // Use existing groupSimilarTables logic
+    relatedTables := findRelatedTables(tableName, allTables)
+    if len(relatedTables) > 1 {
+        score += 20
         reasons = append(reasons, fmt.Sprintf("aggregates %d tables", len(relatedTables)))
     }
 
-    // Criterion 2: Multiple FKs reference this table with different roles (25 points)
-    // e.g., host_id and visitor_id both reference users
-    roleRefs := findRoleBasedReferences(table.Name, allTables)
-    if len(roleRefs) >= 2 {
-        score += 25
-        reasons = append(reasons, fmt.Sprintf("%d role-based references", len(roleRefs)))
-    }
+    // Criterion 4: Has business aliases from LLM (15 points)
+    // This would be post-enrichment scoring
 
-    // Criterion 3: Hub in relationship graph (20 points)
-    // Count relationships where this table is source or target
-    relCount := countRelationships(table.Name, relationships)
-    if relCount >= 4 {
-        score += 20
-        reasons = append(reasons, fmt.Sprintf("hub with %d relationships", relCount))
-    }
-
-    // Criterion 4: Has known business aliases (15 points)
-    // Check against common alias patterns
-    aliases := detectAliases(table.Name)
-    if len(aliases) > 0 {
-        score += 15
-        reasons = append(reasons, fmt.Sprintf("aliases: %v", aliases))
-    }
-
-    // Criterion 5: Name differs from table name (10 points)
-    // If we'd call the entity something different than the table
-    entityName := singularize(table.Name) // users -> User
-    if entityName != table.Name {
+    // Criterion 5: Outbound relationships (10 points)
+    // Tables that connect to many other entities are worth naming
+    outboundCount := countOutboundRelationships(tableName, relationships)
+    if outboundCount >= 3 {
         score += 10
+        reasons = append(reasons, fmt.Sprintf("%d outbound relationships", outboundCount))
     }
 
-    return score, reasons
-}
-
-// Helper: Find tables that likely belong to same entity
-func findRelatedTables(tableName string, allTables []Table) []Table {
-    prefix := extractPrefix(tableName) // "users" -> "user"
-    var related []Table
-    for _, t := range allTables {
-        if strings.HasPrefix(t.Name, prefix) {
-            related = append(related, t)
-        }
-    }
-    return related
-}
-
-// Helper: Find columns that reference this table with role patterns
-func findRoleBasedReferences(tableName string, allTables []Table) []RoleRef {
-    var refs []RoleRef
-    targetCol := guessPrimaryKey(tableName) // users -> user_id
-
-    rolePatterns := []string{"host", "visitor", "creator", "owner", "sender",
-                             "recipient", "payer", "payee", "source", "destination"}
-
-    for _, t := range allTables {
-        for _, col := range t.Columns {
-            if !strings.HasSuffix(col.Name, "_id") {
-                continue
-            }
-            // Check if column references our target with a role prefix
-            for _, role := range rolePatterns {
-                if strings.HasPrefix(col.Name, role) && fkTargetsTable(col, tableName) {
-                    refs = append(refs, RoleRef{
-                        Table:  t.Name,
-                        Column: col.Name,
-                        Role:   role,
-                    })
-                }
-            }
-        }
-    }
-    return refs
+    return PromotionResult{Score: score, Reasons: reasons}
 }
 ```
+
+**Key insight:** Scoring happens AFTER relationship detection, not before. We need relationships to score hubs.
 
 **Acceptance criteria:**
 - Function returns score 0-100 for any table
 - Score >= 50 means table should be promoted to entity
-- Function returns list of reasons for promotion (for transparency)
+- Function returns list of reasons (for transparency)
 - Unit tests cover each criterion
 
 ---
 
-### Task 3: Update Extraction Pipeline
+### Task 2: Add `is_promoted` Field to Entity Model
 
-**File:** `pkg/ontology/extractor.go`
+**File:** `migrations/XXX_entity_promotion.up.sql` (new)
 
-Modify the extraction flow to use promotion scoring:
+```sql
+ALTER TABLE engine_ontology_entities
+ADD COLUMN is_promoted BOOLEAN NOT NULL DEFAULT true;
 
+ALTER TABLE engine_ontology_entities
+ADD COLUMN promotion_score INTEGER;
+
+ALTER TABLE engine_ontology_entities
+ADD COLUMN promotion_reasons TEXT[];
+
+COMMENT ON COLUMN engine_ontology_entities.is_promoted IS
+'True if entity meets promotion criteria or was manually promoted. False for demoted entities.';
+
+COMMENT ON COLUMN engine_ontology_entities.promotion_score IS
+'Computed promotion score (0-100) from PromotionScore function.';
+```
+
+**File:** `pkg/models/ontology_entity.go`
+
+Add fields:
 ```go
-func ExtractOntology(schema Schema) (*Ontology, error) {
-    ontology := &Ontology{
-        Tables:   make([]TableMetadata, 0),
-        Entities: make([]Entity, 0),
-    }
-
-    // Step 1: Extract all table metadata (always done)
-    for _, table := range schema.Tables {
-        tableMeta := extractTableMetadata(table)
-        ontology.Tables = append(ontology.Tables, tableMeta)
-    }
-
-    // Step 2: Detect relationships from FK patterns
-    relationships := detectRelationships(schema)
-
-    // Step 3: Score each table for entity promotion
-    for _, table := range schema.Tables {
-        score, reasons := PromotionScore(table, schema.Tables, relationships)
-
-        if score >= 50 {
-            // Promote to entity
-            entity := Entity{
-                Name:              singularize(table.Name),
-                PrimaryTable:      table.Name,
-                SecondaryTables:   findRelatedTables(table.Name, schema.Tables),
-                Aliases:           detectAliases(table.Name),
-                Roles:             extractRoles(table.Name, schema.Tables),
-                RelationshipCount: countRelationships(table.Name, relationships),
-                IsPromoted:        true,
-            }
-            ontology.Entities = append(ontology.Entities, entity)
-
-            // Log promotion decision
-            log.Info("Promoted table to entity",
-                "table", table.Name,
-                "entity", entity.Name,
-                "score", score,
-                "reasons", reasons)
-        } else {
-            // Keep as table-only, log why not promoted
-            log.Debug("Table not promoted to entity",
-                "table", table.Name,
-                "score", score)
-        }
-    }
-
-    return ontology, nil
-}
+IsPromoted       bool     `json:"is_promoted"`
+PromotionScore   *int     `json:"promotion_score,omitempty"`
+PromotionReasons []string `json:"promotion_reasons,omitempty"`
 ```
 
 **Acceptance criteria:**
-- Extraction produces both Tables (all) and Entities (promoted only)
-- Promotion decisions are logged with reasons
-- Backwards compatible with existing ontology consumers
-
----
-
-### Task 4: Update get_context and get_ontology Tools
-
-**File:** `pkg/mcp/tools.go` (or equivalent)
-
-Modify the MCP tools to reflect the new model:
-
-```go
-// get_context at 'entities' depth should only return promoted entities
-func handleGetContext(params GetContextParams) (*ContextResponse, error) {
-    switch params.Depth {
-    case "domain":
-        // High-level: just entity names and domain facts
-        return getDomainContext()
-
-    case "entities":
-        // Only promoted entities, not every table
-        entities := getPromotedEntities()
-        return &ContextResponse{
-            Entities: entities,
-            Note: "Showing promoted entities only. Use 'tables' depth for all tables.",
-        }
-
-    case "tables":
-        // All tables with metadata
-        return getTableContext(params.Tables)
-
-    case "columns":
-        // Full column details
-        return getColumnContext(params.Tables)
-    }
-}
-```
-
-**Acceptance criteria:**
-- `get_context(depth='entities')` returns only promoted entities (4-5 for tikr_production)
-- `get_context(depth='tables')` returns all tables with rich metadata
-- Response indicates when entities are filtered
-- Entity output includes `occurrences` with {table, column, role} for each cross-table reference
-- `get_entity('User')` returns full output including occurrences, relationship_count, is_promoted
-
----
-
-### Task 5: Add Manual Promotion/Demotion API
-
-**File:** `pkg/mcp/tools.go`
-
-Allow humans to override promotion decisions:
-
-```go
-// promote_to_entity - manually promote a table to entity status
-type PromoteToEntityParams struct {
-    TableName   string   `json:"table_name"`
-    EntityName  string   `json:"entity_name,omitempty"` // defaults to singularized table name
-    Aliases     []string `json:"aliases,omitempty"`
-    Description string   `json:"description,omitempty"`
-}
-
-func handlePromoteToEntity(params PromoteToEntityParams) (*Entity, error) {
-    // Validate table exists
-    table, err := getTable(params.TableName)
-    if err != nil {
-        return nil, fmt.Errorf("table not found: %s", params.TableName)
-    }
-
-    entityName := params.EntityName
-    if entityName == "" {
-        entityName = singularize(params.TableName)
-    }
-
-    entity := &Entity{
-        Name:         entityName,
-        PrimaryTable: params.TableName,
-        Aliases:      params.Aliases,
-        Description:  params.Description,
-        IsPromoted:   true,
-        Provenance:   "manual", // Track that human promoted this
-    }
-
-    return upsertEntity(entity)
-}
-
-// demote_entity - remove entity status, keep as table only
-func handleDemoteEntity(entityName string) error {
-    return deleteEntity(entityName)
-}
-```
-
-**Acceptance criteria:**
-- `promote_to_entity` tool available in MCP
-- `demote_entity` tool available in MCP
-- Manual promotions tracked with provenance="manual"
-- Manual promotions persist across re-extraction
-
----
-
-### Task 6: Migration for Existing Ontologies
-
-**File:** `migrations/XXX_entity_promotion.go`
-
-For existing ontologies, score and demote redundant entities:
-
-```go
-func MigrateToPromotionModel(ontology *Ontology) (*Ontology, error) {
-    var promotedEntities []Entity
-    var demotedTables []string
-
-    for _, entity := range ontology.Entities {
-        // Check if entity was manually created (preserve these)
-        if entity.Provenance == "manual" || entity.Provenance == "admin" {
-            entity.IsPromoted = true
-            promotedEntities = append(promotedEntities, entity)
-            continue
-        }
-
-        // Score existing entity
-        table := findTableByName(entity.PrimaryTable, ontology.Tables)
-        score, _ := PromotionScore(table, ontology.Tables, ontology.Relationships)
-
-        if score >= 50 {
-            entity.IsPromoted = true
-            promotedEntities = append(promotedEntities, entity)
-        } else {
-            // Demote: merge entity metadata into table metadata
-            mergeEntityToTable(entity, table)
-            demotedTables = append(demotedTables, entity.Name)
-        }
-    }
-
-    log.Info("Migration complete",
-        "promoted", len(promotedEntities),
-        "demoted", len(demotedTables))
-
-    ontology.Entities = promotedEntities
-    return ontology, nil
-}
-```
-
-**Acceptance criteria:**
-- Existing ontologies can be migrated without data loss
-- Demoted entity metadata merges into table metadata
-- Manual/admin entities are preserved
+- Existing entities default to `is_promoted=true`
 - Migration is idempotent
+- Model changes are backwards compatible
+
+---
+
+### Task 3: Integrate Promotion Scoring into DAG
+
+**File:** `pkg/services/dag/entity_promotion_node.go` (new)
+
+Create a new DAG node that runs AFTER RelationshipEnrichment:
+
+```
+Current DAG order:
+1. KnowledgeSeeding
+2. ColumnFeatureExtraction
+3. EntityDiscovery ← creates entities for all tables with PKs
+4. EntityEnrichment
+5. FKDiscovery ← creates relationships
+6. PKMatchDiscovery
+7. RelationshipEnrichment
+8. OntologyFinalization
+9. ColumnEnrichment
+10. GlossaryDiscovery
+11. GlossaryEnrichment
+
+Proposed change - insert after RelationshipEnrichment:
+7. RelationshipEnrichment
+8. EntityPromotion (NEW) ← scores and demotes low-value entities
+9. OntologyFinalization
+```
+
+The EntityPromotion node:
+1. Gets all entities and relationships
+2. Scores each entity using PromotionScore
+3. Sets `is_promoted=false` for entities below threshold
+4. Logs promotion decisions with reasons
+
+**Acceptance criteria:**
+- DAG node executes after relationships are populated
+- Entities below score threshold are demoted (not deleted)
+- Demoted entities preserve their metadata (can be re-promoted)
+- Promotion decisions logged for transparency
+
+---
+
+### Task 4: Filter Demoted Entities in `get_context`
+
+**File:** `pkg/services/ontology_context.go`
+
+Modify `GetEntitiesContext` to filter demoted entities:
+
+```go
+func (s *ontologyContextService) GetEntitiesContext(...) {
+    // Get entities - only promoted ones
+    entities, err := s.entityRepo.GetPromotedByProject(ctx, projectID)
+    // ... rest unchanged
+}
+```
+
+Add repository method:
+```go
+// GetPromotedByProject returns only promoted entities (is_promoted=true)
+func (r *ontologyEntityRepository) GetPromotedByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error)
+```
+
+**Acceptance criteria:**
+- `get_context(depth='entities')` returns only promoted entities
+- `get_entity(name='DemotedEntity')` still works (for inspection)
+- UI entity list can show all or only promoted (configurable)
+
+---
+
+### Task 5: Manual Promotion/Demotion API
+
+**File:** `pkg/mcp/tools/entity.go`
+
+Enhance `update_entity` to support promotion:
+
+```go
+// update_entity now accepts is_promoted parameter
+mcp.WithBoolean(
+    "is_promoted",
+    mcp.Description("Optional - Set to true to promote, false to demote. Manual changes persist across re-extraction."),
+)
+```
+
+When `is_promoted` is explicitly set:
+1. Update `is_promoted` field
+2. Set `Source` to `manual` (highest precedence)
+3. Manual promotions/demotions persist across re-extraction
+
+**Acceptance criteria:**
+- `update_entity(name='Session', is_promoted=false)` demotes Session entity
+- Manual demotions prevent auto-promotion during re-extraction
+- Manual promotions prevent auto-demotion during re-extraction
+
+---
+
+## Removed Tasks (Already Implemented)
+
+| Original Task | Why Not Needed |
+|---------------|----------------|
+| Task 0: Fix Relationship Detection | Already works via `deterministic_relationship_service.go` |
+| Task 4 (original): Update get_entity occurrences | Already computed from relationships |
+| Task 4 (original): Update get_context occurrences | Already implemented |
 
 ---
 
 ## Expected Outcome for tikr_production
 
-**Before (current - as of 2026-01-30):**
+**Before (current):**
 ```
-Entities: 38 (nearly 1:1 with tables)
-- User, Account, Session, Engagement, Billing Transaction, Billing Engagement,
-- Billing Activity, Channel, Channel Favorite, Channel Like, Channel Review,
-- Conversation, Conversation Email, E Server, Email, Engagement Payment,
-- Engagement Review, Event, Inbound Email, Invitation, Job, Marketing Campaign,
-- Media, Media Report, Notification Token, Offer, Participant, Password Reset,
-- Payout Account, Tok Log, Transaction, User Follow, User Promotion, User Review,
-- Account Authentication, Account Block, Account Email Update, Account Verification
-
-Issues:
-- Most entities add no value (1:1 with table)
-- occurrences field is empty for most entities
-- probe_relationship returns empty (relationships not populated)
+Entities: ~38 (nearly 1:1 with tables)
+All tables with PKs become entities
 ```
 
 **After (with promotion model):**
 ```
-Entities: 4-5 (promoted only)
-- User (score: 85) - has roles host/visitor/creator/payer/payee, 12+ occurrences
-- Account (score: 60) - 1:N relationship hub to User, appears in 5+ tables
+Promoted Entities: 4-5 (high semantic value)
+- User (score: 85) - 12+ inbound refs, multiple roles (host/visitor/creator/payer/payee)
+- Account (score: 60) - N:1 hub to User, appears in 5+ tables
 - Engagement (score: 55) - central to billing, multiple relationships
 - Media (score: 50) - has status enum, multiple references
 
-Tables with rich metadata: 38 (all tables)
-- Each table has descriptions, FK annotations, enum values
-- No redundant entity layer for simple tables
-- occurrences populated for promoted entities with {table, column, role}
+Demoted Entities: ~33 (still exist, but filtered from default context)
+- Session, PasswordReset, Notification, etc.
+- Can be manually re-promoted if needed
+
+Tables with rich metadata: 38 (unchanged)
+- All tables still have descriptions, FK annotations, enum values
 ```
+
+---
 
 ## Testing Strategy
 
 1. **Unit tests** for PromotionScore function
-   - Table with 3 related tables scores >= 30
-   - Table with 2 role-based FKs scores >= 25
-   - Table with 5 relationships scores >= 20
+   - Table with 5+ inbound references scores >= 30
+   - Table with 2 role-based references scores >= 25
    - Combination scoring works correctly
 
 2. **Integration test** on tikr_production
    - Run extraction with promotion model
    - Verify 4-5 entities promoted
-   - Verify all tables have metadata
-   - Verify promoted entities have correct aliases/roles
+   - Verify ~33 entities demoted (not deleted)
+   - Verify `get_context` returns only promoted entities
 
 3. **Regression test**
-   - Existing MCP tools still work
-   - get_context returns expected structure
-   - AI agents can still answer questions
+   - `get_entity(name='DemotedEntity')` still works
+   - Manual promotion/demotion persists across re-extraction
+   - Existing ontology queries still work
+
+---
 
 ## Success Metrics
 
 | Metric | Before | After |
 |--------|--------|-------|
-| Entity count (tikr_production) | ~38 | 4-5 |
+| Promoted entity count (tikr_production) | ~38 | 4-5 |
+| Total entities (including demoted) | ~38 | ~38 |
 | Tables with rich metadata | ~38 | ~38 (unchanged) |
-| Entity:Table redundancy | ~95% | 0% |
+| Entity:Table redundancy | ~95% | 0% (for promoted) |
 | Promotion decisions explainable | No | Yes (logged reasons) |
-| Occurrences populated | No (empty) | Yes (with roles) |
-| Relationships detected | No (empty) | Yes |
+| Occurrences populated | Yes (from relationships) | Yes (unchanged) |
+| Relationships detected | Yes | Yes (unchanged) |

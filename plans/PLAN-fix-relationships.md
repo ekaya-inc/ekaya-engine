@@ -1,5 +1,8 @@
 # PLAN: Fix Relationships - Verified Joins for MCP Clients
 
+> **Updated 2026-01-30**: Revised after codebase review. Much of the original plan already exists.
+> Key changes: Removed duplicate tasks, updated references to existing tables/services, focused on actual gaps.
+
 ## Problem Statement
 
 MCP clients (AI agents) are currently forced to **guess** at table relationships:
@@ -37,415 +40,72 @@ This plan follows the established Column Features pattern:
 
 ---
 
-## Architecture: Data-Driven FK Discovery
+## What Already Exists (Codebase Review 2026-01-30)
 
-### Principle: No String Pattern Matching
+### Architecture Pattern ✅ ALREADY IMPLEMENTED
 
-❌ **WRONG**: `if strings.HasSuffix(col.Name, "_id")`
-❌ **WRONG**: Pattern rules like `{role}_id → users.user_id`
-❌ **WRONG**: Hard-coded role lists (host, visitor, payer, payee)
+The codebase already follows the deterministic → LLM → deterministic pattern:
 
-✅ **RIGHT**: Use existing Column Features classification
-✅ **RIGHT**: Data overlap analysis to discover relationships
-✅ **RIGHT**: LLM determines semantic role from context
+```
+ColumnFeatureExtraction (DAG Node 2)
+    ├─ Phase 4: FK Resolution via data overlap
+    └─ Output: IdentifierFeatures with FKTargetTable/FKTargetColumn
 
-### Foundation: Column Features Already Exists
+FKDiscovery (DAG Node 5) - `deterministic_relationship_service.go`
+    ├─ Phase 1: Uses ColumnFeatures (data overlap results)
+    ├─ Phase 2: Uses database FK constraints
+    └─ Output: EntityRelationships in engine_entity_relationships
 
-The Column Feature Extraction pipeline (DAG node 2) already classifies columns:
+PKMatchDiscovery (DAG Node 6) - `deterministic_relationship_service.go`
+    ├─ Tests joins via SQL for columns without explicit FKs
+    └─ Output: More EntityRelationships
 
-```go
-// From pkg/models/column_features.go
-type IdentifierFeatures struct {
-    IdentifierType   string   // "internal_uuid", "foreign_key", "primary_key", etc.
-    FKTargetTable    string   // Discovered via Phase 4 overlap analysis
-    FKTargetColumn   string   // Discovered via Phase 4 overlap analysis
-    FKConfidence     float64  // 0.0-1.0 based on match rate
-    EntityReferenced string   // Semantic entity this FK points to
-}
+RelationshipEnrichment (DAG Node 8) - `relationship_enrichment.go`
+    ├─ LLM generates descriptions and associations
+    ├─ Includes project knowledge for role context (host/visitor/etc)
+    └─ Output: Updated EntityRelationships with descriptions
 ```
 
-**Phase 4 (FK Resolution)** already does overlap analysis - but results are not being:
-1. Stored persistently in a relationships table
-2. Surfaced through MCP tools (probe_relationship, get_context)
-3. Used to generate join paths
+### Relationship Storage ✅ ALREADY EXISTS
+
+Two tables store relationship data:
+
+1. **`engine_entity_relationships`** - Entity-level relationships
+   - source/target entity IDs, cardinality, detection_method, confidence
+   - description, association (from LLM enrichment)
+   - provenance tracking (source, created_by, updated_by)
+
+2. **`engine_schema_relationships`** - Column-level with metrics
+   - source/target column IDs, cardinality
+   - match_rate, source_distinct, target_distinct, matched_count
+   - rejection_reason for candidates that didn't pass validation
+
+### MCP Tools ✅ ALREADY IMPLEMENTED
+
+1. **`probe_relationship`** (`pkg/mcp/tools/probe.go:580`)
+   - Returns relationships with entity names, cardinality, description, label
+   - Includes data quality metrics (match_rate, orphan_count, source_distinct, target_distinct)
+   - Shows rejected candidates with rejection reasons
+
+2. **`get_context`** (`pkg/mcp/tools/context.go:722`)
+   - At `depth='columns'`, FK columns show:
+     - `fk_target_table`, `fk_target_column`, `fk_confidence`, `entity_referenced`
+
+3. **`update_relationship` / `delete_relationship`** (`pkg/mcp/tools/relationship.go`)
+   - Entity-based CRUD with provenance tracking
+
+### Repository Layer ✅ ALREADY EXISTS
+
+- `EntityRelationshipRepository` in `pkg/repositories/entity_relationship_repository.go`
+- Methods: `Create`, `Upsert`, `GetByProject`, `GetByOntology`, `GetByEntityPair`, `UpdateDescription`, `UpdateDescriptionAndAssociation`, `Delete`
 
 ---
 
-## Extraction Phase: Relationship Detection
+## What's Actually Missing (Real Gaps)
 
-### Step 1: Identify FK Candidates (Data-Driven)
+### Gap 1: `get_join_path` Tool - NOT IMPLEMENTED
 
-Use Column Features classification to find FK candidates - **no string matching**:
-
-```go
-// From Phase 2 Column Classification output
-func findFKCandidates(columns []SchemaColumn) []FKCandidate {
-    var candidates []FKCandidate
-
-    for _, col := range columns {
-        features := col.GetColumnFeatures()
-        if features == nil {
-            continue
-        }
-
-        // Use classification, not column name patterns
-        if features.IdentifierFeatures != nil {
-            idFeatures := features.IdentifierFeatures
-
-            // FK candidates are columns classified as foreign_key or internal_uuid
-            // that are NOT primary keys
-            if idFeatures.IdentifierType == "foreign_key" ||
-               (idFeatures.IdentifierType == "internal_uuid" && features.Role != "primary_key") {
-                candidates = append(candidates, FKCandidate{
-                    SourceTableID:  col.TableID,
-                    SourceColumnID: col.ID,
-                    SourceColumn:   col.Name,
-                    Features:       features,
-                })
-            }
-        }
-    }
-    return candidates
-}
-```
-
-### Step 2: Find Target Columns (Overlap Analysis)
-
-For each FK candidate, find columns with matching values using **data overlap**:
-
-```go
-// Phase 4 FK Resolution - already exists in column_feature_extraction.go
-func findTargetColumns(ctx context.Context, candidate FKCandidate, allColumns []SchemaColumn) []OverlapResult {
-    var results []OverlapResult
-
-    // Get sample values from source column (already collected in Phase 1)
-    sourceValues := candidate.Features.Profile.SampleValues
-
-    // For each potential target column (identifier columns with Role=primary_key)
-    for _, targetCol := range allColumns {
-        targetFeatures := targetCol.GetColumnFeatures()
-        if targetFeatures == nil || targetFeatures.Role != "primary_key" {
-            continue
-        }
-
-        // Skip same table
-        if targetCol.TableID == candidate.SourceTableID {
-            continue
-        }
-
-        // Check data type compatibility
-        if !compatibleTypes(candidate.Features.Profile.DataType, targetFeatures.Profile.DataType) {
-            continue
-        }
-
-        // Run overlap analysis - what % of source values exist in target?
-        overlap := calculateOverlap(ctx, sourceValues, targetCol)
-        if overlap.MatchRate >= 0.5 {
-            results = append(results, overlap)
-        }
-    }
-
-    return results
-}
-
-// Actual SQL overlap query
-func calculateOverlap(ctx context.Context, sourceValues []string, targetCol SchemaColumn) OverlapResult {
-    // Query: How many of our source sample values exist in the target column?
-    sql := `
-        WITH source_samples AS (
-            SELECT unnest($1::text[]) AS sample_value
-        ),
-        matches AS (
-            SELECT COUNT(DISTINCT s.sample_value) as matched
-            FROM source_samples s
-            WHERE EXISTS (
-                SELECT 1 FROM %s t
-                WHERE t.%s = s.sample_value
-            )
-        )
-        SELECT
-            matched,
-            array_length($1, 1) as total,
-            matched::float / NULLIF(array_length($1, 1), 0) as match_rate
-        FROM matches
-    `
-    // ... execute query and return OverlapResult
-}
-```
-
-### Step 3: LLM Semantic Classification
-
-Once data overlap identifies candidate relationships, use LLM to determine semantic meaning:
-
-```go
-// Present deterministic data to LLM for semantic classification
-type RelationshipClassificationInput struct {
-    // Source column context
-    SourceTable       string
-    SourceColumn      string
-    SourceDescription string   // From column features
-    SourceSampleValues []string
-
-    // Target column context
-    TargetTable       string
-    TargetColumn      string
-    TargetDescription string   // From column features
-
-    // Overlap metrics (deterministic)
-    MatchRate         float64
-    MatchedCount      int
-    TotalSamples      int
-
-    // Schema context
-    OtherColumnsInSourceTable []string
-    OtherColumnsInTargetTable []string
-}
-
-// LLM determines
-type RelationshipClassificationOutput struct {
-    // Is this actually a foreign key relationship?
-    IsFK            bool      `json:"is_fk"`
-    Confidence      float64   `json:"confidence"`
-
-    // Semantic role (LLM infers from context, not column name)
-    Role            string    `json:"role,omitempty"`    // "host", "visitor", "payer", etc.
-    RoleDescription string    `json:"role_description,omitempty"`
-
-    // Entity mapping
-    SourceEntity    string    `json:"source_entity,omitempty"`  // "Engagement"
-    TargetEntity    string    `json:"target_entity,omitempty"`  // "User"
-
-    // Reasoning
-    Reasoning       string    `json:"reasoning"`
-}
-```
-
-**Example LLM Prompt**:
-```
-Given the following data overlap between two columns:
-
-SOURCE: billing_engagements.host_id (text, UUID format)
-  - Sample values: ["a1b2c3...", "d4e5f6...", ...]
-  - Other columns in table: [engagement_id, visitor_id, started_at, ended_at, ...]
-
-TARGET: users.user_id (text, UUID format, PRIMARY KEY)
-  - Other columns in table: [username, email, account_id, ...]
-
-OVERLAP: 98.5% of source values exist in target (985/1000 samples matched)
-
-Questions:
-1. Is this a foreign key relationship?
-2. If yes, what semantic role does the source column represent?
-3. What entities are involved?
-
-Return JSON with: is_fk, confidence, role, role_description, source_entity, target_entity, reasoning
-```
-
-### Step 4: Verify with Full Data (Cardinality & Orphans)
-
-After LLM classification, run full verification queries:
-
-```sql
--- Calculate match rate on full data (not just samples)
-WITH source_values AS (
-    SELECT DISTINCT host_id AS fk_value
-    FROM billing_engagements
-    WHERE host_id IS NOT NULL
-),
-match_check AS (
-    SELECT
-        COUNT(DISTINCT sv.fk_value) AS source_distinct,
-        COUNT(DISTINCT CASE WHEN u.user_id IS NOT NULL THEN sv.fk_value END) AS matched_count
-    FROM source_values sv
-    LEFT JOIN users u ON sv.fk_value = u.user_id
-)
-SELECT
-    source_distinct,
-    matched_count,
-    source_distinct - matched_count AS orphan_count,
-    ROUND(matched_count::numeric / NULLIF(source_distinct, 0) * 100, 2) AS match_rate
-FROM match_check;
-
--- Determine cardinality
-WITH cardinality_check AS (
-    SELECT
-        host_id,
-        COUNT(*) AS row_count
-    FROM billing_engagements
-    WHERE host_id IS NOT NULL
-    GROUP BY host_id
-)
-SELECT
-    CASE
-        WHEN MAX(row_count) = 1 THEN '1:1'
-        ELSE 'N:1'  -- Many rows per FK value
-    END AS cardinality,
-    COUNT(DISTINCT host_id) AS distinct_fk_values,
-    SUM(row_count) AS total_rows
-FROM cardinality_check;
-```
-
-### Step 5: Store Verified Relationships
-
-```sql
-CREATE TABLE engine_relationships (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id UUID NOT NULL REFERENCES engine_projects(project_id),
-    datasource_id UUID NOT NULL REFERENCES engine_datasources(datasource_id),
-
-    -- Source side (from Column Features)
-    source_table_id UUID REFERENCES engine_schema_tables(id),
-    source_column_id UUID REFERENCES engine_schema_columns(id),
-    source_table VARCHAR(255) NOT NULL,
-    source_column VARCHAR(255) NOT NULL,
-    source_entity VARCHAR(255),  -- From LLM classification
-    source_role VARCHAR(255),    -- From LLM classification (e.g., 'host', 'visitor')
-
-    -- Target side
-    target_table_id UUID REFERENCES engine_schema_tables(id),
-    target_column_id UUID REFERENCES engine_schema_columns(id),
-    target_table VARCHAR(255) NOT NULL,
-    target_column VARCHAR(255) NOT NULL,
-    target_entity VARCHAR(255),  -- From LLM classification
-
-    -- Verification results (deterministic)
-    cardinality VARCHAR(10) NOT NULL,  -- '1:1', '1:N', 'N:1', 'N:M'
-    match_rate NUMERIC(5,2),           -- 0.00 to 100.00
-    source_distinct_count INTEGER,
-    orphan_count INTEGER,
-
-    -- Classification metadata
-    llm_confidence NUMERIC(3,2),       -- 0.00 to 1.00
-    llm_reasoning TEXT,
-
-    -- Provenance
-    detection_method VARCHAR(50) DEFAULT 'data_overlap',  -- 'data_overlap', 'llm', 'manual', 'admin'
-    verified_at TIMESTAMPTZ DEFAULT NOW(),
-    provenance VARCHAR(50) DEFAULT 'inference',
-
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-
-    UNIQUE(project_id, source_table, source_column, target_table, target_column)
-);
-
--- RLS policy
-ALTER TABLE engine_relationships ENABLE ROW LEVEL SECURITY;
-CREATE POLICY relationships_project_isolation ON engine_relationships
-    USING (project_id = current_setting('app.current_project_id')::uuid);
-```
-
----
-
-## DAG Integration
-
-### New/Enhanced DAG Nodes
-
-The existing DAG has:
-- Node 5: FKDiscovery
-- Node 8: RelationshipEnrichment
-
-**Enhance these nodes to:**
-1. Use Column Features (from Node 2) as input - no column name scanning
-2. Run data overlap analysis between identifier columns
-3. Present overlap results to LLM for semantic classification
-4. Store relationships in `engine_relationships` table
-5. Update Column Features with FK target info
-
-### Data Flow
-
-```
-Node 2: ColumnFeatureExtraction
-    ├─ Phase 1: Collect profiles (sample values, data types)
-    ├─ Phase 2: Classify columns (identifier, primary_key, foreign_key, etc.)
-    └─ Output: IdentifierFeatures for each column
-
-Node 5: FKDiscovery (ENHANCED)
-    ├─ Input: Columns with IdentifierFeatures
-    ├─ Filter: Non-PK identifier columns = FK candidates
-    ├─ For each candidate: Find PK columns with matching data types
-    ├─ Run overlap analysis (sample-based, deterministic)
-    └─ Output: FKCandidate with OverlapResults
-
-Node 8: RelationshipEnrichment (ENHANCED)
-    ├─ Input: FKCandidates with high overlap (>=50%)
-    ├─ Build LLM prompt with overlap metrics + schema context
-    ├─ LLM classifies: is_fk, role, entities, confidence
-    ├─ Run full verification queries (match_rate, cardinality, orphans)
-    ├─ Store in engine_relationships
-    └─ Update IdentifierFeatures with FKTargetTable/Column
-```
-
----
-
-## MCP Tools: Surfacing Relationships
-
-### Tool 1: `get_context` Includes Relationships
-
-At `depth='columns'`, FK columns show their verified target:
-
-```json
-{
-  "table": "billing_engagements",
-  "columns": [
-    {
-      "column_name": "host_id",
-      "data_type": "text",
-      "references": {
-        "table": "users",
-        "column": "user_id",
-        "cardinality": "N:1",
-        "match_rate": 99.8,
-        "role": "host"
-      }
-    },
-    {
-      "column_name": "visitor_id",
-      "data_type": "text",
-      "references": {
-        "table": "users",
-        "column": "user_id",
-        "cardinality": "N:1",
-        "match_rate": 99.5,
-        "role": "visitor"
-      }
-    }
-  ]
-}
-```
-
-### Tool 2: `probe_relationship` Returns Verified Data
-
-Current state: Returns empty `{"relationships": []}`
-
-Fixed state:
-```json
-{
-  "relationships": [
-    {
-      "source": {
-        "table": "billing_engagements",
-        "column": "host_id",
-        "entity": "Billing Engagement",
-        "role": "host"
-      },
-      "target": {
-        "table": "users",
-        "column": "user_id",
-        "entity": "User"
-      },
-      "cardinality": "N:1",
-      "match_rate": 99.8,
-      "orphan_count": 2,
-      "verified_at": "2026-01-30T10:00:00Z"
-    }
-  ]
-}
-```
-
-### Tool 3: `get_join_path` (New Tool)
-
-Given two tables, return the verified path to join them:
+Given two tables, find verified paths to join them. This is the **highest value missing feature**.
 
 ```
 get_join_path(from_table='billing_engagements', to_table='accounts')
@@ -474,32 +134,23 @@ Response:
       ],
       "total_hops": 2,
       "sql_hint": "JOIN users ON host_id = users.user_id JOIN accounts ON users.account_id = accounts.account_id"
-    },
-    {
-      "description": "Via visitor user",
-      "hops": [
-        {
-          "from": "billing_engagements.visitor_id",
-          "to": "users.user_id",
-          "cardinality": "N:1",
-          "role": "visitor"
-        },
-        {
-          "from": "users.account_id",
-          "to": "accounts.account_id",
-          "cardinality": "N:1"
-        }
-      ],
-      "total_hops": 2,
-      "sql_hint": "JOIN users ON visitor_id = users.user_id JOIN accounts ON users.account_id = accounts.account_id"
     }
   ]
 }
 ```
 
-### Tool 4: `validate_query` Enhancement
+### Gap 2: Role Storage on Relationships - PARTIAL
 
-Before executing a query, validate that JOINs are correct:
+Current state:
+- Roles are extracted during column feature extraction (`EntityReferenced` field)
+- Relationship enrichment generates descriptions with role context
+- But `source_role` is not a dedicated field on `engine_entity_relationships`
+
+Impact: Low. Roles are accessible via ColumnFeatures and relationship descriptions.
+
+### Gap 3: `validate` Tool JOIN Verification - NOT IMPLEMENTED
+
+Enhance `validate` tool to check JOINs against known relationships:
 
 ```
 validate(sql="SELECT * FROM billing_engagements be JOIN users u ON be.host_id = u.user_id")
@@ -523,141 +174,101 @@ Response includes relationship validation:
 
 ---
 
-## Implementation Tasks
+## Implementation Tasks (Revised)
 
-### Task 1: Enhance Phase 4 FK Resolution
+### Task 1: Implement `get_join_path` Tool
 
-**File:** `pkg/services/column_feature_extraction.go`
+**File:** `pkg/mcp/tools/join_path.go` (new)
 
-Ensure Phase 4 properly discovers FK targets using data overlap (not column names).
+**Implementation approach:**
+1. Build graph from `engine_entity_relationships` (or query via `EntityRelationshipRepository`)
+2. BFS/DFS to find all paths up to 3 hops
+3. Return SQL hints for each path
+4. Handle multiple paths (via host vs via visitor)
 
 **Acceptance criteria:**
-- FK candidates from Phase 2 classification only
-- Overlap analysis against PK columns in other tables
-- Results stored in IdentifierFeatures.FKTarget*
-- No string pattern matching on column names
+- Query relationships by project
+- Build adjacency list from source/target tables
+- Find all paths between from_table and to_table
+- Generate SQL JOIN hints
+- Handle bidirectional relationships (relationships are stored both directions)
+
+**Dependencies:**
+- `EntityRelationshipRepository.GetByProject()`
+- Register tool in `RegisterProbeTools()` or create new `RegisterJoinPathTools()`
+- Add to `LoadoutQuery` and `AllToolsOrdered` in `mcp_tool_loadouts.go`
 
 ---
 
-### Task 2: Create Relationship Storage Table
+### Task 2: Enhance `validate` Tool with JOIN Verification
 
-**File:** `migrations/XXX_relationships.sql`
+**File:** `pkg/mcp/tools/query_tools.go` (existing)
 
-Create `engine_relationships` table (schema above).
+**Implementation approach:**
+1. Parse SQL to extract JOIN conditions (use sqlparser)
+2. For each JOIN, look up relationship in `engine_entity_relationships`
+3. Add `join_details` array to validation response
+4. Mark each join as verified/unverified with metrics
 
 **Acceptance criteria:**
-- Stores source/target table/column references
-- Stores verification data (match_rate, cardinality, orphans)
-- Stores LLM classification (role, entities, confidence)
-- RLS policy applied
+- Extract JOIN clauses from SQL
+- Match JOINs to known relationships
+- Include cardinality and match_rate in response
+- Warn (not fail) for unverified JOINs
 
 ---
 
-### Task 3: Implement Relationship Repository
+### Task 3 (Optional): Add `source_role` Field to Relationships
 
-**File:** `pkg/repositories/relationship_repository.go`
+**File:** `migrations/XXX_add_role_to_relationships.sql`
 
-CRUD operations for relationships.
+Add dedicated role field to `engine_entity_relationships`:
 
-**Acceptance criteria:**
-- Upsert by (project, source_table, source_column, target_table, target_column)
-- List by project, filter by table/entity
-- Get verification metrics
-- Find paths between tables (BFS/DFS graph traversal)
+```sql
+ALTER TABLE engine_entity_relationships
+ADD COLUMN source_role VARCHAR(100);
 
----
-
-### Task 4: Enhance RelationshipEnrichment DAG Node
-
-**File:** `pkg/services/dag/relationship_enrichment_node.go`
-
-Run LLM classification and store relationships.
-
-**Acceptance criteria:**
-- Input: FKCandidates from FKDiscovery with overlap >= 50%
-- LLM prompt includes overlap metrics, schema context
-- Output: Classified relationships with roles/entities
-- Store in engine_relationships table
-
----
-
-### Task 5: Update `get_context` to Include FK References
-
-**File:** `pkg/mcp/tools/context_tools.go`
-
-At `depth='columns'`, include `references` for FK columns.
-
-**Acceptance criteria:**
-- Query engine_relationships for each column
-- Add references object with table, column, cardinality, match_rate, role
-- Null/missing relationships omitted
-
----
-
-### Task 6: Fix `probe_relationship`
-
-**File:** `pkg/mcp/tools/probe_tools.go`
-
-Return actual relationship data from `engine_relationships` table.
-
-**Acceptance criteria:**
-- Query engine_relationships by from_entity/to_entity filters
-- Return all verified relationships with full metadata
-- Include verification_at, orphan_count, LLM confidence
-
----
-
-### Task 7: Implement `get_join_path` Tool
-
-**File:** `pkg/mcp/tools/relationship_tools.go`
-
-New tool to find paths between tables.
-
-**Acceptance criteria:**
-- Build graph from engine_relationships
-- BFS to find all paths up to 3 hops
-- Return SQL hints for each path
-- Handle multiple paths (via host vs via visitor)
-
----
-
-## Expected Outcome
-
-**Before:**
-```
-MCP Client: "How do I join billing_engagements to accounts?"
-Action: Guess based on column names, trial and error
-Result: May hallucinate, waste tokens, get wrong answer
+COMMENT ON COLUMN engine_entity_relationships.source_role IS
+'Semantic role of source column (e.g., host, visitor, payer). Extracted from ColumnFeatures or LLM enrichment.';
 ```
 
-**After:**
-```
-MCP Client: get_join_path(from='billing_engagements', to='accounts')
-Response: {
-  "paths": [
-    {"sql_hint": "JOIN users ON host_id = user_id JOIN accounts ON account_id = account_id"}
-  ]
-}
-Action: Use verified path
-Result: Correct query, no guessing
-```
+**File:** `pkg/services/relationship_enrichment.go`
+
+During enrichment, extract role from column name or LLM response and store in `source_role`.
+
+**Impact:** Low priority. Current system already captures roles in descriptions and ColumnFeatures.
 
 ---
 
-## Success Metrics
+## Removed Tasks (Already Implemented)
 
-| Metric | Before | After |
-|--------|--------|-------|
-| `probe_relationship` returns data | No (empty) | Yes |
-| FK columns show references in `get_context` | No | Yes |
-| Join paths discoverable | No | Yes (new tool) |
-| MCP client needs to guess joins | Yes | No |
-| Hallucinated joins | Common | Rare |
-| Column name pattern matching | Yes ❌ | No ✅ |
+The following tasks from the original plan are **not needed**:
+
+| Original Task | Why Not Needed |
+|---------------|----------------|
+| Task 1: Enhance Phase 4 FK Resolution | Already implemented in `column_feature_extraction.go` |
+| Task 2: Create `engine_relationships` table | Already exists as `engine_entity_relationships` + `engine_schema_relationships` |
+| Task 3: Implement Relationship Repository | Already exists as `EntityRelationshipRepository` |
+| Task 4: Enhance RelationshipEnrichment DAG Node | Already implemented in `relationship_enrichment.go` |
+| Task 5: Update `get_context` to Include FK References | Already includes `fk_target_table`, `fk_target_column` via ColumnFeatures |
+| Task 6: Fix `probe_relationship` | Already works - returns relationships with metrics |
 
 ---
 
-## Key Design Decisions
+## Success Metrics (Updated)
+
+| Metric | Current State | After |
+|--------|---------------|-------|
+| `probe_relationship` returns data | ✅ Yes | ✅ Yes |
+| FK columns show references in `get_context` | ✅ Yes (via ColumnFeatures) | ✅ Yes |
+| Join paths discoverable | ❌ No | ✅ Yes (new `get_join_path` tool) |
+| `validate` checks JOINs | ❌ No | ✅ Yes |
+| MCP client needs to guess joins | ⚠️ Sometimes | ✅ No |
+| Column name pattern matching | ✅ Not used | ✅ Not used |
+
+---
+
+## Key Design Decisions (Unchanged)
 
 ### Why No Column Name Pattern Matching?
 
@@ -680,6 +291,6 @@ Result: Correct query, no guessing
 ## Dependencies
 
 - **Column Features implemented** (DAG Node 2) ✅
-- **Assumes Entities implemented** (PLAN-entity-promotion-model.md)
-- Relationships should reference entities where applicable
-- Role detection (host, visitor) determined by LLM from context
+- **Entity relationships implemented** ✅
+- **Relationship enrichment implemented** ✅
+- Only new work: `get_join_path` tool + `validate` enhancement
