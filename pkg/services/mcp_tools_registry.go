@@ -42,6 +42,7 @@ var ToolRegistry = []ToolDefinition{
 	{Name: "update_columns", Description: "Batch update metadata for multiple columns (up to 50) in a single transaction", ToolGroup: ToolGroupDeveloper},
 	{Name: "delete_column_metadata", Description: "Clear custom metadata for a column, reverting to schema-only information", ToolGroup: ToolGroupDeveloper},
 	{Name: "update_table", Description: "Add or update table-level metadata (description, usage notes, ephemeral status, alternatives)", ToolGroup: ToolGroupDeveloper},
+	{Name: "delete_table_metadata", Description: "Clear custom metadata for a table, removing semantic enrichment", ToolGroup: ToolGroupDeveloper},
 	{Name: "list_ontology_questions", Description: "List ontology questions with filtering by status, category, entity, priority, and pagination", ToolGroup: ToolGroupDeveloper},
 	{Name: "resolve_ontology_question", Description: "Mark an ontology question as resolved after researching and updating the ontology", ToolGroup: ToolGroupDeveloper},
 	{Name: "skip_ontology_question", Description: "Mark a question as skipped for revisiting later (e.g., 'Need access to frontend repo')", ToolGroup: ToolGroupDeveloper},

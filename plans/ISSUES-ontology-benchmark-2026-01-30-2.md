@@ -115,7 +115,7 @@ update_table(
 
 ---
 
-#### [ ] 7.3 Add delete_table_metadata MCP Tool
+#### [x] 7.3 Add delete_table_metadata MCP Tool
 
 **Goal**: Create companion tool to remove table metadata (matching the pattern of other ontology tools like `delete_column_metadata`).
 

@@ -38,6 +38,7 @@ func (d *TableToolDeps) GetLogger() *zap.Logger { return d.Logger }
 // RegisterTableTools registers table metadata MCP tools.
 func RegisterTableTools(s *server.MCPServer, deps *TableToolDeps) {
 	registerUpdateTableTool(s, deps)
+	registerDeleteTableMetadataTool(s, deps)
 }
 
 // registerUpdateTableTool adds the update_table tool for adding or updating table metadata.
@@ -222,4 +223,92 @@ func ptrToString(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// registerDeleteTableMetadataTool adds the delete_table_metadata tool for clearing custom table metadata.
+func registerDeleteTableMetadataTool(s *server.MCPServer, deps *TableToolDeps) {
+	tool := mcp.NewTool(
+		"delete_table_metadata",
+		mcp.WithDescription(
+			"Clear custom metadata for a table, removing semantic enrichment. "+
+				"Use this to remove incorrect or outdated table annotations. "+
+				"Example: delete_table_metadata(table='sessions')",
+		),
+		mcp.WithString(
+			"table",
+			mcp.Required(),
+			mcp.Description("Table name to clear metadata for"),
+		),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		projectID, tenantCtx, cleanup, err := AcquireToolAccess(ctx, deps, "delete_table_metadata")
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		// Get required table parameter
+		table, err := req.RequireString("table")
+		if err != nil {
+			return nil, err
+		}
+		table = trimString(table)
+		if table == "" {
+			return NewErrorResult("invalid_parameters", "parameter 'table' cannot be empty"), nil
+		}
+
+		// Get datasource ID
+		datasourceID, err := deps.ProjectService.GetDefaultDatasourceID(tenantCtx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get datasource: %w", err)
+		}
+
+		// Check if metadata exists before deleting
+		existing, err := deps.TableMetadataRepo.Get(tenantCtx, projectID, datasourceID, table)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check existing table metadata: %w", err)
+		}
+
+		if existing == nil {
+			// No metadata found for this table
+			result := deleteTableMetadataResponse{
+				Table:   table,
+				Deleted: false,
+			}
+			jsonResult, err := json.Marshal(result)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal result: %w", err)
+			}
+			return mcp.NewToolResultText(string(jsonResult)), nil
+		}
+
+		// Delete the metadata
+		if err := deps.TableMetadataRepo.Delete(tenantCtx, projectID, datasourceID, table); err != nil {
+			return nil, fmt.Errorf("failed to delete table metadata: %w", err)
+		}
+
+		// Build response
+		result := deleteTableMetadataResponse{
+			Table:   table,
+			Deleted: true,
+		}
+
+		jsonResult, err := json.Marshal(result)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResult)), nil
+	})
+}
+
+// deleteTableMetadataResponse is the response format for delete_table_metadata tool.
+type deleteTableMetadataResponse struct {
+	Table   string `json:"table"`
+	Deleted bool   `json:"deleted"` // true if metadata was deleted, false if not found
 }

@@ -44,7 +44,7 @@ func TestRegisterTableTools(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify all tools are registered
-	expectedTools := []string{"update_table"}
+	expectedTools := []string{"update_table", "delete_table_metadata"}
 	foundTools := make(map[string]bool)
 
 	for _, tool := range response.Result.Tools {
@@ -230,6 +230,161 @@ func TestPtrToString(t *testing.T) {
 // ============================================================================
 // Error Result Tests
 // ============================================================================
+
+func TestDeleteTableMetadataTool_Structure(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &TableToolDeps{
+		Logger: zap.NewNop(),
+	}
+
+	RegisterTableTools(mcpServer, deps)
+
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				InputSchema struct {
+					Type       string                 `json:"type"`
+					Properties map[string]interface{} `json:"properties"`
+					Required   []string               `json:"required"`
+				} `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+
+	err = json.Unmarshal(resultBytes, &response)
+	require.NoError(t, err)
+
+	// Find delete_table_metadata tool
+	var deleteTableMetadataTool *struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		InputSchema struct {
+			Type       string                 `json:"type"`
+			Properties map[string]interface{} `json:"properties"`
+			Required   []string               `json:"required"`
+		} `json:"inputSchema"`
+	}
+
+	for i := range response.Result.Tools {
+		if response.Result.Tools[i].Name == "delete_table_metadata" {
+			deleteTableMetadataTool = &response.Result.Tools[i]
+			break
+		}
+	}
+
+	require.NotNil(t, deleteTableMetadataTool, "delete_table_metadata tool should exist")
+
+	// Verify description mentions key use cases
+	assert.Contains(t, deleteTableMetadataTool.Description, "metadata", "description should mention metadata")
+	assert.Contains(t, deleteTableMetadataTool.Description, "Clear", "description should mention clearing")
+
+	// Verify required parameters
+	assert.Contains(t, deleteTableMetadataTool.InputSchema.Required, "table", "table should be required")
+
+	// Verify only table parameter exists (no optional params for delete)
+	assert.Contains(t, deleteTableMetadataTool.InputSchema.Properties, "table", "should have table parameter")
+}
+
+// ============================================================================
+// Delete Table Metadata Response Tests
+// ============================================================================
+
+func TestDeleteTableMetadata_ResponseStructure(t *testing.T) {
+	t.Run("deleted response", func(t *testing.T) {
+		response := deleteTableMetadataResponse{
+			Table:   "sessions",
+			Deleted: true,
+		}
+
+		assert.Equal(t, "sessions", response.Table, "response should have table field")
+		assert.True(t, response.Deleted, "response should indicate deletion occurred")
+	})
+
+	t.Run("not found response", func(t *testing.T) {
+		response := deleteTableMetadataResponse{
+			Table:   "sessions",
+			Deleted: false,
+		}
+
+		assert.Equal(t, "sessions", response.Table, "response should have table field")
+		assert.False(t, response.Deleted, "response should indicate deletion did not occur")
+	})
+}
+
+func TestDeleteTableMetadata_JSONSerialization(t *testing.T) {
+	t.Run("deleted", func(t *testing.T) {
+		response := deleteTableMetadataResponse{
+			Table:   "sessions",
+			Deleted: true,
+		}
+
+		// Marshal to JSON
+		jsonData, err := json.Marshal(response)
+		require.NoError(t, err)
+
+		// Verify JSON structure
+		var decoded map[string]any
+		err = json.Unmarshal(jsonData, &decoded)
+		require.NoError(t, err)
+
+		assert.Equal(t, "sessions", decoded["table"])
+		assert.Equal(t, true, decoded["deleted"])
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		response := deleteTableMetadataResponse{
+			Table:   "nonexistent_table",
+			Deleted: false,
+		}
+
+		// Marshal to JSON
+		jsonData, err := json.Marshal(response)
+		require.NoError(t, err)
+
+		// Verify JSON structure
+		var decoded map[string]any
+		err = json.Unmarshal(jsonData, &decoded)
+		require.NoError(t, err)
+
+		assert.Equal(t, "nonexistent_table", decoded["table"])
+		assert.Equal(t, false, decoded["deleted"])
+	})
+}
+
+func TestDeleteTableMetadataTool_ErrorResults(t *testing.T) {
+	t.Run("empty table name after trimming", func(t *testing.T) {
+		// Simulate empty table name validation
+		table := "   " // whitespace only
+		table = strings.TrimSpace(table)
+
+		if table == "" {
+			result := NewErrorResult("invalid_parameters", "parameter 'table' cannot be empty")
+
+			// Verify it's an error result
+			assert.NotNil(t, result)
+			assert.True(t, result.IsError)
+
+			// Parse error response
+			var errResp ErrorResponse
+			err := json.Unmarshal([]byte(getTextContent(result)), &errResp)
+			require.NoError(t, err)
+
+			assert.True(t, errResp.Error)
+			assert.Equal(t, "invalid_parameters", errResp.Code)
+			assert.Contains(t, errResp.Message, "table")
+			assert.Contains(t, errResp.Message, "cannot be empty")
+		}
+	})
+}
 
 func TestUpdateTableTool_ErrorResults(t *testing.T) {
 	t.Run("empty table name after trimming", func(t *testing.T) {
