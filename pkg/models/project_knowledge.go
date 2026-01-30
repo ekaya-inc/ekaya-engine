@@ -13,8 +13,7 @@ type ProjectKnowledge struct {
 	ID        uuid.UUID `json:"id"`
 	ProjectID uuid.UUID `json:"project_id"`
 	FactType  string    `json:"fact_type"` // Type of fact (e.g., "business_rule", "convention")
-	Key       string    `json:"key"`       // Fact key (unique within project + fact_type)
-	Value     string    `json:"value"`     // Fact value
+	Value     string    `json:"value"`     // The actual fact content
 	Context   *string   `json:"context,omitempty"`
 
 	// Provenance: source tracking (how it was created/modified)

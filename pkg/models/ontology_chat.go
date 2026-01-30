@@ -211,7 +211,6 @@ type KnowledgeFact struct {
 	ID        uuid.UUID `json:"id"`
 	ProjectID uuid.UUID `json:"project_id"`
 	FactType  string    `json:"fact_type"`
-	Key       string    `json:"key"`
 	Value     string    `json:"value"`
 	Context   string    `json:"context,omitempty"`
 
