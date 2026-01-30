@@ -611,7 +611,6 @@ func TestRelationshipEnrichmentService_HostVisitorRolesWithKnowledge(t *testing.
 				ID:        uuid.New(),
 				ProjectID: projectID,
 				FactType:  "terminology",
-				Key:       "Host is a content creator who receives payments",
 				Value:     "Host is a content creator who receives payments",
 				Context:   "User role",
 			},
@@ -619,7 +618,6 @@ func TestRelationshipEnrichmentService_HostVisitorRolesWithKnowledge(t *testing.
 				ID:        uuid.New(),
 				ProjectID: projectID,
 				FactType:  "terminology",
-				Key:       "Visitor is a viewer who pays for engagements",
 				Value:     "Visitor is a viewer who pays for engagements",
 				Context:   "User role",
 			},
@@ -691,16 +689,11 @@ func (m *mockKnowledgeRepoForRelEnrichment) GetByType(ctx context.Context, proje
 	return result, nil
 }
 
-func (m *mockKnowledgeRepoForRelEnrichment) GetByKey(ctx context.Context, projectID uuid.UUID, factType, key string) (*models.KnowledgeFact, error) {
-	for _, f := range m.facts {
-		if f.FactType == factType && f.Key == key {
-			return f, nil
-		}
-	}
-	return nil, nil
+func (m *mockKnowledgeRepoForRelEnrichment) Create(ctx context.Context, fact *models.KnowledgeFact) error {
+	return nil
 }
 
-func (m *mockKnowledgeRepoForRelEnrichment) Upsert(ctx context.Context, fact *models.KnowledgeFact) error {
+func (m *mockKnowledgeRepoForRelEnrichment) Update(ctx context.Context, fact *models.KnowledgeFact) error {
 	return nil
 }
 

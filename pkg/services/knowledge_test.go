@@ -145,7 +145,7 @@ func TestKnowledgeService_StoreWithSource_Manual(t *testing.T) {
 	defer cleanup()
 
 	// Test storing with manual source
-	fact, err := tc.service.StoreWithSource(ctx, tc.projectID, "overview", "project_overview", "Test project overview", "", "manual")
+	fact, err := tc.service.StoreWithSource(ctx, tc.projectID, "overview", "Test project overview", "", "manual")
 	if err != nil {
 		t.Fatalf("StoreWithSource failed: %v", err)
 	}
@@ -156,9 +156,6 @@ func TestKnowledgeService_StoreWithSource_Manual(t *testing.T) {
 	}
 	if fact.FactType != "overview" {
 		t.Errorf("FactType = %v, want %v", fact.FactType, "overview")
-	}
-	if fact.Key != "project_overview" {
-		t.Errorf("Key = %v, want %v", fact.Key, "project_overview")
 	}
 	if fact.Value != "Test project overview" {
 		t.Errorf("Value = %v, want %v", fact.Value, "Test project overview")
@@ -176,7 +173,7 @@ func TestKnowledgeService_StoreWithSource_Inferred(t *testing.T) {
 	defer cleanup()
 
 	// Test storing with inferred source (non-overview fact)
-	fact, err := tc.service.StoreWithSource(ctx, tc.projectID, "business_rule", "test_rule", "Test business rule value", "Some context", "inferred")
+	fact, err := tc.service.StoreWithSource(ctx, tc.projectID, "business_rule", "Test business rule value", "Some context", "inferred")
 	if err != nil {
 		t.Fatalf("StoreWithSource failed: %v", err)
 	}
@@ -195,7 +192,7 @@ func TestKnowledgeService_StoreWithSource_MCP(t *testing.T) {
 	defer cleanup()
 
 	// Test storing with MCP source
-	fact, err := tc.service.StoreWithSource(ctx, tc.projectID, "domain_term", "channel", "A video content creator", "", "mcp")
+	fact, err := tc.service.StoreWithSource(ctx, tc.projectID, "domain_term", "A video content creator", "", "mcp")
 	if err != nil {
 		t.Fatalf("StoreWithSource failed: %v", err)
 	}
@@ -213,7 +210,7 @@ func TestKnowledgeService_StoreWithSource_InvalidSource(t *testing.T) {
 	defer cleanup()
 
 	// Test with invalid source
-	_, err := tc.service.StoreWithSource(ctx, tc.projectID, "test", "key", "value", "", "invalid_source")
+	_, err := tc.service.StoreWithSource(ctx, tc.projectID, "test", "value", "", "invalid_source")
 	if err == nil {
 		t.Error("StoreWithSource should fail with invalid source")
 	}
@@ -227,7 +224,7 @@ func TestKnowledgeService_StoreWithSource_ProjectOverviewNilOntology(t *testing.
 	defer cleanup()
 
 	// Store a project_overview fact
-	fact, err := tc.service.StoreWithSource(ctx, tc.projectID, "overview", "project_overview", "Overview that survives ontology deletion", "", "manual")
+	fact, err := tc.service.StoreWithSource(ctx, tc.projectID, "overview", "Overview that survives ontology deletion", "", "manual")
 	if err != nil {
 		t.Fatalf("StoreWithSource failed: %v", err)
 	}
@@ -236,12 +233,9 @@ func TestKnowledgeService_StoreWithSource_ProjectOverviewNilOntology(t *testing.
 	if fact.FactType != "overview" {
 		t.Errorf("FactType = %v, want %v", fact.FactType, "overview")
 	}
-	if fact.Key != "project_overview" {
-		t.Errorf("Key = %v, want %v", fact.Key, "project_overview")
-	}
 
 	// Store a different fact type
-	otherFact, err := tc.service.StoreWithSource(ctx, tc.projectID, "convention", "timestamp_format", "UTC timestamps", "", "manual")
+	otherFact, err := tc.service.StoreWithSource(ctx, tc.projectID, "convention", "UTC timestamps", "", "manual")
 	if err != nil {
 		t.Fatalf("StoreWithSource for convention failed: %v", err)
 	}
@@ -252,33 +246,33 @@ func TestKnowledgeService_StoreWithSource_ProjectOverviewNilOntology(t *testing.
 	}
 }
 
-func TestKnowledgeService_StoreWithSource_Upsert(t *testing.T) {
+func TestKnowledgeService_StoreWithSource_CreateMultiple(t *testing.T) {
 	tc := setupKnowledgeServiceTest(t)
 	t.Cleanup(tc.cleanup)
 
 	ctx, cleanup := tc.createTestContext()
 	defer cleanup()
 
-	// Store initial fact with ontology_id set (non-overview fact for upsert testing)
-	fact1, err := tc.service.StoreWithSource(ctx, tc.projectID, "business_rule", "test_key", "Initial value", "", "manual")
+	// Store first fact
+	fact1, err := tc.service.StoreWithSource(ctx, tc.projectID, "business_rule", "Initial value", "", "manual")
 	if err != nil {
 		t.Fatalf("Initial StoreWithSource failed: %v", err)
 	}
 
-	// Update the same fact (upsert behavior)
-	fact2, err := tc.service.StoreWithSource(ctx, tc.projectID, "business_rule", "test_key", "Updated value", "Added context", "manual")
+	// Store another fact of the same type (creates new fact, no upsert since key was removed)
+	fact2, err := tc.service.StoreWithSource(ctx, tc.projectID, "business_rule", "Second value", "Added context", "manual")
 	if err != nil {
-		t.Fatalf("Update StoreWithSource failed: %v", err)
+		t.Fatalf("Second StoreWithSource failed: %v", err)
 	}
 
-	// Verify the value was updated
-	if fact2.Value != "Updated value" {
-		t.Errorf("Value = %v, want %v", fact2.Value, "Updated value")
+	// Verify the second fact has correct value
+	if fact2.Value != "Second value" {
+		t.Errorf("Value = %v, want %v", fact2.Value, "Second value")
 	}
 
-	// Both should have the same ID (upsert)
-	if fact2.ID != fact1.ID {
-		t.Errorf("Upsert should update existing fact, got different IDs: %v vs %v", fact1.ID, fact2.ID)
+	// Each call creates a new fact with different ID (no upsert)
+	if fact2.ID == fact1.ID {
+		t.Errorf("Expected different IDs since key was removed, got same: %v", fact1.ID)
 	}
 
 	// Verify context was set
@@ -296,7 +290,7 @@ func TestKnowledgeService_StoreWithSource_WithExistingProvenance(t *testing.T) {
 	defer cleanup()
 
 	// StoreWithSource should still work - it will use the userID from existing provenance
-	fact, err := tc.service.StoreWithSource(ctx, tc.projectID, "business_rule", "test_key", "test_value", "", "inferred")
+	fact, err := tc.service.StoreWithSource(ctx, tc.projectID, "business_rule", "test_value", "", "inferred")
 	if err != nil {
 		t.Fatalf("StoreWithSource with existing provenance failed: %v", err)
 	}
@@ -315,15 +309,15 @@ func TestKnowledgeService_DeleteAll(t *testing.T) {
 	defer cleanup()
 
 	// Create some test facts
-	_, err := tc.service.StoreWithSource(ctx, tc.projectID, "business_rule", "rule1", "Value 1", "", "manual")
+	_, err := tc.service.StoreWithSource(ctx, tc.projectID, "business_rule", "Value 1", "", "manual")
 	if err != nil {
 		t.Fatalf("StoreWithSource failed: %v", err)
 	}
-	_, err = tc.service.StoreWithSource(ctx, tc.projectID, "convention", "convention1", "Value 2", "", "inferred")
+	_, err = tc.service.StoreWithSource(ctx, tc.projectID, "convention", "Value 2", "", "inferred")
 	if err != nil {
 		t.Fatalf("StoreWithSource failed: %v", err)
 	}
-	_, err = tc.service.StoreWithSource(ctx, tc.projectID, "domain_term", "term1", "Value 3", "", "mcp")
+	_, err = tc.service.StoreWithSource(ctx, tc.projectID, "domain_term", "Value 3", "", "mcp")
 	if err != nil {
 		t.Fatalf("StoreWithSource failed: %v", err)
 	}

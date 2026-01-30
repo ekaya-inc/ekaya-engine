@@ -14,16 +14,15 @@ import (
 
 // KnowledgeService provides operations for project knowledge management.
 type KnowledgeService interface {
-	// Store creates or updates a knowledge fact.
-	Store(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error)
+	// Store creates a knowledge fact.
+	Store(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error)
 
-	// StoreWithSource creates or updates a knowledge fact with explicit source provenance.
+	// StoreWithSource creates a knowledge fact with explicit source provenance.
 	// Use source="manual" for user-entered data, source="inferred" for LLM-extracted data.
-	// For project_overview facts, ontologyID is set to nil so it survives ontology deletion.
-	StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo, source string) (*models.KnowledgeFact, error)
+	StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo, source string) (*models.KnowledgeFact, error)
 
 	// Update modifies an existing knowledge fact by ID.
-	Update(ctx context.Context, projectID, id uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error)
+	Update(ctx context.Context, projectID, id uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error)
 
 	// GetAll retrieves all knowledge facts for a project.
 	GetAll(ctx context.Context, projectID uuid.UUID) ([]*models.KnowledgeFact, error)
@@ -62,36 +61,33 @@ func NewKnowledgeService(
 
 var _ KnowledgeService = (*knowledgeService)(nil)
 
-func (s *knowledgeService) Store(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
+func (s *knowledgeService) Store(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error) {
 	fact := &models.KnowledgeFact{
 		ProjectID: projectID,
 		FactType:  factType,
-		Key:       key,
 		Value:     value,
 		Context:   contextInfo,
 	}
 
-	if err := s.repo.Upsert(ctx, fact); err != nil {
+	if err := s.repo.Create(ctx, fact); err != nil {
 		s.logger.Error("Failed to store knowledge fact",
 			zap.String("project_id", projectID.String()),
 			zap.String("fact_type", factType),
-			zap.String("key", key),
 			zap.Error(err))
 		return nil, err
 	}
 
 	s.logger.Info("Knowledge fact stored",
 		zap.String("project_id", projectID.String()),
-		zap.String("fact_type", factType),
-		zap.String("key", key))
+		zap.String("fact_type", factType))
 
 	return fact, nil
 }
 
-// StoreWithSource creates or updates a knowledge fact with explicit source provenance.
+// StoreWithSource creates a knowledge fact with explicit source provenance.
 // The source parameter should be "manual" for user-entered data or "inferred" for LLM-extracted data.
 // Knowledge facts have project-lifecycle scope and persist across ontology re-extractions.
-func (s *knowledgeService) StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, key, value, contextInfo, source string) (*models.KnowledgeFact, error) {
+func (s *knowledgeService) StoreWithSource(ctx context.Context, projectID uuid.UUID, factType, value, contextInfo, source string) (*models.KnowledgeFact, error) {
 	// Validate and convert source to ProvenanceSource
 	provenanceSource := models.ProvenanceSource(source)
 	if !provenanceSource.IsValid() {
@@ -126,16 +122,14 @@ func (s *knowledgeService) StoreWithSource(ctx context.Context, projectID uuid.U
 	fact := &models.KnowledgeFact{
 		ProjectID: projectID,
 		FactType:  factType,
-		Key:       key,
 		Value:     value,
 		Context:   contextInfo,
 	}
 
-	if err := s.repo.Upsert(provenanceCtx, fact); err != nil {
+	if err := s.repo.Create(provenanceCtx, fact); err != nil {
 		s.logger.Error("Failed to store knowledge fact with source",
 			zap.String("project_id", projectID.String()),
 			zap.String("fact_type", factType),
-			zap.String("key", key),
 			zap.String("source", source),
 			zap.Error(err))
 		return nil, err
@@ -144,23 +138,21 @@ func (s *knowledgeService) StoreWithSource(ctx context.Context, projectID uuid.U
 	s.logger.Info("Knowledge fact stored with source",
 		zap.String("project_id", projectID.String()),
 		zap.String("fact_type", factType),
-		zap.String("key", key),
 		zap.String("source", source))
 
 	return fact, nil
 }
 
-func (s *knowledgeService) Update(ctx context.Context, projectID, id uuid.UUID, factType, key, value, contextInfo string) (*models.KnowledgeFact, error) {
+func (s *knowledgeService) Update(ctx context.Context, projectID, id uuid.UUID, factType, value, contextInfo string) (*models.KnowledgeFact, error) {
 	fact := &models.KnowledgeFact{
 		ID:        id,
 		ProjectID: projectID,
 		FactType:  factType,
-		Key:       key,
 		Value:     value,
 		Context:   contextInfo,
 	}
 
-	if err := s.repo.Upsert(ctx, fact); err != nil {
+	if err := s.repo.Update(ctx, fact); err != nil {
 		s.logger.Error("Failed to update knowledge fact",
 			zap.String("id", id.String()),
 			zap.String("project_id", projectID.String()),
@@ -171,8 +163,7 @@ func (s *knowledgeService) Update(ctx context.Context, projectID, id uuid.UUID, 
 	s.logger.Info("Knowledge fact updated",
 		zap.String("id", id.String()),
 		zap.String("project_id", projectID.String()),
-		zap.String("fact_type", factType),
-		zap.String("key", key))
+		zap.String("fact_type", factType))
 
 	return fact, nil
 }

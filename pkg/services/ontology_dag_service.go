@@ -187,11 +187,10 @@ func (s *ontologyDAGService) Start(ctx context.Context, projectID, datasourceID 
 		manualCtx := models.WithManualProvenance(ctx, userID)
 		overviewFact := &models.KnowledgeFact{
 			ProjectID: projectID,
-			FactType:  "overview",
-			Key:       "project_overview",
+			FactType:  "project_overview",
 			Value:     projectOverview,
 		}
-		if err := s.knowledgeRepo.Upsert(manualCtx, overviewFact); err != nil {
+		if err := s.knowledgeRepo.Create(manualCtx, overviewFact); err != nil {
 			s.logger.Warn("Failed to store project overview, continuing with extraction",
 				zap.String("project_id", projectID.String()),
 				zap.Error(err))

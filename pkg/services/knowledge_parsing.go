@@ -78,13 +78,13 @@ func (s *knowledgeParsingService) ParseAndStore(ctx context.Context, projectID u
 	var storedFacts []*models.KnowledgeFact
 	for _, pf := range parsed {
 		fact, err := s.knowledgeService.StoreWithSource(
-			ctx, projectID, pf.FactType, pf.Key, pf.Value, pf.Context, "manual",
+			ctx, projectID, pf.FactType, pf.Value, pf.Context, "manual",
 		)
 		if err != nil {
 			s.logger.Error("Failed to store parsed fact",
-				zap.String("key", pf.Key),
+				zap.String("fact_type", pf.FactType),
 				zap.Error(err))
-			return nil, fmt.Errorf("store fact '%s': %w", pf.Key, err)
+			return nil, fmt.Errorf("store fact: %w", err)
 		}
 		storedFacts = append(storedFacts, fact)
 	}
@@ -99,7 +99,6 @@ func (s *knowledgeParsingService) ParseAndStore(ctx context.Context, projectID u
 // parsedFact represents a knowledge fact extracted from free-form text.
 type parsedFact struct {
 	FactType string `json:"fact_type"`
-	Key      string `json:"key"`
 	Value    string `json:"value"`
 	Context  string `json:"context,omitempty"`
 }
@@ -116,7 +115,6 @@ Your task is to convert a user's statement about their domain into structured kn
 
 You must respond with a JSON object containing an array of facts. Each fact should have:
 - fact_type: One of "business_rule", "convention", "terminology"
-- key: A unique snake_case identifier (e.g., "timezone_format", "currency_storage")
 - value: A clear, complete statement of the fact
 - context: Brief context about where this fact applies (optional)
 
@@ -146,7 +144,6 @@ Respond with a JSON object containing the structured fact(s):
   "facts": [
     {
       "fact_type": "business_rule" | "convention" | "terminology",
-      "key": "snake_case_identifier",
       "value": "Clear statement of the fact",
       "context": "Optional context"
     }
@@ -174,10 +171,9 @@ func (s *knowledgeParsingService) parseResponse(content string) ([]parsedFact, e
 	validFacts := make([]parsedFact, 0, len(response.Facts))
 	for _, fact := range response.Facts {
 		// Validate required fields
-		if fact.FactType == "" || fact.Key == "" || fact.Value == "" {
+		if fact.FactType == "" || fact.Value == "" {
 			s.logger.Debug("Skipping invalid fact - missing required fields",
-				zap.String("fact_type", fact.FactType),
-				zap.String("key", fact.Key))
+				zap.String("fact_type", fact.FactType))
 			continue
 		}
 
@@ -185,8 +181,7 @@ func (s *knowledgeParsingService) parseResponse(content string) ([]parsedFact, e
 		mappedType := mapFactTypeToModel(fact.FactType)
 		if mappedType == "" {
 			s.logger.Debug("Skipping fact with unknown type",
-				zap.String("fact_type", fact.FactType),
-				zap.String("key", fact.Key))
+				zap.String("fact_type", fact.FactType))
 			continue
 		}
 		fact.FactType = mappedType

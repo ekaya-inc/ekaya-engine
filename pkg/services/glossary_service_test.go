@@ -1376,13 +1376,12 @@ func (m *mockKnowledgeRepoForGlossary) GetByType(ctx context.Context, projectID 
 	return filtered, nil
 }
 
-func (m *mockKnowledgeRepoForGlossary) GetByKey(ctx context.Context, projectID uuid.UUID, factType, key string) (*models.KnowledgeFact, error) {
-	for _, f := range m.facts {
-		if f.FactType == factType && f.Key == key {
-			return f, nil
-		}
-	}
-	return nil, nil
+func (m *mockKnowledgeRepoForGlossary) Create(ctx context.Context, fact *models.KnowledgeFact) error {
+	return nil
+}
+
+func (m *mockKnowledgeRepoForGlossary) Update(ctx context.Context, fact *models.KnowledgeFact) error {
+	return nil
 }
 
 func (m *mockKnowledgeRepoForGlossary) Delete(ctx context.Context, id uuid.UUID) error {
@@ -1466,7 +1465,6 @@ func TestGlossaryService_SuggestTerms_WithDomainKnowledge_IncludesFactsInPrompt(
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			FactType:  "terminology",
-			Key:       "A tik represents 6 seconds of engagement time",
 			Value:     "A tik represents 6 seconds of engagement time",
 			Context:   "Billing unit - from billing_helpers.go:413",
 		},
@@ -1474,7 +1472,6 @@ func TestGlossaryService_SuggestTerms_WithDomainKnowledge_IncludesFactsInPrompt(
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			FactType:  "terminology",
-			Key:       "Host is a content creator who receives payments",
 			Value:     "Host is a content creator who receives payments",
 			Context:   "User role",
 		},
@@ -1482,7 +1479,6 @@ func TestGlossaryService_SuggestTerms_WithDomainKnowledge_IncludesFactsInPrompt(
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			FactType:  "terminology",
-			Key:       "Visitor is a viewer who pays for engagements",
 			Value:     "Visitor is a viewer who pays for engagements",
 			Context:   "User role",
 		},
@@ -1490,7 +1486,6 @@ func TestGlossaryService_SuggestTerms_WithDomainKnowledge_IncludesFactsInPrompt(
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			FactType:  "business_rule",
-			Key:       "Platform fees are 4.5% of total amount",
 			Value:     "Platform fees are 4.5% of total amount",
 			Context:   "billing_helpers.go:373",
 		},
@@ -1498,7 +1493,6 @@ func TestGlossaryService_SuggestTerms_WithDomainKnowledge_IncludesFactsInPrompt(
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			FactType:  "business_rule",
-			Key:       "Tikr share is 30% of amount after platform fees",
 			Value:     "Tikr share is 30% of amount after platform fees",
 			Context:   "billing_helpers.go:375",
 		},
@@ -1656,7 +1650,6 @@ func TestGlossaryService_DiscoverGlossaryTerms_WithDomainKnowledge_GeneratesDoma
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			FactType:  "terminology",
-			Key:       "A tik represents 6 seconds of engagement time",
 			Value:     "A tik represents 6 seconds of engagement time",
 			Context:   "Billing unit",
 		},
@@ -1664,7 +1657,6 @@ func TestGlossaryService_DiscoverGlossaryTerms_WithDomainKnowledge_GeneratesDoma
 			ID:        uuid.New(),
 			ProjectID: projectID,
 			FactType:  "terminology",
-			Key:       "Host is a content creator",
 			Value:     "Host is a content creator",
 			Context:   "User role",
 		},
