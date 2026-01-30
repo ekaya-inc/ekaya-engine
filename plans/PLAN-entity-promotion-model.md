@@ -385,9 +385,11 @@ func TestEntityPromotionNode_PreservesManualDecisions(t *testing.T) {
 ```
 
 **Acceptance criteria:**
-- [ ] Tests pass with real database (integration tests use testhelpers.GetEngineDB)
-- [ ] Test coverage for promotion, demotion, and manual override scenarios
-- [ ] Tests document expected behavior for edge cases
+- [x] Tests pass with real database (integration tests use testhelpers.GetEngineDB)
+- [x] Test coverage for promotion, demotion, and manual override scenarios
+- [x] Tests document expected behavior for edge cases
+
+**Status: ✅ COMPLETE**
 
 ---
 
