@@ -150,6 +150,7 @@ func (r *ontologyEntityRepository) GetByOntology(ctx context.Context, ontologyID
 		       primary_schema, primary_table, primary_column,
 		       is_deleted, deletion_reason,
 		       confidence, is_stale,
+		       is_promoted, promotion_score, promotion_reasons,
 		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_entities
 		WHERE ontology_id = $1 AND NOT is_deleted
@@ -188,6 +189,7 @@ func (r *ontologyEntityRepository) GetByProject(ctx context.Context, projectID u
 		       e.primary_schema, e.primary_table, e.primary_column,
 		       e.is_deleted, e.deletion_reason,
 		       e.confidence, e.is_stale,
+		       e.is_promoted, e.promotion_score, e.promotion_reasons,
 		       e.source, e.last_edit_source, e.created_by, e.updated_by, e.created_at, e.updated_at
 		FROM engine_ontology_entities e
 		JOIN engine_ontologies o ON e.ontology_id = o.id
@@ -227,6 +229,7 @@ func (r *ontologyEntityRepository) GetByName(ctx context.Context, ontologyID uui
 		       primary_schema, primary_table, primary_column,
 		       is_deleted, deletion_reason,
 		       confidence, is_stale,
+		       is_promoted, promotion_score, promotion_reasons,
 		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_entities
 		WHERE ontology_id = $1 AND name = $2 AND NOT is_deleted`
@@ -256,6 +259,7 @@ func (r *ontologyEntityRepository) GetByProjectAndName(ctx context.Context, proj
 		       e.primary_schema, e.primary_table, e.primary_column,
 		       e.is_deleted, e.deletion_reason,
 		       e.confidence, e.is_stale,
+		       e.is_promoted, e.promotion_score, e.promotion_reasons,
 		       e.source, e.last_edit_source, e.created_by, e.updated_by, e.created_at, e.updated_at
 		FROM engine_ontology_entities e
 		JOIN engine_ontologies o ON e.ontology_id = o.id
@@ -376,6 +380,7 @@ func (r *ontologyEntityRepository) GetStaleEntities(ctx context.Context, ontolog
 		       primary_schema, primary_table, primary_column,
 		       is_deleted, deletion_reason,
 		       confidence, is_stale,
+		       is_promoted, promotion_score, promotion_reasons,
 		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_entities
 		WHERE ontology_id = $1 AND is_stale = true AND NOT is_deleted
@@ -418,6 +423,7 @@ func (r *ontologyEntityRepository) GetByID(ctx context.Context, entityID uuid.UU
 		       primary_schema, primary_table, primary_column,
 		       is_deleted, deletion_reason,
 		       confidence, is_stale,
+		       is_promoted, promotion_score, promotion_reasons,
 		       source, last_edit_source, created_by, updated_by, created_at, updated_at
 		FROM engine_ontology_entities
 		WHERE id = $1`
@@ -463,13 +469,15 @@ func (r *ontologyEntityRepository) Update(ctx context.Context, entity *models.On
 		SET name = $2, description = $3, domain = $4,
 		    primary_schema = $5, primary_table = $6, primary_column = $7,
 		    confidence = $8, is_stale = $9,
-		    last_edit_source = $10, updated_by = $11, updated_at = $12
+		    is_promoted = $10, promotion_score = $11, promotion_reasons = $12,
+		    last_edit_source = $13, updated_by = $14, updated_at = $15
 		WHERE id = $1`
 
 	_, err := scope.Conn.Exec(ctx, query,
 		entity.ID, entity.Name, entity.Description, entity.Domain,
 		entity.PrimarySchema, entity.PrimaryTable, entity.PrimaryColumn,
 		entity.Confidence, entity.IsStale,
+		entity.IsPromoted, entity.PromotionScore, entity.PromotionReasons,
 		entity.LastEditSource, entity.UpdatedBy, entity.UpdatedAt,
 	)
 	if err != nil {
@@ -651,6 +659,7 @@ func scanOntologyEntity(row pgx.Row) (*models.OntologyEntity, error) {
 		&e.PrimarySchema, &e.PrimaryTable, &e.PrimaryColumn,
 		&e.IsDeleted, &e.DeletionReason,
 		&e.Confidence, &e.IsStale,
+		&e.IsPromoted, &e.PromotionScore, &e.PromotionReasons,
 		&e.Source, &e.LastEditSource, &e.CreatedBy, &e.UpdatedBy, &e.CreatedAt, &e.UpdatedAt,
 	)
 	if err != nil {

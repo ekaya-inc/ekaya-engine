@@ -32,6 +32,11 @@ type OntologyEntity struct {
 	Confidence     float64   `json:"confidence"` // 0.0-1.0: higher for FK-derived, lower for LLM-inferred
 	IsStale        bool      `json:"is_stale"`   // True when schema changed and needs re-evaluation
 
+	// Promotion: whether this entity should be included in default context
+	IsPromoted       bool     `json:"is_promoted"`                    // True if promoted, false if demoted
+	PromotionScore   *int     `json:"promotion_score,omitempty"`      // Computed score 0-100 from PromotionScore function
+	PromotionReasons []string `json:"promotion_reasons,omitempty"`    // Human-readable reasons for the score
+
 	// Provenance: source tracking (how it was created/modified)
 	Source         string  `json:"source"`                     // 'inferred', 'mcp', 'manual'
 	LastEditSource *string `json:"last_edit_source,omitempty"` // How last modified (nil if never edited)

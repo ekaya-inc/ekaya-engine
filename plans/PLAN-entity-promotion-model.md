@@ -208,7 +208,7 @@ func PromotionScore(
 
 ---
 
-### Task 2: Add `is_promoted` Field to Entity Model
+### Task 2: Add `is_promoted` Field to Entity Model ✅
 
 **File:** `migrations/XXX_entity_promotion.up.sql` (new)
 
