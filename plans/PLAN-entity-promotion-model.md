@@ -302,7 +302,7 @@ Create the new DAG node file and register it in the DAG execution order. This su
 
 ---
 
-#### Task 3.2: Implement EntityPromotion Service Method
+#### Task 3.2: Implement EntityPromotion Service Method ✅
 
 Create the service method that the DAG node calls to perform actual promotion scoring. This requires Task 1 (PromotionScore function) and Task 2 (is_promoted field) to be completed first.
 
@@ -338,12 +338,12 @@ Create the service method that the DAG node calls to perform actual promotion sc
 - Task 2 (is_promoted field) must exist in `pkg/models/ontology_entity.go` and database
 
 **Acceptance criteria:**
-- [ ] Running ontology extraction executes EntityPromotion node after RelationshipEnrichment
-- [ ] Entities below threshold (score < 50) have `is_promoted=false`
-- [ ] Entities at or above threshold have `is_promoted=true`
-- [ ] Promotion scores and reasons are persisted to database
-- [ ] Manual promotions/demotions are preserved (not overwritten)
-- [ ] Demoted entities retain all metadata (description, aliases, key_columns, etc.)
+- [x] Running ontology extraction executes EntityPromotion node after RelationshipEnrichment
+- [x] Entities below threshold (score < 50) have `is_promoted=false`
+- [x] Entities at or above threshold have `is_promoted=true`
+- [x] Promotion scores and reasons are persisted to database
+- [x] Manual promotions/demotions are preserved (not overwritten)
+- [x] Demoted entities retain all metadata (description, aliases, key_columns, etc.)
 
 ---
 
