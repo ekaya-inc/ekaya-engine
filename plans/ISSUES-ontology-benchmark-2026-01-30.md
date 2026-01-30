@@ -75,9 +75,10 @@ Extend the ontology data model to support an explicit `is_sensitive` flag on col
 
 ### 3. probe_relationship Returns Empty for Known Relationships
 
+- [x] **Status**: Complete
+
 **Severity**: HIGH
 **Tool**: `probe_relationship`
-**Status**: Open
 
 **Description**: When probing for relationships between entities that should be related (User -> Account), the tool returns empty results.
 

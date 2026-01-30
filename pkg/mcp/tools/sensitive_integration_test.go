@@ -5,6 +5,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -18,7 +19,6 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/database"
 	"github.com/ekaya-inc/ekaya-engine/pkg/models"
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
-	"github.com/ekaya-inc/ekaya-engine/pkg/services"
 	"github.com/ekaya-inc/ekaya-engine/pkg/testhelpers"
 )
 
@@ -137,11 +137,15 @@ func (tc *sensitiveTestContext) cleanup() {
 func (tc *sensitiveTestContext) createTestContext() (context.Context, func()) {
 	tc.t.Helper()
 	ctx := context.Background()
-	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
 	require.NoError(tc.t, err)
 
-	// Add project ID to context for MCP tools
-	ctx = auth.ContextWithProjectID(scope.Ctx, tc.projectID)
+	ctx = database.SetTenantScope(ctx, scope)
+	// Include admin role to access developer tools
+	ctx = context.WithValue(ctx, auth.ClaimsKey, &auth.Claims{
+		ProjectID: tc.projectID.String(),
+		Roles:     []string{models.RoleAdmin},
+	})
 
 	return ctx, func() { scope.Close() }
 }
@@ -155,13 +159,13 @@ func (tc *sensitiveTestContext) createTestTable(tableName string, columns []stru
 	tc.t.Helper()
 
 	ctx := context.Background()
-	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	scope, err := tc.engineDB.DB.WithoutTenant(ctx)
 	require.NoError(tc.t, err)
 	defer scope.Close()
 
 	// Create the table
 	tableID := uuid.New()
-	_, err = scope.Conn.Exec(scope.Ctx, `
+	_, err = scope.Conn.Exec(ctx, `
 		INSERT INTO engine_schema_tables (id, project_id, datasource_id, schema_name, table_name, is_selected)
 		VALUES ($1, $2, $3, 'public', $4, true)
 	`, tableID, tc.projectID, tc.datasourceID, tableName)
@@ -169,7 +173,7 @@ func (tc *sensitiveTestContext) createTestTable(tableName string, columns []stru
 
 	// Create columns
 	for i, col := range columns {
-		_, err = scope.Conn.Exec(scope.Ctx, `
+		_, err = scope.Conn.Exec(ctx, `
 			INSERT INTO engine_schema_columns (id, project_id, schema_table_id, column_name, data_type, is_nullable, ordinal_position, sample_values, metadata)
 			VALUES ($1, $2, $3, $4, $5, true, $6, $7, '{}')
 		`, uuid.New(), tc.projectID, tableID, col.name, col.dataType, i+1, col.sampleValues)
@@ -215,7 +219,7 @@ func (tc *sensitiveTestContext) callTool(ctx context.Context, toolName string, a
 	}
 
 	if response.Error != nil {
-		return nil, assert.AnError
+		return nil, fmt.Errorf("MCP error: %s", response.Error.Message)
 	}
 
 	if len(response.Result.Content) > 0 && response.Result.Content[0].Type == "text" {
@@ -368,19 +372,20 @@ func TestSensitiveFlag_GetContextRedaction(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify column metadata in database directly
-	scope, err := tc.engineDB.DB.WithTenant(ctx, tc.projectID)
+	scope, err := tc.engineDB.DB.WithoutTenant(context.Background())
 	require.NoError(t, err)
 	defer scope.Close()
+	scopeCtx := database.SetTenantScope(context.Background(), scope)
 
 	// Check display_name is marked as sensitive
-	displayMeta, err := tc.columnMetadataRepo.GetByTableColumn(scope.Ctx, tc.projectID, "test_redaction", "display_name")
+	displayMeta, err := tc.columnMetadataRepo.GetByTableColumn(scopeCtx, tc.projectID, "test_redaction", "display_name")
 	require.NoError(t, err)
 	require.NotNil(t, displayMeta)
 	require.NotNil(t, displayMeta.IsSensitive)
 	assert.True(t, *displayMeta.IsSensitive)
 
 	// Check password is marked as not sensitive
-	passwordMeta, err := tc.columnMetadataRepo.GetByTableColumn(scope.Ctx, tc.projectID, "test_redaction", "password")
+	passwordMeta, err := tc.columnMetadataRepo.GetByTableColumn(scopeCtx, tc.projectID, "test_redaction", "password")
 	require.NoError(t, err)
 	require.NotNil(t, passwordMeta)
 	require.NotNil(t, passwordMeta.IsSensitive)

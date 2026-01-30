@@ -722,6 +722,13 @@ func probeRelationships(ctx context.Context, deps *ProbeToolDeps, projectID uuid
 		filteredRelationships = append(filteredRelationships, rel)
 	}
 
+	// Build entity lookup by primary table for fallback schema-to-entity mapping
+	entityByPrimaryTable := make(map[string]*models.OntologyEntity)
+	for _, entity := range entities {
+		key := entity.PrimaryTable // Use table name without schema prefix for simpler matching
+		entityByPrimaryTable[key] = entity
+	}
+
 	// Build response for confirmed relationships
 	for _, rel := range filteredRelationships {
 		detail := probeRelationshipDetail{
@@ -784,6 +791,18 @@ func probeRelationships(ctx context.Context, deps *ProbeToolDeps, projectID uuid
 		response.Relationships = append(response.Relationships, detail)
 	}
 
+	// Fallback: If no entity relationships found but filters specified, try to derive from schema relationships
+	// This handles the case where FK discovery didn't create entity relationships but schema relationships exist
+	if len(response.Relationships) == 0 && (fromEntity != nil || toEntity != nil) {
+		derivedRelationships := deriveRelationshipsFromSchema(
+			schemaRelationshipsMap,
+			entityByPrimaryTable,
+			fromEntity,
+			toEntity,
+		)
+		response.Relationships = append(response.Relationships, derivedRelationships...)
+	}
+
 	// Add rejected candidates (filter by entity if specified)
 	if fromEntity != nil || toEntity != nil {
 		// If entity filters are specified, filter rejected candidates
@@ -826,10 +845,20 @@ type schemaRelationshipKey struct {
 	targetColumnID uuid.UUID
 }
 
+// schemaRelationshipInfo contains schema relationship data with resolved table/column names.
+// This extends models.SchemaRelationship with the names needed for entity matching.
+type schemaRelationshipInfo struct {
+	*models.SchemaRelationship
+	SourceTableName  string
+	SourceColumnName string
+	TargetTableName  string
+	TargetColumnName string
+}
+
 // getSchemaRelationshipsWithMetrics queries engine_schema_relationships to get cardinality
 // and data quality metrics. Returns a map keyed by (source_column_id, target_column_id)
 // for fast lookup, plus a list of rejected candidates.
-func getSchemaRelationshipsWithMetrics(ctx context.Context, deps *ProbeToolDeps, projectID, datasourceID uuid.UUID) (map[schemaRelationshipKey]*models.SchemaRelationship, []probeRelationshipCandidate, error) {
+func getSchemaRelationshipsWithMetrics(ctx context.Context, deps *ProbeToolDeps, projectID, datasourceID uuid.UUID) (map[schemaRelationshipKey]*schemaRelationshipInfo, []probeRelationshipCandidate, error) {
 	scope, ok := database.GetTenantScope(ctx)
 	if !ok {
 		return nil, nil, fmt.Errorf("no tenant scope in context")
@@ -861,7 +890,7 @@ func getSchemaRelationshipsWithMetrics(ctx context.Context, deps *ProbeToolDeps,
 	}
 	defer rows.Close()
 
-	confirmedMap := make(map[schemaRelationshipKey]*models.SchemaRelationship)
+	confirmedMap := make(map[schemaRelationshipKey]*schemaRelationshipInfo)
 	var rejectedCandidates []probeRelationshipCandidate
 
 	for rows.Next() {
@@ -900,12 +929,18 @@ func getSchemaRelationshipsWithMetrics(ctx context.Context, deps *ProbeToolDeps,
 			}
 			rejectedCandidates = append(rejectedCandidates, candidate)
 		} else {
-			// If confirmed, add to map for lookup
+			// If confirmed, add to map for lookup with table/column names
 			key := schemaRelationshipKey{
 				sourceColumnID: rel.SourceColumnID,
 				targetColumnID: rel.TargetColumnID,
 			}
-			confirmedMap[key] = &rel
+			confirmedMap[key] = &schemaRelationshipInfo{
+				SchemaRelationship: &rel,
+				SourceTableName:    sourceTableName,
+				SourceColumnName:   sourceColumnName,
+				TargetTableName:    targetTableName,
+				TargetColumnName:   targetColumnName,
+			}
 		}
 	}
 
@@ -991,4 +1026,82 @@ type probeRelationshipCandidate struct {
 	ToColumn        string   `json:"to_column"`
 	RejectionReason string   `json:"rejection_reason"`
 	MatchRate       *float64 `json:"match_rate,omitempty"`
+}
+
+// deriveRelationshipsFromSchema attempts to derive entity relationships from schema relationships.
+// This is a fallback when no entity relationships exist but schema relationships do.
+// It maps schema relationships to entities by matching table names to entity primary tables.
+func deriveRelationshipsFromSchema(
+	schemaRelationshipsMap map[schemaRelationshipKey]*schemaRelationshipInfo,
+	entityByPrimaryTable map[string]*models.OntologyEntity,
+	fromEntity, toEntity *string,
+) []probeRelationshipDetail {
+	var results []probeRelationshipDetail
+
+	// Track which entity pairs we've already added (to avoid duplicates from multiple columns)
+	seen := make(map[string]bool)
+
+	for _, schemaRel := range schemaRelationshipsMap {
+		// Skip rejected relationships (should be filtered already, but check anyway)
+		if schemaRel.RejectionReason != nil && *schemaRel.RejectionReason != "" {
+			continue
+		}
+
+		// Use table names from schemaRelationshipInfo to find matching entities
+		sourceEntity := entityByPrimaryTable[schemaRel.SourceTableName]
+		targetEntity := entityByPrimaryTable[schemaRel.TargetTableName]
+
+		// Skip if we can't map both tables to entities
+		if sourceEntity == nil || targetEntity == nil {
+			continue
+		}
+
+		// Apply entity filters if specified
+		if fromEntity != nil && sourceEntity.Name != *fromEntity {
+			continue
+		}
+		if toEntity != nil && targetEntity.Name != *toEntity {
+			continue
+		}
+
+		// Build a unique key for this entity pair to avoid duplicates
+		pairKey := fmt.Sprintf("%s->%s", sourceEntity.Name, targetEntity.Name)
+		if seen[pairKey] {
+			continue
+		}
+		seen[pairKey] = true
+
+		// Build the relationship detail
+		detail := probeRelationshipDetail{
+			FromEntity:  sourceEntity.Name,
+			ToEntity:    targetEntity.Name,
+			FromColumn:  fmt.Sprintf("%s.%s", schemaRel.SourceTableName, schemaRel.SourceColumnName),
+			ToColumn:    fmt.Sprintf("%s.%s", schemaRel.TargetTableName, schemaRel.TargetColumnName),
+			Cardinality: schemaRel.Cardinality,
+		}
+
+		// Add data quality metrics if available
+		if schemaRel.MatchRate != nil && schemaRel.SourceDistinct != nil && schemaRel.TargetDistinct != nil {
+			dataQuality := &probeRelationshipDataQuality{
+				MatchRate:      *schemaRel.MatchRate,
+				SourceDistinct: *schemaRel.SourceDistinct,
+				TargetDistinct: *schemaRel.TargetDistinct,
+			}
+
+			if schemaRel.MatchedCount != nil {
+				dataQuality.MatchedCount = *schemaRel.MatchedCount
+			}
+
+			if schemaRel.SourceDistinct != nil && schemaRel.MatchedCount != nil {
+				orphanCount := *schemaRel.SourceDistinct - *schemaRel.MatchedCount
+				dataQuality.OrphanCount = &orphanCount
+			}
+
+			detail.DataQuality = dataQuality
+		}
+
+		results = append(results, detail)
+	}
+
+	return results
 }
