@@ -72,7 +72,7 @@ type TableMetadata struct {
 
 ---
 
-#### [ ] 7.2 Implement update_table MCP Tool
+#### [x] 7.2 Implement update_table MCP Tool
 
 **Goal**: Create the MCP tool that allows setting table-level metadata.
 

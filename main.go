@@ -138,6 +138,7 @@ func main() {
 	ontologyDAGRepo := repositories.NewOntologyDAGRepository()
 	pendingChangeRepo := repositories.NewPendingChangeRepository()
 	columnMetadataRepo := repositories.NewColumnMetadataRepository()
+	tableMetadataRepo := repositories.NewTableMetadataRepository()
 
 	// Create connection manager with config-driven settings
 	connManagerCfg := datasource.ConnectionManagerConfig{
@@ -518,6 +519,17 @@ func main() {
 	}
 	mcptools.RegisterColumnTools(mcpServer.MCP(), columnToolDeps)
 	mcptools.RegisterBatchTools(mcpServer.MCP(), columnToolDeps)
+
+	// Register table metadata tools (for updating table-level semantic information)
+	tableToolDeps := &mcptools.TableToolDeps{
+		DB:                db,
+		MCPConfigService:  mcpConfigService,
+		SchemaRepo:        schemaRepo,
+		TableMetadataRepo: tableMetadataRepo,
+		ProjectService:    projectService,
+		Logger:            logger,
+	}
+	mcptools.RegisterTableTools(mcpServer.MCP(), tableToolDeps)
 
 	// Register column probe tools (for deep-diving into column statistics and semantics)
 	probeToolDeps := &mcptools.ProbeToolDeps{
