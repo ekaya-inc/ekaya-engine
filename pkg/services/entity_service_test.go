@@ -92,6 +92,9 @@ func (m *mockEntityRepo) GetKeyColumnsByEntity(ctx context.Context, entityID uui
 func (m *mockEntityRepo) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
 	return nil, nil
 }
+func (m *mockEntityRepo) GetPromotedByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
+	return nil, nil
+}
 func (m *mockEntityRepo) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {
 	return nil, nil
 }

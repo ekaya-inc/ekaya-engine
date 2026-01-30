@@ -13,12 +13,12 @@ const PromotionThreshold = 50
 
 // Point values for promotion criteria
 const (
-	pointsHubMajor       = 30 // 5+ inbound references
-	pointsHubMinor       = 20 // 3+ inbound references
-	pointsMultipleRoles  = 25 // 2+ distinct roles reference this table
-	pointsRelatedTables  = 20 // multiple tables share this concept
-	pointsBusinessAlias  = 15 // has business aliases from LLM
-	pointsOutboundMinor  = 10 // 3+ outbound relationships
+	pointsHubMajor      = 30 // 5+ inbound references
+	pointsHubMinor      = 20 // 3+ inbound references
+	pointsMultipleRoles = 25 // 2+ distinct roles reference this table
+	pointsRelatedTables = 20 // multiple tables share this concept
+	pointsBusinessAlias = 15 // has business aliases from LLM
+	pointsOutboundMinor = 10 // 3+ outbound relationships
 )
 
 // PromotionResult contains the score and reasons for a table's promotion evaluation.
@@ -180,13 +180,13 @@ func deriveRoleFromColumn(columnName string) string {
 
 	// Skip generic column names that don't indicate a role
 	genericNames := map[string]bool{
-		"id":         true,
-		"uuid":       true,
-		"key":        true,
-		"ref":        true,
-		"reference":  true,
-		"fk":         true,
-		"foreign":    true,
+		"id":        true,
+		"uuid":      true,
+		"key":       true,
+		"ref":       true,
+		"reference": true,
+		"fk":        true,
+		"foreign":   true,
 	}
 
 	if genericNames[name] {

@@ -196,3 +196,17 @@ func NewGlossaryEnrichmentAdapter(svc GlossaryService) dag.GlossaryEnrichmentMet
 func (a *GlossaryEnrichmentAdapter) EnrichGlossaryTerms(ctx context.Context, projectID, ontologyID uuid.UUID) error {
 	return a.svc.EnrichGlossaryTerms(ctx, projectID, ontologyID)
 }
+
+// EntityPromotionAdapter adapts EntityPromotionService for the dag package.
+type EntityPromotionAdapter struct {
+	svc EntityPromotionService
+}
+
+// NewEntityPromotionAdapter creates a new adapter.
+func NewEntityPromotionAdapter(svc EntityPromotionService) dag.EntityPromotionMethods {
+	return &EntityPromotionAdapter{svc: svc}
+}
+
+func (a *EntityPromotionAdapter) ScoreAndPromoteEntities(ctx context.Context, projectID uuid.UUID) (promoted int, demoted int, err error) {
+	return a.svc.ScoreAndPromoteEntities(ctx, projectID)
+}

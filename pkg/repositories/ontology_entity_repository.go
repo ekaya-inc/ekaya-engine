@@ -512,7 +512,7 @@ func (r *ontologyEntityRepository) Update(ctx context.Context, entity *models.On
 		    primary_schema = $5, primary_table = $6, primary_column = $7,
 		    confidence = $8, is_stale = $9,
 		    is_promoted = $10, promotion_score = $11, promotion_reasons = $12,
-		    last_edit_source = $13, updated_by = $14, updated_at = $15
+		    source = $13, last_edit_source = $14, updated_by = $15, updated_at = $16
 		WHERE id = $1`
 
 	_, err := scope.Conn.Exec(ctx, query,
@@ -520,7 +520,7 @@ func (r *ontologyEntityRepository) Update(ctx context.Context, entity *models.On
 		entity.PrimarySchema, entity.PrimaryTable, entity.PrimaryColumn,
 		entity.Confidence, entity.IsStale,
 		entity.IsPromoted, entity.PromotionScore, entity.PromotionReasons,
-		entity.LastEditSource, entity.UpdatedBy, entity.UpdatedAt,
+		entity.Source, entity.LastEditSource, entity.UpdatedBy, entity.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update entity: %w", err)

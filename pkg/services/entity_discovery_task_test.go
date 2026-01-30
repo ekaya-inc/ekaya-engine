@@ -303,6 +303,9 @@ func (m *mockEntityRepoForTask) GetByOntology(ctx context.Context, ontologyID uu
 func (m *mockEntityRepoForTask) GetByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
 	return nil, nil
 }
+func (m *mockEntityRepoForTask) GetPromotedByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
+	return nil, nil
+}
 func (m *mockEntityRepoForTask) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {
 	return nil, nil
 }

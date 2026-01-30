@@ -89,6 +89,19 @@ func (m *mockEntityRepoForFinalization) GetByProject(ctx context.Context, projec
 	return m.entities, nil
 }
 
+func (m *mockEntityRepoForFinalization) GetPromotedByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
+	if m.getByProjectErr != nil {
+		return nil, m.getByProjectErr
+	}
+	var promoted []*models.OntologyEntity
+	for _, e := range m.entities {
+		if e.IsPromoted {
+			promoted = append(promoted, e)
+		}
+	}
+	return promoted, nil
+}
+
 func (m *mockEntityRepoForFinalization) GetByName(ctx context.Context, ontologyID uuid.UUID, name string) (*models.OntologyEntity, error) {
 	return nil, nil
 }

@@ -118,6 +118,16 @@ func (r *testRelEnrichmentEntityRepo) GetByProject(ctx context.Context, projectI
 	return r.entities, nil
 }
 
+func (r *testRelEnrichmentEntityRepo) GetPromotedByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
+	var promoted []*models.OntologyEntity
+	for _, e := range r.entities {
+		if e.IsPromoted {
+			promoted = append(promoted, e)
+		}
+	}
+	return promoted, nil
+}
+
 func (r *testRelEnrichmentEntityRepo) Create(ctx context.Context, entity *models.OntologyEntity) error {
 	return nil
 }

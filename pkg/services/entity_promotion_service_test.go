@@ -25,6 +25,16 @@ func (m *mockPromotionEntityRepo) GetByProject(ctx context.Context, projectID uu
 	return m.entities, nil
 }
 
+func (m *mockPromotionEntityRepo) GetPromotedByProject(ctx context.Context, projectID uuid.UUID) ([]*models.OntologyEntity, error) {
+	var promoted []*models.OntologyEntity
+	for _, e := range m.entities {
+		if e.IsPromoted {
+			promoted = append(promoted, e)
+		}
+	}
+	return promoted, nil
+}
+
 func (m *mockPromotionEntityRepo) GetAllAliasesByProject(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID][]*models.OntologyEntityAlias, error) {
 	return m.aliasesByID, nil
 }

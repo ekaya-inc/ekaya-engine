@@ -399,9 +399,9 @@ func TestDeriveRoleFromColumn(t *testing.T) {
 		{"created_by_id", "created_by"},
 		{"account_uuid", "account"},
 		{"customer_fk", "customer"},
-		{"id", ""},         // Generic, should return empty
-		{"uuid", ""},       // Generic, should return empty
-		{"user", "user"},   // No suffix, should return as-is
+		{"id", ""},          // Generic, should return empty
+		{"uuid", ""},        // Generic, should return empty
+		{"user", "user"},    // No suffix, should return as-is
 		{"HOST_ID", "host"}, // Uppercase handling
 	}
 
