@@ -132,10 +132,10 @@ const ProjectKnowledgePage = () => {
       const response = await engineApi.listProjectKnowledge(pid);
 
       if (response.data) {
-        // Sort facts alphabetically by key
+        // Sort facts alphabetically by value
         const factsArray = response.data.facts ?? [];
         const sortedFacts = [...factsArray].sort((a, b) =>
-          a.key.localeCompare(b.key)
+          a.value.localeCompare(b.value)
         );
         setFacts(sortedFacts);
       }
@@ -177,7 +177,7 @@ const ProjectKnowledgePage = () => {
       if (response.success) {
         toast({
           title: 'Fact deleted',
-          description: `"${fact.key}" has been removed.`,
+          description: 'The fact has been removed.',
           variant: 'default',
         });
         fetchFacts();
@@ -464,13 +464,8 @@ const ProjectKnowledgePage = () => {
                         </span>
                       </div>
 
-                      {/* Key */}
-                      <h4 className="font-semibold text-text-primary mb-1">
-                        {fact.key}
-                      </h4>
-
-                      {/* Value */}
-                      <p className="text-sm text-text-secondary mb-2">
+                      {/* Fact Value */}
+                      <p className="text-sm text-text-primary mb-2">
                         {fact.value}
                       </p>
 

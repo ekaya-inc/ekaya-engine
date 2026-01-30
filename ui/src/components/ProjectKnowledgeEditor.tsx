@@ -58,7 +58,6 @@ export function ProjectKnowledgeEditor({
   const [factType, setFactType] = useState('business_rule');
   const [customFactType, setCustomFactType] = useState('');
   const [useCustomType, setUseCustomType] = useState(false);
-  const [key, setKey] = useState('');
   const [value, setValue] = useState('');
   const [context, setContext] = useState('');
 
@@ -81,7 +80,6 @@ export function ProjectKnowledgeEditor({
           setUseCustomType(true);
           setCustomFactType(fact.fact_type);
         }
-        setKey(fact.key);
         setValue(fact.value);
         setContext(fact.context ?? '');
       } else {
@@ -90,7 +88,6 @@ export function ProjectKnowledgeEditor({
         setFactType('business_rule');
         setUseCustomType(false);
         setCustomFactType('');
-        setKey('');
         setValue('');
         setContext('');
       }
@@ -139,11 +136,6 @@ export function ProjectKnowledgeEditor({
       return;
     }
 
-    if (!key.trim()) {
-      setSaveError('Key is required');
-      return;
-    }
-
     if (!value.trim()) {
       setSaveError('Value is required');
       return;
@@ -157,13 +149,11 @@ export function ProjectKnowledgeEditor({
       const requestData = trimmedContext
         ? {
             fact_type: effectiveFactType,
-            key: key.trim(),
             value: value.trim(),
             context: trimmedContext,
           }
         : {
             fact_type: effectiveFactType,
-            key: key.trim(),
             value: value.trim(),
           };
 
@@ -193,7 +183,7 @@ export function ProjectKnowledgeEditor({
   };
 
   const effectiveFactType = useCustomType ? customFactType.trim() : factType;
-  const canSaveEdit = effectiveFactType && key.trim() && value.trim();
+  const canSaveEdit = effectiveFactType && value.trim();
   const canSaveCreate = freeFormText.trim();
 
   return (
@@ -255,26 +245,6 @@ export function ProjectKnowledgeEditor({
                     />
                   )}
                 </div>
-              </div>
-
-              {/* Key */}
-              <div>
-                <label
-                  htmlFor="key"
-                  className="block text-sm font-medium text-text-primary mb-1"
-                >
-                  Key
-                </label>
-                <Input
-                  id="key"
-                  value={key}
-                  onChange={(e) => setKey(e.target.value)}
-                  placeholder="e.g., timezone_convention, currency_code"
-                  disabled={isSaving}
-                />
-                <p className="mt-1 text-xs text-text-tertiary">
-                  A short identifier for this fact
-                </p>
               </div>
 
               {/* Value */}

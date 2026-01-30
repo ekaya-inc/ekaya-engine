@@ -17,7 +17,6 @@ export interface ProjectKnowledge {
   project_id: string;
   ontology_id?: string;
   fact_type: string;
-  key: string;
   value: string;
   context?: string;
   source: ProjectKnowledgeSource;
@@ -41,7 +40,6 @@ export interface ProjectKnowledgeListResponse {
  */
 export interface CreateProjectKnowledgeRequest {
   fact_type: string;
-  key: string;
   value: string;
   context?: string;
 }
@@ -51,7 +49,6 @@ export interface CreateProjectKnowledgeRequest {
  */
 export interface UpdateProjectKnowledgeRequest {
   fact_type: string;
-  key: string;
   value: string;
   context?: string;
 }

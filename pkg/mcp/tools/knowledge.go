@@ -54,6 +54,7 @@ func registerUpdateProjectKnowledgeTool(s *server.MCPServer, deps *KnowledgeTool
 				"Facts are upserted by (category, fact) pair - the same fact can be updated with new context. "+
 				"Categories: 'terminology' (domain-specific terms), 'business_rule' (validation rules, calculations), "+
 				"'enumeration' (status values, type codes), 'convention' (naming patterns, soft deletes). "+
+				"For table-specific metadata (ephemeral tables, usage notes, preferred alternatives), use update_table instead. "+
 				"Example: fact='A tik represents 6 seconds of engagement', category='terminology', context='Inferred from billing_engagements table'",
 		),
 		mcp.WithString(
