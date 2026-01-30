@@ -78,6 +78,11 @@ test-integration: ## Run integration tests (requires Docker)
 	@go test -tags="integration,$(BUILD_TAGS)" ./... -timeout 5m
 	@echo "$(GREEN)✓ Integration tests passed$(NC)"
 
+test-race: ## Run tests with race detector (slow, not run automatically)
+	@echo "$(YELLOW)Running tests with race detector...$(NC)"
+	@go test -tags="$(BUILD_TAGS)" -race ./... -v -timeout 10m
+	@echo "$(GREEN)✓ Race detection tests passed$(NC)"
+
 fmt: ## Format Go code
 	@echo "$(YELLOW)Formatting code...$(NC)"
 	@go fmt ./...
