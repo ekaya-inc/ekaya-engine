@@ -1001,18 +1001,19 @@ func TestCreateApprovedQuery_ToolDescription(t *testing.T) {
 	assert.Contains(t, createTool.Description, "Create")
 	assert.Contains(t, createTool.Description, "approved")
 	assert.Contains(t, createTool.Description, "no review")
+	assert.Contains(t, createTool.Description, "default datasource", "description should mention auto-detect behavior")
 
 	// Verify required parameters exist
 	assert.Contains(t, createTool.InputSchema.Properties, "name")
 	assert.Contains(t, createTool.InputSchema.Properties, "description")
 	assert.Contains(t, createTool.InputSchema.Properties, "sql")
-	assert.Contains(t, createTool.InputSchema.Properties, "datasource_id")
 	assert.Contains(t, createTool.InputSchema.Required, "name")
 	assert.Contains(t, createTool.InputSchema.Required, "description")
 	assert.Contains(t, createTool.InputSchema.Required, "sql")
-	assert.Contains(t, createTool.InputSchema.Required, "datasource_id")
 
-	// Verify optional parameters exist
+	// Verify optional parameters exist (datasource_id is now optional with auto-detect)
+	assert.Contains(t, createTool.InputSchema.Properties, "datasource_id")
+	assert.NotContains(t, createTool.InputSchema.Required, "datasource_id", "datasource_id should be optional")
 	assert.Contains(t, createTool.InputSchema.Properties, "parameters")
 	assert.Contains(t, createTool.InputSchema.Properties, "output_column_descriptions")
 	assert.Contains(t, createTool.InputSchema.Properties, "tags")

@@ -191,10 +191,10 @@ ERROR: value too long for type character varying(255) (SQLSTATE 22001)
 
 ---
 
-### 9. `create_approved_query` Requires Undiscoverable datasource_id
+### [x] 9. `create_approved_query` Requires Undiscoverable datasource_id
 
 **Severity**: MEDIUM (UX)
-**Status**: Open
+**Status**: Complete
 
 **Description**: The `create_approved_query` tool requires a `datasource_id` parameter, but there's no obvious way to discover this UUID. The `health` endpoint returns `project_id` but not `datasource_id`.
 
@@ -270,6 +270,6 @@ Option 2 (include at domain level) seems cleanest since project knowledge is hig
 |---------|------|----------|-------------|
 | 7 | Feature Request | MEDIUM | Missing `update_table` tool for table-level metadata (split into 7.1-7.4) |
 | 8 | UX | LOW | `update_project_knowledge` fact limited to 255 chars |
-| 9 | UX | MEDIUM | `create_approved_query` requires undiscoverable datasource_id |
+| ~~9~~ | ~~UX~~ | ~~MEDIUM~~ | ~~`create_approved_query` requires undiscoverable datasource_id~~ ✅ |
 | 10 | Bug | HIGH | `get_context` doesn't surface enriched column metadata |
 | 11 | Feature Gap | HIGH | `get_context` doesn't include project knowledge |

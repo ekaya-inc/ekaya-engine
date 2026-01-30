@@ -603,7 +603,8 @@ func registerCreateApprovedQueryTool(mcpServer *server.MCPServer, deps *DevQuery
 		"create_approved_query",
 		mcp.WithDescription(`Create a new pre-approved query directly (no review required).
 The query will be immediately available for execution with status='approved'.
-SQL syntax is validated before creation. Use this for admin-created queries that bypass the suggestion workflow.`),
+SQL syntax is validated before creation. Use this for admin-created queries that bypass the suggestion workflow.
+If datasource_id is not provided, the project's default datasource will be used.`),
 		mcp.WithString("name",
 			mcp.Required(),
 			mcp.Description("Human-readable name for the query")),
@@ -614,8 +615,7 @@ SQL syntax is validated before creation. Use this for admin-created queries that
 			mcp.Required(),
 			mcp.Description("SQL query with {{parameter}} placeholders")),
 		mcp.WithString("datasource_id",
-			mcp.Required(),
-			mcp.Description("UUID of the datasource")),
+			mcp.Description("UUID of the datasource (optional, defaults to project's default datasource)")),
 		mcp.WithArray("parameters",
 			mcp.Description("Parameter definitions (array of objects with name, type, description, required, example)")),
 		mcp.WithObject("output_column_descriptions",
@@ -665,24 +665,25 @@ SQL syntax is validated before creation. Use this for admin-created queries that
 				}), nil
 		}
 
-		// Parse required datasource_id
+		// Parse optional datasource_id (auto-detect if not provided)
+		var datasourceID uuid.UUID
 		datasourceIDStr, ok := args["datasource_id"].(string)
-		if !ok || datasourceIDStr == "" {
-			return NewErrorResultWithDetails("invalid_parameters",
-				"datasource_id is required",
-				map[string]any{
-					"parameter": "datasource_id",
-				}), nil
-		}
-
-		datasourceID, err := uuid.Parse(datasourceIDStr)
-		if err != nil {
-			return NewErrorResultWithDetails("invalid_parameters",
-				"datasource_id is not a valid UUID",
-				map[string]any{
-					"parameter":    "datasource_id",
-					"actual_value": datasourceIDStr,
-				}), nil
+		if ok && datasourceIDStr != "" {
+			datasourceID, err = uuid.Parse(datasourceIDStr)
+			if err != nil {
+				return NewErrorResultWithDetails("invalid_parameters",
+					"datasource_id is not a valid UUID",
+					map[string]any{
+						"parameter":    "datasource_id",
+						"actual_value": datasourceIDStr,
+					}), nil
+			}
+		} else {
+			// Auto-detect default datasource (same pattern as suggest_approved_query)
+			datasourceID, err = deps.ProjectService.GetDefaultDatasourceID(tenantCtx, projectID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get default datasource: %w", err)
+			}
 		}
 
 		// Validate SQL syntax before creation
