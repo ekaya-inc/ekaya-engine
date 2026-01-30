@@ -9,7 +9,7 @@ Issues discovered during continued MCP API usage after initial testing.
 ### 7. Missing `update_table` Tool for Table-Level Metadata
 
 **Severity**: MEDIUM (Feature Request)
-**Status**: Open
+**Status**: Open - Split into subtasks
 
 **Description**: There is no tool to update table-level metadata. Currently available update tools are:
 - `update_column` - column metadata
@@ -22,11 +22,146 @@ Issues discovered during continued MCP API usage after initial testing.
 
 **Current Workaround**: Using `update_project_knowledge` to capture table-level guidance, but this is less discoverable than table metadata would be.
 
-**Recommendation**: Add `update_table` tool with fields like:
-- `description` - what the table represents
-- `usage_notes` - when to use/not use this table
-- `is_ephemeral` - boolean flag for transient tables
-- `preferred_alternative` - table to use instead if ephemeral
+---
+
+#### [x] 7.1 Add Database Schema and Repository for Table Metadata
+
+**Goal**: Create the database schema and data access layer for storing table-level metadata.
+
+**Database Schema** (`migrations/` - create new migration file):
+Create table `engine_table_metadata` with columns:
+- `id` (UUID, PK)
+- `project_id` (UUID, FK to engine_projects, for RLS)
+- `datasource_id` (UUID, FK to engine_datasources)
+- `table_name` (VARCHAR, the table this metadata describes)
+- `description` (TEXT, what the table represents)
+- `usage_notes` (TEXT, when to use/not use this table)
+- `is_ephemeral` (BOOLEAN, default false, for transient tables)
+- `preferred_alternative` (VARCHAR, table to use instead if ephemeral)
+- `created_at`, `updated_at` timestamps
+- `provenance` (VARCHAR, 'admin'/'mcp'/'inference' like other ontology tables)
+
+Add unique constraint on `(project_id, datasource_id, table_name)`.
+Apply RLS policy using `app.current_project_id` pattern matching other ontology tables.
+
+**Repository** (`pkg/repositories/table_metadata_repository.go`):
+Create `TableMetadataRepository` interface and implementation with methods:
+- `Upsert(ctx, projectID, datasourceID, tableName string, metadata TableMetadata) error`
+- `Get(ctx, projectID, datasourceID, tableName string) (*TableMetadata, error)`
+- `List(ctx, projectID, datasourceID string) ([]TableMetadata, error)`
+- `Delete(ctx, projectID, datasourceID, tableName string) error`
+
+Follow existing repository patterns in `pkg/repositories/` for error handling and connection management.
+
+**Model** (`pkg/models/table_metadata.go`):
+```go
+type TableMetadata struct {
+    ID                   string
+    ProjectID            string
+    DatasourceID         string
+    TableName            string
+    Description          *string
+    UsageNotes           *string
+    IsEphemeral          bool
+    PreferredAlternative *string
+    Provenance           string
+    CreatedAt            time.Time
+    UpdatedAt            time.Time
+}
+```
+
+---
+
+#### [ ] 7.2 Implement update_table MCP Tool
+
+**Goal**: Create the MCP tool that allows setting table-level metadata.
+
+**Tool Registration** (`pkg/mcp/tools/ontology_tools.go` or new file `pkg/mcp/tools/table_tools.go`):
+Register `update_table` tool following the pattern of `update_column`, `update_entity`, etc.
+
+**Tool Definition**:
+```
+Name: update_table
+Description: Add or update metadata about a table. Use this to document table purpose, mark tables as ephemeral/transient, or indicate preferred alternatives. The table name is the upsert key - if metadata exists for this table, it will be updated; otherwise, new metadata is created.
+
+Parameters:
+- table (string, required): Table name to update (e.g., 'sessions', 'billing_transactions')
+- description (string, optional): What this table represents and contains
+- usage_notes (string, optional): When to use or not use this table for queries
+- is_ephemeral (boolean, optional): Mark as transient/temporary table not suitable for analytics
+- preferred_alternative (string, optional): Table to use instead if this one is ephemeral or deprecated
+```
+
+**Handler** (`pkg/mcp/tools/handlers/` or inline):
+- Validate table exists in schema (query `engine_schema_tables`)
+- If `preferred_alternative` is set, validate that table also exists
+- Call repository `Upsert` method
+- Return success message with what was updated
+
+**Wire up**:
+- Add to tool filter in `pkg/mcp/tools/developer.go` (requires Developer Tools enabled)
+- Add to tool registry in server initialization
+
+**Example usage the tool should support**:
+```
+update_table(
+  table='sessions',
+  description='Transient session tracking table',
+  usage_notes='Do not use for analytics. Sessions are deleted after 24 hours.',
+  is_ephemeral=true,
+  preferred_alternative='billing_engagements'
+)
+```
+
+---
+
+#### [ ] 7.3 Add delete_table_metadata MCP Tool
+
+**Goal**: Create companion tool to remove table metadata (matching the pattern of other ontology tools like `delete_column_metadata`).
+
+**Tool Definition**:
+```
+Name: delete_table_metadata
+Description: Clear custom metadata for a table, removing semantic enrichment. Use this to remove incorrect or outdated table annotations.
+
+Parameters:
+- table (string, required): Table name to clear metadata for
+```
+
+**Handler**:
+- Call repository `Delete` method
+- Return success/not-found message
+
+**Wire up**: Same pattern as 7.2 - add to tool filter and registry.
+
+---
+
+#### [ ] 7.4 Surface Table Metadata in get_context
+
+**Goal**: Make table metadata visible in the primary discovery workflow so agents see it without having to probe each table.
+
+**Modify `get_context`** (`pkg/mcp/tools/context_tools.go` or equivalent):
+
+At `depth='tables'` and `depth='columns'`, include table metadata in the output. For each table, if metadata exists, add:
+```json
+{
+  "table": "sessions",
+  "row_count": 15000,
+  "description": "Transient session tracking table",
+  "usage_notes": "Do not use for analytics...",
+  "is_ephemeral": true,
+  "preferred_alternative": "billing_engagements",
+  "columns": [...]
+}
+```
+
+**Implementation**:
+1. In the context builder, after fetching schema tables, also fetch table metadata via repository
+2. Create a map of `tableName -> TableMetadata` for efficient lookup
+3. When building table output objects, merge in metadata fields if present
+4. Null/missing metadata fields should be omitted from output (don't show `"description": null`)
+
+**Also update `get_ontology`** if it has separate table display logic - ensure consistency.
 
 ---
 
@@ -133,7 +268,7 @@ Option 2 (include at domain level) seems cleanest since project knowledge is hig
 
 | Issue # | Type | Severity | Description |
 |---------|------|----------|-------------|
-| 7 | Feature Request | MEDIUM | Missing `update_table` tool for table-level metadata |
+| 7 | Feature Request | MEDIUM | Missing `update_table` tool for table-level metadata (split into 7.1-7.4) |
 | 8 | UX | LOW | `update_project_knowledge` fact limited to 255 chars |
 | 9 | UX | MEDIUM | `create_approved_query` requires undiscoverable datasource_id |
 | 10 | Bug | HIGH | `get_context` doesn't surface enriched column metadata |
