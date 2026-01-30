@@ -1974,6 +1974,19 @@ func (s *columnFeatureExtractionService) analyzeEnumColumn(
 	projectID uuid.UUID,
 	profile *models.ColumnDataProfile,
 ) (*EnumAnalysisResult, error) {
+	// Acquire fresh connection to avoid concurrent map access crashes
+	// when multiple workers call CreateForProject simultaneously
+	workCtx := ctx
+	if s.getTenantCtx != nil {
+		var cleanup func()
+		var err error
+		workCtx, cleanup, err = s.getTenantCtx(ctx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("acquire tenant context: %w", err)
+		}
+		defer cleanup()
+	}
+
 	prompt := s.buildEnumAnalysisPrompt(profile)
 	systemMsg := `You are a database schema analyst. Your task is to analyze enum/categorical column values and provide human-readable labels for each value.
 
@@ -1982,13 +1995,13 @@ If the values appear to form a state machine (workflow progression), identify in
 Respond with valid JSON only.`
 
 	// Get LLM client
-	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
+	llmClient, err := s.llmFactory.CreateForProject(workCtx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
 
 	// Call LLM with low temperature for deterministic classification
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.2, false)
+	result, err := llmClient.GenerateResponse(workCtx, prompt, systemMsg, 0.2, false)
 	if err != nil {
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
@@ -2879,6 +2892,19 @@ func (s *columnFeatureExtractionService) analyzeCrossColumn(
 	tableProfiles []*models.ColumnDataProfile,
 	featuresByColumnID map[uuid.UUID]*models.ColumnFeatures,
 ) (*CrossColumnResult, error) {
+	// Acquire fresh connection to avoid concurrent map access crashes
+	// when multiple workers call CreateForProject simultaneously
+	workCtx := ctx
+	if s.getTenantCtx != nil {
+		var cleanup func()
+		var err error
+		workCtx, cleanup, err = s.getTenantCtx(ctx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("acquire tenant context: %w", err)
+		}
+		defer cleanup()
+	}
+
 	// Gather context: find columns that need cross-column analysis
 	var potentialMonetaryColumns []*models.ColumnDataProfile
 	var potentialSoftDeleteColumns []*models.ColumnDataProfile
@@ -2924,13 +2950,13 @@ Base your analysis on DATA patterns (value distributions, null rates), not colum
 Respond with valid JSON only.`
 
 	// Get LLM client
-	llmClient, err := s.llmFactory.CreateForProject(ctx, projectID)
+	llmClient, err := s.llmFactory.CreateForProject(workCtx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
 
 	// Call LLM with low temperature for deterministic analysis
-	result, err := llmClient.GenerateResponse(ctx, prompt, systemMsg, 0.2, false)
+	result, err := llmClient.GenerateResponse(workCtx, prompt, systemMsg, 0.2, false)
 	if err != nil {
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
