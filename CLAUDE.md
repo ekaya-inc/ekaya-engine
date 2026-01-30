@@ -127,6 +127,107 @@ func (s *userService) GetByID(ctx context.Context, id string) (*models.User, err
 }
 ```
 
+## Critical Architecture Rules
+
+These rules prevent common architectural violations. See `plans/ISSUE-*.md` and `plans/FIX-*.md` for known violations being addressed.
+
+### 1. Handlers Must Not Import Repositories
+
+Handlers must only depend on services, never repositories. This maintains the layering: **Handlers → Services → Repositories**.
+
+```go
+// WRONG - handler importing repository
+import "github.com/ekaya-inc/ekaya-engine/pkg/repositories"
+
+type BadHandler struct {
+    userRepo repositories.UserRepository  // VIOLATION
+}
+
+// CORRECT - handler depends only on services
+type GoodHandler struct {
+    userService services.UserService
+}
+```
+
+If a handler needs data, add a method to the appropriate service.
+
+### 2. Customer Datasource Access Must Use Adapters
+
+There are two databases in this system:
+- **Engine metadata database** (`ekaya_engine`) - Always PostgreSQL, accessed via `pkg/repositories/` using pgx directly. This is correct.
+- **Customer datasources** - Can be PostgreSQL, MSSQL, or other databases. Must ALWAYS go through `pkg/adapters/datasource/` interfaces.
+
+```go
+// WRONG - using pgx directly for customer data
+import "github.com/jackc/pgx/v5"
+rows, _ := customerConn.Query(ctx, "SELECT * FROM their_table")
+
+// CORRECT - use adapter factory
+adapter := adapterFactory.NewSchemaDiscoverer(ctx, datasource)
+tables, _ := adapter.DiscoverTables(ctx)
+```
+
+Key interfaces in `pkg/adapters/datasource/interfaces.go`:
+- `SchemaDiscoverer` - Schema discovery, stats, FK relationships
+- `QueryExecutor` - Query execution, validation, explain plans
+- `ConnectionTester` - Connection testing
+
+### 3. DAG Nodes Must Follow Consistent Patterns
+
+All DAG nodes in `pkg/services/dag/` must:
+- Inherit from `BaseNode` (use `*BaseNode` embedding)
+- Follow fail-fast error handling (return errors, don't log and continue)
+- Validate required fields (e.g., `dag.OntologyID`) at the start of `Execute()`
+- Use the service interface pattern (accept minimal interfaces, not concrete types)
+
+```go
+// CORRECT DAG node pattern
+type MyNode struct {
+    *BaseNode
+    mySvc MyServiceMethods  // Minimal interface
+}
+
+func (n *MyNode) Execute(ctx context.Context, dag *models.OntologyDAG) error {
+    if dag.OntologyID == uuid.Nil {
+        return fmt.Errorf("ontology ID is required")
+    }
+
+    result, err := n.mySvc.DoWork(ctx, dag.ProjectID)
+    if err != nil {
+        return err  // Fail fast - don't log and continue
+    }
+
+    return nil
+}
+```
+
+### 4. Never Classify Columns by Name Patterns
+
+Do NOT use column/table name patterns (suffixes, prefixes, substrings) to classify or make decisions. This is fragile and breaks across different naming conventions.
+
+```go
+// WRONG - fragile name-based classification
+if strings.HasSuffix(columnName, "_id") {
+    // Assume it's a foreign key
+}
+if strings.Contains(columnName, "amount") {
+    // Assume it's currency
+}
+
+// CORRECT - use ColumnFeatures from feature extraction pipeline
+features := column.GetColumnFeatures()
+if features != nil && features.Role == "foreign_key" {
+    // Confirmed FK from analysis
+}
+```
+
+The `column_feature_extraction` service analyzes columns using data sampling and LLM classification. Use `ColumnFeatures` data instead of name heuristics:
+- `features.Role` - "primary_key", "foreign_key", "attribute", etc.
+- `features.SemanticType` - "currency", "timestamp", "identifier", etc.
+- `features.Purpose` - Business purpose description
+
+If `ColumnFeatures` is not available at a given pipeline stage, document why heuristics are necessary and centralize them.
+
 ## Error Handling Philosophy: Fail Fast
 
 **This project follows a strict "fail fast" error handling policy.**
