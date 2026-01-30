@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -645,10 +646,10 @@ func TestEnrichEntitiesWithLLM_BatchedEnrichment_Success(t *testing.T) {
 	conversationRepo := &mockEntityDiscoveryConversationRepo{}
 
 	// Track how many times LLM was called (should be 2 batches: 20 + 5)
-	llmCallCount := 0
+	var llmCallCount atomic.Int64
 	mockClient := llm.NewMockLLMClient()
 	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
-		llmCallCount++
+		llmCallCount.Add(1)
 
 		// Generate response for all entities mentioned in the prompt
 		var responseEntities []string
@@ -704,7 +705,7 @@ func TestEnrichEntitiesWithLLM_BatchedEnrichment_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify: LLM was called twice (2 batches: 20 + 5)
-	assert.Equal(t, 2, llmCallCount, "Expected 2 LLM calls for 25 entities with batch size 20")
+	assert.Equal(t, int64(2), llmCallCount.Load(), "Expected 2 LLM calls for 25 entities with batch size 20")
 
 	// Verify: conversation status should NOT be updated to error
 	assert.False(t, conversationRepo.updateStatusCalled, "UpdateStatus should not be called for success")
@@ -755,12 +756,12 @@ func TestEnrichEntitiesWithLLM_BatchedEnrichment_BatchFailure(t *testing.T) {
 	conversationRepo := &mockEntityDiscoveryConversationRepo{}
 
 	// Make LLM return error on second call
-	llmCallCount := 0
+	var llmCallCount atomic.Int64
 	mockClient := llm.NewMockLLMClient()
 	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
-		llmCallCount++
+		count := llmCallCount.Add(1)
 		// Fail on second batch
-		if llmCallCount > 1 {
+		if count > 1 {
 			return nil, fmt.Errorf("simulated LLM error")
 		}
 

@@ -263,7 +263,7 @@ func TestRelationshipEnrichmentService_ValidationFiltersInvalid(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 0, result.RelationshipsEnriched)
 	assert.Equal(t, 2, result.RelationshipsFailed)
-	assert.Equal(t, 0, mockFactory.MockClient.GenerateResponseCalls, "LLM should not be called for invalid relationships")
+	assert.Equal(t, int64(0), mockFactory.MockClient.GenerateResponseCalls.Load(), "LLM should not be called for invalid relationships")
 }
 
 func TestRelationshipEnrichmentService_RetryOnTransientError(t *testing.T) {

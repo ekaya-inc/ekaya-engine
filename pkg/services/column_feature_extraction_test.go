@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -1058,8 +1059,8 @@ func TestRunPhase2ColumnClassification_Success(t *testing.T) {
 	}
 
 	// Verify LLM was called for each column
-	if mockClient.GenerateResponseCalls != 3 {
-		t.Errorf("GenerateResponseCalls = %d, want 3", mockClient.GenerateResponseCalls)
+	if mockClient.GenerateResponseCalls.Load() != 3 {
+		t.Errorf("GenerateResponseCalls = %d, want 3", mockClient.GenerateResponseCalls.Load())
 	}
 
 	// Verify classification results
@@ -1251,12 +1252,12 @@ func TestRunPhase2ColumnClassification_EnqueuesFollowUpWork(t *testing.T) {
 func TestRunPhase2ColumnClassification_ContinuesOnFailure(t *testing.T) {
 	projectID := uuid.New()
 
-	callCount := 0
+	var callCount atomic.Int64
 	mockClient := llm.NewMockLLMClient()
 	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
-		callCount++
+		count := callCount.Add(1)
 		// Fail on the second call
-		if callCount == 2 {
+		if count == 2 {
 			return nil, context.DeadlineExceeded
 		}
 		return &llm.GenerateResponseResult{
@@ -1459,8 +1460,8 @@ func TestRunPhase3EnumAnalysis_Success(t *testing.T) {
 	}
 
 	// Verify LLM was called
-	if mockClient.GenerateResponseCalls != 1 {
-		t.Errorf("GenerateResponseCalls = %d, want 1", mockClient.GenerateResponseCalls)
+	if mockClient.GenerateResponseCalls.Load() != 1 {
+		t.Errorf("GenerateResponseCalls = %d, want 1", mockClient.GenerateResponseCalls.Load())
 	}
 
 	// Verify progress was reported
@@ -1549,12 +1550,12 @@ func TestRunPhase3EnumAnalysis_ContinuesOnFailure(t *testing.T) {
 	col2ID := uuid.New()
 	col3ID := uuid.New()
 
-	callCount := 0
+	var callCount atomic.Int64
 	mockClient := llm.NewMockLLMClient()
 	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
-		callCount++
+		count := callCount.Add(1)
 		// Fail on second call
-		if callCount == 2 {
+		if count == 2 {
 			return nil, context.DeadlineExceeded
 		}
 		return &llm.GenerateResponseResult{
@@ -1601,8 +1602,8 @@ func TestRunPhase3EnumAnalysis_ContinuesOnFailure(t *testing.T) {
 	}
 
 	// All 3 LLM calls should have been attempted
-	if callCount != 3 {
-		t.Errorf("Expected 3 LLM calls, got %d", callCount)
+	if callCount.Load() != 3 {
+		t.Errorf("Expected 3 LLM calls, got %d", callCount.Load())
 	}
 
 	// Count successful analyses
@@ -1957,8 +1958,8 @@ func TestRunPhase4FKResolution_FallsBackToLLMOnlyWithoutDatasource(t *testing.T)
 	}
 
 	// Verify LLM was called (LLM-only fallback)
-	if mockClient.GenerateResponseCalls != 1 {
-		t.Errorf("GenerateResponseCalls = %d, want 1", mockClient.GenerateResponseCalls)
+	if mockClient.GenerateResponseCalls.Load() != 1 {
+		t.Errorf("GenerateResponseCalls = %d, want 1", mockClient.GenerateResponseCalls.Load())
 	}
 
 	// Verify features were updated
@@ -2330,8 +2331,8 @@ func TestRunPhase5CrossColumnAnalysis_Success(t *testing.T) {
 	}
 
 	// Verify LLM was called
-	if mockClient.GenerateResponseCalls != 1 {
-		t.Errorf("GenerateResponseCalls = %d, want 1", mockClient.GenerateResponseCalls)
+	if mockClient.GenerateResponseCalls.Load() != 1 {
+		t.Errorf("GenerateResponseCalls = %d, want 1", mockClient.GenerateResponseCalls.Load())
 	}
 
 	// Verify progress was reported
@@ -2398,12 +2399,12 @@ func TestRunPhase5CrossColumnAnalysis_EmptyQueue(t *testing.T) {
 func TestRunPhase5CrossColumnAnalysis_ContinuesOnFailure(t *testing.T) {
 	projectID := uuid.New()
 
-	callCount := 0
+	var callCount atomic.Int64
 	mockClient := llm.NewMockLLMClient()
 	mockClient.GenerateResponseFunc = func(ctx context.Context, prompt string, systemMessage string, temperature float64, thinking bool) (*llm.GenerateResponseResult, error) {
-		callCount++
+		count := callCount.Add(1)
 		// Fail on second call
-		if callCount == 2 {
+		if count == 2 {
 			return nil, context.DeadlineExceeded
 		}
 		return &llm.GenerateResponseResult{
@@ -2454,8 +2455,8 @@ func TestRunPhase5CrossColumnAnalysis_ContinuesOnFailure(t *testing.T) {
 	}
 
 	// All 3 LLM calls should have been attempted
-	if callCount != 3 {
-		t.Errorf("Expected 3 LLM calls, got %d", callCount)
+	if callCount.Load() != 3 {
+		t.Errorf("Expected 3 LLM calls, got %d", callCount.Load())
 	}
 }
 

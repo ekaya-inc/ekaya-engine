@@ -284,7 +284,7 @@ func TestFKSemanticEvaluationService_EvaluateCandidates_EmptyCandidates(t *testi
 	// Assert
 	require.NoError(t, err)
 	require.Len(t, results, 0)
-	assert.Equal(t, 0, mockFactory.MockClient.GenerateResponseCalls, "LLM should not be called for empty candidates")
+	assert.Equal(t, int64(0), mockFactory.MockClient.GenerateResponseCalls.Load(), "LLM should not be called for empty candidates")
 }
 
 func TestFKSemanticEvaluationService_EvaluateCandidates_LLMError(t *testing.T) {
