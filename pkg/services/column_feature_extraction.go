@@ -3266,6 +3266,19 @@ func (s *columnFeatureExtractionService) storeFeatures(
 		return nil
 	}
 
+	// Acquire fresh connection for storage to avoid "conn busy" errors.
+	// The parent context's connection may be in a bad state after LLM phases.
+	workCtx := ctx
+	if s.getTenantCtx != nil {
+		var cleanup func()
+		var err error
+		workCtx, cleanup, err = s.getTenantCtx(ctx, projectID)
+		if err != nil {
+			return fmt.Errorf("acquire tenant context for storage: %w", err)
+		}
+		defer cleanup()
+	}
+
 	s.logger.Info("Storing column features",
 		zap.String("project_id", projectID.String()),
 		zap.Int("feature_count", len(features)))
@@ -3276,7 +3289,7 @@ func (s *columnFeatureExtractionService) storeFeatures(
 			continue
 		}
 
-		err := s.schemaRepo.UpdateColumnFeatures(ctx, projectID, f.ColumnID, f)
+		err := s.schemaRepo.UpdateColumnFeatures(workCtx, projectID, f.ColumnID, f)
 		if err != nil {
 			s.logger.Error("Failed to store column features",
 				zap.String("column_id", f.ColumnID.String()),
