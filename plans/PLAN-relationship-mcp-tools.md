@@ -1,7 +1,10 @@
-# PLAN: Fix Relationships - Verified Joins for MCP Clients
+# PLAN: Relationship MCP Tools - Surface Verified Joins to Clients
 
 > **Updated 2026-01-30**: Revised after codebase review. Much of the original plan already exists.
 > Key changes: Removed duplicate tasks, updated references to existing tables/services, focused on actual gaps.
+>
+> **Renamed from PLAN-fix-relationships.md**: This plan adds MCP tools that READ existing relationship
+> data. It does NOT modify the relationship detection pipeline (which already works).
 
 ## Problem Statement
 
