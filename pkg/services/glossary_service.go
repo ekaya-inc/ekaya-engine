@@ -2315,7 +2315,7 @@ func extractColumnReferences(sql string) []columnReference {
 		"lag": true, "lead": true, "first_value": true, "last_value": true,
 		// PostgreSQL date/time functions and their field arguments
 		"date_part": true, "age": true, "date_diff": true, "datediff": true,
-		"epoch":     true, "second": true, "minute": true, "hour": true,
+		"epoch": true, "second": true, "minute": true, "hour": true,
 		"day": true, "week": true, "month": true, "year": true, "quarter": true,
 		"dow": true, "doy": true, "isodow": true, "isoyear": true,
 		"timezone": true, "timezone_hour": true, "timezone_minute": true,

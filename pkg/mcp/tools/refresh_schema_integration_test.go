@@ -237,9 +237,9 @@ func TestRefreshSchema_ColumnsAdded_ReportsOnlyNewColumns_Integration(t *testing
 		expectedColumnsAdded int
 	}{
 		{
-			name:            "reports 0 columns when no new columns exist",
-			columnsUpserted: 634, // Large number representing all columns in the database
-			newColumns:      []models.RefreshColumnChange{}, // No actual new columns
+			name:                 "reports 0 columns when no new columns exist",
+			columnsUpserted:      634,                            // Large number representing all columns in the database
+			newColumns:           []models.RefreshColumnChange{}, // No actual new columns
 			expectedColumnsAdded: 0,
 		},
 		{
