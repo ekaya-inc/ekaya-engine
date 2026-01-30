@@ -222,7 +222,7 @@ func TestEnrichEntitiesWithLLM_ParseFailure_ReturnsError(t *testing.T) {
 		},
 	}
 
-	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns, nil)
 
 	// Verify: error should be returned (fail fast)
 	require.Error(t, err)
@@ -321,7 +321,7 @@ func TestEnrichEntitiesWithLLM_ValidResponse_Success(t *testing.T) {
 		},
 	}
 
-	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns, nil)
 
 	// Verify: no error for valid response
 	require.NoError(t, err)
@@ -357,7 +357,7 @@ func TestEnrichEntitiesWithLLM_EmptyEntities_ReturnsNil(t *testing.T) {
 	)
 
 	// Execute
-	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, nil, nil)
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, nil, nil, nil)
 
 	// Verify: no error when no entities exist (nothing to enrich)
 	require.NoError(t, err)
@@ -468,7 +468,7 @@ func TestEnrichEntitiesWithLLM_IncompleteResponse_ReturnsError(t *testing.T) {
 		{SchemaTableID: tableID3, ColumnName: "id"},
 	}
 
-	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns, nil)
 
 	// Verify: error should be returned for incomplete response
 	require.Error(t, err)
@@ -702,7 +702,7 @@ func TestEnrichEntitiesWithLLM_BatchedEnrichment_Success(t *testing.T) {
 	)
 
 	// Execute
-	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns, nil)
 
 	// Verify: no error
 	require.NoError(t, err)
@@ -816,7 +816,7 @@ func TestEnrichEntitiesWithLLM_BatchedEnrichment_BatchFailure(t *testing.T) {
 	)
 
 	// Execute
-	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns, nil)
 
 	// Verify: error should be returned (fail fast on batch failure)
 	require.Error(t, err)
@@ -1130,7 +1130,7 @@ func TestEnrichEntitiesWithLLM_SmallEntitySet_NoBatching(t *testing.T) {
 	)
 
 	// Execute
-	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns, nil)
 
 	// Verify: no error
 	require.NoError(t, err)
@@ -1607,7 +1607,7 @@ func TestEnrichEntitiesWithLLM_IncludesExistingNamesInPrompt(t *testing.T) {
 	}
 
 	// Execute
-	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns, nil)
 
 	// Verify: no error
 	require.NoError(t, err)
@@ -1698,7 +1698,7 @@ func TestEnrichEntitiesWithLLM_NoExistingNames_NoExistingNamesSection(t *testing
 	}
 
 	// Execute
-	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns, nil)
 
 	// Verify: no error
 	require.NoError(t, err)
@@ -1852,7 +1852,7 @@ func TestEnrichEntitiesWithLLM_SetsConfidence(t *testing.T) {
 	}
 
 	// Execute
-	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns, nil)
 
 	// Verify: no error
 	require.NoError(t, err)
@@ -1962,7 +1962,7 @@ func TestEnrichEntitiesWithLLM_QuestionsInResponse_Parsed(t *testing.T) {
 	}
 
 	// Execute
-	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns, nil)
 
 	// Verify: no error - questions in response should not cause failure
 	require.NoError(t, err)
@@ -2137,7 +2137,7 @@ func TestEnrichEntitiesWithLLM_DeduplicatesAliases(t *testing.T) {
 	}
 
 	// Execute
-	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns)
+	err := svc.EnrichEntitiesWithLLM(context.Background(), projectID, ontologyID, datasourceID, tables, columns, nil)
 
 	// Verify: no error
 	require.NoError(t, err)

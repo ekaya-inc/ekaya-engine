@@ -40,7 +40,7 @@ func NewEntityEnrichmentAdapter(svc EntityDiscoveryService, schemaRepo repositor
 	return &EntityEnrichmentAdapter{svc: svc, schemaRepo: schemaRepo, getTenant: getTenant}
 }
 
-func (a *EntityEnrichmentAdapter) EnrichEntitiesWithLLM(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID) error {
+func (a *EntityEnrichmentAdapter) EnrichEntitiesWithLLM(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID, progressCallback dag.ProgressCallback) error {
 	// Get tables and columns for enrichment context
 	tenantCtx, cleanup, err := a.getTenant(ctx, projectID)
 	if err != nil {
@@ -58,7 +58,13 @@ func (a *EntityEnrichmentAdapter) EnrichEntitiesWithLLM(ctx context.Context, pro
 		return err
 	}
 
-	return a.svc.EnrichEntitiesWithLLM(ctx, projectID, ontologyID, datasourceID, tables, columns)
+	// Convert dag.ProgressCallback to services.EntityEnrichmentProgressCallback
+	var svcCallback EntityEnrichmentProgressCallback
+	if progressCallback != nil {
+		svcCallback = EntityEnrichmentProgressCallback(progressCallback)
+	}
+
+	return a.svc.EnrichEntitiesWithLLM(ctx, projectID, ontologyID, datasourceID, tables, columns, svcCallback)
 }
 
 // FKDiscoveryAdapter adapts DeterministicRelationshipService for FK discovery.

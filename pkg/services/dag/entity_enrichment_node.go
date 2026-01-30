@@ -14,7 +14,8 @@ import (
 // EntityEnrichmentMethods defines the methods needed from EntityDiscoveryService for LLM enrichment.
 type EntityEnrichmentMethods interface {
 	// EnrichEntitiesWithLLM enriches entities with LLM-generated names and descriptions.
-	EnrichEntitiesWithLLM(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID) error
+	// The progressCallback is called to report enrichment progress (current entity, total entities, message).
+	EnrichEntitiesWithLLM(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID, progressCallback ProgressCallback) error
 }
 
 // EntityEnrichmentNode wraps LLM-based entity enrichment.
@@ -52,8 +53,15 @@ func (n *EntityEnrichmentNode) Execute(ctx context.Context, dag *models.Ontology
 		return fmt.Errorf("ontology ID is required for entity enrichment")
 	}
 
+	// Create progress callback that wraps ReportProgress
+	progressCallback := func(current, total int, message string) {
+		if err := n.ReportProgress(ctx, current, total, message); err != nil {
+			n.Logger().Warn("Failed to report progress", zap.Error(err))
+		}
+	}
+
 	// Call the underlying service method
-	if err := n.entityEnrichment.EnrichEntitiesWithLLM(ctx, dag.ProjectID, *dag.OntologyID, dag.DatasourceID); err != nil {
+	if err := n.entityEnrichment.EnrichEntitiesWithLLM(ctx, dag.ProjectID, *dag.OntologyID, dag.DatasourceID, progressCallback); err != nil {
 		return fmt.Errorf("entity enrichment failed: %w", err)
 	}
 

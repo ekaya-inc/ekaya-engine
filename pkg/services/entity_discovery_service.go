@@ -14,14 +14,19 @@ import (
 	"github.com/ekaya-inc/ekaya-engine/pkg/repositories"
 )
 
+// EntityEnrichmentProgressCallback is called to report entity enrichment progress.
+// current: entities enriched so far, total: total entities to enrich, message: status message.
+type EntityEnrichmentProgressCallback func(current, total int, message string)
+
 // EntityDiscoveryService provides entity discovery operations for the DAG workflow.
 // It contains the core algorithms for identifying and enriching entities from schema metadata.
 type EntityDiscoveryService interface {
 	// IdentifyEntitiesFromDDL discovers entities from DDL metadata (PK/unique constraints)
 	IdentifyEntitiesFromDDL(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID) (int, []*models.SchemaTable, []*models.SchemaColumn, error)
 
-	// EnrichEntitiesWithLLM uses an LLM to generate entity names and descriptions
-	EnrichEntitiesWithLLM(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID, tables []*models.SchemaTable, columns []*models.SchemaColumn) error
+	// EnrichEntitiesWithLLM uses an LLM to generate entity names and descriptions.
+	// The progressCallback is called to report progress (can be nil if progress reporting not needed).
+	EnrichEntitiesWithLLM(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID, tables []*models.SchemaTable, columns []*models.SchemaColumn, progressCallback EntityEnrichmentProgressCallback) error
 
 	// ValidateEnrichment checks that all entities have non-empty descriptions
 	ValidateEnrichment(ctx context.Context, projectID, ontologyID uuid.UUID) error
@@ -288,8 +293,9 @@ func (s *entityDiscoveryService) EnrichEntitiesWithLLM(
 	projectID, ontologyID, datasourceID uuid.UUID,
 	tables []*models.SchemaTable,
 	columns []*models.SchemaColumn,
+	progressCallback EntityEnrichmentProgressCallback,
 ) error {
-	return s.enrichEntitiesWithLLM(ctx, projectID, ontologyID, datasourceID, tables, columns)
+	return s.enrichEntitiesWithLLM(ctx, projectID, ontologyID, datasourceID, tables, columns, progressCallback)
 }
 
 // enrichEntitiesWithLLM is the internal implementation.
@@ -298,6 +304,7 @@ func (s *entityDiscoveryService) enrichEntitiesWithLLM(
 	projectID, ontologyID, datasourceID uuid.UUID,
 	tables []*models.SchemaTable,
 	columns []*models.SchemaColumn,
+	progressCallback EntityEnrichmentProgressCallback,
 ) error {
 	tenantCtx, cleanup, err := s.getTenantCtx(ctx, projectID)
 	if err != nil {
@@ -334,11 +341,21 @@ func (s *entityDiscoveryService) enrichEntitiesWithLLM(
 		s.logger.Info("Using batched entity enrichment",
 			zap.Int("total_entities", len(entities)),
 			zap.Int("batch_size", entityBatchSize))
-		return s.enrichEntitiesInBatches(ctx, projectID, entities, tableColumns, entityBatchSize)
+		return s.enrichEntitiesInBatches(ctx, projectID, entities, tableColumns, entityBatchSize, progressCallback)
 	}
 
 	// Single batch enrichment for small entity sets or when worker pool unavailable
-	return s.enrichEntityBatch(tenantCtx, projectID, entities, tableColumns)
+	// Report progress for small batch (start -> complete)
+	if progressCallback != nil {
+		progressCallback(0, len(entities), fmt.Sprintf("Enriching %d entities...", len(entities)))
+	}
+	if err := s.enrichEntityBatch(tenantCtx, projectID, entities, tableColumns); err != nil {
+		return err
+	}
+	if progressCallback != nil {
+		progressCallback(len(entities), len(entities), fmt.Sprintf("Enriched %d entities", len(entities)))
+	}
+	return nil
 }
 
 // enrichEntitiesInBatches splits entities into batches and processes them in parallel.
@@ -349,7 +366,13 @@ func (s *entityDiscoveryService) enrichEntitiesInBatches(
 	entities []*models.OntologyEntity,
 	tableColumns map[string][]string,
 	batchSize int,
+	progressCallback EntityEnrichmentProgressCallback,
 ) error {
+	// Report initial progress
+	if progressCallback != nil {
+		progressCallback(0, len(entities), fmt.Sprintf("Enriching %d entities in batches...", len(entities)))
+	}
+
 	// Build work items for each batch
 	var workItems []llm.WorkItem[int]
 
@@ -401,10 +424,23 @@ func (s *entityDiscoveryService) enrichEntitiesInBatches(
 	}
 
 	// Process all batches with worker pool
-	results := llm.Process(ctx, s.workerPool, workItems, func(completed, total int) {
+	totalEntities := len(entities)
+	results := llm.Process(ctx, s.workerPool, workItems, func(batchesCompleted, totalBatches int) {
+		// Convert batch progress to entity progress
+		entitiesCompleted := batchesCompleted * batchSize
+		if entitiesCompleted > totalEntities {
+			entitiesCompleted = totalEntities
+		}
+
 		s.logger.Debug("Entity enrichment progress",
-			zap.Int("batches_completed", completed),
-			zap.Int("total_batches", total))
+			zap.Int("batches_completed", batchesCompleted),
+			zap.Int("total_batches", totalBatches),
+			zap.Int("entities_completed", entitiesCompleted),
+			zap.Int("total_entities", totalEntities))
+
+		if progressCallback != nil {
+			progressCallback(entitiesCompleted, totalEntities, fmt.Sprintf("Enriching entities (%d/%d)...", entitiesCompleted, totalEntities))
+		}
 	})
 
 	// Check for failures - fail fast on any batch error

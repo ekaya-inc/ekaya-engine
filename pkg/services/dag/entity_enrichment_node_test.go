@@ -15,12 +15,12 @@ import (
 
 // mockEntityEnrichmentMethods implements EntityEnrichmentMethods for testing.
 type mockEntityEnrichmentMethods struct {
-	enrichFunc func(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID) error
+	enrichFunc func(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID, progressCallback ProgressCallback) error
 }
 
-func (m *mockEntityEnrichmentMethods) EnrichEntitiesWithLLM(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID) error {
+func (m *mockEntityEnrichmentMethods) EnrichEntitiesWithLLM(ctx context.Context, projectID, ontologyID, datasourceID uuid.UUID, progressCallback ProgressCallback) error {
 	if m.enrichFunc != nil {
-		return m.enrichFunc(ctx, projectID, ontologyID, datasourceID)
+		return m.enrichFunc(ctx, projectID, ontologyID, datasourceID, progressCallback)
 	}
 	return nil
 }
@@ -156,10 +156,14 @@ func TestEntityEnrichmentNode_Execute_Success(t *testing.T) {
 	var progressReports []string
 
 	mockEntity := &mockEntityEnrichmentMethods{
-		enrichFunc: func(ctx context.Context, pID, oID, dID uuid.UUID) error {
+		enrichFunc: func(ctx context.Context, pID, oID, dID uuid.UUID, progressCallback ProgressCallback) error {
 			assert.Equal(t, projectID, pID)
 			assert.Equal(t, ontologyID, oID)
 			assert.Equal(t, datasourceID, dID)
+			// Simulate progress reporting
+			if progressCallback != nil {
+				progressCallback(5, 10, "Enriching entities...")
+			}
 			return nil
 		},
 	}
@@ -184,10 +188,10 @@ func TestEntityEnrichmentNode_Execute_Success(t *testing.T) {
 	err := node.Execute(ctx, dag)
 	require.NoError(t, err)
 
-	// Verify progress was reported
-	assert.Len(t, progressReports, 2, "Should report initial and completion progress")
+	// Verify progress was reported (initial, intermediate from enrichment, completion)
+	assert.GreaterOrEqual(t, len(progressReports), 2, "Should report at least initial and completion progress")
 	assert.Equal(t, "Generating entity names and descriptions...", progressReports[0])
-	assert.Equal(t, "Entity enrichment complete", progressReports[1])
+	assert.Equal(t, "Entity enrichment complete", progressReports[len(progressReports)-1])
 }
 
 func TestEntityEnrichmentNode_Execute_NoOntologyID(t *testing.T) {
@@ -225,7 +229,7 @@ func TestEntityEnrichmentNode_Execute_EnrichmentError_FailsFast(t *testing.T) {
 	var progressReports []string
 
 	mockEntity := &mockEntityEnrichmentMethods{
-		enrichFunc: func(ctx context.Context, pID, oID, dID uuid.UUID) error {
+		enrichFunc: func(ctx context.Context, pID, oID, dID uuid.UUID, progressCallback ProgressCallback) error {
 			return expectedErr
 		},
 	}
@@ -267,7 +271,7 @@ func TestEntityEnrichmentNode_Execute_ProgressReportingError(t *testing.T) {
 	nodeID := uuid.New()
 
 	mockEntity := &mockEntityEnrichmentMethods{
-		enrichFunc: func(ctx context.Context, pID, oID, dID uuid.UUID) error {
+		enrichFunc: func(ctx context.Context, pID, oID, dID uuid.UUID, progressCallback ProgressCallback) error {
 			return nil
 		},
 	}
@@ -290,6 +294,79 @@ func TestEntityEnrichmentNode_Execute_ProgressReportingError(t *testing.T) {
 	// Should succeed despite progress reporting errors
 	err := node.Execute(ctx, dag)
 	require.NoError(t, err)
+}
+
+func TestEntityEnrichmentNode_Execute_ProgressCallbackInvoked(t *testing.T) {
+	// Verify that progress callback passed to enrichment is properly wired to ReportProgress
+	ctx := context.Background()
+	projectID := uuid.New()
+	ontologyID := uuid.New()
+	datasourceID := uuid.New()
+	nodeID := uuid.New()
+
+	// Track progress values reported
+	var progressValues []struct {
+		current int
+		total   int
+		message string
+	}
+
+	mockEntity := &mockEntityEnrichmentMethods{
+		enrichFunc: func(ctx context.Context, pID, oID, dID uuid.UUID, progressCallback ProgressCallback) error {
+			// Simulate batch progress reporting
+			if progressCallback != nil {
+				progressCallback(0, 50, "Starting enrichment...")
+				progressCallback(25, 50, "Enriching entities (25/50)...")
+				progressCallback(50, 50, "Enriched 50 entities")
+			}
+			return nil
+		},
+	}
+
+	mockRepo := &mockEntityEnrichmentDAGRepo{
+		updateProgressFunc: func(ctx context.Context, nID uuid.UUID, progress *models.DAGNodeProgress) error {
+			progressValues = append(progressValues, struct {
+				current int
+				total   int
+				message string
+			}{progress.Current, progress.Total, progress.Message})
+			return nil
+		},
+	}
+
+	node := NewEntityEnrichmentNode(mockRepo, mockEntity, zap.NewNop())
+	node.SetCurrentNodeID(nodeID)
+
+	dag := &models.OntologyDAG{
+		ProjectID:    projectID,
+		OntologyID:   &ontologyID,
+		DatasourceID: datasourceID,
+	}
+
+	err := node.Execute(ctx, dag)
+	require.NoError(t, err)
+
+	// Should have: initial (0/100), then service progress reports, then completion (100/100)
+	require.GreaterOrEqual(t, len(progressValues), 4, "Should have initial, service progress, and completion reports")
+
+	// First should be initial progress from node
+	assert.Equal(t, "Generating entity names and descriptions...", progressValues[0].message)
+
+	// Last should be completion from node
+	lastProgress := progressValues[len(progressValues)-1]
+	assert.Equal(t, 100, lastProgress.current)
+	assert.Equal(t, 100, lastProgress.total)
+	assert.Equal(t, "Entity enrichment complete", lastProgress.message)
+
+	// Middle ones should include service progress
+	foundServiceProgress := false
+	for _, p := range progressValues[1 : len(progressValues)-1] {
+		if p.total == 50 {
+			foundServiceProgress = true
+			break
+		}
+	}
+	assert.True(t, foundServiceProgress, "Should include progress reports from the enrichment service")
 }
 
 func TestEntityEnrichmentNode_Name(t *testing.T) {

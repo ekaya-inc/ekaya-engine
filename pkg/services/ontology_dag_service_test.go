@@ -178,7 +178,7 @@ func (t *testEntityDiscovery) IdentifyEntitiesFromDDL(_ context.Context, _, _, _
 
 type testEntityEnrichment struct{}
 
-func (t *testEntityEnrichment) EnrichEntitiesWithLLM(_ context.Context, _, _, _ uuid.UUID) error {
+func (t *testEntityEnrichment) EnrichEntitiesWithLLM(_ context.Context, _, _, _ uuid.UUID, _ dag.ProgressCallback) error {
 	return nil
 }
 
