@@ -136,7 +136,7 @@ Parameters:
 
 ---
 
-#### [ ] 7.4 Surface Table Metadata in get_context
+#### [x] 7.4 Surface Table Metadata in get_context
 
 **Goal**: Make table metadata visible in the primary discovery workflow so agents see it without having to probe each table.
 

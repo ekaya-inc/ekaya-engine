@@ -34,6 +34,7 @@ func TestContextToolDeps_Structure(t *testing.T) {
 	assert.Nil(t, deps.GlossaryService, "GlossaryService field should be nil by default")
 	assert.Nil(t, deps.SchemaRepo, "SchemaRepo field should be nil by default")
 	assert.Nil(t, deps.ColumnMetadataRepo, "ColumnMetadataRepo field should be nil by default")
+	assert.Nil(t, deps.TableMetadataRepo, "TableMetadataRepo field should be nil by default")
 	assert.Nil(t, deps.Logger, "Logger field should be nil by default")
 }
 

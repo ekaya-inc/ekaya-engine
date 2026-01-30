@@ -28,6 +28,7 @@ type ContextToolDeps struct {
 	GlossaryService        services.GlossaryService
 	SchemaRepo             repositories.SchemaRepository
 	ColumnMetadataRepo     repositories.ColumnMetadataRepository
+	TableMetadataRepo      repositories.TableMetadataRepository
 	Logger                 *zap.Logger
 }
 
@@ -352,6 +353,23 @@ func buildTablesFromSchema(
 		filteredTables = filterDatasourceTables(schema.Tables, tableFilter)
 	}
 
+	// Fetch table metadata for all tables in one batch
+	var tableMetadataMap map[string]*models.TableMetadata
+	if deps.TableMetadataRepo != nil {
+		metaList, err := deps.TableMetadataRepo.List(ctx, projectID, dsID)
+		if err != nil {
+			deps.Logger.Warn("Failed to get table metadata",
+				zap.String("project_id", projectID.String()),
+				zap.Error(err))
+			// Continue without table metadata - not a fatal error
+		} else if len(metaList) > 0 {
+			tableMetadataMap = make(map[string]*models.TableMetadata, len(metaList))
+			for _, meta := range metaList {
+				tableMetadataMap[meta.TableName] = meta
+			}
+		}
+	}
+
 	// Build table details
 	tableDetails := make([]map[string]any, 0, len(filteredTables))
 	for _, table := range filteredTables {
@@ -359,6 +377,24 @@ func buildTablesFromSchema(
 			"schema_name": table.SchemaName,
 			"table_name":  table.TableName,
 			"row_count":   table.RowCount,
+		}
+
+		// Merge table metadata if available (omit null/empty fields)
+		if tableMetadataMap != nil {
+			if meta, ok := tableMetadataMap[table.TableName]; ok {
+				if meta.Description != nil && *meta.Description != "" {
+					tableDetail["description"] = *meta.Description
+				}
+				if meta.UsageNotes != nil && *meta.UsageNotes != "" {
+					tableDetail["usage_notes"] = *meta.UsageNotes
+				}
+				if meta.IsEphemeral {
+					tableDetail["is_ephemeral"] = true
+				}
+				if meta.PreferredAlternative != nil && *meta.PreferredAlternative != "" {
+					tableDetail["preferred_alternative"] = *meta.PreferredAlternative
+				}
+			}
 		}
 
 		if depth == "columns" {

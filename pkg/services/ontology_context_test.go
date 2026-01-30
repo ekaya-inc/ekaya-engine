@@ -455,7 +455,7 @@ func TestGetDomainContext(t *testing.T) {
 	}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetDomainContext(ctx, projectID)
 
@@ -499,7 +499,7 @@ func TestGetDomainContext_NoActiveOntology(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetDomainContext(ctx, projectID)
 
@@ -603,7 +603,7 @@ func TestGetEntitiesContext(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetEntitiesContext(ctx, projectID)
 
@@ -677,7 +677,7 @@ func TestGetTablesContext(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	// Test with specific table filter
 	result, err := svc.GetTablesContext(ctx, projectID, []string{"users"})
@@ -737,7 +737,7 @@ func TestGetTablesContext_AllTables(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	// Test without filter - should return all entity tables
 	result, err := svc.GetTablesContext(ctx, projectID, nil)
@@ -802,7 +802,7 @@ func TestGetTablesContext_FKRoles(t *testing.T) {
 	}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetTablesContext(ctx, projectID, []string{"billing_engagements"})
 
@@ -879,7 +879,7 @@ func TestGetColumnsContext(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetColumnsContext(ctx, projectID, []string{"users"})
 
@@ -906,7 +906,7 @@ func TestGetColumnsContext_RequiresTableFilter(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetColumnsContext(ctx, projectID, nil)
 
@@ -933,7 +933,7 @@ func TestGetColumnsContext_MissingTable(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	// Should not error, but table won't be in results (no entity matches)
 	result, err := svc.GetColumnsContext(ctx, projectID, []string{"nonexistent"})
@@ -953,7 +953,7 @@ func TestGetColumnsContext_TooManyTables(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	// Create list of tables exceeding the limit
 	tables := make([]string, MaxColumnsDepthTables+1)
@@ -1046,7 +1046,7 @@ func TestGetDomainContext_DeduplicatesRelationships(t *testing.T) {
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetDomainContext(ctx, projectID)
 
@@ -1107,7 +1107,7 @@ func TestGetDomainContext_DeduplicatesRelationships_FirstWinsWhenSameLength(t *t
 	schemaRepo := &mockSchemaRepository{}
 	projectService := &mockProjectServiceForOntology{}
 
-	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, projectService, zap.NewNop())
+	svc := NewOntologyContextService(ontologyRepo, entityRepo, relationshipRepo, schemaRepo, nil, projectService, zap.NewNop())
 
 	result, err := svc.GetDomainContext(ctx, projectID)
 
