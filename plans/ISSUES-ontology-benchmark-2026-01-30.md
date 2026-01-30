@@ -110,9 +110,10 @@ Extend the ontology data model to support an explicit `is_sensitive` flag on col
 
 ### 6. refresh_schema Reports 634 Columns Added on Every Run
 
+- [x] **Status**: Complete
+
 **Severity**: LOW
 **Tool**: `refresh_schema`
-**Status**: Open
 
 **Description**: Running refresh_schema reports 634 columns added even when no schema changes occurred.
 

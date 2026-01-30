@@ -222,3 +222,114 @@ func TestRefreshSchema_AutoSelectApplied_ReflectsNewTables_Integration(t *testin
 		})
 	}
 }
+
+// TestRefreshSchema_ColumnsAdded_ReportsOnlyNewColumns verifies that columns_added
+// in the response reports only NEW columns, not total columns upserted.
+// This fixes the bug where refresh_schema reported 634 columns on every run.
+func TestRefreshSchema_ColumnsAdded_ReportsOnlyNewColumns_Integration(t *testing.T) {
+	tc := setupRefreshSchemaIntegrationTest(t)
+	datasourceID := uuid.MustParse("00000000-0000-0000-0000-000000000069")
+
+	tests := []struct {
+		name                 string
+		columnsUpserted      int // Total columns processed (upserted/updated)
+		newColumns           []models.RefreshColumnChange
+		expectedColumnsAdded int
+	}{
+		{
+			name:            "reports 0 columns when no new columns exist",
+			columnsUpserted: 634, // Large number representing all columns in the database
+			newColumns:      []models.RefreshColumnChange{}, // No actual new columns
+			expectedColumnsAdded: 0,
+		},
+		{
+			name:            "reports only new columns when some are new",
+			columnsUpserted: 634, // Total columns processed
+			newColumns: []models.RefreshColumnChange{
+				{TableName: "public.users", ColumnName: "new_field", DataType: "text"},
+				{TableName: "public.orders", ColumnName: "tracking_id", DataType: "varchar"},
+			},
+			expectedColumnsAdded: 2,
+		},
+		{
+			name:            "reports all columns when all are new (initial schema discovery)",
+			columnsUpserted: 50, // All columns are new
+			newColumns: func() []models.RefreshColumnChange {
+				// Simulate 50 new columns
+				cols := make([]models.RefreshColumnChange, 50)
+				for i := 0; i < 50; i++ {
+					cols[i] = models.RefreshColumnChange{
+						TableName:  "public.new_table",
+						ColumnName: "col_" + string(rune('a'+i%26)),
+						DataType:   "text",
+					}
+				}
+				return cols
+			}(),
+			expectedColumnsAdded: 50,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a fresh MCP server for each test
+			mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+			tc.mcpServer = mcpServer
+
+			// Set up mocks
+			mockMCPConfig := &mockMCPConfigService{
+				config: &models.ToolGroupConfig{
+					Enabled:                true,
+					AddOntologyMaintenance: true,
+				},
+			}
+
+			mockSchema := &mockSchemaService{
+				refreshResult: &models.RefreshResult{
+					NewTableNames:        []string{},
+					RemovedTableNames:    []string{},
+					TablesUpserted:       0,
+					ColumnsUpserted:      tt.columnsUpserted,
+					NewColumns:           tt.newColumns,
+					RelationshipsCreated: 0,
+				},
+			}
+
+			mockProject := &mockProjectService{
+				defaultDatasourceID: datasourceID,
+			}
+
+			deps := &MCPToolDeps{
+				DB:               tc.engineDB.DB,
+				MCPConfigService: mockMCPConfig,
+				SchemaService:    mockSchema,
+				ProjectService:   mockProject,
+				Logger:           zap.NewNop(),
+			}
+			registerRefreshSchemaTool(mcpServer, deps)
+
+			ctx, cleanup := tc.createTestContext()
+			defer cleanup()
+
+			// Call refresh_schema tool
+			result, err := tc.callTool(ctx, "refresh_schema", map[string]any{})
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			// Parse the tool result content
+			require.Len(t, result.Content, 1)
+			textContent, ok := result.Content[0].(mcp.TextContent)
+			require.True(t, ok, "expected text content")
+
+			var refreshResponse struct {
+				ColumnsAdded int `json:"columns_added"`
+			}
+			err = json.Unmarshal([]byte(textContent.Text), &refreshResponse)
+			require.NoError(t, err)
+
+			// Verify columns_added reports only NEW columns, not total upserted
+			assert.Equal(t, tt.expectedColumnsAdded, refreshResponse.ColumnsAdded,
+				"columns_added should report len(NewColumns), not ColumnsUpserted")
+		})
+	}
+}

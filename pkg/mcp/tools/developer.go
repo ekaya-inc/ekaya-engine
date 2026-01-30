@@ -1099,7 +1099,7 @@ func registerRefreshSchemaTool(s *server.MCPServer, deps *MCPToolDeps) {
 		}{
 			TablesAdded:           result.NewTableNames,
 			TablesRemoved:         result.RemovedTableNames,
-			ColumnsAdded:          result.ColumnsUpserted,
+			ColumnsAdded:          len(result.NewColumns),
 			RelationshipsFound:    len(relPairs),
 			Relationships:         relPairs,
 			AutoSelectApplied:     autoSelectApplied,
