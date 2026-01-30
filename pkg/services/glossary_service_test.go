@@ -4624,6 +4624,32 @@ func TestValidateColumnReferences(t *testing.T) {
 		// The suggestion logic should suggest created_at
 		assert.Equal(t, "created_at", errors[0].SuggestFrom, "Should suggest similar column")
 	})
+
+	t.Run("does not flag PostgreSQL EXTRACT EPOCH as invalid column", func(t *testing.T) {
+		sql := "SELECT AVG(EXTRACT(EPOCH FROM (ended_at - created_at))) as avg_duration FROM sessions WHERE ended_at IS NOT NULL"
+		errors := validateColumnReferences(sql, schemaColumns)
+
+		// Should not flag EPOCH, (, ), =, etc. as invalid columns
+		for _, err := range errors {
+			assert.NotEqual(t, "EPOCH", strings.ToUpper(err.Column), "EPOCH should not be flagged as invalid column")
+			assert.NotEqual(t, "(", err.Column, "( should not be flagged as invalid column")
+			assert.NotEqual(t, ")", err.Column, ") should not be flagged as invalid column")
+			assert.NotEqual(t, "=", err.Column, "= should not be flagged as invalid column")
+		}
+		// All columns in this query exist in the schema, so there should be no errors
+		assert.Empty(t, errors, "Valid SQL with EXTRACT(EPOCH FROM ...) should have no column errors")
+	})
+
+	t.Run("does not flag DATE_PART as invalid column", func(t *testing.T) {
+		sql := "SELECT DATE_PART('epoch', ended_at - created_at) as duration FROM sessions"
+		errors := validateColumnReferences(sql, schemaColumns)
+
+		for _, err := range errors {
+			assert.NotEqual(t, "DATE_PART", strings.ToUpper(err.Column), "DATE_PART should not be flagged as invalid column")
+		}
+		// All columns in this query exist in the schema, so there should be no errors
+		assert.Empty(t, errors, "Valid SQL with DATE_PART should have no column errors")
+	})
 }
 
 func TestTokenizeSQL(t *testing.T) {
@@ -4815,6 +4841,58 @@ func TestExtractColumnReferences(t *testing.T) {
 		for _, ref := range refs {
 			assert.NotEqual(t, "COUNT", strings.ToUpper(ref.column))
 			assert.NotEqual(t, "SUM", strings.ToUpper(ref.column))
+		}
+	})
+
+	t.Run("skips PostgreSQL date/time function arguments", func(t *testing.T) {
+		// EXTRACT(EPOCH FROM ...) should not flag EPOCH as a column
+		sql := "SELECT EXTRACT(EPOCH FROM created_at) as epoch_time FROM events"
+		refs := extractColumnReferences(sql)
+
+		for _, ref := range refs {
+			assert.NotEqual(t, "EPOCH", strings.ToUpper(ref.column), "EPOCH should not be flagged as column")
+			assert.NotEqual(t, "EXTRACT", strings.ToUpper(ref.column), "EXTRACT should not be flagged as column")
+		}
+		// Note: the column inside the function may or may not be detected depending
+		// on the parser heuristics, but the key thing is we don't flag EPOCH/EXTRACT.
+	})
+
+	t.Run("skips DATE_PART function arguments", func(t *testing.T) {
+		// DATE_PART('epoch', ...) should not flag epoch or date_part as columns
+		sql := "SELECT DATE_PART('epoch', ended_at - started_at) as duration FROM sessions"
+		refs := extractColumnReferences(sql)
+
+		for _, ref := range refs {
+			assert.NotEqual(t, "DATE_PART", strings.ToUpper(ref.column), "DATE_PART should not be flagged as column")
+			// 'epoch' in quotes is a string literal, not a column
+		}
+		// Note: the columns inside the function may or may not be detected depending
+		// on the parser heuristics, but the key thing is we don't flag DATE_PART.
+	})
+
+	t.Run("skips operators and punctuation", func(t *testing.T) {
+		sql := "SELECT id FROM users WHERE status = 'active' AND (role = 'admin')"
+		refs := extractColumnReferences(sql)
+
+		for _, ref := range refs {
+			assert.NotEqual(t, "=", ref.column, "= should not be flagged as column")
+			assert.NotEqual(t, "(", ref.column, "( should not be flagged as column")
+			assert.NotEqual(t, ")", ref.column, ") should not be flagged as column")
+		}
+	})
+
+	t.Run("handles complex EXTRACT expressions", func(t *testing.T) {
+		// This pattern was causing "SQL references non-existent columns: EPOCH"
+		sql := `SELECT
+			AVG(EXTRACT(EPOCH FROM (ended_at - started_at))) as avg_duration
+		FROM billing_engagements
+		WHERE ended_at IS NOT NULL`
+		refs := extractColumnReferences(sql)
+
+		for _, ref := range refs {
+			assert.NotEqual(t, "EPOCH", strings.ToUpper(ref.column), "EPOCH should not be flagged as column")
+			assert.NotEqual(t, "(", ref.column, "( should not be flagged as column")
+			assert.NotEqual(t, ")", ref.column, ") should not be flagged as column")
 		}
 	})
 }

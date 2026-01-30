@@ -2313,6 +2313,14 @@ func extractColumnReferences(sql string) []columnReference {
 		"array_agg": true, "string_agg": true, "jsonb_agg": true, "json_agg": true,
 		"row_number": true, "rank": true, "dense_rank": true, "ntile": true,
 		"lag": true, "lead": true, "first_value": true, "last_value": true,
+		// PostgreSQL date/time functions and their field arguments
+		"date_part": true, "age": true, "date_diff": true, "datediff": true,
+		"epoch":     true, "second": true, "minute": true, "hour": true,
+		"day": true, "week": true, "month": true, "year": true, "quarter": true,
+		"dow": true, "doy": true, "isodow": true, "isoyear": true,
+		"timezone": true, "timezone_hour": true, "timezone_minute": true,
+		"millisecond": true, "microsecond": true, "century": true, "decade": true,
+		"millennium": true, "julian": true,
 		// Common type names used in CAST
 		"int": true, "integer": true, "bigint": true, "smallint": true,
 		"text": true, "varchar": true, "char": true, "boolean": true, "bool": true,
@@ -2344,8 +2352,10 @@ func extractColumnReferences(sql string) []columnReference {
 			continue
 		}
 
-		// Skip if it's an operator or wildcard
-		if token == "*" || token == "+" || token == "-" || token == "/" {
+		// Skip if it's an operator, punctuation, or wildcard
+		if token == "*" || token == "+" || token == "-" || token == "/" ||
+			token == "=" || token == "<" || token == ">" || token == "!" ||
+			token == "(" || token == ")" || token == "," || token == "." {
 			continue
 		}
 

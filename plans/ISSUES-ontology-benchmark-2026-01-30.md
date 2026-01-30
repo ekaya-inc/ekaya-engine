@@ -99,9 +99,10 @@ Extend the ontology data model to support an explicit `is_sensitive` flag on col
 
 ### 5. Glossary Terms with Invalid SQL Functions
 
+- [x] **Status**: Complete
+
 **Severity**: MEDIUM
 **Tool**: Glossary enrichment
-**Status**: Open
 
 **Description**: 3 out of 10 glossary terms have SQL that fails validation due to PostgreSQL function compatibility.
 
