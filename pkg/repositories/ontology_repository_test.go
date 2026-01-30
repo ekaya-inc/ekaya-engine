@@ -723,10 +723,9 @@ func TestOntologyRepository_DeleteByProject_CleansUpRelatedData(t *testing.T) {
 	fact := &models.KnowledgeFact{
 		ProjectID: tc.projectID,
 		FactType:  "terminology",
-		Key:       "test_term",
 		Value:     "A test term definition",
 	}
-	err := knowledgeRepo.Upsert(ctx, fact)
+	err := knowledgeRepo.Create(ctx, fact)
 	if err != nil {
 		t.Fatalf("failed to create knowledge fact: %v", err)
 	}
