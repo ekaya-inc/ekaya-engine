@@ -420,7 +420,7 @@ func (r *ontologyEntityRepository) GetPromotedByProject(ctx context.Context, pro
 
 ---
 
-### Task 5: Manual Promotion/Demotion API
+### Task 5: Manual Promotion/Demotion API ✅
 
 **File:** `pkg/mcp/tools/entity.go`
 

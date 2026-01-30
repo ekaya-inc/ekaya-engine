@@ -282,6 +282,10 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			"key_columns",
 			mcp.Description("Optional - Array of important business column names (e.g., ['user_id', 'username', 'is_available'])"),
 		),
+		mcp.WithBoolean(
+			"is_promoted",
+			mcp.Description("Optional - Set to true to promote entity (included in default context), false to demote (filtered from context). Manual changes persist across re-extraction."),
+		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(true),
@@ -316,8 +320,15 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 		description := getOptionalString(req, "description")
 		var aliases []string
 		var keyColumns []string
+		var isPromoted *bool // nil means not provided, pointer allows distinguishing false from not-set
 
 		if args, ok := req.Params.Arguments.(map[string]any); ok {
+			// Extract is_promoted boolean (optional - nil means not provided)
+			if val, exists := args["is_promoted"]; exists {
+				if boolVal, ok := val.(bool); ok {
+					isPromoted = &boolVal
+				}
+			}
 			// Extract aliases array
 			if aliasesArray, ok := args["aliases"].([]any); ok {
 				for i, a := range aliasesArray {
@@ -394,9 +405,18 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 				OntologyID:  ontology.ID,
 				Name:        name,
 				Description: description,
+				IsPromoted:  true, // Default to promoted for new entities
 				// Note: PrimaryTable, PrimaryColumn, Domain, PrimarySchema are typically set during discovery
 				// For agent updates, we leave them empty or preserve existing values
 			}
+
+			// If is_promoted was explicitly set, use that value and mark as manual source
+			if isPromoted != nil {
+				newEntity.IsPromoted = *isPromoted
+				// Set source to manual so this persists across re-extraction
+				newEntity.Source = models.ProvenanceManual
+			}
+
 			if err := deps.OntologyEntityRepo.Create(tenantCtx, newEntity); err != nil {
 				return nil, fmt.Errorf("failed to create entity: %w", err)
 			}
@@ -405,8 +425,24 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			// Update existing entity
 			// Note: LastEditSource and UpdatedBy are set by the repository from provenance context
 			entityID = existingEntity.ID
+			needsUpdate := false
+
 			if description != "" {
 				existingEntity.Description = description
+				needsUpdate = true
+			}
+
+			// If is_promoted was explicitly set, update it and mark as manual source
+			if isPromoted != nil {
+				existingEntity.IsPromoted = *isPromoted
+				// Set source to manual so this persists across re-extraction
+				existingEntity.Source = models.ProvenanceManual
+				manualSource := models.ProvenanceManual
+				existingEntity.LastEditSource = &manualSource
+				needsUpdate = true
+			}
+
+			if needsUpdate {
 				if err := deps.OntologyEntityRepo.Update(tenantCtx, existingEntity); err != nil {
 					return nil, fmt.Errorf("failed to update entity: %w", err)
 				}
@@ -493,6 +529,7 @@ func registerUpdateEntityTool(s *server.MCPServer, deps *EntityToolDeps) {
 			Description: description,
 			Aliases:     aliases,
 			KeyColumns:  keyColumns,
+			IsPromoted:  isPromoted, // Include only if explicitly set
 			Created:     isNew,
 		}
 
@@ -657,7 +694,8 @@ type updateEntityResponse struct {
 	Description string   `json:"description,omitempty"`
 	Aliases     []string `json:"aliases,omitempty"`
 	KeyColumns  []string `json:"key_columns,omitempty"`
-	Created     bool     `json:"created"` // true if entity was newly created, false if updated
+	IsPromoted  *bool    `json:"is_promoted,omitempty"` // Only included if explicitly set
+	Created     bool     `json:"created"`               // true if entity was newly created, false if updated
 }
 
 // deleteEntityResponse is the response format for delete_entity tool.

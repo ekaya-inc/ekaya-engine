@@ -792,3 +792,138 @@ func TestGetEntityTool_ErrorResults(t *testing.T) {
 		assert.Contains(t, errorResp.Message, "not found")
 	})
 }
+
+// TestUpdateEntityToolStructure_HasIsPromotedParameter verifies the is_promoted parameter exists.
+func TestUpdateEntityToolStructure_HasIsPromotedParameter(t *testing.T) {
+	mcpServer := server.NewMCPServer("test", "1.0.0", server.WithToolCapabilities(true))
+
+	deps := &EntityToolDeps{
+		Logger: zap.NewNop(),
+	}
+
+	RegisterEntityTools(mcpServer, deps)
+
+	ctx := context.Background()
+	result := mcpServer.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","method":"tools/list","id":1}`))
+
+	resultBytes, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	var response struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				InputSchema struct {
+					Type       string                 `json:"type"`
+					Properties map[string]interface{} `json:"properties"`
+					Required   []string               `json:"required"`
+				} `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+
+	err = json.Unmarshal(resultBytes, &response)
+	require.NoError(t, err)
+
+	// Find update_entity tool
+	var updateEntityTool *struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		InputSchema struct {
+			Type       string                 `json:"type"`
+			Properties map[string]interface{} `json:"properties"`
+			Required   []string               `json:"required"`
+		} `json:"inputSchema"`
+	}
+
+	for i := range response.Result.Tools {
+		if response.Result.Tools[i].Name == "update_entity" {
+			updateEntityTool = &response.Result.Tools[i]
+			break
+		}
+	}
+
+	require.NotNil(t, updateEntityTool, "update_entity tool should exist")
+
+	// Verify is_promoted parameter exists
+	assert.Contains(t, updateEntityTool.InputSchema.Properties, "is_promoted", "should have is_promoted parameter")
+
+	// Verify is_promoted is a boolean type
+	isPromotedProp, ok := updateEntityTool.InputSchema.Properties["is_promoted"].(map[string]interface{})
+	require.True(t, ok, "is_promoted should be an object with properties")
+	assert.Equal(t, "boolean", isPromotedProp["type"], "is_promoted should be boolean type")
+
+	// Verify is_promoted is NOT required (it's optional)
+	assert.NotContains(t, updateEntityTool.InputSchema.Required, "is_promoted", "is_promoted should not be required")
+}
+
+// TestUpdateEntityResponse_WithIsPromoted tests the response structure includes is_promoted.
+func TestUpdateEntityResponse_WithIsPromoted(t *testing.T) {
+	t.Run("is_promoted true", func(t *testing.T) {
+		promoted := true
+		response := updateEntityResponse{
+			Name:        "User",
+			Description: "A platform user",
+			IsPromoted:  &promoted,
+			Created:     false,
+		}
+
+		// Marshal and unmarshal to verify JSON structure
+		jsonData, err := json.Marshal(response)
+		require.NoError(t, err)
+
+		var decoded updateEntityResponse
+		err = json.Unmarshal(jsonData, &decoded)
+		require.NoError(t, err)
+
+		assert.Equal(t, "User", decoded.Name)
+		require.NotNil(t, decoded.IsPromoted)
+		assert.True(t, *decoded.IsPromoted)
+	})
+
+	t.Run("is_promoted false", func(t *testing.T) {
+		demoted := false
+		response := updateEntityResponse{
+			Name:        "Session",
+			Description: "A session entity",
+			IsPromoted:  &demoted,
+			Created:     false,
+		}
+
+		// Marshal and unmarshal to verify JSON structure
+		jsonData, err := json.Marshal(response)
+		require.NoError(t, err)
+
+		var decoded updateEntityResponse
+		err = json.Unmarshal(jsonData, &decoded)
+		require.NoError(t, err)
+
+		assert.Equal(t, "Session", decoded.Name)
+		require.NotNil(t, decoded.IsPromoted)
+		assert.False(t, *decoded.IsPromoted)
+	})
+
+	t.Run("is_promoted nil (not provided)", func(t *testing.T) {
+		response := updateEntityResponse{
+			Name:        "Order",
+			Description: "An order entity",
+			IsPromoted:  nil, // Not set
+			Created:     true,
+		}
+
+		// Marshal and unmarshal to verify JSON structure
+		jsonData, err := json.Marshal(response)
+		require.NoError(t, err)
+
+		// Verify is_promoted is omitted from JSON when nil
+		assert.NotContains(t, string(jsonData), "is_promoted", "is_promoted should be omitted when nil")
+
+		var decoded updateEntityResponse
+		err = json.Unmarshal(jsonData, &decoded)
+		require.NoError(t, err)
+
+		assert.Equal(t, "Order", decoded.Name)
+		assert.Nil(t, decoded.IsPromoted)
+	})
+}
