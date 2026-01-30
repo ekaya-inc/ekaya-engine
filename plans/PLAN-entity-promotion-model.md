@@ -134,7 +134,7 @@ Existing ontologies would need a migration to score and potentially demote redun
 
 ## Revised Implementation Tasks
 
-### Task 1: Add Promotion Scoring Function
+### Task 1: Add Promotion Scoring Function ✅
 
 **File:** `pkg/services/entity_promotion.go` (new)
 
