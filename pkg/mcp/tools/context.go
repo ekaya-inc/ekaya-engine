@@ -27,6 +27,7 @@ type ContextToolDeps struct {
 	SchemaService          services.SchemaService
 	GlossaryService        services.GlossaryService
 	SchemaRepo             repositories.SchemaRepository
+	ColumnMetadataRepo     repositories.ColumnMetadataRepository
 	Logger                 *zap.Logger
 }
 
@@ -461,6 +462,22 @@ func buildColumnDetails(
 		}
 	}
 
+	// Fetch column metadata for sensitive flag overrides
+	var columnMetadata map[string]*models.ColumnMetadata
+	if deps.ColumnMetadataRepo != nil {
+		metaList, err := deps.ColumnMetadataRepo.GetByTable(ctx, projectID, table.TableName)
+		if err != nil {
+			deps.Logger.Warn("Failed to get column metadata",
+				zap.String("table", table.TableName),
+				zap.Error(err))
+		} else if len(metaList) > 0 {
+			columnMetadata = make(map[string]*models.ColumnMetadata, len(metaList))
+			for _, meta := range metaList {
+				columnMetadata[meta.ColumnName] = meta
+			}
+		}
+	}
+
 	for _, col := range table.Columns {
 		colDetail := map[string]any{
 			"column_name": col.ColumnName,
@@ -488,23 +505,59 @@ func buildColumnDetails(
 		// Add sample values if requested and available
 		// Sample values are persisted during ontology extraction for low-cardinality columns (≤50 distinct values)
 		// Sensitive data is automatically redacted to prevent exposure of API keys, secrets, etc.
+		// Manual is_sensitive flag overrides automatic detection: true=always redact, false=never redact, nil=auto-detect
 		if include.SampleValues && schemaCol != nil && len(schemaCol.SampleValues) > 0 {
-			// Check if column name indicates sensitive data (e.g., api_key, password)
-			if DefaultSensitiveDetector.IsSensitiveColumn(col.ColumnName) {
+			// Check for manual sensitive override from column metadata
+			var isSensitiveOverride *bool
+			if columnMetadata != nil {
+				if meta, ok := columnMetadata[col.ColumnName]; ok && meta.IsSensitive != nil {
+					isSensitiveOverride = meta.IsSensitive
+				}
+			}
+
+			// Determine if column should be treated as sensitive
+			isSensitive := false
+			redactionReason := ""
+
+			if isSensitiveOverride != nil {
+				// Manual override takes precedence
+				if *isSensitiveOverride {
+					isSensitive = true
+					redactionReason = "column marked as sensitive (manual override)"
+				}
+				// If explicitly marked as not sensitive (*isSensitiveOverride == false), skip auto-detection
+			} else {
+				// Use automatic detection
+				if DefaultSensitiveDetector.IsSensitiveColumn(col.ColumnName) {
+					isSensitive = true
+					redactionReason = "column name matches sensitive pattern"
+				}
+			}
+
+			if isSensitive {
 				colDetail["sample_values_redacted"] = true
-				colDetail["redaction_reason"] = "column name matches sensitive pattern"
+				colDetail["redaction_reason"] = redactionReason
 			} else {
 				// Check each sample value for sensitive content and redact if needed
+				// (only if not explicitly marked as not sensitive)
 				redactedValues := make([]string, 0, len(schemaCol.SampleValues))
 				anyRedacted := false
-				for _, val := range schemaCol.SampleValues {
-					if DefaultSensitiveDetector.IsSensitiveContent(val) {
-						redactedValues = append(redactedValues, DefaultSensitiveDetector.RedactContent(val))
-						anyRedacted = true
-					} else {
-						redactedValues = append(redactedValues, val)
+
+				// Only do content-based detection if no manual override
+				if isSensitiveOverride == nil {
+					for _, val := range schemaCol.SampleValues {
+						if DefaultSensitiveDetector.IsSensitiveContent(val) {
+							redactedValues = append(redactedValues, DefaultSensitiveDetector.RedactContent(val))
+							anyRedacted = true
+						} else {
+							redactedValues = append(redactedValues, val)
+						}
 					}
+				} else {
+					// Manual override to not sensitive - return values as-is
+					redactedValues = schemaCol.SampleValues
 				}
+
 				colDetail["sample_values"] = redactedValues
 				if anyRedacted {
 					colDetail["sample_values_redacted"] = true

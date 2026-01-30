@@ -189,6 +189,10 @@ func registerGetColumnMetadataTool(s *server.MCPServer, deps *ColumnToolDeps) {
 				if len(columnMeta.EnumValues) > 0 && len(response.Metadata.EnumValues) == 0 {
 					response.Metadata.EnumValues = columnMeta.EnumValues
 				}
+				// Always include is_sensitive if set (it's a manual override)
+				if columnMeta.IsSensitive != nil {
+					response.Metadata.IsSensitive = columnMeta.IsSensitive
+				}
 			}
 		}
 
@@ -223,6 +227,7 @@ type columnMetadataInfo struct {
 	EnumValues   []string `json:"enum_values,omitempty"`
 	Entity       string   `json:"entity,omitempty"`
 	Role         string   `json:"role,omitempty"`
+	IsSensitive  *bool    `json:"is_sensitive,omitempty"` // nil=auto-detect, true=always sensitive, false=never sensitive
 }
 
 // registerUpdateColumnTool adds the update_column tool for adding or updating column semantic information.
@@ -261,6 +266,10 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 		mcp.WithString(
 			"role",
 			mcp.Description("Optional - Semantic role: 'dimension', 'measure', 'identifier', or 'attribute'"),
+		),
+		mcp.WithBoolean(
+			"sensitive",
+			mcp.Description("Optional - Mark column as containing sensitive data. true=always redact sample values, false=never redact (override auto-detection), omit=use automatic detection"),
 		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -321,6 +330,17 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 						"actual":    role,
 					},
 				), nil
+			}
+		}
+
+		// Extract optional sensitive flag
+		// Use getOptionalBoolPointer to distinguish between false and not provided
+		var isSensitive *bool
+		if args, ok := req.Params.Arguments.(map[string]any); ok {
+			if val, exists := args["sensitive"]; exists {
+				if boolVal, ok := val.(bool); ok {
+					isSensitive = &boolVal
+				}
 			}
 		}
 
@@ -476,6 +496,9 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 			if enumValues != nil {
 				colMeta.EnumValues = enumValues
 			}
+			if isSensitive != nil {
+				colMeta.IsSensitive = isSensitive
+			}
 			if err := deps.ColumnMetadataRepo.Upsert(tenantCtx, colMeta); err != nil {
 				return nil, fmt.Errorf("failed to update column metadata: %w", err)
 			}
@@ -489,6 +512,7 @@ func registerUpdateColumnTool(s *server.MCPServer, deps *ColumnToolDeps) {
 			EnumValues:  formatEnumValues(targetColumn.EnumValues),
 			Entity:      targetColumn.SemanticType,
 			Role:        targetColumn.Role,
+			IsSensitive: isSensitive,
 			Created:     isNew,
 		}
 
@@ -667,7 +691,8 @@ type updateColumnResponse struct {
 	EnumValues  []string `json:"enum_values,omitempty"`
 	Entity      string   `json:"entity,omitempty"`
 	Role        string   `json:"role,omitempty"`
-	Created     bool     `json:"created"` // true if column was newly added, false if updated
+	IsSensitive *bool    `json:"is_sensitive,omitempty"` // nil=auto-detect, true=always sensitive, false=never sensitive
+	Created     bool     `json:"created"`                // true if column was newly added, false if updated
 }
 
 // deleteColumnMetadataResponse is the response format for delete_column_metadata tool.

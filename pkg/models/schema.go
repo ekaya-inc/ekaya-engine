@@ -52,6 +52,8 @@ type SchemaColumn struct {
 	JoinabilityReason *string    `json:"joinability_reason,omitempty"` // Why column is/isn't joinable
 	StatsUpdatedAt    *time.Time `json:"stats_updated_at,omitempty"`   // When stats were computed
 	SampleValues      []string   `json:"sample_values,omitempty"`      // Distinct values for low-cardinality columns (≤50 values)
+	// Sensitive data override (NULL=auto-detect, TRUE=always sensitive, FALSE=never sensitive)
+	IsSensitive *bool `json:"is_sensitive,omitempty"`
 }
 
 // GetColumnFeatures extracts the stored ColumnFeatures from the column's Metadata field.

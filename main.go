@@ -478,6 +478,7 @@ func main() {
 		SchemaService:          schemaService,
 		GlossaryService:        glossaryService,
 		SchemaRepo:             schemaRepo,
+		ColumnMetadataRepo:     columnMetadataRepo,
 		Logger:                 logger,
 	}
 	mcptools.RegisterContextTools(mcpServer.MCP(), contextToolDeps)
